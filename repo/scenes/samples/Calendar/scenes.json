@@ -373,7 +373,8 @@
     "settings": {
       "refreshInterval": 900,
       "backgroundColor": "#000000",
-      "execution": "interpreted"
+      "execution": "interpreted",
+      "windowSize": "800x600"
     },
     "apps": {
       "calendar": {

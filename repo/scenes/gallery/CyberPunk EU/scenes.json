@@ -2,7 +2,7 @@
   {
     "id": "d9450112-8b47-4b7d-8030-268489340c02",
     "name": "CyberPunk EU",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted" },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
     "fields": [
       {
         "name": "seconds",

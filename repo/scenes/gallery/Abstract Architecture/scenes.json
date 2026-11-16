@@ -2,7 +2,7 @@
   {
     "id": "589b58e1-8dc1-4ab1-979f-71e51509e0aa",
     "name": "Abstract Architecture",
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted" },
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 86400, "execution": "interpreted", "windowSize": "800x480" },
     "fields": [
       {
         "name": "seconds",

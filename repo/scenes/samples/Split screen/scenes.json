@@ -93,7 +93,8 @@
     "settings": {
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
-      "execution": "interpreted"
+      "execution": "interpreted",
+      "windowSize": "800x480"
     },
     "apps": {
       "frameOSGallery": {

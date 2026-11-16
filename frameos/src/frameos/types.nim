@@ -560,6 +560,7 @@ type
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
     isLayout*: bool ## `settings.isLayout`: in no scene list (docs/scene-layouts.md)
     isDesktop*: bool ## a layout with `settings.desktop`: the frame page lists it apart
+    windowSize*: string ## `settings.windowSize`, "WxH": the size it opens at in a desktop's window
     layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
@@ -597,6 +598,10 @@ type
     ## The layout is a desktop that runs the frame's scenes in windows
     ## (docs/scene-layouts.md "Windows"): the frame page lists it apart.
     desktop*: bool
+    ## "WxH": the size the scene opens at in a desktop's window, over the
+    ## desktop's own "Window size" (docs/scene-layouts.md "Windows"). The
+    ## runtime only hands it to the desktop (`app.frame.scenes`).
+    windowSize*: string
 
   SplitLayoutMarker* = object
     present*: bool

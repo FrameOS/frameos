@@ -2304,6 +2304,41 @@ suite "another layout chosen on the frame":
     chooseLayout("")
     discard pass()
 
+suite "a scene's own window size (settings.windowSize)":
+  # Each listed with its size, as the hosts list it (app.frame.scenes).
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red", "windowSize": "300x200"},
+        {"id": "tests/green", "name": "Green", "windowSize": "1200x1200"}, {"id": "tests/blue", "name": "Blue"}]
+
+  test "opens at it on every desktop of windows, and one too big for the desktop smaller and its shape kept":
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT]:
+      # A desktop of its own, blue in front: nothing carried over, no window kept from before.
+      discard focusOn("tests/blue")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      check desk().id.string == layoutId
+      check current.id.string == "tests/blue"
+      check winOf("tests/blue"){"max"}.getBool() # the first window fills the desktop, as always
+      discard focusOn("tests/red")
+      discard pass()
+      check sceneSize("tests/red") == (300, 200)
+      # Too big for the desktop, and not the first: a window of its shape.
+      discard focusOn("tests/green")
+      discard pass()
+      check not winOf("tests/green"){"max"}.getBool()
+      let (w, h) = sceneSize("tests/green")
+      check abs(w - h) <= 1
+      check h > 200 and h < H
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
 suite "where only two scenes run at once (an ESP32 with 8 MB)":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =

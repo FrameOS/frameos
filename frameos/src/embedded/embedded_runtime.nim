@@ -86,6 +86,7 @@ type
     id*: string
     name*: string
     refreshInterval*: float
+    windowSize*: string ## `settings.windowSize`: its size in a desktop's window
 
 var sceneCatalog: seq[SceneCatalogEntry] = @[]
   ## Empty on the legacy path (one scenes.json parsed whole), in which case
@@ -735,6 +736,7 @@ proc setSceneCatalog*(indexJson: string): int =
         id: id,
         name: item{"name"}.getStr(),
         refreshInterval: item{"refreshInterval"}.getFloat(0.0),
+        windowSize: item{"windowSize"}.getStr(),
       ))
   sceneCatalog = entries
   layoutCatalog = layouts
@@ -840,12 +842,15 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
     if sceneCatalog.len > 0:
       for entry in sceneCatalog:
-        result.add SwitcherEntry(id: entry.id, name: entry.name)
+        result.add SwitcherEntry(id: entry.id, name: entry.name, windowSize: entry.windowSize)
     else:
       let scenes = getInterpretedScenes()
       for sceneId in loadedSceneOrder:
-        result.add SwitcherEntry(id: sceneId.string,
-          name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
+        if scenes.hasKey(sceneId):
+          result.add SwitcherEntry(id: sceneId.string, name: scenes[sceneId].name,
+            windowSize: scenes[sceneId].windowSize)
+        else:
+          result.add SwitcherEntry(id: sceneId.string)
 
 sceneSwitcherListing = switcherListing
 

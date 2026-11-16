@@ -50,6 +50,7 @@ import frameos/utils/svg_frames
 type
   SwitcherEntry* = object
     id*, name*: string
+    windowSize*: string ## its own size in a desktop's window, "" for the desktop's (app.frame.scenes)
 
   SwitcherListing* = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.}
     ## The frame's scenes in its scene list's order, with their names.

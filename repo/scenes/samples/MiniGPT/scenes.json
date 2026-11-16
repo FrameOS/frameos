@@ -2,7 +2,7 @@
   {
     "id": "10618681-5eb4-4b34-8292-ad6ecec8e109",
     "name": "MiniGPT",
-    "settings": { "backgroundColor": "#ffffff", "refreshInterval": 3600, "execution": "interpreted" },
+    "settings": { "backgroundColor": "#ffffff", "refreshInterval": 3600, "execution": "interpreted", "windowSize": "640x480" },
     "fields": [
       {
         "access": "public",

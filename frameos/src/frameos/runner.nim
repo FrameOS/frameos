@@ -976,7 +976,11 @@ proc windowListing(): JsonNode =
   ## `app.frame.scenes`: the frame's scenes a layout can open, in its order.
   result = newJArray()
   for entry in linuxSceneListing():
-    result.add %*{"id": entry.id, "name": entry.name}
+    let item = %*{"id": entry.id, "name": entry.name}
+    # Its own window size, where it says one (settings.windowSize).
+    if entry.windowSize.len > 0:
+      item["windowSize"] = %entry.windowSize
+    result.add item
 
 proc installWindowHooks*(self: RunnerThread) =
   takeParkedLayout = takeParked

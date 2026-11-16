@@ -54,7 +54,8 @@ proc linuxSceneListing*(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
     for sceneId in sceneOrderSnapshot():
       if not hasExportedScene(sceneId):
         continue
-      result.add SwitcherEntry(id: sceneId.string, name: getSceneDisplayName(sceneId).get(""))
+      result.add SwitcherEntry(id: sceneId.string, name: getSceneDisplayName(sceneId).get(""),
+        windowSize: getSceneWindowSize(sceneId))
 
 proc coverFit*(source: Image, width, height: int): Image =
   ## `source` scaled to cover `width` x `height` and cropped to its middle:

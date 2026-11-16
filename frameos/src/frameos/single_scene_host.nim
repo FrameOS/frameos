@@ -505,12 +505,19 @@ proc setWindowed*(host: SingleSceneHost, enabled: bool) =
           # The host's own list: an ESP32's catalog, whose scenes are on flash
           # until they run.
           for entry in sceneSwitcherListing():
-            result.add %*{"id": entry.id, "name": entry.name}
+            let item = %*{"id": entry.id, "name": entry.name}
+            # Its own window size, where it says one (settings.windowSize).
+            if entry.windowSize.len > 0:
+              item["windowSize"] = %entry.windowSize
+            result.add item
         elif not host.sceneOrder.isNil:
           let scenes = getInterpretedScenes()
           for sceneId in host.sceneOrder():
             if scenes.hasKey(sceneId) and not scenes[sceneId].isLayout:
-              result.add %*{"id": sceneId.string, "name": scenes[sceneId].name}
+              let item = %*{"id": sceneId.string, "name": scenes[sceneId].name}
+              if scenes[sceneId].windowSize.len > 0:
+                item["windowSize"] = %scenes[sceneId].windowSize
+              result.add item
   else:
     hostSceneFor = nil
     windowSceneListing = nil

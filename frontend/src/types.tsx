@@ -1316,6 +1316,9 @@ export interface FrameSceneSettings {
   isLayout?: boolean
   /** A layout that is a desktop of windows: the frame's settings page lists it apart (docs/scene-layouts.md). */
   desktop?: boolean
+  /** "WxH": the size this scene opens at in a desktop layout's window, over the desktop's own
+   * (utils/sceneWindowSize.ts, docs/scene-layouts.md "Windows"); unset = the desktop's. */
+  windowSize?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

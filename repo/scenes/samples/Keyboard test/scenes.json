@@ -344,7 +344,8 @@
     "settings": {
       "execution": "interpreted",
       "refreshInterval": 3600,
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "windowSize": "800x480"
     }
   }
 ]

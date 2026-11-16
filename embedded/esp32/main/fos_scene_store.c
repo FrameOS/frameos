@@ -355,8 +355,13 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         cJSON_AddBoolToObject(entry, "isLayout", true);
         /* A desktop (`settings.desktop`) is listed apart on the frame page. */
         if (entry_flag(settings, "desktop")) cJSON_AddBoolToObject(entry, "desktop", true);
-    } else if (entry_flag(scene, "default")) {
-        cJSON_AddBoolToObject(entry, "default", true);
+    } else {
+        if (entry_flag(scene, "default")) cJSON_AddBoolToObject(entry, "default", true);
+        /* "WxH": the size it opens at in a desktop's window (app.frame.scenes). */
+        const cJSON *window = cJSON_GetObjectItem(settings, "windowSize");
+        if (cJSON_IsString(window) && window->valuestring[0]) {
+            cJSON_AddStringToObject(entry, "windowSize", window->valuestring);
+        }
     }
     return entry;
 }

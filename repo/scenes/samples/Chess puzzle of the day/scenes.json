@@ -6,7 +6,8 @@
       "refreshInterval": 43200,
       "backgroundColor": "#11243a",
       "execution": "interpreted",
-      "renderScale": 1
+      "renderScale": 1,
+      "windowSize": "640x480"
     },
     "fields": [
       {

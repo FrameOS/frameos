@@ -533,6 +533,38 @@ static bool entry_has(const char *id, const char *flag)
     return found;
 }
 
+static bool entry_says(const char *id, const char *key, const char *value)
+{
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *entry = NULL;
+    bool found = false;
+    cJSON_ArrayForEach(entry, cJSON_GetObjectItem(tree, "scenes")) {
+        if (strcmp(cJSON_GetObjectItem(entry, "id")->valuestring, id) == 0) {
+            const cJSON *item = cJSON_GetObjectItem(entry, key);
+            found = value == NULL ? item == NULL : cJSON_IsString(item) && strcmp(item->valuestring, value) == 0;
+        }
+    }
+    cJSON_Delete(tree);
+    return found;
+}
+
+/* A scene's own window size goes in its entry: a desktop opens it at that size
+ * without reading the scene off flash. */
+static void test_window_size_in_the_index(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"player\",\"settings\":{\"windowSize\":\"480x480\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("player", "windowSize", "480x480"));
+    CHECK(put_one("{\"id\":\"plain\",\"settings\":{\"windowSize\":\"\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("plain", "windowSize", NULL));
+    CHECK(put_one("{\"id\":\"odd\",\"settings\":{\"windowSize\":480}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("odd", "windowSize", NULL));
+    /* A layout has no window of its own. */
+    CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"windowSize\":\"480x480\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("desk", "windowSize", NULL));
+}
+
 static void test_layouts_and_the_default(void)
 {
     fresh_dir();
@@ -791,6 +823,7 @@ int main(void)
     test_the_store_knows_its_slot_files();
     test_old_index_without_bytes();
     test_layouts_and_the_default();
+    test_window_size_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_whole_set_one_scene_at_a_time();

@@ -535,6 +535,10 @@ export function get(app, context) {
   is in panel pixels (a pointer's `x` / `y` kept in state): divide it by
   `app.frame.scale` before drawing it. A scene can set its own
   `settings.renderScale` (1 keeps every pixel).
+- Give a scene the window size it looks best at in `settings.windowSize`,
+  `"WxH"` (`"480x480"` for a square music player or clock, `"480x800"` for a
+  tall list, `"800x480"` for a wide dashboard): a desktop layout (Windows 98,
+  macOS...) opens the scene's window at that size. It changes nothing else.
 - Layout: block (stacked), `flex` / `flex-col` with `gap`, `grow`, `flex-1`,
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
@@ -636,7 +640,8 @@ export function get(app) {
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
-  lists its scenes (`{id, name}`) and `app.frame.sceneId` is the one wrapped.
+  lists its scenes (`{id, name}`, and `windowSize`, `"WxH"`, where a scene says
+  the size its window should open at) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
   beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
@@ -1070,8 +1075,10 @@ interface FrameOSApp {
     /** The frame's scenes, { id, name } in its scene list's order, layouts left out, on a frame that runs
      * scenes side by side (a Raspberry Pi, an ESP32). There a layout's <Scene id> is that scene itself,
      * running in its window while another has the focus, so a layout can be a desktop of windows. Undefined
-     * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before). */
-    scenes?: { id: string; name: string }[];
+     * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before).
+     * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
+     * one (FrameOS 2026.11.10+). */
+    scenes?: { id: string; name: string; windowSize?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined

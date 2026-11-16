@@ -302,6 +302,15 @@ proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
         return some(interpreted.name)
     return none(string)
 
+proc getSceneWindowSize*(sceneId: SceneId): string =
+  ## The scene's own window size on a desktop (`settings.windowSize`), "" for
+  ## none: what a desktop's `app.frame.scenes` lists beside its name.
+  withLock sceneRegistryLock:
+    if uploadedScenes.hasKey(sceneId):
+      return uploadedScenes[sceneId].windowSize
+    if interpretedScenes.hasKey(sceneId):
+      return interpretedScenes[sceneId].windowSize
+
 proc dynamicSceneCount*(): int =
   ## How many interpreted scenes this frame holds (deployed and uploaded; an
   ## uploaded scene with a deployed scene's id is one scene), for the cloud

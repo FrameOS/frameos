@@ -2492,6 +2492,8 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
       skipValue(s, i)
     of "isLayout", "is_layout": result.isLayout = readFlag(s, i)
     of "desktop": result.desktop = readFlag(s, i)
+    # "WxH", handed to a desktop as is: the layout reads it (app.frame.scenes).
+    of "windowSize", "window_size": result.windowSize = readText(s, i)
     else: skipValue(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
@@ -2546,6 +2548,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     # The install's layout, read here so that nothing else knows its shape.
     isLayout: scene.settings != nil and scene.settings.isLayout,
     isDesktop: scene.settings != nil and scene.settings.isLayout and scene.settings.desktop,
+    windowSize: if scene.settings != nil: scene.settings.windowSize else: "",
     layoutSceneId: scene.layout{"sceneId"}.getStr().SceneId,
     layoutState: scene.layout{"state"},
     # Fields without an explicit access default to public for interpreted

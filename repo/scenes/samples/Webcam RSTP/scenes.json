@@ -163,6 +163,6 @@
         "value": "300"
       }
     ],
-    "settings": { "refreshInterval": 300, "backgroundColor": "#000000", "execution": "interpreted" }
+    "settings": { "refreshInterval": 300, "backgroundColor": "#000000", "execution": "interpreted", "windowSize": "800x480" }
   }
 ]

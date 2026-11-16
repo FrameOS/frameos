@@ -606,6 +606,34 @@ block windowed_host_keeps_what_it_leaves:
   w.setWindowed(false)
   doAssert w.windows.len == 0 and hostSceneFor.isNil and not builtInScenesStay
 
+# A desktop learns each scene's own window size from `app.frame.scenes`
+# (`settings.windowSize`): off the host's own list where it has one (an ESP32's
+# catalog), off the loaded scenes otherwise (the browser).
+block windowed_listing_carries_window_sizes:
+  var sized = parseJson($scenes)
+  sized[1]["settings"]["windowSize"] = %"480x480"
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($sized)))
+  let fromId = "fixtures/dispatcher/switchFrom".SceneId
+  let toId = "fixtures/dispatcher/switchTo".SceneId
+  doAssert sized[1]["id"].getStr() == toId.string
+  let w = SingleSceneHost(frameConfig: config, logger: logger)
+  w.sceneOrder = proc (): seq[SceneId] = @[fromId, toId]
+  let listing = sceneSwitcherListing
+  sceneSwitcherListing = nil
+  w.setWindowed(true)
+  var listed = windowSceneListing()
+  doAssert listed.len == 2, $listed
+  doAssert listed[0]{"windowSize"}.isNil, $listed
+  doAssert listed[1]{"windowSize"}.getStr() == "480x480", $listed
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480")]
+  listed = windowSceneListing()
+  doAssert listed.len == 1 and listed[0]{"windowSize"}.getStr() == "640x480", $listed
+  w.setWindowed(false)
+  sceneSwitcherListing = listing
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
+  echo "window sizes listed ok"
+
 # ------------------------------------------- windows where memory is short
 #
 # An ESP32 runs a desktop's windows too, but only so many at once, the one in

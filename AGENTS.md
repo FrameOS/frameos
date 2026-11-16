@@ -599,7 +599,9 @@
   page turns it on (`frameos_wasm_set_windowed`; the windowed
   `single_scene_host` is the ESP32's and the browser's), a layout can run the
   frame's scenes side by side. The runtime adds three things and no
-  window manager: `app.frame.scenes` / `sceneId`, a layout's bare `<Scene id>`
+  window manager: `app.frame.scenes` / `sceneId` (each scene with its own
+  `settings.windowSize`, which a new window opens at: the ESP32's scene index
+  carries it, so keep the three hosts' listings alike), a layout's bare `<Scene id>`
   resolving to the host's own instance (`hostSceneFor`; one with props stays a
   copy), and one layout instance carried across switches and put on at the
   switch (`carryLayout`, `wearLayout`; `carryLayoutState` across a push or

@@ -122,8 +122,11 @@ proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
     let scenes = getInterpretedScenes()
     for sceneId in loadedSceneOrder:
-      result.add SwitcherEntry(id: sceneId.string,
-        name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
+      if scenes.hasKey(sceneId):
+        result.add SwitcherEntry(id: sceneId.string, name: scenes[sceneId].name,
+          windowSize: scenes[sceneId].windowSize)
+      else:
+        result.add SwitcherEntry(id: sceneId.string)
 
 sceneSwitcherListing = switcherListing
 

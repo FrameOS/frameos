@@ -5,7 +5,8 @@
     "settings": {
       "execution": "interpreted",
       "refreshInterval": 3600,
-      "backgroundColor": "#f1f5f9"
+      "backgroundColor": "#f1f5f9",
+      "windowSize": "480x640"
     },
     "fields": [
       {

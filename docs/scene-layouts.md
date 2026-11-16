@@ -201,6 +201,19 @@ next scene, F10 turns the other panel into the Info panel and back, F3 gives the
 panel with the focus the screen). A scene brought forward from anywhere else goes
 into the panel with the focus; chosen in another desktop's place it opens the two
 that desktop had in front, and hands the next desktop those two as halves.
+**A scene's own window size.** A scene says the size it looks best at in
+`settings.windowSize`, `"WxH"` in a desktop's pixels (`"480x480"` for the Now
+playing player, `"480x800"` for a tall list; "Window size" in the scene's
+settings, on both planes and on the store's scene page). The hosts list it
+beside the scene's name in `app.frame.scenes` (`windowSize`): a Pi from the
+deployed or pushed scene, an ESP32 from its scene index (`fos_scene_store.c`
+`make_entry` writes it, so the scene stays on flash), the browser from the
+loaded scenes. `Windows 98`, `macOS`, `BeOS`, `Classic Mac` and `NeXTSTEP` open
+a new window of the scene at that size in place of their own "Window size",
+made smaller with its shape kept where it does not fit the desktop; set to "The
+whole desktop", a desktop still fills it with every scene. A window's place and
+size once moved are the desktop's own, as before. `Tiling` and `Commander` have
+no window sizes.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
 asset browser, the terminal and the frame's settings. The **Scene store**, the

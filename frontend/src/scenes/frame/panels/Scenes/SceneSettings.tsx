@@ -24,6 +24,11 @@ import {
   sceneRenderScaleFromSelect,
   sceneRenderScaleSelectValue,
 } from '../../../../utils/renderScale'
+import {
+  SCENE_WINDOW_SIZE_HELP,
+  sceneWindowSizeFromSelect,
+  sceneWindowSizeSelectValue,
+} from '../../../../utils/sceneWindowSize'
 
 function SceneLayoutField({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
   const { pickerVisible } = useValues(sceneLayoutLogic({ frameId, sceneId }))
@@ -69,6 +74,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     renderScaleOptions,
     renderScaleFieldName,
     layoutProblem,
+    windowSizeOptions,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -198,6 +204,24 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 />
               )}
             </Field>
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="windowSize"
+                label={<SceneSettingsLabel>Window size</SceneSettingsLabel>}
+                tooltip={SCENE_WINDOW_SIZE_HELP}
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    name="windowSize"
+                    className="h-10"
+                    value={sceneWindowSizeSelectValue(value)}
+                    onChange={(next) => onChange(sceneWindowSizeFromSelect(next))}
+                    options={windowSizeOptions}
+                  />
+                )}
+              </Field>
+            )}
             {frameRunsInterpreted ? null : (
               <AdvancedSection className={fieldClassName}>
                 <Field

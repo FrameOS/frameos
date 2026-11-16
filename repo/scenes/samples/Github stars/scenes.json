@@ -373,6 +373,6 @@
         "dragging": false
       }
     ],
-    "settings": { "backgroundColor": "#000000", "refreshInterval": 300, "execution": "interpreted" }
+    "settings": { "backgroundColor": "#000000", "refreshInterval": 300, "execution": "interpreted", "windowSize": "640x480" }
   }
 ]
