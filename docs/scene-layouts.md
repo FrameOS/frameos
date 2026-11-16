@@ -162,13 +162,15 @@ of their own, and the top bar's gear the frame's) are two. `macOS` and `BeOS`
 are desktops of overlapping windows the way `Windows 98` is, at the same "Window
 size", moved, sized and snapped the same way, with their own chrome: on `macOS`
 the traffic lights close, put away and zoom a window, a gear at the right of its
-title bar opens its settings, the Dock has the frame's scenes (a dot under the
-ones open), Launchpad and System Settings, and the menu bar's Scenes,
+title bar opens its settings, the Dock has Launchpad, the scenes that have a
+window (a dot under each) and System Settings, and the menu bar's Scenes,
 Settings and Window open a scene, the settings of the one in front and the
 windows open (full screen there, or F11); on `BeOS` a window's yellow tab (grey
 behind) has its close, gear and zoom boxes and puts it away on a double click,
 the Deskbar lists the windows open and its gem opens the Be menu (the scenes,
-Preferences), and Tracker's icons under it open the frame's own apps.
+Preferences), and Tracker's icons under it open the frame's own apps (under
+where the Deskbar reaches now, and on in columns to its left, so a window opened
+never puts the Deskbar over one).
 The desktop icons of `Windows 98` and `BeOS` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store, the
 asset browser, the terminal and the frame's settings. The **Scene store**, the
@@ -177,8 +179,8 @@ asset browser, the terminal and the frame's settings. The **Scene store**, the
 (`scene-store`, `asset-browser`, `terminal-app`) or their name; where the frame
 has them each desktop has entries of its own for them and leaves them out of its
 scene lists: the top of `Windows 98`'s Start, a bag for the store and a prompt
-for the terminal in `Tiling`'s top bar, `macOS`'s Dock beside System Settings
-(and the store and the terminal in its mark's menu), `BeOS`'s Be menu. Everywhere
+for the terminal in `Tiling`'s top bar, `macOS`'s mark's menu (the store and
+the terminal; each in the Dock while it has a window), `BeOS`'s Be menu. Everywhere
 else (an editor's preview) they draw the one scene, as before.
 
 The runtime gives a layout three things and keeps no windows of its own:
@@ -211,10 +213,16 @@ The runtime gives a layout three things and keeps no windows of its own:
   `frameos_wasm_choose_layout` in the browser, a push that dresses the scenes in
   another), the runtime hands that list to the new layout's fresh instance
   (`carriedOpen` in `interpreter.nim`), and a desktop that starts
-  with no windows of its own opens those: the samples cascade them as windows
-  or lay them out as tiles, the frame's own scenes named by what they are. The
-  scenes are the host's, so they run on as they were; only where each window
-  was is the old layout's own.
+  with no windows of its own opens those, the frame's own scenes named by what
+  they are. The scenes are the host's, so they run on as they were. Where each
+  one was goes along too, by a convention of the layouts the runtime only
+  carries: **`openPlaces`**, beside `openScenes`, by scene id, `{x, y, w, h}` as
+  shares (0 to 1) of the whole picture (so a desktop whose bars are elsewhere
+  puts a window where it was on the glass) with `max`, `snap` (`'l'` / `'r'` /
+  null) and `min`. The desktops of windows open each scene there, kept on their
+  desktop, and cascade the ones it does not place; `Tiling` writes its tiles'
+  boxes and, taking over, orders its tiles by where the windows were, left to
+  right.
 
 **The frame's own scenes are windows too.** The scene settings and the scene
 switcher (`isBuiltInScene`) open over the scene in front the way any scene comes forward, so a layout gives
