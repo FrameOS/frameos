@@ -562,7 +562,10 @@ export function get(app, context) {
   `frameos.setState`) and the frame renders again by itself. `hover:`,
   `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
   a render: on e-paper a tap answers in a refresh, so keep hover: and
-  active: for LCDs.
+  active: for LCDs. Where `app.frame.paper` is true, take a drag whole as
+  `onSwipe` (`direction`, `startX`/`startY` to `x`/`y`) and two fingers as
+  `onPinch` (`scale`, below 1 drawn together; `startX`/`startY` the point
+  between them at the start, `x`/`y` at the end): one event, one refresh.
 - Every render builds the whole tree again, and what did not change is
   taken back laid out and drawn: an LCD repaints only what changed. For a
   card repeated in a list, `memo(Card)` (as React's) skips running it while
@@ -802,6 +805,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
+| `pinch` | yes |  | `scale` float, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. |
 | `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
 | `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
@@ -945,7 +949,7 @@ interface FrameOSFrameFacts {
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove" | "change" | "keyDown";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pinch" | "pointerDown" | "pointerUp" | "pointerMove" | "change" | "keyDown";
   x: number;
   y: number;
   localX: number;
@@ -957,6 +961,11 @@ interface FrameOSUiEvent {
   pointerType?: "mouse" | "touch" | "pen";
   /** A swipe's way: "left", "right", "up" or "down". */
   direction?: "left" | "right" | "up" | "down";
+  /** A swipe's start; a pinch's point between its fingers when the second went down (x, y: when the first lifted). */
+  startX?: number;
+  startY?: number;
+  /** A pinch's spread: how far apart the fingers ended over how far apart they began (below 1 drawn together). Absent before 2026.11.10. */
+  scale?: number;
   /** onChange of an <input> or <textarea>: its text now (also as target.value, as in React). */
   value?: string;
   target?: { value: string };
@@ -978,6 +987,8 @@ interface FrameOSElementProps {
   onPointerMove?: (event: FrameOSUiEvent) => void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
+  /** Two fingers that began on the element moved, as one event when the first lifts: e.scale, e.startX/startY, e.x/y. Neither finger is a tap or a swipe then. Absent before 2026.11.10. */
+  onPinch?: (event: FrameOSUiEvent) => void;
   /** <input> and <textarea>: the text shown (keep it in a variable, set it in onChange), a hint while empty, and the kind of field. */
   value?: string | number;
   placeholder?: string;
@@ -1111,6 +1122,8 @@ interface FrameOSEventPayloads {
   longPress: { x: number; y: number; durationMs: number; pointerId: number; pointerType: string };
   /** A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. */
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
+  /** Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. The two make no `tap`, `longPress` or `swipe` of their own. One event for the whole gesture, as a `swipe` is for a drag: what e-paper and a frame rendered on its plane zoom by. */
+  pinch: { scale: number; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */

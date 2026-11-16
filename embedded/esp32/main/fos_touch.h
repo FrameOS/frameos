@@ -9,7 +9,7 @@
  * nothing more: the panel's reports become `pointerDown`, `pointerMove` and
  * `pointerUp` with the position on the contract's 0..32767 wire, and the
  * Nim dispatcher (frameos/input_state.nim, the same on every host) makes
- * the scene pixels, the `tap`, `doubleTap`, `longPress` and `swipe` of
+ * the scene pixels, the `tap`, `doubleTap`, `longPress`, `swipe` and `pinch` of
  * them. No gesture is decided here.
  *
  * A touch task reads the controller when its interrupt line says a report

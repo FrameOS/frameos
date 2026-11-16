@@ -107,7 +107,7 @@ describe("preview buttons", () => {
     }
     expect([...POINTER_EVENTS]).toEqual([
       "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp",
-      "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel",
+      "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel",
     ]);
     expect([...KEYBOARD_EVENTS]).toEqual(["keyDown", "keyUp", "textInput"]);
     // turnOn / turnOff are scene commands: both lists used to forget them.

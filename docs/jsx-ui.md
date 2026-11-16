@@ -492,7 +492,10 @@ export const get = () => (
   **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
   on the raw press and release, **`onPointerMove`** as the pointer moves,
   **`onSwipe`** on a `swipe` (its `direction`, to the element it began on,
-  wherever it lifted). A swipe in from the screen's edge is the frame's
+  wherever it lifted), **`onPinch`** on a `pinch` (two fingers that moved,
+  once, when the first lifts: `scale`, and `startX` / `startY` to `x` / `y`
+  between them, to the element under the point between them at the start;
+  neither finger is a tap or a swipe then). A swipe in from the screen's edge is the frame's
   (`edgeSwipe`, docs/events.md "Edge swipes"): no element hears any of that
   touch, so a slider at the edge of a page is safe from it. The handler gets the event's payload plus `type`, `localX` and `localY`
   (from the element's corner) and `width` / `height` (the element's size,
@@ -532,7 +535,10 @@ export const get = () => (
   for a refresh of its own, and the tap's render waited behind it:
   `ui/events.nim`). Every handler is a render, so an app
   that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
-  whole drag as one `onSwipe` there, as the Map scene does.
+  whole drag as one `onSwipe` there, as the Map scene does, and two fingers
+  as one `onPinch` (2026.11.10+): a frame rendered on its plane hears a
+  gesture only when the fingers are off the glass, so there it is the one
+  way to zoom.
 - **Where the events come from**: the dispatcher's pointer events and
   gestures (`docs/events.md` "Input"), on every host: a Pi's touch screen or
   mouse, the touch glass of an ESP32 LCD board (the SenseCAP Indicator, the

@@ -456,6 +456,30 @@
       "synthesized": true
     },
     {
+      "name": "pinch",
+      "class": "input",
+      "device": "pointer",
+      "description": "Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. The two make no `tap`, `longPress` or `swipe` of their own. One event for the whole gesture, as a `swipe` is for a drag: what e-paper and a frame rendered on its plane zoom by.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "scale", "label": "Scale", "type": "float", "required": true, "filter": "more"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "startX", "label": "Start X", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "startY", "label": "Start Y", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "none",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.11.10",
+      "synthesized": true
+    },
+    {
       "name": "edgeSwipe",
       "class": "input",
       "device": "pointer",
@@ -795,7 +819,7 @@
     "yield": "system/yield"
   },
   "gestures": {
-    "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
+    "$comment": "How the dispatcher makes tap, doubleTap, longPress, swipe and pinch out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,
     "tapMs": 500,
     "doubleTapMs": 350,

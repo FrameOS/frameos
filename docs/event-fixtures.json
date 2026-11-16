@@ -5270,7 +5270,7 @@
   ]
  },
  "inputState": {
-  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
+  "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels.",
   "cases": [
    {
     "name": "a tap is down and up at once, and a press when its window closes",
@@ -7614,6 +7614,189 @@
       "at": 2500,
       "tick": true,
       "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "two fingers that moved are one pinch when the first lifts, and neither a swipe",
+    "why": "A pinch on a reTerminal E1003 rendered on its plane (2026-11-16) was two swipes the opposite ways, and the Map scene, which takes a drag whole on e-paper, could not zoom. Held still past longPressMs first: a pair is no long press. scale = 100 px apart at the end / 400 px at the start.",
+    "steps": [
+     {
+      "at": 0,
+      "send": {
+       "origin": "driver",
+       "event": "pointerMove",
+       "payload": {
+        "x": 8202,
+        "y": 16417,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "buttons": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "pointerId": 1,
+         "x": 200,
+         "y": 240
+        }
+       }
+      ]
+     },
+     {
+      "at": 0,
+      "send": {
+       "origin": "driver",
+       "event": "pointerDown",
+       "payload": {
+        "x": 8202,
+        "y": 16417,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerDown",
+        "payload": {
+         "pointerId": 1,
+         "button": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 30,
+      "send": {
+       "origin": "driver",
+       "event": "pointerDown",
+       "payload": {
+        "x": 24606,
+        "y": 16417,
+        "pointerId": 2,
+        "pointerType": "touch",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerDown",
+        "payload": {
+         "pointerId": 2,
+         "x": 600,
+         "y": 240
+        }
+       }
+      ]
+     },
+     {
+      "at": 700,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 700,
+      "send": {
+       "origin": "driver",
+       "event": "pointerMove",
+       "payload": {
+        "x": 14353,
+        "y": 17101,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "buttons": 1
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "pointerId": 1
+        }
+       }
+      ]
+     },
+     {
+      "at": 700,
+      "send": {
+       "origin": "driver",
+       "event": "pointerMove",
+       "payload": {
+        "x": 18454,
+        "y": 17101,
+        "pointerId": 2,
+        "pointerType": "touch",
+        "buttons": 1
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "pointerId": 2
+        }
+       }
+      ]
+     },
+     {
+      "at": 800,
+      "send": {
+       "origin": "driver",
+       "event": "pointerUp",
+       "payload": {
+        "x": 18454,
+        "y": 17101,
+        "pointerId": 2,
+        "pointerType": "touch",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerUp",
+        "payload": {
+         "pointerId": 2
+        }
+       },
+       {
+        "event": "pinch",
+        "payload": {
+         "pointerId": 2,
+         "pointerType": "touch",
+         "scale": 0.25,
+         "startX": 400,
+         "startY": 240,
+         "x": 400,
+         "y": 250
+        }
+       }
+      ]
+     },
+     {
+      "at": 900,
+      "send": {
+       "origin": "driver",
+       "event": "pointerUp",
+       "payload": {
+        "x": 4101,
+        "y": 17101,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerUp",
+        "payload": {
+         "pointerId": 1,
+         "x": 100
+        }
+       }
+      ]
      }
     ]
    }

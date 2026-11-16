@@ -111,6 +111,7 @@ const
   evDoubleTap* = "doubleTap"
   evLongPress* = "longPress"
   evSwipe* = "swipe"
+  evPinch* = "pinch"
   evEdgeSwipe* = "edgeSwipe"
   evWheel* = "wheel"
   evTurnOn* = "turnOn"
@@ -131,7 +132,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[38, string] = [
+  ContractEventNames*: array[39, string] = [
     evInit,
     evRender,
     evOpen,
@@ -151,6 +152,7 @@ const
     evDoubleTap,
     evLongPress,
     evSwipe,
+    evPinch,
     evEdgeSwipe,
     evWheel,
     evTurnOn,
@@ -172,7 +174,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[38, EventPolicy] = [
+  ContractEventPolicies*: array[39, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -297,6 +299,14 @@ const
       heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # swipe
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elNone,
+      synthesized: true,
+      aliasOfIndex: -1,
+      heardByAll: true,
+      linux: true, esp32: true, wasm: true),
+    EventPolicy( # pinch
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
@@ -464,25 +474,26 @@ proc contractEventIndex*(name: string): int =
   of evDoubleTap: 16
   of evLongPress: 17
   of evSwipe: 18
-  of evEdgeSwipe: 19
-  of evWheel: 20
-  of evTurnOn: 21
-  of evTurnOff: 22
-  of evToggleScreen: 23
-  of evGpio: 24
-  of evButton: 25
-  of evSetSceneState: 26
-  of evSetCurrentScene: 27
-  of evSceneSwitcher: 28
-  of evSceneSettings: 29
-  of evBack: 30
-  of evForward: 31
-  of evMetrics: 32
-  of evReload: 33
-  of evRestart: 34
-  of evReboot: 35
-  of evUploadScenes: 36
-  of evVoiceChat: 37
+  of evPinch: 19
+  of evEdgeSwipe: 20
+  of evWheel: 21
+  of evTurnOn: 22
+  of evTurnOff: 23
+  of evToggleScreen: 24
+  of evGpio: 25
+  of evButton: 26
+  of evSetSceneState: 27
+  of evSetCurrentScene: 28
+  of evSceneSwitcher: 29
+  of evSceneSettings: 30
+  of evBack: 31
+  of evForward: 32
+  of evMetrics: 33
+  of evReload: 34
+  of evRestart: 35
+  of evReboot: 36
+  of evUploadScenes: 37
+  of evVoiceChat: 38
   else: -1
 
 proc eventAliasCount*(name: string): int =
