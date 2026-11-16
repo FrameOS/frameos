@@ -485,6 +485,7 @@
       }
     ],
     "settings": {
+      "category": "Calendars & agendas",
       "backgroundColor": "#000000",
       "refreshInterval": 60,
       "execution": "interpreted",

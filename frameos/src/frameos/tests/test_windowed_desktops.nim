@@ -2475,10 +2475,10 @@ proc probe(source: string): JsonNode =
     loopKey: ".", nextSleep: -1))
   scene.state
 
-proc groupedBy(scenes, categories: string): JsonNode =
-  ## What the layouts' `grouped` makes of `scenes` with `categories` (JS literals): [title, ids...] a group.
+proc groupedBy(scenes: string): JsonNode =
+  ## What the layouts' `grouped` makes of `scenes` (a JS literal): [title, ids...] a group.
   let fn = copiesOf(GroupedStart, [layout])[0] & "\n}\n"
-  probe(fn & "export function get(app) {\n  frameos.setState('out', grouped(" & scenes & ", " & categories &
+  probe(fn & "export function get(app) {\n  frameos.setState('out', grouped(" & scenes &
     ").map((g) => [g.title].concat(g.scenes.map((s) => s.id))))\n  return <div />\n}\n"){"out"}
 
 suite "a long list of scenes, by category (each desktop's grouped)":
@@ -2487,35 +2487,32 @@ suite "a long list of scenes, by category (each desktop's grouped)":
     check copies[0].len > 0
     for text in copies: check text == copies[0]
 
-  test "goes by the runtime's categories, in their order, Other last; without them, the list as it was":
-    let scenes = "[{id: 'a', category: 'fun'}, {id: 'b'}, {id: 'c', category: 'photos'}, {id: 'd', category: ' Fun'}, " &
-      "{id: 'e', category: 'clocks'}]"
-    let categories = "[{id: 'photos', name: 'Photos'}, {id: 'weather', name: 'Weather'}, {id: 'fun', name: 'Fun'}]"
-    check groupedBy(scenes, categories) == %*[["Photos", "c"], ["Fun", "a", "d"], ["Other", "b", "e"]]
-    # An older runtime gives none: one group, no title, the frame's order.
-    check groupedBy(scenes, "undefined") == %*[[nil, "a", "b", "c", "d", "e"]]
-    # No scene in a category the runtime knows: the same.
-    check groupedBy("[{id: 'x'}, {id: 'y', category: 'clocks'}]", categories) == %*[[nil, "x", "y"]]
+  test "goes by each category's own name, the groups by name, Other last; without any, the list as it was":
+    # The names are the scenes' own text (settings.category): a store title or
+    # anything else, trimmed, sorted whatever the case; "Other" is none.
+    let scenes = "[{id: 'a', category: 'Fun & comics'}, {id: 'b'}, {id: 'c', category: 'Photos'}, " &
+      "{id: 'd', category: ' Fun & comics'}, {id: 'e', category: 'clocks'}, {id: 'f', category: 'Other'}]"
+    check groupedBy(scenes) == %*[["clocks", "e"], ["Fun & comics", "a", "d"], ["Photos", "c"], ["Other", "b", "f"]]
+    # No scene with a category (an older runtime lists none): one group, no
+    # title, the frame's order.
+    check groupedBy("[{id: 'x'}, {id: 'y', category: ''}]") == %*[[nil, "x", "y"]]
 
   # Forty scenes, longer than the screen in every list: the sixteen numbered ones
-  # take turns at fun, weather, none and photos, so the photos (Scene 3, 7, ...)
-  # come first in a list by category; the rest have none.
+  # take turns at Weather, Fun & comics, none and Art & galleries, so the art
+  # (Scene 3, 7, ...) comes first in a list by category; the rest have none.
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
       result = newJArray()
       for i in 0 ..< 16:
-        result.add %*{"id": "tests/be-" & $i, "name": "Scene " & $i, "category": ["fun", "weather", "", "photos"][i mod 4]}
+        result.add %*{"id": "tests/be-" & $i, "name": "Scene " & $i,
+          "category": ["Weather", "Fun & comics", "", "Art & galleries"][i mod 4]}
       for id in ["tests/red", "tests/green", "tests/blue", "tests/apple", "tests/lime", "tests/ocean", "tests/sky",
           "tests/grass", "tests/sun", "tests/be-red", "tests/be-green", "tests/be-blue", "tests/cm-red", "tests/cm-green",
           "tests/cm-blue", "tests/next-a", "tests/next-b", "tests/next-c", "tests/nc-red", "tests/nc-green",
           "tests/nc-blue", "tests/tt-red", "tests/tt-green", "tests/tt-blue"]:
         result.add %*{"id": id, "name": id}
 
-  test "every desktop's list scrolls under a finger, and goes by category where the runtime has them":
-    # The lists go by category only where the runtime gives a layout its
-    # categories (app.frame.categories): then the photos come first.
-    let byCategory = probe("export function get(app) {\n  frameos.setState('cats', Array.isArray(app.frame.categories))\n" &
-      "  return <div />\n}\n"){"cats"}.getBool()
+  test "every desktop's list scrolls under a finger, and goes by category":
     # Each desktop: how its list of scenes opens, the rows of it (what takes a
     # press, top to bottom), and whether it is still open.
     proc rowsIn(layoutId: string, x0, x1: float32): seq[array[4, float32]] =
@@ -2571,12 +2568,12 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       discard pass()
       # 170 px is no whole number of rows in any of them: every row moved.
       check rows(layoutId).mapIt(it[1]) != first.mapIt(it[1])
-      # Scrolled back to the top: its first row is the first of the photos
-      # where the list goes by category, else the frame's first scene.
+      # Scrolled back to the top: its first row is the first scene of the
+      # first category by name, Art & galleries, not the frame's first scene.
       discard send("wheel", %*{"x": x, "y": y, "deltaX": 0, "deltaY": -40})
       discard pass()
       check acted(clickRect(rows(layoutId)[0])) == @["setCurrentScene"]
-      check current.id.string == (if byCategory: "tests/be-3" else: "tests/be-0")
+      check current.id.string == "tests/be-3"
       discard pass()
       check problems.len == 0
     desk().state["openScenes"] = %*[]
@@ -2630,6 +2627,44 @@ suite "a scene's own icon (app.frame.scenes[i].icon)":
     check dock.color(offMiddle(tiles[1])[0], offMiddle(tiles[1])[1]) == colored("#ffffff")
     check dock.color(offMiddle(tiles[2])[0], offMiddle(tiles[2])[1]) == colored("#555555")
     shot(dock, "icons-nextstep")
+    check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "gives way to the desktop's own drawing of the frame's own apps (layouts may override them)":
+    # Windows 98's desktop icon of the terminal, and its taskbar button once it
+    # is open: the same pixels with an icon of its own (a square filling its
+    # box) as without one. Red keeps its own square in Start (above).
+    proc desktopWith(icon: string): (Image, Image) =
+      let own = icon
+      windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          result = %*[{"id": "tests/red", "name": "Red", "icon": "M0 0H24V24H0Z"},
+            {"id": "tests/term-98", "name": "Terminal"}]
+          if own.len > 0: result[1]["icon"] = %own
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(Layout)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      let desktop = pass()
+      discard focusOn("tests/term-98")
+      (desktop, pass())
+    let (plainDesk, plainBar) = desktopWith("")
+    let (iconDesk, iconBar) = desktopWith("M0 0H24V24H0Z")
+    var icons: seq[array[4, float32]]
+    uiPressRects(Layout, icons)
+    let terminal = icons.filterIt(it[0] == 8 and it[2] == 88)[1] # Programs, the terminal, Control Panel
+    proc same(a, b: Image, x0, y0, x1, y1: int): bool =
+      for y in y0 ..< y1:
+        for x in x0 ..< x1:
+          if a.color(x, y) != b.color(x, y): return false
+      true
+    check same(plainDesk, iconDesk, int(terminal[0]), int(terminal[1]), int(terminal[2]), int(terminal[3]))
+    # The taskbar: Start, then the terminal's button with its prompt.
+    check same(plainBar, iconBar, 0, H - 40, W, H)
     check problems.len == 0
     desk().state["openScenes"] = %*[]
     chooseLayout("")

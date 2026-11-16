@@ -3,6 +3,7 @@
     "id": "layout-commander",
     "name": "Commander",
     "settings": {
+      "category": "Desktop layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#000000",

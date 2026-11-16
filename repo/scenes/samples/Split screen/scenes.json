@@ -91,6 +91,7 @@
       }
     ],
     "settings": {
+      "category": "Art & galleries",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
@@ -284,6 +285,7 @@
       }
     ],
     "settings": {
+      "category": "Art & galleries",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
@@ -476,6 +478,7 @@
       }
     ],
     "settings": {
+      "category": "Demos & examples",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
@@ -539,6 +542,7 @@
       }
     ],
     "settings": {
+      "category": "Demos & examples",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,
       "execution": "interpreted",
@@ -736,6 +740,7 @@
       }
     ],
     "settings": {
+      "category": "Demos & examples",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",
       "execution": "interpreted",

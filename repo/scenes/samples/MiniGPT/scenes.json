@@ -3,6 +3,7 @@
     "id": "10618681-5eb4-4b34-8292-ad6ecec8e109",
     "name": "MiniGPT",
     "settings": {
+      "category": "AI & generative",
       "backgroundColor": "#ffffff",
       "refreshInterval": 3600,
       "execution": "interpreted",

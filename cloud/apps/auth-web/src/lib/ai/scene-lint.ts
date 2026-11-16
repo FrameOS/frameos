@@ -22,6 +22,7 @@ import {
 } from "../../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
 import { sceneIconProblem } from "../../../../../../frontend/src/utils/sceneIcon";
+import { sceneCategoryTitles } from "../../../../../../frontend/src/utils/sceneCategory";
 
 export type LintLevel = "error" | "warning";
 
@@ -778,6 +779,17 @@ export function lintScene(
   const iconProblem = sceneIconProblem(settings.icon);
   if (iconProblem) {
     push("warning", `settings.icon: ${iconProblem} Frames ignore it and show their own placeholder.`);
+  }
+  // A name from the store's list (docs/scene-icons.md "Category"); a name of
+  // the owner's own is kept, and a frame lists it as it is.
+  if (settings.category !== undefined && settings.category !== "") {
+    const titles = sceneCategoryTitles(settings.isLayout === true);
+    if (typeof settings.category !== "string" || !titles.includes(settings.category.trim())) {
+      push(
+        "warning",
+        `settings.category ${JSON.stringify(settings.category)} is none of the store's categories. Use one of ${titles.map((title) => `"${title}"`).join(", ")}.`,
+      );
+    }
   }
   if (settings.renderScale !== undefined) {
     const scale = settings.renderScale;

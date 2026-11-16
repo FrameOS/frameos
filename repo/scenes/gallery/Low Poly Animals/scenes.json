@@ -3,6 +3,7 @@
     "id": "0d6cebbd-7481-45ba-933c-c18a7ece8396",
     "name": "Low Poly Animals",
     "settings": {
+      "category": "Art & galleries",
       "backgroundColor": "#000000",
       "refreshInterval": 86400,
       "execution": "interpreted",

@@ -157,6 +157,7 @@
       }
     ],
     "settings": {
+      "category": "Tools & utilities",
       "execution": "interpreted",
       "refreshInterval": 60,
       "backgroundColor": "#07111f",

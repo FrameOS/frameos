@@ -3,6 +3,7 @@
     "id": "map",
     "name": "Map",
     "settings": {
+      "category": "Data & dashboards",
       "backgroundColor": "#f5f3ee",
       "refreshInterval": 86400,
       "execution": "interpreted",

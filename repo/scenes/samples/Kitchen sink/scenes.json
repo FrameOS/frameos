@@ -3,6 +3,7 @@
     "id": "kitchen-sink",
     "name": "Kitchen sink",
     "settings": {
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 0.05,
       "backgroundColor": "#0b1020",

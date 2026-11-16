@@ -3,6 +3,7 @@
     "id": "tap-counter",
     "name": "Tap counter",
     "settings": {
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#1e1b4b",

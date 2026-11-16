@@ -33,6 +33,16 @@ A scenes file is a JSON array of scenes. Each scene is
   icon from a 24 px icon set (Material Design Icons, say) fits as it is, for
   example `"M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"` for a house. Anything else is
   ignored, and the lists keep their own placeholder.
+- `settings.category` (optional): the scene's category by its name, which a
+  desktop layout groups its list of scenes by. Pick one of the store's:
+  `"Photos"` (the owner's photos or a photo service), `"Art & galleries"` (a
+  collection of artwork the scene carries), `"Calendars & agendas"`,
+  `"Weather"`, `"AI & generative"` (made by an AI service), `"Data &
+  dashboards"` (data, charts, stats, news from a service), `"Fun & comics"`
+  (comics, games), `"Real time"` (animates every second or faster, for a fast
+  screen), `"Tools & utilities"` (clocks and practical tools), `"Demos &
+  examples"` (a demo or a building block); a layout's is `"Desktop layouts"` or
+  `"Full screen layouts"`. Write the name exactly.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -675,9 +685,11 @@ export function get(app) {
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
   lists its scenes (`{id, name}`, and `windowSize`, `"WxH"`, where a scene says
-  the size its window should open at, and `icon`, its `settings.icon`, where it
+  the size its window should open at, `icon`, its `settings.icon`, where it
   has one: draw it as `<svg viewBox="0 0 24 24" className="w-6 h-6"><path d={icon}
-  fill="currentColor" /></svg>`) and `app.frame.sceneId` is the one wrapped.
+  fill="currentColor" /></svg>`, and `category`, its `settings.category`, a name
+  such as `"Photos"`, where it has one: group a list of scenes by it, those
+  without one last under Other) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
   beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
@@ -1132,8 +1144,10 @@ interface FrameOSApp {
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
      * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
+     * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Real time"; its
+     * settings.category), where it has one, to group a list of scenes by, those without one last as Other
      * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string }[];
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined

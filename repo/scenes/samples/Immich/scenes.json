@@ -3,6 +3,7 @@
     "id": "b91d14d1-ed3e-520f-bf9a-f88ce4c1cc9a",
     "name": "Immich",
     "settings": {
+      "category": "Photos",
       "refreshInterval": 300,
       "backgroundColor": "#000000",
       "execution": "interpreted",

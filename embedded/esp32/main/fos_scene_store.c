@@ -368,13 +368,21 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
  * itself (scene_icon.nim); the store only keeps a longer value out of the
  * index, which every catalog read parses whole. */
 #define ICON_MAX_LEN 1024
+/* A category is a name ("Photos", docs/scene-icons.md "Category"), listed as
+ * it is: the store keeps one of a heading's length out of the index. */
+#define CATEGORY_MAX_LEN 128
 
-static bool icon_fits(const char *text)
+/* A setting kept in the index: text no longer than `max` bytes once its ends
+ * are trimmed, and not empty. */
+static void keep_text(cJSON *entry, const cJSON *settings, const char *key, size_t max)
 {
+    const cJSON *value = cJSON_GetObjectItem(settings, key);
+    if (!cJSON_IsString(value)) return;
+    const char *text = value->valuestring;
     size_t start = 0, end = strlen(text);
     while (start < end && strchr(" \t\n\r", text[start])) start++;
     while (end > start && strchr(" \t\n\r", text[end - 1])) end--;
-    return end > start && end - start <= ICON_MAX_LEN;
+    if (end > start && end - start <= max) cJSON_AddStringToObject(entry, key, text);
 }
 
 /* What the index keeps of a scene: what the catalog and a boot need, and the
@@ -406,10 +414,9 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
             cJSON_AddStringToObject(entry, "windowSize", window->valuestring);
         }
         /* Its icon: the switcher's tile and app.frame.scenes, read off the index. */
-        const cJSON *icon = cJSON_GetObjectItem(settings, "icon");
-        if (cJSON_IsString(icon) && icon_fits(icon->valuestring)) {
-            cJSON_AddStringToObject(entry, "icon", icon->valuestring);
-        }
+        keep_text(entry, settings, "icon", ICON_MAX_LEN);
+        /* Its category: a desktop groups its scene lists by it. */
+        keep_text(entry, settings, "category", CATEGORY_MAX_LEN);
     }
     return entry;
 }

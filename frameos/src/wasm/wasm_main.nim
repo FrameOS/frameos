@@ -125,14 +125,7 @@ proc setLastError(msg: string) =
 proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   ## The scene switcher's tiles: the loaded payload, in its order.
   {.cast(gcsafe).}:
-    let scenes = getInterpretedScenes()
-    for sceneId in loadedSceneOrder:
-      if scenes.hasKey(sceneId):
-        let scene = scenes[sceneId]
-        result.add SwitcherEntry(id: sceneId.string, name: scene.name, windowSize: scene.windowSize,
-          icon: scene.icon)
-      else:
-        result.add SwitcherEntry(id: sceneId.string)
+    loadedSceneListing(loadedSceneOrder)
 
 sceneSwitcherListing = switcherListing
 

@@ -342,6 +342,7 @@
       }
     ],
     "settings": {
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#ffffff",
