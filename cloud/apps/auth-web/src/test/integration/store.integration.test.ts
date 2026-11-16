@@ -26,6 +26,12 @@ import { POST as forkScene } from "../../../app/api/account/scenes/[sceneId]/for
 import { POST as uploadScene } from "../../../app/api/account/scenes/upload/route";
 import { POST as publishScene } from "../../../app/api/store/publish/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
+import { GET as getAccountRepositoryJson } from "../../../app/api/store/account/repository.json/route";
+import { GET as getAccountScenes } from "../../../app/api/account/scenes/route";
+import { GET as getAccountScene } from "../../../app/api/account/scenes/[sceneId]/route";
+import { GET as getBrowse } from "../../../app/api/store/browse/route";
+import { GET as getDeviceStore } from "../../../app/api/store/device/scenes/route";
+import { GET as getDeviceStoreScene } from "../../../app/api/store/device/scenes/[sceneId]/route";
 import { GET as downloadScene } from "../../../app/api/store/scenes/[sceneId]/download/route";
 import { GET as getSceneImage } from "../../../app/api/store/scenes/[sceneId]/image/route";
 import { GET as getGalleryImage } from "../../../app/api/store/scenes/[sceneId]/images/[imageId]/route";
@@ -1915,6 +1921,151 @@ describe("store publish and distribution", () => {
     const templates = repo.templates as Array<Record<string, unknown>>;
     expect(templates[0]?.tags).toEqual(["clock", "e-ink"]);
   });
+  it("lists the icon of the scene a version starts on everywhere a scene is listed, and follows the newest version", async () => {
+    // docs/scene-icons.md: the store keeps the main scene's settings.icon (the
+    // default scene, else the first) per version and on the row.
+    const house = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z";
+    const star = "M12 2l3 7h7l-6 5 2 8-6-4-6 4 2-8-6-5h7z";
+    const { accessToken } = await linkClient(publishScopes);
+    const published = await publish(accessToken, {
+      content_base64: templateZip({
+        scenes: [
+          { id: "first", nodes: [], settings: { icon: star } },
+          { default: true, id: "main", nodes: [], settings: { icon: ` ${house} ` } },
+        ],
+      }).toString("base64"),
+      visibility: "public",
+    });
+    expect(published.status).toBe(200);
+    const scene = (await readJson(published)).scene as Record<string, unknown>;
+    const sceneId = scene.id as string;
+    expect(scene.icon).toBe(house);
+
+    const iconsOnRecord = async () => ({
+      row: (
+        await db
+          .select({ icon: storeScenes.icon })
+          .from(storeScenes)
+          .where(eq(storeScenes.id, sceneId))
+      )[0]?.icon,
+      versions: (
+        await db
+          .select({ icon: storeSceneVersions.icon, version: storeSceneVersions.version })
+          .from(storeSceneVersions)
+          .where(eq(storeSceneVersions.sceneId, sceneId))
+          .orderBy(storeSceneVersions.version)
+      ).map((row) => [row.version, row.icon]),
+    });
+    expect(await iconsOnRecord()).toEqual({ row: house, versions: [[1, house]] });
+
+    // Every listing that describes the scene.
+    const listedIcons = async () => {
+      const repo = await readJson(await getRepositoryJson(request("/api/store/repository.json", "GET")));
+      const drive = await readJson(
+        await getAccountRepositoryJson(request("/api/store/account/repository.json", "GET")),
+      );
+      const browse = await readJson(await getBrowse(request("/api/store/browse", "GET")));
+      const device = await readJson(await getDeviceStore(request("/api/store/device/scenes", "GET")));
+      const deviceOne = await readJson(
+        await getDeviceStoreScene(request(`/api/store/device/scenes/${sceneId}`, "GET"), ctx(sceneId)),
+      );
+      const mine = await readJson(await getAccountScenes(request("/api/account/scenes", "GET")));
+      const one = await readJson(
+        await getAccountScene(request(`/api/account/scenes/${sceneId}`, "GET"), ctx(sceneId)),
+      );
+      const find = (list: unknown, key: string) =>
+        (list as Array<Record<string, unknown>>).find((entry) => entry[key] === sceneId);
+      const deviceRow = find(device.scenes, "id");
+      return {
+        account: (find(mine.scenes, "id") ?? {}).icon,
+        accountScene: (one.scene as Record<string, unknown>).icon,
+        accountVersions: (one.versions as Array<Record<string, unknown>>).map((version) => [
+          version.version,
+          version.icon,
+        ]),
+        browse: (find(browse.scenes, "id") ?? {}).icon,
+        device: deviceRow && "icon" in deviceRow ? deviceRow.icon : "(left out)",
+        deviceOne: "icon" in deviceOne ? deviceOne.icon : "(left out)",
+        drive: (find(drive.templates, "sceneId") ?? {}).icon,
+        repository: (find(repo.templates, "sceneId") ?? {}).icon,
+      };
+    };
+    expect(await listedIcons()).toEqual({
+      account: house,
+      accountScene: house,
+      accountVersions: [[1, house]],
+      browse: house,
+      device: house,
+      deviceOne: house,
+      drive: house,
+      repository: house,
+    });
+
+    // A version whose main scene has no icon takes it off every listing: the
+    // device listing leaves the key out, the others say null (repository
+    // JSON leaves it out too).
+    const plain = await saveVersion(sceneId, {
+      scenes: [{ id: "main", nodes: [], settings: { icon: "not an icon" } }],
+    });
+    expect(plain.status).toBe(200);
+    expect(((await readJson(plain)).scene as Record<string, unknown>).icon).toBeNull();
+    expect(await iconsOnRecord()).toEqual({ row: null, versions: [[1, house], [2, null]] });
+    expect(await listedIcons()).toEqual({
+      account: null,
+      accountScene: null,
+      accountVersions: [
+        [2, null],
+        [1, house],
+      ],
+      browse: null,
+      device: "(left out)",
+      deviceOne: "(left out)",
+      drive: undefined,
+      repository: undefined,
+    });
+
+    // Yanking the newest version brings back the icon of the one now served.
+    const yank = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: true },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    expect(yank.status).toBe(200);
+    expect((await iconsOnRecord()).row).toBe(house);
+    expect((await listedIcons()).repository).toBe(house);
+
+    // Unyanking moves it back, and restoring a version (the MCP
+    // scene_version_restore: its scenes.json saved as a new version) brings
+    // that version's icon with its content.
+    const unyank = await patchVersion(
+      request(`/api/account/scenes/${sceneId}/versions/2`, "PATCH", {
+        body: { yanked: false },
+        headers: { origin: baseUrl },
+      }),
+      { params: Promise.resolve({ sceneId, version: "2" }) },
+    );
+    expect(unyank.status).toBe(200);
+    expect((await iconsOnRecord()).row).toBeNull();
+    const first = (await (
+      await getScenesJson(request(`/api/store/scenes/${sceneId}/scenes.json?version=1`, "GET"), ctx(sceneId))
+    ).json()) as Array<Record<string, unknown>>;
+    const restored = await saveVersion(sceneId, {
+      message: "Restore v1",
+      scenes: first.map(({ origin: _origin, ...rest }) => rest),
+    });
+    expect(restored.status).toBe(200);
+    expect(await iconsOnRecord()).toEqual({
+      row: house,
+      versions: [
+        [1, house],
+        [2, null],
+        [3, house],
+      ],
+    });
+  });
+
   it("guards the live-preview proxy against SSRF and junk", async () => {
     // The preview worker's XHR: same-origin, JSON. Anything else — a
     // cross-site form post, say — must be turned away before the fetch.

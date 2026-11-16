@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
       featuredAt: storeScenes.featuredAt,
       frameosVersion: storeScenes.frameosVersion,
       hasPreview: sceneHasImageSql,
+      icon: storeScenes.icon,
       id: storeScenes.id,
       latestVersion: storeScenes.latestVersion,
       name: storeScenes.name,

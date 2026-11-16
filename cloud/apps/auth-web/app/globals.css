@@ -952,7 +952,11 @@ html.theme-dark .button-primary {
 }
 
 .table-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-style: dashed;
+  color: var(--muted);
 }
 
 .tag-pill--active {
@@ -1063,6 +1067,31 @@ a.tag-pill--active:hover {
   background: var(--bg-soft);
   color: var(--muted);
   font-size: 13px;
+}
+
+/* A scene's own icon (docs/scene-icons.md): one path filled with the text
+   color, inline before a name or large where there is no picture. */
+.scene-icon {
+  flex-shrink: 0;
+}
+
+.scene-icon--inline {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.35em;
+  vertical-align: -0.125em;
+}
+
+.scene-icon--placeholder {
+  width: 40px;
+  height: 40px;
+  opacity: 0.7;
+}
+
+.scene-icon--thumb {
+  width: 20px;
+  height: 20px;
 }
 
 .scene-card h3 {

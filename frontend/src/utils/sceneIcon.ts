@@ -146,10 +146,18 @@ export function sceneIconOf(scene: { settings?: { icon?: unknown } | null } | nu
   return sceneIconPath(scene?.settings?.icon)
 }
 
-/** A saved scene's or template's icon: its main scene's (the default, else the first), when it carries its scenes. */
+/**
+ * A saved scene's or template's icon: its main scene's (the default, else the first) when it carries its
+ * scenes, else the `icon` a repository listing gives (the cloud store reads it from the same main scene when a
+ * version is published).
+ */
 export function templateSceneIcon(template: {
   scenes?: readonly { default?: boolean; settings?: { icon?: unknown } | null }[] | null
+  icon?: unknown
 }): string | null {
   const scenes = template.scenes ?? []
+  if (scenes.length === 0) {
+    return sceneIconPath(template.icon)
+  }
   return sceneIconOf(scenes.find((scene) => scene.default) ?? scenes[0])
 }

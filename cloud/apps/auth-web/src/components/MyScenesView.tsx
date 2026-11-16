@@ -14,6 +14,8 @@ export type MyScenesRow = {
   description: string | null;
   downloadCount: number;
   hasPreview: boolean;
+  // The latest version's icon (docs/scene-icons.md), null for none.
+  icon: string | null;
   id: string;
   name: string;
   slug: string;

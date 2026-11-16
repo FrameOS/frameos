@@ -65,7 +65,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The account's own scenes (private drafts and published ones): id, name, slug, visibility, status, latest_version, tags, category, download_count, has_preview. Filter with q (name/slug/tags), visibility (private|public) and status (active|pulled|featured).",
+        "The account's own scenes (private drafts and published ones): id, name, slug, visibility, status, latest_version, tags, category, icon (the main scene's settings.icon, an SVG path in a 24 box, or null), download_count, has_preview. Filter with q (name/slug/tags), visibility (private|public) and status (active|pulled|featured).",
       inputSchema: {
         q: z.string().max(100).optional(),
         status: z.enum(["active", "pulled", "featured"]).optional(),
@@ -94,7 +94,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "One of the account's scenes in full: summary, every version (number, message, size, yanked, risk flags, the listing and image digests it recorded), the latest version's images, preview and share URLs. For the scene JSON itself use scene_get_content.",
+        "One of the account's scenes in full: summary, every version (number, message, size, yanked, risk flags, icon, the listing and image digests it recorded), the latest version's images, preview and share URLs. For the scene JSON itself use scene_get_content.",
       inputSchema: { scene_id: sceneId },
     },
     async ({ scene_id }) =>
@@ -645,7 +645,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos), frameos_version (only scenes that run on that version), page (48 per page). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).",
+        "Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos), frameos_version (only scenes that run on that version), page (48 per page). Each row carries the scene's icon (an SVG path in a 24 box, or null). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).",
       inputSchema: {
         category: z.enum(storeCategories).optional(),
         frameos_version: z.string().max(40).optional(),
@@ -679,7 +679,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Details of a store scene by uuid, slug or store URL: name, author, description, tags, category, version, cover image URL and zip URL, plus the scene JSON's scene ids/names and node counts.",
+        "Details of a store scene by uuid, slug or store URL: name, author, description, tags, category, icon (an SVG path in a 24 box), version, cover image URL and zip URL, plus the scene JSON's scene ids/names and node counts.",
       inputSchema: { scene: z.string() },
     },
     async ({ scene }) =>

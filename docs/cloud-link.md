@@ -430,7 +430,9 @@ release the scene was exported with — the backend stamps it into
 `template.json` at export, the provider reads it from there; the UI shows
 "newer than this install" as an upgrade nudge when applicable), and
 `updated` (ISO 8601, when the scene last changed — a new version or a
-listing edit; the cloud's home page lists the latest additions by it).
+listing edit; the cloud's home page lists the latest additions by it), and
+`icon` (the main scene's `settings.icon`, one SVG path in a 24 box: the tiles
+draw it where there is no cover, docs/scene-icons.md).
 
 The provider may also serve the extracted scenes JSON of a scene's latest
 version for in-browser live previews (same access rules as the download):
