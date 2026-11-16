@@ -66,6 +66,8 @@ elif defined(frameosEmbedded):
   # the ROM's.
   patchFile("crunchy", "crc32", "src/embedded/patched_crc32")
   patchFile("zippy", "crc", "src/embedded/patched_zippy_crc")
+  # The same for MD5 (checksums' 3.3 KB Nim copy; the ROM's esp_rom_md5_*).
+  patchFile("checksums", "md5", "src/embedded/patched_md5")
 
   # chroma's 148 CSS color names are a 256-slot compile-time Table, 9.1 KB;
   # the same names packed into one string are about 2 KB.
@@ -83,6 +85,14 @@ elif defined(frameosEmbedded):
   # `$float` (Dragonbox) links a 9.9 KB table of powers of ten; QuickJS's
   # js_dtoa, linked anyway, finds the same shortest digits.
   patchFile("stdlib", "dragonbox", "src/embedded/patched_dragonbox")
+
+  # A failed assert says where it is, not what it checked: the condition's
+  # source text was a literal per site and module (-20.2 KB).
+  patchFile("stdlib", "assertions", "src/embedded/patched/assertions")
+
+  # base64's decode builds its error message out of line, not at nine reads.
+  # (The file keeps the module's name: callers write `base64.encode`.)
+  patchFile("stdlib", "base64", "src/embedded/patched/base64")
 
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C

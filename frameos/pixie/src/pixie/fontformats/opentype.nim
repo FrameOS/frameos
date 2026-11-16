@@ -1060,6 +1060,20 @@ const cffStandardStrings = [
   "Book", "Light", "Medium", "Regular", "Roman", "Semibold"
 ]
 
+# The 391 names as one string and where each starts: a const array of strings
+# is a literal and a string header per name in the binary, and this is 4.8 KB
+# less of the ESP32-S3 image. Only the packing below reads the array.
+proc packCffStandardStrings(): (string, array[cffStandardStrings.len + 1, uint16]) =
+  for i, name in cffStandardStrings:
+    result[1][i] = result[0].len.uint16
+    result[0].add name
+  result[1][cffStandardStrings.len] = result[0].len.uint16
+
+const
+  cffStandardStringsPacked = packCffStandardStrings()
+  cffStandardStringBytes = cffStandardStringsPacked[0]
+  cffStandardStringStarts = cffStandardStringsPacked[1]
+
 const TOP_DICT_META = {
   0: "version",
   1: "notice",
@@ -1529,7 +1543,8 @@ proc parseCFFTable(buf: string, offset: int, maxp: MaxpTable): CFFTable =
 
   proc getCFFString(strings: seq[string], index: int): string =
     if index <= 390:
-      cffStandardStrings[index]
+      cffStandardStringBytes.substr(cffStandardStringStarts[index].int,
+        cffStandardStringStarts[index + 1].int - 1)
     else:
       if index - 391 < strings.len:
         strings[index - 391]

@@ -2593,6 +2593,12 @@ type InterpretedScenesLoadError* = object of CatchableError
   ## scenes.json.gz and that a redeploy is the fix.
 
 proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] =
+  when defined(frameosEmbedded):
+    # The firmware's scenes come from its scene store (embedded_runtime's
+    # setSceneCatalog fills the cache); there is no environment and no
+    # working directory to find a scenes.json in, so this always came back
+    # empty there. Not compiling the reader is 2.2 KB of flash.
+    return initTable[SceneId, ExportedInterpretedScene]()
   let configuredFile = getEnv("FRAMEOS_SCENES_JSON")
   var sourcePath = ""
   var compressed = false
