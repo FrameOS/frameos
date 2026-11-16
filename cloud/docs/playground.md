@@ -34,10 +34,17 @@ visitor's own browser.
   and `repo/scenes/gallery`, leaving out the samples that need an API key or
   an account in the frame's settings, or a process on a Pi (its
   `excludedTemplates`). `leadingTemplates` is the Start menu's order; the
-  first is the window the desktop opens on. Every real-time and interactive
+  first is the window the desktop opens on: the **Welcome**
+  (`playground-scenes/Welcome`, one JSX app), which says what the visitor is
+  looking at and opens the store, the Terminal, Control Panel and the scene
+  list from its buttons. It is the playground's alone, kept beside this page
+  and not in `repo/scenes`, whose every template also reaches frames and the
+  AI's catalog: its words are about a frame in a browser. Every real-time and interactive
   sample is in it (Pixel toys, Color cycling, the Kitchen sink, DVD Logo
-  Bounce, the Keyboard and Touch tests, the Terminal; `playground.test.ts`
-  holds them there): a scene the playground should show is a sample.
+  Bounce, the Keyboard and Touch tests, the Terminal, and the store's Real
+  time shelf as samples: Form showcase, Map, Now playing, To-do, Colors,
+  Calculator, Home, Clock, Weather demo, Steps, Gallery, Tap counter;
+  `playground.test.ts` holds them there): a scene the playground should show is a sample.
 - **The network**: the Scene store browses and previews from the page's own
   origin (`storeUrl`), and a scene's request the browser's CORS refuses goes
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),

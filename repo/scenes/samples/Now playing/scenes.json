@@ -1,0 +1,120 @@
+[
+  {
+    "id": "now-playing",
+    "name": "Now playing",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#000000"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Now playing",
+        "category": "data",
+        "description": "A music player to tap and drag through, with made-up tracks. It plays no sound.",
+        "version": "1.1.0",
+        "fields": [
+          {
+            "name": "at",
+            "label": "Time to show (empty: now)",
+            "type": "string",
+            "value": ""
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Now playing\",\n  \"category\": \"data\",\n  \"description\": \"A music player to tap and drag through, with made-up tracks. It plays no sound.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"at\",\n      \"label\": \"Time to show (empty: now)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Now playing\n// @background #000000\n// @refresh 1\n// A player: play and pause, skip back and forward, and drag the bar to seek.\n// The cover is a gradient and an SVG; the bar moves with the clock while it\n// plays, and follows the finger while it is held (a captured press).\n// `at` (a field) pins the time, for a snapshot; empty, it is the clock.\nconst tracks = [\n  { title: 'Log Cabin Lullaby', artist: 'The Forest Choir', length: 201, cover: 'from-fuchsia-500 to-indigo-800', bg: 'bg-fuchsia-950' },\n  { title: 'Northern Lights', artist: 'Aurora Static', length: 244, cover: 'from-emerald-300 to-cyan-800', bg: 'bg-emerald-950' },\n  { title: 'Paper Boats', artist: 'Juniper Lane', length: 187, cover: 'from-amber-300 to-rose-600', bg: 'bg-rose-950' },\n  { title: 'Night Bus Home', artist: 'Metro Hum', length: 222, cover: 'from-sky-400 to-slate-800', bg: 'bg-sky-950' },\n]\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\n// Each theme's colors, and its bar's sizes in pixels at 480 px of height\n// (get() scales them with everything else).\nconst THEMES = {\n  color: {\n    page: (track) => `${track.bg} text-white`,\n    dim: 'text-white/60',\n    cover: (track) => `bg-gradient-to-br ${track.cover}`,\n    disc: 'text-white/70',\n    artist: 'text-white/70',\n    bar: 'bg-white/20',\n    played: 'bg-white',\n    knob: 'bg-white',\n    sizes: { bar: 4, played: 4, knob: 12, knobOut: 4, border: 0 },\n    skip: 'active:bg-white/20',\n    skipIcon: 'text-white/80',\n    play: 'bg-white active:bg-white/60',\n    playIcon: 'text-black',\n  },\n  high: {\n    page: () => 'bg-white text-black',\n    dim: 'text-black',\n    cover: () => 'bg-black',\n    disc: 'text-white',\n    artist: 'text-black',\n    bar: 'bg-white border-black',\n    played: 'bg-black',\n    knob: 'bg-black',\n    sizes: { bar: 12, played: 8, knob: 16, knobOut: 8, border: 2 },\n    skip: '',\n    skipIcon: 'text-black',\n    play: 'bg-black',\n    playIcon: 'text-white',\n  },\n}\n\nlet index = 0\nlet playing = true\nlet offset = 74 // seconds played when the clock started\nlet since = null\nlet clockAt = () => Date.now()\n\n// The player outlives the render: a board may start each render with a fresh\n// module, and a frame rendered on its server does, at every tap.\nconst recallPlayer = () => {\n  const kept = frameos.recall('player')\n  if (!kept) return\n  index = kept.index\n  playing = kept.playing\n  offset = kept.offset\n  since = kept.since\n}\nconst rememberPlayer = () => frameos.remember('player', { index, playing, offset, since })\n\nconst position = () => {\n  const t = offset + (playing ? (clockAt() - since) / 1000 : 0)\n  return t % tracks[index].length\n}\nconst toggle = () => {\n  offset = position(); since = clockAt(); playing = !playing\n  rememberPlayer()\n}\nconst skip = (by) => {\n  index = (index + by + tracks.length) % tracks.length; offset = 0; since = clockAt()\n  rememberPlayer()\n}\n// The seek bar's width: the UI's less the page's padding on both sides, set by\n// each render for the handlers that run before the next.\nlet barW = 480 - 64\nconst seek = (e) => {\n  // e.width: the bar's own (2026.10.22+); barW on an older frame.\n  const fraction = Math.max(0, Math.min(1, e.localX / (e.width ?? barW)))\n  offset = fraction * tracks[index].length; since = clockAt()\n  rememberPlayer()\n}\nconst clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`\n\nconst Icon = ({ d, className }) => (\n  <svg className={className} viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d={d} /></svg>\n)\n\n// The size the UI is laid out at: the image it draws into, else the frame\n// as the scene sees it (app.frame is the panel's, before the turn).\nconst uiSize = (app, context) => {\n  const turned = [90, 270].includes(app.frame.rotate)\n  return [context?.imageWidth ?? (turned ? app.frame.height : app.frame.width),\n    context?.imageHeight ?? (turned ? app.frame.width : app.frame.height)]\n}\n\nexport function get(app, context) {\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  const [width, height] = uiSize(app, context)\n  // Laid out for 480 px of height, then scaled to the height there is, as far\n  // as the width allows; what height is left spreads out evenly around it.\n  const k = Math.max(0.5, Math.min(height / 480, width / 380))\n  const px = (n) => `${Math.max(1, Math.round(n * k))}px`\n  const padX = Math.round(32 * k)\n  barW = width - 2 * padX\n  const border = t.sizes.border ? Math.max(1, Math.round(t.sizes.border * k)) : 0\n  if (app.config.at) clockAt = () => Date.parse(app.config.at)\n  recallPlayer()\n  if (since === null) {\n    since = clockAt()\n    rememberPlayer()\n  }\n  const track = tracks[index]\n  const at = position()\n  const played = Math.max(2, Math.round((at * (barW - 2 * border)) / track.length))\n  return (\n    <div className={`flex flex-col items-center justify-evenly gap-[${px(14)}] px-[${padX}px] py-[${px(20)}] ${t.page(track)}`}>\n      <span className={`text-[${px(12)}] uppercase font-semibold ${t.dim}`}>{`Track ${index + 1} of ${tracks.length}`}</span>\n      <div className={`w-[${px(168)}] h-[${px(168)}] rounded-[${px(24)}] ${t.cover(track)} flex items-center justify-center`}>\n        <svg className={`w-[${px(92)}] h-[${px(92)}] ${t.disc}`} viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={1.5} strokeLinecap=\"round\">\n          <circle cx={12} cy={12} r={10} />\n          <circle cx={12} cy={12} r={6} />\n          <circle cx={12} cy={12} r={2} fill=\"currentColor\" />\n        </svg>\n      </div>\n      <div className=\"flex flex-col items-center w-full\">\n        <span className={`text-[${px(24)}] font-bold truncate`}>{track.title}</span>\n        <span className={`text-[${px(16)}] ${t.artist}`}>{track.artist}</span>\n      </div>\n      <div className={`flex flex-col w-full gap-[${px(4)}]`}>\n        {/* A mouse passing over the bar sends moves too: seek only while pressed. */}\n        <div className={`flex items-center h-[${px(32)}]`} onPointerDown={seek} onPointerMove={(e) => { if (e.buttons) seek(e) }}>\n          <div className={`flex-1 rounded-full h-[${px(t.sizes.bar)}] ${t.bar}${border ? ` border-[${border}px]` : ''}`}>\n            <div className={`flex items-center justify-end rounded-full h-[${px(t.sizes.played)}] w-[${played}px] ${t.played}`}>\n              <div className={`rounded-full w-[${px(t.sizes.knob)}] h-[${px(t.sizes.knob)}] -mr-[${px(t.sizes.knobOut)}] ${t.knob}`} />\n            </div>\n          </div>\n        </div>\n        <div className={`flex justify-between text-[${px(12)}] ${t.dim}`}>\n          <span>{clock(at)}</span>\n          <span>{clock(track.length)}</span>\n        </div>\n      </div>\n      <div className={`flex items-center justify-between w-full px-[${px(24)}]`}>\n        <div className={`w-[${px(64)}] h-[${px(64)}] rounded-full flex items-center justify-center ${t.skip}`} onClick={() => skip(-1)}>\n          <Icon className={`w-[${px(36)}] h-[${px(36)}] ${t.skipIcon}`} d=\"M6 6h2v12H6zM9.5 12l8.5 6V6z\" />\n        </div>\n        <div className={`w-[${px(80)}] h-[${px(80)}] rounded-full flex items-center justify-center ${t.play}`} onClick={toggle}>\n          <Icon className={`w-[${px(40)}] h-[${px(40)}] ${t.playIcon}`} d={playing ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M7 4v16l13-8z'} />\n        </div>\n        <div className={`w-[${px(64)}] h-[${px(64)}] rounded-full flex items-center justify-center ${t.skip}`} onClick={() => skip(1)}>\n          <Icon className={`w-[${px(36)}] h-[${px(36)}] ${t.skipIcon}`} d=\"M16 6h2v12h-2zM6 18l8.5-6L6 6z\" />\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -166
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "customEvents": []
+  }
+]

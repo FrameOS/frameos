@@ -1,0 +1,6 @@
+{
+  "name": "Welcome",
+  "description": "The playground's welcome: what FrameOS is, what the desktop shows and what to try.",
+  "config": null,
+  "scenes": "./scenes.json"
+}

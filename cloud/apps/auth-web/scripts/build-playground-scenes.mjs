@@ -1,8 +1,9 @@
 // The scenes the playground (playground.frameos.net, cloud/docs/playground.md)
-// boots with: the repo's sample and gallery scenes, every layout among them,
-// written to public/playground-assets/scenes.json (gitignored) before
-// dev/build. Read from repo/scenes at build time, so a sample added to the
-// repo reaches the playground with the next cloud deploy.
+// boots with: its own Welcome (playground-scenes/, here and nowhere else), then
+// the repo's sample and gallery scenes, every layout among them, written to
+// public/playground-assets/scenes.json (gitignored) before dev/build. Read from
+// repo/scenes at build time, so a sample added to the repo reaches the
+// playground with the next cloud deploy.
 /* global console, process */
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,6 +12,9 @@ import { fileURLToPath } from "node:url";
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = dirname(dirname(dirname(appDir)));
 const scenesRoot = join(repoRoot, "repo", "scenes");
+// Scenes about the playground itself, which would be wrong on a frame: not in
+// repo/scenes, whose every template also reaches frames and the AI's catalog.
+const playgroundRoot = join(appDir, "playground-scenes");
 const target = join(appDir, "public", "playground-assets", "scenes.json");
 
 // Samples that cannot run in a browser tab nobody configured: they need an
@@ -29,13 +33,26 @@ export const excludedTemplates = new Set([
 // The Start menu lists the scenes in this order, then the rest by name. The
 // first is the one the desktop opens on.
 export const leadingTemplates = [
-  "Analog clock face",
+  "Welcome",
   "Scene store",
   "Pixel toys",
-  "Weather",
   "Color cycling",
   "Kitchen sink",
+  "Form showcase",
+  "Map",
+  "Now playing",
+  "To-do",
+  "Colors",
+  "Calculator",
+  "Home",
+  "Clock",
+  "Weather demo",
+  "Steps",
+  "Gallery",
+  "Tap counter",
   "DVD Logo Bounce",
+  "Analog clock face",
+  "Weather",
   "Word clock",
   "Terminal app",
   "Asset browser",
@@ -43,15 +60,18 @@ export const leadingTemplates = [
 
 export const playgroundLayoutId = "layout-windows-98";
 
-function templatesIn(collection) {
-  const dir = join(scenesRoot, collection);
+function templatesIn(dir) {
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({ dir: join(dir, entry.name), name: entry.name }));
 }
 
 export function playgroundScenes() {
-  const templates = [...templatesIn("samples"), ...templatesIn("gallery")].filter(
+  const templates = [
+    ...templatesIn(playgroundRoot),
+    ...templatesIn(join(scenesRoot, "samples")),
+    ...templatesIn(join(scenesRoot, "gallery")),
+  ].filter(
     (template) => !excludedTemplates.has(template.name),
   );
   const rank = (name) => {

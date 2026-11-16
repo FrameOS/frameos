@@ -1,0 +1,10 @@
+{
+  "name": "To-do",
+  "description": "A to-do list for a touch screen: tick to-dos off, tap one to edit it, add your own and delete with a confirm. The list scrolls and is kept. High contrast on black-and-white and grey panels.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

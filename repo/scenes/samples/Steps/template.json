@@ -1,0 +1,10 @@
+{
+  "name": "Steps",
+  "description": "Made-up step counts on today, week and month tabs.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

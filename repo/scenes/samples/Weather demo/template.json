@@ -1,0 +1,10 @@
+{
+  "name": "Weather demo",
+  "description": "A week of made-up weather. Tap a day for its details.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Form showcase",
+  "description": "Every form control on one touch screen, from text and passwords to lists, switches and sliders, with an on-screen keyboard.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

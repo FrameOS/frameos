@@ -1,0 +1,10 @@
+{
+  "name": "Gallery",
+  "description": "Full-screen pictures from the FrameOS gallery. Swipe for the next one or pick a category.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

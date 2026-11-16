@@ -125,10 +125,11 @@ describe("the playground", () => {
 describe("the playground's scenes", () => {
   const scenes = playgroundScenes();
 
-  it("open on the first leading sample, with the store and the layout", () => {
+  it("open on the Welcome, with the store and the layout", () => {
     const names = scenes.map((scene) => scene.name);
-    expect(names[0]).toBe("Analog clock face");
-    expect(leadingTemplates[1]).toBe("Scene store");
+    expect(names[0]).toBe("Welcome");
+    expect(scenes[0]!.id).toBe("playground-welcome");
+    expect(leadingTemplates).toContain("Scene store");
     expect(scenes.some((scene) => scene.id === "scene-store")).toBe(true);
     expect(bundledLayoutId).toBe(playgroundLayoutId);
     expect(scenes.some((scene) => scene.id === playgroundLayoutId)).toBe(true);
@@ -145,6 +146,18 @@ describe("the playground's scenes", () => {
       "keyboard-test",
       "touch-test",
       "terminal-app",
+      "form-showcase",
+      "map",
+      "now-playing",
+      "to-do",
+      "colors",
+      "calculator",
+      "home",
+      "clock",
+      "weather-demo",
+      "steps",
+      "gallery",
+      "tap-counter",
     ]) {
       expect(ids.has(id), id).toBe(true);
     }

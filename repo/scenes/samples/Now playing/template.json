@@ -1,0 +1,10 @@
+{
+  "name": "Now playing",
+  "description": "A music player to tap and drag through, with made-up tracks. It plays no sound.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

@@ -1,0 +1,112 @@
+[
+  {
+    "id": "tap-counter",
+    "name": "Tap counter",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#1e1b4b"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Tap counter",
+        "category": "data",
+        "description": "A big number with plus, minus and reset buttons. It remembers the count.",
+        "version": "1.1.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Tap counter\",\n  \"category\": \"data\",\n  \"description\": \"A big number with plus, minus and reset buttons. It remembers the count.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Tap counter\n// @background #1e1b4b\n// @refresh 3600\n// The smallest interactive UI: onClick changes a number, active: darkens the\n// button under the finger, and frameos.remember keeps the count.\nlet count = null\nconst load = () => {\n  if (count === null) count = frameos.recall('count') ?? 0\n}\nconst set = (n) => { count = n; frameos.remember('count', n) }\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: 'bg-indigo-950 text-white',\n    label: 'text-indigo-300',\n    minus: 'bg-rose-500 active:bg-rose-700',\n    plus: 'bg-emerald-500 active:bg-emerald-700',\n    reset: 'px-5 py-3 bg-white/10 text-slate-300 active:bg-white/30',\n  },\n  high: {\n    page: 'bg-white text-black',\n    label: 'text-black',\n    minus: 'bg-black',\n    plus: 'bg-black',\n    reset: 'px-[18px] py-[10px] bg-white border-2 border-black text-black',\n  },\n}\n\nconst Sign = ({ d }) => (\n  <svg className=\"w-14 h-14 text-white\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={3} strokeLinecap=\"round\">\n    <path d={d} />\n  </svg>\n)\n\nexport function get(app) {\n  load()\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  return (\n    <div className={`flex flex-col items-center justify-center gap-6 ${t.page}`}>\n      <span className={`text-lg uppercase font-semibold ${t.label}`}>Tap counter</span>\n      <span className=\"text-9xl font-bold\">{`${count}`}</span>\n      <div className=\"flex items-center gap-6\">\n        <div className={`w-28 h-28 rounded-full flex items-center justify-center ${t.minus}`} onClick={() => set(count - 1)}>\n          <Sign d=\"M5 12h14\" />\n        </div>\n        <div className={`rounded-xl text-lg ${t.reset}`} onClick={() => set(0)}>Reset</div>\n        <div className={`w-28 h-28 rounded-full flex items-center justify-center ${t.plus}`} onClick={() => set(count + 1)}>\n          <Sign d=\"M12 5v14M5 12h14\" />\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

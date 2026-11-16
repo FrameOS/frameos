@@ -1,0 +1,112 @@
+[
+  {
+    "id": "calculator",
+    "name": "Calculator",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Calculator",
+        "category": "data",
+        "description": "A pocket calculator for touch screens.",
+        "version": "1.3.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Calculator\",\n  \"category\": \"data\",\n  \"description\": \"A pocket calculator for touch screens.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Calculator\n// @background #000000\n// @refresh 3600\n// A calculator: five rows of keys share the height under the display, active:\n// lights the key under the finger, and the operator waiting for its second\n// number stays lit. = again repeats the last operation (2 + 3 = 5, = 8, = 11),\n// as a pocket one does.\nconst rows = [\n  ['C', '±', '%', '÷'],\n  ['7', '8', '9', '×'],\n  ['4', '5', '6', '−'],\n  ['1', '2', '3', '+'],\n]\nconst ops = {\n  '+': (a, b) => a + b,\n  '−': (a, b) => a - b,\n  '×': (a, b) => a * b,\n  '÷': (a, b) => a / b,\n}\n\nlet display = '0'\nlet acc = null\nlet op = null\nlet fresh = true\nlet lastOp = null // what = repeats: the operator and its second number\nlet lastArg = null\n\n// The sum in progress outlives the render: a board may start each render with\n// a fresh module, and a frame rendered on its server does, at every tap.\nconst recallSum = () => {\n  const kept = frameos.recall('sum')\n  if (!kept) return\n  display = kept.display\n  acc = kept.acc\n  op = kept.op\n  fresh = kept.fresh\n  lastOp = kept.lastOp\n  lastArg = kept.lastArg\n}\nconst rememberSum = () => frameos.remember('sum', { display, acc, op, fresh, lastOp, lastArg })\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: 'bg-black',\n    sum: 'text-neutral-500',\n    display: 'text-white',\n    lit: 'bg-white text-orange-500',\n    op: 'bg-orange-500 text-white active:bg-orange-300',\n    fn: 'bg-neutral-400 text-black active:bg-neutral-200',\n    digit: 'bg-neutral-800 text-white active:bg-neutral-600',\n  },\n  high: {\n    page: 'bg-white',\n    sum: 'text-black',\n    display: 'text-black',\n    lit: 'bg-white text-black border-4 border-black',\n    op: 'bg-black text-white',\n    fn: 'bg-white text-black border-2 border-black font-bold',\n    digit: 'bg-white text-black border-2 border-black',\n  },\n}\n\n// The keys take whatever height the screen has, so their labels and the\n// display grow with them: a tall screen should not show pocket-sized digits.\n// 156 px is the padding, the smallest display, its gap and the row gaps.\nconst sizes = (height) => {\n  const keyHeight = (height - 156) / 5\n  if (keyHeight >= 180) return { key: 'text-7xl', display: 'text-8xl', sum: 'text-3xl h-10', top: 'h-36' }\n  if (keyHeight >= 120) return { key: 'text-5xl', display: 'text-7xl', sum: 'text-2xl h-8', top: 'h-28' }\n  if (keyHeight >= 90) return { key: 'text-4xl', display: 'text-6xl', sum: 'text-xl h-7', top: 'h-24' }\n  return { key: 'text-3xl', display: 'text-5xl', sum: 'text-lg h-6', top: 'h-20' }\n}\n\nconst formatNumber = (n) => {\n  if (!isFinite(n)) return 'Error'\n  const s = String(parseFloat(n.toPrecision(9)))\n  return s.length > 10 ? n.toExponential(3) : s\n}\n\nconst press = (key) => {\n  if (key >= '0' && key <= '9') {\n    display = fresh || display === '0' ? key : display.length < 9 ? display + key : display\n    fresh = false\n  } else if (key === '.') {\n    if (fresh) display = '0.'\n    else if (!display.includes('.')) display += '.'\n    fresh = false\n  } else if (key === 'C') {\n    display = '0'; acc = null; op = null; fresh = true; lastOp = null; lastArg = null\n  } else if (key === '±') {\n    if (display !== '0') display = display.startsWith('-') ? display.slice(1) : '-' + display\n  } else if (key === '%') {\n    display = formatNumber(parseFloat(display) / 100); fresh = true\n  } else if (key === '=') {\n    if (op && acc !== null) {\n      lastOp = op; lastArg = parseFloat(display)\n      display = formatNumber(ops[op](acc, lastArg))\n    } else if (lastOp) {\n      display = formatNumber(ops[lastOp](parseFloat(display), lastArg))\n    }\n    acc = null; op = null; fresh = true\n  } else {\n    if (op && acc !== null && !fresh) display = formatNumber(ops[op](acc, parseFloat(display)))\n    acc = parseFloat(display); op = key; fresh = true\n  }\n  rememberSum()\n}\n\nconst tone = (t, key) => {\n  if (key in ops || key === '=') return key === op && fresh ? t.lit : t.op\n  if (key === 'C' || key === '±' || key === '%') return t.fn\n  return t.digit\n}\n\nconst button = (t, s, key) => (\n  <div className={`flex-1 rounded-2xl flex items-center justify-center ${s.key} ${tone(t, key)}`}\n    onClick={() => press(key)}>{key}</div>\n)\n\nexport function get(app, context) {\n  recallSum()\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  // The canvas's height, already turned with the frame (app.frame is the\n  // panel's size before the turn).\n  const turned = (app.frame.rotate || 0) % 180 !== 0\n  const H = context?.imageHeight ?? (turned ? app.frame.width : app.frame.height)\n  const s = sizes(H)\n  // The last row is two halves with the rows' gap between them: a half is\n  // exactly two keys and a gap, so 0 spans two columns and . and = line up.\n  return (\n    <div className={`flex flex-col gap-3 p-4 ${t.page}`}>\n      <div className={`flex flex-col items-end justify-end px-3 ${s.top}`}>\n        <span className={`${s.sum} ${t.sum}`}>{op && acc !== null ? `${formatNumber(acc)} ${op}` : ''}</span>\n        <span className={`${s.display} truncate ${t.display}`}>{display}</span>\n      </div>\n      <div className=\"flex-1 flex flex-col gap-2\">\n        {rows.map((row) => (\n          <div className=\"flex-1 flex gap-2\">{row.map((key) => button(t, s, key))}</div>\n        ))}\n        <div className=\"flex-1 flex gap-2\">\n          <div className=\"flex-1 flex\">{button(t, s, '0')}</div>\n          <div className=\"flex-1 flex gap-2\">{button(t, s, '.')}{button(t, s, '=')}</div>\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

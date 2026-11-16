@@ -1,0 +1,10 @@
+{
+  "name": "Home",
+  "description": "A smart home panel to tap through. It controls no real devices.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.0"
+}

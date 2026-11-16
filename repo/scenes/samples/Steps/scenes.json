@@ -1,0 +1,112 @@
+[
+  {
+    "id": "steps",
+    "name": "Steps",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#18181b"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Steps",
+        "category": "data",
+        "description": "Made-up step counts on today, week and month tabs.",
+        "version": "1.1.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Steps\",\n  \"category\": \"data\",\n  \"description\": \"Made-up step counts on today, week and month tabs.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Steps\n// @background #18181b\n// @refresh 3600\n// Tabs: a tap picks one, and the panel under them changes.\nconst tabs = ['Today', 'Week', 'Month']\nlet active = 0\n\n// The tab outlives the render: a board may start each render with a fresh\n// module, and a frame rendered on its server does, at every tap.\nconst show = (i) => {\n  active = i\n  frameos.remember('tab', active)\n}\n\nconst steps = [6.2, 8.4, 4.1, 9.8, 7.3, 11.2, 5.6]\nconst days = ['M', 'T', 'W', 'T', 'F', 'S', 'S']\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\n// The month's days by how far they got: a shade of green in color, a box\n// filled that far up in high contrast.\nconst THEMES = {\n  color: {\n    page: 'bg-zinc-900 text-white',\n    bar: 'p-4 border-b border-white/10',\n    tab: 'text-zinc-400 active:bg-white/10',\n    tabOn: 'bg-white text-zinc-900 font-semibold',\n    muted: 'text-zinc-400',\n    dim: 'text-zinc-500',\n    day: 'text-zinc-300',\n    track: 'bg-white/10',\n    fill: 'bg-lime-400',\n    column: 'bg-lime-400/40',\n    columnOn: 'bg-lime-400',\n    cells: ['bg-lime-400', 'bg-lime-400/60', 'bg-lime-400/30', 'bg-zinc-800'],\n    filled: [],\n  },\n  high: {\n    page: 'bg-white text-black',\n    bar: 'px-4 pt-4 pb-[15px] border-b-2 border-black',\n    tab: 'text-black',\n    tabOn: 'bg-black text-white font-semibold',\n    muted: 'text-black',\n    dim: 'text-black',\n    day: 'text-black',\n    track: 'bg-white border-2 border-black',\n    fill: 'bg-black',\n    column: 'bg-white border-2 border-black',\n    columnOn: 'bg-black',\n    cells: ['bg-black', 'flex flex-col justify-end border-2 border-black', 'flex flex-col justify-end border-2 border-black', 'border-2 border-black'],\n    filled: ['', 'h-[60%]', 'h-[30%]', ''],\n  },\n}\n\nconst Today = ({ t }) => (\n  <div className=\"flex flex-col items-center justify-center h-full gap-2\">\n    <span className=\"text-8xl font-bold\">7,341</span>\n    <span className={`text-xl ${t.muted}`}>steps so far today</span>\n    <div className={`w-64 h-3 rounded-full mt-4 ${t.track}`}>\n      <div className={`h-full w-[73%] rounded-full ${t.fill}`} />\n    </div>\n    <span className={`text-sm ${t.dim}`}>73% of 10,000</span>\n  </div>\n)\n\nconst Week = ({ t }) => (\n  <div className=\"flex items-end gap-3 h-full\">\n    {steps.map((k, i) => (\n      <div className=\"flex-1 flex flex-col items-center gap-2 h-full justify-end\">\n        <span className={`text-xs ${t.muted}`}>{`${k}k`}</span>\n        <div className={`w-full rounded-t-lg ${i === 5 ? t.columnOn : t.column} h-[${Math.round(k * 6.5)}%]`} />\n        <span className={t.day}>{days[i]}</span>\n      </div>\n    ))}\n  </div>\n)\n\nconst Month = ({ t }) => (\n  <div className=\"grid grid-cols-7 gap-2 h-full\">\n    {Array.from({ length: 28 }).map((_, i) => {\n      const level = (i * 7 + 3) % 4\n      return (\n        <div className={`h-12 rounded-md ${t.cells[level]}`}>\n          {t.filled[level] ? <div className={`w-full rounded-b bg-black ${t.filled[level]}`} /> : null}\n        </div>\n      )\n    })}\n  </div>\n)\n\nexport function get(app) {\n  active = frameos.recall('tab') ?? active\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  return (\n    <div className={`flex flex-col ${t.page}`}>\n      <div className={`flex items-center gap-2 ${t.bar}`}>\n        {tabs.map((tab, i) => (\n          <div className={`px-5 py-2 rounded-lg text-lg ${i === active ? t.tabOn : t.tab}`}\n            onClick={() => show(i)}>{tab}</div>\n        ))}\n        <span className={`flex-1 text-right ${t.dim}`}>Steps</span>\n      </div>\n      <div className=\"flex-1 p-6\">{[<Today t={t} />, <Week t={t} />, <Month t={t} />][active]}</div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]
