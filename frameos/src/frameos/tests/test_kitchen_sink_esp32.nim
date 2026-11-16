@@ -197,3 +197,16 @@ for withLayout in [false, true]:
       let grown = getOccupiedMem() - before
       # 360 frames: a parse a frame (16-45 KB) would be 6 MB or more.
       check grown < 1024 * 1024
+
+suite "the sample":
+  test "repo/scenes/samples/Kitchen sink is this scene, its clock not pinned":
+    # The sample (on every frame's list, and in the playground) is the
+    # snapshot's scene with the time left to the clock: one app, kept alike.
+    let sample = parseJson(readFile(root / "repo" / "scenes" / "samples" / "Kitchen sink" / "scenes.json"))[0]
+    check sample["apps"] == kitchenSink["apps"]
+    check sample["settings"] == kitchenSink["settings"]
+    check sample["edges"] == kitchenSink["edges"]
+    check sample["nodes"].len == kitchenSink["nodes"].len
+    for node in sample["nodes"]:
+      let config = node{"data", "config"}
+      check config.isNil or not config.hasKey("at")

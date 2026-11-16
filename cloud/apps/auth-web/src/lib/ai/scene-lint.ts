@@ -481,8 +481,12 @@ function mainAppSource(sources: JsonObject | undefined): { file: string; source:
 
 // pixie's SVG subset (pixie pin of 2026-08-25): any unsupported tag fails
 // the whole document; <defs> is read for its gradients only, so the tags
-// below fail inside it too. Gradients must be userSpaceOnUse.
-const SVG_UNSUPPORTED_TAGS = /<\s*(use|image|filter|mask|clipPath|pattern|style|foreignObject|symbol|marker|switch)\b/;
+// below fail inside it too. Gradients must be userSpaceOnUse. One exception:
+// in JSX, `<image href={ref}>` draws an image ref (a canvas, a decoded image;
+// docs/jsx-ui.md), which the frame reads itself, so an <image> whose href is
+// an expression is not flagged.
+const SVG_UNSUPPORTED_TAGS = /<\s*(use|image|filter|mask|clipPath|pattern|style|foreignObject|symbol|marker|switch)\b([^>]*)/g;
+const JSX_IMAGE_REF = /\bhref\s*=\s*\{/;
 
 // A drawing the scene makes is JSX (docs/scene-guide.md "Drawing with JSX"):
 // the frame reads it straight into the drawing, where markup built in a
@@ -505,7 +509,14 @@ export function lintSvgMarkup(markup: string): string[] {
   if (!/<\s*svg\b/i.test(markup)) {
     return problems;
   }
-  const unsupported = SVG_UNSUPPORTED_TAGS.exec(markup);
+  let unsupported: RegExpMatchArray | undefined;
+  for (const match of markup.matchAll(SVG_UNSUPPORTED_TAGS)) {
+    if (match[1] === "image" && JSX_IMAGE_REF.test(match[2] ?? "")) {
+      continue;
+    }
+    unsupported = match;
+    break;
+  }
   if (unsupported) {
     problems.push(
       `SVG uses <${unsupported[1]}>, which the frame's renderer does not support — the WHOLE SVG fails to render. Supported: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text/tspan, linearGradient, radialGradient, defs (gradients only).`,
