@@ -34,26 +34,42 @@ ESP32_PIXEL_RGB565 = 9
 # The first firmware whose sixteen-grey canvas is the panel buffer itself
 # (esp32_canvas_is_panel_buffer). Older firmware keeps the two apart.
 ESP32_SHARED_CANVAS_FIRMWARE = "2026.11.6"
+# The first firmware that packs a colour panel's picture into its own 565
+# canvas (esp32_canvas_is_panel_buffer). Older firmware keeps the two apart.
+ESP32_PACK_IN_CANVAS_FIRMWARE = "2026.11.10"
+# The colour e-paper formats: four colours, seven, Spectra 6.
+ESP32_PALETTE_PIXEL_FORMATS = frozenset({5, 6, 7})
 
 
-def esp32_canvas_is_panel_buffer(pixel_format: int | None, rotate: int | None) -> bool:
-    """Whether the scene canvas is the panel buffer itself (the firmware's
-    main.c canvas_is_panel_picture): a sixteen-grey panel's 4-bit canvas is its
-    packed picture byte for byte while nothing turns it, so a reTerminal E1003
-    holds one 1.31 MB buffer, not two. `rotate` None: not known, or firmware
-    that keeps two (esp32_canvas_rotation)."""
-    return pixel_format == ESP32_PIXEL_4BPP_GRAY and rotate == 0
+def esp32_canvas_is_panel_buffer(
+    pixel_format: int | None, rotate: int | None, canvas_bytes_per_pixel: float | None = None
+) -> bool:
+    """Whether the scene canvas is the panel buffer itself while nothing turns
+    it: a sixteen-grey panel's 4-bit canvas is its packed picture byte for byte
+    (the firmware's main.c canvas_is_panel_picture: one 1.31 MB buffer on a
+    reTerminal E1003, not two), and a colour panel's picture is packed into the
+    first bytes of its 565 canvas (main.c canvas_holds_panel_picture: 960 KB
+    back on a reTerminal E1004). `rotate` None: not known, or firmware that
+    keeps two (esp32_canvas_rotation)."""
+    if rotate != 0:
+        return False
+    return pixel_format == ESP32_PIXEL_4BPP_GRAY or (
+        pixel_format in ESP32_PALETTE_PIXEL_FORMATS and canvas_bytes_per_pixel == 2
+    )
 
 
-def esp32_canvas_rotation(rotate: object, firmware_version: object) -> int | None:
+def esp32_canvas_rotation(rotate: object, firmware_version: object, pixel_format: object = None) -> int | None:
     """The rotation to give the limits for a frame at `rotate` running
     `firmware_version`: its own on firmware that draws a sixteen-grey scene in
-    the panel buffer, None on older or unknown firmware (two buffers: the safe
+    the panel buffer (or, for a colour panel, packs its picture in the
+    canvas), None on older or unknown firmware (two buffers: the safe
     direction)."""
     if isinstance(rotate, bool) or not isinstance(rotate, (int, float)):
         return None
     version = version_tuple(firmware_version) if isinstance(firmware_version, str) else None
-    minimum = version_tuple(ESP32_SHARED_CANVAS_FIRMWARE)
+    minimum = version_tuple(
+        ESP32_PACK_IN_CANVAS_FIRMWARE if pixel_format in ESP32_PALETTE_PIXEL_FORMATS else ESP32_SHARED_CANVAS_FIRMWARE
+    )
     if version is None or minimum is None or version < minimum:
         return None
     return int(rotate)
@@ -87,14 +103,14 @@ def esp32_device_limits(
     frame buffers — and the emergency reserve), plus what the renderer spends
     on its RGBX canvas that a 565- or luma-canvas device does not."""
     pixels = max(1, width) * max(1, height)
-    if esp32_canvas_is_panel_buffer(pixel_format, rotate):
+    canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
+    if esp32_canvas_is_panel_buffer(pixel_format, rotate, canvas_bytes_per_pixel):
         packed_bytes = 0
     elif pixel_format == ESP32_PIXEL_RGB565:
         packed_bytes = pixels * 2 * 4
     else:
         packed_bytes = -(-pixels // 2)
     device_heap = max(512 * 1024, psram_bytes - packed_bytes - ESP32_EMERGENCY_RESERVE_BYTES)
-    canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     preview_overhead = pixels * 4 - math.ceil(pixels * canvas_bytes_per_pixel)
     return {
         "memoryBytes": device_heap + preview_overhead,
@@ -165,7 +181,7 @@ def frame_render_device(frame: Frame | None) -> RenderDevice | None:
         label=f"ESP32 with {megabytes:g} MB PSRAM",
         psram_bytes=psram_bytes,
         pixel_format=pixel_format,
-        rotate=esp32_canvas_rotation(frame.rotate or 0, frame_firmware_version(frame)),
+        rotate=esp32_canvas_rotation(frame.rotate or 0, frame_firmware_version(frame), pixel_format),
     )
 
 

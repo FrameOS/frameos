@@ -278,6 +278,23 @@ static bool canvas_is_panel_picture(const fos_config_t *config)
            fos_framebuffer_reserved_bytes() == fos_display_buffer_size();
 }
 
+/* A colour panel's packed picture (palette indices, 2 or 4 bits) is packed
+ * into the first bytes of its own 565 canvas when nothing turns it: the
+ * dither has read every canvas row it writes over (utils/palette_pack.nim), so
+ * the panel buffer is the head of the canvas and the 960 KB a reTerminal
+ * E1004 reserved beside its 3.84 MB canvas goes back to the renders, and the
+ * display's task refreshes from it without a copy (fos_display_lend). The
+ * canvas no longer holds the scene after a pack, so this is for panels that
+ * keep no picture of their own: no partial waveform. */
+static bool canvas_holds_panel_picture(const fos_config_t *config)
+{
+    fos_pixel_format_t format = fos_display_format();
+    return (format == FOS_PIXEL_2BPP_BWYR || format == FOS_PIXEL_4BPP_7COLOR ||
+            format == FOS_PIXEL_4BPP_SPECTRA6) &&
+           fos_display_canvas_bits_per_pixel() == 16 && config->rotate == 0 &&
+           !fos_display_supports_partial() && fos_display_buffer_size() <= fos_display_canvas_bytes();
+}
+
 /* The stored Wi-Fi came back while the provisioning portal was serving.
  * fos_wifi has already dropped the open AP; bring the rest up the way the
  * online boot path does, and replace the portal status screen. */
@@ -432,7 +449,8 @@ void app_main(void)
      * one that reports "out of memory for 96000 byte framebuffer" with 120 KB
      * free but no block that size. No-op on PSRAM boards. */
     if (fos_display_present()) {
-        fos_framebuffer_reserve(fos_display_buffer_size());
+        /* Not where the picture is packed in the canvas, claimed below. */
+        if (!canvas_holds_panel_picture(config)) fos_framebuffer_reserve(fos_display_buffer_size());
         /* The Nim renderer packs into the same reservation (fos_framebuffer.h).
          * The hooks take/return the buffer through the acquire/release pair
          * that fos_client.c already uses to hand it back after the blit. */
@@ -506,9 +524,19 @@ void app_main(void)
     if (local_render_ok && frameos_nim_available() && fos_display_present()) {
         if (canvas_is_panel_picture(config)) {
             frameos_nim_share_canvas(fos_framebuffer_reserved_buffer(), fos_framebuffer_reserved_bytes());
+        } else if (canvas_holds_panel_picture(config) && frameos_nim_reserve_canvas(fos_display_canvas_bytes())) {
+            uint8_t *canvas = frameos_nim_canvas_buffer(fos_display_canvas_bytes());
+            fos_framebuffer_adopt(canvas, fos_display_buffer_size());
+            frameos_nim_share_canvas(canvas, fos_display_canvas_bytes());
+            fos_display_lend(canvas);
         } else {
             frameos_nim_reserve_canvas(fos_display_canvas_bytes());
         }
+    }
+    /* Such a panel with no canvas (rendered on the server from boot, or no
+     * block that big): a panel buffer of its own after all. */
+    if (fos_display_present() && canvas_holds_panel_picture(config) && fos_framebuffer_reserved_bytes() == 0) {
+        fos_framebuffer_reserve(fos_display_buffer_size());
     }
 
     BOOTMEM("after-sd");

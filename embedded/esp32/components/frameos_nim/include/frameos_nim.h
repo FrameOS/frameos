@@ -29,7 +29,10 @@ bool frameos_nim_reserve_canvas(size_t len);
 void *frameos_nim_canvas_buffer(size_t len);
 size_t frameos_nim_canvas_reserved(void);
 /* The scene canvas IS this buffer (a sixteen-grey panel's packed picture,
- * main.c): reserved once, never freed, nothing else reserved for it. */
+ * main.c): reserved once, never freed, nothing else reserved for it. Given
+ * the canvas block itself (frameos_nim_canvas_buffer), the canvas holds the
+ * panel's picture in its first bytes (a colour panel's 565 canvas, main.c
+ * canvas_holds_panel_picture) and is shared from then on. */
 void frameos_nim_share_canvas(void *buffer, size_t len);
 bool frameos_nim_canvas_shared(void);
 void *frameos_nim_shared_canvas_buffer(void);

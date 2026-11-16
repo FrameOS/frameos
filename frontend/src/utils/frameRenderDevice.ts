@@ -47,7 +47,8 @@ export function frameRenderDevice(frame: Partial<FrameType> | null | undefined):
   const pixelFormat = typeof reportedFormat === 'number' ? reportedFormat : null
   const rotate = esp32CanvasRotation(
     frame.hardware?.rotate ?? frame.rotate ?? 0,
-    frame.frameos_version ?? frame.embedded?.lastBoot?.frameosVersion ?? frame.last_successful_deploy?.frameos_version
+    frame.frameos_version ?? frame.embedded?.lastBoot?.frameosVersion ?? frame.last_successful_deploy?.frameos_version,
+    pixelFormat
   )
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10
   return {

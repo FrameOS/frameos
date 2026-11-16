@@ -183,8 +183,63 @@ static void test_a_new_size_gets_a_new_buffer(void)
     CHECK(s_allocs == s_frees);
 }
 
+/* A colour panel whose picture is packed in the scene canvas (main.c
+ * canvas_holds_panel_picture) lends that buffer: no copy of 960 KB on a board
+ * that has 700 KB free, and the render waits while the queue holds it. */
+static void test_a_lent_picture_is_taken_as_it_is(void)
+{
+    fos_refresh_queue_t queue = fresh_queue();
+    uint8_t canvas[LEN];
+    uint8_t other[LEN];
+    queue.lent = canvas;
+    picture(canvas, 1);
+    CHECK(!fos_refresh_queue_holds(&queue, canvas));
+    CHECK(fos_refresh_queue_put(&queue, canvas, LEN) == FOS_REFRESH_STARTED);
+    CHECK(fos_refresh_queue_current(&queue) == canvas);
+    CHECK(fos_refresh_queue_holds(&queue, canvas));
+    CHECK(!fos_refresh_queue_holds(&queue, other));
+    CHECK(s_allocs == 0);
+    /* Something else asked for meanwhile (a status screen in a buffer of its
+     * own) is copied as before, and never into the lent buffer. */
+    picture(other, 2);
+    CHECK(fos_refresh_queue_put(&queue, other, LEN) == FOS_REFRESH_QUEUED);
+    CHECK(s_allocs == 1);
+    CHECK(shows(canvas, 1));
+    /* The lent one again as the next: the copy goes. */
+    CHECK(fos_refresh_queue_put(&queue, canvas, LEN) == FOS_REFRESH_QUEUED);
+    CHECK(s_frees == 1);
+    CHECK(fos_refresh_queue_done(&queue));
+    CHECK(fos_refresh_queue_current(&queue) == canvas);
+    CHECK(fos_refresh_queue_holds(&queue, canvas));
+    /* Done: the lent buffer is never released, and is free to write. */
+    CHECK(!fos_refresh_queue_done(&queue));
+    CHECK(!fos_refresh_queue_holds(&queue, canvas));
+    CHECK(s_frees == 1);
+    /* A copy owed first, then the lent buffer while it shows: the copy is
+     * released when it is done, the lent one is not. */
+    picture(other, 3);
+    CHECK(fos_refresh_queue_put(&queue, other, LEN) == FOS_REFRESH_STARTED);
+    CHECK(!fos_refresh_queue_holds(&queue, canvas));
+    CHECK(fos_refresh_queue_put(&queue, canvas, LEN) == FOS_REFRESH_QUEUED);
+    CHECK(fos_refresh_queue_holds(&queue, canvas));
+    CHECK(fos_refresh_queue_done(&queue));
+    CHECK(!fos_refresh_queue_done(&queue));
+    CHECK(s_allocs == s_frees);
+    /* Out of memory for a copy: the lent buffer waiting as the next stays. */
+    CHECK(fos_refresh_queue_put(&queue, other, LEN) == FOS_REFRESH_STARTED);
+    CHECK(fos_refresh_queue_put(&queue, canvas, LEN) == FOS_REFRESH_QUEUED);
+    s_out_of_memory = true;
+    CHECK(fos_refresh_queue_put(&queue, other, LEN) == FOS_REFRESH_NO_MEMORY);
+    CHECK(fos_refresh_queue_holds(&queue, canvas));
+    s_out_of_memory = false;
+    CHECK(fos_refresh_queue_done(&queue));
+    CHECK(!fos_refresh_queue_done(&queue));
+    CHECK(s_allocs == s_frees);
+}
+
 int main(void)
 {
+    test_a_lent_picture_is_taken_as_it_is();
     test_one_refresh();
     test_the_newest_waits_as_the_next();
     test_a_picture_asked_for_during_the_last_refresh();

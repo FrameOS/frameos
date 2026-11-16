@@ -24,6 +24,7 @@ from frameos/utils/http_client import releaseStrandedHttp
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/panel_damage
+import frameos/utils/palette_pack
 import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
@@ -282,41 +283,19 @@ proc packImagePalette(
     buf: ptr UncheckedArray[uint8];
     bufLen: int;
     palette: seq[(int, int, int)]
-  ): bool {.hotLoop.} =
-  let
-    width = image.width
-    height = image.height
-    bits = if palette.len <= 2: 1 elif palette.len <= 4: 2 elif palette.len <= 16: 4 else: 8
-    pixelsPerByte = if palette.len <= 2: 8 elif palette.len <= 4: 4 elif palette.len <= 16: 2 else: 1
-    rowBytes = (frameWidth + pixelsPerByte - 1) div pixelsPerByte
-
+  ): bool =
+  ## utils/palette_pack.nim: into a buffer of its own, or into the canvas's
+  ## own bytes where the canvas is the panel buffer (main.c
+  ## canvas_holds_panel_picture: a 565 canvas, unturned).
+  let rowBytes = paletteRowBytes(frameWidth, palette.len)
   if rowBytes * frameHeight != bufLen:
     log(&"pack palette: buffer mismatch, want {rowBytes * frameHeight} bytes, got {bufLen}")
     return false
-
-  for i in 0 ..< bufLen:
-    buf[i] = 0
-
-  image.forEachPaletteDithered(palette, x, y, index):
-    let
-      (px, py) = panelCoords(x, y, width, height)
-      outputIndex = py * rowBytes + px div pixelsPerByte
-    case bits:
-    of 8:
-      buf[outputIndex] = index.uint8
-    of 4:
-      let bitPosition = (1 - (px mod 2)) * 4
-      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-    of 2:
-      let bitPosition = (3 - (px mod 4)) * 2
-      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-    of 1:
-      let bitPosition = (7 - px) mod 8
-      buf[outputIndex] = buf[outputIndex] or (index shl bitPosition).uint8
-    else:
-      discard
-
-  true
+  if cast[pointer](buf) == image.bufferPointer and
+      not packsInPlace(image, palette.len, frameWidth, frameHeight, frameRotate):
+    log(&"pack palette: a {image.width}x{image.height} canvas cannot hold its own picture")
+    return false
+  packPalette(image, buf, bufLen, palette, frameWidth, frameHeight, frameRotate)
 
 proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool {.hotLoop.} =
   ## 16-bit colour for an LCD (FOS_PIXEL_RGB565, the SenseCAP Indicator's
@@ -570,9 +549,12 @@ proc packedLenForFormat(width, height, pixelFormat: int): int =
     ((width + 7) div 8) * height
   of 2, 3:
     ((width + 7) div 8) * height * 2
-  of 4:
+  of 4, 5:
+    # Two bits a pixel: four greys, and the four-colour palette's indices
+    # (fos_display_buffer_size; this said four bits for format 5, and its
+    # pack refused the buffer).
     ((width + 3) div 4) * height
-  of 5, 6, 7, 8:
+  of 6, 7, 8:
     ((width + 1) div 2) * height
   of 9:
     width * height * 2
@@ -815,6 +797,9 @@ proc renderErrorFallbackAlloc(
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
     rhythmForgetCanvases()
+    # An error frame is not one to settle, and a colour canvas that is the
+    # panel buffer holds its picture after this pack, not the frame.
+    lastPackedFromCanvas = false
     if not packImageForFormat(image, cast[ptr UncheckedArray[uint8]](raw), packedLen, pixelFormat):
       renderBufferFree(raw)
       return 1
@@ -877,8 +862,9 @@ proc fos_nim_render_alloc_impl(
     # LCD path above; without it an e-paper render said only its total.
     probeOn = debugEnabled()
     let cacheAtStart = probeBegin()
-    # Where the canvas is the panel buffer (a sixteen-grey panel, main.c
-    # frameos_nim_share_canvas) the buffer is borrowed before the scene draws
+    # Where the canvas is the panel buffer (a sixteen-grey panel, or the head
+    # of a colour panel's 565 canvas, main.c frameos_nim_share_canvas) the
+    # buffer is borrowed before the scene draws
     # there: nothing else writes it meanwhile, and a snapshot of the last
     # picture in it lets go (fos_client.c snapshot_before_lend).
     let
@@ -925,9 +911,14 @@ proc fos_nim_render_alloc_impl(
       image = nil
       GC_fullCollect()
       return 1
-    if drawsInPanel and not lastPackedFromCanvas:
-      # Another image was packed over the canvas's own bytes.
+    if drawsInPanel and not (lastPackedFromCanvas and canvas.format == pfGray4):
+      # The picture is in the canvas's bytes now: another image packed over
+      # them, or a colour canvas packed into itself (utils/palette_pack.nim,
+      # main.c canvas_holds_panel_picture). What the scene drew there is
+      # gone, so the next render draws it whole and nothing repacks it. A
+      # sixteen-grey canvas is its picture as it is, and keeps both.
       rhythmForgetCanvases()
+      lastPackedFromCanvas = false
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()

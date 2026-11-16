@@ -27,6 +27,12 @@ typedef struct {
     bool busy;     /* a picture is owed: from the first put to the last done */
     void *(*alloc)(size_t len);
     void (*release)(void *buf);
+    /* A buffer taken as it is, not copied: a colour panel's picture packed in
+     * the scene canvas (main.c canvas_holds_panel_picture), which nothing
+     * writes while the queue holds it (fos_refresh_queue_holds; the render
+     * waits). NULL: every picture is copied. */
+    const uint8_t *lent;
+    bool now_lent, next_lent; /* that slot is `lent` itself: never released */
 } fos_refresh_queue_t;
 
 typedef enum {
@@ -35,7 +41,7 @@ typedef enum {
     FOS_REFRESH_NO_MEMORY, /* nothing changed: refresh in place */
 } fos_refresh_put_t;
 
-/* A copy of `buf` owed to the glass. */
+/* A copy of `buf` owed to the glass; `buf` itself when it is `lent`. */
 fos_refresh_put_t fos_refresh_queue_put(fos_refresh_queue_t *queue, const uint8_t *buf, size_t len);
 
 /* The refresh task: the picture to show now, NULL when none is owed. */
@@ -44,6 +50,10 @@ const uint8_t *fos_refresh_queue_current(const fos_refresh_queue_t *queue);
 /* The refresh task, once `current` is on the glass: true when another picture
  * waits (it is current now); false when the queue went idle. */
 bool fos_refresh_queue_done(fos_refresh_queue_t *queue);
+
+/* Whether `buf` is a picture owed to the glass as it is (`lent`): whoever
+ * writes it waits until this is false. */
+bool fos_refresh_queue_holds(const fos_refresh_queue_t *queue, const uint8_t *buf);
 
 /* Whether a picture is owed (a timed render waits for it, a park leaves the
  * panel to the refresh task). */
