@@ -32,7 +32,10 @@ let networkApps = toHashSet([
   # the Chess puzzle sample's own JS app: Lichess's daily puzzle by default
   "lichessPuzzlePanel",
   # the Scene store sample's own JS app: the store's listing, with no host
-  "sceneStore"
+  "sceneStore",
+  # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
+  # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
+  "weatherOpenMeteoJS", "birdJournal", "flightRadar"
 ])
 let hostOnlyApps = toHashSet(["chromiumScreenshot", "rstpSnapshot"])
 
