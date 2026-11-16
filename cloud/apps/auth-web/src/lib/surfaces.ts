@@ -109,10 +109,26 @@ function isLegacyMyScenesPath(pathname: string) {
 // The playground's page is app/playground; on its own host it is the root.
 export const playgroundPath = "/playground";
 
-export type SurfaceRoute = {
-  destination: URL;
-  kind: "redirect" | "rewrite";
+// How the playground host's root becomes that page: proxy.ts marks the
+// request with this header and next.config.ts rewrites it, inside Next's
+// router. Never a rewrite returned by the proxy: Next keeps one inside the
+// server only when its origin is the one the server was started on
+// (HOSTNAME=127.0.0.1 in production), and the proxy only ever sees that host
+// as `localhost`, so every such rewrite became an HTTP request back into this
+// server, which the rules below sent to the root again: a redirect loop at
+// playground.frameos.net the day it went live (2026-11-16).
+export const playgroundRootHeader = "x-frameos-playground-root";
+
+export const playgroundRootRewrite = {
+  source: "/",
+  has: [{ type: "header" as const, key: playgroundRootHeader, value: "1" }],
+  destination: playgroundPath,
 };
+
+export type SurfaceRoute =
+  | { kind: "redirect"; destination: URL }
+  // The playground host's root (playgroundRootRewrite).
+  | { kind: "playgroundRoot" };
 
 // All the hostnames reach one Next.js process. Human pages get canonical
 // hosts and clean account paths, while API routes stay available everywhere
@@ -143,9 +159,7 @@ export function resolveSurfaceRoute(
   const playgroundIsOwnHost = playground.origin !== cloud.origin;
   if (playgroundIsOwnHost && host === playground.host.toLowerCase()) {
     if (pathname === "/") {
-      const destination = new URL(requestUrl);
-      destination.pathname = playgroundPath;
-      return { destination, kind: "rewrite" };
+      return { kind: "playgroundRoot" };
     }
     if (pathname === playgroundPath) {
       return redirectTo(requestUrl, playground, "/");
