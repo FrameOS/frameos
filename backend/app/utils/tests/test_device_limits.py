@@ -32,7 +32,7 @@ def test_ceiling_matches_the_preview_package(case):
     "case", FIXTURES["canvasRotation"]["cases"], ids=lambda case: f"{case['rotate']}@{case['firmwareVersion']}"
 )
 def test_canvas_rotation_matches_the_preview_package(case):
-    assert esp32_canvas_rotation(case["rotate"], case["firmwareVersion"]) == case["expected"]
+    assert esp32_canvas_rotation(case["rotate"], case["firmwareVersion"], case.get("pixelFormat")) == case["expected"]
 
 
 def test_an_e1003_whose_firmware_shares_the_panel_buffer_has_one_buffer_more():

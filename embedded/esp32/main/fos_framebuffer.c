@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 
 #include "fos_mem.h"
+#include "frameos_display.h"
 
 static const char *TAG = "fos_fb";
 #endif
@@ -83,6 +84,16 @@ void fos_framebuffer_reserve(size_t len)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
+void fos_framebuffer_adopt(uint8_t *buf, size_t len)
+{
+    if (s_reserved || !buf || len == 0) return;
+    if (!s_lock) s_lock = xSemaphoreCreateMutex();
+    if (!s_lock) return;
+    s_reserved = buf;
+    s_reserved_len = len;
+    ESP_LOGI(TAG, "framebuffer: the head of the scene canvas, %u bytes", (unsigned)len);
+}
+
 static uint32_t s_foreign_lends;
 
 static uint8_t *acquire(size_t len, bool render)
@@ -90,8 +101,11 @@ static uint8_t *acquire(size_t len, bool render)
     if (len == 0) return NULL;
     /* Non-blocking on purpose: a console `display_test` asking for the buffer
      * mid-render should fail immediately and say so, not stall the console for
-     * the twenty seconds an e-paper refresh takes. */
-    if (s_reserved && len == s_reserved_len && s_lock &&
+     * the twenty seconds an e-paper refresh takes. Nor lent while the
+     * display's task still refreshes from it (fos_display_lend): the render
+     * waits for that before it asks (fos_client.c), anyone else gets memory
+     * of its own. */
+    if (s_reserved && len == s_reserved_len && s_lock && !fos_display_holds(s_reserved) &&
         xSemaphoreTake(s_lock, 0) == pdTRUE) {
         if (!render) s_foreign_lends++;
         if (s_lend_hook) s_lend_hook();

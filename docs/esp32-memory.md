@@ -49,6 +49,27 @@ room to spare. Differential sweep: the whole jpeg suite (orientations
 included) byte-identical; 24 MP-class photos identical except the
 outermost crop-boundary row/column (footprint rounding).
 
+## The 13.3" on 8 MB packs its picture into its canvas (2026-11-15)
+
+The E1004 (1200×1600 Spectra 6, 8 MB) held a 3.84 MB 565 canvas and, beside
+it, a 960 KB packed panel buffer reserved at boot, and idled at ~676 KB of
+free PSRAM: renders ran out. The pack now writes the picture into the first
+960 KB of the canvas itself (`utils/palette_pack.nim`, `main.c`
+`canvas_holds_panel_picture`; docs/realtime-rendering.md "The picture in the
+canvas"), byte for byte the picture it packed before:
+
+| | before | after |
+|---|---|---|
+| canvas | 3,840,000 | 3,840,000 |
+| panel buffer (reserved at boot) | 960,000 | 0 |
+| refresh copy while the glass refreshes (when it fitted) | 960,000 – 1,920,000 | 0 |
+| idle free PSRAM | ~676 KB (measured) | ~1.6 MB (arithmetic, not yet measured) |
+
+The refresh copy had seldom fitted (676 KB free for a 960 KB copy), so the
+refresh then ran on the render task anyway; now the display's task refreshes
+from the canvas and the next render waits for the glass. Unrotated only; a
+turned frame keeps both blocks.
+
 ## The canvas was 2 bytes per pixel everywhere (2026.8.31 – 2026-08-23)
 
 The scene canvas became a 16-bit RGB 5/6/5 pixie image (`embedded/esp32/README.md`,

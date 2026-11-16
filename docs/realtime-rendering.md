@@ -355,6 +355,48 @@ ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
 another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
 565 beyond.
 
+### The picture in the canvas (a colour panel's 565 canvas)
+
+A colour e-paper panel whose canvas is 565 (a 1200x1600 Spectra 6 on an 8 MB
+board: the reTerminal E1004, the XIAO EE02) packs its picture into the first
+bytes of that canvas, unrotated, and holds no panel buffer of its own
+(`canvas_holds_panel_picture` in `main.c`, `utils/palette_pack.nim`). It can
+because of the order the dither reads in: canvas row y + 1 is read into the
+error row before the first pixel of row y is handed out, so while packed row
+y (bytes `R*y ..< R*(y+1)`, R the picture's bytes a row) is written, every
+canvas byte below `C*(y+2)` has been read (C the canvas's bytes a row), and
+`R <= C`. Nothing is cleared first: in scan order the first pixel of a byte
+stores it and the rest OR in, the same bytes a clear and an OR give. The
+bytes are those of a pack into a buffer of its own (`test_palette_pack.nim`).
+A turned frame writes down the panel's columns and keeps the two apart; a
+panel with a partial waveform (which needs the canvas of the picture shown)
+does too.
+
+What it frees: the 960 KB panel buffer reserved beside the 3.84 MB canvas
+(the E1004 idled at about 676 KB of free PSRAM, 2026-11-15), and the refresh
+copy: the display's task refreshes from the canvas as it is
+(`fos_display_lend`, the queue's `lent`), where it copied the picture (960
+KB, 1.92 MB with one waiting). The rules that make it safe:
+
+- The canvas no longer holds the scene after a pack: the render forgets what
+  it knew of it (`rhythmForgetCanvases`, `lastPackedFromCanvas`), so the next
+  one draws whole.
+- Nothing writes the canvas while the display's task reads it. The render
+  waits for the glass before it draws (`fos_display_wait_for` in
+  `fos_client.c`; a timed render already waits in slices that serve keys,
+  one somebody asked for now waits too); the LAN code and the notice are
+  taken off only after it; any other borrower of the panel buffer (a status
+  screen, a console `display_test`, a pull rendered on the server) gets
+  memory of its own meanwhile (`fos_framebuffer.c`).
+- Otherwise the head of the canvas is the panel buffer as a sixteen-grey
+  canvas is (`fos_framebuffer_adopt`, `frameos_nim_share_canvas`): the
+  render borrows it before the scene draws, the preview's snapshot of the
+  last picture lets go then, and a foreign borrower is counted.
+
+The device-limits ports charge no panel buffer for it from
+`ESP32_PACK_IN_CANVAS_FIRMWARE` on (`esp32CanvasRotation` takes the panel
+format).
+
 ### A JPEG decoded into a target draws its lines in one loop
 
 pixie's JPEG sink (`drawLineInto` in `fileformats/jpeg.nim`) works out once

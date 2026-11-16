@@ -2314,6 +2314,9 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
 static void lan_overlay_end(lan_overlay_t *ov)
 {
     if (!ov->drawn) return;
+    /* The display's task may refresh from this buffer as it is (a picture
+     * packed in the canvas, fos_display_lend): it takes the overlay first. */
+    fos_display_wait_for(ov->surface.buf);
     if (ov->saved) {
         fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, true);
     } else {
@@ -2438,6 +2441,9 @@ static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, 
 static void notice_overlay_end(notice_overlay_t *ov)
 {
     if (!ov->drawn) return;
+    /* The display's task may refresh from this buffer as it is (a picture
+     * packed in the canvas, fos_display_lend): it takes the overlay first. */
+    fos_display_wait_for(ov->surface.buf);
     if (ov->saved) {
         fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, true);
     } else {
@@ -2683,6 +2689,10 @@ static esp_err_t render_once(bool quiet)
             err = frameos_nim_render_panel(buf, buf_len, format, generation) == 0 ? ESP_OK : ESP_FAIL;
         } else {
             if (target) fos_display_release_render_target();
+            /* The picture packed in the canvas (main.c canvas_holds_panel_picture)
+             * may still be going onto the glass: the scene draws there once it
+             * is. A timed render waited for that already, in slices. */
+            fos_display_wait_for(fos_framebuffer_reserved_buffer());
             err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         }
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");

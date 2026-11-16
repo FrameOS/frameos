@@ -30,6 +30,13 @@
  * reservation would not leave enough heap for Wi-Fi and TLS. */
 void fos_framebuffer_reserve(size_t len);
 
+/* Make `buf`, a block of at least `len` bytes held for good elsewhere, the
+ * reservation in place of one of its own: a colour panel's picture packed in
+ * the first bytes of its 565 scene canvas (main.c canvas_holds_panel_picture,
+ * utils/palette_pack.nim). Every borrower is then one of the canvas, as where
+ * a sixteen-grey canvas is the reservation. No-op once there is one. */
+void fos_framebuffer_adopt(uint8_t *buf, size_t len);
+
 /* Borrow a panel-sized buffer: the reservation when it fits and is not
  * already lent out, otherwise a fresh allocation, otherwise NULL. Pair every
  * non-NULL return with fos_framebuffer_release(). */

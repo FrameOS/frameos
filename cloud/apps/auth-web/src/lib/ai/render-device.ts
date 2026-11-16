@@ -41,7 +41,7 @@ export function frameRenderDevice(frame: {
   }
   const panel = frame.hardware as { pixelFormat?: unknown; rotate?: unknown } | null;
   const pixelFormat = typeof panel?.pixelFormat === "number" ? panel.pixelFormat : null;
-  const rotate = esp32CanvasRotation(panel?.rotate, frame.frameosVersion);
+  const rotate = esp32CanvasRotation(panel?.rotate, frame.frameosVersion, pixelFormat);
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10;
   return { label: `ESP32 with ${megabytes} MB PSRAM`, psramBytes, pixelFormat, rotate };
 }

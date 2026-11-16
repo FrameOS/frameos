@@ -181,7 +181,15 @@ void frameos_nim_share_canvas(void *buffer, size_t len)
     /* A sixteen-grey panel's packed picture is the 4-bit canvas byte for byte
      * (dither.nim packGray4Canvas): one block serves as both, the panel-sized
      * buffer main.c reserved, and the 1.31 MB a reTerminal E1003 held twice
-     * goes back to the renders (2026-11-10). Never freed here. */
+     * goes back to the renders (2026-11-10). Never freed here. Or the other
+     * way round: the canvas reserved here is the panel buffer (a colour
+     * panel's picture packed in its 565 canvas, main.c
+     * canvas_holds_panel_picture), and is shared from now on. */
+    if (buffer != NULL && buffer == s_canvas && len == s_canvas_len) {
+        s_canvas_shared = true;
+        ESP_LOGI("fos_nim", "canvas: holds the panel's picture too");
+        return;
+    }
     if (buffer == NULL || len == 0 || s_canvas != NULL) return;
     s_canvas = buffer;
     s_canvas_len = len;

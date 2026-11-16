@@ -227,7 +227,7 @@ const deviceLimitsFixtures = JSON.parse(
     width: number;
   }[];
   canvasRotation: {
-    cases: { rotate: number | null; firmwareVersion: string | null; expected: number | null }[];
+    cases: { rotate: number | null; firmwareVersion: string | null; pixelFormat?: number; expected: number | null }[];
   };
 };
 
@@ -250,7 +250,7 @@ describe("esp32DeviceLimits", () => {
   it.each(deviceLimitsFixtures.canvasRotation.cases.map((entry) => [entry.rotate, entry.firmwareVersion, entry] as const))(
     "gives the limits rotation %s on firmware %s",
     (_rotate, _version, entry) => {
-      expect(esp32CanvasRotation(entry.rotate, entry.firmwareVersion)).toBe(entry.expected);
+      expect(esp32CanvasRotation(entry.rotate, entry.firmwareVersion, entry.pixelFormat ?? null)).toBe(entry.expected);
     },
   );
 

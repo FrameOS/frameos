@@ -172,7 +172,9 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * (docs/device-limits-fixtures.json pins the TS copy and the Python one).
  * Where the 4-bit canvas is the panel buffer itself (main.c
  * canvas_is_panel_picture: unturned sixteen greys) both device-limits ports
- * charge no second buffer (`esp32CanvasIsPanelBuffer`). */
+ * charge no second buffer (`esp32CanvasIsPanelBuffer`), and so where a colour
+ * panel's picture is packed in the first bytes of its 565 canvas (main.c
+ * canvas_holds_panel_picture: unturned, no partial waveform). */
 #define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
 /* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
@@ -201,6 +203,17 @@ esp_err_t fos_display_spi_bus_share(int miso_pin, int *host);
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len);
 /* A picture handed to the display's own task is still on its way. */
 bool fos_display_refreshing(void);
+/* A colour panel's picture packed in the scene canvas (main.c
+ * canvas_holds_panel_picture): the display's task refreshes from `buf` as it
+ * is, without the copy (up to two pictures, 1.92 MB on a 1200x1600 panel).
+ * Nothing may write `buf` while fos_display_holds(buf): the render waits for
+ * the glass first (fos_display_wait_for), another borrower of the panel
+ * buffer gets memory of its own (fos_framebuffer.c). Once, at boot. */
+void fos_display_lend(const uint8_t *buf);
+bool fos_display_holds(const uint8_t *buf);
+/* Until the display's task is done with `buf`; at once when it does not
+ * hold it. */
+void fos_display_wait_for(const uint8_t *buf);
 /* The panel has a partial waveform (fos_partial_refresh.h). */
 bool fos_display_supports_partial(void);
 /* fos_display_blit, or a partial update of the pixels that changed where

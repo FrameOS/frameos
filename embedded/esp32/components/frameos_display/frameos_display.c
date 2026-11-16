@@ -463,7 +463,9 @@ static void note_full_refresh(const uint8_t *buf, size_t len)
  * both first (refresh_wait), and so do a deep sleep (fos_display_park) and a
  * restart (the shutdown handler). Not the IT8951, which keeps the picture and
  * waits for its waveform at the next use anyway (and whose 1.25 MiB copy an
- * 8 MB board cannot spare); and a copy that does not fit refreshes in place. */
+ * 8 MB board cannot spare); and a copy that does not fit refreshes in place.
+ * A picture packed in the scene canvas is not copied at all
+ * (fos_display_lend): the next render waits for the glass instead. */
 #define REFRESH_TASK_STACK_BYTES 5120
 static void *refresh_alloc(size_t len)
 {
@@ -558,6 +560,25 @@ bool fos_display_refreshing(void)
     /* Read without the lock: a stale answer only moves a timed render by one
      * slice of its wait. */
     return fos_refresh_queue_busy(&s_refresh_queue);
+}
+
+void fos_display_lend(const uint8_t *buf)
+{
+    s_refresh_queue.lent = buf;
+}
+
+bool fos_display_holds(const uint8_t *buf)
+{
+    if (s_refresh_lock == NULL || buf == NULL) return false;
+    xSemaphoreTake(s_refresh_lock, portMAX_DELAY);
+    bool holds = fos_refresh_queue_holds(&s_refresh_queue, buf);
+    xSemaphoreGive(s_refresh_lock);
+    return holds;
+}
+
+void fos_display_wait_for(const uint8_t *buf)
+{
+    if (fos_display_holds(buf)) refresh_wait();
 }
 
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
