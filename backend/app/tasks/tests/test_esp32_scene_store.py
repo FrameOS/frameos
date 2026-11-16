@@ -254,7 +254,7 @@ def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     assert ".scene_set = pieces," in fns["fos_scenes_backend_fetch"]
     patch = fns["apply_backend_patch"]
     assert "cJSON_ParseWithLength(set->rest, set->rest_len)" in patch
-    assert ".puts = set_puts(set)" in patch
+    assert ".puts = set_puts(set, puts)" in patch
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():
