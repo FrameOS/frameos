@@ -278,6 +278,12 @@ proc tickInput*(): bool =
   if result:
     persistSceneState()
 
+proc drainSceneEvents*(): bool =
+  ## What async code dispatched (single_scene_host.drainQueued), after the pump.
+  result = host.drainQueued()
+  if result:
+    persistSceneState()
+
 proc originFromMask(mask: cuint): Option[EventOrigin] =
   ## The firmware names an origin by its bit in fos_events_gen.h
   ## (`FOS_ORIGIN_*` = 1 shl the origin's place in the contract) — the same

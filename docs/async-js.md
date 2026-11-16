@@ -188,6 +188,9 @@ is only faster where it can be.
     wait (`fos_client_wake_for_events`). The pump is `frameos_nim_tick`,
     which the idle wait and an animation's wait call on every slice; the
     idle wait's slice ends when a timer is due (`frameos_nim_next_async_ms`).
+    What the settled code dispatched (a `render`) is delivered by the same
+    tick (`single_scene_host.drainQueued`): nothing else sends while the
+    firmware idles, and it waited in the queue for the next tap.
     A picture is decoded from the chunks on the render task, by the same
     code as a buffered download (`decodeBufferedImage`), into the size asked.
 - **A promise is an id.** The prelude asks the bridge for one
@@ -238,9 +241,14 @@ On a SenseCAP Indicator (2026-11-15, main's firmware, the Real time shelf from
 a reboot): six renders in a row of 2.1–2.7 s, each `get()` blocking 1.8–2.4 s
 on one cover, the page full after ~17 s. With async JavaScript no render took
 more than 1.4 s and a tap during the downloads was answered in ~0.75 s, but
-the covers came 24 s late, all at once: answers waited for the input hold,
-which lasts 10 s after the last tap or console event. They now wait only for
-a tap that is queued or 250 ms old.
+the covers came 24 s late, all at once, or only at the next tap. Two
+reasons: answers waited for the input hold, which lasts 10 s after the last
+tap or console event (they now wait only for a tap that is queued or 250 ms
+old), and the `render` the app dispatched when they came sat in the host's
+event queue, which only a firmware event or a render drained (the idle tick
+drains it now). With both fixed, on the same board: the listing drawn ~3 s
+after opening the store, each cover drawn as it lands (renders 0.3–1.6 s,
+`get()` at most 0.4 s), the page full in ~15 s, a tap answered in ~1 s.
 
 **What still blocks:** `fetchText`, `fetchJson`, `httpRequest` and
 `fetchImage` in `get()` stay synchronous, as they must: `get()` returns the

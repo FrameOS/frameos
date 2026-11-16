@@ -1051,6 +1051,9 @@ proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   try:
     if pumpJsAsync() > 0:
       result = true
+      # What it dispatched (a `render`) is delivered now, not at the next tap.
+      if drainSceneEvents():
+        result = true
   except Defect as e:
     log("async pump failed (defect): " & e.msg)
   except Exception as e:
