@@ -1698,7 +1698,7 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return jsUndefSentinel(ctx)
   of "theme":
     # The theme of the desktop around the frame's scene (ui/theme.nim), for
-    # what an element's `role` cannot reach: an SVG's fill, a mask in the
+    # what an element's `look` cannot reach: an SVG's fill, a mask in the
     # page's color. None, or an empty one, is the app's own look.
     let theme = if themeSource.isNil: nil else: themeSource()
     if not theme.isNil and theme.kind == JObject and theme.len > 0:

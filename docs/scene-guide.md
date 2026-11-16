@@ -540,14 +540,25 @@ export function get(app, context) {
   `"WxH"` (`"480x480"` for a square music player or clock, `"480x800"` for a
   tall list, `"800x480"` for a wide dashboard): a desktop layout (Windows 98,
   macOS...) opens the scene's window at that size. It changes nothing else.
-- To look like the desktop a scene runs on, give an element its `role`:
-  `role="page"` on the root, `"bar"`, `"button"`, `"primary"`, `"selected"`,
-  `"field"`, `"option"` (a row that lights when pressed), `"muted"`,
-  `"accent"`, `"card"`, `"tile"`. On a desktop with a theme (Windows 98,
-  macOS...) the role's colors, borders and corners replace the element's
-  own; elsewhere it keeps its classes, so write them as usual.
-  `app.frame.theme` is the theme itself, for an SVG's fill. The Files sample
-  is the worked example.
+- **The desktop's look: `look`.** A desktop layout (Windows 98, macOS,
+  BeOS, Classic Mac, NeXTSTEP, Commander, Tiling) gives a theme, and an
+  element with `look="<role>"` takes that desktop's colors, borders and
+  corners for the role in place of its own classes. With no desktop, or a
+  theme without that role, it keeps its classes, so always write its own
+  look as usual; an element without `look` keeps its own everywhere. Use it
+  for the standard parts of a tool meant to sit in a desktop window (a file
+  browser, a form, settings, a list): `look="page"` on the root, `"bar"` for
+  its header, `"button"`, `"primary"` (the one that does it), `"selected"`
+  (a lit toggle or tab), `"field"` on an `<input>`, `"option"` (a row that
+  lights when pressed) and `"picked"` (the chosen row), `"switch"` /
+  `"switchOn"` with `"knob"` / `"knobOn"`, `"muted"` (quieter text),
+  `"accent"`, `"card"`, `"tile"` / `"tileLit"`, `"keyboard"` / `"key"` /
+  `"keyMod"` / `"keyLit"`. Leave it off a scene with a designed look of its
+  own (a clock face, a game, a photo, a dashboard's colors) and off any
+  element that must keep its colors. `look` is not `role`: `role` themes
+  nothing. `app.frame.theme` is the theme itself (role to classes,
+  undefined with none), for an SVG's fill. The Files and Theme roles
+  samples are the worked examples.
 - Layout: block (stacked), `flex` / `flex-col` with `gap`, `grow`, `flex-1`,
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
@@ -990,12 +1001,14 @@ interface FrameOSUiEvent {
 interface FrameOSElementProps {
   className?: string;
   /**
-   * What the element is, for a desktop's look: "page", "bar", "button", "primary", "selected", "field", "option",
-   * "picked", "muted", "accent", "card", "tile", ... (docs/jsx-ui.md "Themes"). Where a layout around the scene gives a
-   * theme (a desktop's windows), the role's colors, borders and corners take the place of the element's own; with
-   * none, or a role the theme leaves out, it keeps its classes (FrameOS 2026.11.10+; ignored before).
+   * The desktop's look for a role of its theme: "page", "bar", "button", "primary", "selected", "field", "option",
+   * "picked", "switch", "switchOn", "knob", "knobOn", "muted", "accent", "card", "tile", "tileLit", "keyboard", "key",
+   * "keyMod", "keyLit" (docs/jsx-ui.md "Themes"). Where a layout around the scene gives a theme (a desktop and its
+   * windows), the role's colors, borders and corners take the place of the element's own; with none, or a role the
+   * theme leaves out, it keeps its classes. An element without it always keeps its own; role is not used for this
+   * (FrameOS 2026.11.10+; ignored before).
    */
-  role?: string;
+  look?: string;
   children?: any;
   src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
   /** A tap on the element; the frame renders again after it. */
@@ -1101,7 +1114,7 @@ interface FrameOSApp {
      * before). */
     windows?: number;
     /** The theme of the desktop around the scene, its roles' classes (a string, or a list of boxes one inside the
-     * other), for what a role cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
+     * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
   };

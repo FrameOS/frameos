@@ -245,9 +245,9 @@ scenes on disk. That is what "on frame" and Update are measured against.
   (a dot first, `@eaDir`, `Thumbs.db`, ...), as the device's own write paths
   refuse dot names. The button shows where the runtime has the call
   (2026.11.10+). The name being typed is kept with `frameos.remember`.
-- **The desktop's look.** Each element names its role (`role="page"`,
-  `"bar"`, `"button"`, `"selected"`, `"primary"`, `"field"`, `"option"`,
-  `"tile"`, `"card"`, `"muted"`, `"accent"`), so on Windows 98, macOS, BeOS
+- **The desktop's look.** Each element names its role in the theme
+  (`look="page"`, `"bar"`, `"button"`, `"selected"`, `"primary"`, `"field"`,
+  `"option"`, `"tile"`, `"card"`, `"muted"`, `"accent"`), so on Windows 98, macOS, BeOS
   and the other desktops it is drawn in their theme, and in its own dark (or
   high contrast) look with none; folders take the theme's accent color through
   `app.frame.theme` (`docs/jsx-ui.md` "Themes").

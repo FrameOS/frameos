@@ -636,6 +636,13 @@
   in `runEventInner` (every host) and dispatches `render` when something
   changed. A new handler is a `UiEvent` and a walker attribute, never a
   `case event` in a host.
+- **A desktop's look** (`docs/jsx-ui.md` "Themes"): an element with
+  `look="button"` (a role of the layout's `theme`) is dressed by
+  `ui/theme.nim`'s `role`, as the Nim UIs are; one without keeps its classes.
+  Never theme on `role`, which is ARIA's and the app's. `app.frame.theme` is
+  the theme itself. The **Theme roles** sample draws every role, and
+  `test_theme_roles_scene.nim` (`FRAMEOS_THEME_SHOTS=<dir>`) renders it
+  under each desktop sample's looks.
 - **Render scale** (`render_scale.nim`, `docs/jsx-ui.md` "Scale"): a .tsx /
   .jsx app is told its canvas is the panel divided by the scale, its UI is
   laid out at that size, and pixie stretches the root to the full target as

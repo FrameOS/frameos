@@ -207,7 +207,7 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
   var
     tab: ptr UncheckedArray[JSPropertyEnum]
     count: uint32
-    roleName: string
+    look: string
   if jsIsObject(props) and JS_GetOwnPropertyNames(ctx, addr tab, addr count, props,
       (JS_GPN_STRING_MASK or JS_GPN_ENUM_ONLY).cint) == 0:
     for i in 0 ..< count.int:
@@ -230,19 +230,20 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
           discard JS_SetPropertyUint32(ctx, r.handlers, r.handlerCount.uint32, JS_DupValue(ctx, value))
           node.attrs.add((attrName(name), $r.handlerCount))
           inc r.handlerCount
-      elif name == "role":
+      elif name == "look":
         if jsIsString(value):
-          roleName = toNimString(ctx, value)
+          look = toNimString(ctx, value)
       elif name notin ["key", "ref"] and not jsIsNull(value) and not jsIsUndefined(value):
         # A number, a boolean or points={[1, 2, 3, 4]}: what String() makes of it
         node.attrs.add((attrName(name), toNimString(ctx, value)))
       JS_FreeValue(ctx, value)
     JS_FreePropertyEnum(ctx, tab, count)
   JS_FreeValue(ctx, props)
-  if roleName.len > 0:
-    # role="button": the desktop's look for that role where the layout around
-    # the frame's scene gives a theme, as the UIs built in Nim take it
-    # (ui/theme.nim, docs/jsx-ui.md "Themes"); its own classes where none does.
+  if look.len > 0:
+    # look="button": the desktop's look for that role of its theme where the
+    # layout around the frame's scene gives one, as the UIs built in Nim take
+    # it (ui/theme.nim, docs/jsx-ui.md "Themes"); its own classes where none
+    # does. Not `role`, ARIA's attribute, which an app sets for its own ends.
     # theme.role reads the classes off the first attribute (swapped there, as
     # a seq insert was 230 B of the ESP32's flash).
     var at = 0
@@ -251,7 +252,7 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       node.attrs.add(("class", ""))
     if at > 0:
       swap(node.attrs[0], node.attrs[at])
-    node = node.role(roleName)
+    node = node.role(look)
   into.add node
   if memoId >= 0:
     if memoId == 0:

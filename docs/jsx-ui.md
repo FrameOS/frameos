@@ -804,8 +804,8 @@ LCD; what did not change in the tree is still taken back unbuilt.
 The UIs FrameOS builds in Nim (the scene settings and the frame page, the
 scene switcher, the keyboard on the screen) take their look from
 the layout around the frame's scene, so a desktop's settings look like that
-desktop's (`frameos/ui/theme.nim`), and so does a JS app that names its
-elements' roles ([below](#a-js-app-in-the-desktops-look)). A layout gives its theme in its state as
+desktop's (`frameos/ui/theme.nim`), and so does a JS app that gives its
+elements a `look` ([below](#a-js-app-in-the-desktops-look)). A layout gives its theme in its state as
 **`theme`**, an object of roles; the samples set it from their "Look of the
 settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
 `BeOS`, `Classic Mac`: Classic, `NeXTSTEP`, `Commander`, each with High contrast
@@ -847,34 +847,44 @@ the S3's flash (2026-11-15).
 
 ### A JS app in the desktop's look
 
-A JS app takes the same theme by naming what its elements are: **`role`**, one
-of the roles above, on any element (2026.11.10+):
+A JS app takes the same theme where it asks for it: **`look`**, one of the
+roles above, on any element (2026.11.10+):
 
 ```tsx
-<div role="page" className="flex flex-col bg-slate-900 text-white">
-  <div role="bar" className="flex items-center h-12 px-4">Files</div>
-  <div role="button" className="px-3 py-2 rounded-lg bg-slate-700" onClick={up}>Up</div>
+<div look="page" className="flex flex-col bg-slate-900 text-white">
+  <div look="bar" className="flex items-center h-12 px-4">Files</div>
+  <div look="button" className="px-3 py-2 rounded-lg bg-slate-700" onClick={up}>Up</div>
 </div>
 ```
 
-Where a layout around the frame's scene gives a theme (a desktop, its windows
-included), the element is dressed as a Nim UI's element of that role is: its
-look gives way to the role's, a list of boxes goes around it, and the
-outermost takes its place and its presses. With no theme, an empty one, or a
-role the theme leaves out, it keeps its own classes, so an app writes its own
-look as it always did and is drawn in it everywhere else. `option` is a row
-that lights while pressed, as a select's option does, and `tile` a square
-picture's box. A memo()'d element keeps the look it was read in until its
-props change.
+An element with `look` takes the desktop's look for that role where a layout
+around the frame's scene gives a theme (a desktop, its windows included): it is
+dressed as a Nim UI's element of that role is, its own look giving way to the
+role's, a list of boxes going around it, the outermost taking its place and its
+presses. With no theme, an empty one, or a role the theme leaves out, it keeps
+its own classes, so an app writes its own look as it always did and is drawn in
+it everywhere else. **An element without `look` always keeps its own classes**:
+that is how a scene with a look of its own opts out, a custom button among
+themed ones included. `role` is not used for theming: it stays the app's own
+(ARIA's) attribute. `option` is a row that lights while pressed, as a select's
+option does, and `tile` a square picture's box. A memo()'d element keeps the
+look it was read in until its props change.
+
+The **Theme roles** sample (`repo/scenes/samples/Theme roles`) draws every
+role, each with its name, live where it can be (the buttons press, the switch
+toggles, the field types): open it in a desktop to see that desktop's theme, or
+full screen for FrameOS's own look. `frameos/src/frameos/tests/test_theme_roles_scene.nim`
+renders it under every theme the desktop samples give; with
+`FRAMEOS_THEME_SHOTS=<dir>` it writes one picture per theme there.
 
 **`app.frame.theme`** is the theme itself (its roles' class strings, or lists
-of them), undefined with none: for what a role cannot dress, such as an
+of them), undefined with none: for what `look` cannot dress, such as an
 `<svg>` drawn in the accent's color or a mask in the page's color. The Files
 sample (`repo/scenes/samples/Files`) does both: its folders take the accent's
 `bg-[#…]`, and its thumbnails' rounded corners, masked in the page's color, are
 square where the theme's tiles are.
 
-How: the JSX walker (`js_runtime/jsx.nim`) reads `role` instead of keeping it
+How: the JSX walker (`js_runtime/jsx.nim`) reads `look` instead of keeping it
 as an attribute and hands the element to `ui/theme.nim`'s `role`, as the Nim
 UIs do; `themeSource` is the layout's `theme` during its pass
 (`interpreter.layoutTheme`), on the Pi, the ESP32 and in the browser alike.

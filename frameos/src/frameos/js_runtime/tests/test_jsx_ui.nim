@@ -177,16 +177,17 @@ suite "jsx":
         reported = true
     check reported
 
-  test "role takes the desktop's look for it, and the element's own without one":
+  test "look takes the desktop's look for its role, and the element's own without one":
     # What a layout's `theme` hands the frame's scene during its pass
     # (interpreter.layoutTheme): here, straight from the test.
     themeSource = givenTheme
     defer: themeSource = nil
     let source = """
       export const get = (app) => (
-        <div className="flex flex-col bg-slate-900" role="page">
-          <div className="w-[40px] h-[20px] bg-red-500 rounded" onClick={() => {}} role="button" />
+        <div className="flex flex-col bg-slate-900" look="page">
+          <div className="w-[40px] h-[20px] bg-red-500 rounded" onClick={() => {}} look="button" />
           <div className="w-[40px] h-[20px] bg-green-500" />
+          <div className="w-[40px] h-[20px] bg-blue-500" role="button" />
         </div>
       )
     """
@@ -205,7 +206,9 @@ suite "jsx":
     check image[100, 70] == rgbx(0xc0, 0xc0, 0xc0, 255) # the theme's page
     check image[0, 0] == rgbx(0, 0, 0x80, 255) # the bevel's outer box, in the button's place
     check image[10, 10] == rgbx(255, 255, 255, 255) # its inner box
-    check image[10, 30] == rgbx(0x22, 0xc5, 0x5e, 255) # no role: as it was
+    check image[10, 30] == rgbx(0x22, 0xc5, 0x5e, 255) # no look: as it was
+    # `role` is ARIA's, an app's own: it themes nothing.
+    check image[10, 50] == rgbx(0x3b, 0x82, 0xf6, 255)
 
   test "app.frame.theme is the theme, for what classes cannot reach":
     themeSource = givenTheme

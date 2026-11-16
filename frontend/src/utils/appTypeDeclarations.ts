@@ -209,12 +209,14 @@ interface FrameOSUiEvent {
 interface FrameOSElementProps {
   className?: string;
   /**
-   * What the element is, for a desktop's look: "page", "bar", "button", "primary", "selected", "field", "option",
-   * "picked", "muted", "accent", "card", "tile", ... (docs/jsx-ui.md "Themes"). Where a layout around the scene gives a
-   * theme (a desktop's windows), the role's colors, borders and corners take the place of the element's own; with
-   * none, or a role the theme leaves out, it keeps its classes (FrameOS 2026.11.10+; ignored before).
+   * The desktop's look for a role of its theme: "page", "bar", "button", "primary", "selected", "field", "option",
+   * "picked", "switch", "switchOn", "knob", "knobOn", "muted", "accent", "card", "tile", "tileLit", "keyboard", "key",
+   * "keyMod", "keyLit" (docs/jsx-ui.md "Themes"). Where a layout around the scene gives a theme (a desktop and its
+   * windows), the role's colors, borders and corners take the place of the element's own; with none, or a role the
+   * theme leaves out, it keeps its classes. An element without it always keeps its own; role is not used for this
+   * (FrameOS 2026.11.10+; ignored before).
    */
-  role?: string;
+  look?: string;
   children?: any;
   src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
   /** A tap on the element; the frame renders again after it. */
@@ -320,7 +322,7 @@ interface FrameOSApp {
      * before). */
     windows?: number;
     /** The theme of the desktop around the scene, its roles' classes (a string, or a list of boxes one inside the
-     * other), for what a role cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
+     * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
   };
