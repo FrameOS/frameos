@@ -20,6 +20,52 @@ SWITCH_SLOW_MS = 5_000          # a switch (excluding the panel refresh) above t
 LOW_PSRAM = 1_000_000           # free PSRAM below this after a render is a `note`
 
 
+# A slow panel (a refresh this long or longer: the 7.3" and 13.3" Spectras)
+# spends half an hour on what an LCD does in minutes, so the bench samples it
+# unless asked for everything (`--full`): what has broken before runs every
+# time, the rest in turns, a third of it a run (ROTATION), so three runs cover
+# it all. `ctx.rotation` says which third; the report says what was left out.
+SLOW_PANEL_S = 20
+ROTATION = 3
+# Scenes that found bugs on a slow panel, by name: the photo scenes (the
+# E1004's out-of-memory aborts, the auto-fit's 12 s, the dither), the big
+# ones (a set too large to take whole), the clocks and their gradients (the
+# E1003's 15 s renders).
+TROUBLE_SCENES = ['Google Photos', 'Immich', 'Wikimedia Commons', 'SD card image', 'Unsplash image',
+                  'Visited World Map', 'Chess puzzle of the day', 'Word clock', 'Big typographic clock',
+                  'Analog clock face']
+# Desktop layouts pushed every time, in this order: two big sets in a row
+# with windows open is what left a scene on the set before's layout (#828,
+# #833) and what a board short of memory takes store-first (#818).
+TROUBLE_LAYOUTS = ['layout-macos', 'layout-beos']
+
+
+def sampled(ctx, frame) -> bool:
+    """Whether this frame's run samples (a slow panel, not `--full`, not `--quick`)."""
+    return not getattr(ctx, 'full', False) and not ctx.quick and frame.get('refresh_s', 0) >= SLOW_PANEL_S
+
+
+def in_turn(ctx, key: str) -> bool:
+    """Whether `key` is in this run's third (stable: the same key, the same turn)."""
+    import zlib
+    return zlib.crc32(key.encode()) % ROTATION == getattr(ctx, 'rotation', 0) % ROTATION
+
+
+def pick_scenes(ctx, frame, scenes, keep_largest=2):
+    """A slow panel's scenes: the trouble ones, the largest few, and this run's
+    turn of the rest. Returns (picked, left_out_names)."""
+    if not sampled(ctx, frame):
+        return scenes, []
+    largest = {s['id'] for s in sorted(scenes, key=lambda s: -(s.get('bytes') or 0))[:keep_largest]}
+    picked, left = [], []
+    for s in scenes:
+        if s.get('name') in TROUBLE_SCENES or s['id'] in largest or in_turn(ctx, s['id']):
+            picked.append(s)
+        else:
+            left.append(s.get('name') or s['id'])
+    return picked, left
+
+
 def issue(severity, kind, where, detail):
     return {'severity': severity, 'kind': kind, 'where': where, 'detail': detail}
 
@@ -126,6 +172,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
         scenes = [s for s in scenes if s['id'] in scene_filter or s.get('name') in scene_filter]
     if ctx.quick:
         scenes = scenes[:4]
+    scenes, left_out = pick_scenes(ctx, frame, scenes)
     results, issues = [], []
     for sc in scenes:
         where = f"scene {sc.get('name')}"
@@ -194,7 +241,12 @@ def suite_scenes(ctx, frame, scene_filter=None):
         # 3. warm renders.
         warm = []
         if ok:
-            for _ in range(ctx.warm if not ctx.quick else 1):
+            # A slow panel: one warm render for a scene in its turn, two for
+            # a trouble one (each is a dither and maybe a 35 s refresh).
+            warm_n = ctx.warm if not ctx.quick else 1
+            if sampled(ctx, frame):
+                warm_n = min(warm_n, 2 if sc.get('name') in TROUBLE_SCENES else 1)
+            for _ in range(warm_n):
                 con.drain()
                 t_cmd = time.time()
                 con.send('render')
@@ -251,7 +303,9 @@ def suite_scenes(ctx, frame, scene_filter=None):
         wait_render(con, render_timeout(frame))
     if debug_was == '0':
         con.command('set debug 0', 1.5)
-    return {'scenes': results, 'issues': issues}
+    if left_out:
+        issues.append(issue('note', 'sampled', 'scenes', f"slow panel: {len(left_out)} scene(s) left for another run's turn: {', '.join(left_out)}"))
+    return {'scenes': results, 'issues': issues, 'left_out': left_out}
 
 
 def suite_builtin(ctx, frame):
@@ -346,6 +400,12 @@ def suite_soak(ctx, frame, rounds=None):
     scenes = [s for s in scene_list(con) if not s.get('isLayout')]
     if ctx.quick:
         scenes, rounds = scenes[:3], 2
+    # A slow panel: the trouble scenes and this run's turn, three rounds. The
+    # photo scenes again and again is what fragmented the E1004 (#814).
+    left_out = []
+    if sampled(ctx, frame):
+        scenes, left_out = pick_scenes(ctx, frame, scenes, keep_largest=1)
+        rounds = min(rounds, 3)
     t0 = time.time()
     samples = []
     st = status(con)
@@ -362,9 +422,9 @@ def suite_soak(ctx, frame, rounds=None):
     issues = incidents_since(con, t0, 'soak')
     for key, tol in (('internalFree', 4096), ('psramFree', 65536)):
         vals = [s[key] for s in samples[1:] if s.get(key) is not None]
-        if len(vals) >= 5 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
+        if len(vals) >= min(5, rounds) and len(vals) >= 3 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
             issues.append(issue('fail', 'leak', 'soak', f'{key} fell every round: {vals}'))
-    return {'soak': samples, 'issues': issues}
+    return {'soak': samples, 'issues': issues, 'left_out': left_out}
 
 
 class Tarpit:
@@ -562,9 +622,10 @@ def suite_desktop(ctx, frame, layouts=None):
     original = be.frame(fid).get('scenes') or []
     plain = [s for s in original if not (s.get('settings') or {}).get('isLayout')]
     by_name = {s.get('name'): s for s in plain}
-    open_list = [by_name[n] for n in LIGHT_SCENES if n in by_name][:4]
+    windows = 2 if sampled(ctx, frame) else 4
+    open_list = [by_name[n] for n in LIGHT_SCENES if n in by_name][:windows]
     for s in plain:
-        if len(open_list) >= 4:
+        if len(open_list) >= windows:
             break
         if s not in open_list:
             open_list.append(s)
@@ -572,7 +633,16 @@ def suite_desktop(ctx, frame, layouts=None):
     t_suite = time.time()
     chosen = None
     try:
-        for lid in (layouts or (DESKTOP_LAYOUTS[:1] if ctx.quick else DESKTOP_LAYOUTS)):
+        todo = layouts or (DESKTOP_LAYOUTS[:1] if ctx.quick else DESKTOP_LAYOUTS)
+        if not layouts and sampled(ctx, frame):
+            # The trouble pair in a row, then this run's turn of the rest.
+            rest = [l for l in todo if l not in TROUBLE_LAYOUTS]
+            todo = [l for l in TROUBLE_LAYOUTS if l in DESKTOP_LAYOUTS] + [l for l in rest if in_turn(ctx, l)]
+            skipped_layouts = [l for l in rest if l not in todo]
+            if skipped_layouts:
+                issues.append(issue('note', 'sampled', 'desktop',
+                                    f"slow panel: {', '.join(skipped_layouts)} left for another run's turn"))
+        for lid in todo:
             where = f'desktop {lid}'
             sample = _sample_layout(repo_root, lid)
             if not sample:

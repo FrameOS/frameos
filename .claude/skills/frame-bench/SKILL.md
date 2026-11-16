@@ -32,10 +32,22 @@ everything that crashed, failed, ran slow or took a slower path than before.
 tools/frame-bench/bench.py discover            # which frames answer, on which port (saved to ~/.frameos-bench/inventory.json)
 tools/frame-bench/bench.py run --rediscover    # every default suite on every frame, frames in parallel
 tools/frame-bench/bench.py run --quick         # 3-4 scenes each: a smoke test (~10 min)
+tools/frame-bench/bench.py run --full          # no sampling on the slow e-paper panels
 tools/frame-bench/bench.py run --frames sensecap,e1003 --suites scenes,desktop
 tools/frame-bench/bench.py run --baseline ~/.frameos-bench/<older-run>   # flag regressions
 tools/frame-bench/bench.py report <run-dir> --baseline <older-run-dir>
 ```
+
+**Slow panels are sampled.** A frame whose panel takes 20 s or more to
+refresh (the 7.3" and 13.3" Spectras: the E1002, the E1004) runs what has
+broken before every time and the rest in turns: the photo, big and clock
+scenes (`TROUBLE_SCENES`) and its largest scenes always, a third of the other
+scenes per run (by the day, or `--rotation N`), one warm render each (two for
+the trouble ones), the macOS and BeOS desktops back to back (`TROUBLE_LAYOUTS`)
+plus a third of the other layouts, two windows instead of four, and three
+soak rounds of the same picks. The report notes what was left for another
+run's turn (`sampled`). `--full` runs everything, as before; a release check
+or a change to rendering that touches every scene wants it.
 
 A full run takes one to two hours (e-paper refreshes and the 16-grey E1003's
 slow scenes dominate). Run it in the background and read
