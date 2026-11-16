@@ -84,3 +84,13 @@ version is published (`validateSceneZip` in `store.ts`, which already reads
 `isLayout` there), keeping it in a `store_scenes` column (a migration, and a
 backfill that unzips each latest version), and adding it to the device
 listing, the browse and repository listings, `TemplateType` and `SceneCard`.
+
+## The repo's scenes
+
+Every scene in the repo has an icon: the samples (layouts and desktops
+included), the gallery scenes and the playground's Welcome. Each is the path of
+one icon from [Material Design Icons](https://pictogrammers.com/library/mdi/)
+by Pictogrammers, under the Apache License 2.0, copied as it is from `@mdi/js`.
+A new sample takes one the same way: a plain shape that says what the scene
+is, never a brand's logo. An icon of its own replaces the special icon a
+desktop draws for the Scene store, Files and the terminal.
