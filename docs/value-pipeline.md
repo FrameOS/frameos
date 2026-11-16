@@ -297,7 +297,11 @@ Three rules make it correct rather than merely plausible:
   holding whatever rendered before the producer that pass, and a compositing
   producer (JS, SVG) blends over the same, so a canvas snapshot would replay
   a stale background over later renders. `withCache` refuses by buffer
-  identity, which also catches error frames painted into the canvas.
+  identity (`aliasesCanvas`), and not only past the memory limit: a value
+  that is the canvas, or a view of it, is kept in no tier at any size. A
+  156 KB canvas under the 1 MB limit used to be kept, and the next pass got
+  its own canvas back as the "photo" (render/zoomPan zoomed it into itself,
+  then showed black; SenseCAP Indicator, 2026-11-15).
 - **A hit that cannot be served is a miss.** File swept, card pulled,
   truncated write, or no memory to read it back into (the floor read checks
   `availableRenderBytes` before allocating) — the entry is dropped, its file
@@ -344,8 +348,11 @@ on 8 MB, 4-bit on a sixteen-grey panel, luma on another grey one, RGBX where
 two of it fit). The bytes a 565 or
 luma canvas saves against RGBX stay charged (`fos_wasm_memory_set_held`), so
 `memoryBytes` and `previewOverheadBytes` read the same with a bundle from
-before it, which draws RGBX. A producer's error frame goes into that canvas
-too (`runsAsEmbedded`, as on the device). Through 2026.11.4 the preview made a
+before it, which draws RGBX. A producer's error frame is the device's too
+(`runsAsEmbedded`): not drawn into the canvas (until 2026-11-15) but its own
+frame a whole fraction of the canvas's size, under 512 KB (`renderErrorForContext`),
+which the node cache keeps for its period: an erroring producer under a 24 fps
+animation runs, and logs, once a period, not every frame. Through 2026.11.4 the preview made a
 fresh RGBX canvas every render while the page held the last one, so at
 1200×1600 under 8 MB even a blank scene's second render was refused 7.3 MB,
 and a scene whose app failed was refused its error frame: out-of-memory

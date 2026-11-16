@@ -61,20 +61,27 @@ proc contextImageTarget*(self: AppRoot, context: ExecutionContext,
     else: self.frameConfig.renderHeight()
   newImage(width, height)
 
+const ErrorFrameMaxBytes = 512 * 1024
+  ## What a device's standalone error frame may hold (renderErrorForContext).
+
 proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: string): Image =
-  ## Error frame for image producers. On embedded the producer's success path
-  ## decodes straight into the context canvas, so the error path must reuse
-  ## that canvas too — a second full-frame allocation next to the live canvas
-  ## is exactly what OOMs a 16MB module (and the preview running as one).
+  ## Error frame for image producers, a standalone image the consumer draws
+  ## like a photo. On a device it is the canvas's shape at a whole fraction of
+  ## its size, under ErrorFrameMaxBytes: a full-size RGBX frame beside the
+  ## live canvas is what OOMs a 16 MB module (8.7 MB on a reTerminal E1003's
+  ## 1848x1179 window, 2026-11-10). It used to be drawn into the live canvas
+  ## and returned, which the node cache then served back as the next pass's
+  ## "photo": render/zoomPan zoomed the canvas into itself, then showed black
+  ## (2026-11-15). Small, it is kept for the node's cache period, so an
+  ## erroring producer under a 24 fps animation runs (and logs) once a period.
+  let width = self.contextImageWidth(context)
+  let height = self.contextImageHeight(context)
   if runsAsEmbedded():
-    let target = context.contextImage()
-    if not target.isNil:
-      # Painted before the error, or the consumer would pay the owed
-      # background over it afterwards.
-      paintPendingBackground(context)
-      renderErrorInto(target, target.width, target.height, message)
-      return target
-  renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
+    var k = 1
+    while (width div k) * (height div k) * 4 > ErrorFrameMaxBytes:
+      inc k
+    return renderError(max(1, width div k), max(1, height div k), message)
+  renderError(width, height, message)
 
 proc decodeTargetIsOwned*(context: ExecutionContext): bool =
   ## Whether the pending target is one the chain allocated (and so is

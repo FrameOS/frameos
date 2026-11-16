@@ -238,11 +238,13 @@ suite "data/localImage app":
     check cast[pointer](emptyFolder) != cast[pointer](contextImage)
     check contextImage[0, 0] == rgba(0, 255, 0, 255)
 
-  test "on a device an empty folder with no target draws its error into the canvas":
+  test "on a device an empty folder with no target gets a small error frame of its own":
     ## A consumer that pans or zooms the photo (Slideshow with motion) takes
     ## no decode target. The error frame was then a new RGBX image of the
     ## window: 8.7 MB on a reTerminal E1003's 1848x1179, an allocation that
-    ## aborted the render (2026-11-10). On a device it is the canvas.
+    ## aborted the render (2026-11-10); then the canvas, which the node cache
+    ## kept and served back as the photo (2026-11-15). Now a standalone frame
+    ## under 512 KB, the canvas untouched.
     setSimulatedEmbedded(true)
     defer: setSimulatedEmbedded(false)
     let root = uniqueTempDir("frameos-local-image-empty-device")
@@ -257,14 +259,15 @@ suite "data/localImage app":
     )
     createDir(root / "empty")
 
-    let canvas = newImage(7, 5)
+    let canvas = newImage(800, 480)
     canvas.fill(rgba(0, 255, 0, 255))
     let context = ExecutionContext(hasImage: true, image: canvas,
       backgroundPending: true, backgroundColor: color(0, 0, 1, 1))
     let frame = app.get(context)
-    check cast[pointer](frame) == cast[pointer](canvas)
-    check canvas[0, 0] != rgba(0, 255, 0, 255)     # the error frame went into it
-    check not context.backgroundPending            # the owed background went down first
+    check frame.bufferPointer != canvas.bufferPointer
+    check frame.width == 400 and frame.height == 240  # 1.5 MB / 4: under 512 KB
+    check canvas[0, 0] == rgba(0, 255, 0, 255)        # the canvas is untouched
+    check context.backgroundPending                   # and still owed
     var logged = false
     for item in logs.items:
       if "No images found in the folder" in item{"error"}.getStr():
