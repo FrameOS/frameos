@@ -10,6 +10,9 @@ default is no layout (a scene is the whole frame).
   a `setCurrentScene` by id) its yield draws nothing.
 - Its fields are parameters. Each scene that uses it sets them in
   `layout.state` on the install, as a split panel sets a panel's options.
+- `settings.desktop: true` says it is a desktop that runs the frame's scenes
+  in windows ([Windows](#windows)): the frame page lists the desktops apart
+  from the layouts around one scene.
 
 ## What can be a layout
 
@@ -75,8 +78,12 @@ opened over (a layout is made afresh around it), for a taskbar to keep that
 scene's button.
 
 **On the frame.** Frame settings has a Layout select, with a gear for that
-layout's fields. The choice covers every scene until "As each scene says" is
-picked, and what the gear sets overlays the install's `layout.state`. Both are
+layout's fields. It lists the desktops (`settings.desktop`) under "Desktops"
+and the rest under "Full screen", each by name (`layoutsInOrder`; one kind
+alone has no heading). A host lists its layouts in no order of its own (a Pi's
+tables), so the page sorts; an ESP32's scene index keeps `desktop` beside
+`isLayout` (`fos_scene_store.c` `make_entry`). The choice covers every scene
+until "As each scene says" is picked, and what the gear sets overlays the install's `layout.state`. Both are
 the frame's to keep (`layout_choice.nim`, in the hosts' per-scene state files under
 `frame-layout` and the layout's id). No plane is told: the selects in the
 workspace keep showing what each scene was given.

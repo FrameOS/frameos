@@ -3,7 +3,7 @@
  * time. Pure C and cJSON, no IDF: the host test runs it against a directory.
  *
  * /state/scene-index.json  {"scenes":[{"id","name","refreshInterval","slot","bytes",
- *                                      "isLayout","default"}],
+ *                                      "isLayout","desktop","default"}],
  *                           "default":"<id>","source":"local|backend|cloud"}
  * /state/scene-<slot>.json one scene, exactly as it was stored
  *

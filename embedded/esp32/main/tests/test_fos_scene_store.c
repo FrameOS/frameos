@@ -540,6 +540,9 @@ static void test_layouts_and_the_default(void)
     /* A layout is never what a frame boots to, even first in the list. */
     CHECK(put_one("{\"id\":\"wrap\",\"settings\":{\"isLayout\":true}}", &result) == FOS_SCENE_STORE_OK);
     CHECK(entry_has("wrap", "isLayout"));
+    CHECK(!entry_has("wrap", "desktop"));
+    CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"desktop\":true}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_has("desk", "isLayout") && entry_has("desk", "desktop"));
     CHECK(default_id()[0] == '\0');
     CHECK(put_one("{\"id\":\"a\"}", &result) == FOS_SCENE_STORE_OK);
     CHECK(strcmp(default_id(), "a") == 0);

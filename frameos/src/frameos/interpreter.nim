@@ -480,10 +480,10 @@ when not defined(frameosEmbedded):
     {.cast(gcsafe).}:
       for sceneId, scene in uploadedScenes.pairs:
         if scene.isLayout:
-          result.add LayoutEntry(id: sceneId.string, name: scene.name)
+          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop)
       for sceneId, scene in loadedScenes.pairs:
         if scene.isLayout and not uploadedScenes.hasKey(sceneId):
-          result.add LayoutEntry(id: sceneId.string, name: scene.name)
+          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop)
 
   layoutListing = interpreterLayouts
 
@@ -2491,6 +2491,7 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
       result.splitScreenLayout.present = i < s.len and s[i] == '{'
       skipValue(s, i)
     of "isLayout", "is_layout": result.isLayout = readFlag(s, i)
+    of "desktop": result.desktop = readFlag(s, i)
     else: skipValue(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
@@ -2544,6 +2545,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
     # The install's layout, read here so that nothing else knows its shape.
     isLayout: scene.settings != nil and scene.settings.isLayout,
+    isDesktop: scene.settings != nil and scene.settings.isLayout and scene.settings.desktop,
     layoutSceneId: scene.layout{"sceneId"}.getStr().SceneId,
     layoutState: scene.layout{"state"},
     # Fields without an explicit access default to public for interpreted

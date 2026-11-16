@@ -6,10 +6,11 @@
 ## wears this one, or none. It is the frame's to keep and no plane is told, like
 ## its Wi-Fi network. Hosts keep it where they keep scene state.
 
-import std/json
+import std/[algorithm, json, strutils]
 
 type LayoutEntry* = object
   id*, name*: string
+  desktop*: bool ## `settings.desktop`: it runs the frame's scenes in windows
 
 const
   NoLayout* = "none" ## the choice that takes every layout away
@@ -29,6 +30,15 @@ var
     ## Bumped by every new scene set, on whichever thread takes it; each
     ## thread's `missing` is good for one generation. A plain int: a racy read
     ## costs one more lookup, never a wrong layout.
+
+proc layoutsInOrder*(layouts: seq[LayoutEntry]): seq[LayoutEntry] =
+  ## The frame page's order: the desktops, then the layouts around one scene,
+  ## each by name. A host lists them as it holds them (a table's order on a Pi).
+  result = layouts
+  result.sort(proc (a, b: LayoutEntry): int =
+    result = cmp(b.desktop, a.desktop)
+    if result == 0: result = cmpIgnoreCase(a.name, b.name)
+    if result == 0: result = cmp(a.id, b.id))
 
 proc savedLayoutState*(id: string): JsonNode =
   ## What was set on the frame for this layout; nil for nothing.

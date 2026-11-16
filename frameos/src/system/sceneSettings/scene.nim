@@ -82,6 +82,7 @@ const
   UpdateInstalling = 5
   UpdateWords = ["", "Checking\xe2\x80\xa6", "Up to date", "", "Could not check", "Installing\xe2\x80\xa6"]
   OtherValue = "\1" ## a select box's `other` option; no value of its own is this
+  HeadingValue = "\2" ## a group's name in a select box's list: picks nothing
   # The types the panel cannot edit: what they hold is not text.
   Unedited = ["node", "scene", "image"]
   # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
@@ -270,8 +271,10 @@ proc scaleText(scale: float): string =
 
 proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   ## The layout the frame shows its scenes in, its gear beside it for one with
-  ## settings. nil for a frame with no layouts on it.
-  let layouts = if layoutListing.isNil: @[] else: layoutListing()
+  ## settings. nil for a frame with no layouts on it. The desktops come first
+  ## and the layouts around one scene after them, each by name, under a
+  ## heading each when the frame holds both.
+  let layouts = layoutsInOrder(if layoutListing.isNil: @[] else: layoutListing())
   if layouts.len == 0:
     return nil
   result = field("layout", "Layout", "string")
@@ -279,7 +282,12 @@ proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   if chosenLayout().len > 0:
     options.elems.add option("", "As each scene says")
   options.elems.add option(NoLayout, "No layout")
+  let grouped = layouts[0].desktop and not layouts[^1].desktop
   for i in 0 ..< layouts.len:
+    if grouped and (i == 0 or layouts[i].desktop != layouts[i - 1].desktop):
+      let heading = option(HeadingValue, if layouts[i].desktop: "Desktops" else: "Full screen")
+      heading.put("heading", newJBool(true))
+      options.elems.add heading
     options.elems.add option(layouts[i].id, layouts[i].name)
   result.put("options", options)
   info.put("layout", newJString(if self.wornLayout.isNil: NoLayout else: self.wornLayout.id.string))
@@ -489,7 +497,7 @@ proc acting(self: SceneSettingsScene) =
     self.press(handler - HAction)
   elif handler >= HSelect:
     let index = handler - HSelect
-    if index < fields.elems.len:
+    if index < fields.elems.len and actedText != HeadingValue:
       let
         field = fields.elems[index]
         other = actedText == OtherValue
@@ -592,6 +600,13 @@ proc optionRow(look: Look, value, label: string, picked: bool): SvgNode =
   result = el("option", move c, SvgNode(text: label)).role(if picked: "picked" else: "option")
   result.attrs.add(("value", value))
 
+proc headingRow(look: Look, label: string): SvgNode =
+  ## A group's name in a select box's list, over its options: picks nothing.
+  var c = if look.paper: "font-bold" else: "text-zinc-400"
+  c.px("text", look.size * 4 div 5)
+  result = el("option", move c, SvgNode(text: label)).role("muted")
+  result.attrs.add(("value", HeadingValue))
+
 proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, index: int): SvgNode =
   ## A select box: its options, strings or {value, label}, in a list that
   ## opens over the panel (ui/layout.nim), and its `other` last.
@@ -605,7 +620,10 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
     let option = options.elems[j]
     let name = if option.kind == JObject: option{"value"}.text else: option.text
     let label = option{"label"}.getStr()
-    result.children.add look.optionRow(name, if label.len > 0: label else: name, name == held)
+    if option{"heading"}.getBool():
+      result.children.add look.headingRow(label)
+    else:
+      result.children.add look.optionRow(name, if label.len > 0: label else: name, name == held)
   let other = field{"other"}.getStr()
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)

@@ -678,7 +678,8 @@ proc loadScenes*(payload: string): int =
   for input in inputs:
     if newScenes.hasKey(input.id):
       if newScenes[input.id].isLayout:
-        layoutCatalog.add LayoutEntry(id: input.id.string, name: newScenes[input.id].name)
+        layoutCatalog.add LayoutEntry(id: input.id.string, name: newScenes[input.id].name,
+          desktop: newScenes[input.id].isDesktop)
       else:
         loadedSceneOrder.add(input.id)
 
@@ -726,7 +727,7 @@ proc setSceneCatalog*(indexJson: string): int =
       if id.len > 0 and item{"isLayout"}.getBool(false):
         # Read off flash by id when a scene names it, and in no list but the
         # frame page's.
-        layouts.add LayoutEntry(id: id, name: item{"name"}.getStr())
+        layouts.add LayoutEntry(id: id, name: item{"name"}.getStr(), desktop: item{"desktop"}.getBool(false))
         continue
       if id.len == 0:
         continue

@@ -559,6 +559,7 @@ type
     eventMap*: JsonNode ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
     isLayout*: bool ## `settings.isLayout`: in no scene list (docs/scene-layouts.md)
+    isDesktop*: bool ## a layout with `settings.desktop`: the frame page lists it apart
     layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
@@ -593,6 +594,9 @@ type
     splitScreenLayout*: SplitLayoutMarker
     ## The scene is a layout: it wraps other scenes and is in no scene list.
     isLayout*: bool
+    ## The layout is a desktop that runs the frame's scenes in windows
+    ## (docs/scene-layouts.md "Windows"): the frame page lists it apart.
+    desktop*: bool
 
   SplitLayoutMarker* = object
     present*: bool

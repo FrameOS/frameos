@@ -1314,6 +1314,8 @@ export interface FrameSceneSettings {
   splitScreenLayout?: Record<string, any>
   /** This scene is a layout: it wraps other scenes and stays out of the scene lists (docs/scene-layouts.md). */
   isLayout?: boolean
+  /** A layout that is a desktop of windows: the frame's settings page lists it apart (docs/scene-layouts.md). */
+  desktop?: boolean
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

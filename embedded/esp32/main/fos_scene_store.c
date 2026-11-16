@@ -350,8 +350,11 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
     cJSON_AddNumberToObject(entry, "hash", (double)hash);
     /* A layout (docs/scene-layouts.md) is read by id when a scene names it;
      * it is in no list and never what a frame boots to. */
-    if (entry_flag(cJSON_GetObjectItem(scene, "settings"), "isLayout")) {
+    const cJSON *settings = cJSON_GetObjectItem(scene, "settings");
+    if (entry_flag(settings, "isLayout")) {
         cJSON_AddBoolToObject(entry, "isLayout", true);
+        /* A desktop (`settings.desktop`) is listed apart on the frame page. */
+        if (entry_flag(settings, "desktop")) cJSON_AddBoolToObject(entry, "desktop", true);
     } else if (entry_flag(scene, "default")) {
         cJSON_AddBoolToObject(entry, "default", true);
     }

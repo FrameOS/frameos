@@ -6,7 +6,8 @@
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#3b4cc0",
-      "isLayout": true
+      "isLayout": true,
+      "desktop": true
     },
     "fields": [
       {

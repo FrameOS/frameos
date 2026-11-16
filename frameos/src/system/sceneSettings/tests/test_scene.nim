@@ -724,6 +724,44 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   chooseLayout("")
   echo "layout row ok"
 
+block the_layouts_are_desktops_then_full_screen_by_name:
+  # A Pi lists its layouts in its tables' order. The page puts the desktops
+  # first and the layouts around one scene after them, each by name, under a
+  # heading each; a heading picks nothing.
+  layoutListing = proc (): seq[LayoutEntry] {.nimcall, gcsafe.} = @[
+    LayoutEntry(id: "tiling", name: "Tiling", desktop: true),
+    LayoutEntry(id: "bar", name: "Bottom bar"),
+    LayoutEntry(id: "w98", name: "Windows 98", desktop: true),
+    LayoutEntry(id: "polaroid", name: "Polaroid"),
+    LayoutEntry(id: "mac", name: "macOS", desktop: true)]
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"rotate": 0, "renderScale": 0, "version": "2026.11.9"}
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  proc pick(row: int): string =
+    discard scene.draw()
+    # Without Wi-Fi to set, Layout is the page's first select box.
+    scene.tap(uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0])
+    var image = scene.draw()
+    if previews.len > 0 and row == 1: image.writeFile(previews / "settings-layouts.png")
+    scene.tap(regionWith(OptionBase + row))
+    scene.state{"frameValues"}{"layout"}.getStr()
+  # No layout, Desktops, macOS, Tiling, Windows 98, Full screen, Bottom bar, Polaroid
+  doAssert pick(1) == "", "a heading picks nothing"
+  doAssert pick(2) == "mac"
+  doAssert pick(4) == "w98"
+  doAssert pick(5) == "w98", "a heading picks nothing"
+  doAssert pick(6) == "bar"
+  doAssert pick(7) == "polaroid"
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  layoutListing = nil
+  # One kind alone needs no heading: by name.
+  doAssert layoutsInOrder(@[LayoutEntry(id: "b", name: "polaroid"), LayoutEntry(id: "a", name: "Bottom bar")]).mapIt(
+    it.id) == @["a", "b"]
+  echo "layouts in order ok"
+
 block the_frame_page_sets_the_clock_and_offers_an_update:
   var
     actions: seq[string]
