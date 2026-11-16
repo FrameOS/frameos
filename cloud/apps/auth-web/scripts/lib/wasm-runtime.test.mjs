@@ -11,6 +11,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   installReleaseRuntime,
+  localBuildDir,
+  localRuntimeDir,
   parseMinisignPublicKey,
   pinnedReleaseVersion,
   readRuntimeStamp,
@@ -126,6 +128,27 @@ describe("release pin", () => {
 
   it("reads the repo's own versions.json", () => {
     expect(pinnedReleaseVersion()).toMatch(/^\d{4}\.\d{1,2}\.\d+$/);
+  });
+});
+
+describe("the local runtime (FRAMEOS_WASM_SOURCE=local)", () => {
+  it("is what build_wasm.sh last wrote, when that is a whole runtime", () => {
+    expect(localBuildDir).toMatch(/frontend[\\/]public[\\/]frameos-wasm$/);
+    const dir = mkdtempSync(join(tmpdir(), "frameos-wasm-local-"));
+    for (const file of runtimeFiles) {
+      writeFileSync(join(dir, file), "built");
+    }
+    expect(localRuntimeDir({ buildDir: dir })).toBe(dir);
+    // Incomplete: the package's copy, or nothing when there is none either.
+    rmSync(join(dir, "preview-worker.js"));
+    let fallback = null;
+    try {
+      fallback = localRuntimeDir({ buildDir: dir });
+    } catch {
+      // no package copy in this checkout
+    }
+    expect(fallback).not.toBe(dir);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

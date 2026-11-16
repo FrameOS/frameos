@@ -55,7 +55,7 @@ function start(viewport = { height: 900, width: 1440 }) {
     }) as never,
     fetchScenes: async () => [{ id: "first" }, { id: playgroundLayoutId, settings: { isLayout: true } }],
     onStatus: (status) => statuses.push(status),
-    origin: "https://playground.frameos.net",
+    storeUrl: "https://playground.frameos.net",
     viewport: () => size,
   });
   return { canvas, playground, previews, size, statuses };

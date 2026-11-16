@@ -54,6 +54,30 @@ visitor's own browser.
   (`playgroundSize`) and stretched beyond; a resize is taken in place
   (`frameos_wasm_resize`), the windows kept.
 
+## Working on it
+
+`pnpm dev`'s `playground` pane (`mprocs.yaml`, `pnpm run dev:playground` in
+`cloud/`, `scripts/playground-dev.mjs`) is the cloud's dev server with the
+playground on this checkout's runtime: it prints the address to open
+(`http://localhost:3000/playground`, or the port Next took).
+
+- **The runtime** is the one the `wasm` pane builds
+  (`frontend/public/frameos-wasm`, `FRAMEOS_WASM_SOURCE=local`), installed
+  again after every rebuild. The release the cloud ships is behind `main`, so
+  a playground on it shows a sample written for a newer runtime without what
+  it needs (the Scene store's covers, until a release has `<img src>`).
+- **The scenes** (`repo/scenes/samples`, `repo/scenes/gallery`,
+  `playground-scenes`) and the `frameos-wasm` package are built again when
+  they change. Reload the page to see any of it.
+- **The Scene store** browses `cloud.frameos.net`
+  (`FRAMEOS_PLAYGROUND_STORE_URL`; empty for the page's own origin). The
+  runtime asks its page's own origin only through the preview proxy, and the
+  proxy's guard refuses localhost.
+- It is the cloud's dev server, so it runs **instead of** the `cloud` pane:
+  Next refuses a second dev server in `apps/auth-web`, and both would install
+  their runtime into the same `public/frameos-wasm`. It needs the database
+  like `cloud` (`scripts/db-setup.sh`, the `postgres` pane).
+
 ## When it changes
 
 It is part of auth-web, so it ships with every cloud deploy

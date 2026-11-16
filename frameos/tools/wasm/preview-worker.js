@@ -839,6 +839,14 @@ async function init(msg) {
     } catch (e) {
       // older bundle without the export: the app browses on its own
     }
+    // Every frame is shown as it comes, so an <img src> page's pictures come
+    // one a render, the next soon, rather than a first frame that waits for
+    // all of them (a plane's render waits: it is the one picture a board gets).
+    try {
+      call('frameos_wasm_set_pictures_one_a_render', null, ['boolean'], [true])
+    } catch (e) {
+      // older bundle without the export
+    }
     // Run the scenes side by side, as a Pi does (docs/scene-layouts.md
     // "Windows"): a layout's app.frame.scenes and its <Scene id> windows.
     if (msg.windowed) {

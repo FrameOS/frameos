@@ -13,9 +13,11 @@
 // browser preview with the next release, exactly when it reaches frames.
 //
 // FRAMEOS_WASM_SOURCE=local is the development escape hatch: use the
-// workspace package's own build (frameos/wasm/dist/assets, from
-// `turbo run build:runtime --filter=frameos-wasm`) — for working on the
-// Nim runtime itself, or when there is no network.
+// runtime built in this checkout (frontend/public/frameos-wasm, which
+// build_wasm.sh, `turbo run build:runtime --filter=frameos-wasm` and the dev
+// stack's `wasm` pane write, else the package's copy in
+// frameos/wasm/dist/assets) — for working on the Nim runtime itself, or when
+// there is no network.
 /* global Buffer, console, fetch, process */
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -244,8 +246,19 @@ export function readRuntimeStamp(dir) {
   }
 }
 
-/** The workspace package's own build (FRAMEOS_WASM_SOURCE=local). */
-export function localRuntimeDir() {
+/** Where build_wasm.sh writes the runtime (and the dev stack's `wasm` pane). */
+export const localBuildDir = join(repoRoot, "frontend", "public", "frameos-wasm");
+
+/**
+ * The runtime built in this checkout (FRAMEOS_WASM_SOURCE=local): what
+ * build_wasm.sh last wrote, else the frameos-wasm package's copy of it. The
+ * package copies the build only when the package itself is built, so reading
+ * the copy first served a runtime from before the last `build:runtime`.
+ */
+export function localRuntimeDir({ buildDir = localBuildDir } = {}) {
+  if (runtimeFiles.every((file) => existsSync(join(buildDir, file)))) {
+    return buildDir;
+  }
   const require = createRequire(join(appDir, "package.json"));
   return dirname(require.resolve("frameos-wasm/assets/preview-worker.js"));
 }
