@@ -78,10 +78,12 @@ import {
 import {
   isPreviewLayout,
   loadLayoutStarters,
+  previewLayoutGroups,
   previewLayouts,
   scenesWithPreviewLayout,
   wornPreviewLayout,
 } from "./lib/preview-layouts";
+import type { PreviewLayout } from "./lib/preview-layouts";
 import type { LayoutStarter } from "../generated/layoutStarters";
 import { isReauthRequired, reauthHref } from "./lib/reauth-client";
 import { selectFieldOptions } from "./lib/select-options";
@@ -177,6 +179,15 @@ function beforeDitherFor(fitPhotos: boolean, correction: AssetColorProfile): Bef
 const DEVICE_STORAGE_KEY = "frameos.preview.device";
 
 /** Megabytes with one decimal below 10 — the scale these numbers live at. */
+/** The Layout select's options for these layouts. */
+function layoutOptions(layouts: readonly PreviewLayout[]) {
+  return layouts.map((layout) => (
+    <option key={layout.id} value={layout.id}>
+      {layout.name}
+    </option>
+  ));
+}
+
 function formatMegabytes(bytes: number): string {
   const mb = Math.max(0, bytes) / (1024 * 1024);
   return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
@@ -369,6 +380,7 @@ export function SceneLivePreviewPanel({
     () => (editorScenes ? previewLayouts(editorScenes, layoutStarters) : []),
     [editorScenes, layoutStarters],
   );
+  const layoutGroups = useMemo(() => previewLayoutGroups(layouts), [layouts]);
   const [layoutChoice, setLayoutChoice] = useState<string | null>(null);
   // What the runtime runs: the editor's scenes, each wearing the chosen layout.
   const scenes = useMemo(
@@ -1645,11 +1657,13 @@ export function SceneLivePreviewPanel({
             value={shownLayoutId}
           >
             <option value="">No layout</option>
-            {layouts.map((layout) => (
-              <option key={layout.id} value={layout.id}>
-                {layout.name}
-              </option>
-            ))}
+            {layoutGroups.length > 1
+              ? layoutGroups.map((group) => (
+                  <optgroup key={group.kind} label={group.title}>
+                    {layoutOptions(group.items)}
+                  </optgroup>
+                ))
+              : layoutOptions(layouts)}
           </select>
         </div>
       ) : null}

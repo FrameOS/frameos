@@ -5,11 +5,14 @@ import type { FrameId, FrameScene, FrameType, SceneLayoutRef, StateField } from 
 import { sceneStateFields } from '../../../../utils/refreshInterval'
 import {
   currentSceneLayout,
+  isDesktopLayout,
   isLayoutScene,
+  layoutGroups,
   layoutScenes,
   sceneLayoutRef,
   withSceneLayout,
 } from '../../../../utils/sceneLayouts'
+import type { LayoutGroup } from '../../../../utils/sceneLayouts'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
 import { frameLogic } from '../../frameLogic'
 
@@ -32,6 +35,7 @@ export interface sceneLayoutLogicValues {
   currentLayoutScene: FrameScene | null
   draftState: Record<string, any>
   fields: StateField[]
+  layoutGroups: LayoutGroup<FrameScene>[]
   layouts: FrameScene[]
   pickerVisible: boolean
   scene: FrameScene | null
@@ -76,6 +80,7 @@ export interface sceneLayoutLogicMeta {
     scenes: (frameForm: Partial<FrameType>, frame: FrameType) => FrameScene[]
     scene: (scenes: FrameScene[]) => FrameScene | null
     layouts: (scenes: FrameScene[]) => FrameScene[]
+    layoutGroups: (layouts: FrameScene[]) => LayoutGroup<FrameScene>[]
     pickerVisible: (scene: FrameScene | null, layouts: FrameScene[]) => boolean
     current: (scene: FrameScene | null, layouts: FrameScene[]) => SceneLayoutRef | null
     currentLayoutScene: (current: SceneLayoutRef | null, layouts: FrameScene[]) => FrameScene | null
@@ -140,6 +145,11 @@ export const sceneLayoutLogic = kea<sceneLayoutLogicType>([
       (scenes: FrameScene[]): FrameScene | null => scenes.find((scene) => scene.id === props.sceneId) ?? null,
     ],
     layouts: [(s) => [s.scenes], (scenes: FrameScene[]): FrameScene[] => layoutScenes(scenes)],
+    /** The picker's choices: the desktops, then the full screen layouts. */
+    layoutGroups: [
+      (s) => [s.layouts],
+      (layouts: FrameScene[]): LayoutGroup<FrameScene>[] => layoutGroups(layouts, isDesktopLayout),
+    ],
     /** A layout cannot wear a layout, and a frame without any has nothing to pick. */
     pickerVisible: [
       (s) => [s.scene, s.layouts],

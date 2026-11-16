@@ -22,7 +22,8 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'dashboards', title: 'Data & dashboards' },
   { slug: 'fun', title: 'Fun & comics' },
   { slug: 'realtime', title: 'Real time' },
-  { slug: 'layouts', title: 'Layouts' },
+  { slug: 'desktops', title: 'Desktop layouts' },
+  { slug: 'layouts', title: 'Full screen layouts' },
   { slug: 'utilities', title: 'Tools & utilities' },
   { slug: 'demos', title: 'Demos & examples' },
 ]

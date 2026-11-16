@@ -9,10 +9,13 @@ import type { LayoutStarter } from "../../generated/layoutStarters";
 import type { FrameScene } from "../../types";
 import {
   currentSceneLayout,
+  isDesktopLayout,
   isLayoutScene,
+  layoutGroups,
   layoutScenes,
   withLayoutOnEveryScene,
 } from "../../utils/sceneLayouts";
+import type { LayoutGroup } from "../../utils/sceneLayouts";
 
 /** A scene as the preview runs it (frameos-wasm's FrameOSScene). */
 export type PreviewLayoutScene = { id: string; name?: string | undefined } & Record<string, unknown>;
@@ -20,6 +23,8 @@ export type PreviewLayoutScene = { id: string; name?: string | undefined } & Rec
 export type PreviewLayout = {
   id: string;
   name: string;
+  /** A desktop (`settings.desktop`): the select lists it apart from the full screen layouts. */
+  desktop: boolean;
   /** The starter's scene, run beside the scenes; null for a layout already among them. */
   starter: PreviewLayoutScene | null;
 };
@@ -51,11 +56,12 @@ function asFrameScenes(scenes: readonly PreviewLayoutScene[]): FrameScene[] {
  */
 export function previewLayouts(
   scenes: readonly PreviewLayoutScene[],
-  starters: readonly { name: string; scene: { id: string } }[],
+  starters: readonly { name: string; scene: { id: string; settings?: unknown } }[],
 ): PreviewLayout[] {
   const own: PreviewLayout[] = layoutScenes(asFrameScenes(scenes)).map((scene) => ({
     id: scene.id,
     name: scene.name || scene.id,
+    desktop: isDesktopLayout(scene),
     starter: null,
   }));
   const ownIds = new Set(own.map((layout) => layout.id));
@@ -65,9 +71,15 @@ export function previewLayouts(
     .map((starter) => ({
       id: starter.scene.id,
       name: starter.name,
+      desktop: isDesktopLayout(starter.scene as unknown as FrameScene),
       starter: starter.scene as unknown as PreviewLayoutScene,
     }));
   return [...own, ...samples];
+}
+
+/** The select's choices as the frame's settings list them: the desktops, then the full screen layouts. */
+export function previewLayoutGroups(layouts: readonly PreviewLayout[]): LayoutGroup<PreviewLayout>[] {
+  return layoutGroups(layouts, (layout) => layout.desktop);
 }
 
 /** The layout `sceneId` wears among `scenes` (`""`: none, or one the scenes do not hold). */

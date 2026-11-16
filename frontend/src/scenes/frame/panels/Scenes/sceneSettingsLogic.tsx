@@ -68,9 +68,9 @@ export interface sceneSettingsLogicMeta {
     permissionRows: (sceneAccess: SceneAccess | null) => ScenePermissionRow[]
     layoutProblem: (scene: FrameScene | null) => string | null
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
+    windowSizeOptions: (scene: FrameScene | null) => WindowSizeOption[]
     renderScaleFieldName: (scene: FrameScene | null) => string | null
     permissionApps: (sceneAccess: SceneAccess | null) => ScenePermissionApp[]
-    windowSizeOptions: (scene: FrameScene | null) => WindowSizeOption[]
   }
 }
 

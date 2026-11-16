@@ -38,7 +38,12 @@ Layouts group, "Add layout" at the end of the Add scene drawer while it has none
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same
 list (the script also writes `ios/FrameOSKit/.../LayoutStarters.json`): "New
 layout" under a frame's Layouts, "Add layout" in Add scene while it has none. Each sample's `thumb.jpg` is
-shown in those lists and saved as the added layout's picture.
+shown in those lists and saved as the added layout's picture. Every list of
+starters shows the desktops apart from the full screen layouts, each by name,
+as the frame's own settings page does (the script's order; `layoutGroups` in
+`frontend/src/utils/sceneLayouts.ts`, `SceneLayouts.groups` in the app), and so
+do the layout selects of a frame's Settings, of each scene and of the preview:
+under "Desktops" and "Full screen" when a frame has both kinds.
 
 **In the preview.** The live preview of every scene workspace (a store scene's
 page, a frame's scene, a saved scene) has a Layout select under Device: "No
@@ -50,10 +55,13 @@ starts on the layout the shown scene wears (a frame's scene keeps its own), is
 not offered while the scene shown is a layout itself, and the starters load with
 the panel rather than the page.
 
-**In the store.** Layouts have their own shelf (`layouts` in
-`cloud/apps/auth-web/src/lib/categories.ts`). A scene published with a layout as
-the one it starts on goes there without asking the classifier, and an owner can
-still move it.
+**In the store.** Layouts have two shelves of their own
+(`cloud/apps/auth-web/src/lib/categories.ts`): Desktop layouts (`desktops`) and
+Full screen layouts (`layouts`). A scene published with a layout as the one it
+starts on goes on one of them without asking the classifier, Desktop layouts when
+it says `settings.desktop`, and an owner can still move it. A scene already on
+the store keeps the shelf it has: a layout that becomes a desktop later is moved
+by its owner.
 
 **Safe mode.** A layout can leave a frame unusable, and the settings that would
 take it off are drawn inside it. Ten pulls down from the top edge of a touch

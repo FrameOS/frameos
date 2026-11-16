@@ -36,6 +36,7 @@ const storeCategories = [
   "dashboards",
   "fun",
   "realtime",
+  "desktops",
   "layouts",
   "utilities",
   "demos",

@@ -91,6 +91,8 @@ final class FrameDetailModel {
 
     /// The frame's layouts: never on the scene list, listed under Layouts.
     var layouts: [InstalledScene] { scenes.filter(\.isLayout) }
+    /// The layout pickers' choices: the desktops, then the full screen layouts.
+    var layoutGroups: [LayoutGroup<InstalledScene>] { SceneLayouts.groups(layouts) { SceneLayouts.isDesktop($0.scene) } }
 
     var layoutIds: Set<String> { Set(layouts.map(\.id)) }
 

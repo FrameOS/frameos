@@ -14,7 +14,8 @@ public enum StoreCategories {
         ("dashboards", "Data & dashboards"),
         ("fun", "Fun & comics"),
         ("realtime", "Real time"),
-        ("layouts", "Layouts"),
+        ("desktops", "Desktop layouts"),
+        ("layouts", "Full screen layouts"),
         ("utilities", "Tools & utilities"),
         ("demos", "Demos & examples"),
     ]

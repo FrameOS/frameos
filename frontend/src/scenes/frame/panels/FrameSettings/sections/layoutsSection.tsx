@@ -3,13 +3,12 @@ import { useActions, useValues } from 'kea'
 
 import { Button } from '../../../../../components/Button'
 import { H6 } from '../../../../../components/H6'
-import { LAYOUT_STARTERS } from '../../../../../generated/layoutStarters'
 import type { FrameId, FrameScene } from '../../../../../types'
-import { SceneLayoutPicker } from '../../Scenes/SceneLayoutPicker'
+import { LayoutOptions, SceneLayoutPicker } from '../../Scenes/SceneLayoutPicker'
 import { SceneLayoutSettingsModal } from '../../Scenes/SceneLayoutSettingsModal'
 import { sceneLayoutLogic } from '../../Scenes/sceneLayoutLogic'
 import { useFrameSettings } from '../frameSettingsContext'
-import { frameLayoutsLogic } from '../frameLayoutsLogic'
+import { LAYOUT_STARTER_GROUPS, frameLayoutsLogic } from '../frameLayoutsLogic'
 
 const DIFFERENT = '__different'
 
@@ -51,21 +50,27 @@ function LayoutSettingsButton({
 /** One select for the whole frame. Advanced has each scene's own select and the starters. */
 export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Element {
   const logic = frameLayoutsLogic({ frameId })
-  const { layouts, contentScenes, commonLayoutId, advancedOpen } = useValues(logic)
+  const { layouts, layoutGroups, contentScenes, commonLayoutId, advancedOpen } = useValues(logic)
   const { chooseLayoutForEveryScene, addStarterLayout, setAdvancedOpen } = useActions(logic)
   const starters = (
-    <div className="flex flex-wrap items-center gap-2" data-layout-starters>
-      <span className="frameos-muted text-xs">Add a layout:</span>
-      {LAYOUT_STARTERS.map((starter) => (
-        <Button
-          key={starter.name}
-          size="tiny"
-          color="secondary"
-          title={starter.description}
-          onClick={() => addStarterLayout(starter.name)}
-        >
-          {starter.name}
-        </Button>
+    <div className="space-y-2" data-layout-starters>
+      {LAYOUT_STARTER_GROUPS.map((group) => (
+        <div key={group.kind} className="flex flex-wrap items-center gap-2" data-layout-starter-group={group.kind}>
+          <span className="frameos-muted text-xs">
+            {group.kind === 'desktops' ? 'Add a desktop:' : 'Add a full screen layout:'}
+          </span>
+          {group.items.map((starter) => (
+            <Button
+              key={starter.name}
+              size="tiny"
+              color="secondary"
+              title={starter.description}
+              onClick={() => addStarterLayout(starter.name)}
+            >
+              {starter.name}
+            </Button>
+          ))}
+        </div>
       ))}
     </div>
   )
@@ -99,11 +104,7 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
                   </option>
                 ) : null}
                 <option value="">No layout</option>
-                {(layouts as FrameScene[]).map((layout) => (
-                  <option key={layout.id} value={layout.id}>
-                    {layout.name || 'Untitled layout'}
-                  </option>
-                ))}
+                <LayoutOptions groups={layoutGroups} />
               </select>
               {commonLayoutId && contentScenes.length > 0 ? (
                 <LayoutSettingsButton

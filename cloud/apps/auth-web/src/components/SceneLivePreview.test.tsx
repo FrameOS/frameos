@@ -701,7 +701,7 @@ describe("SceneLivePreviewPanel layout", () => {
       id: "frame-chrome",
       name: "Windows 98",
       nodes: [],
-      settings: { isLayout: true },
+      settings: { isLayout: true, desktop: true },
     };
     const worn = { ...clockScene, layout: { sceneId: "frame-chrome", state: { twentyFourHour: true } } };
     const scenes = [worn, frameLayout];
@@ -717,6 +717,14 @@ describe("SceneLivePreviewPanel layout", () => {
     expect(values.slice(0, 2)).toEqual(["", "frame-chrome"]);
     expect(values).not.toContain("layout-windows-98");
     expect(values).toContain("layout-top-bar");
+    // The desktops apart from the full screen layouts, the frame's own first in its kind.
+    const groups = [...select.querySelectorAll("optgroup")].map((group) => [
+      group.label,
+      [...group.querySelectorAll("option")].map((option) => option.value),
+    ]);
+    expect(groups.map(([label]) => label)).toEqual(["Desktops", "Full screen"]);
+    expect((groups[0]![1] as string[])[0]).toBe("frame-chrome");
+    expect(groups[1]![1]).toContain("layout-top-bar");
 
     fireEvent.change(select, { target: { value: "layout-top-bar" } });
     await waitFor(() => expect(previews).toHaveLength(2));

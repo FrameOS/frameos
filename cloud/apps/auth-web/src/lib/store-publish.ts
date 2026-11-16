@@ -120,14 +120,15 @@ export async function preflightStorePublish(
 }
 
 // What the listing says the category is before any model is asked: the
-// manifest's, then the row's, then the Layouts shelf for a layout.
+// manifest's, then the row's, then a layouts shelf for a layout (Desktop
+// layouts for a desktop, else Full screen layouts).
 function listingCategory(
-  validated: { isLayout: boolean; manifestCategory: string | null | undefined },
+  validated: { isLayout: boolean; isDesktop: boolean; manifestCategory: string | null | undefined },
   existing: { category: string | null } | undefined,
 ): string | null {
   const stated =
     validated.manifestCategory !== undefined ? validated.manifestCategory : (existing?.category ?? null);
-  return stated ?? (validated.isLayout ? "layouts" : null);
+  return stated ?? (validated.isDesktop ? "desktops" : validated.isLayout ? "layouts" : null);
 }
 
 // Moderation and classification: network calls to a model, up to ~80 s.

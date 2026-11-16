@@ -290,7 +290,7 @@ describe("validateSceneZip transparency rejection", () => {
     expect(validateSceneZip(zip({ settings: {} })).ok).toBe(true);
   });
 
-  it("says when the scene a pack starts on is a layout, for the Layouts shelf", () => {
+  it("says when the scene a pack starts on is a layout, and a desktop, for the layouts shelves", () => {
     const pack = (scenes: unknown) =>
       validateSceneZip(
         Buffer.from(
@@ -305,9 +305,18 @@ describe("validateSceneZip transparency rejection", () => {
     );
     const layout = pack(sample);
     expect(layout.ok && layout.value.isLayout).toBe(true);
+    expect(layout.ok && layout.value.isDesktop).toBe(false);
+    const desktop = pack(
+      JSON.parse(
+        readFileSync(join(__dirname, "../../../../../repo/scenes/samples/Windows 98 layout/scenes.json"), "utf8"),
+      ),
+    );
+    expect(desktop.ok && desktop.value.isLayout).toBe(true);
+    expect(desktop.ok && desktop.value.isDesktop).toBe(true);
     const plain = pack([{ id: "a", nodes: [], edges: [], settings: {} }]);
     expect(plain.ok).toBe(true);
     expect(plain.ok && plain.value.isLayout).toBe(false);
+    expect(plain.ok && plain.value.isDesktop).toBe(false);
   });
 
   it("rejects a zip whose preview is proven fully transparent", () => {
