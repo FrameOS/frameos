@@ -73,7 +73,11 @@ scene's settings open from the gear button at the left of its window's title bar
 frame's from Start's Control Panel and the tray; in macOS from the gear at the
 right of the title bar and the menu bar's Settings, the frame's from System
 Settings in the Dock and the status icons; in BeOS from the gear box on the
-window's tab, the frame's from Preferences and the Deskbar's tray.
+window's tab, the frame's from Preferences and the Deskbar's tray; in Classic Mac
+from the gear box on the title bar and File's Get Info, the frame's from About
+This Frame, the clock and the Frame icon; in NeXTSTEP from the gear on the title
+bar and Info's Inspector, the frame's from Info Panel and the Dock's clock; in
+Commander from F4, the frame's from F1 and the clock.
 
 ## The frame page
 

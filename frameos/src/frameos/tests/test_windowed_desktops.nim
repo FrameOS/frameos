@@ -22,6 +22,11 @@ const
   Tiling = "layout-tiling"
   MacOS = "layout-macos"
   BeOS = "layout-beos"
+  ClassicMac = "layout-classic-mac"
+  NeXT = "layout-nextstep"
+  Commander = "layout-commander"
+  Teletext = "layout-teletext"
+  EReader = "layout-e-reader"
 
 proc panel(id, name, hex: string, layout = Layout): JsonNode =
   %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": 600,
@@ -88,7 +93,17 @@ let macos = parseFile(Samples / "macOS layout" / "scenes.json")[0]
 doAssert macos["id"].getStr() == MacOS
 let beos = parseFile(Samples / "BeOS layout" / "scenes.json")[0]
 doAssert beos["id"].getStr() == BeOS
-var allScenes = %*[layout, tiling, macos, beos,
+let classicMac = parseFile(Samples / "Classic Mac layout" / "scenes.json")[0]
+doAssert classicMac["id"].getStr() == ClassicMac
+let nextstep = parseFile(Samples / "NeXTSTEP layout" / "scenes.json")[0]
+doAssert nextstep["id"].getStr() == NeXT
+let commander = parseFile(Samples / "Commander layout" / "scenes.json")[0]
+doAssert commander["id"].getStr() == Commander
+let teletext = parseFile(Samples / "Teletext layout" / "scenes.json")[0]
+doAssert teletext["id"].getStr() == Teletext
+let eReader = parseFile(Samples / "E-reader layout" / "scenes.json")[0]
+doAssert eReader["id"].getStr() == EReader
+var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander, teletext, eReader,
   panel("tests/red", "Red", "#ff0000"), panel("tests/green", "Green", "#00ff00"),
   panel("tests/blue", "Blue", "#0000ff"),
   panel("tests/sky", "Sky", "#38bdf8", Tiling), panel("tests/grass", "Grass", "#4ade80", Tiling),
@@ -97,12 +112,24 @@ var allScenes = %*[layout, tiling, macos, beos,
   panel("tests/ocean", "Ocean", "#0000ff", MacOS),
   panel("tests/be-red", "Red", "#ff0000", BeOS), panel("tests/be-green", "Green", "#00ff00", BeOS),
   panel("tests/be-blue", "Blue", "#0000ff", BeOS),
+  panel("tests/cm-red", "Red", "#ff0000", ClassicMac), panel("tests/cm-green", "Green", "#00ff00", ClassicMac),
+  panel("tests/cm-blue", "Blue", "#0000ff", ClassicMac),
+  panel("tests/next-a", "Alpha", "#ff0000", NeXT), panel("tests/next-b", "Bravo", "#00ff00", NeXT),
+  panel("tests/next-c", "Charlie", "#0000ff", NeXT),
   # The scene store and the terminal, as each desktop finds them: by their names.
   panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
   panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS),
+  panel("tests/store-cm", "Scene store", "#3b82f6", ClassicMac), panel("tests/store-next", "Scene store", "#3b82f6", NeXT),
   panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
   panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS),
-  slideshowPanel("tests/photo", "SD card image")]
+  panel("tests/term-cm", "Terminal", "#111111", ClassicMac), panel("tests/term-next", "Terminal", "#111111", NeXT),
+  slideshowPanel("tests/photo", "SD card image"),
+  panel("tests/nc-red", "Red", "#ff0000", Commander), panel("tests/nc-green", "Green", "#00ff00", Commander),
+  panel("tests/nc-blue", "Blue", "#0000ff", Commander), buttonPanel("tests/nc-button", "Button", Commander),
+  panel("tests/tt-red", "Red", "#ff0000", Teletext), panel("tests/tt-green", "Green", "#00ff00", Teletext),
+  panel("tests/tt-blue", "Blue", "#0000ff", Teletext),
+  panel("tests/er-red", "Red", "#ff0000", EReader), panel("tests/er-green", "Green", "#00ff00", EReader),
+  panel("tests/er-blue", "Blue", "#0000ff", EReader)]
 # Enough BeOS scenes for a Deskbar longer than the panel.
 for i in 0 ..< 16: allScenes.add panel("tests/be-" & $i, "Scene " & $i, "#808080", BeOS)
 setUploadedInterpretedScenes(parseInterpretedScenes($allScenes))
@@ -172,8 +199,16 @@ proc settle(): seq[string] =
     if message[1] == "sceneSettings":
       settingsFrom = current.id.string
     if message[1] == "setCurrentScene":
-      let next = message[2]{"sceneId"}.getStr()
-      if next != current.id.string:
+      var next = message[2]{"sceneId"}.getStr()
+      let direction = message[2]{"direction"}.getStr()
+      if next.len == 0 and direction.len > 0 and not windowSceneListing.isNil:
+        # By `direction`: the host's scene order, walked as the dispatcher does.
+        var order: seq[string]
+        for scene in windowSceneListing(): order.add scene{"id"}.getStr()
+        let at = order.find(current.id.string)
+        if order.len > 0:
+          next = order[if direction == "next": (at + 1) mod order.len else: (at + order.len - 1) mod order.len]
+      if next.len > 0 and next != current.id.string:
         parked = current.wornLayout
         current.wornLayout = nil
         current = hostScene(next)
@@ -1320,6 +1355,844 @@ proc openIds(): seq[string] =
     for id in open: result.add id.getStr()
   result.sort()
 
+const
+  CMenuH = 20 ## the Classic Mac menu bar at 800 x 480, the desktop the 460 px under it
+  CIconX = W - 4 - 42 ## the middle of the column of icons down the desktop's right
+  CIconTop = CMenuH + 10 ## the first icon's top, one every 62 px
+
+proc macTitles(): seq[array[4, float32]] =
+  ## The menu bar's titles, left to right: the mark, File, Scenes, Special, the clock,
+  ## the Application menu.
+  byX(rectsOf(ClassicMac).filterIt(it[1] <= 1 and it[3] <= CMenuH.float32 and it[2] - it[0] < 200))
+
+proc macDrop(title: array[4, float32], right = false): seq[array[4, float32]] =
+  ## The items of the menu open under a title, top to bottom (rules take no press).
+  byY(rectsOf(ClassicMac).filterIt(it[1] >= CMenuH.float32 - 2 and it[3] - it[1] < 25 and it[2] - it[0] > 150 and
+    (if right: it[2] <= title[2] + 1 and it[2] >= title[2] - 6 else: it[0] >= title[0] and it[0] <= title[0] + 6)))
+
+proc fromMacScenes(index: int): seq[string] =
+  ## The scene at `index` of the menu bar's Scenes opened.
+  let bar = macTitles()
+  discard clickRect(bar[2])
+  discard pass()
+  acted(clickRect(macDrop(bar[2])[index]))
+
+proc titleBoxes(win: JsonNode): seq[array[4, float32]] =
+  ## The boxes on a window's title bar, left to right: close, the gear (on a
+  ## scene's), zoom. Only the window in front has them.
+  let maxed = win{"max"}.getBool()
+  let x = (if maxed: 0 else: win{"x"}.getInt()).float32
+  let y = (CMenuH + (if maxed: 0 else: win{"y"}.getInt())).float32
+  byX(rectsOf(ClassicMac).filterIt(it[0] >= x and it[1] >= y and it[3] <= y + 22 and
+    it[2] - it[0] >= 13 and it[2] - it[0] <= 17))
+
+proc isHole(scene: FrameScene): bool =
+  ## Whether the desktop draws a scene straight into its window (a hole), not as a picture.
+  for slot in desk().slots:
+    if slot.hole and slot.child == scene: return true
+
+proc blackShare(image: Image, x0, y0, x1, y1: int): float =
+  var black = 0
+  for y in y0 ..< y1:
+    for x in x0 ..< x1:
+      if image.color(x, y) == colored("#000000"): inc black
+  black / ((x1 - x0) * (y1 - y0))
+
+proc dragBy(x, y, dx, dy: int) =
+  discard send("pointerDown", at(x, y))
+  discard send("pointerMove", at(x + dx div 2, y + dy div 2))
+  discard send("pointerMove", at(x + dx, y + dy))
+  discard send("pointerUp", at(x + dx, y + dy, %*{"buttons": 0}))
+
+suite "the Classic Mac desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/cm-red", "name": "Red"}, {"id": "tests/cm-green", "name": "Green"},
+        {"id": "tests/cm-blue", "name": "Blue"}]
+
+  test "the first scene fills the desktop under the menu bar, the screen's corners rounded":
+    current = hostScene("tests/cm-red")
+    let image = pass()
+    shot(image, "cm1-first")
+    check problems.len == 0
+    check wins().len == 1
+    check winOf("tests/cm-red"){"max"}.getBool()
+    check isHole(current)
+    check image.color(W div 2, H div 2) == colored("#ff0000")
+    check image.color(W div 2, 4) == colored("#ffffff") # the menu bar
+    check image.color(W div 2, CMenuH - 1) == colored("#000000") # and its rule
+    check image.color(0, 0) == colored("#000000")
+    check image.color(W - 1, 0) == colored("#000000")
+    check macTitles().len == 6
+
+  test "Scenes in the menu bar opens a scene in a window of its own":
+    let bar = macTitles()
+    discard clickRect(bar[2])
+    check desk().state{"menu"}.getStr() == "scenes"
+    shot(pass(), "cm2-scenes-menu")
+    let items = macDrop(bar[2])
+    check items.len == 3
+    check acted(clickRect(items[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/cm-green"
+    check desk().state{"menu"}.kind == JNull
+    let image = pass()
+    check problems.len == 0
+    check wins().len == 2
+    check isHole(current)
+    let g = winOf("tests/cm-green")
+    check not g{"max"}.getBool()
+    let (gx, gy, gw, gh) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt())
+    check image.color(gx + gw div 2, CMenuH + gy + gh div 2) == colored("#00ff00")
+    check image.color(W - 10, 300) == colored("#ff0000")
+
+  test "a window dragged by its title bar follows the pointer":
+    let g = winOf("tests/cm-green")
+    let (x0, y0, w) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt())
+    let (grabX, grabY) = (x0 + w div 2, CMenuH + y0 + 10)
+    discard send("pointerDown", at(grabX, grabY))
+    discard send("pointerMove", at(grabX + 40, grabY + 30))
+    discard send("pointerMove", at(grabX + 100, grabY + 50))
+    discard send("pointerUp", at(grabX + 100, grabY + 50, %*{"buttons": 0}))
+    check winOf("tests/cm-green"){"x"}.getInt() == x0 + 100
+    check winOf("tests/cm-green"){"y"}.getInt() == y0 + 50
+    check pass().color(x0 + 100 + 30, CMenuH + y0 + 50 + 80) == colored("#00ff00")
+
+  test "a press on a window behind brings it forward, and a tap reaches no scene":
+    check "setCurrentScene" in click(W - 10, 300)
+    check current.id.string == "tests/cm-red"
+    check pass().color(W - 10, 300) == colored("#ff0000")
+
+  test "a double click on a title bar rolls its window up, the next one taking the focus, and another rolls it down":
+    # Red fills the desktop: its title bar across the top, right of green.
+    check acted(send("doubleTap", at(W - 60, CMenuH + 10))) == @["setCurrentScene"]
+    check winOf("tests/cm-red"){"shade"}.getBool()
+    check current.id.string == "tests/cm-green"
+    var image = pass()
+    shot(image, "cm3-shade")
+    check isHole(current)
+    check image.color(W - 60, 300) == colored("#808080") # the desktop, under where red was
+    check image.color(W - 60, CMenuH + 10) == colored("#ffffff") # red's title bar, behind: plain white
+    check acted(send("doubleTap", at(W - 60, CMenuH + 10))) == @["setCurrentScene"]
+    check not winOf("tests/cm-red"){"shade"}.getBool()
+    check current.id.string == "tests/cm-red"
+    image = pass()
+    check image.color(W - 60, 300) == colored("#ff0000")
+    check problems.len == 0
+
+  test "the gear box on a scene's title bar opens its settings":
+    let boxes = titleBoxes(winOf("tests/cm-red"))
+    check boxes.len == 3
+    settingsFrom = ""
+    check acted(clickRect(boxes[1])) == @["sceneSettings"]
+    check settingsFrom == "tests/cm-red"
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#tests/cm-red"
+    discard pass()
+
+  test "the zoom box gives a window its own box back, and the icons down the right are the frame's own apps":
+    discard clickRect(titleBoxes(winOf("tests/cm-red"))[2])
+    check not winOf("tests/cm-red"){"max"}.getBool()
+    discard pass()
+    # The disk and the scene list (no store, no asset browser, no terminal on
+    # this frame), none of the scenes.
+    discard send("tap", at(CIconX, CIconTop + 62 + 16))
+    check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
+    let picked = pass()
+    shot(picked, "cm4-icons")
+    # Its name on black: the label under the folder, inverted.
+    check picked.blackShare(CIconX - 20, CIconTop + 62 + 38, CIconX + 20, CIconTop + 62 + 50) > 0.5
+    check picked.blackShare(CIconX - 14, CIconTop + 38, CIconX + 14, CIconTop + 50) < 0.5
+    check send("doubleTap", at(CIconX, CIconTop + 62 + 16)).filterIt(it != "render") == @["sceneSwitcher"]
+    check desk().state{"asked"}.getStr() == "system/sceneSwitcher"
+    check send("doubleTap", at(CIconX, CIconTop + 16)).filterIt(it != "render") == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"asked"}.getStr() == "system/sceneSettings"
+    discard pass()
+    check problems.len == 0
+
+  test "the Application menu hides the window in front or the others, shows them all, and brings any forward":
+    var bar = macTitles()
+    discard clickRect(bar[^1])
+    check desk().state{"menu"}.getStr() == "app"
+    shot(pass(), "cm5-app-menu")
+    var items = macDrop(bar[^1], right = true)
+    check items.len == 5 # Hide Red, Hide Others, Show All, and the two windows
+    discard clickRect(items[1]) # Hide Others
+    check winOf("tests/cm-green"){"min"}.getBool()
+    check not winOf("tests/cm-red"){"min"}.getBool()
+    check pass().color(W - 10, CMenuH + 300) == colored("#808080")
+    bar = macTitles()
+    discard clickRect(bar[^1])
+    discard pass()
+    discard clickRect(macDrop(bar[^1], right = true)[2]) # Show All
+    check not winOf("tests/cm-green"){"min"}.getBool()
+    discard pass()
+    discard clickRect(bar[^1])
+    discard pass()
+    check acted(clickRect(macDrop(bar[^1], right = true)[0])) == @["setCurrentScene"] # Hide Red
+    check winOf("tests/cm-red"){"min"}.getBool()
+    check current.id.string == "tests/cm-green"
+    discard pass()
+    discard clickRect(bar[^1])
+    discard pass()
+    items = macDrop(bar[^1], right = true)
+    check items.len == 5
+    check acted(clickRect(items[3])) == @["setCurrentScene"] # Red, hidden: brought back
+    check current.id.string == "tests/cm-red"
+    check not winOf("tests/cm-red"){"min"}.getBool()
+    discard pass()
+    check problems.len == 0
+
+  test "Special gives the panel to the window in front, and cleans up the windows":
+    var bar = macTitles()
+    discard clickRect(bar[3])
+    discard pass()
+    var items = macDrop(bar[3])
+    check items.len == 2 # Clean Up Windows, Full Screen
+    discard clickRect(items[1])
+    check desk().state{"full"}.getBool()
+    let full = pass()
+    shot(full, "cm6-full")
+    check full.color(W div 2, 4) == colored("#ff0000")
+    check full.color(W div 2, H - 4) == colored("#ff0000")
+    discard key("Escape")
+    check not desk().state{"full"}.getBool()
+    discard pass()
+    # Clean Up: every window cascades from the top left again, the one in front last.
+    bar = macTitles()
+    discard clickRect(bar[3])
+    discard pass()
+    discard clickRect(macDrop(bar[3])[0])
+    check (winOf("tests/cm-green"){"x"}.getInt(), winOf("tests/cm-green"){"y"}.getInt()) == (24, 12)
+    check (winOf("tests/cm-red"){"x"}.getInt(), winOf("tests/cm-red"){"y"}.getInt()) == (46, 34)
+    check desk().state{"menu"}.kind == JNull
+    discard pass()
+    check problems.len == 0
+
+  test "File gets the info of the window in front and closes it, and a window opens at the layout's size and where it was":
+    var bar = macTitles()
+    discard clickRect(bar[1])
+    discard pass()
+    var items = macDrop(bar[1])
+    check items.len == 3 # Open Scene…, Close Window, Get Info
+    settingsFrom = ""
+    check acted(clickRect(items[2])) == @["sceneSettings"]
+    check settingsFrom == "tests/cm-red"
+    discard pass()
+    discard clickRect(bar[1])
+    discard pass()
+    check acted(clickRect(macDrop(bar[1])[1])) == @["setCurrentScene"]
+    check winOf("tests/cm-red").isNil
+    check current.id.string == "tests/cm-green"
+    discard pass()
+    desk().state["windowSize"] = %"400x240"
+    desk().state.delete("boxes")
+    discard pass()
+    check fromMacScenes(2) == @["setCurrentScene"]
+    check current.id.string == "tests/cm-blue"
+    discard pass()
+    let o = winOf("tests/cm-blue")
+    check not o{"max"}.getBool()
+    check o{"w"}.getInt() == 400 + 3
+    check o{"h"}.getInt() == 240 + 23
+    check sceneSize("tests/cm-blue") == (400, 240)
+    let (x, y) = (o{"x"}.getInt(), o{"y"}.getInt())
+    dragBy(x + 200, CMenuH + y + 10, 30, 20)
+    discard key("F4", alt = true)
+    check winOf("tests/cm-blue").isNil
+    discard pass()
+    discard fromMacScenes(2)
+    discard pass()
+    check winOf("tests/cm-blue"){"x"}.getInt() == x + 30
+    check winOf("tests/cm-blue"){"y"}.getInt() == y + 20
+    check problems.len == 0
+
+  test "Alt+Tab goes back and forth between two windows, and Cmd+H hides the one in front":
+    let before = current.id.string
+    discard key("Tab", alt = true)
+    check current.id.string != before
+    discard pass()
+    discard key("Tab", alt = true)
+    check current.id.string == before
+    discard pass()
+    discard key("h", meta = true)
+    check winOf(before){"min"}.getBool()
+    check current.id.string != before
+    discard pass()
+    discard key("w", meta = true)
+    check wins().len == 1
+    discard pass()
+
+  test "the mark's menu has About This Frame, and the scene store and the terminal where the frame has them":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/cm-red", "name": "Red"}, {"id": "tests/cm-green", "name": "Green"},
+        {"id": "tests/cm-blue", "name": "Blue"}, {"id": "tests/store-cm", "name": "Scene store"},
+        {"id": "tests/term-cm", "name": "Terminal"}]
+    discard pass()
+    let bar = macTitles()
+    discard clickRect(bar[0])
+    shot(pass(), "cm7-mark-menu")
+    var items = macDrop(bar[0])
+    check items.len == 4 # About This Frame…, Scene store, Terminal, Scenes…
+    check acted(clickRect(items[0])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    discard pass()
+    discard clickRect(bar[0])
+    discard pass()
+    check acted(clickRect(macDrop(bar[0])[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/store-cm"
+    discard pass()
+    check not winOf("tests/store-cm").isNil
+    # Scenes has them under a rule, after the frame's scenes.
+    discard clickRect(macTitles()[2])
+    discard pass()
+    check macDrop(macTitles()[2]).len == 5
+    discard key("Escape")
+    discard pass()
+    # And so do the icons: the disk, the scene list, the store, the terminal.
+    discard send("tap", at(CIconX, CIconTop + 3 * 62 + 16))
+    check desk().state{"picked"}.getStr() == "tests/term-cm"
+    check send("doubleTap", at(CIconX, CIconTop + 3 * 62 + 16)).filterIt(it != "render") == @["setCurrentScene"]
+    check current.id.string == "tests/term-cm"
+    shot(pass(), "cm8-terminal")
+    check problems.len == 0
+
+  test "two windows let go at the two sides take a half each, and both scenes are drawn as holes":
+    desk().state["wins"] = %*[]
+    desk().state.delete("boxes")
+    discard focusOn("tests/cm-red")
+    discard pass()
+    discard focusOn("tests/cm-green")
+    discard pass()
+    check wins().len == 2
+    var r = winOf("tests/cm-red")
+    dragBy(r{"x"}.getInt() + 150, CMenuH + r{"y"}.getInt() + 10, -(r{"x"}.getInt() + 150), 0)
+    check winOf("tests/cm-red"){"snap"}.getStr() == "l"
+    discard pass()
+    let g = winOf("tests/cm-green")
+    # Red, in front on the left half now, covers most of green's title bar: its right end.
+    dragBy(g{"x"}.getInt() + 380, CMenuH + g{"y"}.getInt() + 10, W - 1 - (g{"x"}.getInt() + 380), 0)
+    check winOf("tests/cm-green"){"snap"}.getStr() == "r"
+    let image = pass()
+    shot(image, "cm9-halves")
+    check current.id.string == "tests/cm-green"
+    check isHole(current)
+    check isHole(hosted["tests/cm-red"])
+    check image.color(W div 4, H div 2) == colored("#ff0000")
+    check image.color(3 * W div 4, H div 2) == colored("#00ff00")
+    check problems.len == 0
+
+  test "where only two scenes run at once, a third opened closes the one that had the focus longest ago":
+    deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
+    check windowLimit() == 2
+    desk().state["wins"] = %*[]
+    for id in ["tests/cm-red", "tests/cm-green", "tests/cm-blue"]:
+      discard focusOn(id)
+      discard pass()
+    var open: seq[string]
+    for w in wins(): open.add w{"id"}.getStr()
+    check open.sorted() == @["tests/cm-blue", "tests/cm-green"]
+    check desk().state{"openScenes"} == %*["tests/cm-green", "tests/cm-blue"]
+    discard focusOn("tests/cm-red")
+    discard pass()
+    open = @[]
+    for w in wins(): open.add w{"id"}.getStr()
+    check open.sorted() == @["tests/cm-blue", "tests/cm-red"]
+    check problems.len == 0
+    deviceMemoryBytesOverride = 0
+
+const
+  NextMenuW = 118 ## the NeXTSTEP main menu's column at 800 x 480
+  NextDockW = 64 ## and the Dock's, the desktop the 618 px between them
+  NextDeskW = W - NextMenuW - NextDockW
+
+proc nextMenu(): seq[array[4, float32]] =
+  ## The main menu's items, top to bottom: Info, Scenes, Windows, (Services,) Hide.
+  byY(rectsOf(NeXT).filterIt(it[0] <= 2 and it[2] <= NextMenuW.float32 + 1 and it[3] - it[1] < 30 and
+    it[1] > 10))
+
+proc nextSubmenu(): seq[array[4, float32]] =
+  ## The items of the submenu open beside the main menu, top to bottom.
+  byY(rectsOf(NeXT).filterIt(it[0] >= NextMenuW.float32 - 2 and it[0] <= NextMenuW.float32 + 4 and
+    it[1] > 40 and it[3] - it[1] < 30 and it[2] - it[0] > 150))
+
+proc nextDock(): seq[array[4, float32]] =
+  ## The Dock's tiles, top to bottom: the mark, the scenes, the store / terminal, the clock.
+  byY(rectsOf(NeXT).filterIt(it[0] >= float32(W - NextDockW - 1) and it[2] - it[0] >= 60))
+
+proc nextMinis(): seq[array[4, float32]] =
+  ## The miniwindows under the main menu.
+  byY(rectsOf(NeXT).filterIt(it[2] <= NextMenuW.float32 and it[1] > 150 and it[3] - it[1] >= 50))
+
+proc idle(image: Image, tile: array[4, float32]): bool =
+  ## Whether a Dock tile has the ellipsis at its bottom left: a scene not running.
+  for y in int(tile[3]) - 12 .. int(tile[3]) - 3:
+    for x in int(tile[0]) + 3 .. int(tile[0]) + 22:
+      if image.color(x, y) == colored("#000000"):
+        return true
+
+proc fromNextMenu(item, index: int): seq[string] =
+  ## The item at `index` of the submenu under the main menu's `item` chosen.
+  discard clickRect(nextMenu()[item])
+  discard pass()
+  acted(clickRect(nextSubmenu()[index]))
+
+suite "the NeXTSTEP desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/next-a", "name": "Alpha"}, {"id": "tests/next-b", "name": "Bravo"},
+        {"id": "tests/next-c", "name": "Charlie"}]
+
+  test "the first scene fills the desktop between the main menu and the Dock":
+    current = hostScene("tests/next-a")
+    let image = pass()
+    shot(image, "n1-first")
+    check problems.len == 0
+    check desk().id.string == NeXT
+    check wins().len == 1
+    check winOf("tests/next-a"){"max"}.getBool()
+    check image.color(NextMenuW + NextDeskW div 2, H div 2) == colored("#ff0000")
+    check image.color(NextMenuW + 4, H div 2) == colored("#ff0000")
+    check image.color(W - NextDockW - 4, H div 2) == colored("#ff0000")
+    # The workspace's grey under the menu, and the Dock's tiles on the right.
+    check image.color(50, H - 20) == colored("#555555")
+    check image.color(W - NextDockW + 6, 58) == colored("#aaaaaa")
+    # Its title bar, black: the window has the focus.
+    check image.color(NextMenuW + 200, 8) == colored("#000000")
+    let tiles = nextDock()
+    check tiles.len == 5 # the mark, the three scenes, the clock
+    check not image.idle(tiles[1]) # Alpha runs
+    check image.idle(tiles[2]) # Bravo does not
+    check image.idle(tiles[3])
+    check nextMenu().len == 4 # Info, Scenes, Windows, Hide: no Services on this frame
+    # The scene is a hole in the desktop, drawn straight into the panel.
+    check desk().slots.anyIt(it.hole and it.child == current)
+
+  test "Scenes opens a scene in a window of its own, and its tile in the Dock loses the ellipsis":
+    discard clickRect(nextMenu()[1])
+    check desk().state{"menu"}.getStr() == "scenes"
+    shot(pass(), "n2-scenes")
+    check nextSubmenu().len == 4 # the three scenes and the scene list
+    check acted(clickRect(nextSubmenu()[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/next-b"
+    check desk().state{"menu"}.kind == JNull
+    let image = pass()
+    check problems.len == 0
+    check wins().len == 2
+    let b = winOf("tests/next-b")
+    check not b{"max"}.getBool()
+    let (bx, by, bw, bh) = (b{"x"}.getInt(), b{"y"}.getInt(), b{"w"}.getInt(), b{"h"}.getInt())
+    check image.color(NextMenuW + bx + bw div 2, by + bh div 2) == colored("#00ff00")
+    check image.color(NextMenuW + NextDeskW - 10, H - 30) == colored("#ff0000")
+    # Alpha's title bar behind, light grey; Bravo's black.
+    check image.color(NextMenuW + NextDeskW - 60, 8) == colored("#aaaaaa")
+    check image.color(NextMenuW + bx + bw div 2, by + 4) == colored("#000000")
+    let tiles = nextDock()
+    check not image.idle(tiles[1])
+    check not image.idle(tiles[2])
+    check image.idle(tiles[3])
+    # The window in front's scene is a hole (Alpha's, under it, is a picture: Bravo
+    # is painted over it).
+    check desk().slots.anyIt(it.hole and it.child == current)
+
+  test "a window dragged by its title bar follows the pointer":
+    let b = winOf("tests/next-b")
+    let (x0, y0, w) = (b{"x"}.getInt(), b{"y"}.getInt(), b{"w"}.getInt())
+    let (grabX, grabY) = (NextMenuW + x0 + w div 2, y0 + 12)
+    discard send("pointerDown", at(grabX, grabY))
+    discard send("pointerMove", at(grabX + 40, grabY + 30))
+    discard send("pointerMove", at(grabX + 100, grabY + 50))
+    discard send("pointerUp", at(grabX + 100, grabY + 50, %*{"buttons": 0}))
+    check winOf("tests/next-b"){"x"}.getInt() == x0 + 100
+    check winOf("tests/next-b"){"y"}.getInt() == y0 + 50
+    check pass().color(NextMenuW + x0 + 100 + 30, y0 + 50 + 80) == colored("#00ff00")
+
+  test "a press on a window behind brings it forward, and a tap reaches no scene":
+    check "setCurrentScene" in click(NextMenuW + 10, H - 30)
+    check current.id.string == "tests/next-a"
+    check pass().color(NextMenuW + 10, H - 30) == colored("#ff0000")
+
+  test "the button at a title bar's left makes a miniwindow under the menu, and a click on it brings the window back":
+    # Alpha fills the desktop: its button at the top left.
+    check nextMinis().len == 0
+    discard click(NextMenuW + 12, 12)
+    check winOf("tests/next-a"){"min"}.getBool()
+    check current.id.string == "tests/next-b"
+    let image = pass()
+    shot(image, "n3-miniwindow")
+    let minis = nextMinis()
+    check minis.len == 1
+    # Its black strip with the name, and Alpha's picture gone from the desktop.
+    check image.color(int(minis[0][0]) + 52, int(minis[0][1]) + 4) == colored("#000000")
+    check image.color(NextMenuW + NextDeskW - 10, H - 30) != colored("#ff0000")
+    check desk().slots.anyIt(it.hole and it.child == current)
+    check acted(clickRect(minis[0])) == @["setCurrentScene"]
+    check current.id.string == "tests/next-a"
+    check not winOf("tests/next-a"){"min"}.getBool()
+    discard pass()
+    check nextMinis().len == 0
+    # Hide does it to the window in front, and so does Cmd+H.
+    discard clickRect(nextMenu()[^1])
+    check winOf("tests/next-a"){"min"}.getBool()
+    check current.id.string == "tests/next-b"
+    discard pass()
+    discard key("h", meta = true)
+    check winOf("tests/next-b"){"min"}.getBool()
+    discard pass()
+    check nextMinis().len == 2
+    discard clickRect(nextMinis()[0])
+    discard pass()
+    discard clickRect(nextMinis()[0])
+    discard pass()
+    check nextMinis().len == 0
+    check problems.len == 0
+
+  test "the gear on a scene's title bar opens its settings":
+    discard focusOn("tests/next-a")
+    discard pass()
+    check winOf("tests/next-a"){"max"}.getBool()
+    settingsFrom = ""
+    check acted(click(NextMenuW + NextDeskW - 31, 12)) == @["sceneSettings"]
+    check settingsFrom == "tests/next-a"
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#tests/next-a"
+    discard pass()
+
+  test "Info has the frame's page and the Inspector of the scene in front":
+    check fromNextMenu(0, 0) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"asked"}.getStr() == "system/sceneSettings"
+    discard pass()
+    desk().state["asked"] = newJNull()
+    check fromNextMenu(0, 1) == @["sceneSettings"]
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#" & current.id.string
+    discard pass()
+    check problems.len == 0
+
+  test "Windows lists the windows, and Full Screen gives the panel to the window in front":
+    discard clickRect(nextMenu()[2])
+    check desk().state{"menu"}.getStr() == "windows"
+    shot(pass(), "n4-windows")
+    let items = nextSubmenu()
+    check items.len == 5 # the two windows, Full Screen, Miniaturize Window, Close Window
+    discard clickRect(items[2])
+    check desk().state{"full"}.getBool()
+    let full = pass()
+    shot(full, "n5-full")
+    check full.color(W div 2, 4) == colored("#ff0000")
+    check full.color(4, H - 4) == colored("#ff0000")
+    check full.color(W - 4, H - 4) == colored("#ff0000")
+    discard key("Escape")
+    check not desk().state{"full"}.getBool()
+    discard pass()
+    check nextMenu().len == 4
+    check problems.len == 0
+
+  test "a window opens at the layout's size where that fits, and where it was when it opens again":
+    check fromNextMenu(1, 2) == @["setCurrentScene"]
+    check current.id.string == "tests/next-c"
+    discard pass()
+    discard key("w", meta = true) # closes Charlie
+    check winOf("tests/next-c").isNil
+    check current.id.string != "tests/next-c"
+    desk().state["windowSize"] = %"400x240"
+    desk().state.delete("boxes")
+    discard pass()
+    check fromNextMenu(1, 2) == @["setCurrentScene"]
+    check current.id.string == "tests/next-c"
+    discard pass()
+    let c = winOf("tests/next-c")
+    check not c{"max"}.getBool()
+    check c{"w"}.getInt() == 400 + 2
+    check c{"h"}.getInt() == 240 + 34
+    check sceneSize("tests/next-c") == (400, 240)
+    let (x, y) = (c{"x"}.getInt(), c{"y"}.getInt())
+    discard send("pointerDown", at(NextMenuW + x + 200, y + 12))
+    discard send("pointerMove", at(NextMenuW + x + 230, y + 32))
+    discard send("pointerUp", at(NextMenuW + x + 230, y + 32, %*{"buttons": 0}))
+    discard key("F4", alt = true)
+    check winOf("tests/next-c").isNil
+    discard pass()
+    discard fromNextMenu(1, 2)
+    discard pass()
+    check winOf("tests/next-c"){"x"}.getInt() == x + 30
+    check winOf("tests/next-c"){"y"}.getInt() == y + 20
+    # Its close button: the window goes, and the next one down takes the focus.
+    let c2 = winOf("tests/next-c")
+    discard click(NextMenuW + c2{"x"}.getInt() + c2{"w"}.getInt() - 12, c2{"y"}.getInt() + 12)
+    check winOf("tests/next-c").isNil
+    check current.id.string != "tests/next-c"
+    desk().state["windowSize"] = %"800x480"
+    discard pass()
+    check problems.len == 0
+
+  test "Alt+Tab goes back and forth between two windows":
+    let before = current.id.string
+    discard key("Tab", alt = true)
+    check current.id.string != before
+    discard pass()
+    discard key("Tab", alt = true)
+    check current.id.string == before
+
+  test "the Dock's mark opens the scene list, a scene's tile its scene, and the clock the frame's page":
+    discard pass()
+    var tiles = nextDock()
+    check acted(clickRect(tiles[0])) == @["sceneSwitcher"]
+    check desk().state{"asked"}.getStr() == "system/sceneSwitcher"
+    discard pass()
+    desk().state["asked"] = newJNull()
+    check winOf("tests/next-c").isNil
+    tiles = nextDock()
+    check pass().idle(tiles[3])
+    check acted(clickRect(tiles[3])) == @["setCurrentScene"]
+    check current.id.string == "tests/next-c"
+    check not pass().idle(nextDock()[3])
+    check acted(clickRect(nextDock()[^1])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"asked"}.getStr() == "system/sceneSettings"
+    discard pass()
+    check problems.len == 0
+
+  test "Services has the scene store and the terminal, each in a window and in the Dock":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/next-a", "name": "Alpha"}, {"id": "tests/next-b", "name": "Bravo"},
+        {"id": "tests/next-c", "name": "Charlie"}, {"id": "tests/store-next", "name": "Scene store"},
+        {"id": "tests/term-next", "name": "Terminal"}]
+    var image = pass()
+    check nextMenu().len == 5 # Info, Scenes, Windows, Services, Hide
+    let tiles = nextDock()
+    check tiles.len == 7 # the mark, the three scenes, the store, the terminal, the clock
+    check image.idle(tiles[4])
+    discard clickRect(nextMenu()[1])
+    discard pass()
+    check nextSubmenu().len == 4 # the three scenes and the scene list: not the store or the terminal
+    discard clickRect(nextMenu()[1])
+    discard pass()
+    check fromNextMenu(3, 0) == @["setCurrentScene"]
+    check current.id.string == "tests/store-next"
+    image = pass()
+    shot(image, "n6-store")
+    check not winOf("tests/store-next").isNil
+    check not image.idle(nextDock()[4])
+    check fromNextMenu(3, 1) == @["setCurrentScene"]
+    check current.id.string == "tests/term-next"
+    discard pass()
+    check not winOf("tests/term-next").isNil
+    check problems.len == 0
+
+  test "windows side by side are both holes, the one behind too":
+    discard focusOn("tests/next-a")
+    discard pass()
+    var halves = newJArray()
+    for w in wins():
+      let id = w{"id"}.getStr()
+      if id in ["tests/next-a", "tests/next-b"]:
+        var win = copy(w)
+        win["max"] = %false
+        win["min"] = %false
+        win["snap"] = %(if id == "tests/next-a": "l" else: "r")
+        halves.add win
+    desk().state["wins"] = halves
+    let image = pass()
+    shot(image, "n7-halves")
+    check image.color(NextMenuW + 100, H div 2) == colored("#ff0000")
+    check image.color(NextMenuW + NextDeskW - 100, H div 2) == colored("#00ff00")
+    check desk().slots.anyIt(it.hole and it.child == current)
+    check desk().slots.anyIt(it.hole and it.child == hosted["tests/next-b"])
+    check problems.len == 0
+
+const
+  KeyY = H - 10 ## the Commander's function keys at 800 x 480, ten of them 80 px wide
+  LeftPanel = (200, 200) ## a point inside each of its panels' scenes
+  RightPanel = (600, 200)
+
+proc fKey(n: int): seq[string] =
+  ## Function key `n`, tapped on the Commander's bar.
+  acted(click(80 * (n - 1) + 50, KeyY))
+
+proc panelsNow(): seq[string] =
+  for id in desk().state{"panels"}: result.add id.getStr()
+
+suite "the Commander desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/nc-red", "name": "Red"}, {"id": "tests/nc-green", "name": "Green"},
+        {"id": "tests/nc-blue", "name": "Blue"}]
+
+  test "the scene fills the left panel, and the next of the frame's scenes runs in the right":
+    current = hostScene("tests/nc-red")
+    let image = pass()
+    shot(image, "c1-first")
+    check problems.len == 0
+    check panelsNow() == @["tests/nc-red", "tests/nc-green"]
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#ff0000")
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#00ff00")
+    var hole = false
+    var embedded: seq[FrameScene]
+    var holes = 0
+    for slot in current.wornLayout.slots:
+      hole = hole or slot.hole and slot.child == current
+      embedded.add slot.child
+      if slot.hole: inc holes
+    check hole
+    check holes == 2 # the other panel's scene too
+    check hosted["tests/nc-green"] in embedded
+    # What a desktop chosen in its place opens: green, then red with the focus.
+    check desk().state{"openScenes"} == %*["tests/nc-green", "tests/nc-red"]
+
+  test "a press on the other panel gives it the focus, and Tab gives it back":
+    check acted(click(RightPanel[0], RightPanel[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/nc-green"
+    discard pass()
+    check desk().state{"side"}.getInt() == 1
+    check panelsNow() == @["tests/nc-red", "tests/nc-green"]
+    check acted(key("Tab")) == @["setCurrentScene"]
+    check current.id.string == "tests/nc-red"
+    discard pass()
+    check desk().state{"side"}.getInt() == 0
+
+  test "F5 swaps the panels, the focus going with its scene":
+    check acted(key("F5")).len == 0
+    let image = pass()
+    check panelsNow() == @["tests/nc-green", "tests/nc-red"]
+    check desk().state{"side"}.getInt() == 1
+    check current.id.string == "tests/nc-red"
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#00ff00")
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#ff0000")
+    discard fKey(5)
+    discard pass()
+    check panelsNow() == @["tests/nc-red", "tests/nc-green"]
+
+  test "F10 turns the other panel into the Info panel, and back to its scene":
+    check fKey(10).len == 0
+    var image = pass()
+    shot(image, "c2-info")
+    check panelsNow() == @["tests/nc-red", ""]
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#0000aa")
+    check desk().state{"openScenes"} == %*["tests/nc-red"]
+    discard key("F10")
+    image = pass()
+    check panelsNow() == @["tests/nc-red", "tests/nc-green"]
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#00ff00")
+
+  test "F6 puts the next scene in the panel with the focus, past the one in the other":
+    check fKey(6) == @["setCurrentScene"]
+    check current.id.string == "tests/nc-blue"
+    let image = pass()
+    check panelsNow() == @["tests/nc-blue", "tests/nc-green"]
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#0000ff")
+    # From blue, past green, round to red.
+    discard fKey(6)
+    discard pass()
+    check panelsNow() == @["tests/nc-red", "tests/nc-green"]
+
+  test "a scene brought forward from outside goes into the panel with the focus":
+    discard focusOn("tests/nc-blue")
+    discard pass()
+    check panelsNow() == @["tests/nc-blue", "tests/nc-green"]
+    discard focusOn("tests/nc-green")
+    discard pass()
+    check panelsNow() == @["tests/nc-blue", "tests/nc-green"]
+    check desk().state{"side"}.getInt() == 1
+
+  test "the keys open the frame's page, the scene list and the scene's settings":
+    settingsFrom = ""
+    check fKey(1) == @["sceneSettings"]
+    check payloads["sceneSettings"]{"page"}.getStr() == "frame"
+    check fKey(2) == @["sceneSwitcher"]
+    check fKey(4) == @["sceneSettings"]
+    check settingsFrom == "tests/nc-green"
+    # No store, terminal or asset browser on this frame: their keys are blank.
+    check fKey(7).len == 0
+    check fKey(8).len == 0
+    discard pass()
+
+  test "F3 gives the panel with the focus the screen, the keys kept, and Escape takes it back":
+    discard key("F3")
+    var image = pass()
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#00ff00")
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#00ff00")
+    discard key("Escape")
+    image = pass()
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#0000ff")
+    check problems.len == 0
+
+  test "a press on the other panel's scene reaches no scene, and one on its own panel does":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/nc-red", "name": "Red"}, {"id": "tests/nc-button", "name": "Button"}]
+    discard focusOn("tests/nc-red")
+    discard pass()
+    desk().state["panels"] = %*["tests/nc-red", "tests/nc-button"]
+    discard pass()
+    let button = hostScene("tests/nc-button")
+    check acted(click(RightPanel[0], RightPanel[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/nc-button"
+    discard pass()
+    check button.state{"clicks"}.getInt() == 0
+    discard click(RightPanel[0], RightPanel[1])
+    discard pass()
+    check button.state{"clicks"}.getInt() == 1
+    check problems.len == 0
+
+suite "the Teletext page":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/tt-red", "name": "Red"}, {"id": "tests/tt-green", "name": "Green"},
+        {"id": "tests/tt-blue", "name": "Blue"}]
+
+  test "the scene under the band, and the Fastext links: red before, green after, yellow the index, cyan its settings":
+    current = hostScene("tests/tt-green")
+    let image = pass()
+    shot(image, "t1-page")
+    check problems.len == 0
+    check current.wornLayout.slots.anyIt(it.hole and it.child == current)
+    check image.color(W div 2, H div 2) == colored("#00ff00")
+    check image.color(W - 20, 40) == colored("#0000ff") # the band
+    check acted(click(30, H - 12)) == @["setCurrentScene"]
+    check payloads["setCurrentScene"]{"direction"}.getStr() == "prev"
+    check current.id.string == "tests/tt-red"
+    check pass().color(W div 2, H div 2) == colored("#ff0000")
+    check acted(click(230, H - 12)) == @["setCurrentScene"]
+    check payloads["setCurrentScene"]{"direction"}.getStr() == "next"
+    check current.id.string == "tests/tt-green"
+    discard pass()
+    check acted(click(430, H - 12)) == @["sceneSwitcher"]
+    settingsFrom = ""
+    check acted(click(630, H - 12)) == @["sceneSettings"]
+    check settingsFrom == "tests/tt-green"
+    # The clock in the header: the frame's page.
+    check acted(click(W - 30, 9)) == @["sceneSettings"]
+    check payloads["sceneSettings"]{"page"}.getStr() == "frame"
+    check problems.len == 0
+
+suite "the E-reader page":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/er-red", "name": "Red"}, {"id": "tests/er-green", "name": "Green"},
+        {"id": "tests/er-blue", "name": "Blue"}]
+
+  test "the scene on a white page, the footer's halves turning to the scene before and after":
+    current = hostScene("tests/er-green")
+    let image = pass()
+    shot(image, "e1-page")
+    check problems.len == 0
+    check current.wornLayout.slots.anyIt(it.hole and it.child == current)
+    check image.color(W div 2, H div 2) == colored("#00ff00")
+    check image.color(W div 2, 4) == colored("#ffffff")
+    check acted(click(W div 4, H - 28)) == @["setCurrentScene"]
+    check payloads["setCurrentScene"]{"direction"}.getStr() == "prev"
+    check current.id.string == "tests/er-red"
+    discard pass()
+    check acted(click(3 * W div 4, H - 28)) == @["setCurrentScene"]
+    check payloads["setCurrentScene"]{"direction"}.getStr() == "next"
+    check current.id.string == "tests/er-green"
+    discard pass()
+    # The name: the scene list; the clock: the frame's page.
+    check acted(click(60, 19)) == @["sceneSwitcher"]
+    check acted(click(W div 2, 19)) == @["sceneSettings"]
+    check payloads["sceneSettings"]{"page"}.getStr() == "frame"
+    check problems.len == 0
+    chooseLayout("")
+    discard pass()
+
 suite "another layout chosen on the frame":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
@@ -1336,7 +2209,8 @@ suite "another layout chosen on the frame":
     check desk().id.string == Layout
     check desk().state{"openScenes"} == %*["tests/red", "tests/blue", "tests/green"]
     let all = @["tests/blue", "tests/green", "tests/red"]
-    for (layoutId, name) in [(MacOS, "15-to-macos"), (Tiling, "16-to-tiling"), (BeOS, "17-to-beos"), (Layout, "18-back")]:
+    for (layoutId, name) in [(MacOS, "15-to-macos"), (Tiling, "16-to-tiling"), (BeOS, "17-to-beos"),
+        (ClassicMac, "17a-to-classic-mac"), (NeXT, "17b-to-nextstep"), (Layout, "18-back")]:
       chooseLayout(layoutId)
       let image = pass()
       shot(image, name)
@@ -1388,10 +2262,44 @@ suite "another layout chosen on the frame":
     discard pass()
     g = winOf("tests/green")
     check (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
+    # Classic Mac, under its menu bar; NeXTSTEP, its desk right of the main menu.
+    chooseLayout(ClassicMac)
+    discard pass()
+    g = winOf("tests/green")
+    check (g{"x"}.getInt(), CMenuH + g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
+    chooseLayout(NeXT)
+    discard pass()
+    g = winOf("tests/green")
+    check (NextMenuW + g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
     chooseLayout(Layout)
     discard pass()
     g = winOf("tests/green")
     check (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
+    check problems.len == 0
+    chooseLayout("")
+    discard pass()
+
+  test "the Commander opens the two the desktop before it had in front, and hands them on as halves":
+    chooseLayout(MacOS)
+    discard pass()
+    for id in ["tests/red", "tests/green", "tests/blue"]:
+      discard focusOn(id)
+      discard pass()
+    check desk().id.string == MacOS
+    chooseLayout(Commander)
+    let image = pass()
+    shot(image, "19-to-commander")
+    check desk().id.string == Commander
+    check current.id.string == "tests/blue"
+    check panelsNow() == @["tests/blue", "tests/green"]
+    check image.color(LeftPanel[0], LeftPanel[1]) == colored("#0000ff")
+    check image.color(RightPanel[0], RightPanel[1]) == colored("#00ff00")
+    # Back on macOS: those two, side by side.
+    chooseLayout(MacOS)
+    discard pass()
+    check openIds() == @["tests/blue", "tests/green"]
+    check winOf("tests/blue"){"snap"}.getStr() == "l"
+    check winOf("tests/green"){"snap"}.getStr() == "r"
     check problems.len == 0
     chooseLayout("")
     discard pass()
@@ -1404,7 +2312,7 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
   test "a third scene opened closes the one that had the focus longest ago, on every desktop":
     deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
     check windowLimit() == 2
-    for layoutId in [Layout, MacOS, BeOS, Tiling]:
+    for layoutId in [Layout, MacOS, BeOS, Tiling, ClassicMac, NeXT]:
       # A desktop of its own, nothing carried over from the one before.
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)

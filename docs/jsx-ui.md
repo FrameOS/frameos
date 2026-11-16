@@ -807,8 +807,8 @@ the layout around the frame's scene, so a desktop's settings look like that
 desktop's (`frameos/ui/theme.nim`). A layout gives its theme in its state as
 **`theme`**, an object of roles; the samples set it from their "Look of the
 settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
-`BeOS`, each with High contrast and FrameOS, the built-in look; `Tiling`:
-FrameOS and High contrast):
+`BeOS`, `Classic Mac`: Classic, `NeXTSTEP`, `Commander`, each with High contrast
+and FrameOS, the built-in look; `Tiling`: FrameOS and High contrast):
 
 ```js
 frameos.setState('theme', {

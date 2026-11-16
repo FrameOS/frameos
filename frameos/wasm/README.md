@@ -100,8 +100,8 @@ addEventListener('resize', () => preview.resize(innerWidth, innerHeight))
 ```
 
 `windowed` runs the scenes side by side as a Pi does, so a desktop layout
-(Windows 98, Tiling, macOS, BeOS) opens each in a window. `chooseLayout(id)`
-is the layout every scene wears (`"none"` for none, `""` for each scene's
+(Windows 98, Tiling, macOS, BeOS, Classic Mac, NeXTSTEP, Commander) opens
+each in a window. `chooseLayout(id)` is the layout every scene wears (`"none"` for none, `""` for each scene's
 own), `resize(width, height)` a new size with everything kept
 (`runtimeInfo.resize` says the bundle can), `setRenderScale(scale)` the
 frame's render scale. With `framePage`, the frame page's Restart and Reboot

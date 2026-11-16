@@ -1,0 +1,10 @@
+{
+  "name": "E-reader layout",
+  "description": "An e-reader's page around each scene: its name, the clock and the battery at the top, and a footer with its place in the frame's list, the time left in the day and a line that fills as the day goes. Tap the name for the scene list, the clock for the frame's page, and the footer's left or right half to turn to the scene before or after.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}
