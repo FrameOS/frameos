@@ -21,6 +21,7 @@ import {
   sceneAccess,
 } from "../../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout, sceneLayoutProblemText } from "../../../../../../frontend/src/utils/sceneLayoutRule";
+import { sceneIconProblem } from "../../../../../../frontend/src/utils/sceneIcon";
 
 export type LintLevel = "error" | "warning";
 
@@ -772,6 +773,11 @@ export function lintScene(
     if (mismatch) {
       push("warning", `settings.backgroundColor: ${mismatch}.`);
     }
+  }
+  // One path in the 24 box (docs/scene-icons.md); anything else is ignored.
+  const iconProblem = sceneIconProblem(settings.icon);
+  if (iconProblem) {
+    push("warning", `settings.icon: ${iconProblem} Frames ignore it and show their own placeholder.`);
   }
   if (settings.renderScale !== undefined) {
     const scale = settings.renderScale;

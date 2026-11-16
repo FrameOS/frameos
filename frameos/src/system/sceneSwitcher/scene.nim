@@ -51,6 +51,7 @@ type
   SwitcherEntry* = object
     id*, name*: string
     windowSize*: string ## its own size in a desktop's window, "" for the desktop's (app.frame.scenes)
+    icon*: string ## its icon, one path in 0 0 24 24 (scene_icon.nim), "" for none
 
   SwitcherListing* = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.}
     ## The frame's scenes in its scene list's order, with their names.
@@ -100,6 +101,18 @@ var
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
+
+proc listingItem*(entry: SwitcherEntry): JsonNode =
+  ## The scene as `app.frame.scenes` lists it (docs/scene-layouts.md
+  ## "Windows"): `{id, name}`, and its window size and icon where it has
+  ## them. One builder for every host, so their listings stay alike.
+  result = newJObject()
+  result.put("id", newJString(entry.id))
+  result.put("name", newJString(entry.name))
+  if entry.windowSize.len > 0:
+    result.put("windowSize", newJString(entry.windowSize))
+  if entry.icon.len > 0:
+    result.put("icon", newJString(entry.icon))
 
 proc isBuiltInScene*(sceneId: string): bool =
   ## A scene the runtime draws itself: no slot, no file. The switcher and the
@@ -436,6 +449,16 @@ proc square(c: var string, size: int) =
   c.px("w", size)
   c.px("h", size)
 
+proc iconNode(icon: string, side: int): SvgNode =
+  ## A scene's icon (docs/scene-icons.md), `side` px square: its one path in
+  ## the 24 box, filled with the text color, so it reads on e-paper (black,
+  ## white on the highlighted tile) as on an LCD. scene_icon.nim checked the
+  ## path when the scene was read, so drawing it raises nothing.
+  var c = "shrink-0"
+  c.square(side)
+  SvgNode(tag: "svg", attrs: @[("class", c), ("viewBox", "0 0 24 24")],
+    children: @[SvgNode(tag: "path", attrs: @[("d", icon), ("fill", "currentColor")])])
+
 proc onClick(node: sink SvgNode, handler: int): SvgNode =
   node.attrs.add(("on-click", $handler))
   node
@@ -513,12 +536,15 @@ proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index:
   if not picture.isNil:
     tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
   else:
-    # No picture yet (a scene not shown since the card was made).
+    # No picture yet (a scene not shown since the card was made): its icon,
+    # else its number.
     c.add " flex items-center justify-center font-bold"
     c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
     c.px("text", clamp(ph div 3, 12, 64))
     c.mute(look)
-    tile.children.add el("div", c, txt($(index + 1))).role("field")
+    let icon = self.entries[index].icon
+    let mark = if icon.len > 0: iconNode(icon, clamp(min(pw, ph) * 45 div 100, 12, 160)) else: txt($(index + 1))
+    tile.children.add el("div", c, mark).role("field")
   let row = look.titleRow(index, size, titleH)
   row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
   tile.children.add row
@@ -556,9 +582,30 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
       return result.role(if look.lit: "tileLit" else: "tile")
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
   result.children.add look.titleRow(index, size)
-  var name = "grow flex items-center justify-center text-center font-bold line-clamp-3"
+  # Its icon above the name where the card has room for both (the number
+  # row, the name's lines, the gap), up to three letters tall. The name
+  # takes two lines when it looks too long for one (a letter is about half
+  # as wide as it is tall), and is cut to what it was given.
+  let
+    icon = self.entries[index].icon
+    inner = 2 * look.border + 2 * look.inner
+    gap = max(2, size div 4)
+    lines = if title.len * size * 11 div 20 > grid.tileW - inner: 2 else: 1
+    side = if icon.len == 0: 0
+      else: min(min(grid.tileH - inner - size - lines * (size * 6 div 5) - gap, (grid.tileW - inner) * 2 div 3),
+        size * 3)
+  var name = "grow flex items-center justify-center text-center font-bold"
   name.px("text", size)
-  result.children.add el("div", name, txt(title))
+  if side >= 12:
+    name.add " flex-col"
+    name.px("gap", gap)
+    let column = el("div", name, iconNode(icon, side))
+    column.children.add el("div", if lines == 1: "text-center line-clamp-1" else: "text-center line-clamp-2",
+      txt(title))
+    result.children.add column
+  else:
+    name.add " line-clamp-3"
+    result.children.add el("div", name, txt(title))
   result = result.role(if look.lit: "tileLit" else: "tile")
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,

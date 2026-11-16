@@ -1319,6 +1319,9 @@ export interface FrameSceneSettings {
   /** "WxH": the size this scene opens at in a desktop layout's window, over the desktop's own
    * (utils/sceneWindowSize.ts, docs/scene-layouts.md "Windows"); unset = the desktop's. */
   windowSize?: string
+  /** Its icon: one SVG path in a 0 0 24 24 box, filled with the color around it
+   * (utils/sceneIcon.ts, docs/scene-icons.md); unset = each list's own placeholder. */
+  icon?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

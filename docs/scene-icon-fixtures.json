@@ -1,0 +1,34 @@
+{
+  "$comment": "What a scene's `settings.icon` is (docs/scene-icons.md): one SVG path in a 0 0 24 24 box, at most `maxLength` characters once trimmed, starting with a moveto. `path` is the icon a runtime uses, null for no icon (the value is ignored). Replayed by the SPA's sceneIconPath (cloud shared-spa scene-icon.test.ts) and the runtime's sceneIconPath (frameos/src/frameos/tests/test_scene_icon.nim). `@long-N` stands for a path of exactly N characters: `M0 0`, then `h1` as often as fits, then `z` when N is odd.",
+  "maxLength": 1024,
+  "cases": [
+    { "name": "a triangle", "icon": "M12 2L2 22h20z", "path": "M12 2L2 22h20z" },
+    { "name": "relative commands and commas", "icon": "m12,2 l-10,20 h20 z", "path": "m12,2 l-10,20 h20 z" },
+    { "name": "trimmed", "icon": "  M0 0h24v24H0z\n", "path": "M0 0h24v24H0z" },
+    {
+      "name": "every command",
+      "icon": "M2 2L4 4H6V8C8 8 9 9 10 10S12 12 13 13Q14 14 15 15T17 17A2 2 0 0 1 19 19Z",
+      "path": "M2 2L4 4H6V8C8 8 9 9 10 10S12 12 13 13Q14 14 15 15T17 17A2 2 0 0 1 19 19Z"
+    },
+    { "name": "compact numbers", "icon": "M.5.5l1-1.5e1 2,2z", "path": "M.5.5l1-1.5e1 2,2z" },
+    { "name": "arc flags written together", "icon": "M2 12a10 10 0 1020 0", "path": "M2 12a10 10 0 1020 0" },
+    { "name": "a circle as two arcs", "icon": "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0z", "path": "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0z" },
+    { "name": "a moveto with pairs after it", "icon": "M2 2 22 2 12 22z", "path": "M2 2 22 2 12 22z" },
+    { "name": "absent", "icon": null, "path": null },
+    { "name": "empty", "icon": "", "path": null },
+    { "name": "blank", "icon": "   ", "path": null },
+    { "name": "a number", "icon": 42, "path": null },
+    { "name": "an object", "icon": { "d": "M0 0h24v24H0z" }, "path": null },
+    { "name": "a whole SVG", "icon": "<svg viewBox=\"0 0 24 24\"><path d=\"M0 0h24v24H0z\"/></svg>", "path": null },
+    { "name": "does not start with a moveto", "icon": "L12 2L2 22h20z", "path": null },
+    { "name": "a number before the first command", "icon": "5 M12 2L2 22h20z", "path": null },
+    { "name": "a letter that is no command", "icon": "M12 2X2 22h20z", "path": null },
+    { "name": "a moveto with one number", "icon": "M12", "path": null },
+    { "name": "a curve one number short", "icon": "M0 0C1 1 2 2 3", "path": null },
+    { "name": "numbers after a closepath", "icon": "M0 0h24v24z 5", "path": null },
+    { "name": "a bad exponent", "icon": "M0 0l1e 2z", "path": null },
+    { "name": "a url", "icon": "url(#a)", "path": null },
+    { "name": "one character too long", "icon": "@long-1025", "path": null },
+    { "name": "as long as it can be", "icon": "@long-1024", "path": "@long-1024" }
+  ]
+}

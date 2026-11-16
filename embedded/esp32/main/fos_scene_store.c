@@ -363,6 +363,20 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
     return cJSON_IsNumber(stored) && stored->valuedouble == (double)hash;
 }
 
+/* A scene's icon (`settings.icon`, docs/scene-icons.md) is one SVG path of at
+ * most this many characters, its ends trimmed. The runtime checks the path
+ * itself (scene_icon.nim); the store only keeps a longer value out of the
+ * index, which every catalog read parses whole. */
+#define ICON_MAX_LEN 1024
+
+static bool icon_fits(const char *text)
+{
+    size_t start = 0, end = strlen(text);
+    while (start < end && strchr(" \t\n\r", text[start])) start++;
+    while (end > start && strchr(" \t\n\r", text[end - 1])) end--;
+    return end > start && end - start <= ICON_MAX_LEN;
+}
+
 /* What the index keeps of a scene: what the catalog and a boot need, and the
  * hash of the bytes in its file. */
 static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t hash)
@@ -390,6 +404,11 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         const cJSON *window = cJSON_GetObjectItem(settings, "windowSize");
         if (cJSON_IsString(window) && window->valuestring[0]) {
             cJSON_AddStringToObject(entry, "windowSize", window->valuestring);
+        }
+        /* Its icon: the switcher's tile and app.frame.scenes, read off the index. */
+        const cJSON *icon = cJSON_GetObjectItem(settings, "icon");
+        if (cJSON_IsString(icon) && icon_fits(icon->valuestring)) {
+            cJSON_AddStringToObject(entry, "icon", icon->valuestring);
         }
     }
     return entry;

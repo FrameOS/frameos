@@ -311,6 +311,15 @@ proc getSceneWindowSize*(sceneId: SceneId): string =
     if interpretedScenes.hasKey(sceneId):
       return interpretedScenes[sceneId].windowSize
 
+proc getSceneIcon*(sceneId: SceneId): string =
+  ## The scene's icon (`settings.icon`, docs/scene-icons.md), "" for none:
+  ## what `app.frame.scenes` and the scene switcher show beside its name.
+  withLock sceneRegistryLock:
+    if uploadedScenes.hasKey(sceneId):
+      return uploadedScenes[sceneId].icon
+    if interpretedScenes.hasKey(sceneId):
+      return interpretedScenes[sceneId].icon
+
 proc dynamicSceneCount*(): int =
   ## How many interpreted scenes this frame holds (deployed and uploaded; an
   ## uploaded scene with a deployed scene's id is one scene), for the cloud

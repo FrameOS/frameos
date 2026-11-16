@@ -29,6 +29,8 @@ import {
   sceneWindowSizeFromSelect,
   sceneWindowSizeSelectValue,
 } from '../../../../utils/sceneWindowSize'
+import { SCENE_ICON_HELP, sceneIconFromInput } from '../../../../utils/sceneIcon'
+import { SceneIcon } from '../../../../components/SceneIcon'
 
 function SceneLayoutField({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): JSX.Element | null {
   const { pickerVisible } = useValues(sceneLayoutLogic({ frameId, sceneId }))
@@ -64,6 +66,7 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
+  const { uploadIcon, setIcon } = useActions(sceneSettingsLogic({ frameId, sceneId }))
   const {
     sceneIndex,
     scene,
@@ -75,6 +78,9 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     renderScaleFieldName,
     layoutProblem,
     windowSizeOptions,
+    iconPath,
+    iconProblem,
+    iconUploadError,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -222,6 +228,62 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 )}
               </Field>
             )}
+            <Field
+              className={fieldClassName}
+              name="icon"
+              label={<SceneSettingsLabel>Icon</SceneSettingsLabel>}
+              tooltip={SCENE_ICON_HELP}
+              hint={
+                iconUploadError || iconProblem ? (
+                  <span className="text-amber-500" data-scene-icon-problem>
+                    {iconUploadError ?? iconProblem}
+                  </span>
+                ) : undefined
+              }
+            >
+              {({ value, onChange }) => (
+                <div className="space-y-2" data-scene-icon>
+                  <div className="flex items-center gap-3">
+                    {/* As small as a list draws it, and larger to check the details. */}
+                    <div className="frameos-muted flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-500/20">
+                      {iconPath ? <SceneIcon path={iconPath} className="h-6 w-6" /> : null}
+                    </div>
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-slate-500/20">
+                      {iconPath ? <SceneIcon path={iconPath} className="h-14 w-14" /> : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <label className="frameos-button frameos-secondary-button cursor-pointer rounded-md px-2 py-1 text-sm font-medium">
+                        Upload SVG
+                        <input
+                          type="file"
+                          accept=".svg,image/svg+xml"
+                          className="hidden"
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            event.target.value = ''
+                            if (file) {
+                              uploadIcon(file)
+                            }
+                          }}
+                        />
+                      </label>
+                      <Button size="small" color="secondary" disabled={!value} onClick={() => setIcon(null)}>
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+                  <TextArea
+                    name="icon"
+                    rows={2}
+                    className="font-mono text-xs"
+                    placeholder="One SVG path in a 24 × 24 box, like M12 2L2 22h20z"
+                    spellCheck={false}
+                    value={typeof value === 'string' ? value : ''}
+                    onChange={(text) => onChange(sceneIconFromInput(text))}
+                  />
+                </div>
+              )}
+            </Field>
             {frameRunsInterpreted ? null : (
               <AdvancedSection className={fieldClassName}>
                 <Field

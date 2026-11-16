@@ -14,6 +14,7 @@ import { previewSkipsNimMessage } from '../utils/sceneExecution'
 import { wasmPreviewCacheKey } from '../utils/wasmScenePreview'
 import type { FrameId, FrameType } from '../types'
 import { Spinner } from './Spinner'
+import { SceneIcon } from './SceneIcon'
 
 const placeholderRefreshAttempts = new Set<string>()
 
@@ -65,6 +66,9 @@ export interface FrameImageProps extends React.HTMLAttributes<HTMLDivElement> {
    * the frameos-wasm worker and show the captured bitmap instead of an empty
    * box. Click-to-render only; frame-control mode never shows it. */
   wasmFallback?: { sceneId: string } | undefined
+  /** The scene's icon (utils/sceneIcon.ts sceneIconOf), drawn in the empty box
+   * when there is no picture to show. */
+  placeholderIcon?: string | null
 }
 
 /**
@@ -82,11 +86,13 @@ function WasmScenePreviewFallback({
   sceneId,
   imageClassName,
   imageStyle,
+  icon,
 }: {
   frame: FrameType
   sceneId: string
   imageClassName: string
   imageStyle: React.CSSProperties
+  icon?: string | null
 }): JSX.Element {
   const { scenePreviews } = useValues(wasmPreviewModel)
   const { requestScenePreview } = useActions(wasmPreviewModel)
@@ -121,23 +127,30 @@ function WasmScenePreviewFallback({
           ) : null}
         </>
       ) : !rendered ? (
-        <button
-          type="button"
-          className="z-10 rounded-lg bg-white/60 px-2 py-1 text-[10px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200/70 backdrop-blur transition hover:bg-white/90 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-default disabled:opacity-60"
-          disabled={pending}
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setRequested(true)
-            requestScenePreview(frame.id, sceneId)
-          }}
-        >
-          {pending ? 'Rendering…' : 'Preview in browser'}
-        </button>
+        <div className="flex flex-col items-center gap-1">
+          {icon ? <SceneIcon path={icon} className={placeholderIconClassName} /> : null}
+          <button
+            type="button"
+            className="z-10 rounded-lg bg-white/60 px-2 py-1 text-[10px] font-medium text-slate-500 shadow-sm ring-1 ring-slate-200/70 backdrop-blur transition hover:bg-white/90 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-default disabled:opacity-60"
+            disabled={pending}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setRequested(true)
+              requestScenePreview(frame.id, sceneId)
+            }}
+          >
+            {pending ? 'Rendering…' : 'Preview in browser'}
+          </button>
+        </div>
+      ) : icon ? (
+        <SceneIcon path={icon} className={placeholderIconClassName} />
       ) : null}
     </div>
   )
 }
+
+const placeholderIconClassName = 'frameos-muted h-10 w-10 shrink-0 opacity-60'
 
 export function FrameImageRefreshButton({
   frameId,
@@ -244,6 +257,7 @@ export function FrameImage({
   hideWhileLoading = false,
   loadFullSizeAfterThumb = false,
   wasmFallback,
+  placeholderIcon,
   ...props
 }: FrameImageProps) {
   const { frames } = useValues(framesModel)
@@ -410,7 +424,10 @@ export function FrameImage({
               sceneId={wasmFallbackSceneId}
               imageClassName={baseImageClassName}
               imageStyle={imageStyle}
+              icon={placeholderIcon}
             />
+          ) : placeholderIcon && (baseImageFailed || !imageSrc) ? (
+            <SceneIcon path={placeholderIcon} className={placeholderIconClassName} />
           ) : null}
           {shouldProgressivelyLoadFullSize && shouldLoadFullSize ? (
             <img

@@ -610,8 +610,12 @@ block windowed_host_keeps_what_it_leaves:
 # (`settings.windowSize`): off the host's own list where it has one (an ESP32's
 # catalog), off the loaded scenes otherwise (the browser).
 block windowed_listing_carries_window_sizes:
+  # And its icon (`settings.icon`, docs/scene-icons.md), where it is one: a
+  # value that is not a path is no icon.
   var sized = parseJson($scenes)
   sized[1]["settings"]["windowSize"] = %"480x480"
+  sized[1]["settings"]["icon"] = %" M12 2L2 22h20z "
+  sized[0]["settings"]["icon"] = %"<svg/>"
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($sized)))
   let fromId = "fixtures/dispatcher/switchFrom".SceneId
   let toId = "fixtures/dispatcher/switchTo".SceneId
@@ -625,10 +629,13 @@ block windowed_listing_carries_window_sizes:
   doAssert listed.len == 2, $listed
   doAssert listed[0]{"windowSize"}.isNil, $listed
   doAssert listed[1]{"windowSize"}.getStr() == "480x480", $listed
+  doAssert listed[0]{"icon"}.isNil, $listed
+  doAssert listed[1]{"icon"}.getStr() == "M12 2L2 22h20z", $listed
   sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
-    @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480")]
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480", icon: "M0 0h24v24H0z")]
   listed = windowSceneListing()
   doAssert listed.len == 1 and listed[0]{"windowSize"}.getStr() == "640x480", $listed
+  doAssert listed[0]{"icon"}.getStr() == "M0 0h24v24H0z", $listed
   w.setWindowed(false)
   sceneSwitcherListing = listing
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))

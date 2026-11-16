@@ -25,6 +25,14 @@ A scenes file is a JSON array of scenes. Each scene is
   cadence. Never below 3600 when the scene calls a paid API (an image or text
   model) unless the person asked for it.
 - `settings.backgroundColor`: the hex color every render starts from. Set it.
+- `settings.icon` (optional): a small picture of the scene for the lists that
+  show it without its picture (the frame's scene switcher, desktop layouts,
+  the editor's lists). ONE SVG path `d` string in a `0 0 24 24` box, at most
+  1024 characters, starting with `M`, filled (nonzero) with the color of the
+  text around it: no colors, strokes, transforms or other elements. A solid
+  icon from a 24 px icon set (Material Design Icons, say) fits as it is, for
+  example `"M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"` for a house. Anything else is
+  ignored, and the lists keep their own placeholder.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -661,7 +669,9 @@ export function get(app) {
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
   lists its scenes (`{id, name}`, and `windowSize`, `"WxH"`, where a scene says
-  the size its window should open at) and `app.frame.sceneId` is the one wrapped.
+  the size its window should open at, and `icon`, its `settings.icon`, where it
+  has one: draw it as `<svg viewBox="0 0 24 24" className="w-6 h-6"><path d={icon}
+  fill="currentColor" /></svg>`) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
   beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
@@ -1106,8 +1116,10 @@ interface FrameOSApp {
      * running in its window while another has the focus, so a layout can be a desktop of windows. Undefined
      * where one scene runs at a time (the preview of one scene) (FrameOS 2026.11.8+; undefined before).
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
-     * one (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string }[];
+     * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
+     * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
+     * (FrameOS 2026.11.10+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
      * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
