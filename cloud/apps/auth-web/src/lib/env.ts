@@ -84,6 +84,14 @@ export function getPlaygroundBaseUrl() {
   return configured ? devLocalUrl(configured) : getCloudBaseUrl();
 }
 
+// The store the playground's Scene store browses, when not the page's own
+// origin: the dev pane's (scripts/playground-dev.mjs). A store on localhost
+// is out of the runtime's reach: the page's own origin goes through the
+// preview proxy, whose guard refuses a loopback address.
+export function getPlaygroundStoreUrl() {
+  return optionalEnv("FRAMEOS_PLAYGROUND_STORE_URL");
+}
+
 export function getAppOrigins() {
   return new Set([
     new URL(getAccountBaseUrl()).origin,

@@ -5,7 +5,7 @@ import { startPlayground, type PlaygroundStatus } from "../lib/playground";
 
 // The playground's one screen: the frame, the size of the window. All of the
 // work is src/lib/playground.ts; this only holds the canvas and the status.
-export function Playground() {
+export function Playground({ storeUrl }: { storeUrl?: string | undefined }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<PlaygroundStatus>({ kind: "loading" });
 
@@ -17,6 +17,7 @@ export function Playground() {
     const playground = startPlayground({
       canvas,
       onStatus: setStatus,
+      storeUrl,
       viewport: () => ({ height: window.innerHeight, width: window.innerWidth }),
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -30,7 +31,7 @@ export function Playground() {
       window.removeEventListener("resize", onResize);
       playground.destroy();
     };
-  }, []);
+  }, [storeUrl]);
 
   return (
     <main className="playground">

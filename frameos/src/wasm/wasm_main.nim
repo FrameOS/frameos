@@ -20,7 +20,8 @@ import system/sceneSettings/scene as sceneSettings
 import frameos/relayed_input
 from frameos/input_state import initInputState
 from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
-from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory
+from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
+  urlImagesOneARender
 import frameos/interpreter
 from frameos/layout_choice import chooseLayout
 import frameos/planner
@@ -297,9 +298,11 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   ## frameConfig.settings{"openAI"}{"apiKey"} and the like.
   try:
     host.dropScene()
-    # One scene at a time, and no frame page, until the page asks again.
+    # One scene at a time, no frame page and every picture in the render,
+    # until the page asks again.
     host.setWindowed(false)
     framePage = false
+    urlImagesOneARender = false
     resetInterpretedScenes()
     keepAppMemoryAcrossProcesses()
     setSimulatedEmbedded(false)
@@ -579,6 +582,14 @@ proc frameos_wasm_set_windowed(enabled: bool) {.exportc, cdecl.} =
   ## default, as the preview of one scene; every frameos_wasm_init turns it off.
   host.setWindowed(enabled)
   host.renderRequested = true
+
+proc frameos_wasm_set_pictures_one_a_render(enabled: bool) {.exportc, cdecl.} =
+  ## For a page that shows every frame as it comes (the preview worker): an
+  ## `<img src>` page's pictures come one a render, the next render soon,
+  ## instead of a first frame that waits for all of them. Off by default (a
+  ## plane's render is the one picture a board gets); every
+  ## frameos_wasm_init turns it off.
+  urlImagesOneARender = enabled
 
 proc frameos_wasm_choose_layout(layoutId: cstring): bool {.exportc, cdecl.} =
   ## The layout every scene wears, chosen as the frame's settings page chooses

@@ -7,6 +7,7 @@
     "admin:grant": "scripts/grant-superadmin.sh",
     "dev": "pnpm --filter @frameos-cloud/auth-web dev",
     "dev:hub": "pnpm --filter @frameos-cloud/frame-hub dev",
+    "dev:playground": "pnpm --filter @frameos-cloud/auth-web dev:playground",
     "build": "turbo run build --filter=@frameos-cloud/auth-web --filter=@frameos-cloud/frame-hub",
     "db:cleanup": "scripts/db-cleanup.sh",
     "db:migrate": "scripts/db-migrate.sh",
