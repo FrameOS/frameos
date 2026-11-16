@@ -321,6 +321,19 @@ export function attachPointerInput(
     send('wheel', { deltaX: dx.notches, deltaY: dy.notches, ...positionOf(event) })
   }
 
+  // A second finger on the picture makes the touch the scene's: two
+  // pointers, as a touch panel reports them (a pinch, a two-finger drag).
+  // The canvas's `touch-action` leaves one finger's vertical swipe to the
+  // page, and a browser that takes a gesture cancels every pointer in it, so
+  // a pinch never reached the scene. Holding back the touches' default while
+  // more than one is down keeps the page from zooming or scrolling under
+  // them (Safari, which reads no `pinch-zoom` in `touch-action`, too).
+  const onTouch = (event: TouchEvent): void => {
+    if (enabled() && v2() && event.cancelable && (event.touches?.length ?? 0) > 1) {
+      event.preventDefault()
+    }
+  }
+
   // The right button is a button here, not the browser's menu.
   const onContextMenu = (event: Event): void => {
     if (enabled()) {
@@ -334,6 +347,8 @@ export function attachPointerInput(
   canvas.addEventListener('pointercancel', onCancel)
   canvas.addEventListener('lostpointercapture', onCancel)
   canvas.addEventListener('wheel', onWheel, { passive: false })
+  canvas.addEventListener('touchstart', onTouch, { passive: false })
+  canvas.addEventListener('touchmove', onTouch, { passive: false })
   canvas.addEventListener('contextmenu', onContextMenu)
 
   return () => {
@@ -343,6 +358,8 @@ export function attachPointerInput(
     canvas.removeEventListener('pointercancel', onCancel)
     canvas.removeEventListener('lostpointercapture', onCancel)
     canvas.removeEventListener('wheel', onWheel)
+    canvas.removeEventListener('touchstart', onTouch)
+    canvas.removeEventListener('touchmove', onTouch)
     canvas.removeEventListener('contextmenu', onContextMenu)
     if (moveFrame !== null) {
       cancelAnimationFrame(moveFrame)
