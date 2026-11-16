@@ -37,7 +37,7 @@ type
     ## field's change and keys (onChange, onKeyDown) come from its edits.
     ueClick = "tap", ueDoubleClick = "doubleTap", ueLongPress = "longPress",
     uePointerDown = "pointerDown", uePointerUp = "pointerUp", uePointerMove = "pointerMove",
-    ueSwipe = "swipe", ueChange = "change", ueKeyDown = "keyDown"
+    ueSwipe = "swipe", uePinch = "pinch", ueChange = "change", ueKeyDown = "keyDown"
 
   UiRegion* = object
     ## An element the pointer can do something to, where the layout put it:
@@ -192,7 +192,7 @@ const
   # The attributes the JSX walker turns onClick, onLongPress, ... into.
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
     "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
-    "on-change", "on-key-down"]
+    "on-pinch", "on-change", "on-key-down"]
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
   PopupKey = 1 shl 22    ## an open <select>'s list, likewise
   AccentKey = 1 shl 23   ## a held key's accents, likewise

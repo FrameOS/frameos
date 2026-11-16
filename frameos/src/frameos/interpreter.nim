@@ -795,7 +795,7 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
         return false
       if took >= 0:
         uiPresses.del(took)
-    elif took >= 0 and event in ["tap", "doubleTap", "longPress", "swipe"]:
+    elif took >= 0 and event in ["tap", "doubleTap", "longPress", "swipe", "pinch"]:
       return false
     elif uiOverScene(self.id.string, event, x, y, pid):
       return false
@@ -825,10 +825,10 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
   true
 
 when defined(frameosEmbedded):
-  const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp",
+  const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pinch", "pointerDown", "pointerUp",
     "pointerMove", "pointerCancel"]
 else:
-  const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp",
+  const PointerEvents = ["tap", "doubleTap", "longPress", "swipe", "pinch", "pointerDown", "pointerUp",
     "pointerMove", "pointerCancel", "wheel"]
     ## And the wheel, which an ESP32 has none of: over a scene in a layout's
     ## window it is that scene's, a window behind's included (routePointer).
@@ -2086,7 +2086,8 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     # One render listener whose flow is one node: what that node draws is the
     # whole frame.
     context.wholeFrame = not scene.program.isNil and scene.program.wholeFrame
-  of "tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp", "pointerMove", "pointerCancel", "uiTimer":
+  of "tap", "doubleTap", "longPress", "swipe", "pinch", "pointerDown", "pointerUp", "pointerMove", "pointerCancel",
+     "uiTimer":
     # A JSX UI's handlers and hover:/active: classes, its fields and the
     # boxes that scroll (ui/events.nim). A run of a handler, a change in
     # what the pointer is over, a field's text or a scroll is a new picture.

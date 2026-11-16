@@ -371,6 +371,26 @@ suite "jsx events":
     check not dispatchUiEvent("tests/jsx-swipe", "swipe", %*{"x": 120, "y": 10, "startX": 50, "startY": 150,
       "direction": "left", "pointerId": 1, "pointerType": "touch"})
 
+  test "a pinch goes to the element under where it began, with its scale":
+    let ui = newUi("""
+      export const get = () => (
+        <div className="flex bg-white">
+          <div className="w-[100px] h-[100px]" onPinch={(e) => frameos.setState('a', e.scale)} />
+          <div className="w-[100px] h-[100px]" onSwipe={(e) => frameos.setState('b', e.direction)} />
+        </div>
+      )
+    """, "tests/jsx-pinch")
+    discard ui.render()
+    check uiListens("tests/jsx-pinch", "pinch")
+    # Begun between two fingers over the first, ended over the second: the first's.
+    check dispatchUiEvent("tests/jsx-pinch", "pinch", %*{"x": 150, "y": 50, "startX": 50, "startY": 50,
+      "scale": 0.5, "pointerId": 2, "pointerType": "touch"})
+    check ui.scene.state{"a"}.getFloat() == 0.5
+    # Over the second, which hears no pinch: nobody's.
+    check not dispatchUiEvent("tests/jsx-pinch", "pinch", %*{"x": 150, "y": 50, "startX": 150, "startY": 50,
+      "scale": 2.0, "pointerId": 2, "pointerType": "touch"})
+    check ui.scene.state{"b"}.isNil
+
   test "a handler that throws is logged, and the frame goes on":
     let ui = newUi("""
       export const get = () => <div className="bg-white"><div className="w-10 h-10 bg-black" onClick={() => { throw new Error('nope') }} /></div>

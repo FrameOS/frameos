@@ -182,7 +182,7 @@ interface FrameOSFrameFacts {
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove" | "change" | "keyDown";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pinch" | "pointerDown" | "pointerUp" | "pointerMove" | "change" | "keyDown";
   x: number;
   y: number;
   localX: number;
@@ -194,6 +194,11 @@ interface FrameOSUiEvent {
   pointerType?: "mouse" | "touch" | "pen";
   /** A swipe's way: "left", "right", "up" or "down". */
   direction?: "left" | "right" | "up" | "down";
+  /** A swipe's start; a pinch's point between its fingers when the second went down (x, y: when the first lifted). */
+  startX?: number;
+  startY?: number;
+  /** A pinch's spread: how far apart the fingers ended over how far apart they began (below 1 drawn together). Absent before 2026.11.10. */
+  scale?: number;
   /** onChange of an <input> or <textarea>: its text now (also as target.value, as in React). */
   value?: string;
   target?: { value: string };
@@ -215,6 +220,8 @@ interface FrameOSElementProps {
   onPointerMove?: (event: FrameOSUiEvent) => void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
+  /** Two fingers that began on the element moved, as one event when the first lifts: e.scale, e.startX/startY, e.x/y. Neither finger is a tap or a swipe then. Absent before 2026.11.10. */
+  onPinch?: (event: FrameOSUiEvent) => void;
   /** <input> and <textarea>: the text shown (keep it in a variable, set it in onChange), a hint while empty, and the kind of field. */
   value?: string | number;
   placeholder?: string;

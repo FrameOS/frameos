@@ -2,7 +2,7 @@
 ## a driver, a preview or a request said. Positions are scene pixels on the
 ## way out; the wire is 0..PointerWireMax across the panel on the way in.
 
-import std/[json, monotimes, os, strutils, times]
+import std/[json, monotimes, os, sequtils, strutils, times]
 import ../input_state
 import ../driver_abi
 import ../events
@@ -188,6 +188,74 @@ block test_a_release_far_from_its_press_is_a_swipe_whichever_event_carried_the_p
   doAssert output.names == @[evPointerDown, evPointerUp, evSwipe]
   doAssert output[2].payload["direction"].getStr() == "right"
   doAssert output[2].payload["startX"].getInt() == 200 and output[2].payload["x"].getInt() == 600
+
+block test_two_fingers_that_move_are_a_pinch_when_the_first_lifts:
+  # Two fingers drawn together over a map (the reTerminal E1003, 2026-11-16):
+  # each made a swipe of its own, the two the opposite ways, and a scene that
+  # takes a drag as one `swipe` (e-paper, a frame rendered on its plane)
+  # could not zoom. A pair that moved is one `pinch` at the first lift, and
+  # neither finger makes a gesture of its own.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  let wx = proc (x: int): int = x * PointerWireMax div 799
+  let wy = proc (y: int): int = y * PointerWireMax div 479
+  state.applyDriverInput(abs(1, wx(200), wy(240)), eoDriver, at(0), output)
+  state.applyDriverInput(down(1, 0), eoDriver, at(0), output)
+  state.applyDriverInput(abs(2, wx(600), wy(240)), eoDriver, at(30), output)
+  state.applyDriverInput(down(2, 0), eoDriver, at(30), output)
+  # Held still past a long press first: a pair is no long press.
+  state.tick(at(GestureLongPressMs + 100), output)
+  state.applyDriverInput(abs(1, wx(350), wy(250)), eoDriver, at(700), output)
+  state.applyDriverInput(abs(2, wx(450), wy(250)), eoDriver, at(700), output)
+  state.applyDriverInput(up(2, 0), eoDriver, at(800), output)
+  doAssert output.names == @[evPointerMove, evPointerDown, evPointerMove, evPointerDown,
+    evPointerMove, evPointerMove, evPointerUp, evPinch], $output.names
+  let pinch = output[^1].payload
+  doAssert pinch["pointerId"].getInt() == 2 and pinch["pointerType"].getStr() == "touch"
+  doAssert pinch["startX"].getInt() == 400 and pinch["startY"].getInt() == 240, $pinch
+  doAssert pinch["x"].getInt() == 400 and pinch["y"].getInt() == 250, $pinch
+  doAssert pinch["scale"].getFloat() == 0.25, $pinch
+  # The finger left behind drags on and lifts: no swipe, it was the pinch's.
+  output.setLen(0)
+  state.applyDriverInput(abs(1, wx(100), wy(250)), eoDriver, at(900), output)
+  state.applyDriverInput(up(1, 0), eoDriver, at(1000), output)
+  doAssert output.names == @[evPointerMove, evPointerUp], $output.names
+  # Spread apart: above one.
+  output.setLen(0)
+  state.applyDriverInput(abs(1, wx(380), wy(240)), eoDriver, at(2000), output)
+  state.applyDriverInput(down(1, 0), eoDriver, at(2000), output)
+  state.applyDriverInput(abs(2, wx(420), wy(240)), eoDriver, at(2000), output)
+  state.applyDriverInput(down(2, 0), eoDriver, at(2000), output)
+  state.applyDriverInput(abs(1, wx(200), wy(240)), eoDriver, at(2100), output)
+  state.applyDriverInput(abs(2, wx(600), wy(240)), eoDriver, at(2100), output)
+  state.applyDriverInput(up(1, 0), eoDriver, at(2200), output)
+  state.applyDriverInput(up(2, 0), eoDriver, at(2210), output)
+  doAssert output.names[^3 .. ^1] == @[evPointerUp, evPinch, evPointerUp], $output.names
+  doAssert output.names.count(evSwipe) == 0, $output.names
+  for d in output:
+    if d.name == evPinch:
+      doAssert d.payload["scale"].getFloat() == 10.0 and d.payload["pointerId"].getInt() == 1, $d.payload
+
+block test_two_fingers_that_stay_put_are_two_taps:
+  # A two-finger tap moved nothing: no pinch, each finger its own tap, as before.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  state.applyDriverInput(abs(1, 8000, 16000), eoDriver, at(0), output)
+  state.applyDriverInput(down(1, 0), eoDriver, at(0), output)
+  state.applyDriverInput(abs(2, 24000, 16000), eoDriver, at(10), output)
+  state.applyDriverInput(down(2, 0), eoDriver, at(10), output)
+  state.applyDriverInput(up(1, 0), eoDriver, at(100), output)
+  state.applyDriverInput(up(2, 0), eoDriver, at(110), output)
+  doAssert output.names.count(evTap) == 2 and output.names.count(evPinch) == 0, $output.names
+  # A pair whose finger is cancelled is no pinch: the other is one finger again.
+  output.setLen(0)
+  state.applyDriverInput(down(1, 0), eoDriver, at(1000), output)
+  state.applyDriverInput(down(2, 0), eoDriver, at(1000), output)
+  state.applyDriverInput(DriverInputEvent(kind: ord(dikPointerCancel).cint, pointerId: 2,
+    pointerType: ord(dptTouch).cint), eoDriver, at(1050), output)
+  state.applyDriverInput(abs(1, 20000, 16000), eoDriver, at(1100), output)
+  state.applyDriverInput(up(1, 0), eoDriver, at(1200), output)
+  doAssert output.names[^1] == evSwipe and output.names.count(evPinch) == 0, $output.names
 
 block test_a_cancel_lets_go_of_what_is_down:
   var state = initInputState(config(800, 480))

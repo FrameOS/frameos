@@ -247,6 +247,7 @@ proc handlerKind(event: string): int =
   of "pointerUp": ord(uePointerUp)
   of "pointerMove": ord(uePointerMove)
   of "swipe": ord(ueSwipe)
+  of "pinch": ord(uePinch)
   else: -1
 
 proc timerPending(target: UiTarget): bool =
@@ -876,8 +877,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     released = event in ["pointerUp", "pointerCancel"]
     placed = not payload.isNil and payload.kind == JObject and payload.hasKey("x") and payload.hasKey("y")
     # A swipe belongs to where it began: a card swiped is the card the finger
-    # went down on, wherever it lifted.
-    starts = placed and kind == ord(ueSwipe) and payload.hasKey("startX") and payload.hasKey("startY")
+    # went down on, wherever it lifted. A pinch too, from between its fingers.
+    starts = placed and kind in [ord(ueSwipe), ord(uePinch)] and payload.hasKey("startX") and
+      payload.hasKey("startY")
     x = if starts: payload{"startX"}.getFloat() elif placed: payload{"x"}.getFloat() else: 0
     y = if starts: payload{"startY"}.getFloat() elif placed: payload{"y"}.getFloat() else: 0
     touch = placed and payload{"pointerType"}.getStr() == "touch"

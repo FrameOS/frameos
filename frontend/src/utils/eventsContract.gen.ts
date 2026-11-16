@@ -40,6 +40,7 @@ export type ContractEventName =
   | 'doubleTap'
   | 'longPress'
   | 'swipe'
+  | 'pinch'
   | 'edgeSwipe'
   | 'wheel'
   | 'turnOn'
@@ -529,6 +530,31 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "wasm": true
     },
     "since": "2026.9.23"
+  },
+  "pinch": {
+    "class": "input",
+    "device": "pointer",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "none",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.11.10"
   },
   "edgeSwipe": {
     "class": "input",
@@ -1145,6 +1171,8 @@ interface FrameOSEventPayloads {
   longPress: { x: number; y: number; durationMs: number; pointerId: number; pointerType: string };
   /** A press and a release at least \`gestures.swipeMinPx\` apart, in one of four directions. */
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
+  /** Two fingers (or pens) down together that moved, when the first of them lifts: \`scale\` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), \`startX\` / \`startY\` the point between them then and \`x\` / \`y\` the point between them now. The two make no \`tap\`, \`longPress\` or \`swipe\` of their own. One event for the whole gesture, as a \`swipe\` is for a drag: what e-paper and a frame rendered on its plane zoom by. */
+  pinch: { scale: number; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** A finger or a pen that went down within \`gestures.edgePx\` of an edge of the screen and moved at least \`gestures.swipeMinPx\` away from it, as on a phone: \`edge\` is where it started, \`direction\` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
   edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches, and a trackpad's fractions of one; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */

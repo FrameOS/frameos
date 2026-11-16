@@ -321,7 +321,20 @@ without moving, delivered while it is still held where the host ticks the
 dispatcher (the Linux runner and the preview do; the ESP32 asleep in a render
 does not, and delivers it on release), and then no `tap`; `swipe {direction,
 x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one of
-`left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
+`left` / `right` / `up` / `down`; `pinch {scale, x, y, startX, startY,
+pointerId, pointerType}` — two pointers down together (the second went down
+while the first was held; a third is no part of it) that moved, made when the
+first of them lifts: `scale` is their distance then over their distance when
+the second went down (below 1 drawn together, above 1 spread), `startX` /
+`startY` the point between them then and `x` / `y` the point between them
+now, `pointerId` the finger that lifted. Neither finger makes a `tap`,
+`longPress` or `swipe` of its own once they are a pinch, nor a `longPress`
+while both are down; a pair that did not move is two taps as before, and one
+whose finger is cancelled is no pinch. Before 2026.11.10 two fingers were two
+swipes the opposite ways, and a scene that takes a drag whole (`swipe`, as
+e-paper and a frame rendered on its plane must: the board sends a touch to
+its plane only once every finger is off the glass) could not zoom (the Map
+scene on a reTerminal E1003). Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
 
 **A UI's timer, `uiTimer`.** The runtime's own (`internal` in the contract:

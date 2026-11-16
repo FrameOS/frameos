@@ -559,6 +559,66 @@
     ]
   },
   {
+    "name": "pinch",
+    "description": "Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. The two make no `tap`, `longPress` or `swipe` of their own. One event for the whole gesture, as a `swipe` is for a drag: what e-paper and a frame rendered on its plane zoom by.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "scale",
+        "label": "Scale",
+        "type": "float",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "startX",
+        "label": "Start X",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "startY",
+        "label": "Start Y",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
+      }
+    ]
+  },
+  {
     "name": "edgeSwipe",
     "description": "A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse.",
     "canListen": true,
