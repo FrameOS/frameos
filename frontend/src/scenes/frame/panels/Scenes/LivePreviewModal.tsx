@@ -314,8 +314,9 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               style={{
                 imageRendering: 'pixelated',
                 // Taps and sideways drags are the scene's; a vertical swipe
-                // still scrolls the dialog on a phone.
-                touchAction: 'pan-y pinch-zoom',
+                // still scrolls the dialog on a phone. A pinch is the scene's (two
+                // pointers, utils/previewPointer), never the dialog's zoom.
+                touchAction: 'pan-y',
                 aspectRatio: `${previewDimensions.width} / ${previewDimensions.height}`,
               }}
             />
