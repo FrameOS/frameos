@@ -158,6 +158,7 @@ describe("the playground's scenes", () => {
       "steps",
       "gallery",
       "tap-counter",
+      "theme-roles",
     ]) {
       expect(ids.has(id), id).toBe(true);
     }

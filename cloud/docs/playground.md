@@ -44,7 +44,9 @@ visitor's own browser.
   Bounce, the Keyboard and Touch tests, the Terminal, and the store's Real
   time shelf as samples: Form showcase, Map, Now playing, To-do, Colors,
   Calculator, Home, Clock, Weather demo, Steps, Gallery, Tap counter;
-  `playground.test.ts` holds them there): a scene the playground should show is a sample.
+  and Theme roles, every role of a desktop's theme in the look of the
+  desktop chosen in the Control Panel; `playground.test.ts` holds them
+  there): a scene the playground should show is a sample.
 - **The network**: the Scene store browses and previews from the page's own
   origin (`storeUrl`), and a scene's request the browser's CORS refuses goes
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),

@@ -56,6 +56,7 @@ export const leadingTemplates = [
   "Word clock",
   "Terminal app",
   "Files",
+  "Theme roles",
 ];
 
 export const playgroundLayoutId = "layout-windows-98";
