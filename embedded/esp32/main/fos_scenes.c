@@ -29,9 +29,9 @@
 #include "fos_mem.h"
 #include "fos_scene_state.h"
 #include "fos_scene_store.h"
+#include "fos_store_scan.h"
 #include "fos_slot_cache.h"
 #include "fos_spiffs_footprint.h"
-#include "fos_store_scan.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1106,7 +1106,14 @@ static bool load_into_nim(const char *json, size_t len, const char *origin)
      * count and inline JS, so a constant in the UI would be fiction. This
      * gives the control plane a real per-frame number to advise from. */
     size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    int count = frameos_nim_load_scenes(json);
+    /* Split here by the store's scanner, each scene read where it lies by the
+     * runtime: never a copy of the whole set (a 378 KB set aborted the
+     * reTerminal E1004 out of memory with 1.5 MB free in 300 KB blocks,
+     * 2026-11-16). More scenes than a store holds is refused, not cut. */
+    static const char *scene_starts[SCENES_SLOT_MAX + 1];
+    static size_t scene_lens[SCENES_SLOT_MAX + 1];
+    int scene_count = fos_store_split_scenes(json, len, scene_starts, scene_lens, SCENES_SLOT_MAX + 1);
+    int count = scene_count > SCENES_SLOT_MAX ? 0 : frameos_nim_load_scenes(scene_starts, scene_lens, scene_count);
     if (count <= 0) {
         ESP_LOGE(TAG, "scene payload rejected by runtime");
         log_scene_event("scenes:load", "error", origin, "", "runtime-rejected",

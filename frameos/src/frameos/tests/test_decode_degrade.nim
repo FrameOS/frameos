@@ -15,6 +15,23 @@ proc budgetRefusal(): ref PixieError =
     "JPEG decode of 2048x3072 needs 1869K of decode buffers, over the " &
     "1807K memory budget")
 
+var
+  released = 0
+  askedRefused = false
+
+proc countRelease(refused: bool): bool {.nimcall, raises: [].} =
+  inc released
+  false
+
+proc releaseWhenRefused(refused: bool): bool {.nimcall, raises: [].} =
+  # The kept interpreters holding a UI's handlers go only when asked as for
+  # a refused allocation; then there is room.
+  if refused:
+    askedRefused = true
+    availableRenderBytesOverride = 1024 * 1024
+    return true
+  false
+
 suite "decodeIntoTargetWithDegrade":
   test "a decode that fits runs once, straight into the target":
     let target = newImage(120, 160)
@@ -63,6 +80,62 @@ suite "decodeIntoTargetWithDegrade":
           inc calls
           raise budgetRefusal())
     check calls == 3
+
+  test "a rung decodes in the target's own format":
+    # A 565 canvas's rung is 2 bytes a pixel, not an RGBX copy twice its size:
+    # the half-res rung of a 1184x1450 photo was 1.7 MB in RGBX (2026-11-16).
+    let target = newImage565(120, 160)
+    var formats: seq[PixelFormat] = @[]
+    discard decodeIntoTargetWithDegrade(target, fitCover,
+      proc(dst: Image) =
+        formats.add(dst.format)
+        if dst.width == target.width:
+          raise budgetRefusal()
+        dst.fill(rgbx(200, 100, 50, 255)))
+    check formats == @[pfRgb565, pfRgb565]
+    check target[119, 159].r > 150
+
+  test "on an ESP32 nothing under the reserve is no room, never unknown":
+    # availableRenderBytes answers 0 there: read as "unknown", the rung's
+    # buffer was allocated with 1.4 MB free in 750 KB blocks and the render
+    # aborted out of memory, three in a row on a reTerminal E1004.
+    setSimulatedEmbedded(true)
+    availableRenderBytesOverride = -1
+    defer:
+      setSimulatedEmbedded(false)
+      availableRenderBytesOverride = 0
+      renderMemoryReleaseHook = nil
+    released = 0
+    renderMemoryReleaseHook = countRelease
+    let target = newImage565(120, 160)
+    var calls: seq[(int, int)] = @[]
+    expect PixieError:
+      discard decodeIntoTargetWithDegrade(target, fitCover,
+        proc(dst: Image) =
+          calls.add((dst.width, dst.height))
+          raise budgetRefusal())
+    check calls == @[(120, 160)]
+    check released > 0
+
+  test "on an ESP32 what a render can rebuild goes before a rung is given up":
+    setSimulatedEmbedded(true)
+    availableRenderBytesOverride = -1
+    defer:
+      setSimulatedEmbedded(false)
+      availableRenderBytesOverride = 0
+      renderMemoryReleaseHook = nil
+    askedRefused = false
+    renderMemoryReleaseHook = releaseWhenRefused
+    let target = newImage565(120, 160)
+    var calls: seq[(int, int)] = @[]
+    discard decodeIntoTargetWithDegrade(target, fitCover,
+      proc(dst: Image) =
+        calls.add((dst.width, dst.height))
+        if dst.width == target.width:
+          raise budgetRefusal()
+        dst.fill(rgbx(1, 2, 3, 255)))
+    check askedRefused
+    check calls == @[(120, 160), (60, 80)]
 
   test "non-budget errors pass through without any retry":
     let target = newImage(120, 160)

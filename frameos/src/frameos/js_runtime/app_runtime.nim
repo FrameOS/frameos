@@ -217,7 +217,9 @@ when defined(frameosEmbedded):
   # roomy frame never evict and keep today's behaviour exactly.
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
     let headroom = availableRenderBytes()
-    if headroom <= 0 or headroom >= RenderMemoryShortBytes:
+    # 0 on an ESP32 is nothing left under the reserve: as short as it gets,
+    # not "unknown" (a host's), so the idle ones go then too.
+    if (headroom <= 0 and not runsAsEmbedded()) or headroom >= RenderMemoryShortBytes:
       return
     for other in liveJsRuntimes:
       # Not one holding a UI's handlers: they live nowhere else, and the
@@ -794,8 +796,11 @@ proc keptPictureTarget(runtime: JsAppRuntime, owner: AppRoot, like: Image,
       let
         bytes = keptPictureBytes(like, w, h)
         contiguous = availableRenderBytes()
-      # 0: unknown, as on a host without the numbers.
-      if contiguous <= 0 or (bytes <= contiguous and bytes <= availableRenderHeadroomBytes()):
+      # 0: unknown, as on a host without the numbers. On an ESP32-class
+      # runtime it is nothing left under the reserve, and an allocation there
+      # is an out-of-memory abort (decodeIntoTargetWithDegrade, 2026-11-16).
+      if (contiguous <= 0 and not runsAsEmbedded()) or
+          (bytes <= contiguous and bytes <= availableRenderHeadroomBytes()):
         if dropped > 0 or step > 0:
           frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": dropped,
             "reason": "no room", "width": w, "height": h, "askedWidth": width,

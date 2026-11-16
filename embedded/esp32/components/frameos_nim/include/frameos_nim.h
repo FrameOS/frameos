@@ -144,11 +144,12 @@ bool frameos_nim_set_scene(const char *scene_id);
  * with nothing to read off flash. */
 bool frameos_nim_scene_running(const char *scene_id);
 
-/* Install interpreted scenes from JSON (the backend's scenes.json array
- * format); code nodes run on QuickJS, app nodes on the AOT-compiled standard
+/* Install interpreted scenes: the scene objects of a backend scenes.json, by
+ * where they start and how long they are (fos_store_split_scenes), read where
+ * they lie; code nodes run on QuickJS, app nodes on the AOT-compiled standard
  * library. Returns the number of scenes loaded (0 = bad payload or runtime
  * unavailable). Hot-swaps live scenes. */
-int frameos_nim_load_scenes(const char *json);
+int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int count);
 /* Lazy scene loading (fos_scenes.c per-scene store). The catalog is every
  * scene available on flash — ids and names only, nothing parsed — so a frame
  * can list and switch scenes while holding just one in memory. load_scene

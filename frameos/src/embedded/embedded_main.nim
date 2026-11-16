@@ -623,13 +623,18 @@ proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
   except Exception as e:
     log("service settings apply failed: " & e.msg)
 
-proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
-  ## Install interpreted scenes from JSON (backend scenes.json format).
-  ## Returns the number of scenes loaded, 0 on bad payload.
+proc fos_nim_load_scenes_impl(scenes: ptr UncheckedArray[cstring], lens: ptr UncheckedArray[csize_t],
+    count: cint): cint {.exportc, cdecl.} =
+  ## Install interpreted scenes, the objects of a backend scenes.json where
+  ## they lie in the firmware's buffer. Returns the number of scenes loaded,
+  ## 0 on bad payload.
   try:
-    # The scenes it replaces go before the payload is copied (makeRoomForScenes).
+    # The scenes it replaces go before the payload is read (makeRoomForScenes),
+    # and it is read in place, a scene copied at a time: a copy of the whole
+    # set was one more block of its size (a 378 KB set aborted a reTerminal
+    # E1004 out of memory with 1.5 MB free in 300 KB blocks, 2026-11-16).
     makeRoomForScenes(whole = true)
-    result = loadScenes($payload).cint
+    result = loadScenes(scenes, lens, count.int).cint
     recoverEmergencyReserve("scene load")
   except Defect as e:
     log("loadScenes failed (defect): " & e.msg)

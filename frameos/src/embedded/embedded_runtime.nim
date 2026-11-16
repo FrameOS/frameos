@@ -651,13 +651,24 @@ proc makeRoomForScenes*(whole: bool) =
   clearCoverageCache()
   when defined(memProbe): memProbe("  makeRoomForScenes: old scene dropped")
 
-proc loadScenes*(payload: string): int =
-  when defined(memProbe): memProbe("  >>> loadScenes payload=" & $payload.len & "B")
+proc loadSceneInputs(inputs: seq[FrameSceneInput]): int
+
+proc loadScenes*(scenes: ptr UncheckedArray[cstring], lens: ptr UncheckedArray[csize_t], count: int): int =
   ## Parse and install interpreted scenes from the backend's JSON format
-  ## (array of scenes; same payload Linux frames read from scenes.json).
+  ## (array of scenes; same payload Linux frames read from scenes.json), split
+  ## by the firmware where it lies (fos_store_split_scenes): each scene copied
+  ## alone, never a second block the size of the whole set.
   ## Returns the number of scenes loaded; the current scene is re-created
   ## on the next render so hot updates don't tear down mid-render state.
-  let inputs = parseInterpretedSceneInputs(payload)
+  var inputs: seq[FrameSceneInput]
+  for i in 0 ..< count:
+    var text = newString(lens[i].int)
+    if text.len > 0:
+      copyMem(addr text[0], scenes[i], text.len)
+    inputs.add(parseInterpretedSceneInput(text))
+  loadSceneInputs(inputs)
+
+proc loadSceneInputs(inputs: seq[FrameSceneInput]): int =
   if inputs.len == 0:
     log("loadScenes: no scenes in payload")
     return 0
