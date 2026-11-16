@@ -267,7 +267,7 @@ desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,
 the `macOS` Dock and Scenes menu, `BeOS`'s Be menu, Deskbar and Tracker's icons,
 the `Classic Mac` menus and icons, `NeXTSTEP`'s Dock and miniwindows, `Tiling`'s
 +. A scene without one gets the desktop's own, as before, and the scene store,
-Files and the terminal keep theirs unless they have one. That is `ownIcon`, the
+Files and the terminal keep the desktop's drawings of them even where they have an icon of their own. That is `ownIcon`, the
 same text in the six. `Commander` draws no icons. Launchpad and the Scenes icons open the
 frame's own scene list (the scene switcher, `docs/scene-switcher.md`), which is
 the runtime's, not a layout's.

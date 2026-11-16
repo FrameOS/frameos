@@ -2632,6 +2632,44 @@ suite "a scene's own icon (app.frame.scenes[i].icon)":
     chooseLayout("")
     discard pass()
 
+  test "gives way to the desktop's own drawing of the frame's own apps (layouts may override them)":
+    # Windows 98's desktop icon of the terminal, and its taskbar button once it
+    # is open: the same pixels with an icon of its own (a square filling its
+    # box) as without one. Red keeps its own square in Start (above).
+    proc desktopWith(icon: string): (Image, Image) =
+      let own = icon
+      windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          result = %*[{"id": "tests/red", "name": "Red", "icon": "M0 0H24V24H0Z"},
+            {"id": "tests/term-98", "name": "Terminal"}]
+          if own.len > 0: result[1]["icon"] = %own
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(Layout)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      let desktop = pass()
+      discard focusOn("tests/term-98")
+      (desktop, pass())
+    let (plainDesk, plainBar) = desktopWith("")
+    let (iconDesk, iconBar) = desktopWith("M0 0H24V24H0Z")
+    var icons: seq[array[4, float32]]
+    uiPressRects(Layout, icons)
+    let terminal = icons.filterIt(it[0] == 8 and it[2] == 88)[1] # Programs, the terminal, Control Panel
+    proc same(a, b: Image, x0, y0, x1, y1: int): bool =
+      for y in y0 ..< y1:
+        for x in x0 ..< x1:
+          if a.color(x, y) != b.color(x, y): return false
+      true
+    check same(plainDesk, iconDesk, int(terminal[0]), int(terminal[1]), int(terminal[2]), int(terminal[3]))
+    # The taskbar: Start, then the terminal's button with its prompt.
+    check same(plainBar, iconBar, 0, H - 40, W, H)
+    check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
 suite "where only two scenes run at once (an ESP32 with 8 MB)":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
