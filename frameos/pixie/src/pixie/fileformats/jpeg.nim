@@ -2008,6 +2008,7 @@ proc decodeBlocks(state: var DecoderState) =
       h = (state.components[comp].height + 7) div 8
       rows = state.stripBlockRows(comp)
     for column in rows.first ..< min(h, rows.last):
+      breathe()
       for row in 0 ..< w:
         if streamBaselineBlocks:
           state.decodeRegularBlockIntoChannel(comp, row, column)
@@ -2025,6 +2026,7 @@ proc decodeBlocks(state: var DecoderState) =
       firstMcuY = state.strip * state.stripMcuRows
       lastMcuY = min(state.numMcuHigh, firstMcuY + state.stripMcuRows)
     for mcuY in firstMcuY ..< lastMcuY:
+      breathe()
       for mcuX in 0 ..< state.numMcuWide:
         for comp in state.componentOrder:
           for compY in 0 ..< state.components[comp].xScale:

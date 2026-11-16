@@ -23,6 +23,9 @@ block:
   let blitCalls = calls
   image.drawResampled(other, 0, 0, 180, 100)
   doAssert calls > blitCalls, "a resample calls it once a row"
+  let decodeBefore = calls
+  discard decodeImage(readFile("tests/fileformats/jpeg/masters/cat_4_2_0.jpg"))
+  doAssert calls > decodeBefore, "a JPEG decode calls it once an MCU row"
   renderBreathe = nil
   let before = calls
   image.fillPath("M 0 0 L 50 0 L 50 50 Z", rgba(0, 255, 0, 255))
