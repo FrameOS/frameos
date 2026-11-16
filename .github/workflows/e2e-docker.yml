@@ -418,6 +418,12 @@ jobs:
             embedded/esp32/main/fos_store_scan.c embedded/esp32/main/tests/test_fos_store_scan.c \
             -o /tmp/test_fos_store_scan
           /tmp/test_fos_store_scan
+          # How an answer's body is read into one buffer (fos_http_body.c):
+          # a declared length is read to the byte, never grown to the cap.
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+            embedded/esp32/main/fos_http_body.c embedded/esp32/main/tests/test_fos_http_body.c \
+            -o /tmp/test_fos_http_body
+          /tmp/test_fos_http_body
           # The SPIFFS garbage collection order and the scene store split,
           # replayed on the SPIFFS that ESP-IDF ships (fos_spiffs_gc.c, a
           # 20-scene set pushed over itself on a 1 MB /state). The backend

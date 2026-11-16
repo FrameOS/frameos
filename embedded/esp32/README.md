@@ -45,6 +45,7 @@ main/                     boot orchestration + platform modules
   fos_commands.c          the backend's command queue: pulled once per pass and on a nudge, acked by id;
                           fetched on the backend link task and run on the render task (fos_client.c)
   fos_backend_http.c      the one HTTP client for the small pulls and posts (settings, scenes, commands, tz, OTA manifest)
+  fos_http_body.c         its body read: a declared length read to the byte, a chunked one grown to the cap (host-tested)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
                           producer — /event/<name>, the schedule, the cloud verbs, the console's
@@ -1471,7 +1472,16 @@ paced around renders and taps like every write off the render task
 (`store_pace_hook`); the render task's apply then reads the index and loads
 one scene, and a switch asked for meanwhile waits for that apply
 (`s_store_changing`). A backend sync's set is held whole by the runtime and
-written by the store task.
+written by the store task when there is room for it (`runtime_room_for_whole`:
+a largest PSRAM block of twice the set and four times the set free); without
+it, or when the runtime refuses it, the set goes store-first like a push:
+written by the store task as fast as flash goes, then applied one scene at a
+time (the reTerminal E1004 could not copy a 378 KB set whole, 2026-11-16). A
+backend's `?patch=1` answer is read without a tree of the whole answer
+(`fos_store_object_member`), each scene of its `put` parsed by the store as
+it is written. Every body is read into one buffer of its declared length
+(`fos_http_body.c`, host-tested); a body that never got its buffer logs
+`no-memory`, one that broke off `read-failed`.
 
 **On a frame that has a per-scene store, a whole set goes in as changes to
 it, one scene at a time** (`fos_scene_store_apply_set`, called by

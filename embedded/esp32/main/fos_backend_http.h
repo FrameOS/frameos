@@ -25,6 +25,9 @@ typedef struct {
     bool no_store;             /* Cache-Control: no-store (a body that is credentials) */
     int timeout_ms;            /* 0 = 15 s */
     int buffer_size;           /* esp_http_client's receive buffer; 0 = 2 KB */
+    /* How long the body's buffer may be waited for when it cannot be had at
+     * once (a render holding the PSRAM it needs); 0 = not at all. */
+    int alloc_wait_ms;
 } fos_http_request_t;
 
 typedef struct {
@@ -34,6 +37,9 @@ typedef struct {
     char etag[96];          /* the response ETag, "" when none */
     char *body;             /* NUL-terminated; NULL when not read. fos_http_response_free() */
     size_t body_len;
+    /* Why a body that came was not read (NULL body, not too_large):
+     * ESP_ERR_NO_MEM, no buffer for it; otherwise the read failed. */
+    esp_err_t body_err;
 } fos_http_response_t;
 
 /* Perform the request. ESP_OK means an answer came (any status, including

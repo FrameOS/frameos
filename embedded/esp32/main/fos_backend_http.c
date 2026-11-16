@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 
 #include "fos_config.h"
+#include "fos_http_body.h"
 #include "fos_mem.h"
 
 static const char *TAG = "fos_http";
@@ -54,48 +55,67 @@ void fos_http_response_free(fos_http_response_t *res)
     res->body_len = 0;
 }
 
-/* The body, however it is delimited: Content-Length sizes the buffer once;
- * a chunked answer grows it up to the cap. */
-static void read_body(esp_http_client_handle_t client, size_t max_body, fos_http_response_t *res)
+/* Between two tries for a body's buffer (alloc_wait_ms). */
+#define FOS_HTTP_ALLOC_RETRY_MS 100
+
+typedef struct {
+    esp_http_client_handle_t client;
+    int alloc_wait_ms;
+} body_io_ctx_t;
+
+static int body_io_read(void *ctx, char *buf, int len)
 {
-    if (res->content_length > (int64_t)max_body) {
-        res->too_large = true;
-        return;
+    return esp_http_client_read(((body_io_ctx_t *)ctx)->client, buf, len);
+}
+
+/* The body's first buffer, in one block. A render beside the download (the
+ * link task's) holds the PSRAM it needs for a second or two on an e-paper
+ * board; the answer waits in the socket meanwhile. */
+static void *body_io_alloc(void *ctx, size_t bytes)
+{
+    int wait_ms = ((body_io_ctx_t *)ctx)->alloc_wait_ms;
+    void *buf = fos_big_malloc(bytes);
+    int64_t until = esp_timer_get_time() + (int64_t)wait_ms * 1000;
+    while (buf == NULL && esp_timer_get_time() < until) {
+        vTaskDelay(pdMS_TO_TICKS(FOS_HTTP_ALLOC_RETRY_MS));
+        buf = fos_big_malloc(bytes);
     }
-    size_t cap = res->content_length > 0 ? (size_t)res->content_length
-                 : max_body < FOS_HTTP_FIRST_CHUNK ? max_body
-                                                   : FOS_HTTP_FIRST_CHUNK;
-    char *buf = fos_big_malloc(cap + 1);
-    if (buf == NULL) return;
-    size_t total = 0;
-    while (true) {
-        if (total == cap) {
-            if (cap >= max_body) {
-                /* More than the cap and still coming. */
-                res->too_large = true;
-                free(buf);
-                return;
-            }
-            size_t new_cap = cap * 2 > max_body ? max_body : cap * 2;
-            char *grown = fos_big_realloc(buf, new_cap + 1);
-            if (grown == NULL) {
-                free(buf);
-                return;
-            }
-            buf = grown;
-            cap = new_cap;
-        }
-        int r = esp_http_client_read(client, buf + total, (int)(cap - total));
-        if (r < 0) {
-            free(buf);
-            return;
-        }
-        if (r == 0) break;
-        total += (size_t)r;
+    if (buf == NULL) {
+        ESP_LOGW(TAG, "no %u-byte block for the body (PSRAM largest %u of %u free)", (unsigned)bytes,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
-    buf[total] = '\0';
-    res->body = buf;
-    res->body_len = total;
+    return buf;
+}
+
+static void *body_io_realloc(void *ctx, void *ptr, size_t bytes)
+{
+    (void)ctx;
+    return fos_big_realloc(ptr, bytes);
+}
+
+static void body_io_free(void *ctx, void *ptr)
+{
+    (void)ctx;
+    free(ptr);
+}
+
+static void read_body(esp_http_client_handle_t client, size_t max_body, int alloc_wait_ms,
+                      fos_http_response_t *res)
+{
+    body_io_ctx_t ctx = {.client = client, .alloc_wait_ms = alloc_wait_ms};
+    fos_http_body_io_t io = {
+        .read = body_io_read, .alloc = body_io_alloc, .realloc = body_io_realloc, .free = body_io_free, .ctx = &ctx,
+    };
+    fos_http_body_err_t err =
+        fos_http_body_read(res->content_length, max_body, FOS_HTTP_FIRST_CHUNK, &io, &res->body, &res->body_len);
+    res->too_large = err == FOS_HTTP_BODY_TOO_LARGE;
+    res->body_err = err == FOS_HTTP_BODY_OK || err == FOS_HTTP_BODY_TOO_LARGE ? ESP_OK
+                    : err == FOS_HTTP_BODY_NO_MEMORY                          ? ESP_ERR_NO_MEM
+                                                                              : ESP_FAIL;
+    if (err == FOS_HTTP_BODY_READ_FAILED) {
+        ESP_LOGW(TAG, "body read failed or cut short (%lld bytes declared)", (long long)res->content_length);
+    }
 }
 
 /* A connect that fails within this long never waited on the network: the
@@ -195,7 +215,7 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     res->content_length = esp_http_client_fetch_headers(client);
     res->status = esp_http_client_get_status_code(client);
     if (max_body > 0 && res->status != 304 && res->status != 204) {
-        read_body(client, max_body, res);
+        read_body(client, max_body, req->alloc_wait_ms, res);
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
