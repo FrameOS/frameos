@@ -622,15 +622,22 @@ var carried {.threadvar.}: tuple[layoutId: string, state: JsonNode]
   ## that layout, under what the install and the frame set (`startLayout`).
 var carriedOpen {.threadvar.}: JsonNode
   ## The scenes a desktop had open (its `openScenes`, docs/scene-layouts.md
-  ## "Windows") when another layout took its place: the frame's layout chosen
-  ## anew, or scenes replaced by ones that wear another. The next layout
-  ## started afresh is handed them, whichever it is, and opens them.
+  ## "Windows") and where they were (its `openPlaces`) when another layout
+  ## took its place: the frame's layout chosen anew, or scenes replaced by
+  ## ones that wear another. The next layout started afresh is handed them,
+  ## whichever it is, and opens them.
+
+const CarriedOpenKeys = ["openScenes", "openPlaces"]
 
 proc keepOpenScenes(layout: FrameScene) =
   if not layout.isNil and not layout.state.isNil and layout.state.kind == JObject:
     let open = layout.state{"openScenes"}
     if not open.isNil and open.kind == JArray:
-      carriedOpen = copy(open)
+      carriedOpen = newJObject()
+      for key in CarriedOpenKeys:
+        let value = layout.state{key}
+        if not value.isNil:
+          carriedOpen[key] = copy(value)
 
 proc carryLayoutState*(scene: FrameScene) =
   ## Before a host drops its scenes: the state of the layout `scene` wears
@@ -676,7 +683,8 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
       # Another layout's scenes, for this one to open: its own kept state, a
       # same layout's carried above, goes first.
       if not carriedOpen.isNil and result.state.kind == JObject and not result.state.hasKey("openScenes"):
-        result.state["openScenes"] = carriedOpen
+        for key, value in carriedOpen.pairs:
+          result.state[key] = value
       carriedOpen = nil
       return
     except Exception as error:
