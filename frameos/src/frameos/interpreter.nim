@@ -2099,7 +2099,12 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
           rhythmMarkDue(self)
           sendEvent("render", %*{}, eoScene)
       elif context.event in ["keyDown", "textInput"]:
+        # Due, as for a tap: the scene's own `render` asks for no fresh pass,
+        # so a scene drawn into a layout's <yield />, a window or a split
+        # would otherwise put back its last picture until its interval ran
+        # out (the Terminal's typed line showed only after a click).
         if dispatchUiEvent(self.id.string, context.event, context.payload):
+          rhythmMarkDue(self)
           sendEvent("render", %*{}, eoScene)
       else:
         uiSceneEvent(self.id.string)
