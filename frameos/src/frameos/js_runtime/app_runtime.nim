@@ -1646,16 +1646,14 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return nimBoolToJS(ctx, runsAsEmbedded())
   of "paper":
     # A panel that shows a change only in a refresh (panel_shape.nim): an app
-    # that follows a finger waits for it to lift there.
-    let like = pictureFormatLike(e.context)
-    return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device,
-      not like.isNil and like.format == pfRgb565))
+    # that follows a finger waits for it to lift there. The frame's panel,
+    # never the context's canvas, which onEvent, init() and an async
+    # continuation do not have: on an ESP32 they read paper on an LCD.
+    return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
   of "color":
     # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
-    # a scene draws in high contrast where it does not.
-    let like = pictureFormatLike(e.context)
-    return nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device,
-      if like.isNil: pfRgbx else: like.format))
+    # a scene draws in high contrast where it does not. The panel's, as above.
+    return nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device))
   of "sceneName":
     # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
     if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
@@ -3434,9 +3432,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     regions: seq[UiRegion]
   let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
-    # E-paper's on-screen keyboard shows no press (ui/keyboard.nim).
-    target.input.paper = panelIsPaper(if owner.frameConfig.isNil: "" else: owner.frameConfig.device,
-      context.hasImage and not context.image.isNil and context.image.format == pfRgb565)
+    # E-paper's on-screen keyboard shows no press (ui/keyboard.nim). The
+    # frame's panel, as `app.frame.paper` says it.
+    target.input.paper = panelIsPaper(if owner.frameConfig.isNil: "" else: owner.frameConfig.device)
     when not defined(frameosEmbedded):
       # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
       target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and

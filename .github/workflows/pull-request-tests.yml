@@ -281,6 +281,11 @@ jobs:
       - name: Draw <img src> pictures in the browser preview
         run: node frameos/tools/wasm_img_src.mjs "$RUNNER_TEMP/frameos-wasm"
 
+      # What a scene hears of its panel (app.frame.paper, color) in every
+      # phase, in the preview, running as an ESP32 and drawn for a board.
+      - name: Hear the panel in every phase
+        run: node frameos/tools/wasm_app_frame_panel.mjs "$RUNNER_TEMP/frameos-wasm"
+
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
     needs: changes

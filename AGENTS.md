@@ -550,7 +550,10 @@
   board clicks from its touch task at once. And the runtime is told the
   board's panel (`set_frame`'s `pixelFormat` → `panel_shape.boardPanelFormat`):
   `app.frame.color` / `paper` and the built-in scenes' look are the board's,
-  never the plane's RGBX canvas.
+  never the plane's RGBX canvas. An ESP32 sets the same from its own panel at
+  init, and nothing a scene asks of its panel reads a canvas: an event,
+  init() and what runs after an await have none, and a 13.3" color e-paper
+  on 8 MB draws in RGB565 like an LCD.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
 - A board rendered on the server is sent nothing a scene holds ("Nothing

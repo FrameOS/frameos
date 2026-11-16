@@ -132,9 +132,9 @@ proc listEntries(): seq[SwitcherEntry] =
 
 proc paperPanel*(frameConfig: FrameConfig, canvas: Image = nil): bool =
   ## Whether the switcher is drawn for e-paper (black on white, no press
-  ## feedback): any panel that is not an LCD. An ESP32's LCD canvas is its
-  ## RGB565 buffer and any other is e-paper or a monochrome OLED; a Pi says
-  ## by its device.
+  ## feedback): any panel that is not an LCD. A board says by its panel
+  ## (panel_shape.boardPanelFormat), a Pi by its device; the canvas only
+  ## where neither has (an ESP32's LCD canvas is its RGB565 buffer).
   let lcd = not canvas.isNil and canvas.format == pfRgb565
   when defined(frameosEmbedded):
     panelIsPaper("", lcd)
@@ -914,7 +914,7 @@ proc renderSwitcher(self: FrameScene, context: ExecutionContext): Image =
 
 proc initSwitcher(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   ## Nothing persisted to start from: the switcher keeps no state file.
-  # Until the first render says (an ESP32's LCD is known by its canvas).
+  # The panel's, from the host: there is no canvas yet.
   let paper = paperPanel(frameConfig)
   SceneSwitcherScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: switcherOwnRun,
     shownName: "Scene switcher", refreshInterval: idleSeconds(paper), backgroundColor: background(paper), paper: paper)

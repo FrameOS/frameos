@@ -230,7 +230,14 @@ the runtime answer for the board's panel instead
 (`panel_shape.boardPanelFormat`): `app.frame.color` is false on a black and
 white or grey panel (a scene's "auto" draws in high contrast there),
 `app.frame.paper` true on anything but an LCD, and the scene switcher and
-the scene settings take e-paper's look, as the board's own runtime would.
+the scene settings take e-paper's look, as the board's own runtime would:
+an ESP32 sets the same value from its own panel at init (`embedded_main.nim`).
+Every phase of a scene reads it, `init()`, an event, a handler and what runs
+after an `await` included, never the canvas, which only a render has. The
+browser preview running as an ESP32 is told no panel, only the canvas the
+board keeps: a 4 or 8 bit one is a grey panel's (`syncBoardPanel` in
+`wasm_main.nim`), and a 16 or 32 bit one could be an LCD's or a color
+e-paper's, so it answers as the browser does.
 
 ### Keys, touch and the schedule
 

@@ -286,7 +286,10 @@ calls, and it calls no other:
   `frameos.setState(key, value)`.
 - `app.frame`: the frame, read only: `width`, `height` (always set, also in
   the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, `embedded`
-  (true on an ESP32, and in a preview running as one), and `batteryPercent`
+  (true on an ESP32, and in a preview running as one), `paper` (true where a
+  change shows only in a refresh: e-paper) and `color` (false on a black and
+  white or grey panel), which say the frame's panel the same way in `get()`,
+  `init()`, `onEvent`, a handler and after an `await`, and `batteryPercent`
   (0 to 100) and `wifiRssi` (dBm), which are undefined wherever the frame
   cannot tell (a Pi, the preview, an ESP32 with no battery or off Wi-Fi), so
   draw them only when they are numbers.
@@ -1090,11 +1093,12 @@ interface FrameOSApp {
      * divided by it, and its JSX is drawn that many times larger (FrameOS 2026.10.22+; undefined before). */
     scale?: number;
     /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
-     * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
+     * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). The same in get(), init(),
+     * onEvent, a handler and after an await (2026.11.10+; before, an ESP32 said true on an LCD outside get()). */
     paper?: boolean;
     /** Whether the panel shows colors (an LCD, an HDMI screen, a four-, six- or seven-ink e-paper). False on
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
-     * undefined before, so treat undefined as color). */
+     * undefined before, so treat undefined as color). The same in every phase, as paper. */
     color?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */

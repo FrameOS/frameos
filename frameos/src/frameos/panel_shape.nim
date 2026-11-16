@@ -42,24 +42,22 @@ const
     ## frameos_display.h's FOS_PIXEL_1BPP, _2BPP_GRAY and _4BPP_GRAY: the
     ## panels that show no color.
 
-when defined(frameosWasm):
-  var boardPanelFormat* = 0
-    ## A control plane drawing for a board (docs/server-rendering.md): the
-    ## board's panel as frameos_display.h numbers it, from
-    ## `frameos_wasm_set_frame`'s `pixelFormat`. The plane's canvas is RGBX
-    ## and its device "wasm", so without it every board was a colour LCD to
-    ## its scenes: `app.frame.color` true on a grey E1003 (a scene's "auto"
-    ## chose its colours) and the switcher and settings in the LCD's look.
-    ## 0: the panel is the runtime's own.
+var boardPanelFormat* = 0
+  ## A board's panel as frameos_display.h numbers it, where the runtime knows
+  ## it: an ESP32's own (embedded_main at init, `fos_display_format`), the
+  ## board a control plane draws for (`frameos_wasm_set_frame`'s
+  ## `pixelFormat`, docs/server-rendering.md) and a grey board the browser
+  ## preview runs as (wasm_main). It answers `app.frame.paper` and `color`
+  ## in every phase: an event, init() and an async continuation have no
+  ## canvas to ask, and an ESP32's RGB565 canvas is an LCD's or a 13.3"
+  ## color e-paper's on 8 MB. 0: a Pi says by its device.
 
-proc panelIsPaper*(device: string, rgb565Canvas: bool): bool =
+proc panelIsPaper*(device: string, rgb565Canvas = false): bool =
   ## Whether a press would cost a refresh to show (e-paper, a monochrome
-  ## OLED): any panel that is not an LCD. An ESP32's LCD canvas is its RGB565
-  ## buffer and any other is e-paper or an OLED; a Pi says by its device; a
-  ## control plane by the board's panel.
-  when defined(frameosWasm):
-    if boardPanelFormat > 0:
-      return boardPanelFormat != PanelFormatRgb565
+  ## OLED): any panel that is not an LCD. A board says by its panel; a Pi by
+  ## its device. Without either, an ESP32's LCD canvas is its RGB565 buffer.
+  if boardPanelFormat > 0:
+    return boardPanelFormat != PanelFormatRgb565
   if rgb565Canvas:
     return false
   when defined(frameosEmbedded):
