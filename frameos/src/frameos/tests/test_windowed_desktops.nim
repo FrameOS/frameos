@@ -123,6 +123,8 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander,
   panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
   panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS),
   panel("tests/term-cm", "Terminal", "#111111", ClassicMac), panel("tests/term-next", "Terminal", "#111111", NeXT),
+  # Files (the sample once named Asset browser), as Windows 98 finds it: by its name.
+  panel("tests/files-98", "Files", "#a3e635"),
   slideshowPanel("tests/photo", "SD card image"),
   panel("tests/nc-red", "Red", "#ff0000", Commander), panel("tests/nc-green", "Green", "#00ff00", Commander),
   panel("tests/nc-blue", "Blue", "#0000ff", Commander), buttonPanel("tests/nc-button", "Button", Commander),
@@ -433,8 +435,8 @@ suite "the Windows 98 desktop":
 
   test "the desktop's icons are the frame's own apps, and a double click opens one":
     discard pass()
-    # Down the left: Programs, Control Panel (no store, no asset browser on
-    # this frame), none of the scenes.
+    # Down the left: Programs, Control Panel (no store, no Files on this
+    # frame), none of the scenes.
     let (ix, iy) = (48, 8 + 1 * 72 + 20)
     discard send("tap", at(ix, iy))
     check desk().state{"picked"}.getStr() == "system/sceneSettings"
@@ -586,6 +588,33 @@ suite "the Windows 98 desktop":
     uiPressRects(Layout, icons)
     check icons.filterIt(it[0] == 8 and it[2] == 88).mapIt(int(it[1])) == @[8, 8 + 72, 8 + 2 * 72]
     check problems.len == 0
+    windowSceneListing = listing
+
+  test "Files, by its name or by its old one, is at the top of Start and an icon on the desktop":
+    let listing = windowSceneListing
+    for name in ["Files", "Asset browser"]:
+      let named = name
+      windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          result = %*[{"id": "tests/red", "name": "Red"}, {"id": "tests/green", "name": "Green"},
+            {"id": "tests/blue", "name": "Blue"}, {"id": "tests/files-98", "name": named}]
+      sendEvent("setCurrentScene", %*{"sceneId": "tests/red"}, eoScene)
+      discard settle()
+      discard pass()
+      discard click(20, H - 20) # Start
+      discard pass()
+      # Files, a rule, the three programs (not Files), then Full screen and
+      # Control Panel.
+      let menuTop = H - 42 - (30 * (3 + 2 + 1) + 22 + 8)
+      check click(80, menuTop + 6 + 15).filterIt(it != "render") == @["setCurrentScene"]
+      check current.id.string == "tests/files-98"
+      discard pass()
+      check not winOf("tests/files-98").isNil
+      # Down the left: Programs, Files, Control Panel.
+      var icons: seq[array[4, float32]]
+      uiPressRects(Layout, icons)
+      check icons.filterIt(it[0] == 8 and it[2] == 88).mapIt(int(it[1])) == @[8, 8 + 72, 8 + 2 * 72]
+      check problems.len == 0
     windowSceneListing = listing
 
 proc topBar(): seq[array[4, float32]] =
@@ -1192,7 +1221,7 @@ suite "the BeOS desktop":
 
   test "the icons under the Deskbar are the frame's own apps, and the Be menu opens its scenes":
     # Under where the Deskbar reaches, one window's row: the disk and the scene
-    # list (no store, no asset browser on this frame).
+    # list (no store, no Files on this frame).
     let (ix, iy) = (W - BarW div 2, iconTop(1) + 1 * 66 + 20)
     discard send("tap", at(ix, iy))
     check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
@@ -1492,8 +1521,8 @@ suite "the Classic Mac desktop":
     discard clickRect(titleBoxes(winOf("tests/cm-red"))[2])
     check not winOf("tests/cm-red"){"max"}.getBool()
     discard pass()
-    # The disk and the scene list (no store, no asset browser, no terminal on
-    # this frame), none of the scenes.
+    # The disk and the scene list (no store, no Files, no terminal on this
+    # frame), none of the scenes.
     discard send("tap", at(CIconX, CIconTop + 62 + 16))
     check desk().state{"picked"}.getStr() == "system/sceneSwitcher"
     let picked = pass()
@@ -1905,15 +1934,18 @@ suite "the NeXTSTEP desktop":
     check c{"h"}.getInt() == 240 + 34
     check sceneSize("tests/next-c") == (400, 240)
     let (x, y) = (c{"x"}.getInt(), c{"y"}.getInt())
+    # Moved away from the desktop's nearer side edge, where it may have opened, so
+    # its close button stays clear of the Dock.
+    let dx = (if x + c{"w"}.getInt() + 30 <= NextDeskW: 30 else: -30)
     discard send("pointerDown", at(NextMenuW + x + 200, y + 12))
-    discard send("pointerMove", at(NextMenuW + x + 230, y + 32))
-    discard send("pointerUp", at(NextMenuW + x + 230, y + 32, %*{"buttons": 0}))
+    discard send("pointerMove", at(NextMenuW + x + 200 + dx, y + 32))
+    discard send("pointerUp", at(NextMenuW + x + 200 + dx, y + 32, %*{"buttons": 0}))
     discard key("F4", alt = true)
     check winOf("tests/next-c").isNil
     discard pass()
     discard fromNextMenu(1, 2)
     discard pass()
-    check winOf("tests/next-c"){"x"}.getInt() == x + 30
+    check winOf("tests/next-c"){"x"}.getInt() == x + dx
     check winOf("tests/next-c"){"y"}.getInt() == y + 20
     # Its close button: the window goes, and the next one down takes the focus.
     let c2 = winOf("tests/next-c")
@@ -2100,7 +2132,7 @@ suite "the Commander desktop":
     check fKey(2) == @["sceneSwitcher"]
     check fKey(4) == @["sceneSettings"]
     check settingsFrom == "tests/nc-green"
-    # No store, terminal or asset browser on this frame: their keys are blank.
+    # No store, terminal or Files on this frame: their keys are blank.
     check fKey(7).len == 0
     check fKey(8).len == 0
     discard pass()
@@ -2338,6 +2370,91 @@ suite "a scene's own window size (settings.windowSize)":
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()
+
+proc boxOf(win: JsonNode): (int, int, int, int) =
+  (win{"x"}.getInt(), win{"y"}.getInt(), win{"w"}.getInt(), win{"h"}.getInt())
+
+proc covered(a, b: (int, int, int, int)): int =
+  ## How much of box b the box a covers.
+  let across = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+  let deep = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+  if across > 0 and deep > 0: across * deep else: 0
+
+suite "where a new window opens (each desktop's freeSpot)":
+  # Six scenes whose windows are small enough that four fit side by side on every
+  # desktop at 800 x 480, and the next two do not.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      result = newJArray()
+      for (id, name) in [("tests/red", "Red"), ("tests/green", "Green"), ("tests/blue", "Blue"),
+          ("tests/apple", "Apple"), ("tests/lime", "Lime"), ("tests/ocean", "Ocean")]:
+        result.add %*{"id": id, "name": name, "windowSize": "200x120"}
+
+  test "on bare desktop while there is room, clear of the icons, and never right over another window":
+    let none: seq[(int, int, int, int)] = @[]
+    # Each desktop's own: where its windows may go (x, y, w, h in its own pixels,
+    # as it keeps its windows), and its icons there.
+    let desks = @[
+      (Layout, (0, 0, W, H - 42), @[(8, 8, 80, 2 * 72)]),
+      (MacOS, (0, 0, W, H - MenuH - DockH), none),
+      (BeOS, (0, 0, W - BarW, H), none),
+      (ClassicMac, (0, 0, W, H - CMenuH), @[(W - 4 - 84, 10, 84, 2 * 62)]),
+      (NeXT, (0, 0, NextDeskW, H), none)]
+    let ids = ["tests/red", "tests/green", "tests/blue", "tests/apple", "tests/lime", "tests/ocean"]
+    for (layoutId, area, icons) in desks:
+      # A desktop of its own: nothing carried over, no window kept from before.
+      discard focusOn(ids[0])
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      check desk().id.string == layoutId
+      for i, id in ids:
+        if i > 0:
+          discard focusOn(id)
+          discard pass()
+        let win = winOf(id)
+        check not win.isNil
+        check not win{"max"}.getBool()
+        check sceneSize(id) == (200, 120)
+        let box = boxOf(win)
+        # All of it on the desktop.
+        check box[0] >= area[0] and box[1] >= area[1]
+        check box[0] + box[2] <= area[0] + area[2] and box[1] + box[3] <= area[1] + area[3]
+        var over = 0
+        for other in wins():
+          if other{"id"}.getStr() == id: continue
+          let o = boxOf(other)
+          over += covered(box, o)
+          # Never right over another: a part of every title bar stays in reach.
+          check not (box[0] <= o[0] and box[0] + box[2] >= o[0] + o[2] and box[1] <= o[1] and
+            box[1] + box[3] >= o[1] + 22)
+        if i < 4:
+          # Room for it: none of it over another window or an icon.
+          check over == 0
+          for icon in icons: check covered(box, icon) == 0
+        if i == 3:
+          # Side by side, every scene is drawn straight into its window: none is
+          # a picture of its own.
+          for j in 0 .. 3: check isHole(hosted[ids[j]])
+      shot(pass(), "placed-" & layoutId.replace("/", "-"))
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "is the same function, word for word, in every desktop of windows":
+    # A scene cannot share code with another: each carries its own copy.
+    var copies: seq[string]
+    for scene in [layout, macos, beos, classicMac, nextstep]:
+      var source = ""
+      for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
+      let start = source.find("// Where a new window w by h goes")
+      check start >= 0
+      copies.add source[start ..< source.find("\n}\n", start)]
+    for text in copies: check text == copies[0]
 
 suite "where only two scenes run at once (an ESP32 with 8 MB)":
   setup:

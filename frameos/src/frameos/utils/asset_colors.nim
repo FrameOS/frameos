@@ -207,54 +207,128 @@ proc luminance*(r, g, b: float): float {.inline.} =
 # The automatic fit runs over every pixel an image covers, twice (the
 # histogram, then the table), on every render of a palette panel: 1.92 M
 # pixels a pass on a 13.3" Spectra. Written the obvious way — `float`
-# luminance and `round()` per pixel through `unsafe[x, y]` — that was ~6 µs a
-# pixel on an ESP32-S3, whose FPU has no double precision (every `float` op
-# is a soft-float call): ~12.5 s a fit, two fits a render under a layout, and
-# the render task on one core for all of it without letting its idle task run
-# (the task watchdog; the hardware bench, reTerminal E1004, 2026-11-16). So:
-# integers, a row at a time through `getPixel` / `setPixel` (what
-# `unsafe[x, y]` expands to, without the index per pixel), checks off, -O2 on
-# the firmware, and a breath per row. The bins and the stored pixels are the
-# same as before, bit for bit (test_asset_colors.nim compares them).
-
-when defined(frameosEmbedded):
-  {.pragma: fitLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
-else:
-  {.pragma: fitLoop.}
+# luminance and `round()` per pixel — that was ~6 µs a pixel on an ESP32-S3,
+# whose FPU has no double precision (every `float` op is a soft-float call),
+# and the render task on one core for seconds without letting its idle task
+# run (the task watchdog; the hardware bench, reTerminal E1004, 2026-11-16).
+# Integers alone were not enough: through `getPixel` / `setPixel` each pixel
+# was still ~1.2 µs a pass, because the loop's -O2 kept gcc from inlining the
+# -Os helpers it called (the 565 expand and pack, the bin, three zeroed
+# temporaries), and a raw read of the same canvas took a twentieth of that
+# (the E1004 again, measured on the device). So each format gets a loop of
+# its own over its buffer, with nothing called per pixel (and no -O2 of its
+# own: there is nothing to inline, and it cost flash): a 565 pixel's
+# channels go through 32- and 64-entry tables, and its store through tables
+# of what pixie's own pack (dithered or not) makes of each level, built per
+# fit. A grey canvas keeps the accessors. The bins and the stored pixels are
+# the same as before, bit for bit (test_asset_colors.nim compares them).
 
 static:
   # The integer bins below are these weights in hundredths.
   doAssert LumR == 0.21 and LumG == 0.72 and LumB == 0.07
 
+proc tieBin(r, g, b: int): int {.noinline.} =
+  ## A sum ending in .50 is decided by the float sum, whose rounding error
+  ## can put it on either side, exactly as before.
+  max(0, min(255, luminance(r.float, g.float, b.float).round().int))
+
+template binOf(r, g, b: int): int =
+  ## `round(luminance(r, g, b))` on 0 .. 255 channels, in integers: the
+  ## weights are whole hundredths, so the sum is exact.
+  (let hundredths = 21 * r + 72 * g + 7 * b;
+   if hundredths mod 100 != 50: (hundredths + 50) div 100 else: tieBin(r, g, b))
+
+proc expandTable(bits: static int): array[1 shl bits, uint8] =
+  for v in 0 ..< (1 shl bits):
+    result[v] = (if bits == 5: (v shl 3) or (v shr 2) else: (v shl 2) or (v shr 4)).uint8
+
+const
+  Expand5 = expandTable(5)
+  Expand6 = expandTable(6)
+
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
-proc luminanceBin*(r, g, b: uint8): int {.inline.} =
-  ## `round(luminance(r, g, b))` on 0 .. 255 channels, in integers. The
-  ## weights are whole hundredths, so the sum is exact as `hundredths`; only
-  ## a tie (a sum ending in .50) is decided by the float sum, whose rounding
-  ## error can put it on either side, exactly as before.
-  let hundredths = 21 * r.int + 72 * g.int + 7 * b.int
-  if hundredths mod 100 != 50:
-    (hundredths + 50) div 100
-  else:
-    max(0, min(255, luminance(r.float, g.float, b.float).round().int))
+proc luminanceBin*(r, g, b: uint8): int =
+  binOf(r.int, g.int, b.int)
 
 proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
-    histogram: var array[256, int]) {.fitLoop.} =
+    histogram: var array[256, int]) =
+  let width = xEnd - xStart
   for y in yStart ..< yEnd:
     breathe()
     let rowStart = image.dataIndex(xStart, y)
-    for index in rowStart ..< rowStart + (xEnd - xStart):
-      let p = image.getPixel(index)
-      inc histogram[luminanceBin(p.r, p.g, p.b)]
+    case image.format
+    of pfRgb565:
+      let px = image.data16
+      for index in rowStart ..< rowStart + width:
+        let p = px[index].int
+        inc histogram[binOf(Expand5[p shr 11].int, Expand6[(p shr 5) and 63].int, Expand5[p and 31].int)]
+    of pfRgbx:
+      let px = image.data
+      for index in rowStart ..< rowStart + width:
+        inc histogram[binOf(px[index].r.int, px[index].g.int, px[index].b.int)]
+    else:
+      for index in rowStart ..< rowStart + width:
+        let p = image.getPixel(index)
+        inc histogram[binOf(p.r.int, p.g.int, p.b.int)]
 
-proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) {.fitLoop.} =
-  for y in yStart ..< yEnd:
-    breathe()
-    let rowStart = image.dataIndex(xStart, y)
-    for index in rowStart ..< rowStart + (xEnd - xStart):
-      let p = image.getPixel(index)
-      image.setPixel(index, rgbx(lut[p.r], lut[p.g], lut[p.b], p.a))
+proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) =
+  let width = xEnd - xStart
+  case image.format
+  of pfRgb565:
+    # What the pack stores for each 5- and 6-bit level, per dither cell (one
+    # cell when the stores are not dithered): rgbxToRgb565(Dithered) itself,
+    # on a grey of the mapped level, so the result cannot drift from it.
+    let cells = if image.ditherStores: 16 else: 1
+    var
+      at: array[16, int] # an index in each dither cell, -1 until found
+      found = 0
+      t5: array[16, array[32, uint16]]
+      t6: array[16, array[64, uint16]]
+    if image.ditherStores:
+      for cell in 0 ..< 16:
+        at[cell] = -1
+      var index = 0
+      while found < 16:
+        let cell = ((index.uint32 * 0x9E3779B1'u32) shr 28).int
+        if at[cell] < 0:
+          at[cell] = index
+          inc found
+        inc index
+    for cell in 0 ..< cells:
+      template pack(v: uint8): uint16 =
+        (let c = rgbx(v, v, v, 255);
+         if image.ditherStores: rgbxToRgb565Dithered(c, at[cell]) else: rgbxToRgb565(c))
+      for v in 0 ..< 32:
+        t5[cell][v] = pack(lut[Expand5[v]]) shr 11
+      for v in 0 ..< 64:
+        t6[cell][v] = (pack(lut[Expand6[v]]) shr 5) and 63
+    let px = image.data16
+    let dither = image.ditherStores
+    for y in yStart ..< yEnd:
+      breathe()
+      let rowStart = image.dataIndex(xStart, y)
+      for index in rowStart ..< rowStart + width:
+        let
+          p = px[index].int
+          cell = if dither: ((index.uint32 * 0x9E3779B1'u32) shr 28).int else: 0
+        px[index] = (t5[cell][p shr 11] shl 11) or (t6[cell][(p shr 5) and 63] shl 5) or t5[cell][p and 31]
+  of pfRgbx:
+    let px = image.data
+    for y in yStart ..< yEnd:
+      breathe()
+      let rowStart = image.dataIndex(xStart, y)
+      for index in rowStart ..< rowStart + width:
+        px[index].r = lut[px[index].r]
+        px[index].g = lut[px[index].g]
+        px[index].b = lut[px[index].b]
+  else:
+    for y in yStart ..< yEnd:
+      breathe()
+      let rowStart = image.dataIndex(xStart, y)
+      for index in rowStart ..< rowStart + width:
+        let p = image.getPixel(index)
+        image.setPixel(index, rgbx(lut[p.r], lut[p.g], lut[p.b], p.a))
 
 {.pop.}
 

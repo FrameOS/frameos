@@ -736,6 +736,9 @@ type
     loopIndex*: int
     loopKey*: string
     nextSleep*: float
+    when defined(frameosWasm):
+      # This render fetched its one `<img>` picture (js_async.nim urlImage).
+      urlImageFetched*: bool
     # The scene's background colour, owed to the canvas since the render
     # began and not painted yet (runEventInner): whatever draws first pays it
     # (`paintPendingBackground`), and a first paint that covers every pixel

@@ -1,10 +1,10 @@
 {
   "name": "Touch test",
-  "description": "A dot follows your finger, pen or mouse, and the scene says which gesture it saw: tap, double tap, long press, swipe.",
+  "description": "A dot follows your finger, pen or mouse, and the scene says which gesture it saw: tap, double tap, long press, swipe. Hold and drag to draw the path, which stays until the next press.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,
   "imageHeight": 720,
   "scenes": "./scenes.json",
-  "frameosVersion": "2026.11.0"
+  "frameosVersion": "2026.11.5"
 }

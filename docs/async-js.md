@@ -65,9 +65,11 @@ Scene store puts the scene's initial under each cover).
 - **Where it waits is the runtime's call, not the app's.** An LCD, an HDMI
   screen and a Pi's fetch every picture of a pass at once, off the render,
   and render the scene once more however many land together. E-paper, a
-  board that deep-sleeps and the editor's preview fetch it in the render
-  (e-paper: one refresh with every picture; the preview one picture a
-  render, the next render soon).
+  board that deep-sleeps and every wasm runtime fetch it in the render
+  (e-paper: one refresh with every picture; a plane's render for a board:
+  every picture in that render; the browser preview, which shows each frame
+  as it comes: one picture a render and the next render soon, turned on by
+  its worker with `frameos_wasm_set_pictures_one_a_render`).
 - The picture is a kept picture (`fetchImage` `keep`: 48 small ones,
   `docs/jsx-ui.md` "Photos that stay"): the same url at the same size is
   one picture while the interpreter lives. At a new size (the box changed)
