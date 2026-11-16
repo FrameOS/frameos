@@ -237,6 +237,18 @@ def test_a_set_the_runtime_refuses_is_loaded_from_flash_after_its_write():
     assert store.index("store_puts_as_changes_locked(") < pending < store.index("store_unlock();")
     assert "bool reload = job->reload;" in store, "whether the write worked or not: flash is what runs"
 
+def test_no_apply_while_a_store_first_set_is_written():
+    """A patch's apply that ran while a store-first set was being written
+    could not load the resident scene (load_scene_slot waits for the write),
+    took that for a refusal and pointed the scene back at its previous file:
+    the E1004 kept a scene four pushes old, wearing a layout no longer on
+    flash (the hardware bench, 2026-11-16). The apply waits for the write."""
+    fns = _functions(_source("fos_scenes.c"))
+    apply = fns["fos_scenes_apply_pending"]
+    assert apply.index("if (s_store_changing) return false;") < apply.index("apply_index_change()")
+    assert "if (!ok && !s_store_changing && before_slot >= 0" in fns["apply_index_change"]
+
+
 def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     """The desktop layouts' sets (365-465 KB) never reached two 8 MB boards
     (the hardware bench, 2026-11-16): a declared length was read and then
