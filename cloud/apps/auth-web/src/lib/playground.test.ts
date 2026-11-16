@@ -135,6 +135,24 @@ describe("the playground's scenes", () => {
     expect(scenes.length).toBeGreaterThan(30);
   });
 
+  it("hold every real-time and interactive sample", () => {
+    const ids = new Set(scenes.map((scene) => scene.id));
+    for (const id of [
+      "kitchen-sink",
+      "64a15e71-cc27-467b-a69b-c4c28bb77017", // Pixel toys
+      "58257360-472f-45ef-9acd-05b4f2b8f067", // Color cycling
+      "dvd-logo-bounce",
+      "keyboard-test",
+      "touch-test",
+      "terminal-app",
+    ]) {
+      expect(ids.has(id), id).toBe(true);
+    }
+    for (const name of leadingTemplates) {
+      expect(excludedTemplates.has(name), name).toBe(false);
+    }
+  });
+
   it("leave out what needs a key or a Pi", () => {
     expect(excludedTemplates.has("OpenAI image")).toBe(true);
     expect(scenes.some((scene) => scene.id === "9f5a338b-0048-495a-a64f-e3190071ff51")).toBe(false);

@@ -95,7 +95,7 @@ suite "Pixel toys":
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
     let events = parseJson(app["sources"]["config.json"].getStr())["events"]
-    check events == %*["tap", "swipe", "back", "forward"]
+    check events == %*["tap", "swipe", "back", "forward", "keyDown"]
 
   test "the e2e fixture is the sample, its Hellfire seeded":
     check fixture["apps"]["pixelToys"]["sources"] == app["sources"]
@@ -213,6 +213,30 @@ suite "Pixel toys":
     toys.event(config, "tap", %*{"x": 120, "y": 120})
     let after = toys.render(config)
     check lit(after, 100, 100, 140, 140) != lit(before, 100, 100, 140, 140)
+    check toys.scene.state{"effect"}.getStr() == "life" # the tap stayed on the ripples
+
+  test "a tap, Enter, Space or the right arrow is the next effect, the left arrow the previous":
+    let toys = newToys("tests/toys-keys", 120, 120)
+    let config = %*{"effect": "fire", "pixelSize": "4", "seed": "5"}
+    discard toys.render(config)
+    proc key(code: string, repeat = false): JsonNode =
+      %*{"code": code, "key": code, "repeat": repeat, "shift": false, "ctrl": false, "alt": false, "meta": false}
+    toys.scene.state["effect"] = %"unmoved"
+    toys.event(config, "tap", %*{"x": 60, "y": 60, "pointerId": 0, "pointerType": "mouse"})
+    check toys.scene.state{"effect"}.getStr() == "bluefire"
+    for (code, effect) in [("Enter", "bluefire"), ("NumpadEnter", "bluefire"), ("Space", "bluefire"),
+        ("ArrowRight", "bluefire"), ("ArrowLeft", "life")]:
+      toys.scene.state["effect"] = %"unmoved"
+      toys.event(config, "keyDown", key(code))
+      checkpoint code
+      check toys.scene.state{"effect"}.getStr() == effect
+    # A key held down, another key, or a chord does not move it.
+    var chord = key("Enter")
+    chord["meta"] = %true
+    toys.scene.state["effect"] = %"unmoved"
+    for payload in [key("ArrowRight", repeat = true), key("KeyA"), chord]:
+      toys.event(config, "keyDown", payload)
+    check toys.scene.state{"effect"}.getStr() == "unmoved"
 
   test "the counter leaves the effect as it found it":
     let

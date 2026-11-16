@@ -787,6 +787,17 @@ describe("lintScenes", () => {
     expect(other).toEqual(expect.arrayContaining([expect.stringContaining('listens for "nextPhoto"')]));
   });
 
+  it("lets JSX draw an image ref with <image href={ref}>, and nothing else as an <image>", () => {
+    const svg = (inner: string) => `<svg viewBox="0 0 10 10">${inner}</svg>`;
+    expect(lintSvgMarkup(svg("<image href={base} x={0} y={0} width={w} height={h} />"))).toEqual([]);
+    expect(lintSvgMarkup(svg('<image href="photo.png" width="10" height="10" />'))).toEqual([
+      expect.stringContaining("SVG uses <image>"),
+    ]);
+    expect(lintSvgMarkup(svg("<image href={base} /><use href={base} />"))).toEqual([
+      expect.stringContaining("SVG uses <use>"),
+    ]);
+  });
+
   // Every shipped example must lint clean — the linter is only useful if it
   // does not reject the scenes the catalog itself ships, and a sample that
   // fails it teaches the scene AI a value the editor will not offer.

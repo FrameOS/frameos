@@ -26,7 +26,10 @@ visitor's own browser.
   and `repo/scenes/gallery`, leaving out the samples that need an API key or
   an account in the frame's settings, or a process on a Pi (its
   `excludedTemplates`). `leadingTemplates` is the Start menu's order; the
-  first is the window the desktop opens on.
+  first is the window the desktop opens on. Every real-time and interactive
+  sample is in it (Pixel toys, Color cycling, the Kitchen sink, DVD Logo
+  Bounce, the Keyboard and Touch tests, the Terminal; `playground.test.ts`
+  holds them there): a scene the playground should show is a sample.
 - **The network**: the Scene store browses and previews from the page's own
   origin (`storeUrl`), and a scene's request the browser's CORS refuses goes
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),
