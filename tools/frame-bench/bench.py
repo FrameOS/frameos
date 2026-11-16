@@ -91,6 +91,8 @@ def cmd_run(args):
     ctx = Ctx(out_dir, backend=be if be.token else None, warm=args.warm, passive=args.passive, quick=args.quick,
               host_ip=args.host_ip or os.environ.get('FRAMEOS_BENCH_HOST_IP'))
     ctx.soak_rounds = args.soak_rounds
+    ctx.full = args.full
+    ctx.rotation = args.rotation if args.rotation is not None else int(time.time() // 86400)
     ctx.scene_filter = args.scenes.split('|') if args.scenes else None
     results = []
     threads = []
@@ -138,6 +140,8 @@ def main():
     r.add_argument('--scenes', help='scenes suite: only these scene names or ids, separated by |')
     r.add_argument('--soak-rounds', type=int, default=5, help='rounds of every scene in the soak')
     r.add_argument('--quick', action='store_true')
+    r.add_argument('--full', action='store_true', help='no sampling on slow panels: every scene, layout and round')
+    r.add_argument('--rotation', type=int, help='which third of the rotated scenes and layouts a slow panel runs (default: the day)')
     r.add_argument('--rediscover', action='store_true')
     r.add_argument('--host-ip')
     r.add_argument('--baseline', help='an earlier run directory to compare with')
