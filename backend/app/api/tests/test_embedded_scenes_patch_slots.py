@@ -58,3 +58,48 @@ async def test_a_patch_that_does_not_fit_the_slots_is_the_whole_list(async_clien
     assert body["patch"] is True
     assert len(body["put"]) == 7
     assert len(body["order"]) == 25
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [1, 24])
+async def test_after_a_save_and_a_deploy_the_next_pull_is_a_304(async_client, no_auth_client, db, redis, changed):
+    """Save, fast deploy, pull, pull again with the first answer's ETag: a
+    304, whether the first answer was a patch (one scene changed) or the
+    whole list (24 changed, past the slots). The SenseCAP's second 200 after
+    a push (2026-11-15) carried the same ETag as the first: the device asked
+    without it (a deploy's forced sync and the link task's poll both
+    fetching, fos_scenes_backend_fetch), not a backend whose ETag moved."""
+    from unittest.mock import AsyncMock, patch
+
+    frame = await device_frame(async_client, db)
+    # Saved as the editor saves (which stamps each scene's settings).
+    response = await async_client.post(f"/api/frames/{frame.id}", json={"scenes": scenes(25)})
+    assert response.status_code == 200, response.text
+    url = f"/api/frames/{frame.id}/embedded/scenes?patch=1"
+    held = (await no_auth_client.get(url, headers=auth(frame))).headers["etag"]
+
+    saved = [*scenes(25)[: 25 - changed], *scenes(25, " laid out")[25 - changed :]]
+    response = await async_client.post(f"/api/frames/{frame.id}", json={"scenes": saved})
+    assert response.status_code == 200, response.text
+    with patch("app.tasks.fast_deploy_frame", new_callable=AsyncMock) as fast_deploy:
+        response = await async_client.post(f"/api/frames/{frame.id}/fast_deploy")
+    assert response.status_code == 200, response.text
+    fast_deploy.assert_awaited_once()
+
+    first = await no_auth_client.get(url, headers={**auth(frame), "If-None-Match": held})
+    assert first.status_code == 200
+    body = first.json()
+    if changed == 24:
+        assert isinstance(body, list) and len(body) == 25
+    else:
+        assert body["patch"] is True and len(body["put"]) == 1
+    etag = first.headers["etag"]
+    assert etag != held
+
+    for _ in range(2):
+        again = await no_auth_client.get(url, headers={**auth(frame), "If-None-Match": etag})
+        assert again.status_code == 304
+        assert again.headers["etag"] == etag
+    # One that names nothing gets the same set under the same ETag.
+    bare = await no_auth_client.get(url, headers=auth(frame))
+    assert bare.status_code == 200 and bare.headers["etag"] == etag

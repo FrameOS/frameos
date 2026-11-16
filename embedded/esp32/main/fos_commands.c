@@ -204,7 +204,11 @@ static bool run_answer(cJSON *root, bool after_forced_pull)
          * frame does not hold until the pull below — run first, it failed
          * with apply-failed and the old scene rendered (E1002, 2026-10-24). */
         fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
+        /* The set the link task fetched, before and after a sync that names
+         * it (it waits out a fetch in flight): a 304, not the set again. */
+        fos_client_take_link_payload();
         fos_scenes_sync(true);
+        fos_client_take_link_payload();
         fos_scenes_apply_pending();
         fos_settings_sync(true);
     }

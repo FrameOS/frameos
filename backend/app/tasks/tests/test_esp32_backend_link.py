@@ -155,8 +155,32 @@ def test_a_scene_payload_is_written_off_the_render_task():
     client = _strip_comments(CLIENT_C.read_text())
     sleep = client.index("esp_deep_sleep((uint64_t)")
     assert "fos_scenes_store_wait(" in client[sleep - 400 : sleep], "a deep sleep does not wait for the scene store"
-    assert "fos_scenes_take_backend_payload(" in CLIENT["pass_scenes_sync"]
+    assert "fos_client_take_link_payload()" in CLIENT["pass_scenes_sync"]
+    assert "fos_scenes_take_backend_payload(" in CLIENT["fos_client_take_link_payload"]
     assert "pass_scenes_sync();" in CLIENT["link_hand_back"]
+
+
+def test_one_scenes_fetch_at_a_time_and_a_fetched_set_is_named():
+    """After a push the SenseCAP fetched the same 372 KB set two or three
+    times (2026-11-15): a deploy's forced sync on the render task and the link
+    task's poll both asked with the ETag of the set before, and the second
+    body could not be read. One fetch runs at a time (a poll skips, a forced
+    sync waits), a set fetched and not yet taken is what the next one names,
+    and the deploy's sync takes the link task's set around its own."""
+    scenes = _functions(_strip_comments(SCENES_C.read_text()))
+    fetch = scenes["fos_scenes_backend_fetch"]
+    take_lock = fetch.index("xSemaphoreTake(s_fetch_lock, force ?")
+    assert take_lock < fetch.index("s_sync_requested"), "a skipped poll must not eat a sync request"
+    assert take_lock < fetch.index("s_fetched_etag") < fetch.index("fos_http_fetch(")
+    assert "fetched ||" in fetch, "a fetched set is named even by a forced sync"
+    assert fetch.index("fetched_set(response.etag)") < fetch.index("xSemaphoreGive(s_fetch_lock)")
+    assert fetch.count("return") == 2, "every way out of the fetch after the lock gives it back"
+    take = scenes["fos_scenes_take_backend_payload"]
+    assert take.strip("{ \n").startswith('fetched_set("")'), "the take clears the fetched ETag on every path"
+    commands = _functions(_strip_comments(COMMANDS_C.read_text()))["run_answer"]
+    sync = commands.index("fos_scenes_sync(true)")
+    assert commands.rfind("fos_client_take_link_payload()", 0, sync) != -1
+    assert commands.find("fos_client_take_link_payload()", sync) != -1
 
 
 def test_the_render_task_uses_the_tested_rules():

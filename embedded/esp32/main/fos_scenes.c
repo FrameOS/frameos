@@ -456,6 +456,21 @@ static void etag_set(const char *etag)
     portEXIT_CRITICAL(&s_etag_mux);
 }
 
+/* One scenes GET at a time, and the ETag of a payload fetched but not taken
+ * yet (the link task's slot, or a forced sync's own) is what the next one
+ * sends: a deploy's forced sync on the render task and the link task's poll
+ * both fetched the same 372 KB set after a push, and the second could not be
+ * read (SenseCAP, 2026-11-15). Under s_etag_mux; cleared at the take. */
+static SemaphoreHandle_t s_fetch_lock = NULL;
+static char s_fetched_etag[ETAG_LEN] = "";
+
+static void fetched_set(const char *etag)
+{
+    portENTER_CRITICAL(&s_etag_mux);
+    strlcpy(s_fetched_etag, etag, sizeof(s_fetched_etag));
+    portEXIT_CRITICAL(&s_etag_mux);
+}
+
 static void load_etag(void)
 {
     size_t len = 0;
@@ -1624,6 +1639,7 @@ esp_err_t fos_scenes_init(void)
 {
     if (s_scene_file_lock == NULL) {
         s_scene_file_lock = xSemaphoreCreateRecursiveMutex();
+        s_fetch_lock = xSemaphoreCreateMutex();
     }
     fos_scene_store_hooks_t store_hooks = {
         .make_room = make_room, .big_alloc = fos_big_malloc, .pace = store_pace_hook,
@@ -2332,13 +2348,21 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
     if (out_len) *out_len = 0;
     if (etag_out && etag_len) etag_out[0] = '\0';
     bool log_unchanged = force;
+    /* A poll skips while another fetch runs; a forced sync waits for it. */
+    if (s_fetch_lock && xSemaphoreTake(s_fetch_lock, force ? pdMS_TO_TICKS(35000) : 0) != pdTRUE) {
+        if (out_err) *out_err = ESP_ERR_TIMEOUT;
+        return NULL;
+    }
     if (__atomic_exchange_n(&s_sync_requested, false, __ATOMIC_SEQ_CST)) {
         force = true;
         log_unchanged = true;
     }
     fos_config_t *config = fos_config();
     char etag[ETAG_LEN];
-    etag_get(etag, sizeof(etag));
+    portENTER_CRITICAL(&s_etag_mux);
+    bool fetched = s_fetched_etag[0] != '\0';
+    strlcpy(etag, fetched ? s_fetched_etag : s_etag, sizeof(etag));
+    portEXIT_CRITICAL(&s_etag_mux);
     if (!config->backend_url[0] || config->frame_id == 0) {
         err = ESP_ERR_INVALID_STATE;
     } else if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
@@ -2362,7 +2386,7 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
         fos_http_request_t request = {
             .url = url,
             .auth = auth,
-            .if_none_match = (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set)) ? etag : NULL,
+            .if_none_match = (fetched || (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set))) ? etag : NULL,
             .timeout_ms = 30000,
             .buffer_size = 4096,
         };
@@ -2393,14 +2417,17 @@ char *fos_scenes_backend_fetch(bool force, size_t *out_len, char *etag_out, size
             body = response.body;
             if (out_len) *out_len = response.body_len;
             if (etag_out && etag_len) strlcpy(etag_out, response.etag, etag_len);
+            fetched_set(response.etag);
         }
     }
+    if (s_fetch_lock) xSemaphoreGive(s_fetch_lock);
     if (out_err) *out_err = err;
     return body;
 }
 
 esp_err_t fos_scenes_take_backend_payload(char *body, size_t len, const char *etag)
 {
+    fetched_set("");
     if (body == NULL || len == 0) {
         free(body);
         return ESP_ERR_INVALID_ARG;
