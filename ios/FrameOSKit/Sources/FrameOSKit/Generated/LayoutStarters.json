@@ -11,7 +11,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#336698",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M21,3H3A2,2 0 0,0 1,5V19A2,2 0 0,0 3,21H21A2,2 0 0,0 23,19V5A2,2 0 0,0 21,3M21,19H3V5H13V9H21V19Z"
       },
       "fields": [
         {
@@ -197,7 +198,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#808080",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M6,2C4.89,2 4,2.89 4,4V12C4,13.11 4.89,14 6,14H18C19.11,14 20,13.11 20,12V4C20,2.89 19.11,2 18,2H6M6,4H18V12H6V4M4,15C2.89,15 2,15.89 2,17V20C2,21.11 2.89,22 4,22H20C21.11,22 22,21.11 22,20V17C22,15.89 21.11,15 20,15H4M8,17H20V20H8V17M9,17.75V19.25H13V17.75H9M15,17.75V19.25H19V17.75H15Z"
       },
       "fields": [
         {
@@ -371,7 +373,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#000000",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M13 19C13 19.34 13.04 19.67 13.09 20H4C2.9 20 2 19.11 2 18V6C2 4.89 2.89 4 4 4H10L12 6H20C21.1 6 22 6.89 22 8V13.81C21.12 13.3 20.1 13 19 13C15.69 13 13 15.69 13 19M23 17L20 14.5V16H16V18H20V19.5L23 17M18 18.5L15 21L18 23.5V22H22V20H18V18.5Z"
       },
       "fields": [
         {
@@ -507,7 +510,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#3b4cc0",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M6,2A4,4 0 0,1 10,6V8H14V6A4,4 0 0,1 18,2A4,4 0 0,1 22,6A4,4 0 0,1 18,10H16V14H18A4,4 0 0,1 22,18A4,4 0 0,1 18,22A4,4 0 0,1 14,18V16H10V18A4,4 0 0,1 6,22A4,4 0 0,1 2,18A4,4 0 0,1 6,14H8V10H6A4,4 0 0,1 2,6A4,4 0 0,1 6,2M16,18A2,2 0 0,0 18,20A2,2 0 0,0 20,18A2,2 0 0,0 18,16H16V18M14,10H10V14H14V10M6,16A2,2 0 0,0 4,18A2,2 0 0,0 6,20A2,2 0 0,0 8,18V16H6M8,6A2,2 0 0,0 6,4A2,2 0 0,0 4,6A2,2 0 0,0 6,8H8V6M18,8A2,2 0 0,0 20,6A2,2 0 0,0 18,4A2,2 0 0,0 16,6V8H18Z"
       },
       "fields": [
         {
@@ -697,7 +701,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#555555",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L6.04,7.5L12,10.85L17.96,7.5L12,4.15Z"
       },
       "fields": [
         {
@@ -875,7 +880,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M10,5V11H21V5M16,18H21V12H16M4,18H9V5H4M10,18H15V12H10V18Z"
       },
       "fields": [
         {
@@ -1013,7 +1019,8 @@
         "refreshInterval": 1,
         "backgroundColor": "#008080",
         "isLayout": true,
-        "desktop": true
+        "desktop": true,
+        "icon": "M18 18V20H4A2 2 0 0 1 2 18V8H4V18M22 6V14A2 2 0 0 1 20 16H8A2 2 0 0 1 6 14V6A2 2 0 0 1 8 4H20A2 2 0 0 1 22 6M20 6H8V14H20Z"
       },
       "fields": [
         {
@@ -1192,7 +1199,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M20 4H4A2 2 0 0 0 2 6V18A2 2 0 0 0 4 20H20A2 2 0 0 0 22 18V6A2 2 0 0 0 20 4M20 13H4V6H20Z"
       },
       "fields": [
         {
@@ -1311,7 +1319,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#ffffff",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M19 2L14 6.5V17.5L19 13V2M6.5 5C4.55 5 2.45 5.4 1 6.5V21.16C1 21.41 1.25 21.66 1.5 21.66C1.6 21.66 1.65 21.59 1.75 21.59C3.1 20.94 5.05 20.5 6.5 20.5C8.45 20.5 10.55 20.9 12 22C13.35 21.15 15.8 20.5 17.5 20.5C19.15 20.5 20.85 20.81 22.25 21.56C22.35 21.61 22.4 21.59 22.5 21.59C22.75 21.59 23 21.34 23 21.09V6.5C22.4 6.05 21.75 5.75 21 5.5V19C19.9 18.65 18.7 18.5 17.5 18.5C15.8 18.5 13.35 19.15 12 20V6.5C10.55 5.4 8.45 5 6.5 5Z"
       },
       "fields": [
         {
@@ -1473,7 +1482,8 @@
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#f5f0e1",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M20,11H4V8H20M20,15H13V13H20M20,19H13V17H20M11,19H4V13H11M20.33,4.67L18.67,3L17,4.67L15.33,3L13.67,4.67L12,3L10.33,4.67L8.67,3L7,4.67L5.33,3L3.67,4.67L2,3V19A2,2 0 0,0 4,21H20A2,2 0 0,0 22,19V3L20.33,4.67Z"
       },
       "fields": [
         {
@@ -1592,7 +1602,8 @@
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#d8d2c4",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M10,14.29L6.5,19H17.46L14.75,15.46L12.78,17.8L10,14.29M5,21V7H18.96V21H5M12,2.4L14.61,5.03H9.37L12,2.4M5,5.03C4.5,5.03 4,5.22 3.61,5.61C3.2,6 3,6.46 3,7V21C3,21.5 3.2,22 3.61,22.39C4,22.8 4.5,23 5,23H18.96C19.5,23 19.96,22.8 20.37,22.39C20.77,22 21,21.5 21,21V7C21,6.46 20.77,6 20.37,5.61C19.96,5.22 19.5,5.03 18.96,5.03H16L12,1L7.96,5.03H5Z"
       },
       "fields": [
         {
@@ -1727,7 +1738,8 @@
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#faf7ef",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M6,3H18A2,2 0 0,1 20,5V19A2,2 0 0,1 18,21H6A2,2 0 0,1 4,19V5A2,2 0 0,1 6,3M6,5V17H18V5H6Z"
       },
       "fields": [
         {
@@ -1854,7 +1866,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M20 4H4A2 2 0 0 0 2 6V18A2 2 0 0 0 4 20H20A2 2 0 0 0 22 18V6A2 2 0 0 0 20 4M20 18H9V6H20Z"
       },
       "fields": [
         {
@@ -1977,7 +1990,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#000000",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M21,17V5H3V17H21M21,3A2,2 0 0,1 23,5V17A2,2 0 0,1 21,19H16V21H8V19H3A2,2 0 0,1 1,17V5A2,2 0 0,1 3,3H21M5,7H11V11H5V7M5,13H11V15H5V13M13,7H19V9H13V7M13,11H19V15H13V11Z"
       },
       "fields": [
         {
@@ -2121,7 +2135,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0b0f0c",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M13,19V16H21V19H13M8.5,13L2.47,7H6.71L11.67,11.95C12.25,12.54 12.25,13.5 11.67,14.07L6.74,19H2.5L8.5,13Z"
       },
       "fields": [
         {
@@ -2232,7 +2247,8 @@
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
-        "isLayout": true
+        "isLayout": true,
+        "icon": "M4 20H20C21.11 20 22 19.11 22 18V6C22 4.89 21.11 4 20 4H4C2.9 4 2 4.89 2 6V18C2 19.11 2.9 20 4 20M4 11H20V18H4V11Z"
       },
       "fields": [
         {

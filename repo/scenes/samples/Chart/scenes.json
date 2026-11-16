@@ -6,7 +6,8 @@
       "refreshInterval": 300,
       "backgroundColor": "#000000",
       "execution": "interpreted",
-      "windowSize": "800x480"
+      "windowSize": "800x480",
+      "icon": "M22,21H2V3H4V19H6V10H10V19H12V6H16V19H18V14H22V21Z"
     },
     "fields": [
       {
