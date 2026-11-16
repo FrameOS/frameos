@@ -257,7 +257,9 @@ def test_a_forced_backend_sync_still_asks_for_a_patch():
     the frame holds no set at all."""
     fetch = _functions(_source("fos_scenes.c"))["fos_scenes_backend_fetch"]
     assert "bool holds_set = s_slot_count > 0 || s_loaded > 0;" in fetch
-    assert '.if_none_match = (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set)) ? etag : NULL' in fetch
+    # A set fetched and not taken yet is named whatever the rest says (one
+    # fetch at a time: test_esp32_backend_link.py).
+    assert '.if_none_match = (fetched || (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set))) ? etag : NULL' in fetch
     assert "/embedded/scenes?patch=1" in fetch
 
 
