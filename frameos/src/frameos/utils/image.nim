@@ -607,7 +607,9 @@ proc ensureFileReadBudget(path: string, fileSize: int64) =
   ## Refuses to buffer a whole compressed file when doing so would consume
   ## most of the remaining render memory.
   let available = availableRenderBytes()
-  if available > 0 and fileSize > available.int64 div 2:
+  # On an ESP32-class runtime 0 is nothing left under the reserve, not
+  # "unknown": a buffer there is an out-of-memory abort.
+  if (available > 0 or runsAsEmbedded()) and fileSize > available.int64 div 2:
     raise newException(PixieError,
       "Image file " & path & " is " & $(fileSize div 1024) &
       "K; only " & $(available div 1024) &
@@ -730,18 +732,27 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
     for divisor in [2, 4]:
       let tempWidth = max(1, target.width div divisor)
       let tempHeight = max(1, target.height div divisor)
-      when defined(frameosEmbedded) or defined(frameosWasm):
-        # An allocation the heap cannot satisfy is not a catchable failure on
-        # embedded — the runtime longjmp-aborts the whole render and leaks
-        # everything on the stack, and so does the preview under a simulated
-        # ceiling. Ask first: seen on an 8 MB board whose largest free block
-        # was 1.7 MB when the half-res rung wanted 1.9 MB.
-        let contiguous = availableRenderBytes()
-        if contiguous > 0 and tempWidth * tempHeight * 4 > contiguous:
-          continue
+      # In the target's own format: a rung into a 565 canvas holds 2 bytes a
+      # pixel, not the 4 of an RGBX copy it would only be packed back from.
+      let tempBytes =
+        if target.format == pfGray4: ((tempWidth + 1) div 2) * tempHeight
+        else: tempWidth * tempHeight * target.bytesPerPixel
+      # An allocation the heap cannot satisfy is not a catchable failure on
+      # an ESP32: the runtime longjmp-aborts the whole render and leaks every
+      # interpreter mid-call (the preview under a simulated ceiling refuses
+      # the same way). Ask first, and on an ESP32-class runtime a 0 from the
+      # largest-block answer is no room, never "unknown": read as unknown it
+      # let the half-res rung of a 1184x1450 photo ask for 1.7 MB in RGBX with
+      # 1.4 MB free in blocks of 750 KB on a reTerminal E1004, three aborts in
+      # a row and a restart (2026-11-16). What a render can rebuild goes
+      # before a rung is given up (roomForImage), and the interpreters that
+      # hold a UI's handlers too: a picture nobody can press beats an abort.
+      if not roomForImage(tempBytes) and
+          not (runsAsEmbedded() and releaseRenderMemory() and roomForImage(tempBytes)):
+        continue
       var temp: Image
       try:
-        temp = newImage(tempWidth, tempHeight)
+        temp = newImageLike(target, tempWidth, tempHeight)
       except CatchableError:
         continue
       # The temp allocation itself changed the heap; re-plan against it.
@@ -1927,8 +1938,7 @@ proc materializeImageSpool*(spool: ImageSpool): Image =
   if spool.isNil or spool.width <= 0 or spool.height <= 0:
     return nil
   let bytes = spool.byteSize()
-  let available = availableRenderBytes()
-  if available > 0 and bytes > available:
+  if not roomForImage(bytes):
     return nil
   var file: File
   if not file.open(spool.path):

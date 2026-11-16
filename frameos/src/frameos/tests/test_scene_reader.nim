@@ -257,3 +257,35 @@ suite "scene reader":
       discard parseInterpretedSceneInput("""{"id": "x"} {"id": "y"}""")
     expect CatchableError:
       discard parseInterpretedSceneInput("""{"id": "x"""")
+
+  test "reads a whole set in the firmware's buffer as the string reader does":
+    # An ESP32 hands a set over in its own buffer (fos_nim_load_scenes): read
+    # in place, a scene copied at a time, never a copy of the whole set.
+    var whole = "["
+    var sets: seq[string]
+    for (name, text) in corpus():
+      sets.add(text)
+      let body = text.strip()
+      let items = body[1 ..< body.len - 1].strip()
+      if items.len > 0:
+        if whole.len > 1:
+          whole.add(",\n ")
+        whole.add(items)
+    whole.add("]")
+    sets.add(whole)
+    let odd = """ [ null, 3, "x\"]", [{"id": "inner"}], {"id": "a", "name": "b]}\\", "nodes": []} ,{"id": "c"} ] """
+    sets.add(odd)
+    sets.add("[]")
+    for text in sets:
+      let byString = parseInterpretedSceneInputs(text)
+      let inPlace = parseInterpretedSceneInputs(text.cstring, text.len)
+      check sameScenes(inPlace, byString, text[0 ..< min(40, text.len)])
+    let read = parseInterpretedSceneInputs(odd.cstring, odd.len)
+    check read.len == 2
+    check read[0].name == "b]}\\"
+    check read[1].id.string == "c"
+    check parseInterpretedSceneInputs(cstring(nil), 0).len == 0
+    for broken in ["""{"id": "not a list"}""", "null", """[{"id": "x"}""", """[{"id": "x", """,
+        """[{"id": "x", "nodes": [}]""", """[{"id": "x"]""", "[,,]", """[{"id": "x", "name": "y]"""]:
+      expect CatchableError:
+        discard parseInterpretedSceneInputs(broken.cstring, broken.len)

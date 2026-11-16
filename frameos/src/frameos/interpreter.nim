@@ -2607,6 +2607,86 @@ proc parseInterpretedSceneInput*(data: string): seq[FrameSceneInput] =
   if i < data.len:
     raise newException(jsony.JsonError, "Unexpected text after the scene at offset " & $i)
 
+proc skipJsonText(data: ptr UncheckedArray[char], len: int, i: var int) =
+  ## Past one JSON value of `data`, from `i` (at its first character): an
+  ## object or a list to its closing bracket, a string to its closing quote,
+  ## anything else to the next delimiter. Brackets are counted, not checked:
+  ## each scene object found is read by the real reader, which refuses it.
+  case data[i]
+  of '{', '[':
+    var depth = 0
+    while i < len:
+      case data[i]
+      of '{', '[':
+        inc depth
+      of '}', ']':
+        dec depth
+        if depth == 0:
+          inc i
+          return
+      of '"':
+        inc i
+        while i < len and data[i] != '"':
+          if data[i] == '\\':
+            inc i
+          inc i
+      else:
+        discard
+      inc i
+    raise newException(jsony.JsonError, "Unexpected end of the scene list")
+  of '"':
+    inc i
+    while i < len and data[i] != '"':
+      if data[i] == '\\':
+        inc i
+      inc i
+    if i >= len:
+      raise newException(jsony.JsonError, "Unexpected end of the scene list")
+    inc i
+  else:
+    while i < len and data[i] notin {',', ']', '}', ' ', '\t', '\n', '\r'}:
+      inc i
+
+proc parseInterpretedSceneInputs*(data: cstring, len: int): seq[FrameSceneInput] =
+  ## scenes.json as the ESP32 firmware holds it, in its own buffer: read a
+  ## scene at a time, each copied alone. `$payload` for the whole list was one
+  ## more block the size of the set beside the firmware's own copy, at the
+  ## moment a set arrives: a reTerminal E1004 had 1.5 MB free in blocks of
+  ## 300 KB when a 378 KB set came, and the load aborted out of memory twice
+  ## (2026-11-16). The largest block this needs is the largest scene's text.
+  ## Anything but a list refuses the payload; items that are not objects are
+  ## skipped, as the string reader does.
+  if data.isNil or len <= 0:
+    return @[]
+  let text = cast[ptr UncheckedArray[char]](data)
+  template space() =
+    while i < len and text[i] in {' ', '\t', '\n', '\r'}:
+      inc i
+  var i = 0
+  space()
+  if i >= len or text[i] != '[':
+    raise newException(jsony.JsonError, "Expected [ at offset " & $i)
+  inc i
+  while true:
+    space()
+    if i >= len:
+      raise newException(jsony.JsonError, "Unexpected end of the scene list")
+    if text[i] == ']':
+      break
+    if text[i] == ',':
+      inc i
+      space()
+      if i >= len:
+        raise newException(jsony.JsonError, "Unexpected end of the scene list")
+    let start = i
+    skipJsonText(text, len, i)
+    if i == start:
+      raise newException(jsony.JsonError, "Unexpected " & text[i] & " at offset " & $i)
+    if text[start] == '{':
+      var scene = newString(i - start)
+      copyMem(addr scene[0], addr text[start], i - start)
+      result.add(parseInterpretedSceneInput(scene))
+
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()
   for scene in scenes:

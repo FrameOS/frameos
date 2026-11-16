@@ -156,6 +156,45 @@ And two things changed on the visibility side:
   baseline free, held by live scenes and fragmented to 328 KB blocks, and
   one scene load that did not fit restarted it. `fos_oom_policy.h`.)
 
+## A 1200x1600 board's aborts were two allocations (2026-11-16)
+
+The hardware bench's reTerminal E1004 (8 MB PSRAM, Spectra 6, a 3.84 MB
+RGB565 canvas and the 960 KB panel buffer claimed at boot) has ~2.4 MB free
+after its first render, and every other allocation shares it. Its aborts were
+two allocations, each fine in total memory and each one block too many:
+
+- **The degrade ladder's rung.** A photo decoded into its 1184x1450 box was
+  refused by the plan (free PSRAM 1.4 MB, under `EmbeddedReserveBytes`), and
+  the half-res rung asked for its temporary image: 592x725 in RGBX, the
+  1,716,804-byte request of every abort. Its check read the 0 that
+  `availableRenderBytes` answers under the reserve as "unknown" and allocated
+  anyway. The rung now asks `roomForImage` (an ESP32's 0 is no room; what a
+  render can rebuild goes first, and the interpreters holding a UI's handlers
+  before the rung is given up) and is made in the target's format, 858 KB for
+  the 565 canvas. The kept pictures, the evicting of idle interpreters, the
+  SD card's buffered read and the disk tier's read had the same "0 is unknown"
+  reading and have the same fix.
+- **The scene set.** A whole set from the backend (378 KB, 465 KB) was copied
+  out of the firmware's buffer into one Nim string (`$payload`) with 1.5 MB
+  free in blocks of 300 KB. `loadScenes(cstring)` reads it in place and copies
+  one scene at a time (`parseInterpretedSceneInputs(data, len)`), so the
+  largest block a set needs is its largest scene's text.
+
+The soak's "leak" (130 KB, 585 KB, 1.4 MB over three aborts in five seconds,
+then the restart) was those aborts: each abandons the JS interpreters it
+jumped out of (`jsDroppedBytes`, 420-550 KB a time: the photo app's, the
+scene's, the layout's) and whatever the decode and the download held. Nothing
+leaked outside an abort.
+
+Why a 1 MB block is the largest: the emergency reserve. It is armed at boot
+next to the canvas, but once a render spends it, it is armed again wherever
+TLSF finds 1 MB, which on this board is likely the one ~1.8 MB region left:
+the largest block sat at 1792 KB for most of the bench and at 736-835 KB
+(about 1.8 MB less the reserve) once the reserve had been spent and armed
+again, and right after an abort it is exactly 1,048,576 bytes, the reserve's
+own slot. Not changed here; the two allocations above no longer need the
+block it splits.
+
 ## Gradient fills paint in strips (2026-08-24)
 
 The 16 MB 13.3" (frame 529463b4, fw 2026.8.35) OOM-aborted every Weather
