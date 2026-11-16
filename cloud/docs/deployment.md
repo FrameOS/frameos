@@ -441,9 +441,12 @@ Consequences worth knowing:
   reply). The `version.json` next to the bundle carries the interpreter
   version, the release it belongs to and the commit.
 - **Working on the runtime itself**: `FRAMEOS_WASM_SOURCE=local pnpm dev`
-  (or `build`) installs the workspace package's own build instead —
-  `turbo run build:runtime --filter=frameos-wasm` after `nimble install -d`
-  in `frameos/`, needs nim + emscripten. Nothing else changes.
+  (or `build`) installs this checkout's build instead: what `build_wasm.sh`
+  last wrote to `frontend/public/frameos-wasm` (`turbo run build:runtime
+  --filter=frameos-wasm` after `nimble install -d` in `frameos/`, or the dev
+  stack's `wasm` pane; needs nim + emscripten), else the `frameos-wasm`
+  package's copy of it. Nothing else changes. The `playground` pane
+  (`cloud/docs/playground.md`) does this and installs each rebuild.
 - **A deploy in the window between a release's `chore: version X` commit and
   its assets landing** fails on the download with a message saying so; the
   release's own `workflow_run` deploy follows minutes later, or re-run the

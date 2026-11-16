@@ -7,6 +7,7 @@
   "scripts": {
     "predev": "node scripts/require-database-url.mjs development && node scripts/build-frames-app.mjs && node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/copy-font-assets.mjs && node scripts/build-playground-scenes.mjs && node scripts/generate-ai-context.mjs",
     "dev": "next dev --turbopack",
+    "dev:playground": "node scripts/playground-dev.mjs",
     "prebuild": "node scripts/copy-wasm-assets.mjs && node scripts/copy-editor-assets.mjs && node scripts/copy-frames-app-assets.mjs && node scripts/copy-install-script.mjs && node scripts/copy-font-assets.mjs && node scripts/build-playground-scenes.mjs && node scripts/generate-ai-context.mjs",
     "build": "next build",
     "prestart": "node scripts/require-database-url.mjs production",

@@ -34,7 +34,8 @@ export interface PlaygroundOptions {
   onStatus: (status: PlaygroundStatus) => void;
   fetchScenes?: () => Promise<FrameOSScene[]>;
   createPreview?: typeof createFrameOSPreview;
-  origin?: string;
+  /** The store the Scene store browses: the page's own origin by default. */
+  storeUrl?: string | undefined;
 }
 
 export interface Playground {
@@ -53,7 +54,7 @@ async function fetchPlaygroundScenes(): Promise<FrameOSScene[]> {
 
 export function startPlayground(options: PlaygroundOptions): Playground {
   const create = options.createPreview ?? createFrameOSPreview;
-  const origin = options.origin ?? window.location.origin;
+  const storeUrl = options.storeUrl ?? window.location.origin;
   let scenes: FrameOSScene[] | null = null;
   let preview: FrameOSPreview | null = null;
   let detachInput: Array<() => void> = [];
@@ -92,7 +93,7 @@ export function startPlayground(options: PlaygroundOptions): Playground {
       renderScale,
       sceneId: scenes[0]!.id,
       scenes,
-      storeUrl: origin,
+      storeUrl,
       width: size.width,
       windowed: true,
       workerUrl: playgroundWorkerUrl,

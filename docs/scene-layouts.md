@@ -165,8 +165,9 @@ browser when the page asks for it: `frameos_wasm_set_windowed`, the worker's
 `windowed`), a layout can be a desktop: every scene opened in a window or a tile
 of its own, all of them running, one with the focus. The samples `Windows 98`
 (overlapping windows that open at its "Window size", 800×480 unless set
-otherwise, filling the desktop where that does not fit, and where they were
-when their scene opens again; moved and sized with the mouse, snapped to a half or the
+otherwise, filling the desktop where that does not fit, on bare desktop where
+there is room (below), and where they were when their scene opens again; moved
+and sized with the mouse, snapped to a half or the
 whole desktop at its edges, a taskbar of what is open, a Start menu and desktop
 icons, Alt+Tab and Alt+F4, full screen with F11, a gear button at the left of a
 scene's title bar for its settings, Start's Control Panel) and `Tiling`
@@ -222,6 +223,26 @@ made smaller with its shape kept where it does not fit the desktop; set to "The
 whole desktop", a desktop still fills it with every scene. A window's place and
 size once moved are the desktop's own, as before. `Tiling` and `Commander` have
 no window sizes.
+**Where a new window opens.** Those five put a new window where it covers the
+least of the windows open: all of it on bare desktop where there is room, the
+highest such spot first, then the leftmost, a small gap from the others and from
+the desktop's edges. Where nothing is free, it keeps off the desktop's icons if
+it can (`Windows 98`'s down the left, `Classic Mac`'s down the right, and on
+`BeOS` the column left of the Deskbar that Tracker's icons move into as the
+Deskbar grows), then covers as little of the windows as it can, a title bar
+counting five times over, so no window opens right over another and every title
+bar stays in reach. The taskbar, the menu bars, the Deskbar's column, the Docks
+and `NeXTSTEP`'s main menu are not part of the desktop at all. The rule is one
+function, `freeSpot`, the same text in each layout (a scene cannot share code
+with another): it tries the desktop's corners and thirds, the spots beside each
+window and icon, and a title bar down from each window, a few hundred with a few
+windows open, each a sum over the boxes, and only when a window opens, so it
+costs an ESP32's JavaScript next to nothing.
+Windows that do not overlap are holes, each scene drawn straight into its window
+(below): a window opened clear of the others costs no picture of its own. A
+scene that had a window before opens where it was, as before. `Tiling` tiles,
+its tiles never over one another and a new one the next place in the
+arrangement, so it has nothing to choose; `Commander` has its two panels.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store,
 Files, the terminal and the frame's settings. The **Scene store**,
@@ -279,7 +300,8 @@ The runtime gives a layout three things and keeps no windows of its own:
   shares (0 to 1) of the whole picture (so a desktop whose bars are elsewhere
   puts a window where it was on the glass) with `max`, `snap` (`'l'` / `'r'` /
   null) and `min`. The desktops of windows open each scene there, kept on their
-  desktop, and cascade the ones it does not place; `Tiling` writes its tiles'
+  desktop, and put the ones it does not place where there is room, as any new
+  window (`freeSpot`, above); `Tiling` writes its tiles'
   boxes and, taking over, orders its tiles by where the windows were, left to
   right.
 

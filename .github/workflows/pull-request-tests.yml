@@ -276,6 +276,11 @@ jobs:
       - name: Play the 8-bit palette samples in 8 MB
         run: node frameos/tools/esp32_palette_scenes.mjs "$RUNNER_TEMP/frameos-wasm"
 
+      # The same build as the browser preview runs it: an `<img src>` page's
+      # pictures fetched in the render, one a render, and then no more renders.
+      - name: Draw <img src> pictures in the browser preview
+        run: node frameos/tools/wasm_img_src.mjs "$RUNNER_TEMP/frameos-wasm"
+
   visual-regression:
     name: Visual Regression Tests (${{ matrix.shard }}/2)
     needs: changes
