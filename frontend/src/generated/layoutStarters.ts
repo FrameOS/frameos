@@ -1161,7 +1161,8 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#555555",
-        "isLayout": true
+        "isLayout": true,
+        "desktop": true
       },
       "fields": [
         {
@@ -1754,7 +1755,8 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#000000",
-        "isLayout": true
+        "isLayout": true,
+        "desktop": true
       },
       "fields": [
         {
@@ -1889,7 +1891,8 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#808080",
-        "isLayout": true
+        "isLayout": true,
+        "desktop": true
       },
       "fields": [
         {
