@@ -4,7 +4,8 @@
 ## the JS app runtime, this pins that every scene draws a picture and moves,
 ## that its cells stay put while its colors move (what lets a panel rewrite
 ## only the cells whose color changed), that a seed is the same picture on
-## every frame type, the automatic cell size, a swipe, and the scene's wiring.
+## every frame type, the automatic cell size, a swipe, the footer and its
+## buttons, and the scene's wiring.
 
 import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
@@ -45,12 +46,19 @@ proc newCycling(id: string, width, height: int): Cycling =
   result.runtime = newJsAppRuntime(category = "data", outputType = "image",
     source = app["sources"]["app.tsx"].getStr(), sourceName = "app.tsx", sources = app["sources"])
 
+proc bare(config: JsonNode): JsonNode =
+  ## The scene alone unless a test asks for the footer: it has tests of its
+  ## own, and its frame rate makes two runs differ once a second has passed.
+  result = config.copy()
+  if not result.hasKey("footer"):
+    result["footer"] = %"false"
+
 proc render(c: Cycling, config: JsonNode): Image =
   let context = ExecutionContext(scene: c.scene, event: "render", payload: %*{},
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1,
     decodeTargetImage: nil, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
     wholeFrame: false)
-  c.runtime.get(c.owner, config, context).asImage()
+  c.runtime.get(c.owner, bare(config), context).asImage()
 
 proc intoPanel(c: Cycling, target: Image, config: JsonNode) =
   ## One render of an LCD's buffer, the way the ESP32's render does it.
@@ -59,18 +67,18 @@ proc intoPanel(c: Cycling, target: Image, config: JsonNode) =
     decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
     wholeFrame: true, backgroundPending: true, backgroundColor: rgba(0, 0, 0, 255).color)
   beginPanelFrame(target.bufferPointer, 1)
-  discard c.runtime.get(c.owner, config, context).asImage()
+  discard c.runtime.get(c.owner, bare(config), context).asImage()
   endPanelFrame()
 
 proc swipe(c: Cycling, config: JsonNode, direction: string, event = "swipe") =
   let context = ExecutionContext(scene: c.scene, event: event, payload: %*{"direction": direction},
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
-  discard c.runtime.run(c.owner, config, context, isEvent = true)
+  discard c.runtime.run(c.owner, bare(config), context, isEvent = true)
 
 proc send(c: Cycling, config: JsonNode, event: string, payload: JsonNode) =
   let context = ExecutionContext(scene: c.scene, event: event, payload: payload,
     hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
-  discard c.runtime.run(c.owner, config, context, isEvent = true)
+  discard c.runtime.run(c.owner, bare(config), context, isEvent = true)
 
 proc key(code: string, repeat = false): JsonNode =
   %*{"code": code, "key": code, "repeat": repeat, "shift": false, "ctrl": false, "alt": false, "meta": false}
@@ -116,9 +124,11 @@ suite "Color cycling":
     for edge in sample["edges"]:
       if edge["type"].getStr() == "codeNodeEdge" and edge["target"].getStr() == "cycling":
         bound.add edge["source"].getStr() & " -> " & edge["targetHandle"].getStr()
-    check bound == @["scene -> fieldInput/scene", "quality -> fieldInput/pixelSize"]
+    check bound == @["scene -> fieldInput/scene", "quality -> fieldInput/pixelSize", "footer -> fieldInput/footer"]
     for field in sample["fields"]:
       check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
+    check sample["fields"].filterIt(it["name"].getStr() == "footer")[0]["value"].getStr() == "true"
+    check app["fields"].filterIt(it["name"].getStr() == "footer")[0]["value"].getStr() == "true"
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
     check parseJson(app["sources"]["config.json"].getStr())["events"] ==
       %*["tap", "swipe", "back", "forward", "keyDown"]
@@ -163,6 +173,74 @@ suite "Color cycling":
     c.intoPanel(target, config)
     check target[120, 40] == rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 255, 255)))
     target[120, 40] = before[120, 40]
+    check changed(before, target) > 100 # the water fell
+
+  test "the footer: at the bottom in two colors that never cycle, over art it leaves as it found it":
+    # 480x480 at 2 px cells: a dot of the font is two cells, the bar 18.
+    let
+      plain = newCycling("tests/cycling-plain", 480, 480)
+      footed = newCycling("tests/cycling-footed", 480, 480)
+      base = %*{"scene": "falls", "pixelSize": "2", "seed": "3", "msPerRender": "300"}
+      shown = %*{"scene": "falls", "pixelSize": "2", "seed": "3", "msPerRender": "300", "footer": "true"}
+      bar = rgbx(0x14, 0x12, 0x1c, 255)
+      ink = rgbx(0xf4, 0xef, 0xe4, 255)
+    for i in 0 .. 3:
+      let
+        a = plain.render(base)
+        b = footed.render(shown)
+      var differ, other, inked = 0
+      for y in 0 ..< 480 - 36:
+        for x in 0 ..< 480:
+          if a[x, y] != b[x, y]: inc differ
+      for y in 480 - 36 ..< 480:
+        for x in 0 ..< 480:
+          let c = b[x, y]
+          if c == ink: inc inked
+          elif c != bar: inc other
+      check differ == 0
+      check other == 0
+      check inked > 3000
+    check same(plain.render(base), footed.render(base))
+
+  test "the footer's buttons: previous, next and hide; hidden, the bottom edge brings it back":
+    let c = newCycling("tests/cycling-footer", 480, 480)
+    var config = %*{"scene": "falls", "pixelSize": "2", "seed": "1", "footer": "true"}
+    discard c.render(config)
+    proc tap(x, y: int) =
+      c.send(config, "tap", %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch"})
+      # The scene's state nodes hand the app its new state, and it renders.
+      for key in ["scene", "footer"]:
+        if c.scene.state.hasKey(key):
+          config[key] = c.scene.state[key]
+      discard c.render(config)
+    tap(20, 460)
+    check c.scene.state{"scene"}.getStr() == "campfire" # Previous, round the end
+    tap(56, 460)
+    check c.scene.state{"scene"}.getStr() == "falls" # Next
+    tap(240, 460)
+    check c.scene.state{"scene"}.getStr() == "falls" # the bar between does nothing
+    check not c.scene.state.hasKey("footer")
+    tap(460, 460)
+    check c.scene.state{"footer"} == %false # Hide
+    tap(240, 200)
+    check c.scene.state{"scene"}.getStr() == "harbor" # a tap above is the next scene still
+    tap(240, 470)
+    check c.scene.state{"footer"} == %true # the bottom edge brings it back
+    check c.scene.state{"scene"}.getStr() == "harbor"
+
+  test "into an LCD's buffer the footer's cells are written once, not every frame":
+    forgetPanelFrames()
+    let c = newCycling("tests/cycling-panel", 480, 480)
+    let config = %*{"scene": "falls", "pixelSize": "2", "seed": "3", "msPerRender": "300", "footer": "true"}
+    let target = newImage565(480, 480)
+    c.intoPanel(target, config)
+    let before = copy(target)
+    let poked = rgb565ToRgbx(rgbxToRgb565(rgbx(255, 0, 255, 255)))
+    target[240, 477] = poked
+    for i in 0 ..< 3:
+      c.intoPanel(target, config)
+    check target[240, 477] == poked
+    target[240, 477] = before[240, 477]
     check changed(before, target) > 100 # the water fell
 
   test "a seed is the same picture, and a fixed step the same frames":

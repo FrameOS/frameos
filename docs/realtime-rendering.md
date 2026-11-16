@@ -22,10 +22,10 @@ The second yardstick is **Hellfire**, the first effect of the Pixel toys sample
 spread rule in the app's own JS and the cells returned in the **8-bit palette
 mode** (below), which writes the ones that changed straight into the panel's
 buffer. No SVG, JSX or canvas is involved, so what it measures is the
-interpreter's loop and the raw pixel path. It reads its own number off the panel: the scene's **FPS counter**
-field draws the renders a second the panel gets (simulation, blit and pacing
-included) in a corner, in the fire's own cells so that it does not slow what it
-measures, and its **Quality** field picks the cell size: automatic (4 px, 8 on
+interpreter's loop and the raw pixel path. It reads its own number off the panel: the scene's **footer**
+shows the renders a second the panel gets (simulation, blit and pacing
+included), in the fire's own cells so that it does not slow what it
+measures (below), and its **Quality** field picks the cell size: automatic (4 px, 8 on
 an ESP32), 8, 4 or 2 px. (It was a sample of its own until it joined Pixel toys.) The rule stays in JS on purpose: a native Doom spread
 in every runtime (`frameos.fire`, tried and taken out again) was one scene's
 inner loop as a core API, and the interpreter's cost is what the yardstick is
@@ -79,16 +79,38 @@ layers, no writes into a canvas (all three were built and taken out again).
 So an app can animate two ways. It can change cells, as the **Pixel toys** do
 (`repo/scenes/samples/Pixel toys`, each effect a component of one app: Hellfire
 in three palettes, fireworks, a fountain, a waterfall, a starfield,
-Matrix rain, ripples, blobs, a plasma and Life; a tap (on the ripples it
-drops a stone), a swipe, Enter, Space or the right arrow for the next, the
-left arrow for the one before). Or it can change only the palette, as 8-bit
-games did: the **Color cycling** sample (`repo/scenes/samples/Color cycling`,
-moved through the same way) draws each of its six scenes once, with
+Matrix rain, ripples, blobs, a plasma and Life; the footer's buttons, a tap
+(on the ripples it drops a stone), a swipe, Enter, Space or the right arrow
+for the next, the left arrow for the one before). Or it can change only the
+palette, as 8-bit games did: the **Color cycling** sample
+(`repo/scenes/samples/Color cycling`, moved through the same way) draws each
+of its six scenes once, with
 ranges of colors laid out the way things move (down the waterfall, out from
 where a drop lands, up a flame, along an aurora), and from then on rotates
 those ranges by the clock. A frame of it is a palette of 256 colors worked out
 in JS and the cells of the colors that moved; the cells that hold still, most
 of the picture, are never written again.
+
+Both have a **footer** (`footer.ts` in each app, a public `footer` state
+field, on by default): Previous and Next, the name of what shows, the frame
+rate the panel gets and Hide. Hidden, a tap along the bottom edge or the
+scene's settings bring it back. It is drawn in the picture's own cells with
+the 3x5 font, not as JSX: an `<img>` takes no pixel frame, and a node drawing
+over the pixels makes the render more than one node (`wholeFrame` in
+`scene_compiler.nim`), after which the panel gets every cell again each frame;
+the controls bar that was a layer of its own went with the layers in #666.
+The strip is drawn again only when its text changes (the rate, once a
+second) and copied over the bottom rows each frame, in the cells' own typed
+array kind (QuickJS copies one typed array into another with `memmove` only
+when the two are the same kind, element by element otherwise), and what it
+covered is put back before the next step, so the effect under it runs as
+before. Pixel toys draws it in each effect's darkest and brightest colors;
+Color cycling keeps the last two of its 256 for it. Rendered on a laptop into
+an RGB565 buffer at an ESP32's cell sizes (a frame's median, before / footer
+shown / hidden), it costs nothing measurable: Hellfire 124 / 118 / 126 µs,
+Matrix rain 66 / 64 / 65, Color cycling's waterfall 72 / 71 / 72. What it
+saves is writing: the cells under it stop changing, so a Hellfire frame writes
+~34,000 pixels instead of ~47,000 (the wasm runtime, 480x480).
 
 The Pixel toys use `frameos.ops` where the runtime has it (the trails' fade
 is one `map` over all the cells, the ripples' wave five passes) and keep their
