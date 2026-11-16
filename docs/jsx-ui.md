@@ -505,7 +505,9 @@ export const get = () => (
 - **A press is captured**, as a browser captures a touch: the innermost
   element with an `onPointerDown` or `onPointerMove` under the press gets
   that pointer's `pointerMove`s and its `pointerUp` until it lifts, inside
-  its box or not, and no other element hears them. `localX` / `localY` stay
+  its box or not, and no other element hears them (unless it scrolls, or a
+  box that scrolls is drawn over it: that box is dragged,
+  [Scrolling](#scrolling-and-clipping)). `localX` / `localY` stay
   from its corner, so they go negative or past its width: a slider clamps
   them. `localX / width` is how far along it the finger is, so a slider
   needs no width of its own and works on any frame. A move with no press goes to the element under it,
@@ -768,7 +770,10 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   along the way it scrolls, the content follows the finger and nothing is
   pressed; the swipe that ends the drag is the box's, not a handler's. A
   press on an element that takes it (`onPointerDown`, `onPointerMove`: a
-  slider) stays that element's. A wheel scrolls the box under the pointer
+  slider) stays that element's, unless the box that scrolls is that element
+  or drawn over it (inside it, or over it): a menu that takes its presses, so the
+  cover under it that closes it does not, still scrolls under a finger, and a
+  slider inside a list stays the slider's. A wheel scrolls the box under the pointer
   (72 px a notch, about three lines; a trackpad's fractions of a notch their
   share of it), and the box around it once that one is at its end. In a
   layout it is routed like the pointer: over a scene in a window it scrolls

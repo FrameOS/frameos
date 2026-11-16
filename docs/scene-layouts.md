@@ -200,9 +200,10 @@ them, Special cleans up the windows or goes full screen, and the Application
 menu at its right end hides the front window or the others and lists the
 windows open. On `NeXTSTEP` the main menu is a column at the top left that no
 window goes under (Info, Scenes, Windows, Services for the frame's own apps,
-Hide), the Dock down the right edge has every scene with an ellipsis under those
-not running and a clock tile for the frame's page, and a window put away is a
-miniwindow under the main menu. `Commander` is a desktop of two panels and no
+Hide), the Dock down the right edge has the scenes that have run there (a window
+open, or one closed) with an ellipsis under those not running now and a clock
+tile for the frame's page, and a window put away is a miniwindow under the main
+menu. `Commander` is a desktop of two panels and no
 windows: the scene with the focus in one, a second scene running in the other
 (two at most, which every host can run), a press or Tab giving the other the
 focus, and the function keys along the bottom (F5 swaps the panels, F6 shows the
@@ -249,6 +250,27 @@ Windows that do not overlap are holes, each scene drawn straight into its window
 scene that had a window before opens where it was, as before. `Tiling` tiles,
 its tiles never over one another and a new one the next place in the
 arrangement, so it has nothing to choose; `Commander` has its two panels.
+**Long lists of scenes.** Each desktop's list of the frame's scenes (`Windows
+98`'s Start, the Scenes menus of `macOS`, `Classic Mac` and `NeXTSTEP`, `BeOS`'s
+Be menu, `Tiling`'s +) scrolls where it is longer than the screen, under a
+finger as under a wheel, and so does `BeOS`'s Deskbar with many windows open.
+The lists go by category: a scene's `settings.category` reaches a layout as
+`category` on its entry of `app.frame.scenes`, and the runtime gives the
+categories it knows, in order, as `app.frame.categories` (`{id, name}`); each
+list has a heading over each category with scenes, under its name, in that
+order, and those with none or one not in it last as Other. Where the runtime
+gives no categories (an older one) or no scene has one, the list is as it
+always was. That is `grouped`, one more function the same text in each of those
+six layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
+`docs/scene-icons.md`) is drawn, in the color of the text around it, wherever a
+desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,
+the `macOS` Dock and Scenes menu, `BeOS`'s Be menu, Deskbar and Tracker's icons,
+the `Classic Mac` menus and icons, `NeXTSTEP`'s Dock and miniwindows, `Tiling`'s
++. A scene without one gets the desktop's own, as before, and the scene store,
+Files and the terminal keep theirs unless they have one. That is `ownIcon`, the
+same text in the six. `Commander` draws no icons. Launchpad and the Scenes icons open the
+frame's own scene list (the scene switcher, `docs/scene-switcher.md`), which is
+the runtime's, not a layout's.
 The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store,
 Files, the terminal and the frame's settings. The **Scene store**,

@@ -618,6 +618,51 @@ suite "jsx fields":
     check ui.scene.state{"picked"}.getInt(-1) == 1
     check image[160, 45] == rgbx(0x22, 0xc5, 0x5e, 255) # row 1 is green
 
+const menuForm = """
+let picked = -1
+let closed = 0
+const rows = Array.from({ length: 12 }, (_, i) => i)
+export function get(app) {
+  return (
+    <div className="relative w-full h-full bg-white">
+      <div className="absolute inset-0" onPointerDown={() => { closed++; frameos.setState('closed', closed) }} />
+      <div className="absolute left-[40px] top-[20px] w-[200px] flex flex-col bg-slate-100" onPointerDown={OUTER}>
+        <div className="flex flex-col max-h-[200px] overflow-y-auto" onPointerDown={INNER}>
+          {rows.map((i) => <div className={`shrink-0 h-10 ${i % 2 ? 'bg-green-500' : 'bg-red-500'}`}
+            onClick={() => { picked = i; frameos.setState('picked', i) }} />)}
+        </div>
+      </div>
+    </div>
+  )
+}
+"""
+
+suite "jsx menus":
+  test "a menu that takes its presses, over a cover that closes it, still scrolls under a finger":
+    # The press taken around the list, or by the list itself.
+    for (n, outer, inner) in [(1, "() => {}", "undefined"), (2, "undefined", "() => {}")]:
+      let id = "tests/jsx-menu-scroll-" & $n
+      let ui = newUi(menuForm.replace("OUTER", outer).replace("INNER", inner), id, 320, 240)
+      discard ui.render()
+      # A press on row 2 (y 20 + 2 * 40 + 20), dragged up 60 px: the list scrolls,
+      # and the cover under the menu hears nothing.
+      discard dispatchUiEvent(id, "pointerDown", at(140, 120, "touch"))
+      check dispatchUiEvent(id, "pointerMove", at(140, 60, "touch"))
+      discard dispatchUiEvent(id, "pointerUp", at(140, 60, "touch"))
+      check ui.scene.state{"closed"}.isNil
+      let target = uiTarget(id, 1, create = false)
+      var scrolledBy = 0'f32
+      for (_, _, y) in target.input.scrolls:
+        scrolledBy = max(scrolledBy, y)
+      check scrolledBy > 40 and scrolledBy < 70
+      discard ui.render()
+      # y 30 is content y 10 + the scroll: row 1 now, not row 0.
+      check dispatchUiEvent(id, "tap", at(140, 30, "touch"))
+      check ui.scene.state{"picked"}.getInt(-1) == 1
+      # Around the menu, a press is the cover's.
+      discard dispatchUiEvent(id, "pointerDown", at(300, 200, "touch"))
+      check ui.scene.state{"closed"}.getInt() == 1
+
 const notesForm = """
 let notes = 'one\ntwo\nthree\nfour\nfive\nsix'
 export function get(app) {

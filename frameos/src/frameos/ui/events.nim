@@ -1046,30 +1046,35 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
               target.glideW = r.w
               target.glideAt = getMonoTime()
               break
-        # The innermost element that takes a press holds the pointer; else
-        # the innermost box that scrolls may be dragged.
+        # The innermost element that takes a press holds the pointer, unless
+        # the innermost box that scrolls is that element or drawn over it
+        # (inside it, or over it): then that box may be dragged. A menu takes
+        # its presses, so the cover under it that closes it does not, and its
+        # list still scrolls under a finger; a slider inside a list is drawn
+        # over the list and stays the slider's.
         target.release(pointer)
         target.dragged = false
+        var takes, box = -1
         for i in countdown(target.regions.high, 0):
           let r = target.regions[i]
           if r.overScene(lx, ly):
             break
-          if (r.handlers[uePointerDown] > 0 or r.handlers[uePointerMove] > 0) and r.inside(lx, ly):
-            target.captures.add((pointer, r.key))
+          if takes < 0 and (r.handlers[uePointerDown] > 0 or r.handlers[uePointerMove] > 0) and r.inside(lx, ly):
+            takes = i
+          if box < 0 and r.scrolls and r.inside(lx, ly):
+            box = i
+          if takes >= 0 and box >= 0:
             break
-        if target.captureOf(pointer) < 0:
-          for i in countdown(target.regions.high, 0):
-            let r = target.regions[i]
-            if r.overScene(lx, ly):
-              break
-            if r.scrolls and r.inside(lx, ly):
-              (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
-              target.dragKey = r.key
-              target.dragPointer = pointer
-              target.dragX = x
-              target.dragY = y
-              target.dragging = false
-              break
+        if takes >= 0 and box < takes:
+          target.captures.add((pointer, target.regions[takes].key))
+        elif box >= 0:
+          let r = target.regions[box]
+          (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
+          target.dragKey = r.key
+          target.dragPointer = pointer
+          target.dragX = x
+          target.dragY = y
+          target.dragging = false
     when not defined(frameosEmbedded):
       if event == "wheel" and placed:
         for i in countdown(target.regions.high, 0):
