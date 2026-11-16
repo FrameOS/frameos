@@ -121,6 +121,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
         con.command('set debug 1', 1.5)
     intervals = {s.get('id'): s.get('refreshInterval') for s in ((st.get('scenes') or {}).get('scenes') or [])}
     scenes = [s for s in scene_list(con) if not s.get('isLayout')]
+    scene_filter = scene_filter or getattr(ctx, 'scene_filter', None)
     if scene_filter:
         scenes = [s for s in scenes if s['id'] in scene_filter or s.get('name') in scene_filter]
     if ctx.quick:
@@ -530,6 +531,13 @@ def _push_and_wait(ctx, frame, scenes, expect_layout=None, timeout=300):
     # Taken: `scenes:load ... runtime-loaded` from the backend (a patch or the whole list).
     _, line, got = con.wait_for(lambda x: ('"scenes:load"' in x and '"origin":"backend"' in x) or
                                 ('"scenes:sync"' in x and '"status":"error"' in x and 'patch-refused' not in x and 'connect' not in x), timeout)
+    if line and '"status":"error"' in line:
+        # A second fetch can fail while the first payload is applying (a board
+        # short of memory): the push took if a backend load follows.
+        _, ok_line, more_lines = con.wait_for(lambda x: '"scenes:load"' in x and '"origin":"backend"' in x and '"status":"ok"' in x, 20)
+        got += more_lines
+        if ok_line:
+            line = ok_line
     took = round((time.time() - t) * 1000) if line and '"status":"ok"' in line else None
     _, _, more = wait_render(con, render_timeout(frame))
     notes = [x for _, x in got + more if '"scenes:patch"' in x and '"status":"error"' in x]

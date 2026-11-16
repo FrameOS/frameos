@@ -102,4 +102,5 @@ def stats(values):
     if not v:
         return None
     n = len(v)
-    return {'n': n, 'min': v[0], 'median': v[n // 2], 'mean': round(sum(v) / n, 1), 'max': v[-1]}
+    median = v[n // 2] if n % 2 else (v[n // 2 - 1] + v[n // 2]) / 2
+    return {'n': n, 'min': v[0], 'median': median, 'mean': round(sum(v) / n, 1), 'max': v[-1]}

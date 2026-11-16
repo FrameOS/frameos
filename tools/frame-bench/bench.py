@@ -91,6 +91,7 @@ def cmd_run(args):
     ctx = Ctx(out_dir, backend=be if be.token else None, warm=args.warm, passive=args.passive, quick=args.quick,
               host_ip=args.host_ip or os.environ.get('FRAMEOS_BENCH_HOST_IP'))
     ctx.soak_rounds = args.soak_rounds
+    ctx.scene_filter = args.scenes.split('|') if args.scenes else None
     results = []
     threads = []
     for f in frames:
@@ -134,6 +135,7 @@ def main():
     r.add_argument('--suites', default='default', help=f"comma list of {','.join(SUITES)} (default: per frame kind)")
     r.add_argument('--warm', type=int, default=3)
     r.add_argument('--passive', type=float, default=8.0, help='seconds to watch each scene on an LCD')
+    r.add_argument('--scenes', help='scenes suite: only these scene names or ids, separated by |')
     r.add_argument('--soak-rounds', type=int, default=5, help='rounds of every scene in the soak')
     r.add_argument('--quick', action='store_true')
     r.add_argument('--rediscover', action='store_true')
