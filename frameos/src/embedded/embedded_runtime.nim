@@ -607,6 +607,39 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
 
 # ------------------------------------------------------------------- scenes
 
+proc desktopKeepsScenes(): bool =
+  ## A desktop (docs/scene-layouts.md "Windows"): the scene in front stays
+  ## running in its window when another is read off flash.
+  host.windowed and (host.windows.len > 0 or
+    not host.scene.isNil and host.keepsInWindow(host.scene.id))
+
+proc makeRoomForScenes*(whole: bool) =
+  ## Before a scene comes off flash or a whole set arrives, and before its
+  ## text is even copied: the scene it replaces goes first, with its QuickJS
+  ## context, its app instances and its kept interpreters, and pixie's kept
+  ## masks with it. Built first and dropped after, the old and the new were in
+  ## memory together, and a switch storm on the reTerminal E1003 (8 MB PSRAM,
+  ## 1.65 MB free in blocks of 328 KB) aborted a load out of memory that the
+  ## old scene's room would have held (2026-11-15). The scene cache stays
+  ## until the new one is built, so a payload that does not parse leaves the
+  ## old scene to be built again by the next render.
+  ##
+  ## `whole`: a whole set. A desktop's windows (where they were) go to the
+  ## layout's next instance, and the scenes in them go: they may be changed.
+  ## One scene on a desktop keeps the scene in front in its window, so
+  ## nothing goes.
+  if whole:
+    host.carryDesktop()
+    host.dropScene()
+    host.dropWindows()
+    dropParkedLayout()
+  elif not desktopKeepsScenes():
+    host.dropScene()
+  else:
+    return
+  clearCoverageCache()
+  when defined(memProbe): memProbe("  makeRoomForScenes: old scene dropped")
+
 proc loadScenes*(payload: string): int =
   when defined(memProbe): memProbe("  >>> loadScenes payload=" & $payload.len & "B")
   ## Parse and install interpreted scenes from the backend's JSON format
@@ -619,20 +652,13 @@ proc loadScenes*(payload: string): int =
     return 0
 
   let firstId = some(inputs[0].id)
+  # Normally done already (makeRoomForScenes, before the payload was even
+  # copied); here for a caller that did not.
+  makeRoomForScenes(whole = true)
   let newScenes = buildInterpretedScenes(inputs)
   if newScenes.len == 0:
     log("loadScenes: no scenes survived parsing")
     return 0
-
-  # Tear down the old scene before swapping the registry so its QuickJS
-  # context and app instances are reclaimed; the layout it wore may be one of
-  # the new scenes, changed. A desktop's windows (where they were) go to the
-  # layout's next instance; the scenes in them go.
-  host.carryDesktop()
-  host.dropScene()
-  host.dropWindows()
-  dropParkedLayout()
-  when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
@@ -735,7 +761,7 @@ proc loadScene*(payload: string, alongside = false): bool =
   ## Returns false and leaves the runtime scene-less on a bad payload — the
   ## caller (fos_scenes.c) logs and keeps the previous file on flash, so a
   ## corrupt scene cannot take the frame down permanently.
-  let inputs = parseInterpretedSceneInputs("[" & payload & "]")
+  let inputs = parseInterpretedSceneInput(payload)
   if inputs.len == 0:
     log("loadScene: payload contained no scene")
     return false
@@ -745,7 +771,7 @@ proc loadScene*(payload: string, alongside = false): bool =
     log("loadScene: \"" & inputs[0].id.string & "\" resident alongside")
     return true
   let sceneId = inputs[0].id
-  if host.windowed and (host.windows.len > 0 or not host.scene.isNil and host.keepsInWindow(host.scene.id)):
+  if desktopKeepsScenes():
     # A desktop (docs/scene-layouts.md "Windows"): the scene in front stays
     # running in its window, and the one read off flash starts beside it.
     # What no window runs leaves the cache, as a switch's whole-cache
@@ -761,13 +787,11 @@ proc loadScene*(payload: string, alongside = false): bool =
       defaultSceneId = some(sceneId)
     log(&"loadScene: \"{sceneId.string}\" in front, {host.windows.len} more in windows")
     return true
+  makeRoomForScenes(whole = false) # normally done already, before the copy
   let newScenes = buildInterpretedScenes(inputs)
   if newScenes.len == 0:
     log("loadScene: scene did not survive parsing")
     return false
-
-  host.dropScene()
-  when defined(memProbe): memProbe("  loadScene: old scene dropped")
 
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")

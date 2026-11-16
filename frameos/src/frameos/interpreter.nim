@@ -2546,6 +2546,19 @@ proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
     if openValue(data, i, '{'):
       result.add(readScene(data, i))
 
+proc parseInterpretedSceneInput*(data: string): seq[FrameSceneInput] =
+  ## ONE scene object, as an ESP32 keeps each scene in a file of its own:
+  ## read in place, where wrapping it in brackets for the list reader was a
+  ## second copy of the whole scene in one block, at the moment a scene
+  ## switch has the least room (the reTerminal E1003's switch storm,
+  ## 2026-11-15). Anything but an object is no scene.
+  var i = 0
+  if openValue(data, i, '{'):
+    result.add(readScene(data, i))
+  eatSpace(data, i)
+  if i < data.len:
+    raise newException(jsony.JsonError, "Unexpected text after the scene at offset " & $i)
+
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()
   for scene in scenes:

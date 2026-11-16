@@ -644,6 +644,8 @@ proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Install interpreted scenes from JSON (backend scenes.json format).
   ## Returns the number of scenes loaded, 0 on bad payload.
   try:
+    # The scenes it replaces go before the payload is copied (makeRoomForScenes).
+    makeRoomForScenes(whole = true)
     result = loadScenes($payload).cint
     recoverEmergencyReserve("scene load")
   except Defect as e:
@@ -700,6 +702,7 @@ proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
   try:
     if payload == nil:
       return 0
+    makeRoomForScenes(whole = false)
     result = (if loadScene($payload): 1 else: 0).cint
     recoverEmergencyReserve("scene load")
   except Defect as e:

@@ -644,7 +644,7 @@ patched system file. What changes:
 - A Defect in a node fails the whole render (and leaks what that render held,
   as an OOM abort does) instead of failing the node: the interpreter's
   per-node `except Exception` no longer sees Defects. Four in a row restart
-  the frame (`FOS_NIM_OOM_ABORT_RESTART_STREAK`).
+  the frame (`FOS_OOM_RESTART_STREAK`, `fos_oom_policy.h`).
 - A Defect in a Nim bridge function called from JS no longer becomes a JS
   `RangeError` / `Error` (`burrito.nim`'s `except RangeDefect`); it aborts the
   render. The bridge's number conversions would want clamping first.

@@ -233,3 +233,27 @@ suite "scene reader":
         """[{"id": "x"""", """[{"id": "x"]""", """[{"id": "x", "fields": [{"options": [1, }]}]"""]:
       expect CatchableError:
         discard parseInterpretedSceneInputs(broken)
+
+  test "reads one scene object as the list reader reads it in brackets":
+    # An ESP32's scene file, read without a bracketed copy (loadScene).
+    for (name, text) in corpus():
+      let listed = parseInterpretedSceneInputs(text)
+      if listed.len != 1:
+        continue
+      let body = text.strip()
+      let one = body[1 ..< body.len - 1]
+      if not one.strip().startsWith("{"):
+        continue
+      let alone = parseInterpretedSceneInput(one)
+      check alone.len == 1
+      if alone.len == 1:
+        check alone[0].id == listed[0].id
+        check alone[0].nodes.len == listed[0].nodes.len
+        check alone[0].edges.len == listed[0].edges.len
+        check alone[0].fields.len == listed[0].fields.len
+    check parseInterpretedSceneInput("""  {"id": "x"}  """)[0].id.string == "x"
+    check parseInterpretedSceneInput("null").len == 0
+    expect CatchableError:
+      discard parseInterpretedSceneInput("""{"id": "x"} {"id": "y"}""")
+    expect CatchableError:
+      discard parseInterpretedSceneInput("""{"id": "x"""")
