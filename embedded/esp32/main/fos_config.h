@@ -349,6 +349,8 @@ const char *fos_config_cpu_mode_name(uint8_t mode);
 /* The clock `mode` runs the chip at, in MHz: auto picks 240 for a board
  * whose screen is watched (an RGB LCD, a touch panel) and 160 otherwise. */
 int fos_config_cpu_mhz(uint8_t mode, bool lcd, bool touch);
+/* The clock a render runs at: auto renders at 240 even where it waits at 160. */
+int fos_config_render_mhz(uint8_t mode, bool lcd, bool touch);
 /* Pins the firmware refuses to hand to a button, the battery ADC read or the
  * divider's enable switch: outside the chip's GPIO range, an SPI flash /
  * PSRAM pad (an input pull-up or an output level on one of those wedges the

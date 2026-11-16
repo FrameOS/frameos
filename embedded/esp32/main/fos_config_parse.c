@@ -351,6 +351,17 @@ int fos_config_cpu_mhz(uint8_t mode, bool lcd, bool touch)
     return lcd || touch ? 240 : 160;
 }
 
+int fos_config_render_mhz(uint8_t mode, bool lcd, bool touch)
+{
+    /* auto keeps an e-paper frame at 160 MHz for its long refresh waits, but
+     * its renders are not "a few seconds" everywhere: 30-150 s on a 13.3"
+     * Spectra (reTerminal E1004), and a third shorter at 240 (the hardware
+     * bench, 2026-11-15). So auto renders at 240 and waits at 160; an explicit
+     * battery stays at 160 throughout. */
+    if (mode != FOS_CPU_PERFORMANCE && mode != FOS_CPU_BATTERY) return 240;
+    return fos_config_cpu_mhz(mode, lcd, touch);
+}
+
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
 {
     if (!spec || !spec[0]) {
