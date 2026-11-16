@@ -163,11 +163,10 @@ proc renderAt*(self: App, context: ExecutionContext, image: Image, now: float) =
     if sourceImage.isNil:
       raise newException(Exception, "No image provided.")
     if sourceImage.bufferPointer == image.bufferPointer:
-      # The producer drew straight into this canvas: a decode into it, or on
-      # a device an error frame (renderErrorForContext), which the node cache
-      # then hands back as a new view each pass. Zooming the canvas into
-      # itself drew garbage, at 2.25 s a frame on the SenseCAP Indicator's
-      # 565 canvas (2026-11-15).
+      # The producer drew straight into this canvas (a decode into it), and
+      # what it drew is the picture. Zooming the canvas into itself drew
+      # garbage, at 2.25 s a frame on the SenseCAP Indicator's 565 canvas
+      # (2026-11-15); the node cache never keeps such a value (aliasesCanvas).
       return
     let durationSeconds = if self.appConfig.durationSeconds > 0:
       self.appConfig.durationSeconds else: 60.0

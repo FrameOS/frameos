@@ -77,6 +77,17 @@ const FlowAppsSettlingBackground = ["render/svg", "render/split"]
   ## twice per render; on an LCD it also repaints only what changed
   ## (utils/svg_frames.nim), which a fill ahead of it would have wiped.
 
+proc aliasesCanvas(image: Image, context: ExecutionContext): bool =
+  ## Whether `image` addresses the live canvas's pixels (the canvas or a view
+  ## of it, in any format): never a value the node cache may keep, whatever
+  ## its size. A hit would hand the next pass its own canvas as the "photo",
+  ## since overwritten: a localImage error frame drawn into the canvas was
+  ## kept under the 1 MB limit, and render/zoomPan zoomed the canvas into
+  ## itself, then (refusing that, #797) left the frame black (2026-11-15).
+  not image.isNil and image.width > 0 and image.height > 0 and
+    context != nil and context.hasImage and not context.image.isNil and
+    image.bufferPointer == context.image.bufferPointer
+
 proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): bool =
   ## An image over the memory cache's limit is still kept while the frame
   ## affords it easily: with it held (it is allocated already), render
@@ -87,11 +98,8 @@ proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): 
   ## SenseCAP Indicator (2026-10-25). The bar was 2 MB of headroom at first,
   ## and that board's 1 MB photo left 2.03 MB: for the first minute after a
   ## boot a few KB of TLS buffers put it under, and the slideshow decoded at
-  ## 0.2 fps until they went (2026-10-26). The live canvas is never kept: a
-  ## hit would redraw it onto itself.
-  if context != nil and context.hasImage and not context.image.isNil and
-      image.bufferPointer == context.image.bufferPointer:
-    return false
+  ## 0.2 fps until they went (2026-10-26). The live canvas is never kept
+  ## (aliasesCanvas, cacheStore).
   when defined(testing):
     # A host's headroom is its own RAM; a test says what the frame has.
     availableRenderBytesOverride >= memoryLimit
@@ -121,8 +129,7 @@ proc keepsBoundedImage(image: Image, nodeId: NodeId, context: ExecutionContext):
   # Cover-sized at most: one axis within the box (boundedDecodeDims).
   if image.width > boundWidth and image.height > boundHeight:
     return false
-  if context.hasImage and not context.image.isNil and
-      image.bufferPointer == context.image.bufferPointer:
+  if aliasesCanvas(image, context):
     return false
   when defined(testing):
     availableRenderBytesOverride >= KeptBoundedImageFloorBytes
@@ -199,8 +206,7 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
 
   if imageSpillDisabled:
     return refuse("spill disabled after an earlier storage failure")
-  if context != nil and context.hasImage and not context.image.isNil and
-      image.bufferPointer == context.image.bufferPointer:
+  if aliasesCanvas(image, context):
     return refuse("value aliases the live canvas", debugOnly = true)
   # The disk tier exists for canvas-shaped values. A native-resolution decode
   # that some unfused shape materialized (tens of MB) would cost a huge write
@@ -372,24 +378,26 @@ proc cacheStore(scene: InterpretedFrameScene, nodeId: NodeId, context: Execution
   var toStore = fresh
   var held = true
   let memoryLimit = cachedImageMemoryLimit()
-  if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
-      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context):
+  if fresh.kind == fkImage and aliasesCanvas(fresh.img, context):
+    # The live canvas, at any size: in no tier (aliasesCanvas).
+    held = false
+  elif memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
+      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context) and
+      not keepsBoundedImage(fresh.img, nodeId, context):
     # Never retain a frame-sized image in memory on embedded: the next render
-    # needs a second canvas and runs the module out of memory, and an alias
-    # of the live canvas would redraw the since-overwritten canvas onto
-    # itself. The disk tier takes what memory refuses; with nothing to spill
-    # to, nothing is stored and the producer runs again next time.
-    if not keepsBoundedImage(fresh.img, nodeId, context):
-      let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
-      if spool.isNil:
-        # Nothing held, but the keys are, so the next miss knows it repeats
-        # this value (cacheLookup's remake). A remade value keeps the time
-        # the first one was made: the interval still ends when it would.
-        if context.remakingCachedValue:
-          return
-        held = false
-      else:
-        toStore = VImageSpool(spool)
+    # needs a second canvas and runs the module out of memory. The disk tier
+    # takes what memory refuses; with nothing to spill to, nothing is stored
+    # and the producer runs again next time.
+    let spool = trySpillCachedImage(scene, nodeId, fresh.img, context)
+    if spool.isNil:
+      held = false
+    else:
+      toStore = VImageSpool(spool)
+  if not held and context.remakingCachedValue:
+    # Nothing held, but the keys are, so the next miss knows it repeats this
+    # value (cacheLookup's remake). A remade value keeps the time the first
+    # one was made: the interval still ends when it would.
+    return
   if held:
     scene.cacheValues[nodeId] = toStore
   else:

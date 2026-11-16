@@ -116,10 +116,8 @@ proc error*(self: App, context: ExecutionContext, message: string,
     # allocate a second full-size image on memory-tight devices.
     renderErrorInto(target, target.width, target.height, message)
     return target
-  # No target taken (a consumer that pans or zooms the photo): on a device,
-  # still the canvas. A full-size RGBX error frame was 8.7 MB on a reTerminal
-  # E1003's 1848x1179 window, an allocation that aborted the render
-  # (2026-11-10).
+  # No target taken (a consumer that pans or zooms the photo): a standalone
+  # frame, small on a device, that the node cache can keep.
   self.renderErrorForContext(context, message)
 
 proc init*(self: App) =
