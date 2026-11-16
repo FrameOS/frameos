@@ -32,7 +32,6 @@
 #include "fos_store_scan.h"
 #include "fos_slot_cache.h"
 #include "fos_spiffs_footprint.h"
-#include "fos_store_scan.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
