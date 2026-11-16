@@ -106,18 +106,23 @@ function play(name, sceneId, state) {
   let early = 0
   let before = picture()
   let still = 0
+  const changes = []
   for (let i = 0; i < FRAMES; i += 1) {
     times.push(render(`${name}, frame ${i + 1}`))
     if (i === 9) early = memoryUsed()
     const now = picture()
-    if (i > 0 && changedPixels(before, now) === 0) still += 1
+    changes.push(changedPixels(before, now))
+    if (i > 0 && changes[i] === 0) still += 1
     before = now
   }
   // Grown by more than a frame buffer's worth while it ran: something is kept
   // every frame.
   const grown = memoryUsed() - early
   if (grown > WIDTH * HEIGHT * 2) fail(`${name}: memory grew ${grown} bytes between frame 10 and ${FRAMES}`)
-  if (still > FRAMES / 4) fail(`${name}: ${still} of ${FRAMES} frames did not move`)
+  if (still > FRAMES / 4) {
+    fail(`${name}: ${still} of ${FRAMES} frames did not move (pixels changed each frame: ${changes.join(' ')}; ` +
+      `ms: ${times.map((t) => t.toFixed(1)).join(' ')}; state ${JSON.stringify(stateNow())})`)
+  }
   const first = median(times.slice(5, 15))
   const last = median(times.slice(-10))
   if (last > first * 3 + 5) fail(`${name}: frames slowed from ${first.toFixed(1)} to ${last.toFixed(1)} ms`)
