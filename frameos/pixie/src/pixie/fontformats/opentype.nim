@@ -1061,8 +1061,8 @@ const cffStandardStrings = [
 ]
 
 # The 391 names as one string and where each starts: a const array of strings
-# is a literal and a string header per name in the binary (9.4 KB on the
-# ESP32-S3), this is 3.4 KB. Only the packing below reads the array.
+# is a literal and a string header per name in the binary, and this is 4.8 KB
+# less of the ESP32-S3 image. Only the packing below reads the array.
 proc packCffStandardStrings(): (string, array[cffStandardStrings.len + 1, uint16]) =
   for i, name in cffStandardStrings:
     result[1][i] = result[0].len.uint16
