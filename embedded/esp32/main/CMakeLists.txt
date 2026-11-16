@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "fos_cpu.c"
         "fos_board.c"
         "fos_buttons.c"
         "fos_button_timing.c"

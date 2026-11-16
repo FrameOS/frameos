@@ -182,6 +182,14 @@ static void test_cpu_mode(void)
     CHECK(fos_config_cpu_mhz(FOS_CPU_BATTERY, true, true) == 160, "battery on an LCD");
     CHECK(fos_config_cpu_mhz(FOS_CPU_PERFORMANCE, false, false) == 240, "performance on e-paper");
     CHECK(fos_config_cpu_mhz(200, false, false) == 160, "a stray stored value reads as auto");
+    /* The render's clock: auto renders at 240 everywhere (an e-paper frame
+     * drops back to 160 for the refresh wait); battery renders at 160. */
+    CHECK(fos_config_render_mhz(FOS_CPU_AUTO, false, false) == 240, "auto e-paper renders at 240");
+    CHECK(fos_config_render_mhz(FOS_CPU_AUTO, true, false) == 240, "auto LCD renders at 240");
+    CHECK(fos_config_render_mhz(FOS_CPU_BATTERY, false, false) == 160, "battery renders at 160");
+    CHECK(fos_config_render_mhz(FOS_CPU_BATTERY, true, true) == 160, "battery on an LCD renders at 160");
+    CHECK(fos_config_render_mhz(FOS_CPU_PERFORMANCE, false, false) == 240, "performance renders at 240");
+    CHECK(fos_config_render_mhz(200, false, false) == 240, "a stray stored value renders as auto");
 }
 
 static void test_normalize_rotate(void)

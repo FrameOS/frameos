@@ -1,4 +1,5 @@
 #include "fos_client.h"
+#include "fos_cpu.h"
 #include "fos_heap_walk.h"
 
 #include <stdio.h>
@@ -2664,6 +2665,12 @@ static esp_err_t render_once(bool quiet)
             seen_foreign_lends = fos_framebuffer_foreign_lends();
             frameos_nim_canvas_forget();
         }
+        /* The render at its clock: auto renders at 240 MHz even where it waits
+         * at 160 (an e-paper frame's refresh), and goes back down after. */
+        const fos_config_t *cpu_config = fos_config();
+        int wait_mhz = fos_config_cpu_mhz(cpu_config->cpu_mode, fos_display_is_lcd(), fos_touch_present());
+        int render_mhz = fos_config_render_mhz(cpu_config->cpu_mode, fos_display_is_lcd(), fos_touch_present());
+        if (render_mhz > wait_mhz) fos_cpu_set_mhz(render_mhz);
         size_t target_len = 0;
         uint32_t generation = 0;
         uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len, &generation) : NULL;
@@ -2676,6 +2683,7 @@ static esp_err_t render_once(bool quiet)
             err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         }
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
+        if (render_mhz > wait_mhz) fos_cpu_set_mhz(wait_mhz);
     }
 
     int64_t framebuffer_ms = (esp_timer_get_time() - start) / 1000;

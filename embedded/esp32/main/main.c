@@ -42,6 +42,7 @@
 #include "fos_i2c.h"
 #include "fos_led.h"
 #include "fos_rtc.h"
+#include "fos_cpu.h"
 #include "fos_codec.h"
 #include "fos_touch.h"
 #include "fos_voice.h"
@@ -242,11 +243,8 @@ static void scene_state_write_behind(void)
 static void cpu_240(const char *why)
 {
 #if CONFIG_IDF_TARGET_ESP32S3
-    rtc_cpu_freq_config_t cpu;
-    if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
-        rtc_clk_cpu_freq_set_config(&cpu);
-        printf("cpu: 240 MHz (%s)\n", why);
-    }
+    fos_cpu_set_mhz(240);
+    printf("cpu: 240 MHz (%s)\n", why);
 #else
     (void)why;
 #endif
