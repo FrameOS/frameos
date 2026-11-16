@@ -284,9 +284,12 @@ Bench notes from the passes so far (Pi 5 + 4.0 Touch, Zero 2 W + Round
 touch, both 2026-09-19):
 
 - The touch-test scene is `repo/scenes/samples/Touch test` (install it from
-  the samples): a dot follows the pointer and the scene names the gesture it
-  saw. Test orientation at an OFF-diagonal point: a transposed axis is
-  invisible on the diagonal, and that mistake has been made once.
+  the samples): a dot follows the pointer, the scene names the gesture it
+  saw, and a held drag draws its path from the press (a ring) to the finger,
+  a small dot per move the scene heard, kept until the next press. On e-paper
+  the path is drawn once, at the lift. Test orientation at an OFF-diagonal
+  point: a transposed axis is invisible on the diagonal, and that mistake has
+  been made once.
 - `dtparam=i2c_arm=on` makes `drm-rp1-dpi` fail with no fb0 (GPIO 2/3 are
   DPI pins) — setup writes `i2c_arm=off` and `spi=off` for that reason; a
   later `dtoverlay=i2c-gpio` silently re-points the touch bus at GPIO 23/24.
