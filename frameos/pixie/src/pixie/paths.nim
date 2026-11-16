@@ -2496,15 +2496,26 @@ proc paintStripRows*(width, height: int): int {.raises: [].} =
     rows = min(rows, contiguous.int64 div rowBytes)
   max(min(height.int64, paintStripMinRows.int64), rows).int
 
-proc paintGradientGrey(
+proc paintGradientNarrow(
   image, mask: Image, rows: GradientRows, colors: ptr UncheckedArray[ColorRGBX],
   x, y: int
 ) =
-  ## A gradient blended normally onto grey through a coverage `mask` whose
-  ## top left sits at (x, y): each row painted where the mask covers it, the
-  ## gradient evaluated there alone into `colors` (the mask's width) and
-  ## stored straight into the canvas. The arithmetic is the paint image's,
-  ## its mask multiply's and the normal composite's, so the same pixels.
+  ## A gradient blended normally onto a grey or 565 canvas through a
+  ## coverage `mask` whose top left sits at (x, y): each row painted where
+  ## the mask covers it, the gradient evaluated there alone into `colors`
+  ## (the mask's width) and stored straight into the canvas. The arithmetic
+  ## is the paint image's, its mask multiply's and the normal composite's,
+  ## stored as `setPixel` stores (a 565 canvas's dither included), so the
+  ## same pixels. A pixel the mask leaves out is left as it is: the
+  ## composite of nothing stores back what it read.
+  let
+    grey = image.format >= pfGray8
+    data16 = image.data16
+    dither = image.ditherStores
+  template source(i: int): ColorRGBX =
+    let m = coverage[i]
+    if m.a == 255: colors[i - x0] # blendMask by a whole mask is the colour
+    else: blendMask(colors[i - x0], m)
   for r in 0 ..< mask.height:
     let coverage = mask.getUncheckedArray(0, r)
     var x0 = 0
@@ -2516,18 +2527,26 @@ proc paintGradientGrey(
     while coverage[x1 - 1].a == 0:
       dec x1
     rows.row(y + r, x0, x1, colors)
-    image.greyRowStore(image.dataIndex(x + x0, y + r)):
+    if grey:
+      image.greyRowStore(image.dataIndex(x + x0, y + r)):
+        for i in x0 ..< x1:
+          if coverage[i].a != 0:
+            let s = source(i)
+            if s.a == 255:
+              store(rgbxToGray8(s))
+            elif s.a != 0:
+              store(rgbxToGray8(blendNormal(backdrop(), s)))
+          step()
+    else:
+      var idx = image.dataIndex(x + x0, y + r)
       for i in x0 ..< x1:
-        let m = coverage[i]
-        if m.a != 0: # uncovered: the composite of nothing, the pixel as it was
-          let source =
-            if m.a == 255: colors[i - x0] # blendMask by a whole mask is the colour
-            else: blendMask(colors[i - x0], m)
-          if source.a == 255:
-            store(rgbxToGray8(source))
-          elif source.a != 0:
-            store(rgbxToGray8(blendNormal(backdrop(), source)))
-        step()
+        if coverage[i].a != 0:
+          var s = source(i)
+          if s.a != 0:
+            if s.a != 255:
+              s = blendNormal(rgb565ToRgbx(data16[idx]), s)
+            data16[idx] = if dither: rgbxToRgb565Dithered(s, idx) else: rgbxToRgb565(s)
+        inc idx
 
 template paintThroughMask(
   image: Image, paint: Paint, transform: Mat3, bounds: Rect, rasterise: untyped
@@ -2568,14 +2587,14 @@ template paintThroughMask(
     boxW = boxX1 - boxX0
     stripRows = paintStripRows(max(boxW, 1), max(boxY1 - boxY0, 1))
     savedOpacity = paint.opacity
-    # A gradient blended normally onto grey: no paint image
-    # (`paintGradientGrey`), so half the memory and a third of the passes.
-    greyGradient = image.format >= pfGray8 and paint.blendMode == NormalBlend and
+    # A gradient blended normally onto grey or 565: no paint image
+    # (`paintGradientNarrow`), so half the memory and a third of the passes.
+    narrowGradient = image.format != pfRgbx and paint.blendMode == NormalBlend and
       paint.kind in {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}
   var
     gradientRows: GradientRows
     gradientLine: seq[ColorRGBX]
-  if greyGradient and boxW > 0:
+  if narrowGradient and boxW > 0:
     # The table is chosen as for one pass over the whole image, as before
     # strips and boxes: every strip of the fill alike, the same colours.
     paint.opacity = 1
@@ -2595,11 +2614,11 @@ template paintThroughMask(
 
     rasterise
 
-    if greyGradient:
+    if narrowGradient:
       if savedOpacity != 1:
         mask.applyOpacity(savedOpacity)
       paint.opacity = 1 # the colours `gradientColor` gives, as the paint image had them
-      image.paintGradientGrey(mask, gradientRows,
+      image.paintGradientNarrow(mask, gradientRows,
         cast[ptr UncheckedArray[ColorRGBX]](gradientLine[0].addr), boxX0, stripY)
       paint.opacity = savedOpacity
       stripY += stripHeight

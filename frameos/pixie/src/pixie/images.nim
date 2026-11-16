@@ -711,6 +711,21 @@ proc blendSampleLineAny(
           store(rgbxToGray8(blendNormal(backdrop(), c)))
         step()
     return
+  if a.format == pfRgb565 and blendMode in {OverwriteBlend, NormalBlend}:
+    # The same onto 565, its stores dithered as `setPixel` dithers them.
+    let
+      overwrite = blendMode == OverwriteBlend
+      data16 = a.data16
+      dither = a.ditherStores
+    var ai = a.dataIndex(ax, ay)
+    for i in 0 ..< len:
+      var c = samples[i]
+      if overwrite or c.a != 0:
+        if not overwrite and c.a != 255:
+          c = blendNormal(rgb565ToRgbx(data16[ai]), c)
+        data16[ai] = if dither: rgbxToRgb565Dithered(c, ai) else: rgbxToRgb565(c)
+      inc ai
+    return
   var ai = a.dataIndex(ax, ay)
   case blendMode:
   of OverwriteBlend:
@@ -984,7 +999,7 @@ proc blendRect(a, b: Image, pos: Ivec2, blendMode: BlendMode) =
         blendLineAny(a, xStart + px, y + py, b, xStart, y, xEnd - xStart, OverwriteBlend)
     return
 
-  if a.format >= pfGray8 and b.format == pfRgbx and blendMode in {NormalBlend, OverwriteBlend}:
+  if a.format != pfRgbx and b.format == pfRgbx and blendMode in {NormalBlend, OverwriteBlend}:
     for y in yStart ..< yEnd:
       blendSampleLineAny(a, xStart + px, y + py, b.getUncheckedArray(xStart, y),
         xEnd - xStart, blendMode)

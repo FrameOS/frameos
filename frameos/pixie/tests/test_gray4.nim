@@ -252,11 +252,21 @@ block whole_image_operations:
   for got in image.levels:
     doAssert got in 12 .. 15
 
-block gradient_fills_onto_grey_match_the_paint_image:
-  # A gradient fills a grey canvas from the coverage straight, without the
-  # paint image: the pixels must be the ones the paint image, its mask
-  # multiply and a normal composite give, for any shape, stop alpha and
-  # paint opacity, on both greys, a view among them.
+proc narrowCanvas(kind, w, h: int): Image =
+  ## 0: 8-bit grey, 1: 4-bit grey, 2: 565, 3: 565 with dithered stores.
+  case kind
+  of 0: newImageGray8(w, h)
+  of 1: newImageGray4(w, h)
+  else:
+    let image = newImage565(w, h)
+    image.ditherStores = kind == 3
+    image
+
+block gradient_fills_onto_narrow_canvases_match_the_paint_image:
+  # A gradient fills a grey or 565 canvas from the coverage straight,
+  # without the paint image: the pixels must be the ones the paint image,
+  # its mask multiply and a normal composite give, for any shape, stop alpha
+  # and paint opacity, on both greys and both 565s, a view among them.
   proc reference(canvas: Image, path: Path, paint: Paint) =
     # The paint image's way, over the shape's box as it always was.
     let
@@ -309,19 +319,19 @@ block gradient_fills_onto_grey_match_the_paint_image:
   for w in [64, 37]:
     for d in shapes:
       for i, paint in paints():
-        for gray4 in [false, true]:
+        for kind in 0 .. 3:
           let
-            got = if gray4: newImageGray4(w, 41) else: newImageGray8(w, 41)
-            want = if gray4: newImageGray4(w, 41) else: newImageGray8(w, 41)
-          got.fill(rgba(90, 90, 90, 255))
-          want.fill(rgba(90, 90, 90, 255))
+            got = narrowCanvas(kind, w, 41)
+            want = narrowCanvas(kind, w, 41)
+          got.fill(rgba(90, 120, 60, 255))
+          want.fill(rgba(90, 120, 60, 255))
           let path = parsePath(d)
           got.fillPath(path, paint)
           want.reference(path, paint)
           for y in 0 ..< 41:
             for x in 0 ..< w:
               doAssert got.unsafe[x, y] == want.unsafe[x, y],
-                &"paint {i} gray4={gray4} w={w} {d}: ({x}, {y}) " &
+                &"paint {i} canvas {kind} w={w} {d}: ({x}, {y}) " &
                 &"{got.unsafe[x, y]} != {want.unsafe[x, y]}"
   # Onto a view: where it sits decides the dither.
   let
@@ -335,21 +345,21 @@ block gradient_fills_onto_grey_match_the_paint_image:
   refOwner.view(5, 3, 40, 30).reference(path, paint)
   doAssert owner.levels == refOwner.levels, "a gradient into a view"
 
-block opaque_rgbx_rows_onto_grey:
-  # An RGBX picture drawn onto grey, normally and overwriting: the row
-  # kernel against the per-pixel accessors.
+block rgbx_rows_onto_narrow_canvases:
+  # An RGBX picture drawn onto grey or 565, normally and overwriting: the
+  # row kernels against the per-pixel accessors.
   let picture = newImage(23, 9)
   for y in 0 ..< 9:
     for x in 0 ..< 23:
       let a = uint8((x * 37 + y * 11) mod 256)
       picture.unsafe[x, y] = rgbx(min(a, uint8(x * 9)), min(a, uint8(y * 20)), a div 2, a)
-  for gray4 in [false, true]:
+  for kind in 0 .. 3:
     for mode in [NormalBlend, OverwriteBlend]:
       let
-        got = if gray4: newImageGray4(31, 13) else: newImageGray8(31, 13)
-        want = if gray4: newImageGray4(31, 13) else: newImageGray8(31, 13)
-      got.fill(rgba(120, 120, 120, 255))
-      want.fill(rgba(120, 120, 120, 255))
+        got = narrowCanvas(kind, 31, 13)
+        want = narrowCanvas(kind, 31, 13)
+      got.fill(rgba(120, 140, 100, 255))
+      want.fill(rgba(120, 140, 100, 255))
       got.draw(picture, translate(vec2(5, 3)), mode)
       for y in 0 ..< 9:
         for x in 0 ..< 23:
@@ -359,6 +369,6 @@ block opaque_rgbx_rows_onto_grey:
       for y in 0 ..< 13:
         for x in 0 ..< 31:
           doAssert got.unsafe[x, y] == want.unsafe[x, y],
-            &"gray4={gray4} {mode}: ({x}, {y})"
+            &"canvas {kind} {mode}: ({x}, {y})"
 
 echo "test_gray4: ok"
