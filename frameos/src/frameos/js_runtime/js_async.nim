@@ -423,8 +423,11 @@ else:
     jsUndefSentinel(ctx)
 
 when defined(frameosWasm):
-  var previewLoadRender {.threadvar.}: pointer
-    ## The render (its context) that already fetched an `<img>`'s picture.
+  var urlImagesOneARender* = false
+    ## The browser preview's (frameos_wasm_set_pictures_one_a_render): a page
+    ## that shows every frame as it comes gets an `<img>` page's pictures one
+    ## a render. A plane's render is the one picture a board or a check gets,
+    ## so it waits for all of them.
 
 proc fitName(fit: ScaledDecodeFit): string =
   case fit
@@ -457,9 +460,11 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
     of uiLoading:
       discard
   if at < 0:
-    var now = blocking or url.startsWith("data:")
+    # Nothing pumps (the browser preview, a deep sleeper): no later to fetch
+    # in, so the render does. Asked only where the async I/O is compiled in,
+    # the browser preview never fetched an `<img>` at all.
+    var now = blocking or url.startsWith("data:") or not asyncPumped
     when jsAsyncOn:
-      now = now or not asyncPumped
       if not now:
         if startUrlImage(runtime, owner, context, url, width, height, fit):
           runtime.rememberUrlImage(UrlImage(url: url, width: width, height: height, fit: fit,
@@ -467,14 +472,17 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
     when defined(frameosWasm):
       # The preview: nothing pumps, and a render that fetched every picture of
       # a page one after the other would show nothing for seconds. One picture
-      # a render, and the next render soon.
-      if now and not url.startsWith("data:"):
-        if cast[pointer](context) == previewLoadRender:
-          if not context.isNil and (context.nextSleep < 0 or context.nextSleep > 0.05):
+      # a render, and the next render soon. Marked on the render's context: a
+      # pointer to the last one was kept before, and a new render's context
+      # made where the last was freed passed for it, so no picture came after
+      # that and the scene asked for a render every 50 ms.
+      if now and urlImagesOneARender and not url.startsWith("data:") and not context.isNil:
+        if context.urlImageFetched:
+          if context.nextSleep < 0 or context.nextSleep > 0.05:
             context.nextSleep = 0.05
           now = false
         else:
-          previewLoadRender = cast[pointer](context)
+          context.urlImageFetched = true
     if now:
       let e = JsAppEvalEnv(runtime: runtime, owner: owner, context: context)
       let answer = fetchImageJson(e, url, %*{"width": width, "height": height, "fit": fitName(fit)},

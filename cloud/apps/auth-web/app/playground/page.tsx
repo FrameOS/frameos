@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Playground } from "../../src/components/Playground";
+import { getPlaygroundStoreUrl } from "../../src/lib/env";
 import "./playground.css";
 
 // playground.frameos.net (cloud/docs/playground.md); src/lib/surfaces.ts
@@ -16,5 +17,5 @@ export const viewport: Viewport = {
 };
 
 export default function PlaygroundPage() {
-  return <Playground />;
+  return <Playground storeUrl={getPlaygroundStoreUrl()} />;
 }
