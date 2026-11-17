@@ -31,9 +31,11 @@
  * What an app may ask for. A write only ever lands inside the assets folder, so "files" covers reading the assets folder
  * but never writing it. "frame" is `frameos.frame`: the frame page's facts and powers (Wi-Fi, rotation, scale, render,
  * restart, reboot) and an ESP32's serial console, while the frame page is allowed on the screen (docs/terminal.md).
+ * "code" is `frameos.code`: every scene's source on the frame, saving scenes to it and asking its control plane's AI
+ * for one, under the same condition (docs/code-editor.md).
  */
-export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame'
-export const SCENE_PERMISSIONS: readonly ScenePermission[] = ['shell', 'files', 'assets', 'assets-write', 'frame']
+export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code'
+export const SCENE_PERMISSIONS: readonly ScenePermission[] = ['shell', 'files', 'assets', 'assets-write', 'frame', 'code']
 
 /** "Uses your <service> key": a settings namespace an app reads with getSetting. */
 export type SceneKeyFlag = `key:${string}`
@@ -45,6 +47,7 @@ const permissionLabels: Record<ScenePermission, string> = {
   assets: 'reads assets folder',
   'assets-write': 'writes assets folder',
   frame: 'changes frame settings',
+  code: "reads and changes this frame's scenes",
 }
 
 const permissionDescriptions: Record<ScenePermission, string> = {
@@ -55,6 +58,7 @@ const permissionDescriptions: Record<ScenePermission, string> = {
     "This scene writes and deletes files in the frame's assets folder, where your uploaded photos and other scenes' files are.",
   frame:
     "This scene can change the frame's Wi-Fi, rotation and scale, restart or reboot it, and run its console commands on an ESP32, as the frame's settings on its screen can.",
+  code: "This scene can read the code and the settings of every scene on the frame (API keys set in their apps included), change them and add scenes, and ask the frame's control plane's AI to write scenes.",
 }
 
 /** The services behind the settings namespaces apps declare (secretSettings.ts takes its titles from here). */
@@ -100,7 +104,7 @@ export function sceneAccessFlagDescription(flag: SceneAccessFlag): string {
 
 /** The permissions that reach past the frame's own data: red tags, and a red button when an update gains one. */
 export function sceneAccessFlagIsRisky(flag: SceneAccessFlag): boolean {
-  return flag === 'shell' || flag === 'files' || flag === 'assets-write' || flag === 'frame'
+  return flag === 'shell' || flag === 'files' || flag === 'assets-write' || flag === 'frame' || flag === 'code'
 }
 
 /**
@@ -144,6 +148,8 @@ const assetStreamPattern = /\bopenAssetStream\b/g
 // `frameos.frame(...)`: the frame page's powers. Named with its object, as a
 // bare `frame` is any word.
 const frameCallPattern = /\bframeos\s*\.\s*frame\s*\(/
+// `frameos.code(...)`: the frame's scenes and its plane's scene AI.
+const codeCallPattern = /\bframeos\s*\.\s*code\s*\(/
 const literalStreamModePattern = /^\\?(["'`])([rwa])\\?\1$/
 
 /**
@@ -258,6 +264,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
   let writeCall: string | null = null
   let shell = false
   let frame = false
+  let codeCall = false
   for (const [name, text] of Object.entries(sources)) {
     if (name.endsWith('.nim')) {
       shell = shell || nimShellPattern.test(text)
@@ -267,6 +274,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
       continue
     }
     frame = frame || frameCallPattern.test(text)
+    codeCall = codeCall || codeCallPattern.test(text)
     readCall = readCall ?? assetReadCallPattern.exec(text)?.[1] ?? null
     writeCall = writeCall ?? assetWriteCallPattern.exec(text)?.[1] ?? null
     for (const stream of text.matchAll(assetStreamPattern)) {
@@ -296,6 +304,10 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
   if (frame) {
     found.push('frame')
     reasons.push('calls frameos.frame')
+  }
+  if (codeCall) {
+    found.push('code')
+    reasons.push('calls frameos.code')
   }
   const detection = { detected: orderedPermissions(found), reasons }
   if (cacheKey) {

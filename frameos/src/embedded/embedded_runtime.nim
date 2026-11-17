@@ -24,6 +24,7 @@ import frameos/layout_choice
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
+import frameos/scene_code_hooks
 import frameos/scene_icon
 from frameos/utils/memory import panelMemoryBytes
 when defined(memProbe): import frameos/utils/memory
@@ -939,17 +940,31 @@ sceneSettings.frameSettingsAction = frameSettingsDo
 proc fos_store_json(asker: cstring): cstring {.importc, cdecl.}
 proc fos_store_action(asker, action, args: cstring) {.importc, cdecl.}
 
-proc sceneStoreJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
-  let raw = fos_store_json(asker.cstring)
+proc takeCString(raw: cstring): string =
+  ## A string the firmware malloc'd, as Nim's, the C one freed.
   if not raw.isNil:
     result = $raw
     cFree(raw)
+
+proc sceneStoreJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
+  takeCString(fos_store_json(asker.cstring))
 
 proc sceneStoreDo(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
   fos_store_action(asker.cstring, action.cstring, args.cstring)
 
 sceneStoreRead = sceneStoreJson
 sceneStoreAction = sceneStoreDo
+
+# The code editor's host (docs/code-editor.md, frameos/scene_code_hooks.nim):
+# main/fos_code.c answers every operation, reads a scene's file off the scene
+# store and asks the plane on the task that makes every request a scene asks
+# for. Every call comes from a JS app, on the render task.
+proc fos_code(asker, op, arg: cstring): cstring {.importc, cdecl.}
+
+proc sceneCodeDo(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
+  takeCString(fos_code(asker.cstring, op.cstring, arg.cstring))
+
+sceneCode = sceneCodeDo
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

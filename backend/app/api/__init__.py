@@ -35,6 +35,7 @@ from .embedded_device import *  # noqa: E402, F403
 from .embedded_commands import *  # noqa: E402, F403
 from .embedded_voice import *  # noqa: E402, F403
 from .panel_scenes import *  # noqa: E402, F403
+from .panel_code import *  # noqa: E402, F403
 from .virtual_frame import *  # noqa: E402, F403
 from .firmware_release import *  # noqa: E402, F403
 from .frame_bootstrap import *  # noqa: E402, F403

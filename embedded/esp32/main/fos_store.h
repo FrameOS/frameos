@@ -7,6 +7,9 @@
  */
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
+
 /* At boot. (Also what links this file in: the Nim runtime's calls alone come
  * too late in the link to pull it out of main's library.) */
 void fos_store_init(void);
@@ -19,3 +22,10 @@ char *fos_store_json(const char *asker);
  * JSON. Returns at once; `asker` is drawn again when the work is done, if it
  * still shows. */
 void fos_store_action(const char *asker, const char *action, const char *args);
+/* The frame's control plane, at `route` ("/panel/scenes"): a backend first,
+ * else the cloud it is enrolled with (as the voice chat's upload_target), its
+ * URL and bearer value. False for a frame with none; `*pending` (and true)
+ * when it belongs to a cloud it cannot reach yet. The code editor's host
+ * (fos_code.c) asks the same plane. */
+bool fos_store_plane(const char *route, char *url, size_t len, char *auth, size_t auth_len, bool *backend,
+                     bool *pending);

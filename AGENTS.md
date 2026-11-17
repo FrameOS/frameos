@@ -335,6 +335,23 @@
   the frame offers its page. The desktops find it like the store
   (`appIs('terminal-app', 'terminal')`): keep the four alike.
 
+## The code editor: `docs/code-editor.md`
+
+- **Code editor** is a scene (`repo/scenes/samples/Code editor`, id
+  `code-editor`, one JSX app): a scene's files (scene.json, each app's files,
+  each code node's code) read and changed on the frame, and the plane's scene
+  AI asked for a draft. It stands on ONE native, `frameos.code(op, arg)`
+  (`jsCode`; hooks in `frameos/scene_code_hooks.nim`, hosts
+  `scene_code_linux.nim`, `main/fos_code.c`, `scene_code_preview.nim`), only
+  for an app whose `permissions` has `"code"` (red tag, detected from
+  `frameos.code(`) and only while the frame offers its page. The scene
+  settings' Code button opens it on a scene (its public field `open`).
+- The plane's half is `POST …/panel/code` (backend `panel_code.py`, cloud
+  `panel-code.ts`): `ask` is the voice chat's scene builder asked `typed`
+  and saves nothing; `save` never widens what the scene may do (`needs_owner`:
+  the permissions and settings its apps declare against the saved scene's).
+  Keep the two routes and their codes alike.
+
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
 - The firmware keeps one file per scene (`main/fos_scene_store.c`, pure, host

@@ -65,6 +65,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   assets: 'Read the assets folder',
   'assets-write': 'Write to the assets folder',
   frame: "Change the frame's settings",
+  code: "Read and change the frame's scenes",
 }
 
 function Section({

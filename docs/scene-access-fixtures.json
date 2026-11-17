@@ -137,6 +137,11 @@
       "flags": ["frame"]
     },
     {
+      "name": "an app that calls frameos.code reads and changes the frame's scenes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "export function get() { const scene = frameos.code('source', 'clock'); return <div>{scene?.name}</div> }", "config.json": "{\n  \"name\": \"Code editor\",\n  \"permissions\": [\n    \"code\"\n  ]\n}\n"}}}},
+      "flags": ["code"]
+    },
+    {
       "name": "app.frame is the panel, not the frame's settings",
       "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get(app) { return app.frame.width + (frame(1) || 0) }"}}}},
       "flags": []

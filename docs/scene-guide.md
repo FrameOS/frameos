@@ -948,6 +948,23 @@ interface FrameOSStoreScene {
   /** The cover as a path on the store's host ("/api/store/scenes/<id>/image?version=N"): prefix the store's url. Null without one. */
   image: string | null;
 }
+/** What frameos.code("read") says: the code editor's host (docs/code-editor.md). */
+interface FrameOSCodeFacts {
+  /** The action running ("ask", "save"), else "". One at a time. */
+  busy: string;
+  /** The last action's refusal ("no_plane", "needs_owner", "ai_unavailable", "panel_locked", ...), else "". */
+  error: string;
+  /** The last action that worked ("ask", "save"), else "". */
+  done: string;
+  /** The AI's last scene, read whole with frameos.code("draft"); null without one. */
+  draft: { id: string; name: string; summary: string } | null;
+  /** An AI can be asked: the frame has a control plane. */
+  ask: boolean;
+  /** A scene can be saved here. */
+  save: boolean;
+  /** The browser preview's host: it reads scenes and saves or asks nothing. */
+  previewOnly?: boolean;
+}
 /** What frameos.store() says: the scene store as this frame's host knows it (docs/scene-store.md). */
 interface FrameOSStore {
   /** The store this frame browses: its cloud provider, else FrameOS Cloud. The app fetches its listing for frames
@@ -1324,6 +1341,23 @@ declare const frameos: {
    * scan for the networks in range (in "read" once wifi.scanning is false), and on an ESP32 checkUpdate and
    * installUpdate. */
   frame(op: "action", action: "render" | "restart" | "reboot" | "scan" | "checkUpdate" | "installUpdate"): boolean;
+  /** The frame's scenes as it holds them and its control plane's scene AI (docs/code-editor.md), for an app whose
+   * config.json permissions include "code" (saving the scene adds it when the code calls this), and only while the
+   * frame's settings are allowed on its screen: it throws otherwise. "read" is the host's facts, null without a host
+   * (FrameOS 2026.11.11+). */
+  code(op: "read"): FrameOSCodeFacts | null;
+  /** A scene as the frame holds it (its scenes.json object), or null. */
+  code(op: "source", sceneId: string): Record<string, any> | null;
+  /** The AI's last scene, or null. */
+  code(op: "draft"): Record<string, any> | null;
+  /** Asks the plane's AI for a scene: a change to the scene given, else a new one. It runs off the render and this scene
+   * renders again when it is done (read().busy, then read().draft). Nothing is saved. */
+  code(op: "ask", args: { prompt: string; scene?: Record<string, any> }): boolean;
+  /** Puts the scene on the frame (replacing one of its id), shown unless show is false. A save from the frame may not
+   * ask for permissions or settings the saved scene did not have (error "needs_owner"). */
+  code(op: "save", args: { scene: Record<string, any>; show?: boolean }): boolean;
+  /** Forgets the draft and the last error. */
+  code(op: "clear"): boolean;
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(

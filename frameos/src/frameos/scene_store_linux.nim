@@ -95,15 +95,18 @@ proc get(url: string, maxBytes: int): tuple[body, error: string] =
   except CatchableError:
     ("", "store_unavailable")
 
-proc cloudPlane(): tuple[url, token: string] =
-  ## A cloud-managed frame's panel route and its token; ("", "") otherwise.
+proc cloudPanel*(route: string): tuple[url, token: string] =
+  ## A cloud-managed frame's panel route (`scenes`, `code`) and its token;
+  ## ("", "") otherwise. The code editor's host asks the same plane.
   try:
     let state = loadCloudLinkState()
     if isManagedLink(state) and state{"frame_id"}.getStr().len > 0:
-      return (providerUrlFromState(state) & "/api/frames/" & state{"frame_id"}.getStr() & "/panel/scenes",
+      return (providerUrlFromState(state) & "/api/frames/" & state{"frame_id"}.getStr() & "/panel/" & route,
         state{"access_token"}.getStr())
   except CatchableError:
     discard
+
+proc cloudPlane(): tuple[url, token: string] = cloudPanel("scenes")
 
 proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, status, shown: string] =
   try:
@@ -166,7 +169,7 @@ proc storeScenes(store: string): tuple[scenes: seq[JsonNode], error: string] =
   if result.scenes.len == 0:
     result.error = "store_unavailable"
 
-proc saveHere(scenes: JsonNode, show: string) =
+proc saveHere*(scenes: JsonNode, show: string) =
   ## The frame's own scenes, as its admin page saves them, and the runtime
   ## reloads them; then `show`. From the runtime itself (`system`), as the
   ## frame page's reload is: the contract lets no panel ask either.
@@ -322,7 +325,7 @@ var
   hookConfig {.threadvar.}: FrameConfig
   hookGeneration {.threadvar.}: int
 
-proc runnerConfig(): FrameConfig =
+proc runnerConfig*(): FrameConfig =
   {.cast(gcsafe).}:
     let generation = currentFrameConfigGeneration()
     if hookConfig.isNil or generation != hookGeneration:
@@ -333,7 +336,7 @@ proc runnerConfig(): FrameConfig =
         discard
     hookConfig
 
-proc backendOf(config: FrameConfig): tuple[url, key: string] =
+proc backendOf*(config: FrameConfig): tuple[url, key: string] =
   ## The frame's backend, when it has one (and is not cloud-managed).
   if config != nil and config.serverHost.len > 0 and config.serverApiKey.len > 0 and
       config.serverHost notin ["localhost", "127.0.0.1"]:

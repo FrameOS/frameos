@@ -1391,6 +1391,7 @@ POST {provider}/api/frames/{id}/scenes         # assign scene versions → enque
 POST {provider}/api/frames/{id}/scenes/add     # add (or re-pin) ONE scene, keeping the rest
 POST {provider}/api/frames/{id}/scenes/update  # {"scene_id"} → that scene's newest version (see "Scene updates")
 POST {provider}/api/frames/{id}/panel/scenes   # DEVICE-authed: {"action": install|preview|update|remove|discard, "scene_id", "show"?} asked by the Scene store scene on the frame (docs/scene-store.md): public store scenes only, nothing granted, refused while frame_settings_on_screen is off; the push that follows is the answer
+POST {provider}/api/frames/{id}/panel/code     # DEVICE-authed: {"action": "ask", "prompt", "scene"?} → {"ok", "scene", "summary"} (the scene AI on a typed request, nothing saved) | {"action": "save", "scene", "show"?} → the scene as a new version of the account's own private scene, else a new private scene (a copy in a public scene's place), pushed; never widens a grant (needs_owner); asked by the Code editor scene (docs/code-editor.md)
 GET  {provider}/api/store/device/scenes?q=&category=&page=&limit=&prefer=&exclude=&version=&categories=1   # public: the store as a frame lists it, {id, name, category, version, by, about, image, thumb, icon?} a scene
 GET  {provider}/api/store/device/scenes/{id}   # public: one of those, with a longer description and its newest version
 GET  {provider}/api/frames/{id}/device-scenes  # what the frame ran before it joined (names only), or null

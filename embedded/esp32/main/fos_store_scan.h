@@ -2,7 +2,8 @@
  * What the scene store on the frame (fos_store.c) reads off untrusted text
  * without building a JSON tree: the scene objects of a store scene's
  * scenes.json, and where a stored scene came from. Pure C, no IDF: the host
- * test runs it (tests/test_fos_store_scan.c).
+ * test runs it (tests/test_fos_store_scan.c). The code editor's host
+ * (fos_code.c) reads and writes its requests and answers with it too.
  */
 #pragma once
 
@@ -25,3 +26,8 @@ void fos_store_read_origin(const char *json, char *store, size_t store_len, int 
  * store does not take the frame's default from the owner. Keys of nested
  * objects are left alone. */
 void fos_store_clear_default(char *scene, size_t len);
+
+/* The value of `key` among the JSON object's own keys (not a nested
+ * object's): where it starts and how long it is, a string with its quotes.
+ * False without one, or when `json` is not an object. */
+bool fos_store_find_key(const char *json, size_t len, const char *key, const char **value, size_t *value_len);

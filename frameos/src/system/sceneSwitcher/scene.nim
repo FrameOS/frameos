@@ -143,7 +143,9 @@ proc isBuiltInScene*(sceneId: string): bool =
 
 # ------------------------------------------------------------------ the model
 
-proc listEntries(): seq[SwitcherEntry] =
+proc listEntries*(): seq[SwitcherEntry] =
+  ## The host's scene list, empty without a host or when it fails (the
+  ## settings read it too).
   if sceneSwitcherListing.isNil:
     return @[]
   try:

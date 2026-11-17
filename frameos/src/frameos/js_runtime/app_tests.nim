@@ -69,6 +69,7 @@ proc runJsAppTests*(sources: JsonNode, testFile: string, frameConfig: FrameConfi
     source = sources[testFile].getStr(), settingsKeys = settingsKeys, sourceName = testFile, sources = sources,
     assetGrant = assetGrantFromConfig(config))
   runtime.frameGrant = frameGrantFromConfig(config)
+  runtime.codeGrant = codeGrantFromConfig(config)
   runtime.extraPrelude = "globalThis.__frameosTestAppConfig = " & escapeJson($config) & ";\n" & appTestHarness
   let context = ExecutionContext(scene: scene, event: "test", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: -1)

@@ -1097,7 +1097,7 @@ export interface AppConfig {
    * frame page's settings and powers, FrameOS 2026.11.8+). Filled from a JS app's code
    * on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
    */
-  permissions?: ('shell' | 'files' | 'assets' | 'assets-write' | 'frame')[]
+  permissions?: ('shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code')[]
   /**
    * The events a JS app's onEvent hears, without an event node: contract names, the scene's
    * custom events, or "*" (docs/events.md "Apps that subscribe"; FrameOS 2026.11+).

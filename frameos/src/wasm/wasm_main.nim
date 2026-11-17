@@ -40,6 +40,7 @@ import frameos/js_runtime/app_tests
 import lib/tz
 import frameos/version
 import frameos/scene_store_preview
+import frameos/scene_code_preview
 from frameos/utils/http_client import boundedRequestWithHeaders
 
 # ------------------------------------------------------------------ JS hooks
@@ -272,6 +273,8 @@ proc frameos_wasm_set_store_preview(storeUrl: cstring): bool {.exportc, cdecl.} 
   ## this preview. Only the browser's preview worker calls this.
   try:
     enableStorePreview($storeUrl, publishedFrameOSVersion(compiledFrameOSVersion()), storeFetch)
+    # The code editor reads the page's scenes there too (docs/code-editor.md).
+    enableCodePreview()
     result = true
   except Exception as e:
     setLastError("store preview failed: " & e.msg)
@@ -452,6 +455,7 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
   ## Parse and install interpreted scenes from the backend's JSON format
   ## (array of scenes). Returns the number of scenes loaded.
   try:
+    codePreviewLoaded($payload)
     let inputs = parseInterpretedSceneInputs($payload)
     if inputs.len == 0:
       setLastError("loadScenes: no scenes in payload")

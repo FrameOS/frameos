@@ -65,6 +65,7 @@ const
   HCancel = 0
   HSave = 1
   HGear = 2
+  HCode = 3
   HText = 1000
   HToggle = 2000
   HSelect = 13000 ## + field: a select box's pick
@@ -87,6 +88,10 @@ const
   Unedited = ["node", "scene", "image"]
   # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
   Scales = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "2", "2.5", "3", "4"]
+  # Two angle brackets, the code editor's button, 48 units square as the gear is.
+  CodePath = "M29.2 33.2 38.4 24 29.2 14.8 32 12l12 12-12 12zM18.8 33.2 9.6 24l9.2-9.2L16 12 4 24l12 12z"
+  CodeEditorId = "code-editor"
+  CodeEditorName = "Code editor"
   # A circle with an arrow, 48 units square as the gear is (switcher.gearPath).
   RefreshPath = "M24 8a16 16 0 1 0 16 16h-5a11 11 0 1 1-11-11v6l10-8.5L24 2Z"
   # wifiLine's words, by the host's `state`.
@@ -383,11 +388,29 @@ var wentBack {.threadvar.}: bool
   ## focus to a window beside it: its "close" ends it (docs/scene-layouts.md
   ## "Windows").
 
+proc codeEditor(): string =
+  ## The code editor's scene id where the frame holds it (docs/code-editor.md):
+  ## the sample's id, else its name, as a plane may have given a copy another
+  ## id. "" without one.
+  for entry in listEntries():
+    if entry.id == CodeEditorId:
+      return CodeEditorId
+    if result.len == 0 and entry.name == CodeEditorName:
+      result = entry.id
+
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
   ## knows which.
   wentBack = true
   sendEvent(evSceneSettings, newJObject(), eoScene)
+
+proc goTo(sceneId: string, state: JsonNode) =
+  ## To `sceneId`, its public fields set to `state`, as a Save goes back.
+  let payload = newJObject()
+  payload.put("sceneId", newJString(sceneId))
+  payload.put("state", state)
+  wentBack = true
+  sendEvent(evSetCurrentScene, payload, eoScene)
 
 proc collect(fields, values: JsonNode): JsonNode =
   ## The values of `fields` as their owner keeps them (`saved`), by name.
@@ -415,11 +438,7 @@ proc save(self: SceneSettingsScene) =
     self.formObject("edited").fields.clear()
     sendEvent(evRender, newJObject(), eoScene)
     return
-  let payload = newJObject()
-  payload.put("sceneId", newJString(self.opener()))
-  payload.put("state", values)
-  wentBack = true
-  sendEvent(evSetCurrentScene, payload, eoScene)
+  goTo(self.opener(), values)
 
 proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
   ## The frame page's Save: what was edited there to the host, which applies
@@ -508,6 +527,15 @@ proc acting(self: SceneSettingsScene) =
     if self.onLayoutPage(): self.saveLayoutPage()
     elif frame: self.saveFrame(fields)
     else: self.save()
+  elif handler == HCode:
+    # The scene's code in the code editor, which opens on it (its public
+    # field `open`, set as a Save sets the scene's).
+    let editor = codeEditor()
+    let opener = self.opener()
+    if editor.len > 0 and opener.len > 0:
+      let state = newJObject()
+      state.put("open", newJString(opener))
+      goTo(editor, state)
   elif handler == HGear:
     if self.ownWindow():
       # The frame page has a window of its own: it comes forward.
@@ -898,10 +926,18 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
     SvgNode(text: if frame: "Frame settings" else: title))
+  # The scene's code, where the frame holds the code editor (not the
+  # editor's own: it is open on it already).
+  let opener = self.opener()
+  let code = not frame and not layoutPage and opener.len > 0 and
+    (let editor = codeEditor(); editor.len > 0 and editor != opener)
+  if code:
+    header.children.add look.iconButton(false, CodePath, HCode)
   if not info.isNil and not layoutPage:
-    # About 30 of the text's size: the two buttons, the title and the name.
+    # About 30 of the text's size: the two buttons, the title and the name
+    # (34 with the code button beside them).
     if not self.panelWindow():
-      header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
+      header.children.add look.gear(frame, named = not frame and width >= look.size * (if code: 34 else: 30))
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
@@ -916,14 +952,9 @@ proc title(self: SceneSettingsScene): string =
   if self.onLayoutPage():
     return "Layout settings"
   result = self.opener()
-  if not sceneSwitcherListing.isNil:
-    try:
-      let entries = sceneSwitcherListing()
-      for i in 0 ..< entries.len:
-        if entries[i].id == result and entries[i].name.len > 0:
-          return entries[i].name
-    except Exception:
-      discard
+  for entry in listEntries():
+    if entry.id == result and entry.name.len > 0:
+      return entry.name
 
 proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for
