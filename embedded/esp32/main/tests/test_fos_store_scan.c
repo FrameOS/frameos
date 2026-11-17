@@ -77,6 +77,38 @@ int main(void)
     assert(strcmp(plain, "{\"id\":\"a\",\"default\":false}") == 0);
     fos_store_clear_default(NULL, 0);
 
+    /* A key of the object itself, not of a nested one or inside a string. */
+    const char *v = NULL;
+    size_t vl = 0;
+    const char *answer = "{ \"summary\" : \"a \\\"scene\\\": x\" , \"nested\":{\"scene\":1},"
+                         "\"list\":[{\"scene\":2}],\"scene\": {\"id\":\"s\",\"a\":[1,{\"b\":\"}\"}]} ,\"ok\":true }";
+    assert(fos_store_find_key(answer, strlen(answer), "scene", &v, &vl));
+    assert(vl == strlen("{\"id\":\"s\",\"a\":[1,{\"b\":\"}\"}]}") && strncmp(v, "{\"id\":\"s\"", 9) == 0);
+    assert(fos_store_find_key(v, vl, "id", &v, &vl) && vl == 3 && strncmp(v, "\"s\"", 3) == 0);
+    assert(fos_store_find_key(answer, strlen(answer), "ok", &v, &vl) && vl == 4 && strncmp(v, "true", 4) == 0);
+    assert(fos_store_find_key(answer, strlen(answer), "summary", &v, &vl) && v[0] == '"' && v[vl - 1] == '"');
+    assert(!fos_store_find_key(answer, strlen(answer), "b", &v, &vl));
+    assert(!fos_store_find_key(answer, strlen(answer), "scen", &v, &vl));
+    /* A value that is a key's name is no key. */
+    const char *tricky = "{\"a\":\"scene\",\"scene\":false}";
+    assert(fos_store_find_key(tricky, strlen(tricky), "scene", &v, &vl) && vl == 5);
+    assert(!fos_store_find_key("[{\"scene\":1}]", 14, "scene", &v, &vl));
+    assert(!fos_store_find_key("{\"scene\":1", 11, "scene", &v, &vl));
+    assert(!fos_store_find_key("{\"scene\":}", 11, "scene", &v, &vl));
+    assert(!fos_store_find_key(NULL, 0, "scene", &v, &vl));
+
+    /* The request body: the action, then the arguments' members. */
+    char body[64];
+    const char *args = " {\"prompt\":\"hi\",\"scene\":{}}";
+    size_t need = fos_store_with_action(body, sizeof(body), "ask", args);
+    assert(strcmp(body, "{\"action\":\"ask\",\"prompt\":\"hi\",\"scene\":{}}") == 0 && need == strlen(body));
+    assert(fos_store_with_action(body, sizeof(body), "save", "{ }") == 17 && strcmp(body, "{\"action\":\"save\"}") == 0);
+    assert(fos_store_with_action(NULL, 0, "ask", args) == need);
+    char small[8] = "x";
+    assert(fos_store_with_action(small, sizeof(small), "ask", args) == need && strcmp(small, "x") == 0);
+    assert(fos_store_with_action(body, sizeof(body), "ask", "[1]") == 0);
+    assert(fos_store_with_action(body, sizeof(body), "ask", NULL) == 0);
+
     puts("fos_store_scan: ok");
     return 0;
 }

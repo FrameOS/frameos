@@ -450,6 +450,36 @@ block no_gear_without_a_page:
   scene.send("close", %*{})
   frameSettingsRead = nil
 
+block the_code_button:
+  # docs/code-editor.md: a Code button in the header where the frame holds the
+  # code editor, which it opens on the scene (its public field `open`); none
+  # without one, and none on the editor's own settings.
+  frameSettingsRead = nil
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [], "values": {}}})
+  discard scene.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[ueClick] != 3 + 1, "a code button without the editor"
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather"), SwitcherEntry(id: "my-editor", name: "Code editor")]
+  let image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-code.png")
+  doAssert regionWith(3).x < regionWith(1).x
+  sent.setLen(0)
+  scene.tap(regionWith(3))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
+  doAssert sent[0][1] == %*{"sceneId": "my-editor", "state": {"open": "scenes/weather"}}, $sent[0][1]
+  # The editor's own settings: it is open on its code already.
+  let own = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  own.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "my-editor", "fields": [], "values": {}}})
+  discard own.draw()
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    doAssert r.handlers[ueClick] != 3 + 1, "a code button on the editor's own settings"
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "scenes/weather", name: "Weather")]
+  sent.setLen(0)
+
 block the_frame_page:
   # A host with a page (an ESP32, a Pi): a gear left of Save opens it. The
   # page shows the host's facts in words, the network as a select box of the

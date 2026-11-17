@@ -27,6 +27,7 @@ idf_component_register(
         "fos_wifi_networks.c"
         "fos_frame_settings.c"
         "fos_store.c"
+        "fos_code.c"
         "fos_store_scan.c"
         "fos_http_body.c"
         "fos_scene_pieces.c"

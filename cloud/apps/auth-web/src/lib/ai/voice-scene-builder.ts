@@ -79,32 +79,48 @@ export function renderCheckMessage(check: RenderCheck): string {
   );
 }
 
-/** The sub-turn's context: the frame, what was asked by voice, and the
- * rules of this turn (what the tools are, where the scene goes). */
+/** How the request reached the plane: spoken to the frame (the voice chat)
+ * or typed on its screen (the code editor, docs/code-editor.md). */
+export type SceneBuilderAsked = "voice" | "typed";
+
+/** The sub-turn's context: the frame, what was asked (by voice, or typed on
+ * the frame's screen), and the rules of this turn (what the tools are, where
+ * the scene goes). The voice wording is the voice chat's and stays as it is. */
 export function builderContext(
   frameBlock: string,
   request: string,
   base: JsonObject | null,
   name: string | null,
+  asked: SceneBuilderAsked = "voice",
 ): string {
+  const typed = asked === "typed";
   const lines = [frameBlock, ""];
   if (base) {
     lines.push(
-      "The user asked, by voice, for a change to the scene the frame shows. The scene is below; change it as " +
-        "asked with patch_scene / edit_app_source (small changes) or update_scene (most of it changes), keeping " +
-        "everything not mentioned. The changed scene goes on the frame as a preview; the user's installed scene " +
-        "is not touched.",
+      typed
+        ? "The user typed, on the frame's screen, a request for a change to the scene below. Change it as asked " +
+            "with patch_scene / edit_app_source (small changes) or update_scene (most of it changes), keeping " +
+            "everything not mentioned and the scene's id. The changed scene goes back to the frame's code editor as " +
+            "a draft; nothing is saved until the user saves it there."
+        : "The user asked, by voice, for a change to the scene the frame shows. The scene is below; change it as " +
+            "asked with patch_scene / edit_app_source (small changes) or update_scene (most of it changes), keeping " +
+            "everything not mentioned. The changed scene goes on the frame as a preview; the user's installed scene " +
+            "is not touched.",
     );
-    lines.push(`The spoken request: ${request}`);
-    lines.push("The scene the frame shows:");
+    lines.push(`${typed ? "The typed request" : "The spoken request"}: ${request}`);
+    lines.push(typed ? "The scene:" : "The scene the frame shows:");
     lines.push(JSON.stringify(base));
   } else {
     lines.push(
-      "The user asked, by voice, for a new scene for this frame. Build it with create_scenes: one scene, fit " +
-        "for the frame's size and colors, that renders without the account's service keys unless the request " +
-        "needs an app that takes one.",
+      typed
+        ? "The user typed, on the frame's screen, a request for a new scene for this frame. Build it with " +
+            "create_scenes: one scene, fit for the frame's size and colors, that renders without the account's " +
+            "service keys unless the request needs an app that takes one."
+        : "The user asked, by voice, for a new scene for this frame. Build it with create_scenes: one scene, fit " +
+            "for the frame's size and colors, that renders without the account's service keys unless the request " +
+            "needs an app that takes one.",
     );
-    lines.push(`The spoken request: ${request}`);
+    lines.push(`${typed ? "The typed request" : "The spoken request"}: ${request}`);
     if (name) {
       lines.push(`Name the scene: ${name}`);
     }
@@ -112,8 +128,9 @@ export function builderContext(
   lines.push(
     "This turn has the editor tools (create_scenes, update_scene, patch_scene, edit_app_source, render_scene) and " +
       "the catalog tools (search_apps, get_app, search_examples, get_example, search_docs, read_doc) and no others: " +
-      "nothing here saves, installs or touches a frame; the scene you deliver is shown on the frame as a preview by " +
-      "the caller. Deliver, render it once with render_scene to check it, fix what is wrong, and end with one " +
+      "nothing here saves, installs or touches a frame; the scene you deliver is " +
+      (typed ? "handed back to the frame's code editor as a draft by the caller" : "shown on the frame as a preview by the caller") +
+      ". Deliver, render it once with render_scene to check it, fix what is wrong, and end with one " +
       "sentence saying what the scene shows. Nobody reads a question back: decide and build.",
   );
   return lines.join("\n");
@@ -173,6 +190,7 @@ export async function buildSceneByVoice({
   request,
   base,
   name,
+  asked = "voice",
   apiKey,
   model,
   reasoningEffort,
@@ -191,6 +209,9 @@ export async function buildSceneByVoice({
   request: string;
   base: JsonObject | null;
   name: string | null;
+  /** How the request was made: spoken (the voice chat, the default) or typed
+   * on the frame's screen (the code editor). Only the context's words change. */
+  asked?: SceneBuilderAsked;
   apiKey: string;
   model: string;
   reasoningEffort: string;
@@ -234,7 +255,7 @@ export async function buildSceneByVoice({
     renderTimeZone: timeZone,
   };
   const input: ResponseInputItem[] = buildInitialInput({
-    contextBlock: builderContext(frameBlock, request, working, name),
+    contextBlock: builderContext(frameBlock, request, working, name, asked),
     history: [],
     prompt: request,
   });

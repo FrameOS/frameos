@@ -235,33 +235,49 @@ async def _check(render: Render | None, scenes: list[JsonObject], scene_id: str,
     return RenderCheck(ok=not errors, errors=errors[:20])
 
 
-def builder_context(frame_context: str, request: str, base: JsonObject | None, name: str | None) -> str:
-    """The sub-turn's context: the frame, what was asked by voice, and the
-    rules of this turn (what the tools are, where the scene goes)."""
+def builder_context(
+    frame_context: str, request: str, base: JsonObject | None, name: str | None, asked: str = "voice"
+) -> str:
+    """The sub-turn's context: the frame, what was asked (by voice, or typed
+    on the frame's screen: the code editor, docs/code-editor.md), and the
+    rules of this turn (what the tools are, where the scene goes). The voice
+    wording is the voice chat's and stays as it is."""
+    typed = asked == "typed"
     lines = [frame_context, ""]
     if base is not None:
         lines.append(
-            "The user asked, by voice, for a change to the scene the frame shows. The scene is below; change it as "
+            "The user typed, on the frame's screen, a request for a change to the scene below. Change it as asked "
+            "with patch_scene / edit_app_source (small changes) or update_scene (most of it changes), keeping "
+            "everything not mentioned and the scene's id. The changed scene goes back to the frame's code editor as "
+            "a draft; nothing is saved until the user saves it there."
+            if typed
+            else "The user asked, by voice, for a change to the scene the frame shows. The scene is below; change it as "
             "asked with patch_scene / edit_app_source (small changes) or update_scene (most of it changes), keeping "
             "everything not mentioned. The changed scene goes on the frame as a preview; the user's installed scene "
             "is not touched."
         )
-        lines.append(f"The spoken request: {request}")
-        lines.append("The scene the frame shows:")
+        lines.append(f"{'The typed request' if typed else 'The spoken request'}: {request}")
+        lines.append("The scene:" if typed else "The scene the frame shows:")
         lines.append(json.dumps(base))
     else:
         lines.append(
-            "The user asked, by voice, for a new scene for this frame. Build it with create_scenes: one scene, fit "
+            "The user typed, on the frame's screen, a request for a new scene for this frame. Build it with "
+            "create_scenes: one scene, fit for the frame's size and colors, that renders without the account's "
+            "service keys unless the request needs an app that takes one."
+            if typed
+            else "The user asked, by voice, for a new scene for this frame. Build it with create_scenes: one scene, fit "
             "for the frame's size and colors, that renders without the account's service keys unless the request "
             "needs an app that takes one."
         )
-        lines.append(f"The spoken request: {request}")
+        lines.append(f"{'The typed request' if typed else 'The spoken request'}: {request}")
         if name:
             lines.append(f"Name the scene: {name}")
     lines.append(
         "This turn has the editor tools (create_scenes, update_scene, patch_scene, edit_app_source, render_scene) and "
         "the catalog tools (apps_list, app_source_get) and no others: nothing here saves, installs or touches a frame; "
-        "the scene you deliver is shown on the frame as a preview by the caller. Deliver, render it once with "
+        "the scene you deliver is "
+        + ("handed back to the frame's code editor as a draft by the caller" if typed else "shown on the frame as a preview by the caller")
+        + ". Deliver, render it once with "
         "render_scene to check it, fix what is wrong, and end with one sentence saying what the scene shows. Nobody "
         "reads a question back: decide and build."
     )
@@ -282,6 +298,7 @@ async def build_scene_by_voice(
     render: Render | None = None,
     timeout: float = SCENE_BUILDER_TIMEOUT_SECONDS,
     split_state_nodes: Callable[[JsonObject], None] | None = None,
+    asked: str = "voice",
 ) -> dict[str, Any]:
     """One scene for a spoken request: {"ok": True, "scene", "summary",
     "rounds", "render_checked"} or {"ok": False, "error", "detail"}. `base`
@@ -317,7 +334,7 @@ async def build_scene_by_voice(
     async def emit(event: dict[str, Any]) -> None:
         return None
 
-    input_items = build_initial_input(builder_context(frame_context, request, working, name), [], request)
+    input_items = build_initial_input(builder_context(frame_context, request, working, name, asked), [], request)
 
     async def run_once() -> AgentResult:
         return await run_agent_loop(

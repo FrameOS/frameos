@@ -1347,6 +1347,19 @@ slot's `origin`, read off the file by its keys and kept by the index's content
 hash. When the work is done the scene that asked is drawn again if it still
 shows (`fos_scenes_showing`).
 
+The Code editor scene (`docs/code-editor.md`) has its host beside it,
+`main/fos_code.c`, through `frameos.code()`: the same shape (one PSRAM block,
+one action at a time on the request task, the asking scene drawn again) and
+the same plane (`fos_store_plane`, at `…/panel/code`). A scene's source is its
+file in the scene store (`fos_scenes_get_json`); `ask` waits up to 180 s for
+the plane's AI and keeps its answer's scene, up to 1 MiB, as the draft in the
+answer's own buffer; a save goes to the plane, or, with none, into the store
+(`fos_scenes_put`, only the frame's default scene keeping a `default` mark).
+No scene is made a JSON tree: the request is the app's arguments with the
+action spliced in and the answer is read by its keys (`fos_store_find_key`,
+`fos_store_with_action` in `fos_store_scan.c`, host-tested). While an ask
+waits, the request task does nothing else: a scene's `fetch` queues behind it.
+
 ## Rendering on the server
 
 `render_mode remote` hands the frame's scenes to its control plane

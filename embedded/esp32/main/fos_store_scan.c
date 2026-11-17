@@ -91,3 +91,75 @@ void fos_store_clear_default(char *scene, size_t len)
         }
     }
 }
+
+static bool blank(char c) { return c == ' ' || c == '\n' || c == '\r' || c == '\t'; }
+
+bool fos_store_find_key(const char *json, size_t len, const char *key, const char **value, size_t *value_len)
+{
+    size_t key_len = strlen(key);
+    int depth = 0;
+    bool in_string = false, escaped = false, want_key = false, match = false, next = false;
+    const char *found = NULL;
+    for (size_t i = 0; json != NULL && i < len; i++) {
+        char c = json[i];
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') in_string = false;
+            continue;
+        }
+        if (blank(c)) continue;
+        if (next) {
+            found = json + i;
+            next = false;
+        }
+        if (found != NULL && depth == 1 && (c == ',' || c == '}')) {
+            size_t n = (size_t)(json + i - found);
+            while (n > 0 && blank(found[n - 1])) n--;
+            *value = found;
+            *value_len = n;
+            return n > 0;
+        }
+        if (c == '"') {
+            match = depth == 1 && want_key && i + key_len + 1 < len && memcmp(json + i + 1, key, key_len) == 0 &&
+                    json[i + key_len + 1] == '"';
+            in_string = true;
+        } else if (c == '{' || c == '[') {
+            if (depth == 0 && c != '{') return false;
+            want_key = ++depth == 1;
+        } else if (c == '}' || c == ']') {
+            if (--depth <= 0) return false;
+        } else if (depth == 1 && c == ':') {
+            want_key = false;
+            next = match;
+        } else if (depth == 1 && c == ',') {
+            want_key = true;
+            match = false;
+        } else if (depth == 0) {
+            return false;
+        }
+    }
+    return false;
+}
+
+size_t fos_store_with_action(char *out, size_t cap, const char *action, const char *args)
+{
+    while (args != NULL && blank(*args)) args++;
+    if (args == NULL || *args != '{') return 0;
+    const char *rest = args + 1;
+    while (blank(*rest)) rest++;
+    size_t action_len = strlen(action), rest_len = strlen(rest);
+    /* {"action":"…" then "," unless the object is empty, then the rest. */
+    size_t need = 11 + action_len + 1 + (*rest != '}') + rest_len;
+    if (out != NULL && need < cap) {
+        char *at = out;
+        memcpy(at, "{\"action\":\"", 11);
+        at += 11;
+        memcpy(at, action, action_len);
+        at += action_len;
+        *at++ = '"';
+        if (*rest != '}') *at++ = ',';
+        memcpy(at, rest, rest_len + 1);
+    }
+    return need;
+}

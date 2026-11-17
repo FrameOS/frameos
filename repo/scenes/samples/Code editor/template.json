@@ -1,0 +1,10 @@
+{
+  "name": "Code editor",
+  "description": "The code of the frame's scenes on its screen: read and change a scene's files, and ask the control plane's AI for a new scene or a change.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

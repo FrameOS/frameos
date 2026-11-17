@@ -306,12 +306,10 @@ static const char *fetch(const char *url, size_t max, char **body, size_t *len)
     return error;
 }
 
-/* The frame's control plane: a backend first, else the cloud it is enrolled
- * with (as the voice chat's upload_target). False for a frame with none;
- * `*pending` when it belongs to a cloud it cannot reach yet. */
-static bool plane(char *url, size_t len, char *auth, size_t auth_len, bool *backend, bool *pending)
+bool fos_store_plane(const char *route, char *url, size_t len, char *auth, size_t auth_len, bool *backend,
+                     bool *pending)
 {
-    *backend = fos_backend_url("/panel/scenes", url, len) && fos_config()->api_key[0];
+    *backend = fos_backend_url(route, url, len) && fos_config()->api_key[0];
     *pending = false;
     if (*backend) {
         fos_backend_auth(auth, auth_len);
@@ -320,7 +318,7 @@ static bool plane(char *url, size_t len, char *auth, size_t auth_len, bool *back
     char cloud[FOS_URL_LEN];
     char frame_id[FOS_STR_LEN];
     if (fos_cloud_api_access(cloud, sizeof(cloud), frame_id, sizeof(frame_id), auth, auth_len)) {
-        snprintf(url, len, "%s/api/frames/%s/panel/scenes", cloud, frame_id);
+        snprintf(url, len, "%s/api/frames/%s%s", cloud, frame_id, route);
         return true;
     }
     *pending = fos_config()->cloud_url[0] && fos_cloud_state() != FOS_CLOUD_NONE;
@@ -497,7 +495,7 @@ static void run(const char *job)
     if (strcmp(job, "scan") != 0) {
         bool backend = false, pending = false;
         char status[WORD_LEN] = "", shown[SCENE_ID_LEN] = "";
-        if (plane(url, sizeof(url), auth, sizeof(auth), &backend, &pending)) {
+        if (fos_store_plane("/panel/scenes", url, sizeof(url), auth, sizeof(auth), &backend, &pending)) {
             /* The plane's: what it holds is the store scene's (a preview's
              * Discard goes back to the scene it covered). */
             error = pending ? "offline"
