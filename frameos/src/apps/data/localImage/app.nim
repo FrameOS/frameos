@@ -4,6 +4,7 @@ import options
 import algorithm
 import os
 import strutils
+import unicode
 import strformat
 import random
 import frameos/utils/image
@@ -59,6 +60,13 @@ proc hasSameImages(a, b: seq[string]): bool =
   right.sortImagesAlphabetically()
   return left == right
 
+proc lowerRunes(s: string): string =
+  ## unicode's toLower a rune at a time: the ESP32 answers a Rune's from
+  ## QuickJS's tables (fos_unicode_case.c), where a string's toLower would
+  ## link std/unicode's own.
+  for rune in s.runes:
+    result.add(rune.toLower)
+
 # Function to return all images in a folder
 proc getImagesInFolder(folder: string, search: string): seq[string] =
   # If the scene points at one exact file, honor it even when the name looks
@@ -70,13 +78,13 @@ proc getImagesInFolder(folder: string, search: string): seq[string] =
   if not dirExists(folder):
     return @[]
 
-  let searchQuery = search.toLower()
+  let searchQuery = lowerRunes(search)
   var images: seq[string] = @[]
   # walkDirRecNoJunk skips hidden/OS-junk files (`._IMG.jpg`, `.DS_Store`,
   # `Thumbs.db`, `*.crdownload`, …) and never descends into junk directories
   # (`.thumbs`, `.frameos`, `@eaDir`, `System Volume Information`, …).
   for file in walkDirRecNoJunk(folder, relative = true):
-    if isImage(file) and (searchQuery == "" or file.toLower().contains(searchQuery)):
+    if isImage(file) and (searchQuery == "" or lowerRunes(file).contains(searchQuery)):
       # An empty file is not an image, whatever it is called. The Waveshare
       # demo card ships a zero-byte `sys_decode.bmp`, and enumerating it meant
       # the rotation landed on an error frame every Nth render for a file that

@@ -764,3 +764,41 @@ walk did. What made the difference: the program writes its own log lines
 `%*{…}` per line in flash), and the nested edge tables became one list.
 The compiler itself in JavaScript, shipped as bytecode like the preludes,
 would be the next 8–12 KB (estimated, not built).
+
+---
+
+# After the desktops, async JS and the books (2026-11-17)
+
+*Same recipe. 17bc7fbc6 builds at 3,224,448 bytes, main at 4bba999d6 at
+3,304,752 (+80.3 KB in three days, 91.7% of the slot). Nothing in it was an
+accident: the compiled scenes, async JavaScript (#747), the desktops' JSX UI
+(selection, links, themes), the EPUB reader's zip members and the storages
+are each a few KB. One function was not: `jsAssets` grew 9.3 KB to 14.8 KB.*
+
+**3,304,752 → 3,285,312 bytes (−19,440).** QuickJS's Unicode tables stay
+(the owner's call, 2026-11-17: frames will show Chinese text, and
+`normalize` / `\p{Script=Han}` are what handling it in a scene may want).
+
+| Cut | Saves | Behaviour |
+|---|---:|---|
+| Nim's `toUpper` / `toLower` (Rune) answered from QuickJS's case tables (`fos_unicode_case.c`, `--wrap`) | −11,300 | the same rune wherever std/unicode maps one; 281 more code points map (newer Unicode: Roman numerals, circled letters), as in the frame's JS |
+| `jsAssets` and `jsStreams`: one proc per op, `jsAssets`' options read once into plain values | −7,900 | none |
+
+- **Where the bytes in `jsAssets` were**: 371 `=destroy` and 254 `dealloc`
+  calls. Each `options{"x"}` is a JsonNode alive to the end of the proc, and
+  under `--exceptions:goto` every `return` (about twenty) destroys everything
+  alive. A proc per op keeps each exit's list short. Others with the same
+  shape, smaller (cleanup calls / bytes): `jsStreams` before this 225 / 4.6 K,
+  `imageFromSpec` 168 / 3.4 K, `downloadImageStreamingInto` 132 / 3.7 K,
+  `jsCanvas` 101 / 3.4 K, `get` of `data/localImage` 98 / 4.2 K, the scene
+  settings' `row` 95 / 4.0 K. `jsStreams` gave a quarter back, so the rest
+  are worth about 0.5–1 KB each.
+- **The case wrap**: the callers are pixie's text-transform (the JSX
+  `uppercase` / `lowercase` / `capitalize` classes) and `data/localImage`'s
+  search, which now lowercases a rune at a time (a string's `toLower` calls
+  `nuctoLower` inside std/unicode, where no wrap reaches). Where QuickJS's
+  full mapping is several letters the wrap gives std/unicode's simple one
+  (ß stays ß, İ → i, ᾀ → ᾈ). `src/embedded/tests/test_unicode_case_wrap.nim`
+  compares every code point with std/unicode.
+- Still on the table: `--panics:on` (−149 KB, "Measured, needs a decision"
+  above).

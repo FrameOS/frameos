@@ -58,9 +58,11 @@ AREAS: dict[str, list[tuple[str, bool]]] = {
     # Kitchen sink: frameos/ itself, repo/ (assets), docs/ fixtures, the root
     # manifests, frontend/ (the frame's admin bundle is built from
     # frontend/src, and prepare_assets.py fingerprints it), e2e/scenes (read by
-    # test_interpreter_svg_paint_strips.nim).
+    # test_interpreter_svg_paint_strips.nim), the ESP32's unicode case wrap.
     "runtime": [
         ("e2e/scenes/**", True),
+        # test_unicode_case_wrap.nim compiles the firmware's case wrap.
+        ("embedded/esp32/components/frameos_quickjs/fos_unicode_case.c", True),
         *irrelevant(
             "cloud/**",
             "cloud-frontend/**",
