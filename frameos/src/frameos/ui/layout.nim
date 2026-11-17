@@ -1608,10 +1608,11 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
     arrangement = t.arrange(round(x + t.x + t.size.x) - tx, t.text.align)
   if arrangement.runes.len == 0:
     return
-  if ui.anchor:
-    # A drag that selects: where it went down is the selection's other end.
-    ui.anchor = false
-    ui.sel = n.value.runeOffset(arrangement.caretAt(ui.anchorX - (tx - x) + sx, ui.anchorY - (ty - y) + sy)) + 1
+  when not defined(frameosEmbedded): # only a mouse sets it: none on an ESP32
+    if ui.anchor:
+      # A drag that selects: where it went down is the selection's other end.
+      ui.anchor = false
+      ui.sel = n.value.runeOffset(arrangement.caretAt(ui.anchorX - (tx - x) + sx, ui.anchorY - (ty - y) + sy)) + 1
   if ui.place:
     ui.place = false
     ui.goal = false

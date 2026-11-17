@@ -335,14 +335,11 @@ template typesIn(r: UiRegion): bool =
 proc wants(r: UiRegion, event: string): bool =
   case event
   of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0 or r.scrolls
-  of "pointerDown":
-    # A field: a mouse pressed on it selects as it drags.
+  of "pointerDown", "pointerUp", "pointerCancel":
     r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls or
-      (not defined(frameosEmbedded) and r.typesIn)
-  of "pointerUp", "pointerCancel":
-    r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
-      r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls
+      # A field: a mouse pressed on it selects as it drags (no mouse on an ESP32).
+      (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
   of "wheel": r.scrolls
   else:
@@ -1198,10 +1195,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.selectPointer = -1
       elif kind == ord(uePointerMove) and placed:
         let box = target.regions[r]
-        if not target.selectKept:
-          target.input.anchor = true
-          target.input.anchorX = target.selectX
-          target.input.anchorY = target.selectY
+        when not defined(frameosEmbedded):
+          # A mouse's drag (a touch keeps its end: selectKept): no mouse on an ESP32.
+          if not target.selectKept:
+            target.input.anchor = true
+            target.input.anchorX = target.selectX
+            target.input.anchorY = target.selectY
         target.input.place = true
         target.input.placeX = lx - box.x
         target.input.placeY = ly - box.y

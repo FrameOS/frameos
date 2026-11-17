@@ -519,11 +519,11 @@ proc unpair(state: var InputState, rec: ptr PointerRecord): int =
       result = -1
     rec.pairedWith = -1
 
-proc addModifiers(state: InputState, payload: JsonNode) =
-  ## The modifier keys held, on a press and a tap: `shift` and the rest, each
-  ## only while it is down (shift+click extends a selection in a JSX field,
-  ## docs/jsx-ui.md). No keyboard on an ESP32: never there.
-  when not defined(frameosEmbedded):
+when not defined(frameosEmbedded):
+  proc addModifiers(state: InputState, payload: JsonNode) =
+    ## The modifier keys held, on a press and a tap: `shift` and the rest, each
+    ## only while it is down (shift+click extends a selection in a JSX field,
+    ## docs/jsx-ui.md). No keyboard on an ESP32: never called there.
     if state.shift: payload["shift"] = %true
     if state.ctrl: payload["ctrl"] = %true
     if state.altLeft or state.altRight: payload["alt"] = %true
@@ -550,7 +550,8 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
-  state.addModifiers(down.payload)
+  when not defined(frameosEmbedded):
+    state.addModifiers(down.payload)
   if rec.edgeTaken:
     return
   if pressed and rec.edge.len > 0 or rec.edgeHeld.len > 0:
@@ -620,9 +621,12 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
       rec.hasLastTap = false
       return
     if held <= GestureTapMs:
-      let tap = pointerEvent(rec[], evTap, origin)
-      state.addModifiers(tap.payload)
-      output.add(tap)
+      when defined(frameosEmbedded):
+        output.add(pointerEvent(rec[], evTap, origin))
+      else:
+        let tap = pointerEvent(rec[], evTap, origin)
+        state.addModifiers(tap.payload)
+        output.add(tap)
       if rec.hasLastTap and msSince(now, rec.lastTapAt) <= GestureDoubleTapMs and
           abs(rec.x - rec.lastTapX) <= GestureTapSlopPx and abs(rec.y - rec.lastTapY) <= GestureTapSlopPx:
         output.add(pointerEvent(rec[], evDoubleTap, origin))
