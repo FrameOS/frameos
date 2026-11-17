@@ -483,10 +483,12 @@ when not defined(frameosEmbedded):
     {.cast(gcsafe).}:
       for sceneId, scene in uploadedScenes.pairs:
         if scene.isLayout:
-          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop)
+          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop,
+            category: scene.category)
       for sceneId, scene in loadedScenes.pairs:
         if scene.isLayout and not uploadedScenes.hasKey(sceneId):
-          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop)
+          result.add LayoutEntry(id: sceneId.string, name: scene.name, desktop: scene.isDesktop,
+            category: scene.category)
 
   layoutListing = interpreterLayouts
 
@@ -549,6 +551,13 @@ proc desktopShown(): bool {.nimcall, gcsafe.} =
     let open = shown.wornLayout.state{"openScenes"}
     result = not open.isNil and open.kind == JArray and open.len > 0
 onDesktop = desktopShown
+
+proc layoutShown(): FrameScene {.nimcall, gcsafe.} =
+  ## The layout around the frame's scene during its run (types.frameLayoutShown).
+  {.cast(gcsafe).}:
+    if not yieldScene.isNil:
+      result = yieldScene.wornLayout
+frameLayoutShown = layoutShown
 
 proc runSceneNodeRender(parent: FrameScene, child: FrameScene,
     runChild: proc (self: FrameScene, context: ExecutionContext), context: ExecutionContext,

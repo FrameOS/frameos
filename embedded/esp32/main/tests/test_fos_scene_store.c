@@ -609,8 +609,8 @@ static void test_icon_in_the_index(void)
 }
 
 /* And its category (docs/scene-icons.md "Category"), the name a desktop
- * groups its scene lists by: kept as it is, text of 128 bytes or fewer, and
- * listed so by the runtime. */
+ * groups its scene lists by and the frame page its layouts by: kept as it is,
+ * text of 128 bytes or fewer, and listed so by the runtime. */
 static void test_category_in_the_index(void)
 {
     fresh_dir();
@@ -628,7 +628,7 @@ static void test_category_in_the_index(void)
     CHECK(put_one("{\"id\":\"odd\",\"settings\":{\"category\":7}}", &result) == FOS_SCENE_STORE_OK);
     CHECK(entry_says("odd", "category", NULL));
     CHECK(put_one("{\"id\":\"desk\",\"settings\":{\"isLayout\":true,\"category\":\"Desktop layouts\"}}", &result) == FOS_SCENE_STORE_OK);
-    CHECK(entry_says("desk", "category", NULL));
+    CHECK(entry_says("desk", "category", "Desktop layouts"));
 }
 
 static void test_layouts_and_the_default(void)

@@ -11,10 +11,15 @@ import std/[algorithm, json, strutils]
 type LayoutEntry* = object
   id*, name*: string
   desktop*: bool ## `settings.desktop`: it runs the frame's scenes in windows
+  category*: string ## `settings.category`, its name as the scene has it, "" for none
 
 const
   NoLayout* = "none" ## the choice that takes every layout away
   ChoiceStateId = "frame-layout"
+  # The store's two shelves for layouts (docs/scene-layouts.md "In the
+  # store"): a layout without a category goes on the one its kind is on.
+  DesktopLayouts = "Desktop layouts"
+  FullScreenLayouts = "Full screen layouts"
 
 var
   layoutListing*: proc(): seq[LayoutEntry] {.nimcall, gcsafe.}
@@ -31,12 +36,21 @@ var
     ## thread's `missing` is good for one generation. A plain int: a racy read
     ## costs one more lookup, never a wrong layout.
 
+proc layoutGroup*(entry: LayoutEntry): string =
+  ## The heading a layout is listed under on the frame page: its category
+  ## (trimmed, as the desktops' `grouped` reads a scene's), else the store's
+  ## shelf for its kind, so a layout without one joins those that name it.
+  result = entry.category.strip()
+  if result.len == 0:
+    result = if entry.desktop: DesktopLayouts else: FullScreenLayouts
+
 proc layoutsInOrder*(layouts: seq[LayoutEntry]): seq[LayoutEntry] =
-  ## The frame page's order: the desktops, then the layouts around one scene,
-  ## each by name. A host lists them as it holds them (a table's order on a Pi).
+  ## The frame page's order: by group (`layoutGroup`), the groups by name, and
+  ## in each the layouts by name, whatever the case. A host lists them as it
+  ## holds them (a table's order on a Pi).
   result = layouts
   result.sort(proc (a, b: LayoutEntry): int =
-    result = cmp(b.desktop, a.desktop)
+    result = cmpIgnoreCase(a.layoutGroup, b.layoutGroup)
     if result == 0: result = cmpIgnoreCase(a.name, b.name)
     if result == 0: result = cmp(a.id, b.id))
 

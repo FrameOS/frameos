@@ -269,11 +269,32 @@ proc scaleText(scale: float): string =
   of 3: result.add ".75"
   else: discard
 
+proc frameLayout(self: SceneSettingsScene): FrameScene =
+  ## The layout instance the frame wears: the one around this page, or, drawn
+  ## in a window beside the scene with the focus, the one around that scene
+  ## (on a desktop the one instance goes along with the focus).
+  result = self.wornLayout
+  if result.isNil and not frameLayoutShown.isNil:
+    result = frameLayoutShown()
+
+proc heldLayout*(self: SceneSettingsScene, layouts: seq[LayoutEntry]): string =
+  ## What the Layout select holds: the frame's layout whatever has the focus,
+  ## the one this page wears while it has it (from the frame's choice and the
+  ## scene it was opened from), or `NoLayout` for one not among `layouts`.
+  ## Read off the instance it wore, the page in a window beside the focus said
+  ## "No layout" (the Windows 98 Control Panel, 2026-11-17).
+  let shown = layoutFor(self.state{"layout", "sceneId"}.getStr())
+  result = NoLayout
+  for i in 0 ..< layouts.len:
+    if layouts[i].id == shown:
+      result = shown
+
 proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   ## The layout the frame shows its scenes in, its gear beside it for one with
-  ## settings. nil for a frame with no layouts on it. The desktops come first
-  ## and the layouts around one scene after them, each by name, under a
-  ## heading each when the frame holds both.
+  ## settings. nil for a frame with no layouts on it. Grouped as the store
+  ## shelves them (`layoutGroup`: the category, else Desktop layouts or Full
+  ## screen layouts by kind), the groups by name and each by name, under a
+  ## heading each when there is more than one group.
   let layouts = layoutsInOrder(if layoutListing.isNil: @[] else: layoutListing())
   if layouts.len == 0:
     return nil
@@ -282,16 +303,19 @@ proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   if chosenLayout().len > 0:
     options.elems.add option("", "As each scene says")
   options.elems.add option(NoLayout, "No layout")
-  let grouped = layouts[0].desktop and not layouts[^1].desktop
+  let grouped = cmpIgnoreCase(layouts[0].layoutGroup, layouts[^1].layoutGroup) != 0
   for i in 0 ..< layouts.len:
-    if grouped and (i == 0 or layouts[i].desktop != layouts[i - 1].desktop):
-      let heading = option(HeadingValue, if layouts[i].desktop: "Desktops" else: "Full screen")
+    let group = layouts[i].layoutGroup
+    if grouped and (i == 0 or cmpIgnoreCase(group, layouts[i - 1].layoutGroup) != 0):
+      let heading = option(HeadingValue, group)
       heading.put("heading", newJBool(true))
       options.elems.add heading
     options.elems.add option(layouts[i].id, layouts[i].name)
   result.put("options", options)
-  info.put("layout", newJString(if self.wornLayout.isNil: NoLayout else: self.wornLayout.id.string))
-  if not self.wornLayout.isNil and InterpretedFrameScene(self.wornLayout).publicStateFields.len > 0:
+  let held = self.heldLayout(layouts)
+  info.put("layout", newJString(held))
+  let worn = self.frameLayout()
+  if not worn.isNil and worn.id.string == held and InterpretedFrameScene(worn).publicStateFields.len > 0:
     result.put("button", newJInt(ALayout))
 
 proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, unit = 0): JsonNode =
@@ -419,10 +443,11 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
 
 proc openLayoutPage(self: SceneSettingsScene) =
   ## The settings of the layout showing, on a page of their own.
-  if self.wornLayout.isNil:
+  let worn = self.frameLayout()
+  if worn.isNil:
     return
   let form = newJObject()
-  settingsOf(self.wornLayout, form)
+  settingsOf(worn, form)
   self.state.put("layoutForm", form)
   forgetUiTarget(self.uiId, SettingsNode)
   frameAction("close")
@@ -431,7 +456,7 @@ proc openLayoutPage(self: SceneSettingsScene) =
 
 proc saveLayoutPage(self: SceneSettingsScene) =
   ## Kept on the frame under the layout's id, and on the bar at once.
-  let worn = self.wornLayout
+  let worn = self.frameLayout()
   let values = collect(self.fieldList(), self.valueMap())
   if not worn.isNil and values.len > 0:
     saveLayoutState(worn.id.string, values)

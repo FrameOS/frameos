@@ -60,7 +60,9 @@ select, and is a category like any other.
   every host, as the icon goes (below). The desktop layouts group their lists
   of scenes by it: one heading per category, the groups by name, and the scenes
   without one last under Other (`grouped`, docs/scene-layouts.md "Long lists of
-  scenes").
+  scenes"). The frame page's Layout select groups the layouts by theirs, a
+  layout without one under the store's shelf for its kind (docs/scene-layouts.md
+  "On the frame").
 - **The store**: when a version of a scene is written (published, saved from
   the store's editor, forked) and its main scene's `settings.category` is one
   of the store's titles, the listing's category becomes that one
@@ -81,7 +83,7 @@ category?}`, one builder: `listingItem` in `system/sceneSwitcher/scene.nim`):
 | Host | Where the icon and category come from |
 |---|---|
 | Linux (a Pi) | the deployed or pushed scene (`interpreter.nim` `readSettings`, `scenes.nim` `getSceneListing`) |
-| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) and `category` (128 bytes or fewer) for a scene that is not a layout, and `embedded_runtime.nim` checks the icon when it reads the catalog, so the scene stays on flash |
+| ESP32 | its scene index: `fos_scene_store.c` `make_entry` keeps `icon` (1024 characters or fewer) for a scene that is not a layout and `category` (128 bytes or fewer) for every scene, layouts included, and `embedded_runtime.nim` checks the icon when it reads the catalog, so the scene stays on flash |
 | browser / wasm (the preview, the plane rendering a board, a virtual frame) | the loaded scenes (`single_scene_host.nim` `loadedSceneListing`, which an ESP32 without a scene index uses too) |
 
 The scene switcher (`docs/scene-switcher.md`) draws it on the tile: above the

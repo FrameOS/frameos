@@ -674,6 +674,11 @@ block the_frame_page:
 
 echo "scene settings: ok"
 
+var aroundFocus: FrameScene
+proc layoutAroundFocus(): FrameScene {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    aroundFocus
+
 block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   var actions: seq[string]
   layoutListing = proc (): seq[LayoutEntry] {.nimcall, gcsafe.} = @[LayoutEntry(id: "layouts/bar", name: "Bar")]
@@ -687,11 +692,14 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
   scene.wornLayout = InterpretedFrameScene(id: "layouts/bar".SceneId, state: %*{"side": "top"},
     publicStateFields: @[StateField(name: "side", label: "Side", fieldType: "string")])
-  # Opened on the frame page by name: that is what it says it is.
-  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  # Opened on the frame page by name: that is what it says it is. The
+  # dispatcher hands it the layout of the scene it was opened from.
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame",
+    "layout": {"sceneId": "layouts/bar"}}})
   doAssert scene.state["page"].getStr() == "frame"
   doAssert scene.shownName == "Frame settings", scene.shownName
   doAssert scene.wornLayout.shownName == "Frame settings"
+  doAssert SceneSettingsScene(scene).heldLayout(layoutListing()) == "layouts/bar"
   var image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-layout.png")
   # Scan is a button on the network select's own line.
@@ -718,22 +726,44 @@ block the_frame_page_has_the_layout_and_scans_on_the_network_line:
   scene.tap(regionWith(0))
   doAssert scene.state["page"].getStr() == "frame"
   doAssert scene.shownName == "Frame settings"
+  # In a window beside the scene with the focus (a desktop) the page wears no
+  # layout itself: the one instance went along with the focus. It still holds
+  # the frame's, and its gear is that instance's (types.frameLayoutShown).
+  aroundFocus = scene.wornLayout
+  scene.wornLayout = nil
+  frameLayoutShown = layoutAroundFocus
+  doAssert SceneSettingsScene(scene).heldLayout(layoutListing()) == "layouts/bar"
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  discard regionWith(20004)
+  frameLayoutShown = nil
+  aroundFocus = nil
   frameSettingsRead = nil
   frameSettingsAction = nil
   layoutListing = nil
   chooseLayout("")
   echo "layout row ok"
 
-block the_layouts_are_desktops_then_full_screen_by_name:
-  # A Pi lists its layouts in its tables' order. The page puts the desktops
-  # first and the layouts around one scene after them, each by name, under a
-  # heading each; a heading picks nothing.
-  layoutListing = proc (): seq[LayoutEntry] {.nimcall, gcsafe.} = @[
-    LayoutEntry(id: "tiling", name: "Tiling", desktop: true),
-    LayoutEntry(id: "bar", name: "Bottom bar"),
+proc categorized(): seq[LayoutEntry] {.nimcall, gcsafe.} =
+  ## As a Pi lists them, in its tables' order: categories as the scenes have
+  ## them, and two layouts without one.
+  @[LayoutEntry(id: "tiling", name: "Tiling", desktop: true, category: " Desktop layouts "),
+    LayoutEntry(id: "bar", name: "Bottom bar", category: "Full screen layouts"),
+    LayoutEntry(id: "wall", name: "Gallery wall", category: "Photos"),
     LayoutEntry(id: "w98", name: "Windows 98", desktop: true),
     LayoutEntry(id: "polaroid", name: "Polaroid"),
-    LayoutEntry(id: "mac", name: "macOS", desktop: true)]
+    LayoutEntry(id: "mac", name: "macOS", desktop: true, category: "Desktop layouts")]
+
+block the_layouts_go_by_category_each_by_name:
+  # The page groups the layouts by category, the groups by name and each by
+  # name, under a heading each; a heading picks nothing. A layout without a
+  # category joins the store's shelf for its kind (Desktop layouts, Full
+  # screen layouts).
+  doAssert layoutsInOrder(categorized()).mapIt(it.id) == @["mac", "tiling", "w98", "bar", "polaroid", "wall"]
+  doAssert layoutsInOrder(categorized()).mapIt(it.layoutGroup) == @["Desktop layouts", "Desktop layouts",
+    "Desktop layouts", "Full screen layouts", "Full screen layouts", "Photos"]
+  layoutListing = categorized
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}:
       result = %*{"rotate": 0, "renderScale": 0, "version": "2026.11.9"}
@@ -747,17 +777,20 @@ block the_layouts_are_desktops_then_full_screen_by_name:
     if previews.len > 0 and row == 1: image.writeFile(previews / "settings-layouts.png")
     scene.tap(regionWith(OptionBase + row))
     scene.state{"frameValues"}{"layout"}.getStr()
-  # No layout, Desktops, macOS, Tiling, Windows 98, Full screen, Bottom bar, Polaroid
+  # No layout, Desktop layouts, macOS, Tiling, Windows 98, Full screen
+  # layouts, Bottom bar, Polaroid, Photos, Gallery wall
   doAssert pick(1) == "", "a heading picks nothing"
   doAssert pick(2) == "mac"
   doAssert pick(4) == "w98"
   doAssert pick(5) == "w98", "a heading picks nothing"
   doAssert pick(6) == "bar"
   doAssert pick(7) == "polaroid"
+  doAssert pick(8) == "polaroid", "a heading picks nothing"
+  doAssert pick(9) == "wall"
   scene.send("close", %*{})
   frameSettingsRead = nil
   layoutListing = nil
-  # One kind alone needs no heading: by name.
+  # One group alone needs no heading: by name.
   doAssert layoutsInOrder(@[LayoutEntry(id: "b", name: "polaroid"), LayoutEntry(id: "a", name: "Bottom bar")]).mapIt(
     it.id) == @["a", "b"]
   echo "layouts in order ok"

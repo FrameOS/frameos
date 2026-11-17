@@ -942,6 +942,11 @@ var onDesktop*: proc(): bool {.nimcall, gcsafe.}
   ## windows, a layout that keeps the scenes it has open (`openScenes`,
   ## docs/scene-layouts.md "Windows"). A built-in scene there is sized like
   ## the desktop's apps, not like the whole panel (sceneSwitcher's panelUnit).
+var frameLayoutShown*: proc(): FrameScene {.nimcall, gcsafe.}
+  ## Set by the interpreter: the layout the frame's scene wears on the run at
+  ## hand, nil outside one. On a desktop that is the scene with the focus: the
+  ## frame page drawn in a window beside it wears none itself (the one layout
+  ## instance goes along with the focus), and asks here for the frame's.
 var builtInScenesStay* {.threadvar.}: bool
   ## Set by a host that runs a frame's scenes side by side (runner.nim, a
   ## windowed single_scene_host): a built-in scene the frame leaves for

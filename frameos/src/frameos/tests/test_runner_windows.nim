@@ -13,6 +13,8 @@ import ../scenes
 import ../types
 import ../channels
 from ../events import SceneSettingsId, settingsWindowId
+from ../layout_choice import layoutListing
+import system/sceneSettings/scene as sceneSettings
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -160,8 +162,14 @@ suite "windows on the Pi's runner":
       check waitUntil(proc(): bool = runnerThread.currentSceneId == SceneSettingsId.SceneId and
         not windowOf(SceneSettingsId.SceneId).isNil)
       check not windowOf(settingsA).isNil
+      let framePage = SceneSettingsScene(runnerThread.scenes[SceneSettingsId.SceneId])
+      check framePage.heldLayout(layoutListing()) == "layout-windows-98"
       # Cancel in A's goes back to A by itself: its window closes, the others stay.
       forward(settingsA)
+      # The frame page left open beside the focus wears no layout now (the one
+      # instance went along), and its Layout still holds the frame's.
+      check framePage.state{"away"}.getBool() and framePage.wornLayout.isNil
+      check framePage.heldLayout(layoutListing()) == "layout-windows-98"
       sendEvent("sceneSettings", %*{}, eoHttpAdmin)
       check waitUntil(proc(): bool = runnerThread.currentSceneId == sceneA and windowOf(settingsA).isNil and
         runnerThread.scenes[sceneA].wornLayout == layout)
