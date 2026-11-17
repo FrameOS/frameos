@@ -587,10 +587,12 @@ export function get(app, context) {
   `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
   `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
   `h-*`, `size-*`, `max-w-*`, padding and margins (`mx-auto`).
-- Unlike a browser, a flex item without a set size can shrink to nothing,
-  and its text then wraps a character per line. In a row, give the parts that
-  must keep their width (a number, a label, an icon, a badge) `shrink-0` or a
-  `w-*`, and the long text `flex-1`.
+- As in a browser, a flex item does not shrink below its content (its
+  text's height in a column, its longest word in a row): a column with more
+  than fits overflows at the bottom rather than squashing its items over
+  each other. Give a long list `flex-1 overflow-y-auto` so it scrolls, and
+  an item that should give way `min-h-0` / `min-w-0` or `overflow-hidden`
+  (a `truncate` text already does). In a row, give the long text `flex-1`.
 - Paint: `bg-*`, `text-*`, `border-*` from Tailwind's palette, `/50`
   opacity, `bg-[#hex]`, `bg-gradient-to-r from-* via-* to-*`, `border`,
   `rounded-*`, `opacity-*`.

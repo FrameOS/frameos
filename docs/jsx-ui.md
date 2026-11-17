@@ -368,9 +368,20 @@ of its own.
   inline elements flow into lines.
 - **`flex`**: a row (`flex-col`: a column) with `grow`, `shrink`, `basis`,
   `flex-1` / `flex-auto` / `flex-none`, `flex-wrap`, `gap`, `justify-*`,
-  `items-*`, `self-*` and `auto` margins. An item with a set size does not
-  shrink below it (CSS's automatic minimum); one without can shrink to
-  nothing, as with `min-w-0`.
+  `items-*`, `self-*` and `auto` margins. As in a browser, an item does
+  not shrink below its content (CSS's automatic minimum, `min-height: auto`
+  / `min-width: auto`): in a column its content's height, in a row its
+  longest word; one with a set size not below that size. A column or row
+  too small for its items overflows instead (a scroller scrolls to it), and
+  a title never ends up over the paragraph under it. `min-h-0` / `min-w-0`
+  (or any `min-*`), or an item that clips (`overflow-hidden`, `truncate`,
+  `overflow-y-auto`), may shrink to fit as before; a picture (`<img>`,
+  `<svg>`, `<Scene>`) always may, and a scroller lays its children out at
+  their own heights anyway. `flex-1` items share the room from their
+  content up: one holding more keeps it and the others share the rest.
+  Unlike a browser, what clips inside an item counts for nothing in the
+  item's minimum: a `truncate` name in a `flex-1` box cuts at the box's
+  edge without the box's `min-w-0`.
 - **`grid grid-cols-N`**: equal columns, items in order, `col-span-N`; each
   row as tall as its tallest item (a grid is laid out as a wrapping row whose
   items are as wide as the columns they span).
@@ -1061,7 +1072,7 @@ Rounded clipping (a picture in a `rounded-full` box keeping its corners;
 order is the tree's, absolute children last), group opacity (an element's opacity multiplies into each of
 its paints instead of compositing the group once), letter spacing, inline
 boxes with their own background or padding inside a line of text, `min-content`
-sizing, handlers on inline text (a `<span onClick>` in a block's line; one in a
+/ `max-content` sizes as classes (`w-min`, `w-max`), handlers on inline text (a `<span onClick>` in a block's line; one in a
 flex row is an element and works), a selection in a field (copy, paste,
 select all), momentum when a scroll is flung, and focus for frames with
 buttons and no glass: `docs/ui-todo.md` has the plan for those.

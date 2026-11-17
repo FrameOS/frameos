@@ -168,6 +168,8 @@ type
     margins: array[4, float32]
     autos: set[0 .. 3]
     fixedMain, fixedCross, main, cross: float32
+    base, least: float32  # its flex base size, and the least its main size may be
+    frozen: bool          # ... while the free space is shared out (layoutFlex)
     # ukText
     spans: seq[Span]
     bold: seq[Font]       # drawn with a stroke: no bold face to use
@@ -922,6 +924,43 @@ proc stretches(parent: Box, c: UiNode, cs, ce: int): bool {.inline.} =
   alignOf(parent, c.box) == alStretch and c.fixedCross < 0 and
     cs notin c.autos and ce notin c.autos
 
+proc minContentW(n: UiNode): float32 =
+  ## CSS's min-content width: the narrowest `n` is with nothing sticking out
+  ## of it, text at its longest word (all of it, `whitespace-nowrap`). What
+  ## clips counts for nothing: a `truncate` name in a row item cuts as it
+  ## did, where a browser would want `min-w-0` on the item.
+  template b: untyped = n.box
+  let own = b.w.resolve(-1)
+  if own >= 0:
+    return own
+  if b.overflowX != ovVisible or b.overflowY != ovVisible or n.kind != ukBox and n.kind != ukText:
+    return 0
+  if n.kind == ukText:
+    let a = if n.arrangement.isNil: n.arrange(Unbounded, LeftAlign) else: n.arrangement
+    if n.text.nowrap:
+      return a.layoutBounds().x + b.padX
+    var start, line = -1'f32
+    for i in 0 ..< a.runes.len:
+      let r = a.selectionRects[i]
+      if a.runes[i].isWhiteSpace:
+        start = -1
+      else:
+        if start < 0 or r.y != line:
+          start = r.x
+          line = r.y
+        result = max(result, r.x + r.w - start)
+  else:
+    let row = b.display == diFlex and not b.col
+    var count = 0
+    for c in n.children:
+      if c.inFlow:
+        let w = c.minContentW() + max(c.box.margin[1].resolve(-1), 0) + max(c.box.margin[3].resolve(-1), 0)
+        result = if row: result + w else: max(result, w)
+        inc count
+    if row and count > 1:
+      result += b.gapX * float32(count - 1)
+  result = result + b.padX
+
 proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
   ## A block (a column that stretches its children), a flex container or a
   ## grid: equal columns are a wrapping row whose items are as wide as the
@@ -981,6 +1020,7 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     var basis = if grid: -1'f32 else: cb.basis.resolve(if mainDef: mainAvail else: -1)
     if basis < 0:
       basis = c.fixedMain
+    var measured = false
     if row:
       if basis < 0:
         let fixC = c.fixedCross >= 0
@@ -995,7 +1035,21 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
         else: c.layout(max(crossAvail - crossMargin, 0), Unbounded, false, false).x
       if basis < 0:
         basis = c.layout(c.cross, Unbounded, true, false).y
+        measured = true
     c.main = basis
+    # The least it may be: its `min-*`, else CSS's automatic minimum, its
+    # content (the longest word in a row) unless it clips or has a size. A
+    # picture scales, so it has none.
+    let least = if row: cb.minW else: cb.minH
+    c.least = max(least.resolve(mainAvail), 0)
+    if flexing and least.isAuto and c.fixedMain < 0 and c.kind < ukImage and
+        (cb.overflowX == ovVisible and cb.overflowY == ovVisible or not row and c.field in {1'u8, 3, 4}):
+      c.least =
+        if row: min(c.minContentW(), mainAvail)
+        elif measured: basis
+        else: c.layout(c.cross, Unbounded, true, false).y
+      let most = (if row: cb.maxW else: cb.maxH).resolve(mainAvail)
+      if most >= 0: c.least = min(c.least, most)
     let size = basis + c.margins[ms] + c.margins[me]
     # A grid row ends after its columns; a wrapping line where room ends.
     let breaks =
@@ -1017,34 +1071,65 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     return vec2(0, 0)
   lines.add((first, n.children.len))
   var lineCross = newSeq[float32](lines.len)
+  template fit(c: UiNode, v: float32): float32 =
+    # Within its max-* and, above all, its least (CSS: the min wins).
+    let most = (if row: c.box.maxW else: c.box.maxH).resolve(mainAvail)
+    max(if most >= 0: min(v, most) else: v, c.least)
   for li, (s, e) in lines:
+    # CSS's flexible lengths: each item from its base size, the free space
+    # shared by grow (or shrink, by its size), and an item that would go
+    # past its least or most frozen there and the rest shared again.
     var
       sum = 0'f32
       count = 0
-      grow, shrink = 0'f32
     for i in s ..< e:
       template c: untyped = n.children[i]
       if c.inFlow:
+        c.base = c.main
+        c.main = c.fit(c.main)
         sum += c.main + c.margins[ms] + c.margins[me]
         inc count
-        grow += c.box.grow
-        if c.fixedMain < 0: shrink += c.box.shrink * c.main
-    sum += gapMain * float32(count - 1)
-    let free = if mainDef: mainAvail - sum else: min(0'f32, mainAvail - sum)
+    let
+      gaps = gapMain * float32(count - 1)
+      room = if mainDef: mainAvail else: min(mainAvail, sum + gaps)
+      growing = sum + gaps < room
+    for i in s ..< e:
+      template c: untyped = n.children[i]
+      c.frozen = not flexing or (if growing: c.box.grow <= 0 or c.base > c.main
+        else: c.box.shrink <= 0 or c.fixedMain >= 0 or c.base < c.main)
+    for _ in 0 .. count:
+      var
+        free = room - gaps
+        factors, violation = 0'f32
+      for i in s ..< e:
+        template c: untyped = n.children[i]
+        if c.inFlow:
+          free -= c.margins[ms] + c.margins[me] + (if c.frozen: c.main else: c.base)
+          if not c.frozen: factors += (if growing: c.box.grow else: c.box.shrink * c.base)
+      if factors <= 0:
+        break
+      for i in s ..< e:
+        template c: untyped = n.children[i]
+        if c.inFlow and not c.frozen:
+          c.main = c.base + free * (if growing: c.box.grow else: c.box.shrink * c.base) / factors
+          violation += c.fit(c.main) - c.main
+      let done = abs(violation) < 0.01
+      for i in s ..< e:
+        template c: untyped = n.children[i]
+        if c.inFlow and not c.frozen:
+          let f = c.fit(c.main)
+          if done or f != c.main and (violation > 0) == (f > c.main):
+            c.main = f
+            c.frozen = true
+      if done:
+        break
     var tallest = 0'f32
     for i in s ..< e:
       template c: untyped = n.children[i]
       if not c.inFlow:
         continue
-      template cb: untyped = c.box
-      if not flexing:
-        discard
-      elif free > 0 and grow > 0:
-        c.main += free * cb.grow / grow
-      elif free < 0 and shrink > 0 and c.fixedMain < 0:
-        # A set size is also the item's least size (CSS's automatic minimum).
-        c.main = max(0, c.main + free * cb.shrink * c.main / shrink)
-      c.main = c.main.clampTo(if row: cb.minW else: cb.minH, if row: cb.maxW else: cb.maxH, mainAvail)
+      if not c.frozen:
+        c.main = c.fit(c.main)
       let crossMargin = c.margins[cs] + c.margins[ce]
       if row:
         c.cross =
