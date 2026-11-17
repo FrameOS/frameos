@@ -17,6 +17,10 @@
   ],
   "exclude": [
     "node_modules",
+    // Mounts assetsLogic and frameLogic and renders the Assets panel: their
+    // import graph predates this package's strict compiler options. Vitest
+    // still runs it; only tsc leaves it out.
+    "src/test/shared-spa/asset-storages.test.tsx",
     // Renders the legacy workspace's FrameActionsMenu, whose import graph
     // (frontend/src components) predates this package's strict compiler
     // options. Vitest still runs it; only tsc leaves it out.
