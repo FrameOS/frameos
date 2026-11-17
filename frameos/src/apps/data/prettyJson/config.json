@@ -2,6 +2,7 @@
   "name": "Pretty JSON",
   "description": "Pretty print JSON into a string",
   "category": "data",
+  "program": true,
   "version": "1.0.0",
   "fields": [
     {

@@ -47,6 +47,18 @@ const
     ## A producer chain deeper than this is refused, naming the node (a scene
     ## error, not a stack overflow on a board's render task).
 
+  ProgramApps* = ["data/log", "data/parseJson", "data/prettyJson",
+    "logic/breakIfRendering", "logic/ifElse", "logic/nextSleepDuration", "logic/setAsState"]
+    ## Built-in apps the program runs itself, as JavaScript: no Nim app, no
+    ## native call per run. What they do is the kit's (`AP`, bytecode on the
+    ## ESP32): the compiler emits their config and one call. Their config.json
+    ## says `"program": true`, which keeps them out of the app registry
+    ## (src/apps/apps.nim, so out of every image); their Nim modules stay for
+    ## compiled scenes on a Pi. test_program_apps.nim checks the two lists.
+
+
+proc isProgramApp*(keyword: string): bool = keyword in ProgramApps
+
 proc nodeType(node: DiagramNode): string {.inline.} = node.nodeType
 
 proc keyword(node: DiagramNode): string =
@@ -283,14 +295,29 @@ const ProgramKit* = "\"use strict\";(N)=>{const T={a:0},\n" &
   # Every listener filtered the event out: said, with the payload where the
   # event's may be logged (a key's never is, event_log.nim).
   "NL=(n,w)=>L({event:\"runEvent:noListenerMatched\",contextEvent:n,expected:w,error:'\"'+n+'\" reached the scene but every listener filtered it out'+(w.length?\" (nodes want \"+w.join(\", \")+\")\":\"\")},1);\n" &
-  "return G(N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL})}}}\n"
+  # The program apps (`ProgramApps`): `g` reads a field of the config `c`
+  # with its default `d`, in its kind (s string, b bool as app_config reads
+  # "true"/"yes", j JSON as it is, f a number, i/n an integer); `r` runs a
+  # logic app, else a data app's value goes back as a handle. `P` is the
+  # program, for logic/ifElse's branch (`scene.execNode` is `flow`).
+  """let P;const AP=(k,c,r,nm)=>{const g=(f,t,d)=>{const x=c[f];if(x==null)return d;switch(t){case"s":return String(x);case"b":return typeof x=="string"?/^(true|1|yes|y)$/i.test(x):!!x;case"j":return x}const n=+x;return x===""||n!=n?d:t=="f"?n:Math.trunc(n)};
+if(r)switch(k){case"logic/ifElse":{const n=g(g("condition","b",true)?"thenNode":"elseNode","n",0);if(n)P.flow(n)}return;
+case"logic/breakIfRendering":if(N.ir())throw Error("Abording run because scene is rendering");return;
+case"logic/nextSleepDuration":{const d=g("duration","f",0);N.ns(d);L({event:"log:"+nm,message:"Set sleep duration between renders to "+d+" seconds"})}return;
+case"logic/setAsState":{const s=g("valueString","s",""),x=g("valueJson","j",null),y=g("stateKey","s","");if(s&&x!=null)return void L({event:"error:"+nm,error:"Both valueString and valueJson are set. Only one can be set."});if(x!=null)N.sw(y,x);else if(s)N.sw(y,s);if(g("debugLog","b",false))L({event:"log:"+nm+":setAsState",key:y,value:N.st(y)??null})}return}
+else switch(k){case"data/log":{const x=g("inputJson","j",null);if(x!=null)L({event:"log:"+nm+":log",message:x});return v(x,"json")}
+case"data/parseJson":{let x;try{x=JSON.parse(g("text","s",""))}catch(e){throw Error("Failed to parse JSON: "+e.message)}return v(x,"json")}
+case"data/prettyJson":return v(JSON.stringify(g("json","j",null),null,g("prettify","b",true)?g("ident","i",2):0),"string")}
+throw Error(r?"App '"+k+"' cannot be run; use get().":"Unknown app keyword: "+k)};
+""" &
+  "return P=G(N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL,AP})}}}\n"
 
 const ProgramHead = "\"use strict\";(__K)=>{const{console,__S,__C,__E}=__K;\n" &
   "const __F=((__K)=>{\n"
 const SnippetLines = 3
   ## The line of the first snippet function's header (its snippet starts on
   ## the next one).
-const GlueHead = "const{g,r,s,p,q,t,j,v,d,ss,sc,ka,cq,cs,m,bg,n0,n1,lo}=N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL}=Z;\n"
+const GlueHead = "const{g,r,s,p,q,t,j,v,d,ss,sc,ka,cq,cs,m,bg,n0,n1,lo}=N,{T,JE,I,X,A,EI,ZA,LE,NF,CY,XC,NL,AP}=Z;\n"
 
 type Emitter = object
   names: seq[string] ## the snippet functions, handed from their scope to the glue's
@@ -508,6 +535,37 @@ proc emitCodeFunction(e: var Emitter, g: Graph, node: DiagramNode, id: int) =
   header.add "return((state,args,context)=>(\n"
   discard e.snippetFunction(id, psCode, "codeJS", codeSnippet(node), header)
 
+# ------------------------------------------------------------- program apps
+#
+# A built-in app the program runs itself (`ProgramApps`): a constant `C<id>`
+# holding the node's config, a wired input setting a key of it, and a call
+# of the kit's `AP`, which reads the config with the app's defaults and does
+# the app's work. Written once in the kit, not per app in this compiler: the
+# kit is bytecode in the ESP32 image, the compiler is Nim code.
+
+proc appName(node: DiagramNode): string =
+  ## AppRoot's name in its log lines (frameos/apps.nim `appName`).
+  let name = node.data{"name"}.getStr()
+  if name.len == 0: $node.id.int else: $node.id.int & ":" & name
+
+proc emitProgramAppConfig(e: var Emitter, node: DiagramNode, id: int) =
+  ## `const C<id>=`: the node's config, which holds the targets of its
+  ## `field/<name>` edges too (logic/ifElse's branches): interpreter.init
+  ## writes them in (`setNodeFieldFromEdge`) before a program is compiled.
+  let config = node.data{"config"}
+  e.put "const C#=", id
+  e.add(if config.isNil or config.kind != JObject: "{}" else: $config)
+  e.add ";\n"
+
+proc addProgramAppCall(e: var Emitter, node: DiagramNode, id: int, run: bool) =
+  ## `AP(keyword, C<id>, run, name)`: a run (logic apps), or the value's handle.
+  e.add "AP("
+  e.addStr node.keyword
+  e.put ",C#,", id
+  e.add(if run: "1," else: "0,")
+  e.addStr appName(node)
+  e.add ")"
+
 proc eventFilters(node: DiagramNode): tuple[match: seq[(string, string)], expected: seq[string]] =
   ## What a listener's payload must say (every filter it sets; an empty one
   ## matches anything; the node's own `label` when the config sets none), and
@@ -586,12 +644,30 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
     let id = node.id.int
     let kind = node.nodeType
     let throws = kind notin ["app", "code", "dispatch", "scene", "state"]
+    let program = kind == "app" and isProgramApp(node.keyword)
+    let cached = kind == "app" and readCacheConfig(node.data).enabled
+    if program:
+      emitProgramAppConfig(e, node, id)
     if kind == "code":
       emitCodeFunction(e, g, node, id)
     elif kind == "app" and g.appInputs.hasKey(id):
       # i<id>(): its fields set from their producers.
       e.put "function i#(){", id
       for input in g.ordered(g.appInputs[id]):
+        if program:
+          # The handle as a JavaScript value; `AP` reads it in the field's kind.
+          e.add "try{const H="
+          e.addProducer(input, node)
+          e.add ";"
+          if cached and readCacheConfig(node.data).inputEnabled:
+            e.put "ka(#,", id
+            e.addStr input.field
+            e.add ",H);"
+          e.put "C#[", id
+          e.addStr input.field
+          e.add "]=j(H)"
+          e.addInputFailure(0, id, input)
+          continue
         e.put "try{s(#,", id
         e.addStr input.field
         e.add ","
@@ -614,10 +690,20 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
       of "app":
         if g.appInputs.hasKey(id):
           e.put "i#();", id
-        e.put "h=g(#", id
-        if readCacheConfig(node.data).enabled:
-          emitCacheExpression(e, node, id, brokenCache)
-        e.add ")"
+        if not program:
+          e.put "h=g(#", id
+          if cached:
+            emitCacheExpression(e, node, id, brokenCache)
+          e.add ")"
+        else:
+          if cached:
+            e.put "const K=cq(#,1", id
+            emitCacheExpression(e, node, id, brokenCache)
+            e.add ");if(K>=0)return K;"
+          e.add "h="
+          e.addProgramAppCall(node, id, false)
+          if cached:
+            e.put ";cs(#,h,1)", id
       of "code":
         e.add "\n"
         emitCodeBody(e, g, node, id, true, brokenCache)
@@ -659,7 +745,7 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
     e.put "function f#(V){", id
     if looping[i]:
       e.put "V||=new Set();if(V.has(#))return CY(#,V);V.add(#);", id
-    if kind != "app":
+    if kind != "app" or program:
       # Whatever draws first pays the background still owed; an app settles
       # it in `p` (a planned image edge may waive it).
       e.add "bg();"
@@ -670,7 +756,11 @@ proc compileScene*(nodes: seq[DiagramNode], edges: seq[DiagramEdge], profile = f
       e.put "g#();", id
     else:
       e.wrapStart(id, cyclic[i], profile, false)
-      if kind == "app":
+      if program:
+        if g.appInputs.hasKey(id):
+          e.put "i#();", id
+        e.addProgramAppCall(node, id, true)
+      elif kind == "app":
         e.put "const P=p(#);", id
         if g.appInputs.hasKey(id):
           e.put "i#();", id

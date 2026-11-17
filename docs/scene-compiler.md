@@ -101,6 +101,45 @@ A Nim exception a native throws crosses the program as a JavaScript error
 carrying its message and stack; one no JavaScript caught leaves the program
 as itself (a `JsAppError` stays one).
 
+## Program apps
+
+Seven built-in apps are no Nim app on a frame: the program runs them itself
+(`ProgramApps` in `scene_compiler.nim`; their `config.json` says
+`"program": true`, which keeps them out of the registry `src/apps/apps.nim`
+and so out of every image). They are `logic/ifElse`,
+`logic/breakIfRendering`, `logic/nextSleepDuration`, `logic/setAsState`,
+`data/log`, `data/parseJson` and `data/prettyJson`.
+
+- **What they do is the kit's** (`AP` in `ProgramKit`, bytecode in the ESP32
+  image). The compiler emits only a constant `C<id>` with the node's config
+  (which holds the targets of its `field/<name>` edges: `interpreter.init`
+  writes them in before a program is compiled), a wired input as a key of it
+  (`C<id>[field]=j(handle)`), and a call: `AP(keyword, C<id>, run, name)`.
+- **`AP` reads a field** with the generated loader's default and in its kind
+  (`"true"`/`"yes"` a bool, `"7.5"` a number), whether it came from the
+  config or an input: a `Value` of another kind is converted where the Nim
+  app refused it. A cache keyed on inputs keys on the handle, as the code
+  nodes do (`ka`, `cq`, `cs`).
+- **The work** is the app's few lines of JavaScript (`JSON.parse`,
+  `JSON.stringify`, `L` for a log line in the app's own shape, `P.flow` for
+  an ifElse branch), and what JavaScript cannot do is a native: `sw` writes
+  the state, `ns` sets the run's next sleep, `ir` asks whether the scene is
+  rendering. Numbers in log lines read as JavaScript writes them (`5`, not
+  `5.0`).
+- No app instance (`appsByNodeId` has none) and no native call per run.
+- The Nim modules stay in `src/apps` for compiled scenes, which import them
+  (`backend/app/codegen/scene_nim.py`), and so do their tests.
+  `test_program_apps.nim` runs each program app and checks the compiler's
+  list against the `config.json` flags.
+
+A new one is an entry in `ProgramApps`, a case in `AP`, `"program": true` in
+its `config.json`, and a test. Only an app whose work is a few lines of
+JavaScript; per-app code in the compiler (a first version emitted each app's
+lines from Nim) cost more flash than the apps it replaced.
+`data/clock` stays a Nim app until stored scenes carry chrono's format
+(`{hour/2}:{minute/2}`) instead of std/times' (`HH:mm`), converted by the
+control planes.
+
 ## Where a program runs
 
 A scene with code of its own (a code node, an inline input, a cache

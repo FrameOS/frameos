@@ -1089,6 +1089,8 @@ export interface AppConfig {
   description?: string
   /** Version for this app */
   version?: string
+  /** A built-in app the scene's program runs itself, as JavaScript (frameos/scene_compiler.nim `ProgramApps`): no Nim app on a frame */
+  program?: boolean
   /** List of top level settings exported for this app */
   settings?: string[]
   /**

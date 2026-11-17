@@ -1065,11 +1065,12 @@ layoutWrappedSceneId = wrappedSceneId
 type ProgramOp = enum
   opGet, opRun, opSet, opInputImage, opPre, opPost, opState, opToJs, opFromJs, opZero,
   opDispatch, opChildState, opScene, opCacheKey, opCacheLookup, opCacheStore, opMatch,
-  opBackground, opProfileStart, opProfileEnd, opLog, opLogOutput, opStateRead, opContextRead
+  opBackground, opProfileStart, opProfileEnd, opLog, opLogOutput, opStateRead, opContextRead,
+  opStateWrite, opNextSleep, opRendering
 
 const ProgramNativeNames: array[ProgramOp, cstring] = ["g", "r", "s", "ei", "p", "q",
   "t", "j", "v", "zv", "d", "ss", "sc", "ka", "cq", "cs", "m", "bg", "n0", "n1",
-  "L", "lo", "st", "cx"]
+  "L", "lo", "st", "cx", "sw", "ns", "ir"]
 
 const ProgramFile = "<frameos:scene>"
 
@@ -1563,6 +1564,17 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
   of opContextRead:
     if not context.isNil:
       result = contextValue(ctx, context, toNimString(ctx, a(0)))
+  # What the program apps (scene_compiler.ProgramApps) do that JavaScript
+  # cannot: logic/setAsState's write, logic/nextSleepDuration's sleep,
+  # logic/breakIfRendering's question.
+  of opStateWrite:
+    scene.state[toNimString(ctx, a(0))] = jsValueToJson(ctx, a(1))
+  of opNextSleep:
+    var seconds: float64
+    discard JS_ToFloat64(ctx, addr seconds, a(0))
+    context.nextSleep = seconds
+  of opRendering:
+    result = nimBoolToJS(ctx, scene.isRendering)
 
 proc programNative(ctx: ptr JSContext, thisVal: JSValueConst, argc: cint, argv: ptr JSValueConst,
     magic: cint, data: ptr JSValue): JSValue {.cdecl.} =
@@ -1854,6 +1866,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
   for node in exportedScene.nodes:
     if node.nodeType == "app":
       let keyword = node.data{"keyword"}.getStr()
+      if isProgramApp(keyword):
+        # The program runs it (scene_compiler.ProgramApps): no app instance.
+        continue
       let app = initInterpretedApp(keyword, node, scene)
       scene.appsByNodeId[node.id] = app
       if app.dynamicJsAppSubscribes():
