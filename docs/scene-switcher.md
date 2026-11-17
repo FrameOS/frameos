@@ -5,7 +5,7 @@
 Swipe up from the bottom of a touch screen and the frame shows every scene it
 has as a tile with its title; tap one and the frame shows it. The same screen
 works on e-paper, with the keys: the highlight walks the tiles, and a key
-picks one.
+picks one. A gear in its header opens the frame's own settings page.
 
 | Piece | Where |
 |---|---|
@@ -31,6 +31,14 @@ like `setCurrentScene {direction}`:
   settings closes them unsaved ([scene-settings.md](scene-settings.md)), or,
   with `{swap: true}` (a taskbar's Start), goes straight to the list, the
   scene behind staying behind.
+- **The gear** in the header goes the other way: `sceneSettings {page:
+  "frame"}` while the switcher shows opens the frame page
+  ([scene-settings.md](scene-settings.md) "The frame page") over the scene
+  the switcher was opened from, in its layout, instead of going back to that
+  scene. A layout that broke every scene can leave the switcher as the one
+  screen still reachable, and the frame page's Layout is where it is taken
+  off. On a desktop the frame page opens as its window and the switcher stays
+  open in its own. A plain `sceneSettings` still goes back.
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
@@ -106,6 +114,13 @@ scenes fill three slots of the same grid that thirty would page through,
 rather than growing to fill the page. More scenes than a page holds page,
 with the page and two arrows in the header.
 
+The header ends with the gear and Close. The gear is there only while the
+frame offers its page (`frameSettingsRead` answers, as the scene settings'
+gear): not in an editor's preview, and not while the frame's control plane
+turned the settings on the screen off (`frame_settings_on_screen`), where it
+would open nothing. The device's unlock (docs/scene-settings.md "Turned off by
+the control plane") brings it back with the page.
+
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
   gets a dark grid: each tile its picture when the host has one (Linux), its number
   and title under it, the highlighted tile ringed, and a tile lighter while a
@@ -172,12 +187,14 @@ The preview lists names only.
 
 - **Touch:** tap a tile to show that scene, swipe left or right across the
   tiles (or in from the right or the left edge: the frame's `forward` and
-  `back`) for the next or the previous page, tap Close (or swipe up from the
-  bottom again) to go back.
+  `back`) for the next or the previous page, tap the gear for the frame's
+  settings, tap Close (or swipe up from the bottom again) to go back.
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
-  highlight one tile on, `prev` / `up` one back (wrapping, across pages);
+  highlight one tile on, `prev` / `up` one back (wrapping, across pages, and
+  through the gear after the last tile, which keeps the page showing and is
+  inverted like a tile);
   `primary`, `refresh` and `menu` (OK, REFRESH, BOOT, HOME) show the
-  highlighted scene; `back` goes back. A press is one step and a double press
+  highlighted scene, or open the frame page on the gear; `back` goes back. A press is one step and a double press
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.

@@ -471,20 +471,26 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
-  # From the settings straight to the scene list when asked (a taskbar's Start):
-  # the scene behind stays behind, and the layout goes on as it was.
-  let swap = sceneId == SceneSwitcherId and current.isBuiltIn and current.id.string == SceneSettingsId and
-    envelope.payload{"swap"}.getBool()
+  let page = envelope.payload{"page"}.getStr()
+  # From the settings straight to the scene list when asked (a taskbar's Start),
+  # and from the scene list straight to the frame page (its gear, the way back
+  # from a layout that broke the scenes): the scene behind stays behind, and
+  # the layout goes on as it was.
+  let swap = current.isBuiltIn and (if sceneId == SceneSwitcherId:
+      current.id.string == SceneSettingsId and envelope.payload{"swap"}.getBool()
+    else: current.id.string == SceneSwitcherId and page == "frame")
   # `{page: "safe"}` (safe mode): the frame page with no layout around it,
   # opened or not already. The scene it came from, and its layout, stay as they
   # are, so closing it unsaved changes nothing.
-  let safe = envelope.payload{"page"}.getStr() == "safe"
+  let safe = page == "safe"
   if swap:
     let state = newJObject()
     state.put("from", newJString(current.state{"from"}.getStr()))
     let worn = current.state{"layout"}
     if not worn.isNil:
       state.put("layout", copy(worn))
+    if sceneId == SceneSettingsId:
+      state.put("opened", newJString("frame"))
     payload.put("state", state)
   elif not current.isBuiltIn or safe:
     let state = newJObject()
@@ -500,7 +506,7 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
       if not current.isBuiltIn:
         current.settingsOf(state)
       # `{page: "frame"}`: straight to the frame's own page, if it has one.
-      if safe or envelope.payload{"page"}.getStr() == "frame":
+      if safe or page == "frame":
         state.put("opened", newJString("frame"))
     payload.put("state", state)
   else:
@@ -529,13 +535,14 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
   ## opened over the scene in front or over the scene the settings in front
   ## are for. While a built-in scene is in front, the command goes back from
   ## it, as `builtInScene` does, but for the frame page asked for over a
-  ## scene's settings.
+  ## scene's settings or over the scene list (its gear).
   let
     current = loop.host.sceneFor(none(SceneId))
     framePage = envelope.payload{"page"}.getStr() == "frame"
     payload = newJObject()
-  if current.isBuiltIn and not (framePage and isSceneSettings(current.id.string) and
-      current.id.string != SceneSettingsId):
+  # A built-in scene other than the frame page: the switcher, or a scene's
+  # settings window.
+  if current.isBuiltIn and not (framePage and current.id.string != SceneSettingsId):
     payload.put("sceneId", newJString(loop.backFrom(current)))
     return loop.host.selectScene(payload)
   let state = newJObject()

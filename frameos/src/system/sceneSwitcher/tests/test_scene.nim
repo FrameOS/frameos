@@ -3,6 +3,7 @@ import pixie
 import frameos/channels
 import frameos/types
 import frameos/events_gen
+import frameos/frame_settings_hooks
 import frameos/utils/dither
 import frameos/panel_shape
 import frameos/ui/events
@@ -420,6 +421,98 @@ block a_round_panel_pages_with_its_arrows:
   # The square grid is no smaller than it must be: a third of the scenes'
   # tiles on a page at least, each at least a fifth of the circle across.
   doAssert grid.tileW >= 80 and grid.tileH >= 64, $grid
+
+proc offered(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  ## A host whose frame page is on (its facts do not matter here).
+  {.cast(gcsafe).}:
+    result = %*{"rotate": 0, "renderScale": 0}
+
+proc turnedOff(): JsonNode {.nimcall, gcsafe, raises: [].} =
+  ## The frame's control plane turned the settings on the screen off.
+  nil
+
+proc gearRegion(count: int): int =
+  ## The index of the gear's region (handler count + 3), -1 for none.
+  result = -1
+  for i, r in uiTarget(SceneSwitcherId, 1).regions:
+    if r.handlers[ueClick] == count + 3 + 1:
+      return i
+
+block the_gear_opens_the_frame_page:
+  # The header's gear is the way to the frame page (and its Layout) from the
+  # switcher, which may be all a broken layout left reachable: by touch, and
+  # by the keys, after the last tile.
+  listed = entries(3)
+  sent.setLen(0)
+  frameSettingsRead = offered
+  let lcd = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-2")
+  preview("switcher-800x480-lcd-gear", lcd.draw(newImage(800, 480)))
+  let gear = gearRegion(3)
+  doAssert gear >= 0, "a gear in the header"
+  let r = uiTarget(SceneSwitcherId, 1).regions[gear]
+  let grid = switcherGrid(3, 800, 480, thumbnails = false)
+  doAssert r.y + r.h <= grid.headerH.float32, $r
+  lcd.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "touch"})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSettings and sent[0][1] == %*{"page": "frame"}, $sent
+  # The keys: after the last tile the gear, inverted on e-paper, then the first.
+  sent.setLen(0)
+  let paper = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-3")
+  let plain = paper.draw(newImage(800, 480))
+  let at = uiTarget(SceneSwitcherId, 1).regions[gearRegion(3)]
+  proc ink(image: Image): int =
+    for y in int(at.y) ..< int(at.y + at.h):
+      for x in int(at.x) ..< int(at.x + at.w):
+        if image[x, y].r < 128: inc result
+  paper.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
+  doAssert paper.highlighted() == 3 and paper.state{"page"}.getInt() == 0
+  let lit = paper.draw(newImage(800, 480))
+  preview("switcher-800x480-eink-gear", oneBit(lit))
+  doAssert lit.ink > plain.ink * 3 div 2, "the gear the keys are on is inverted: " & $lit.ink & " " & $plain.ink
+  paper.send("button", %*{"label": "REFRESH", "role": "refresh", "action": "press"})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSettings and sent[0][1] == %*{"page": "frame"}, $sent
+  paper.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
+  doAssert paper.highlightedId == "scene-1", "and on to the first: " & paper.highlightedId
+  paper.send("button", %*{"label": "LEFT", "role": "prev", "action": "press"})
+  doAssert paper.highlighted() == 3, "back from the first: the gear"
+  # With no scenes, the gear is what the keys are on.
+  listed = @[]
+  let empty = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"))
+  doAssert empty.highlighted() == 0
+  sent.setLen(0)
+  empty.send("button", %*{"label": "REFRESH", "role": "refresh", "action": "press"})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSettings, $sent
+  # Turned off by the frame's control plane: no gear, and the keys walk the
+  # tiles alone, as before.
+  frameSettingsRead = turnedOff
+  listed = entries(3)
+  let off = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-3")
+  discard off.draw(newImage(800, 480))
+  doAssert gearRegion(3) < 0, "no gear while the frame page is off"
+  off.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
+  doAssert off.highlightedId == "scene-1"
+  # A round panel: the gear beside Close at 6 o'clock, on the glass.
+  frameSettingsRead = offered
+  for count in [1, 20]:
+    listed = entries(count)
+    let round = newSwitcher(config(480, 480, "pimoroni.hyperpixel2r"), opener = "scene-1")
+    round.state["highlight"] = %"\1"
+    let image = round.draw(newImage(480, 480))
+    preview("switcher-480x480-round-gear-" & $count, image)
+    let g = gearRegion(count)
+    doAssert g >= 0, $count
+    for r in uiTarget(SceneSwitcherId, 1).regions:
+      for (x, y) in [(r.x, r.y), (r.x + r.w - 1, r.y), (r.x, r.y + r.h - 1), (r.x + r.w - 1, r.y + r.h - 1)]:
+        doAssert insideRound(480, 480, int(x), int(y), RoundInset), $count & ": off the glass at " & $(x, y)
+    let background = image[0, 0]
+    for y in 0 ..< 480:
+      for x in 0 ..< 480:
+        if not insideRound(480, 480, x, y, RoundInset):
+          doAssert image[x, y] == background, $count & ": drawn off the glass at " & $(x, y)
+    sent.setLen(0)
+    let r = uiTarget(SceneSwitcherId, 1).regions[g]
+    round.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "touch"})
+    doAssert sent.len == 1 and sent[0][0] == evSceneSettings, $sent
+  frameSettingsRead = nil
 
 block it_is_a_built_in_scene:
   doAssert isBuiltInScene(SceneSwitcherId)

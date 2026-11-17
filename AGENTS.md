@@ -204,8 +204,9 @@
   into every runtime, `frameos/src/system/sceneSwitcher/scene.nim`: every
   scene on the frame as a tile. The `sceneSwitcher` scene command opens it
   and the dispatcher resolves it (`event_loop.nim` hands it `state.from`;
-  while it or the scene settings show, either command goes back there),
-  never a host. It is drawn
+  while it or the scene settings show, either command goes back there, but
+  its header's gear, `sceneSettings {page: "frame"}`, opens the frame page,
+  shown only while the frame offers one), never a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, and on Linux shows each
   scene's last snapshot (`sceneSwitcherThumbnail`,

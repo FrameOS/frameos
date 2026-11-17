@@ -87,11 +87,7 @@ const
   Unedited = ["node", "scene", "image"]
   # The scales offered (frontend/src/utils/renderScale.ts RENDER_SCALE_STEPS).
   Scales = ["0.25", "0.5", "0.75", "1", "1.25", "1.5", "2", "2.5", "3", "4"]
-  # A gear, 48 units square: the teeth clockwise, the hole the other way.
-  GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
-    "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
-    "M17 24a7 7 0 1 0 14 0a7 7 0 1 0 -14 0Z"
-  # A circle with an arrow, the same 48 units.
+  # A circle with an arrow, 48 units square as the gear is (switcher.gearPath).
   RefreshPath = "M24 8a16 16 0 1 0 16 16h-5a11 11 0 1 1-11-11v6l10-8.5L24 2Z"
   # wifiLine's words, by the host's `state`.
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
@@ -575,14 +571,14 @@ proc gear(look: Look, lit, named: bool): SvgNode =
   ## The gear that opens the frame page, lit while it shows, with its name
   ## beside it where the header has the room.
   if not named:
-    return look.iconButton(lit, GearPath, HGear)
+    return look.iconButton(lit, gearPath(), HGear)
   var c = "shrink-0 flex items-center rounded-full font-bold"
   c.px("h", look.line * 4 div 5)
   c.px("px", look.size)
   c.px("gap", look.size div 2)
   if look.paper: c.add " border-2 border-black"
   else: c.add " bg-zinc-800 active:bg-zinc-600"
-  result = el("div", move c, look.icon(GearPath)).on("on-click", HGear)
+  result = el("div", move c, look.icon(gearPath())).on("on-click", HGear)
   result.children.add el("span", "whitespace-nowrap", SvgNode(text: "Frame settings"))
   result = result.role("button")
 
@@ -674,7 +670,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
     else:
       # A button on the select box's line: scan for networks, a layout's gear.
       let boxLine = el("div", "flex items-center gap-2", el("div", "flex-1 min-w-0", box))
-      boxLine.children.add look.iconButton(false, if action == AScan: RefreshPath else: GearPath, HAction + action)
+      boxLine.children.add look.iconButton(false, if action == AScan: RefreshPath else: gearPath(), HAction + action)
       result.children.add boxLine
     if not typing:
       return
