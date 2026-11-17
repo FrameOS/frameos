@@ -244,6 +244,11 @@ proc isLink*(href: string): bool =
   else:
     false
 
+proc links(n: SvgNode): bool {.noinline.} =
+  ## An `<a>` that opens its href on a tap: one with an onClick of its own
+  ## does what that says instead.
+  n.tag == "a" and n.attr("on-click").len == 0 and n.attr("href").isLink
+
 proc scrolled*(input: UiInput, key: int): (float32, float32) =
   ## How far the box at `key` is scrolled: (0, 0) until something scrolls it.
   for (k, x, y) in input.scrolls:
@@ -541,7 +546,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     let value = n.attr(if event == ueChange and n.attr("on-input").len > 0: "on-input" else: handlerAttrs[event])
     if value.len > 0 and number(value, 0, value.len, id):
       result.handlers[event] = int(id) + 1
-  if n.tag == "a" and result.handlers[ueClick] == 0 and n.attr("href").isLink:
+  if n.links:
     # A link: a tap puts its QR code up (an onClick of its own replaces that).
     result.handlers[ueClick] = LinkOpen + 1
   var states: set[UiState]
@@ -589,7 +594,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
         run = newUiNode(ukText, result.text)
         run.inGroup = childGroup
         result.children.add run
-      if child.tag == "a" and run.src.isNil and child.attr("on-click").len == 0 and child.attr("href").isLink:
+      if run.src.isNil and child.links:
         # A link in running text: the text it runs in is what a tap opens it
         # from (the first link there), keyed by the link's place in the tree.
         run.src = child
@@ -1843,19 +1848,11 @@ proc selectOption*(memo: UiMemo, key, option: int, handler: var int): string =
     handler = n.handlers[ueChange]
     result = n.src.children[option].attr("value")
 
-proc linkIn(n: UiNode, key: int): UiNode =
-  if n.isNil or n.key == key and n.handlers[ueClick] == LinkOpen + 1 and not n.src.isNil:
-    return n
-  for c in n.children:
-    result = c.linkIn(key)
-    if not result.isNil:
-      return
-
 proc linkAt*(memo: UiMemo, key: int): string =
   ## The href of the link at `key` as the last layout had it ("" for none).
   if not memo.isNil:
-    let n = memo.root.linkIn(key)
-    if not n.isNil:
+    let n = memo.root.fieldIn(key) # a link's key is its own, as a field's is
+    if not n.isNil and not n.src.isNil:
       result = n.src.attr("href")
 
 proc linkCard(url: string, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
