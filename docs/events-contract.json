@@ -239,7 +239,7 @@
       "name": "pointerDown",
       "class": "input",
       "device": "pointer",
-      "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event.",
+      "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds `shift`, `ctrl`, `alt` or `meta` as true.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -248,7 +248,11 @@
         {"name": "button", "label": "Button", "type": "integer", "required": true, "unit": "pointer-button"},
         {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
-        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": false, "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
@@ -371,14 +375,18 @@
       "name": "tap",
       "class": "input",
       "device": "pointer",
-      "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host.",
+      "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host. A modifier key held adds `shift`, `ctrl`, `alt` or `meta` as true, as on `pointerDown`.",
       "listen": true,
       "dispatch": false,
       "payload": [
         {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
-        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": false, "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",

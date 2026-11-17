@@ -7948,6 +7948,136 @@
       ]
      }
     ]
+   },
+   {
+    "name": "a modifier held on a keyboard is on the press and the tap",
+    "why": "Shift+click extends a selection in a JSX field (docs/jsx-ui.md \"Selecting, copying and pasting\"). A preview sends its own flags with every key, and its pointer presses are made here: the modifier key's own down and up say what is held.",
+    "steps": [
+     {
+      "at": 0,
+      "send": {
+       "origin": "preview",
+       "event": "keyDown",
+       "payload": {
+        "code": "ShiftLeft",
+        "key": "Shift",
+        "shift": true,
+        "ctrl": false,
+        "alt": false,
+        "meta": false,
+        "repeat": false
+       }
+      },
+      "delivered": [
+       {
+        "event": "keyDown",
+        "payload": {
+         "code": "ShiftLeft",
+         "shift": true
+        }
+       }
+      ]
+     },
+     {
+      "at": 10,
+      "send": {
+       "origin": "preview",
+       "event": "pointerMove",
+       "payload": {
+        "x": 16417,
+        "y": 16417,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "buttons": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerMove",
+        "payload": {
+         "pointerId": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 20,
+      "send": {
+       "origin": "preview",
+       "event": "pointerDown",
+       "payload": {
+        "x": 16417,
+        "y": 16417,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerDown",
+        "payload": {
+         "button": 0,
+         "shift": true
+        }
+       }
+      ]
+     },
+     {
+      "at": 60,
+      "send": {
+       "origin": "preview",
+       "event": "pointerUp",
+       "payload": {
+        "x": 16417,
+        "y": 16417,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0
+       }
+      },
+      "delivered": [
+       {
+        "event": "pointerUp",
+        "payload": {
+         "button": 0
+        }
+       },
+       {
+        "event": "tap",
+        "payload": {
+         "x": 400,
+         "y": 240,
+         "shift": true
+        }
+       }
+      ]
+     },
+     {
+      "at": 80,
+      "send": {
+       "origin": "preview",
+       "event": "keyUp",
+       "payload": {
+        "code": "ShiftLeft",
+        "key": "Shift",
+        "shift": false,
+        "ctrl": false,
+        "alt": false,
+        "meta": false
+       }
+      },
+      "delivered": [
+       {
+        "event": "keyUp",
+        "payload": {
+         "code": "ShiftLeft",
+         "shift": false
+        }
+       }
+      ]
+     }
+    ]
    }
   ]
  }

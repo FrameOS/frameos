@@ -20,8 +20,10 @@ import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
 import frameos/render_probe
+import frameos/utils/qr
 when not defined(frameosEmbedded):
   import frameos/panel_shape
+  from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
 
@@ -68,6 +70,14 @@ type
     hovered*, pressed*: seq[int]
     focus*: int          ## the focused field's key + 1; 0 for none
     caret*: int          ## where in its text the next character goes, in bytes
+    sel*: int            ## the selection's other end (its anchor) + 1: the text between it and
+                         ## the caret is selected (`selected`); 0 for none
+    anchor*: bool        ## a drag selects: the next layout puts `sel` at anchorX, anchorY ...
+    anchorX*, anchorY*: float32 ## ... from the field's corner, as `place` puts the caret
+    secret*: bool        ## the focused field is a password's, as the last layout found it: never copied
+    word*: bool          ## the caret's next placing selects the word there (a long press, a double tap)
+    handles*: bool       ## the selection was made by touch: handles at its ends to drag ...
+    menu*: bool          ## ... and its menu over it (Cut, Copy, Paste, Select all)
     text*: string        ## its text as the last layout found it, with the edits since
     place*: bool         ## a tap focused it: the caret goes to placeX, placeY ...
     placeX*, placeY*: float32 ## ... from the field's corner
@@ -90,6 +100,7 @@ type
     goal*: bool
     open*: int           ## the <select> whose list is up: its key + 1; 0 for none
     fresh*: bool         ## it just opened: the next layout scrolls to what it holds
+    link*: string        ## the link whose QR code is up over the UI ("Links"); "" for none
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -128,6 +139,7 @@ type
     keyboard: UiNode     ## the on-screen keyboard's, likewise
     popup: UiNode        ## an open <select>'s list, likewise
     accents: UiNode      ## a held key's accents, likewise
+    menu: UiNode         ## a selection's menu, likewise
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -197,13 +209,84 @@ const
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
     "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
     "on-pinch", "on-change", "on-key-down"]
+  LinkOpen* = KeyBase div 2
+    ## The tap handler of a link (`<a href>`, "Links" in docs/jsx-ui.md): its
+    ## QR code goes up over the UI. Past every handler a tree can hold.
+  LinkClose* = LinkOpen + 1 ## the QR code's: it goes away
+  LinkCloseAttr = $LinkClose
+  MaxLink = 1024 ## a longer href is no link: its QR code would be too dense to scan
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
+  LinkKey = 1 shl 24     ## a link's QR code, likewise
   PopupKey = 1 shl 22    ## an open <select>'s list, likewise
   AccentKey = 1 shl 23   ## a held key's accents, likewise
+  EndsKey = 1 shl 25     ## where a selection made by touch starts and ends (+ 1), as its field shows them
+  MenuKey = 1 shl 26     ## its menu
   Unbounded = 1e9'f32
   MaxDepth = 64
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
+
+func scheme(name: string): uint64 =
+  for c in name: result = result shl 8 or uint64(ord(c))
+
+proc isLink*(href: string): bool =
+  ## Whether an `<a href>` opens: http(s)://, mailto: and tel: only (never
+  ## `javascript:`), no control characters, at most MaxLink bytes. The scheme
+  ## is read into a number, lowercased, and compared with four: no copy of the
+  ## href, no string compares (flash on an ESP32).
+  if href.len > MaxLink:
+    return false
+  var
+    name = 0'u64
+    colon = -1
+  for i, c in href:
+    if c < ' ' or c == '\x7f':
+      return false
+    if colon < 0:
+      if c == ':': colon = i
+      elif i == 6: return false # longer than any scheme here
+      else: name = name shl 8 or uint64(ord(c) or 0x20)
+  case name
+  of scheme("http"), scheme("https"):
+    colon + 2 < href.len and href[colon + 1] == '/' and href[colon + 2] == '/'
+  of scheme("mailto"), scheme("tel"):
+    true
+  else:
+    false
+
+proc links(n: SvgNode): bool {.noinline.} =
+  ## An `<a>` that opens its href on a tap: one with an onClick of its own
+  ## does what that says instead.
+  n.tag == "a" and n.attr("on-click").len == 0 and n.attr("href").isLink
+
+const MaxClipboard = when defined(frameosEmbedded): 4096 else: 65536
+  ## The most a copy keeps, in bytes (cut at a character).
+
+var clipboard {.threadvar.}: string
+  ## What Copy and Cut took, for Paste: the frame's own, every UI's.
+
+proc uiClipboard*(): string =
+  ## The frame's clipboard (a host with one of its own, the browser's
+  ## preview, mirrors it).
+  clipboard
+
+proc setUiClipboard*(text: string) =
+  ## Copy and Cut; and a host's own clipboard handed to the frame for Paste.
+  clipboard = text
+  if clipboard.len > MaxClipboard:
+    var cut = MaxClipboard
+    while cut > 0 and (ord(clipboard[cut]) and 0xC0) == 0x80:
+      dec cut
+    clipboard.setLen(cut)
+
+proc selected*(input: UiInput): (int, int) =
+  ## The bytes of the focused field's text that are selected, from and to;
+  ## the two are the caret for none.
+  let caret = clamp(input.caret, 0, input.text.len)
+  result = (caret, caret)
+  if input.sel > 0:
+    let other = clamp(input.sel - 1, 0, input.text.len)
+    result = (min(other, caret), max(other, caret))
 
 proc scrolled*(input: UiInput, key: int): (float32, float32) =
   ## How far the box at `key` is scrolled: (0, 0) until something scrolls it.
@@ -333,6 +416,9 @@ var
   ui {.threadvar.}: ptr UiInput ## and the input it was asked for
   focusSeen {.threadvar.}: bool ## the focused field was laid out
   revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
+  ends {.threadvar.}: array[2, array[4, float32]] ## a selection made by touch: its start and end
+                                                  ## (x, y, -, line height), as emitField found them ...
+  endsFound {.threadvar.}: bool                   ## ... when it did
 
 proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, rootH: float32,
     input: UiInput) =
@@ -360,6 +446,7 @@ proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, 
       # in React: a line emptied on Enter (the Terminal), a length kept.
       ui.text = result.value
       ui.caret = result.value.len
+      ui.sel = 0
   var
     style = result.text
     shown = result.value
@@ -502,6 +589,9 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     let value = n.attr(if event == ueChange and n.attr("on-input").len > 0: "on-input" else: handlerAttrs[event])
     if value.len > 0 and number(value, 0, value.len, id):
       result.handlers[event] = int(id) + 1
+  if n.links:
+    # A link: a tap puts its QR code up (an onClick of its own replaces that).
+    result.handlers[ueClick] = LinkOpen + 1
   var states: set[UiState]
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
@@ -547,6 +637,12 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
         run = newUiNode(ukText, result.text)
         run.inGroup = childGroup
         result.children.add run
+      if run.src.isNil and child.links:
+        # A link in running text: the text it runs in is what a tap opens it
+        # from (the first link there), keyed by the link's place in the tree.
+        run.src = child
+        run.key = (key * 31 + i + 1) and 0x3fff_ffff
+        run.handlers[ueClick] = LinkOpen + 1
       child.addRuns(result.text, run, rootW, rootH, depth + 1, inlineStates)
       if run.pointer:
         result.pointer = true
@@ -1197,6 +1293,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var
+  linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
+  linkQrUrl {.threadvar.}: string ## ... its URL ...
+  linkQrSide {.threadvar.}: int ## ... and the room it was made for
 
 proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opacity: float32] =
   ## `c` at `opacity`, as the colour it makes over the backdrop.
@@ -1513,9 +1613,27 @@ proc runeOffset(text: string, rune: int): int =
       inc result
     inc n
 
-proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, float32] =
+proc viewport(x, y, w, h, sx, sy: float32): SvgNode =
+  ## A nested <svg> that shows (x, y, w, h) and cuts off the rest, what is in
+  ## it moved by (sx, sy): pixie's clip. A box that clips, and a line of a
+  ## selection on paper.
+  SvgNode(tag: "svg", attrs: @[("x", num(x)), ("y", num(y)), ("width", num(w)),
+    ("height", num(h)), ("viewBox", nums([x + sx, y + sy, w, h]))])
+
+proc isWordByte(c: char): bool {.inline.} =
+  ## Part of a word: a letter, a digit, `_`, or any byte of a character past
+  ## ASCII (é, ł, 字 are letters; a selection's ends are never inside one).
+  c in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'} or ord(c) >= 0x80
+
+proc runeIndex(text: string, at: int): int {.inline.} =
+  ## How many runes come before byte `at`.
+  text.toOpenArray(0, min(at, text.len) - 1).runeLen
+
+proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var seq[SvgNode]): array[4, float32] =
   ## The focused field's caret, where it is in the text: placed where a tap
-  ## landed, and the field scrolled so it shows. Its box, unscrolled.
+  ## landed, and the field scrolled so it shows. Its box, unscrolled. A
+  ## selection is drawn into `marks` (a band a line of it, under the text),
+  ## and then no caret: its width is 0.
   template b: untyped = n.box
   let t = n.children[0] # the field's one run of text
   let
@@ -1524,11 +1642,30 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, fl
     arrangement = t.arrange(round(x + t.x + t.size.x) - tx, t.text.align)
   if arrangement.runes.len == 0:
     return
+  when not defined(frameosEmbedded): # only a mouse sets it: none on an ESP32
+    if ui.anchor:
+      # A drag that selects: where it went down is the selection's other end.
+      ui.anchor = false
+      ui.sel = n.value.runeOffset(arrangement.caretAt(ui.anchorX - (tx - x) + sx, ui.anchorY - (ty - y) + sy)) + 1
   if ui.place:
     ui.place = false
     ui.goal = false
     ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
   ui.caret = clamp(ui.caret, 0, n.value.len)
+  ui.secret = n.src.attr("type") == "password"
+  if ui.word:
+    # The word at the caret (the one before it at its end): a password's
+    # whole text, whose words are not shown.
+    ui.word = false
+    var (a, z) = (ui.caret, ui.caret)
+    if ui.secret:
+      (a, z) = (0, n.value.len)
+    else:
+      while a > 0 and n.value[a - 1].isWordByte: dec a
+      while z < n.value.len and n.value[z].isWordByte: inc z
+    if z > a:
+      ui.sel = a + 1
+      ui.caret = z
   var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
@@ -1558,6 +1695,43 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, fl
       r = arrangement.selectionRects[min(i, arrangement.runes.high)]
   let cw = max(1'f32, round(t.text.size / 16))
   result = [tx + (if i < arrangement.runes.len: r.x else: r.x + r.w), ty + r.y, cw, r.h]
+  if ui.sel > 0:
+    ui.sel = clamp(ui.sel, 1, n.value.len + 1)
+    let (a, z) = ui[].selected
+    if z > a:
+      # The selected glyphs' boxes, a band a line, in the text's color at a
+      # third (pixie draws it: one rasterizer for everything a UI shows).
+      let
+        last = min(n.value.runeIndex(z), arrangement.runes.len) - 1
+        band = SvgNode(tag: "path", path: newPath())
+      marks.add band
+      var j = min(n.value.runeIndex(a), arrangement.runes.len)
+      while j <= last:
+        let first = arrangement.selectionRects[j]
+        var right = first.x + first.w
+        while j < last and arrangement.selectionRects[j + 1].y == first.y:
+          inc j
+          right = max(right, arrangement.selectionRects[j].x + arrangement.selectionRects[j].w)
+        band.path.rect(tx + first.x, ty + first.y, right - first.x, first.h)
+        if ui.paper:
+          # E-paper dithers a third of a color into a stipple that eats the
+          # glyphs: a solid band, the text in it inverted as on a lit key.
+          # A viewport a line, which emit fills with the text again.
+          marks.add viewport(tx + first.x, ty + first.y, right - first.x, first.h, 0, 0)
+        inc j
+      band.paint(t.text.color, if ui.paper: 1'f32 else: 0.3)
+      result[2] = 0 # no caret while text is selected
+      if ui.handles:
+        # Its ends, for the handles a finger drags (layoutUi draws them).
+        let
+          first = arrangement.selectionRects[min(n.value.runeIndex(a), arrangement.runes.high)]
+          final = arrangement.selectionRects[max(last, 0)]
+        ends = [[tx + first.x, ty + first.y, 0, first.h], [tx + final.x + final.w, ty + final.y, 0, final.h]]
+        endsFound = true
+  if ui.menu and not endsFound:
+    # A menu with nothing selected (Paste): at the caret.
+    ends = [[result[0], result[1], 0, r.h], [result[0], result[1], 0, r.h]]
+    endsFound = true
   if not revealCaret:
     # Scrolled by a finger or the wheel: the caret may be out of sight, as
     # in a browser, until the next edit or key brings it back.
@@ -1595,12 +1769,13 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   var
     (sx, sy) = scrollOf(n.key)
     caret: array[4, float32]
+    marks: seq[SvgNode] # a focused field's selection, under its text
   if clips:
     sx = clamp(sx, 0, n.maxX)
     sy = clamp(sy, 0, n.maxY)
     if n.field > 0 and n.key == ui.focus - 1 and n.children.len > 0:
       focusSeen = true
-      caret = n.emitField(x, y, w, h, sx, sy)
+      caret = n.emitField(x, y, w, h, sx, sy, marks)
     elif n.field > 0 and n.field != 2:
       # A field that lets go of the keyboard shows its text from the start;
       # a <textarea> stays where it was scrolled to, like any box.
@@ -1629,7 +1804,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     scrollsY = b.overflowY == ovScroll or n.field == 2
     scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
-  let cursor = when defined(frameosEmbedded): 0'u8 else: b.cursor
+  # A link with no `cursor-*` of its own shows the hand, as in a browser.
+  let cursor = when defined(frameosEmbedded): 0'u8
+    else: (if b.cursor == 0 and n.handlers[ueClick] == LinkOpen + 1: csPointer.cursorCode else: b.cursor)
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
       n.field > 0 or scrolls or cursor != 0:
     # In paint order: whatever comes later is on top.
@@ -1682,8 +1859,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     if clips:
       if vw <= 0 or vh <= 0:
         return
-      view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
-        ("height", num(vh)), ("viewBox", nums([vx + sx, vy + sy, vw, vh]))])
+      view = viewport(vx, vy, vw, vh, sx, sy)
+      if marks.len > 0:
+        view.children.add marks[0] # the selection's band, under the text
     let outer = emitBackdrop
     for pass in [false, true]:
       # What the children are painted over (overBackdrop): this box's own
@@ -1704,6 +1882,19 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           if clips: c.emit(x, y, op, view.children, gradients, regions)
           else: c.emit(x, y, op, drawn, gradients, regions)
     emitBackdrop = outer
+    if marks.len > 1:
+      # E-paper: the selected text again over its band, in the other ink,
+      # each line's viewport cutting it to the band.
+      let
+        c = n.text.color
+        ink = SvgNode()
+      ink.paint(if c.r.int + c.g.int + c.b.int < 384: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+      for m in 1 ..< marks.len:
+        for k in 1 ..< view.children.len:
+          template glyph: untyped = view.children[k]
+          if not glyph.path.isNil:
+            marks[m].children.add SvgNode(tag: "path", path: glyph.path, offset: glyph.offset, attrs: ink.attrs)
+        view.children.add marks[m]
     if clips:
       if caret[2] > 0:
         let bar = SvgNode(tag: "rect", attrs: @[("x", num(caret[0])), ("y", num(caret[1])),
@@ -1711,6 +1902,12 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         bar.paint(n.text.color, op)
         view.children.add bar
       drawn.add view
+      if endsFound and n.field > 0 and n.key == ui.focus - 1:
+        # Where the selection ends, as a region a pixel wide that the boxes
+        # around scroll and cut off like any: layoutUi takes them back out.
+        for e in 0 .. 1:
+          regions.add UiRegion(x: ends[e][0], y: ends[e][1], w: 1, h: ends[e][3], key: EndsKey + e,
+            visible: [ends[e][0], ends[e][1], ends[e][0] + 1, ends[e][1] + ends[e][3]])
       # What is inside answers the pointer where it shows, scrolled.
       var k = kids
       for i in kids ..< regions.len:
@@ -1792,6 +1989,52 @@ proc selectOption*(memo: UiMemo, key, option: int, handler: var int): string =
   if not n.isNil:
     handler = n.handlers[ueChange]
     result = n.src.children[option].attr("value")
+
+proc linkAt*(memo: UiMemo, key: int): string =
+  ## The href of the link at `key` as the last layout had it ("" for none).
+  if not memo.isNil:
+    let n = memo.root.fieldIn(key) # a link's key is its own, as a field's is
+    if not n.isNil and not n.src.isNil:
+      result = n.src.attr("href")
+
+proc linkCard(url: string, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
+    gradients: var int, regions: var seq[UiRegion]) =
+  ## A link's QR code over the whole UI, for a phone to open it: the code as
+  ## large as fits, its URL under it and a Close button. Black on white, as a
+  ## camera reads it best, on every panel. A tap anywhere puts it away, and
+  ## it is all there is to touch while it is up. The code gets all the room
+  ## the URL (two lines at most) and the button leave: a first pass lays the
+  ## card out with the code as a box that grows into it, the second draws the
+  ## code at the size that box got.
+  let
+    code = el("img", "flex-1 min-h-0 w-full")
+    card = el("div", "flex flex-col items-center justify-center gap-2 p-3 bg-white text-black text-sm", code)
+  card.attrs.add(("on-click", LinkCloseAttr))
+  card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
+  card.children.add el("div", "px-4 py-1 border border-black rounded font-bold", SvgNode(text: "Close"))
+  var shown: UiNode
+  for pass in 0 .. 1:
+    shown = card.build(initText(), width, height, 0, LinkKey, input, false, nil)
+    shown.size = shown.layout(width, height, true, true)
+    if pass == 0:
+      let
+        room = shown.children[0].size
+        side = max(int(min(room.x, room.y)), 32)
+      if linkQr.isNil or linkQrUrl != url or linkQrSide != side:
+        linkQrUrl = url
+        linkQrSide = side
+        try:
+          linkQr = qrImage(qrEncode(url), side)
+        except Exception:
+          linkQr = nil
+      var classes = "shrink-0"
+      let at = if linkQr.isNil: side else: linkQr.width
+      classes.px("w", at)
+      classes.px("h", at)
+      code.attrs[0][1] = move classes
+      code.image = linkQr
+  regions.setLen(0)
+  shown.emit(0, 0, 1, drawn, gradients, regions)
 
 proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
     gradients: var int, regions: var seq[UiRegion]): bool =
@@ -1931,6 +2174,73 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     memo.accents = shown
   true
 
+proc selectionChrome(at: array[2, array[3, float32]], seen: array[2, bool], width, height: int,
+    input: var UiInput, drawn: var seq[SvgNode], gradients: var int, regions: var seq[UiRegion]) =
+  ## A selection made by touch, `at` its start and end (x, top, line height)
+  ## as its field showed them (`seen`: an end scrolled out of sight is not;
+  ## its place is the other's): a handle under each end that shows
+  ## (ui/events.nim drags them, SelectBase + 0 and + 1), and its menu over
+  ## it, or under it without room (Cut and Copy with text selected and no
+  ## password, Paste with something on the clipboard, Select all with more
+  ## to select). Plain numbers, not regions: on an ESP32 every region copied
+  ## is a hundred bytes of code.
+  let
+    lineH = max(at[0][2], at[1][2])
+    radius = clamp(round(lineH * 0.4), 7, 14)
+    (a, z) = input.selected
+  var lowest = 0'f32
+  if z > a and input.handles:
+    let knobs = SvgNode(tag: "path", path: newPath())
+    for e in 0 .. 1:
+      if not seen[e]:
+        continue
+      let
+        x = at[e][0]
+        bottom = at[e][1] + at[e][2]
+      # A bar on the end and a knob under it, leaning out of the selection
+      # (left at its start, right at its end), so two that meet both show.
+      knobs.path.rect(x - 1, at[e][1], 2, at[e][2])
+      knobs.path.circle(x + float32(e * 2 - 1) * 0.7 * radius, bottom + radius, radius)
+      lowest = max(lowest, bottom + 2 * radius)
+      regions.setLen(regions.len + 1)
+      template handle: untyped = regions[^1]
+      handle.x = x - 2 * radius
+      handle.y = bottom - at[e][2] / 2
+      handle.w = 4 * radius
+      handle.h = at[e][2] / 2 + 2.5 * radius
+      handle.key = EndsKey + e
+      handle.visible = [handle.x, handle.y, handle.x + handle.w, handle.y + handle.h]
+      handle.handlers[ueClick] = SelectBase + e + 1
+    knobs.paint(if input.paper: rgba(0, 0, 0, 255) else: rgba(14, 165, 233, 255), 1) # sky-500
+    drawn.add knobs
+  if not input.menu:
+    return
+  var items: set[EditCut .. EditSelectAll]
+  if z > a and not input.secret: items.incl {EditCut, EditCopy}
+  if clipboard.len > 0: items.incl EditPaste
+  if input.text.len > 0 and (a > 0 or z < input.text.len): items.incl EditSelectAll
+  if items == {}:
+    return
+  let
+    shown = editMenuTree(items, int(clamp(round(lineH * 0.6), 12, 22)), input.paper)
+      .build(initText(), width.float32, height.float32, 0, MenuKey, input, false,
+        if memo.isNil: nil else: memo.menu)
+    edge = 4'f32
+    gap = max(lineH / 4, 4)
+  shown.size = shown.layout(Unbounded, Unbounded, false, false)
+  let
+    w = min(shown.size.x, width.float32 - 2 * edge)
+    h = shown.size.y
+    above = at[0][1] - gap - h
+    centre = if at[0][1] == at[1][1]: (at[0][0] + at[1][0]) / 2 else: at[0][0]
+  if w < shown.size.x:
+    shown.size = shown.layout(w, h, true, true)
+  shown.x = clamp(round(centre - w / 2), edge, max(width.float32 - edge - w, edge))
+  shown.y = round(if above >= edge: above else: min(max(at[1][1] + at[1][2], lowest) + gap, height.float32 - edge - h))
+  shown.emit(0, 0, 1, drawn, gradients, regions)
+  if not memo.isNil:
+    memo.menu = shown
+
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
@@ -1942,6 +2252,7 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   memo = textMemo
   ui = addr input
   focusSeen = false
+  endsFound = false
   var kbTop, kb: int
   if input.keyboard and input.focus > 0: (kbTop, kb) = keyboardBox(width, height, input.round)
   else: kbTop = height
@@ -1991,7 +2302,13 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
           break
     if not shown:
       input.open = 0
-  if kb > 0:
+  if input.link.len == 0:
+    linkQr = nil # no card up: its picture goes
+  if input.link.len > 0:
+    # A link's QR code: over everything, the keyboard gone (events.openLink).
+    input.open = 0
+    linkCard(input.link, w, height.float32, input, result.children, gradients, regions)
+  elif kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
       height, input.accents, input.flash).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
       if memo.isNil: nil else: memo.keyboard)
@@ -2017,6 +2334,29 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     input.accents = 0
   if input.accents == 0:
     input.accentLit = -1
+  if input.handles or input.menu:
+    # A selection made by touch: its handles and its menu, on top of it all.
+    # The selection's ends the field left (one-pixel regions), taken back out.
+    var
+      at: array[2, array[3, float32]]
+      seen: array[2, bool]
+      k = 0
+    for i in 0 ..< regions.len:
+      let e = regions[i].key - EndsKey
+      if e == 0 or e == 1:
+        at[e] = [regions[i].x, regions[i].y, regions[i].h]
+        seen[e] = true
+      else:
+        if k != i: regions[k] = regions[i]
+        inc k
+    regions.setLen(k)
+    if seen[0] or seen[1]:
+      if not seen[0]: at[0] = at[1]
+      if not seen[1]: at[1] = at[0]
+      selectionChrome(at, seen, width, height, input, result.children, gradients, regions)
+    elif not endsFound:
+      input.handles = false
+      input.menu = false
   if input.focus > 0 and not focusSeen:
     # The field is gone: nothing has the keyboard.
     input.focus = 0
@@ -2091,7 +2431,7 @@ proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
   if memo.isNil or memo.root.isNil:
     return
   memo.root.seekHoles(0, 0, 1, false, yieldReady, result)
-  if input.open > 0 or input.accents > 0:
+  if input.open > 0 or input.accents > 0 or input.link.len > 0:
     for i in 0 ..< result.count:
       result.items[i].clean = false
 

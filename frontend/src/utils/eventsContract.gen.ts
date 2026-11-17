@@ -1151,8 +1151,8 @@ interface FrameOSEventPayloads {
   textInput: { text: string };
   /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
   pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
-  /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. */
-  pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
+  /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds \`shift\`, \`ctrl\`, \`alt\` or \`meta\` as true. */
+  pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** When a pointer button is released or a finger lifts (not logged) */
   pointerUp: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
   /** When a pointer that was down is lost without a release: the queue overflowed, the device went away. A scene holding a drag lets go. */
@@ -1163,8 +1163,8 @@ interface FrameOSEventPayloads {
   mouseDown: { button: number };
   /** When a mouse button is released (not logged). An alias of \`pointerUp\` with its old payload. */
   mouseUp: { button: number };
-  /** A press and release in one place, within \`gestures.tapMs\`. Made by the dispatcher from \`pointerDown\` / \`pointerUp\` on every host. */
-  tap: { x: number; y: number; pointerId: number; pointerType: string };
+  /** A press and release in one place, within \`gestures.tapMs\`. Made by the dispatcher from \`pointerDown\` / \`pointerUp\` on every host. A modifier key held adds \`shift\`, \`ctrl\`, \`alt\` or \`meta\` as true, as on \`pointerDown\`. */
+  tap: { x: number; y: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** A second \`tap\` in the same place within \`gestures.doubleTapMs\` of the first. The first tap is delivered too. */
   doubleTap: { x: number; y: number; pointerId: number; pointerType: string };
   /** A pointer held in one place for \`gestures.longPressMs\`. Delivered while it is still held where the host ticks the dispatcher, on release otherwise; no \`tap\` follows it. */

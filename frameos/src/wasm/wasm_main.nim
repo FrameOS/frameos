@@ -21,7 +21,7 @@ import frameos/relayed_input
 from frameos/input_state import initInputState, CursorHideMs
 import frameos/cursor_sprite
 from frameos/loading_mark import MarkView
-from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
+from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput, uiOpenLink
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
 import frameos/interpreter
@@ -46,6 +46,12 @@ from frameos/utils/http_client import boundedRequestWithHeaders
 
 proc jsLogHook(msg: cstring) {.importc: "frameos_wasm_js_log", cdecl.}
 proc jsEventHook(event: cstring, payload: cstring) {.importc: "frameos_wasm_js_event", cdecl.}
+proc jsOpenLinkHook(url: cstring): cint {.importc: "frameos_wasm_js_open_link", cdecl.}
+
+proc openLinkInPage(url: string): bool {.nimcall, raises: [].} =
+  ## A tapped link, to the embedding page: the browser preview opens it in a
+  ## tab; a page without the hook leaves it to the QR code (ui/events.nim).
+  jsOpenLinkHook(url.cstring) != 0
 
 proc log(msg: string) =
   jsLogHook(msg.cstring)
@@ -405,6 +411,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     initLock(logger.lock)
     channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
       jsLogHook(($payload).cstring)
+    uiOpenLink = openLinkInPage
     channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string,
         payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
       {.cast(gcsafe).}:

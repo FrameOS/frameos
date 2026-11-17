@@ -633,6 +633,11 @@ export function get(app, context) {
   above or below it, stays on the screen and scrolls; style the chosen one
   through the `<option>`'s own `className`, and use it when the choices are
   many (a few fit better as buttons on a touch screen).
+- Links: `<a href="https://…">` (or `mailto:`, `tel:`) opens on a tap: a
+  frame shows its QR code over the UI for a phone to scan (tap to close), the
+  browser preview opens a tab. Other schemes (`javascript:`) do nothing, an
+  `onClick` on the `<a>` replaces it, and in running text the whole run of
+  text holding the link is its target. Style it yourself (`underline`).
 - Lists longer than the screen: give the box a height (`flex-1` in a
   column, `h-*`, `max-h-*`) and `overflow-y-auto`, and a finger (or a wheel)
   scrolls it; no paging needed on an LCD. `overflow-hidden` clips.
@@ -851,13 +856,13 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `keyUp` | yes |  | `code` string, `key` string, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is released on a keyboard |
 | `textInput` | yes |  | `text` string | Pi, preview | Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). |
 | `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer | all | When a pointer (a finger, a mouse, a pen) moves |
-| `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is pressed or a finger touches the panel. |
+| `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string, `shift`? boolean, `ctrl`? boolean, `alt`? boolean, `meta`? boolean | all | When a pointer button is pressed or a finger touches the panel. |
 | `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is released or a finger lifts |
 | `pointerCancel` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | When a pointer that was down is lost without a release: the queue overflowed, the device went away. |
 | `mouseMove` | yes |  | `x` integer, `y` integer | all | When a mouse moves. |
 | `mouseDown` | yes |  | `button` integer | all | When a mouse button is pressed. |
 | `mouseUp` | yes |  | `button` integer | all | When a mouse button is released. |
-| `tap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A press and release in one place, within `gestures.tapMs`. |
+| `tap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `shift`? boolean, `ctrl`? boolean, `alt`? boolean, `meta`? boolean | all | A press and release in one place, within `gestures.tapMs`. |
 | `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
@@ -1189,8 +1194,8 @@ interface FrameOSEventPayloads {
   textInput: { text: string };
   /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
   pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
-  /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. */
-  pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
+  /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds `shift`, `ctrl`, `alt` or `meta` as true. */
+  pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** When a pointer button is released or a finger lifts (not logged) */
   pointerUp: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string };
   /** When a pointer that was down is lost without a release: the queue overflowed, the device went away. A scene holding a drag lets go. */
@@ -1201,8 +1206,8 @@ interface FrameOSEventPayloads {
   mouseDown: { button: number };
   /** When a mouse button is released (not logged). An alias of `pointerUp` with its old payload. */
   mouseUp: { button: number };
-  /** A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host. */
-  tap: { x: number; y: number; pointerId: number; pointerType: string };
+  /** A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host. A modifier key held adds `shift`, `ctrl`, `alt` or `meta` as true, as on `pointerDown`. */
+  tap: { x: number; y: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** A second `tap` in the same place within `gestures.doubleTapMs` of the first. The first tap is delivered too. */
   doubleTap: { x: number; y: number; pointerId: number; pointerType: string };
   /** A pointer held in one place for `gestures.longPressMs`. Delivered while it is still held where the host ticks the dispatcher, on release otherwise; no `tap` follows it. */

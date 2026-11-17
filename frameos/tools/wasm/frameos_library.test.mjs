@@ -250,3 +250,15 @@ test('a failed request is logged by its origin, the error text included', () => 
   assert.match(logged, /GET https:\/\/cloud\.frameos\.net failed: Error: Failed to load 'https:\/\/cloud\.frameos\.net'/)
   assert.doesNotMatch(logged, /pk_secret|index=3/)
 })
+
+test('a tapped link goes to the page when it takes links, else 0 (the QR code)', () => {
+  const opened = []
+  const context = { Module: {}, UTF8ToString: (ptr) => ptr }
+  let library = null
+  vm.runInNewContext(source, { ...context, addToLibrary: (object) => (library = object) })
+  assert.equal(library.frameos_wasm_js_open_link('https://frameos.net'), 0)
+  const withPage = { Module: { onFrameosOpenLink: (url) => opened.push(url) }, UTF8ToString: (ptr) => ptr }
+  vm.runInNewContext(source, { ...withPage, addToLibrary: (object) => (library = object) })
+  assert.equal(library.frameos_wasm_js_open_link('https://frameos.net'), 1)
+  assert.deepEqual(opened, ['https://frameos.net'])
+})

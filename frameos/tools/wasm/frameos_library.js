@@ -2,8 +2,9 @@
 // (src/wasm/wasm_main.nim, built by tools/build_wasm.sh).
 //
 // Provides the host hooks the Nim side imports:
-//  - frameos_wasm_js_log / frameos_wasm_js_event: forwarded to the embedding
-//    script through Module.onFrameosLog / Module.onFrameosEvent.
+//  - frameos_wasm_js_log / frameos_wasm_js_event / frameos_wasm_js_open_link:
+//    forwarded to the embedding script through Module.onFrameosLog /
+//    Module.onFrameosEvent / Module.onFrameosOpenLink.
 //  - fos_nim_http_request / fos_nim_http_free: the same hook the ESP32
 //    firmware implements in C (see src/frameos/utils/http_client.nim),
 //    implemented here with synchronous XHR. Synchronous requests with a
@@ -126,6 +127,18 @@ addToLibrary({
     if (Module['onFrameosEvent']) {
       Module['onFrameosEvent'](UTF8ToString(eventPtr), UTF8ToString(payloadPtr))
     }
+  },
+
+  // A tapped link (`<a href>`, docs/jsx-ui.md "Links"): 1 when the embedding
+  // page takes it (the browser preview opens a tab), 0 when nothing does,
+  // and the runtime shows its QR code as a frame would (a plane rendering
+  // a board, which defines no Module.onFrameosOpenLink).
+  frameos_wasm_js_open_link: function (urlPtr) {
+    if (Module['onFrameosOpenLink']) {
+      Module['onFrameosOpenLink'](UTF8ToString(urlPtr))
+      return 1
+    }
+    return 0
   },
 
   fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl'],

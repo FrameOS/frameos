@@ -9,6 +9,7 @@ import frameos/ui/layout
 import frameos/ui/keyboard
 import frameos/utils/font
 import frameos/cursor_shape
+import frameos/utils/qr
 
 # A JSX UI's handlers and pointer classes (docs/jsx-ui.md "Events"): what the
 # last render left where, a tap or a move over it, and the next render.
@@ -846,3 +847,431 @@ suite "jsx select boxes":
     check target.input.open == 0
     image = ui.render()
     check image.width == 320
+
+const links = """
+let taps = 0
+export function get(app) {
+  return (
+    <div className="flex flex-col gap-2 h-full p-2 bg-white text-black">
+      <a href="https://frameos.net/docs" className="h-10 shrink-0 bg-sky-500">Docs</a>
+      <p className="h-10 shrink-0">Write to <a href="mailto:hello@frameos.net">us</a></p>
+      <a href="javascript:alert(1)" className="h-10 shrink-0 bg-red-500">Nope</a>
+      <a href="https://example.com" className="h-10 shrink-0 bg-green-500"
+        onClick={() => { taps++; frameos.setState('taps', taps) }}>Own</a>
+    </div>
+  )
+}
+"""
+
+proc firstDark(image: Image): (int, int) =
+  for y in 0 ..< image.height:
+    for x in 0 ..< image.width:
+      let c = image[x, y]
+      if c.a > 0 and c.r < 64 and c.g < 64 and c.b < 64:
+        return (x, y)
+  (-1, -1)
+
+proc uiOpenLinkForTest(url: string): bool {.nimcall, raises: [].} =
+  {.cast(gcsafe).}:
+    logged.add "open " & url
+  true
+
+suite "jsx links":
+  test "a tapped link puts its QR code up, and a tap puts it away":
+    let id = "tests/jsx-link"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    var linkRows: seq[UiRegion]
+    for r in target.regions:
+      if r.handlers[ueClick] == LinkOpen + 1: linkRows.add r
+    # The block link and the text the mailto: runs in; not javascript:, and
+    # not the one with an onClick of its own.
+    check linkRows.len == 2
+    check uiCursorAt(id, 160, 28) == ord(csPointer) # a link shows the hand, as in a browser
+    check isLink("https://a.b") and isLink("HTTP://a.b") and isLink("mailto:a@b.c") and isLink("tel:+3712")
+    check not isLink("javascript:alert(1)") and not isLink("") and not isLink("ftp://a") and
+      not isLink("https://a\nb") and not isLink("https://" & "a".repeat(1100)) and
+      not isLink("http:/a") and not isLink("httpx://a") and not isLink("mailt:a") and not isLink(":a") and
+      isLink("Mailto:x@y.z") and isLink("https://")
+    check dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    check target.input.link == "https://frameos.net/docs"
+    let image = ui.render()
+    # All there is to touch: one region, the card's, which closes it.
+    check target.regions.len == 1
+    check target.regions[0].handlers[ueClick] == LinkClose + 1
+    check target.regions[0].w == 320 and target.regions[0].h == 240
+    # The QR code, every module where the encoder put it, centred, and as
+    # large as the room the URL's one line and the button leave: 26 rows of
+    # 240 for those and the padding, not a fixed three lines (2 px modules
+    # for a long URL on a small panel).
+    let qr = qrEncode("https://frameos.net/docs")
+    let (gx, gy) = image.firstDark() # the top-left finder's corner
+    var unit = 0
+    while gx + unit < image.width and image[gx + unit, gy].r < 128: inc unit
+    unit = unit div 7 # a finder is 7 modules across
+    check unit >= 5
+    let extent = unit * qr.size
+    check extent >= 125 # 100 (4 px modules) when 96 px were kept for three lines of text
+    check abs(gx - (320 - extent) div 2) <= 1
+    var wrong = 0
+    for y in 0 ..< qr.size:
+      for x in 0 ..< qr.size:
+        if qr[x, y] != (image[gx + x * unit + unit div 2, gy + y * unit + unit div 2].r < 128): inc wrong
+    check wrong == 0
+    # A tap on the card puts it away; the UI is back.
+    check dispatchUiEvent(id, "tap", at(5, 5, "touch"))
+    check target.input.link == ""
+    discard ui.render()
+    check target.regions.len > 1
+    check ui.scene.state{"taps"}.isNil
+
+  test "a link in running text, javascript: and a link with an onClick":
+    let id = "tests/jsx-link-text"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check dispatchUiEvent(id, "tap", at(40, 76, "touch")) # the paragraph's text
+    check target.input.link == "mailto:hello@frameos.net"
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
+    check target.input.link == ""
+    discard ui.render()
+    discard dispatchUiEvent(id, "tap", at(160, 124, "touch")) # javascript:
+    check target.input.link == ""
+    check dispatchUiEvent(id, "tap", at(160, 172, "touch")) # its own onClick
+    check target.input.link == ""
+    check ui.scene.state{"taps"}.getInt() == 1
+    # Back puts a link's QR code away, as it does the keyboard.
+    check dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    # Kept between a plane's pulls, as an open <select> is.
+    var kept = ""
+    for entry in lastingUiInput()["targets"]:
+      if entry{"sceneId"}.getStr() == id: kept = entry{"link"}.getStr()
+    check kept == "https://frameos.net/docs"
+    check dismissKeyboard(id, 1)
+    check target.input.link == ""
+
+  test "a host that opens links itself gets the URL, and no QR code goes up":
+    let id = "tests/jsx-link-host"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    uiOpenLink = uiOpenLinkForTest
+    logged.setLen(0)
+    discard dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    uiOpenLink = nil
+    check "open https://frameos.net/docs" in logged
+    check target.input.link == ""
+
+proc key(name: string, code = "", shift = false, ctrl = false, meta = false): JsonNode =
+  %*{"key": name, "code": (if code.len > 0: code else: name), "shift": shift, "ctrl": ctrl, "alt": false,
+    "meta": meta}
+
+proc differs(a, b: Image, x0, y0, x1, y1: int): int =
+  ## How many pixels of the box are not the same in the two pictures.
+  for y in y0 ..< y1:
+    for x in x0 ..< x1:
+      if a[x, y] != b[x, y]:
+        inc result
+
+const secretForm = """
+let pin = 'hunter2'
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <input type="password" className="h-10 px-2 shrink-0 bg-slate-100 text-black" value={pin}
+        onChange={(e) => { pin = e.target.value; frameos.setState('pin', pin) }} />
+    </div>
+  )
+}
+"""
+
+suite "jsx selection":
+  test "shift and the arrows select; Ctrl/Cmd copies, cuts, pastes and selects all":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-select-keys"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("End")) # typed on: no keyboard on the screen
+    let plain = ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.caret == 3 and target.input.selected == (3, 3)
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    check target.input.selected == (2, 3)
+    check dispatchUiEvent(id, "keyDown", key("Home", shift = true))
+    check target.input.selected == (0, 3) and target.input.caret == 0
+    # Drawn: a band behind the text, through pixie like the rest.
+    let marked = ui.render()
+    check differs(plain, marked, 0, 0, 320, 40) > 100
+    check differs(plain, marked, 0, 40, 320, 240) == 0
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "Ann"
+    check ui.scene.state{"key"}.getStr() == "c" # onKeyDown hears the chord too
+    # Right without shift lets go at the selection's end; Cmd+V pastes there.
+    check dispatchUiEvent(id, "keyDown", key("ArrowRight"))
+    check target.input.selected == (3, 3)
+    check dispatchUiEvent(id, "keyDown", key("v", "KeyV", meta = true))
+    check ui.scene.state{"name"}.getStr() == "AnnAnn"
+    discard ui.render()
+    # Select all, and what is typed replaces it.
+    check dispatchUiEvent(id, "keyDown", key("a", "KeyA", meta = true))
+    check target.input.selected == (0, 6)
+    check dispatchUiEvent(id, "textInput", %*{"text": "Zoe"})
+    check ui.scene.state{"name"}.getStr() == "Zoe"
+    discard ui.render()
+    # Backspace takes a selection and nothing more; Cut empties it.
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    check dispatchUiEvent(id, "keyDown", key("Backspace"))
+    check ui.scene.state{"name"}.getStr() == "Zo"
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("A", "KeyA", shift = true, ctrl = true)) # shift too: still all
+    check dispatchUiEvent(id, "keyDown", key("x", "KeyX", ctrl = true))
+    check ui.scene.state{"name"}.getStr() == "" and uiClipboard() == "Zo"
+    discard ui.render()
+    # A layout that is not Latin: the key it is on.
+    check dispatchUiEvent(id, "keyDown", key("м", "KeyV", ctrl = true))
+    check ui.scene.state{"name"}.getStr() == "Zo"
+    discard ui.render()
+    # The selection outlives the process, with the rest of the field.
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    var kept = false
+    for entry in lastingUiInput(){"targets"}.getElems():
+      if entry{"sceneId"}.getStr() == id:
+        kept = entry{"sel"}.getInt() == 3 and entry{"caret"}.getInt() == 1
+    check kept
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    check target.input.focus == 0 and target.input.sel == 0
+    forgetTypedKeys()
+
+  test "shift and a click extend the selection; a mouse dragged over the text selects it":
+    forgetTypedKeys()
+    let id = "tests/jsx-select-mouse"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check uiListens(id, "pointerDown")
+    check dispatchUiEvent(id, "tap", at(9, 20)) # before the A
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.caret == 0
+    var shifted = at(160, 20)
+    shifted["shift"] = %true
+    check dispatchUiEvent(id, "tap", shifted)
+    discard ui.render()
+    check target.input.selected == (0, 3)
+    check dispatchUiEvent(id, "tap", at(160, 20)) # without: the caret alone
+    discard ui.render()
+    check target.input.selected == (3, 3)
+    # A press of the mouse and a drag, before any tap: the field has the
+    # keyboard at once, and the drag selects from where it went down.
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    discard ui.render()
+    check target.input.focus == 0
+    var down = at(9, 20)
+    down["button"] = %0
+    check dispatchUiEvent(id, "pointerDown", down)
+    check target.input.focus > 0
+    discard ui.render()
+    check target.input.caret == 0
+    check uiListens(id, "pointerMove")
+    var move = at(160, 20)
+    move["buttons"] = %1
+    check dispatchUiEvent(id, "pointerMove", move)
+    discard ui.render()
+    check target.input.selected == (0, 3)
+    discard dispatchUiEvent(id, "pointerUp", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "Ann"
+    # A finger does not select by dragging: it scrolls, as before.
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    discard ui.render()
+    discard dispatchUiEvent(id, "pointerDown", at(9, 20, "touch"))
+    check target.input.focus == 0
+    forgetTypedKeys()
+
+  test "on e-paper the selection is a solid band, its text inverted, never a stipple":
+    forgetTypedKeys()
+    let id = "tests/jsx-select-paper"
+    let ui = newUi(form, id, 320, 240)
+    ui.owner.frameConfig.device = "waveshare.EPD_7in5_V2"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("End"))
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("Home", shift = true))
+    let image = ui.render()
+    check uiTarget(id, 1, create = false).input.selected == (0, 3)
+    # Over "Ann": black and white only, both of them (the band and the
+    # letters cut out of it); a third of black would be grey.
+    var black, white, grey = 0
+    for y in 8 .. 30:
+      for x in 9 .. 36:
+        let p = image[x, y]
+        if p.r < 40: inc black
+        elif p.r > 215: inc white
+        else: inc grey
+    check black > 200 and white > 40
+    check grey < (black + white) div 3 # only the glyphs' anti-aliased edges
+    forgetTypedKeys()
+
+  test "a password is never copied, and a field of one line pastes one line":
+    forgetTypedKeys()
+    setUiClipboard("kept")
+    let id = "tests/jsx-select-secret"
+    let ui = newUi(secretForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("a", "KeyA", ctrl = true))
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "kept"
+    check dispatchUiEvent(id, "keyDown", key("x", "KeyX", ctrl = true)) # cut: only taken out
+    check uiClipboard() == "kept" and ui.scene.state{"pin"}.getStr() == ""
+    discard ui.render()
+    setUiClipboard("one\ntwo")
+    check dispatchUiEvent(id, "keyDown", key("v", "KeyV", ctrl = true))
+    check ui.scene.state{"pin"}.getStr() == "one"
+    # The clipboard keeps so much and no more, cut at a character.
+    var long = ""
+    for _ in 0 ..< 70000: long.add "é"
+    setUiClipboard(long)
+    check uiClipboard().len <= 65536 and uiClipboard().len mod 2 == 0
+    setUiClipboard("")
+    forgetTypedKeys()
+
+const wordsForm = """
+let words = 'hello big world'
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <input className="h-10 px-2 shrink-0 bg-slate-100 text-black" value={words}
+        onChange={(e) => { words = e.target.value; frameos.setState('words', words) }} />
+      <input className="h-10 px-2 shrink-0 bg-slate-200 text-black" value="" placeholder="Empty"
+        onChange={(e) => frameos.setState('other', e.target.value)} />
+    </div>
+  )
+}
+"""
+
+proc selectAt(id: string, handler: int): JsonNode =
+  ## A touch at the middle of the region with this tap handler (an item of
+  ## a selection's menu, or a handle), or nil when the last render drew none.
+  let target = uiTarget(id, 1, create = false)
+  for r in target.regions:
+    if r.handlers[ueClick] == SelectBase + handler + 1:
+      return %*{"x": r.x + r.w / 2 + target.offsetX, "y": r.y + r.h / 2 + target.offsetY,
+        "pointerId": 1, "pointerType": "touch"}
+
+proc touch(x, y: float, id = 1): JsonNode =
+  %*{"x": x, "y": y, "pointerId": id, "pointerType": "touch", "buttons": 1, "button": 0}
+
+suite "jsx selection by touch":
+  test "a long press selects the word, with handles and a menu; Copy, then Paste over another":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-touch-select"
+    let ui = newUi(wordsForm, id, 320, 240)
+    let before = ui.render()
+    check uiListens(id, "longPress") and uiListens(id, "doubleTap")
+    discard dispatchUiEvent(id, "pointerDown", touch(60, 20))
+    var hold = touch(60, 20)
+    hold["durationMs"] = %600
+    check dispatchUiEvent(id, "longPress", hold)
+    let target = uiTarget(id, 1, create = false)
+    check target.input.focus > 0 and target.input.handles and target.input.menu
+    let shown = ui.render()
+    check target.input.selected == (6, 9) # "big"
+    check not selectAt(id, 0).isNil and not selectAt(id, 1).isNil # its handles
+    check not selectAt(id, EditCopy).isNil and not selectAt(id, EditCut).isNil
+    check selectAt(id, EditPaste).isNil # nothing on the clipboard yet
+    check not selectAt(id, EditSelectAll).isNil
+    check differs(before, shown, 0, 0, 320, 40) > 0
+    # Lifted where it held: the menu stays, no tap.
+    check dispatchUiEvent(id, "pointerUp", touch(60, 20))
+    discard ui.render()
+    check target.input.menu
+    check dispatchUiEvent(id, "tap", selectAt(id, EditCopy))
+    check uiClipboard() == "big"
+    discard ui.render()
+    check not target.input.menu and target.input.selected == (6, 9) # the selection stays
+    check selectAt(id, EditCopy).isNil
+    # A long press on the empty field: no word, the menu alone, with Paste.
+    discard dispatchUiEvent(id, "pointerDown", touch(60, 60, 2))
+    hold = touch(60, 60, 2)
+    hold["durationMs"] = %600
+    check dispatchUiEvent(id, "longPress", hold)
+    discard ui.render()
+    check target.input.selected[0] == target.input.selected[1]
+    check selectAt(id, EditCopy).isNil and selectAt(id, 0).isNil
+    discard dispatchUiEvent(id, "pointerUp", touch(60, 60, 2))
+    check dispatchUiEvent(id, "tap", selectAt(id, EditPaste))
+    check ui.scene.state{"other"}.getStr() == "big"
+    discard ui.render()
+    check not target.input.menu and not target.input.handles
+    setUiClipboard("")
+
+  test "a double tap selects the word; its handles drag its ends; Select all and Cut":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-touch-handles"
+    let ui = newUi(wordsForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(20, 20, "touch"))
+    discard ui.render()
+    check dispatchUiEvent(id, "doubleTap", at(20, 20, "touch"))
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.selected == (0, 5) # "hello"
+    # The end's handle, dragged far right: to the end of the text.
+    let grip = selectAt(id, 1)
+    check not grip.isNil
+    let (gx, gy) = (grip["x"].getFloat(), grip["y"].getFloat())
+    check uiListens(id, "pointerDown")
+    check dispatchUiEvent(id, "pointerDown", touch(gx, gy, 3))
+    check not target.input.menu # it waits for the finger to lift
+    check dispatchUiEvent(id, "pointerMove", touch(300, gy, 3))
+    discard ui.render()
+    check target.input.selected == (0, 15)
+    check dispatchUiEvent(id, "pointerUp", touch(300, gy, 3))
+    discard ui.render()
+    check target.input.menu
+    # The start's handle, dragged right past "hello ": from "big".
+    let start = selectAt(id, 0)
+    check dispatchUiEvent(id, "pointerDown", touch(start["x"].getFloat(), start["y"].getFloat(), 4))
+    check dispatchUiEvent(id, "pointerMove", touch(start["x"].getFloat() + 42, start["y"].getFloat(), 4))
+    discard ui.render()
+    check target.input.selected == (6, 15)
+    discard dispatchUiEvent(id, "pointerUp", touch(start["x"].getFloat() + 42, start["y"].getFloat(), 4))
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", selectAt(id, EditSelectAll))
+    discard ui.render()
+    check target.input.selected == (0, 15) and target.input.handles and target.input.menu
+    check selectAt(id, EditSelectAll).isNil # all of it already
+    check dispatchUiEvent(id, "tap", selectAt(id, EditCut))
+    check uiClipboard() == "hello big world" and ui.scene.state{"words"}.getStr() == ""
+    discard ui.render()
+    check not target.input.handles and not target.input.menu
+
+  test "a key typed replaces a selection made by touch; back lets it go before the keyboard":
+    forgetTypedKeys()
+    let id = "tests/jsx-touch-type"
+    let ui = newUi(wordsForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(20, 20, "touch"))
+    discard ui.render()
+    check dispatchUiEvent(id, "doubleTap", at(20, 20, "touch"))
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('x')))
+    check ui.scene.state{"words"}.getStr() == "x big world"
+    discard ui.render()
+    check not target.input.handles and not target.input.menu and target.input.sel == 0
+    check dispatchUiEvent(id, "doubleTap", at(30, 20, "touch"))
+    discard ui.render()
+    check target.input.selected == (2, 5)
+    check dismissKeyboard(id, 1)
+    check target.input.focus > 0 and target.input.sel == 0 and not target.input.menu
+    check dismissKeyboard(id, 1)
+    check target.input.focus == 0

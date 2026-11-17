@@ -60,6 +60,15 @@ const
   AccentBase* = KeyBase + 256
     ## The accents of a held key, in a row above it: this handler + n for its
     ## form number n. Above every key, below a <select>'s options.
+  SelectBase* = AccentBase + 192
+    ## A field's selection on a touch screen: its handles (this handler + 0
+    ## its start, + 1 its end) and its menu's items (+ EditCut ...). Above
+    ## every accent, below a <select>'s options.
+  EditCut* = 2
+  EditCopy* = 3
+  EditPaste* = 4
+  EditSelectAll* = 5
+  EditWords: array[EditCut .. EditSelectAll, string] = ["Cut", "Copy", "Paste", "Select all"]
   Accents = "aàáâäæãåācçćčeèéêëēėęiîïíīįìlłnñńoôöòóœøōõsßśšuûüùúūyÿzžźż" &
     "$€£¥¢-–—•\"“”„«»'‘’‚‹›.…?¿!¡0°%‰"
     ## Each key's accented forms, after the key's own ASCII byte (the one
@@ -348,5 +357,27 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardP
     let key = el("div", move c, SvgNode(text: formText(code, i, shift, page)))
     key.attrs.add(("on-click", $(AccentBase + i)))
     result.children.add key.role(if i == lit: "keyLit" else: "key")
+
+proc editMenuTree*(items: set[EditCut .. EditSelectAll], size: int, paper: bool): SvgNode =
+  ## The menu over a selection made by touch, in the keyboard's look (the
+  ## accents' row's classes, the same strings in flash): a row of `items`
+  ## (Cut, Copy, Paste, Select all) with text `size` px tall, each a handler
+  ## of its own (SelectBase + the item). ui/layout.nim places it. E-paper
+  ## shows no press, as on its keyboard.
+  var c = "flex rounded-lg border-2"
+  c.px("text", size)
+  c.px("p", max(size div 6, 2))
+  if paper: c.add " bg-white text-black border-black"
+  else: c.add " bg-zinc-800 text-white border-zinc-500"
+  result = el("div", move c).role("keyboard")
+  for item in items:
+    c = "flex items-center justify-center rounded-md"
+    c.add " whitespace-nowrap"
+    c.px("px", size * 2 div 3)
+    c.px("h", size * 2)
+    if not paper: c.add " active:bg-zinc-400"
+    let button = el("div", move c, SvgNode(text: EditWords[item]))
+    button.attrs.add(("on-click", $(SelectBase + item)))
+    result.children.add button.role("key")
 
 {.pop.}

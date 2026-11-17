@@ -156,7 +156,7 @@ shows no select pays only the code.
 |---|---|
 | `svg` | A drawing. At the root, the whole image; inside a UI, a leaf whose `viewBox` is fitted into its box (centered, whole; `preserveAspectRatio="none"` stretches), sized by its classes, else its `width`/`height`, else its viewBox. `currentColor` in it is the text color. |
 | `img` | A picture: `src` is what `frameos.fetchImage` (its result, or its `image`) or `frameos.loadAssetImage` returned, or a URL, which the runtime fetches at the size the `<img>` is laid out at (give it one: `w-[…] h-[…]`), off the render where it can, and draws nothing until it is in (`docs/async-js.md`). `object-cover` / `object-contain` / `object-fill` (the default, as in CSS). One size given, the other follows the picture's aspect. |
-| `span`, `b`, `strong`, `i`, `em`, `u`, `s`, `small`, `a`, `code`, `label`, `mark` | Inline: in a block they flow with the text around them and only their text classes count (color, size, weight, ...). In a flex or grid container they are items, like any element. |
+| `span`, `b`, `strong`, `i`, `em`, `u`, `s`, `small`, `a`, `code`, `label`, `mark` | Inline: in a block they flow with the text around them and only their text classes count (color, size, weight, ...). In a flex or grid container they are items, like any element. An `<a href>` opens its link on a tap ([Links](#links)). |
 | `br` | A line break. |
 | `input`, `textarea` | A field to type into ([Fields and the keyboard](#fields-and-the-keyboard)). |
 | `select`, `option` | A select box ([Select boxes](#select-boxes)). |
@@ -735,6 +735,68 @@ scene listens for it), which `dispatchUiEvent` turns into the next erase or
 a render. A host that ticks only while input is held (the preview) also
 ticks while `uiTimersPending`; the Pi's message loop wakes every 20 ms then.
 
+### Selecting, copying and pasting
+
+A field's text can be selected, copied, cut and pasted, as in a browser.
+
+- **On a keyboard** (a Pi's, the computer's over the preview): shift with
+  the arrows, Home or End selects from where the caret was; left or right
+  without it lets go at that end of the selection. Ctrl or Cmd (`meta`) with
+  `A` selects all, with `C` copies, `X` cuts and `V` pastes, the letter as
+  the layout has it (else the key it is on: Ctrl+V on a Cyrillic layout
+  pastes). `onKeyDown` hears the chord too, first.
+- **With a mouse**: a press on a field gives it the keyboard at once, the
+  caret where it went down, and a drag from there selects, as on a desktop.
+  Shift with a click (or a press) extends what is selected to it, on the
+  field that has the keyboard. The modifiers come with the press and its
+  tap from the dispatcher (`pointerDown` / `tap` `shift`, `ctrl`, `alt`,
+  `meta`: docs/events.md "Input"). A finger dragged over a field still
+  scrolls what is around it.
+- **On a touch screen**, as on a phone: a long press on a field gives it
+  the keyboard and selects the word there (a password's whole text), and
+  the finger, still down, slides the selection on to where it goes; a
+  double tap selects the word too. Its ends get handles, a bar and a knob
+  under it leaning out of the selection, which a finger drags (the other
+  end stays), and a menu comes up over it, or under it without room: Cut
+  and Copy (text selected, no password), Paste (something on the
+  clipboard), Select all (more to select). Copy keeps the selection and
+  puts the menu away; dragging a handle hides it until the finger lifts. A
+  long press where there is no word brings the menu alone, at the caret
+  (Paste). A tap on the field puts the caret there as before, and anything
+  typed, a key moved, a tap elsewhere or the frame's `back` lets the
+  selection go (`back` first, keeping the keyboard). On e-paper the
+  handles drag without a refresh until the finger lifts. Every host,
+  ESP32 touch boards included.
+- **What is typed replaces the selection**, and Backspace or Delete takes it
+  out. Every edit runs `onChange` as before.
+- **The clipboard is the frame's** (`ui/events.nim` `clipboard`, 64 KiB at
+  most, 4 KiB on an ESP32), shared by every UI on it. A password is never
+  copied (a cut takes it out and copies nothing), and an `<input>` pastes
+  the clipboard's first line.
+- **The selection is drawn** as a band a line behind the selected glyphs, in
+  the text's color at a third, inside the field's viewport (on e-paper,
+  where a third dithers into a stipple that eats the glyphs, a solid band
+  with the selected text inverted, as a lit key is), and the caret is not
+  drawn while text is selected: SVG nodes like the rest of the UI,
+  so it is damaged and repainted as any other change.
+
+How: the selection is `UiInput.sel`, its other end + 1 (0 for none), and the
+caret, so everything that moves the caret moves one end of it (`selected`
+gives the bytes). A drag of a mouse places the caret as a tap does
+(`place`) and its other end where it went down (`anchor`, `anchorX`,
+`anchorY`), both from the glyph boxes at the next layout. It is kept
+between pulls with the rest of the field (`sel`). A long press or a double
+tap sets `word` with `place`, and the layout widens the caret to the word
+(`isWordByte`: letters, digits, `_` and any character past ASCII). A
+selection made by touch sets `handles` and `menu`: the field's emit leaves
+its two ends as regions a pixel wide (`EndsKey`), which the boxes around it
+scroll and cut off like any region, and `layoutUi` takes them back out and
+draws the handles and the menu (`ui/keyboard.nim` `editMenuTree`, the
+keyboard's look) on top, from them. Their handlers are numbered from
+`SelectBase` (above the accents, below a `<select>`'s options): + 0 and + 1
+the handles, which a press grabs (`ui/events.nim`, the other end made the
+anchor), + `EditCut` ... the items.
+
 ## Select boxes
 
 `<select>` holds its options, controlled as in React: it shows the `<option>`
@@ -786,6 +848,54 @@ where the select's region landed, so a scrolled or moved select needs no
 second pass; its regions are then the only ones, so the page under it needs no
 guard. A row's handler is `OptionBase` + its number (`ui/events.nim`
 `pickOption`).
+
+## Links
+
+`<a href="https://…">` opens on a tap. A frame has no browser, so on a Pi and
+an ESP32 (and a board its control plane renders for) the link's **QR code**
+goes up over the whole UI, as large as fits, black on white on every panel,
+with its URL under it and a Close button: a phone scans it and opens the page
+there. In the browser (the editor's preview, the playground) the tap opens the
+URL in a new tab instead.
+
+```tsx
+<p>Tickets at <a href="https://example.com/tickets" className="underline">example.com</a></p>
+<a href="tel:+37120000000" className="px-4 py-2 rounded bg-sky-600">Call us</a>
+```
+
+- **Only `http://`, `https://`, `mailto:` and `tel:`**, at most 1024 bytes
+  with no control characters (`ui/layout.nim` `isLink`); any other href
+  (`javascript:` above all) is no link and a tap on it does nothing.
+- **An `onClick` of its own replaces it**: the handler runs and nothing
+  opens, so an app that routes its own links keeps them.
+- **The target** is the `<a>` itself where it is a box (an item of a flex or
+  grid container, the outermost element), and in running text (a `<p>`, a
+  block) the run of text it is in: a tap anywhere on that text opens the first
+  link there. Two links in one sentence want two elements.
+- **While the code is up nothing else answers**: a tap anywhere on it, the
+  frame's `back` in a built-in scene or Escape puts it away. A field's
+  keyboard and an open `<select>` go first. A board its plane renders keeps
+  it between pulls (`lastingUiInput`).
+- `<a>` has no look of its own: give it `underline`, a color, or a button's
+  classes. Under a mouse it shows the hand (`cursor-pointer`) unless it has a
+  `cursor-*` class of its own (not on an ESP32, which draws no cursor).
+- No `<Link>` component: none exists in the runtime or the repo's apps.
+
+How: the walker keeps `href` as a plain attribute (a string; an image ref in
+`href` is still a picture). The layout gives a linking `<a>`, or the run of
+text holding one, the tap handler `LinkOpen` (past every handler number a tree
+can hold, as `OptionBase` is), so a link is a `UiRegion` like any element and
+needs no `UiEvent` of its own: it has no JavaScript to call. A tap on it
+(`ui/events.nim` `openLink`) asks the host's `uiOpenLink` hook first: the wasm
+runtime sets it (`wasm_main.nim` → `frameos_wasm_js_open_link` →
+`Module.onFrameosOpenLink`), and only the browser preview's worker defines
+that, posting `openLink` to `FrameOSPreview` (`onOpenLink`, default
+`window.open`); a plane's renderer defines none, so its boards get the QR code.
+Otherwise the URL goes into `UiInput.link` and `layoutUi` draws the card after
+the UI (`linkCard`), as it does a `<select>`'s list, its one region
+`LinkClose`. The code is `utils/qr.nim`, the encoder the frame's setup screens
+already use, so the ESP32 image carries no second one; it is encoded once per
+URL and size (`UiMemo.linkQr`).
 
 ## Scrolling and clipping
 
