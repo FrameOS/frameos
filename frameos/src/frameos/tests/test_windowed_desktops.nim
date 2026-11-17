@@ -2853,3 +2853,64 @@ suite "a slideshow in a window (the SD card image sample)":
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()
+
+suite "a new render scale on a desktop of windows":
+  # The windows' boxes are in the desktop's pixels, and the desktop is the
+  # panel over the render scale: at 0.5 it has twice the room, at 2 half. The
+  # boxes made for one scale sat in a quarter of the panel at 0.5 and off it at
+  # 2, the window gone (the frame page's Scale, 2026-11-16). Each desktop keeps
+  # them where they were on the glass (`refit`).
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red"}, {"id": "tests/green", "name": "Green"}, {"id": "tests/blue", "name": "Blue"}]
+
+  proc shown(): seq[(string, array[4, float32])] =
+    ## Where each open scene is drawn on the panel: its hole or its picture.
+    for slot in desk().slots:
+      if slot.child.id.string.startsWith("tests/"): result.add((slot.child.id.string, slot.visible))
+    result.sort(proc(a, b: (string, array[4, float32])): int = cmp(a[0], b[0]))
+
+  test "keeps every window where it was on the panel, in every desktop of windows":
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT]:
+      checkpoint layoutId
+      config.renderScale = 0.0
+      chooseLayout(layoutId)
+      parked = nil
+      for scene in hosted.values: scene.wornLayout = nil
+      for id in ["tests/red", "tests/green", "tests/blue", "tests/green"]:
+        discard focusOn(id)
+        discard pass()
+      discard pass()
+      let before = shown()
+      check before.len == 3
+      for scale in [0.5, 2.0, 1.0]:
+        checkpoint $scale
+        config.renderScale = scale
+        discard pass()
+        let image = pass()
+        shot(image, "scale-" & layoutId & "-" & $scale)
+        let now = shown()
+        check now.len == before.len
+        for i in 0 ..< min(now.len, before.len):
+          check now[i][0] == before[i][0]
+          # The title bars and borders are the desktop's size over the scale,
+          # so what is inside them moves a little; the window does not.
+          let (a, b) = (before[i][1], now[i][1])
+          checkpoint now[i][0] & " " & $a & " -> " & $b
+          if winOf(now[i][0]){"max"}.getBool():
+            # It fills the desktop, whose bars may move with its size (BeOS's
+            # Deskbar along the top of a narrow one).
+            continue
+          check abs((a[0] + a[2]) - (b[0] + b[2])) / 2 <= 40 and abs((a[1] + a[3]) - (b[1] + b[3])) / 2 <= 40
+          let area = (b[2] - b[0]) * (b[3] - b[1]) / max((a[2] - a[0]) * (a[3] - a[1]), 1)
+          check area > 0.6 and area < 1.6
+      check problems.len == 0
+      desk().state["openScenes"] = %*[]
+    config.renderScale = 0.0
+    chooseLayout("")
+    discard pass()
+
+  test "is the same function, word for word, in every desktop of windows":
+    let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep])
+    check copies[0].len > 0
+    for text in copies: check text == copies[0]

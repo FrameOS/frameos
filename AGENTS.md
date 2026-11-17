@@ -636,7 +636,9 @@
   scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
   A new window opens at the size `ownSize` gives it (the scene's own, else
   800x480: a desktop has no "Window size" of its own any more) where `freeSpot`
-  puts it (bare desktop first, then the least overlap), both the same text in
+  puts it (bare desktop first, then the least overlap), and a desktop of
+  another size (a new render scale, a resize) puts every window at the same
+  share of it (`refit`), each the same text in
   all five desktops of windows, and a list of scenes
   goes by category through `grouped` (the `category` name on each
   `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
