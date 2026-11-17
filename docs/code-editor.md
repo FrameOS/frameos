@@ -22,13 +22,27 @@ nothing of a plane: `previewOnly`).
 
 ## Using it
 
-- **The scenes.** It opens on the frame's scenes (`app.frame.scenes`), each a
-  row; a tap opens one. **New scene** opens the AI box with no scene.
-- **A scene's files.** A scene opens as files: `scene.json` (the scene without
-  its apps' sources and its code nodes' code: name, settings, fields, nodes,
-  edges), then every app's files as `<app>/<file>` (`config.json`, `app.tsx`,
-  …) and every code node's code as `code/<node id>.js`. A file shows as lines
-  with their numbers, a page a screen; a swipe or the arrows turn the page.
+- **The look** is a code editor's workbench, after VS Code's Dark+: a title bar
+  with the actions (Ask AI, Save; a draft's Discard and Save & show), an
+  activity bar (the scenes, the files, the AI), the explorer, a tab with its
+  breadcrumbs over the code, and a blue status bar (purple for an AI draft):
+  the lines showing, the page, the language. Text is 13 px like other windows
+  (the frame's render scale makes it bigger on a big screen, never the app).
+  The code is colored by kind (keywords, strings, numbers, calls, comments,
+  JSON keys) in Cascadia Mono where the frame has it in its fonts (a Pi's
+  assets folder), else in the frame's own face; lines are not wrapped, as in
+  VS Code: a long one is cut at the edge, and Edit shows it whole. A screen
+  under 600 px wide drops the activity bar and the explorer for a select of
+  the files; e-paper and a grey panel are black on white, uncolored. A refusal
+  or a note is a notification over the bottom right corner; a tap puts it away.
+- **The scenes.** It opens on the frame's scenes (`app.frame.scenes`) in the
+  explorer, beside a start page with **New scene with AI**.
+- **A scene's files.** A scene opens as files in a tree: `scene.json` (the
+  scene without its apps' sources and its code nodes' code: name, settings,
+  fields, nodes, edges), a folder per app with its files (`config.json`,
+  `app.tsx`, …) and a `code` folder with every code node's code as
+  `<node id>.js`. A file shows as lines with their numbers, a page a screen;
+  a swipe or the arrows in the tab bar turn the page.
 - **Changing a file.** **Edit** puts the page showing into a `<textarea>` (the
   keyboard on the screen, or a real one); **Done** puts it back into the file.
   A page at a time keeps the layout small on an ESP32 and a 2,000-line app
