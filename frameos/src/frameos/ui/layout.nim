@@ -216,17 +216,33 @@ const
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
 
+func scheme(name: string): uint64 =
+  for c in name: result = result shl 8 or uint64(ord(c))
+
 proc isLink*(href: string): bool =
-  ## Whether an `<a href>` opens: http(s), mailto: and tel: only (never
-  ## `javascript:`), no control characters, at most MaxLink bytes.
-  if href.len == 0 or href.len > MaxLink:
+  ## Whether an `<a href>` opens: http(s)://, mailto: and tel: only (never
+  ## `javascript:`), no control characters, at most MaxLink bytes. The scheme
+  ## is read into a number, lowercased, and compared with four: no copy of the
+  ## href, no string compares (flash on an ESP32).
+  if href.len > MaxLink:
     return false
-  for c in href:
+  var
+    name = 0'u64
+    colon = -1
+  for i, c in href:
     if c < ' ' or c == '\x7f':
       return false
-  let lower = href.toLowerAscii()
-  lower.startsWith("https://") or lower.startsWith("http://") or lower.startsWith("mailto:") or
-    lower.startsWith("tel:")
+    if colon < 0:
+      if c == ':': colon = i
+      elif i == 6: return false # longer than any scheme here
+      else: name = name shl 8 or uint64(ord(c) or 0x20)
+  case name
+  of scheme("http"), scheme("https"):
+    colon + 2 < href.len and href[colon + 1] == '/' and href[colon + 2] == '/'
+  of scheme("mailto"), scheme("tel"):
+    true
+  else:
+    false
 
 proc scrolled*(input: UiInput, key: int): (float32, float32) =
   ## How far the box at `key` is scrolled: (0, 0) until something scrolls it.

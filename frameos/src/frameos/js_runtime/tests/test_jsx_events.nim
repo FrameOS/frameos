@@ -862,7 +862,9 @@ suite "jsx links":
     check uiCursorAt(id, 160, 28) == ord(csPointer) # a link shows the hand, as in a browser
     check isLink("https://a.b") and isLink("HTTP://a.b") and isLink("mailto:a@b.c") and isLink("tel:+3712")
     check not isLink("javascript:alert(1)") and not isLink("") and not isLink("ftp://a") and
-      not isLink("https://a\nb") and not isLink("https://" & "a".repeat(1100))
+      not isLink("https://a\nb") and not isLink("https://" & "a".repeat(1100)) and
+      not isLink("http:/a") and not isLink("httpx://a") and not isLink("mailt:a") and not isLink(":a") and
+      isLink("Mailto:x@y.z") and isLink("https://")
     check dispatchUiEvent(id, "tap", at(160, 28, "touch"))
     check target.input.link == "https://frameos.net/docs"
     let image = ui.render()
