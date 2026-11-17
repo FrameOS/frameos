@@ -27,42 +27,13 @@ export function playgroundSize(width: number, height: number) {
   };
 }
 
-/**
- * Whose the keyboard is: the page's (the browser keeps the shortcuts it
- * reserves, Cmd+W and the like), offered (a Super key was pressed: the page
- * shows the offer of full screen), or the frame's (full screen, every key the
- * operating system lets a browser have).
- */
-export type PlaygroundKeyboard = "page" | "offered" | "frame";
-
-/** The Keyboard Lock API (Chromium): `navigator.keyboard`. */
-export interface KeyboardLock {
-  lock(keyCodes?: string[]): Promise<void>;
-  unlock(): void;
-}
-
-/** What the playground asks of the page for the keyboard: its full screen and the lock. */
-export interface PlaygroundPage {
-  /** Full screen for the whole page, asked from a press (a user's gesture). */
-  enterFullscreen(): Promise<void>;
-  isFullscreen(): boolean;
-  /** Listen for full screen coming and going; returns the detach. */
-  onFullscreenChange(listener: () => void): () => void;
-  /** Null where the browser has no Keyboard Lock (Firefox, Safari): no offer there. */
-  keyboard: KeyboardLock | null;
-}
-
 export interface PlaygroundOptions {
   canvas: HTMLCanvasElement;
   /** The viewport, read at start and on every resize. */
   viewport: () => { width: number; height: number };
   onStatus: (status: PlaygroundStatus) => void;
-  /** Whose the keyboard is now (`PlaygroundKeyboard`). */
-  onKeyboard?: (keyboard: PlaygroundKeyboard) => void;
   fetchScenes?: () => Promise<FrameOSScene[]>;
   createPreview?: typeof createFrameOSPreview;
-  /** The page's full screen and keyboard lock: the browser's by default, null for none. */
-  page?: PlaygroundPage | null;
   /** The store the Scene store browses: the page's own origin by default. */
   storeUrl?: string | undefined;
 }
@@ -70,34 +41,8 @@ export interface PlaygroundOptions {
 export interface Playground {
   /** Fit the frame to the viewport again (a resize of the window). */
   resize(): void;
-  /** Full screen with every key the frame's: from a press on the offer. */
-  captureKeyboard(): Promise<void>;
-  /** The offer turned down: not made again until the page is loaded again. */
-  declineKeyboard(): void;
   destroy(): void;
 }
-
-function browserPage(): PlaygroundPage | null {
-  if (typeof document === "undefined" || typeof navigator === "undefined") {
-    return null;
-  }
-  const keyboard = (navigator as Navigator & { keyboard?: Partial<KeyboardLock> }).keyboard;
-  return {
-    enterFullscreen: () => document.documentElement.requestFullscreen({ navigationUI: "hide" }),
-    isFullscreen: () => document.fullscreenElement !== null,
-    onFullscreenChange: (listener) => {
-      document.addEventListener("fullscreenchange", listener);
-      return () => document.removeEventListener("fullscreenchange", listener);
-    },
-    keyboard:
-      keyboard && typeof keyboard.lock === "function" && typeof keyboard.unlock === "function"
-        ? (keyboard as KeyboardLock)
-        : null,
-  };
-}
-
-// A Super chord: Cmd on a Mac, the Windows key elsewhere, or that key alone.
-const superKey = (event: KeyboardEvent) => event.metaKey || event.key === "Meta" || event.key === "OS";
 
 async function fetchPlaygroundScenes(): Promise<FrameOSScene[]> {
   const response = await fetch(playgroundScenesUrl);
@@ -117,38 +62,14 @@ export function startPlayground(options: PlaygroundOptions): Playground {
   let destroyed = false;
   let renderScale = 0;
 
-  // The keyboard. While the frame has the focus every key is its: the
-  // browser's default for it never runs, so Cmd+L, Cmd+F or Cmd+1 reach a
-  // desktop's Super bindings instead of the address bar, the find bar or a
-  // tab. What the browser reserves (Cmd+W, Cmd+T, Cmd+N, Cmd+Q) only the
-  // Keyboard Lock API takes, and only in full screen the page asked for, so
-  // the first Super key offers that; holding Esc leaves it. What the
-  // operating system keeps (Cmd+Space, Cmd+Tab on a Mac) no page gets.
-  const page = options.page === undefined ? browserPage() : options.page;
-  let keyboard: PlaygroundKeyboard = "page";
-  let declined = false;
-  const setKeyboard = (next: PlaygroundKeyboard) => {
-    if (next !== keyboard) {
-      keyboard = next;
-      options.onKeyboard?.(next);
-    }
-  };
-  const onKey = (event: KeyboardEvent) => {
-    event.preventDefault();
-    if (event.type === "keydown" && keyboard === "page" && !declined && page?.keyboard && superKey(event)) {
-      setKeyboard("offered");
-    }
-  };
+  // The keyboard is the frame's while it has the focus: the browser's default
+  // for a key never runs, so Cmd+L, Cmd+F or Cmd+1 reach a desktop's Super
+  // bindings instead of the address bar, the find bar or a tab. What the
+  // browser reserves (Cmd+W, Cmd+T, Cmd+Q) it keeps: a desktop that binds Super
+  // takes Ctrl too (Omarchy's "Super key"), which no Mac browser binds.
+  const onKey = (event: KeyboardEvent) => event.preventDefault();
   options.canvas.addEventListener("keydown", onKey);
   options.canvas.addEventListener("keyup", onKey);
-  const detachFullscreen = page
-    ? page.onFullscreenChange(() => {
-        if (!page.isFullscreen()) {
-          page.keyboard?.unlock();
-          setKeyboard("page");
-        }
-      })
-    : () => {};
 
   const stop = () => {
     for (const detach of detachInput) {
@@ -243,34 +164,11 @@ export function startPlayground(options: PlaygroundOptions): Playground {
         boot();
       }
     },
-    async captureKeyboard() {
-      if (!page) {
-        return;
-      }
-      try {
-        if (!page.isFullscreen()) {
-          await page.enterFullscreen();
-        }
-        // Chromium asks the visitor first; a no leaves the page's keyboard.
-        await page.keyboard?.lock();
-        setKeyboard(page.keyboard ? "frame" : "page");
-      } catch {
-        setKeyboard("page");
-      } finally {
-        options.canvas.focus();
-      }
-    },
-    declineKeyboard() {
-      declined = true;
-      setKeyboard("page");
-      options.canvas.focus();
-    },
     destroy() {
       destroyed = true;
       stop();
       options.canvas.removeEventListener("keydown", onKey);
       options.canvas.removeEventListener("keyup", onKey);
-      detachFullscreen();
     },
   };
 }

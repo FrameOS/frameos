@@ -2704,6 +2704,34 @@ suite "the Omarchy desktop":
     discard pass()
     check problems.len == 0
 
+  test "Super is Super or Ctrl by default, and the Super key setting makes it Super, Ctrl or Alt alone":
+    proc chord(key, code: string, meta = false, ctrl = false, alt = false): seq[string] =
+      send("keyDown", %*{"key": key, "code": code, "repeat": false, "shift": false, "ctrl": ctrl, "alt": alt,
+        "meta": meta})
+    # Ctrl stands for Super by default (no Mac browser binds Ctrl+2), and so does Super.
+    discard chord("2", "Digit2", ctrl = true)
+    check desk().state{"ws"}.getInt() == 2
+    discard chord("1", "Digit1", meta = true)
+    check desk().state{"ws"}.getInt() == 1
+    discard pass()
+    # Super with Ctrl: Ctrl is the binding's own, Setup.
+    check acted(chord("w", "KeyW", meta = true, ctrl = true)) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    discard pass()
+    desk().state["superKey"] = %"super"
+    discard chord("2", "Digit2", ctrl = true)
+    check desk().state{"ws"}.getInt() == 1
+    # Alt alone: a Mac's Option+3 types a pound sign, the key is still the 3.
+    desk().state["superKey"] = %"alt"
+    discard chord("1", "Digit1", meta = true)
+    discard chord("£", "Digit3", alt = true)
+    check desk().state{"ws"}.getInt() == 3
+    discard chord("¡", "Digit1", alt = true)
+    check desk().state{"ws"}.getInt() == 1
+    desk().state["superKey"] = %"both"
+    discard pass()
+    check problems.len == 0
+
   test "with Windows off, the bar and one tile around the scene":
     desk().state["windows"] = %false
     let image = pass()

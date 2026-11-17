@@ -253,7 +253,9 @@ puts one in it). A press in a tile gives it the focus and reaches its scene too.
 Super+Space opens the menu, a field that filters the frame's own apps, its
 scenes by category and the desktop's commands (Setup, the scene list, the
 window's own, the layout, the theme, the bar, the bindings). The keys are
-Omarchy's (Super+1 to 0, with Shift the window goes there, Super+Tab, Super+W or
+Omarchy's, Super being the key its "Super key" setting says (Super or Ctrl by
+default, as a browser keeps Cmd+W and Cmd+Space and no Mac binds Ctrl; or
+Super, Ctrl or Alt alone): (Super+1 to 0, with Shift the window goes there, Super+Tab, Super+W or
 Q, Super+F, Super+arrows, with Shift the tiles swap, Super+Return the terminal,
 Super+Shift+F Files, Super+K, Super+Ctrl+W Setup, Super+Shift+Ctrl+Space the next
 theme, Alt+Tab), and the theme is one of eleven of Omarchy's (its field

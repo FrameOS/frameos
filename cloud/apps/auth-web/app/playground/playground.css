@@ -29,41 +29,6 @@
   pointer-events: none;
 }
 
-/* The offer of the whole keyboard, after a Super key: a strip at the top. */
-.playground__keyboard {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100% - 32px);
-  padding: 10px 12px 10px 16px;
-  border-radius: 10px;
-  background: rgb(17 17 17 / 0.92);
-  color: #fff;
-  font: 14px/1.4 system-ui, sans-serif;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
-}
-
-.playground__keyboard button {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  border: 1px solid rgb(255 255 255 / 0.35);
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.playground__keyboard .playground__keyboard-yes {
-  border-color: #fff;
-  background: #fff;
-  color: #111;
-}
-
 /* The frame is the whole page: the site's theme switch has nothing to switch. */
 body:has(.playground) .theme-toggle {
   display: none;
