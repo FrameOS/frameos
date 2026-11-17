@@ -575,20 +575,6 @@ suite "the Windows 98 desktop":
     discard pass()
     check problems.len == 0
 
-  test "a hold on Start opens it, as a tap does (e-paper: people hold until the press shows)":
-    if desk().state{"menu"}.getBool():
-      discard click(20, H - 20)
-      discard pass()
-    check not desk().state{"menu"}.getBool()
-    discard send("pointerDown", at(20, H - 20))
-    discard pass()
-    discard send("pointerUp", at(20, H - 20, %*{"buttons": 0}))
-    discard send("longPress", at(20, H - 20, %*{"durationMs": 1500}))
-    discard pass()
-    check desk().state{"menu"}.getBool()
-    discard click(20, H - 20)
-    discard pass()
-
   test "Start has the Control Panel, and no scene settings":
     discard click(20, H - 20) # Start
     let menu = pass()

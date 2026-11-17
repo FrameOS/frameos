@@ -488,9 +488,9 @@ export const get = () => (
 ```
 
 - **`onClick`** runs on a `tap` (a press and a release in one place, by
-  finger, pen or mouse), and on a `longPress` of an element with no
-  `onLongPress` (a browser clicks at the release however long the press, and
-  on e-paper people hold until the pressed look shows), **`onDoubleClick`**
+  finger, pen or mouse), and on a slow panel (e-paper) on a `longPress` of
+  an element with no `onLongPress` too (no press shows there, so people hold
+  until something does; a fast panel keeps a phone's rule), **`onDoubleClick`**
   on a `doubleTap`, **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
   on the raw press and release, **`onPointerMove`** as the pointer moves,
   **`onSwipe`** on a `swipe` (its `direction`, to the element it began on,

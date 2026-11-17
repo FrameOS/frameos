@@ -291,15 +291,15 @@ template overScene(r: UiRegion, lx, ly: float32): bool =
   ## drew under it is covered there, and hears nothing of the pointer.
   r.scene and r.inside(lx, ly)
 
-proc wants(r: UiRegion, event: string): bool =
+proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
   case event
   of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0 or r.scrolls
   of "pointerDown", "pointerUp", "pointerCancel":
     r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
-  # A hold on what only clicks is its click (dispatchUiEvent).
-  of "longPress": r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[ueLongPress] > 0
+  # On a slow panel a hold on what only clicks is its click (dispatchUiEvent).
+  of "longPress": r.handlers[ueLongPress] > 0 or slowPanel and (r.field > 0 or r.handlers[ueClick] > 0)
   of "wheel": r.scrolls
   else:
     let kind = handlerKind(event)
@@ -323,7 +323,7 @@ proc uiListens*(sceneId, event: string): bool =
       if event == "uiTimer" and target.timerPending:
         return true
       for r in target.regions:
-        if r.wants(event):
+        if r.wants(event, target.input.slow):
           return true
 
 proc keyboardAt*(sceneId: string, x, y: float32): bool =
@@ -797,7 +797,7 @@ proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
       if r.inside(lx, ly):
         if r.scene:
           break
-        if r.wants(event):
+        if r.wants(event, target.input.slow):
           return true
 
 proc uiHoldsPointer*(sceneId: string, pointer: int): bool =
@@ -967,13 +967,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       scale = if target.scale > 0: target.scale else: 1'f32
       lx = (x - target.offsetX) / scale
       ly = (y - target.offsetY) / scale
-    # A hold on what only clicks is a click, as a browser's click comes at the
-    # release however long the press: on e-paper nothing shows until the
-    # pressed look is drawn a second later, and people hold until it is (the
-    # reTerminal Sticky's Start did nothing, 2026-11-17). What has its own
-    # onLongPress, and the keyboard's keys (a hold is their accents), keep it.
+    # On a slow panel a hold on what only clicks is a click: no press shows
+    # there (showsPress below), so people hold until something does, and a
+    # hold was a longPress that clicked nothing. A fast panel keeps a phone's
+    # rule: a long press is no click. What has its own onLongPress, and the
+    # keyboard's keys (a hold is their accents), keep the hold everywhere.
     var kind = kind
-    if kind == ord(ueLongPress) and placed:
+    if kind == ord(ueLongPress) and placed and target.input.slow:
       for i in countdown(target.regions.high, 0):
         let r = target.regions[i]
         if r.overScene(lx, ly):
