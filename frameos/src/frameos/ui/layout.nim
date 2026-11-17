@@ -1584,6 +1584,13 @@ proc runeOffset(text: string, rune: int): int =
       inc result
     inc n
 
+proc viewport(x, y, w, h, sx, sy: float32): SvgNode =
+  ## A nested <svg> that shows (x, y, w, h) and cuts off the rest, what is in
+  ## it moved by (sx, sy): pixie's clip. A box that clips, and a line of a
+  ## selection on paper.
+  SvgNode(tag: "svg", attrs: @[("x", num(x)), ("y", num(y)), ("width", num(w)),
+    ("height", num(h)), ("viewBox", nums([x + sx, y + sy, w, h]))])
+
 proc runeIndex(text: string, at: int): int {.inline.} =
   ## How many runes come before byte `at`.
   text.toOpenArray(0, min(at, text.len) - 1).runeLen
@@ -1649,6 +1656,7 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
       let
         last = min(n.value.runeIndex(z), arrangement.runes.len) - 1
         band = SvgNode(tag: "path", path: newPath())
+      marks.add band
       var j = min(n.value.runeIndex(a), arrangement.runes.len)
       while j <= last:
         let first = arrangement.selectionRects[j]
@@ -1657,9 +1665,13 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
           inc j
           right = max(right, arrangement.selectionRects[j].x + arrangement.selectionRects[j].w)
         band.path.rect(tx + first.x, ty + first.y, right - first.x, first.h)
+        if ui.paper:
+          # E-paper dithers a third of a color into a stipple that eats the
+          # glyphs: a solid band, the text in it inverted as on a lit key.
+          # A viewport a line, which emit fills with the text again.
+          marks.add viewport(tx + first.x, ty + first.y, right - first.x, first.h, 0, 0)
         inc j
-      band.paint(t.text.color, 0.3)
-      marks.add band
+      band.paint(t.text.color, if ui.paper: 1'f32 else: 0.3)
       result[2] = 0 # no caret while text is selected
   if not revealCaret:
     # Scrolled by a finger or the wheel: the caret may be out of sight, as
@@ -1788,10 +1800,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     if clips:
       if vw <= 0 or vh <= 0:
         return
-      view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
-        ("height", num(vh)), ("viewBox", nums([vx + sx, vy + sy, vw, vh]))])
-      for mark in marks:
-        view.children.add mark
+      view = viewport(vx, vy, vw, vh, sx, sy)
+      if marks.len > 0:
+        view.children.add marks[0] # the selection's band, under the text
     let outer = emitBackdrop
     for pass in [false, true]:
       # What the children are painted over (overBackdrop): this box's own
@@ -1812,6 +1823,19 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           if clips: c.emit(x, y, op, view.children, gradients, regions)
           else: c.emit(x, y, op, drawn, gradients, regions)
     emitBackdrop = outer
+    if marks.len > 1:
+      # E-paper: the selected text again over its band, in the other ink,
+      # each line's viewport cutting it to the band.
+      let
+        c = n.text.color
+        ink = SvgNode()
+      ink.paint(if c.r.int + c.g.int + c.b.int < 384: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+      for m in 1 ..< marks.len:
+        for k in 1 ..< view.children.len:
+          template glyph: untyped = view.children[k]
+          if not glyph.path.isNil:
+            marks[m].children.add SvgNode(tag: "path", path: glyph.path, offset: glyph.offset, attrs: ink.attrs)
+        view.children.add marks[m]
     if clips:
       if caret[2] > 0:
         let bar = SvgNode(tag: "rect", attrs: @[("x", num(caret[0])), ("y", num(caret[1])),

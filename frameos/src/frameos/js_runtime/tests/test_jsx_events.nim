@@ -1062,6 +1062,31 @@ suite "jsx selection":
     check target.input.focus == 0
     forgetTypedKeys()
 
+  test "on e-paper the selection is a solid band, its text inverted, never a stipple":
+    forgetTypedKeys()
+    let id = "tests/jsx-select-paper"
+    let ui = newUi(form, id, 320, 240)
+    ui.owner.frameConfig.device = "waveshare.EPD_7in5_V2"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("End"))
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("Home", shift = true))
+    let image = ui.render()
+    check uiTarget(id, 1, create = false).input.selected == (0, 3)
+    # Over "Ann": black and white only, both of them (the band and the
+    # letters cut out of it); a third of black would be grey.
+    var black, white, grey = 0
+    for y in 8 .. 30:
+      for x in 9 .. 36:
+        let p = image[x, y]
+        if p.r < 40: inc black
+        elif p.r > 215: inc white
+        else: inc grey
+    check black > 200 and white > 40
+    check grey < (black + white) div 3 # only the glyphs' anti-aliased edges
+    forgetTypedKeys()
+
   test "a password is never copied, and a field of one line pastes one line":
     forgetTypedKeys()
     setUiClipboard("kept")

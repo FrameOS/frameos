@@ -757,8 +757,10 @@ A field's text can be selected, copied, cut and pasted, as in a browser.
   copied (a cut takes it out and copies nothing), and an `<input>` pastes
   the clipboard's first line.
 - **The selection is drawn** as a band a line behind the selected glyphs, in
-  the text's color at a third, inside the field's viewport, and the caret
-  is not drawn while text is selected: SVG nodes like the rest of the UI,
+  the text's color at a third, inside the field's viewport (on e-paper,
+  where a third dithers into a stipple that eats the glyphs, a solid band
+  with the selected text inverted, as a lit key is), and the caret is not
+  drawn while text is selected: SVG nodes like the rest of the UI,
   so it is damaged and repainted as any other change.
 
 How: the selection is `UiInput.sel`, its other end + 1 (0 for none), and the
