@@ -10,6 +10,8 @@
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "fos_assets_flash.h"
 #include "fos_assets_sd.h"
@@ -17,15 +19,97 @@
 
 static const char *TAG = "fos_assets";
 
+/* Which storage each task's asset calls reach: the assets folder unless the
+ * task said "internal" (fos_assets_use_storage). A request or a cloud job
+ * says it at its start and goes back at its end; a few tasks do assets at
+ * once at most (the HTTP server's, the cloud's asset jobs), so a table by
+ * task handle, under a spinlock. */
+#define STORAGE_SCOPES_MAX 6
+static TaskHandle_t s_scope_task[STORAGE_SCOPES_MAX];
+static portMUX_TYPE s_scope_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static bool scoped_internal(void)
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    bool found = false;
+    portENTER_CRITICAL(&s_scope_lock);
+    for (int i = 0; i < STORAGE_SCOPES_MAX; i++) {
+        if (s_scope_task[i] == self) {
+            found = true;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_scope_lock);
+    return found;
+}
+
+bool fos_assets_use_storage(const char *storage)
+{
+    bool internal = storage && strcmp(storage, "internal") == 0;
+    if (storage && storage[0] && !internal && strcmp(storage, "assets") != 0) return false;
+    if (internal && !fos_assets_internal_active()) return false;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    bool placed = !internal;
+    portENTER_CRITICAL(&s_scope_lock);
+    for (int i = 0; i < STORAGE_SCOPES_MAX; i++) {
+        if (s_scope_task[i] == self) s_scope_task[i] = NULL;
+    }
+    for (int i = 0; internal && i < STORAGE_SCOPES_MAX; i++) {
+        if (s_scope_task[i] == NULL) {
+            s_scope_task[i] = self;
+            placed = true;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_scope_lock);
+    return placed;
+}
+
+const char *fos_assets_storage(void)
+{
+    return scoped_internal() ? "internal" : "assets";
+}
+
+void fos_assets_storages_json(cJSON *storages)
+{
+    /* The same places, and names, as app.frame.storages gives a JS app
+     * (js_runtime/app_runtime.nim frameStorages). */
+    if (!storages) return;
+    bool card = fos_assets_sd_mounted();
+    bool internal = fos_assets_internal_active();
+    if (card || !internal) {
+        cJSON *entry = cJSON_CreateObject();
+        if (!entry) return;
+        cJSON_AddStringToObject(entry, "id", "assets");
+        cJSON_AddStringToObject(entry, "name", card ? "TF card" : "Internal storage");
+        cJSON_AddItemToArray(storages, entry);
+    }
+    if (internal) {
+        cJSON *entry = cJSON_CreateObject();
+        if (!entry) return;
+        cJSON_AddStringToObject(entry, "id", "internal");
+        cJSON_AddStringToObject(entry, "name", "Internal storage");
+        cJSON_AddItemToArray(storages, entry);
+    }
+}
+
+/* Whether this task's storage is the state partition (SPIFFS: short names). */
+static bool on_flash(void)
+{
+    return scoped_internal() || fos_assets_flash_active();
+}
+
 bool fos_assets_available(void)
 {
     /* The SD card, or on a board without one the state partition
-     * (fos_assets_flash.c). */
+     * (fos_assets_flash.c); for a task in the internal storage, that. */
+    if (scoped_internal()) return fos_assets_internal_active();
     return fos_assets_sd_mounted() || fos_assets_flash_active();
 }
 
 const char *fos_assets_root(void)
 {
+    if (scoped_internal()) return FOS_ASSETS_INTERNAL_PATH;
     const fos_config_t *config = fos_config();
     return config->assets_path[0] ? config->assets_path : "/srv/assets";
 }
@@ -203,7 +287,7 @@ esp_err_t fos_assets_write_begin(const char *rel, fos_assets_writer_t *writer,
         return ESP_FAIL;
     }
     fos_assets_full_path(writer->final_path, sizeof(writer->final_path), rel);
-    if (fos_assets_flash_active()) {
+    if (on_flash()) {
         /* SPIFFS names are short: a temporary name of its own, hidden. */
         static unsigned s_put_seq = 0;
         snprintf(writer->tmp_path, sizeof(writer->tmp_path), "%s/.w%04x", fos_assets_root(),
@@ -267,7 +351,7 @@ void fos_assets_write_abort(fos_assets_writer_t *writer)
  * on the state partition `.u/<hash of the id>` (SPIFFS names are short). */
 static void uploads_dir(char *out, size_t out_len)
 {
-    snprintf(out, out_len, "%s/%s", fos_assets_root(), fos_assets_flash_active() ? ".u" : ".uploads");
+    snprintf(out, out_len, "%s/%s", fos_assets_root(), on_flash() ? ".u" : ".uploads");
 }
 
 void fos_assets_cleanup_stale_uploads(void)
@@ -321,7 +405,7 @@ static int pending_upload_parts(const char *dir_path)
 
 static void chunk_part_path(char *out, size_t out_len, const char *upload_id)
 {
-    if (fos_assets_flash_active()) {
+    if (on_flash()) {
         uint32_t hash = 2166136261u; /* FNV-1a */
         for (const char *c = upload_id; *c; c++) hash = (hash ^ (uint8_t)*c) * 16777619u;
         snprintf(out, out_len, "%s/.u/%08lx", fos_assets_root(), (unsigned long)hash);

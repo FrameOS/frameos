@@ -1109,7 +1109,8 @@ interface FrameOSApp {
     assetsPath: string;
     /** The places the asset calls reach, each with the name to show it by. The assets folder ("assets", the
      * default) and, on an ESP32 with a TF card in, its internal storage ("internal") beside it. Pass an id as
-     * listAssets', readAsset's and loadAssetImage's storage option (FrameOS 2026.11.11+; undefined before). */
+     * the storage option of the asset calls that read, and of makeAssetFolder and deleteAsset (FrameOS 2026.11.11+;
+     * undefined before; writeAsset, appendAsset and streams reach the assets folder alone). */
     storages?: { id: "assets" | "internal"; name: string }[];
     timeZone: string;
     /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
@@ -1408,8 +1409,8 @@ declare const frameos: {
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
    * ending in "/" (FrameOS 2026.11.8+). */
   listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
-  assetExists(path: string): boolean;
-  assetSize(path: string): number;
+  assetExists(path: string, options?: { storage?: "assets" | "internal" }): boolean;
+  assetSize(path: string, options?: { storage?: "assets" | "internal" }): number;
   /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its
    * ends). entry reads that member of a ZIP file instead (an EPUB's chapter, inflated by the frame a window at a
    * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
@@ -1421,10 +1422,10 @@ declare const frameos: {
   ): string | null;
   writeAsset(path: string, base64: string): boolean;
   appendAsset(path: string, base64: string): boolean;
-  deleteAsset(path: string): boolean;
+  deleteAsset(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   /** One folder, inside a folder that is there: true when it was made, false when it was there already or refused
    * (a name starting with a dot, one the listing hides, an app without "assets-write") (FrameOS 2026.11.10+). */
-  makeAssetFolder(path: string): boolean;
+  makeAssetFolder(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   /** An image file of the assets folder. With width and height it is decoded at that size (a JPEG scaled as it
    * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
   loadAssetImage(

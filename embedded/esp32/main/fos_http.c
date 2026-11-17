@@ -2044,6 +2044,31 @@ static bool asset_query_path(httpd_req_t *req, bool write_rule, char *out, size_
                       : fos_assets_sanitize_path(raw, out, out_len);
 }
 
+/* The storage an asset request's `storage` query names (the assets folder
+ * without one) for the rest of the request: false, answered 404
+ * storage_unavailable, for an unknown id or a storage this frame lacks. */
+static bool asset_storage_begin(httpd_req_t *req)
+{
+    char storage[16] = "";
+    asset_query_param(req, "storage", storage, sizeof(storage));
+    if (fos_assets_use_storage(storage[0] ? storage : NULL)) return true;
+    fos_assets_use_storage(NULL);
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"error\":\"storage_unavailable\"}");
+    return false;
+}
+
+/* Runs an asset handler in its request's storage, and back to the assets
+ * folder after: the scope is the HTTP task's, which serves the next request. */
+#define IN_ASSET_STORAGE(req, call)                    \
+    do {                                               \
+        if (!asset_storage_begin(req)) return ESP_OK;  \
+        esp_err_t in_storage_result = (call);          \
+        fos_assets_use_storage(NULL);                  \
+        return in_storage_result;                      \
+    } while (0)
+
 static esp_err_t assets_list_get_handler(httpd_req_t *req)
 {
     cJSON *msg = cJSON_CreateObject();
@@ -2053,6 +2078,9 @@ static esp_err_t assets_list_get_handler(httpd_req_t *req)
     bool ok = assets && fos_assets_list_json(assets, &truncated);
     if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
     cJSON_AddBoolToObject(msg, "mounted", fos_assets_available());
+    /* Which places a panel may browse, and which this listing is. */
+    fos_assets_storages_json(cJSON_AddArrayToObject(msg, "storages"));
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     char *body = ok ? cJSON_PrintUnformatted(msg) : NULL;
     cJSON_Delete(msg);
     if (!body) return httpd_resp_send_500(req);
@@ -2620,8 +2648,8 @@ static esp_err_t frame_api_get_handler(httpd_req_t *req)
     }
     if (strcmp(suffix, "/logs") == 0) return logs_get_handler(req);
     if (strcmp(suffix, "/metrics") == 0) return metrics_get_handler(req);
-    if (strcmp(suffix, "/assets") == 0) return assets_list_get_handler(req);
-    if (strcmp(suffix, "/asset") == 0) return asset_file_get_handler(req);
+    if (strcmp(suffix, "/assets") == 0) IN_ASSET_STORAGE(req, assets_list_get_handler(req));
+    if (strcmp(suffix, "/asset") == 0) IN_ASSET_STORAGE(req, asset_file_get_handler(req));
     return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
 }
 
@@ -2642,10 +2670,10 @@ static esp_err_t frame_api_post_handler(httpd_req_t *req)
     }
     if (strcmp(suffix, "/scenes") == 0) return scenes_body_post(req, true);
     if (strcmp(suffix, "/scenes/delete") == 0) return scene_delete_post_handler(req);
-    if (strcmp(suffix, "/assets/upload") == 0) return asset_upload_post_handler(req);
-    if (strcmp(suffix, "/assets/mkdir") == 0) return asset_mutate_post_handler(req, "mkdir");
-    if (strcmp(suffix, "/assets/delete") == 0) return asset_mutate_post_handler(req, "delete");
-    if (strcmp(suffix, "/assets/rename") == 0) return asset_mutate_post_handler(req, "rename");
+    if (strcmp(suffix, "/assets/upload") == 0) IN_ASSET_STORAGE(req, asset_upload_post_handler(req));
+    if (strcmp(suffix, "/assets/mkdir") == 0) IN_ASSET_STORAGE(req, asset_mutate_post_handler(req, "mkdir"));
+    if (strcmp(suffix, "/assets/delete") == 0) IN_ASSET_STORAGE(req, asset_mutate_post_handler(req, "delete"));
+    if (strcmp(suffix, "/assets/rename") == 0) IN_ASSET_STORAGE(req, asset_mutate_post_handler(req, "rename"));
     if (strcmp(suffix, "/assets/remount-sd") == 0) return sd_remount_post_handler(req);
     if (strcmp(suffix, "/assets/format-sd") == 0) return sd_format_post_handler(req);
     const char *event_prefix = "/event/";
