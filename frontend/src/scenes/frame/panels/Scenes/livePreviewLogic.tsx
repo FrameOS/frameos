@@ -15,7 +15,7 @@ import { router } from 'kea-router'
 
 import { FrameScene, GPIOButton, RepositoryType, TemplateType, FrameId } from '../../../../types'
 import { openCanvasImageInNewTab } from '../../../../utils/objectUrl'
-import { attachKeyboardInput, attachPointerInput } from '../../../../utils/previewPointer'
+import { attachKeyboardInput, attachPointerInput, writeHostClipboard } from '../../../../utils/previewPointer'
 import { isHostEvent, isKeyboardEvent, isPointerEvent } from '../../../../utils/eventsContract'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { assetUrl } from '../../../../utils/assetUrl'
@@ -942,6 +942,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           case 'assetsChanged':
             actions.previewAssetsChanged()
             break
+          case 'clipboard':
+            // A Copy or a Cut in the frame's UI: the computer's clipboard too.
+            writeHostClipboard(String(msg.text ?? ''))
+            break
           case 'assetsResult':
             assetRequester.resolve(msg)
             break
@@ -1089,7 +1093,11 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           })
         : null
       cache.detachKeyboard = canvas
-        ? attachKeyboardInput(canvas, send, { enabled: () => cache.inputEvents === true })
+        ? attachKeyboardInput(canvas, send, {
+            enabled: () => cache.inputEvents === true,
+            // The computer's clipboard, for the frame's Paste.
+            onPaste: (text) => cache.worker?.postMessage({ type: 'clipboard', text }),
+          })
         : null
     },
     openPreviewImage: () => {

@@ -978,8 +978,10 @@ suite "jsx selection":
     let marked = ui.render()
     check differs(plain, marked, 0, 0, 320, 40) > 100
     check differs(plain, marked, 0, 40, 320, 240) == 0
+    let changes = uiClipboardChanges()
     check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
     check uiClipboard() == "Ann"
+    check uiClipboardChanges() == changes + 1 # what the preview hands to the browser's
     check ui.scene.state{"key"}.getStr() == "c" # onKeyDown hears the chord too
     # Right without shift lets go at the selection's end; Cmd+V pastes there.
     check dispatchUiEvent(id, "keyDown", key("ArrowRight"))

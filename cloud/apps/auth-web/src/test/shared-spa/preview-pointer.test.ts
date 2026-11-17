@@ -294,6 +294,54 @@ describe("preview pointer input, package and frontend", () => {
     ]);
   });
 
+  it("hands the frame the computer's clipboard before a Ctrl/Cmd+V, from either page", () => {
+    vi.useFakeTimers();
+    try {
+      for (const pointer of [packagePointer, frontendPointer]) {
+        const sent: Array<[string, unknown]> = [];
+        const canvas = new FakeCanvas();
+        const detach = pointer.attachKeyboardInput(
+          canvas as unknown as HTMLCanvasElement,
+          (name, payload) => sent.push([name, payload]),
+          { onPaste: (text) => sent.push(["(clipboard)", text]) },
+        );
+        const key = (init: Record<string, unknown>) =>
+          Object.assign(new Event("keydown", { cancelable: true }), {
+            code: "KeyV", key: "v", shiftKey: false, ctrlKey: false, altKey: false, metaKey: false,
+            repeat: false, isComposing: false, ...init,
+          });
+        const paste = (text: string) =>
+          Object.assign(new Event("paste", { cancelable: true }), {
+            clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") },
+          });
+        // The key waits for the browser's paste event, and goes after its text.
+        canvas.dispatchEvent(key({ metaKey: true }));
+        expect(sent).toEqual([]);
+        const event = paste("from the computer");
+        canvas.dispatchEvent(event);
+        expect(event.defaultPrevented).toBe(true);
+        expect(sent.map(([name]) => name)).toEqual(["(clipboard)", "keyDown"]);
+        expect(sent[0]?.[1]).toBe("from the computer");
+        expect(sent[1]?.[1]).toMatchObject({ code: "KeyV", meta: true });
+        // Nothing to paste: no paste event, the key alone, soon.
+        sent.length = 0;
+        canvas.dispatchEvent(key({ ctrlKey: true }));
+        expect(sent).toEqual([]);
+        vi.advanceTimersByTime(150);
+        expect(sent.map(([name]) => name)).toEqual(["keyDown"]);
+        detach();
+      }
+      // Without onPaste the key goes at once, as before.
+      const sent: Array<[string, unknown]> = [];
+      const canvas = new FakeCanvas();
+      packagePointer.attachKeyboardInput(canvas as unknown as HTMLCanvasElement, (name) => sent.push([name, null]));
+      canvas.dispatchEvent(Object.assign(new Event("keydown"), { code: "KeyV", key: "v", ctrlKey: true }));
+      expect(sent.map(([name]) => name)).toEqual(["keyDown"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("uses the evdev driver's button numbers and range", () => {
     const driver = repoFile("frameos/src/drivers/evdev/translate.nim");
     for (const [name, button] of [

@@ -4,7 +4,7 @@
 // a canvas, and exposes events/state as callbacks.
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
-import { attachKeyboardInput, attachPointerInput } from './pointer'
+import { attachKeyboardInput, attachPointerInput, writeHostClipboard } from './pointer'
 import { PreviewCursor, type CursorSprite } from './cursor'
 import type {
   FrameOSScene,
@@ -347,6 +347,10 @@ export class FrameOSPreview {
       case 'assetsChanged':
         this.options.onAssetsChanged?.()
         break
+      case 'clipboard':
+        // A Copy or a Cut in the frame's UI: the computer's clipboard too.
+        writeHostClipboard(String(msg.text ?? ''))
+        break
       case 'appTestsResult': {
         const pending = this.appTestsRequests.get(msg.requestId)
         if (pending) {
@@ -512,7 +516,18 @@ export class FrameOSPreview {
   attachKeyboardInput(canvas: HTMLCanvasElement): () => void {
     return attachKeyboardInput(canvas, (name, payload) => this.sendEvent(name, payload), {
       enabled: () => !this.destroyed && this.runtimeInfo.inputEvents,
+      onPaste: (text) => this.setClipboard(text),
     })
+  }
+
+  /**
+   * The frame's clipboard (docs/jsx-ui.md "Selecting, copying and pasting"):
+   * what its next Paste types. The keyboard sets it from the computer's
+   * before a Ctrl/Cmd+V; the frame's own Copy and Cut go the other way, onto
+   * the computer's clipboard, by themselves.
+   */
+  setClipboard(text: string): void {
+    this.worker?.postMessage({ type: 'clipboard', text })
   }
 
   /** Update the current scene's state fields; renders by default. */
