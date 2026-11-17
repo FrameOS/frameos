@@ -242,6 +242,9 @@ else:
 
 const BlockRows = 32 ## a worker's share at a time; each block caches its first two source rows afresh
 
+when defined(testing):
+  var testDrawsFrom*: array[PixelFormat, int] ## draws so far, by the source's format: a test asks which path ran
+
 proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
   ## Fills all of `target` with the source rectangle (sx, sy, sw, sh), in
   ## source pixels, from a source of any format onto a target of any format;
@@ -250,6 +253,8 @@ proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
   let height = target.height
   if width <= 0 or height <= 0 or source.width <= 0 or source.height <= 0:
     return
+  when defined(testing):
+    inc testDrawsFrom[source.format]
   let columns = axisTaps(sx, sw, width, source.width)
   let rows = axisTaps(sy, sh, height, source.height)
   let workers = rowsWorkers()
