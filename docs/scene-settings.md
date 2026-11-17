@@ -38,7 +38,9 @@ as it resolves `sceneSwitcher`:
 - `sceneSwitcher` while the panel shows goes back the same way, and
   `sceneSettings` while the switcher shows goes back to the scene: a swipe
   from the other edge closes either built-in scene, so the frame never stacks
-  one over the other.
+  one over the other. `sceneSettings {page: "frame"}` while the switcher shows
+  (its gear, docs/scene-switcher.md) opens the frame page over the scene the
+  switcher was opened from instead, and Back there goes to that scene.
 
 Who may say it (`origins`) is the switcher's list: the frame's event map, a
 scene, a schedule, the HTTP API with the frame access key or an admin

@@ -5266,6 +5266,155 @@
       "current": "fixtures/dispatcher/swapA"
      }
     ]
+   },
+   {
+    "name": "the frame page opens straight from the scene list, the scene behind staying behind",
+    "why": "The switcher's gear (`sceneSettings {page: \"frame\"}` while the switcher shows) opens the frame page over the scene the switcher was opened from, in its layout, as the settings' `sceneSwitcher {swap: true}` opens the list: the switcher can be all a layout that broke the scenes left reachable, and the frame page is where the layout is changed. A plain `sceneSettings` there still goes back, and so does the frame page's own Back.",
+    "scene": "fixtures/dispatcher/gearA",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/gearA",
+      "name": "gearA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": []
+     }
+    ],
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/gearA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "frame"
+        }
+       }
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/gearA",
+       "opened": "frame"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "fixtures/dispatcher/gearA"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "system/sceneSwitcher"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "fixtures/dispatcher/gearA"
+     }
+    ]
+   },
+   {
+    "name": "on a desktop the frame page opens from the scene list too",
+    "why": "Where built-in scenes stay open as windows, the switcher's gear opens the frame page's one window over the scene the switcher was opened from (`settingsWindows`), not back to that scene; a plain `sceneSettings` while the switcher is in front still goes back.",
+    "windows": true,
+    "scene": "fixtures/dispatcher/gearB",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/gearB",
+      "name": "gearB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": []
+     }
+    ],
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/gearB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings",
+        "payload": {
+         "page": "frame"
+        }
+       }
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/gearB",
+       "opened": "frame"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "fixtures/dispatcher/gearB"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "system/sceneSwitcher"
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "fixtures/dispatcher/gearB"
+     }
+    ]
    }
   ]
  },

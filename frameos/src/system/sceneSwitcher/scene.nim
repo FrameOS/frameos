@@ -17,7 +17,10 @@
 ## runner's scene snapshots); e-paper gets black on white with the
 ## highlighted tile inverted, so it reads on a one-bit panel and follows the
 ## keys. The scene list is the host's (`sceneSwitcherListing`): the order
-## `setCurrentScene {direction}` walks, with each scene's name.
+## `setCurrentScene {direction}` walks, with each scene's name. A gear in the
+## header opens the frame page (`sceneSettings {page: "frame"}`), where the
+## frame offers one: the way back to the layout's choice when the switcher is
+## all a layout left reachable.
 ##
 ## Flash is the budget on an ESP32 (AGENTS.md): the firmware gets the names
 ## only layout, no keyboard, no pictures and no round panel (none of its
@@ -33,6 +36,7 @@ import pixie/fileformats/svg
 import frameos/types
 import frameos/channels
 import frameos/events_gen
+import frameos/frame_settings_hooks
 import frameos/panel_shape
 import frameos/render_scale
 import frameos/scene_rhythm
@@ -78,6 +82,7 @@ type
     entries*: seq[SwitcherEntry] ## what the last render or key listed
     paper*: bool ## drawn in e-paper's look last time (panelLook)
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
+    gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
@@ -90,19 +95,29 @@ const
   # path's points either way.
   ChevronHead = "<svg viewBox=\"0 0 24 24\"><path d=\"M"
   ChevronTail = "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
+  # A gear, 48 units square: the teeth clockwise, the hole the other way.
+  GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
+    "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
+    "M17 24a7 7 0 1 0 14 0a7 7 0 1 0 -14 0Z"
+  GearMark = "\1" ## the highlight on the gear: no scene's id is this
 
 var
   sceneSwitcherListing*: SwitcherListing
   sceneSwitcherThumbnail*: SwitcherThumbnail
   sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
   # What the last hit test ran: a tile's index, Close (the tile count), an
-  # arrow (count + 1, + 2), or -1. Read by runEvent once the hit test is
-  # done, so the handler holds nothing of the scene's.
+  # arrow (count + 1, + 2), the gear (count + 3), or -1. Read by runEvent
+  # once the hit test is done, so the handler holds nothing of the scene's.
   tapped {.threadvar.}: int
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
+
+proc gearPath*(): string =
+  ## The gear that opens the frame page, here and in the scene settings: one
+  ## copy of its path in flash for the two built-in scenes.
+  GearPath
 
 proc putText(node: JsonNode, key, text: string, always = false) =
   ## `node[key] = text`, where there is any text (or `always`).
@@ -331,10 +346,14 @@ proc forget(self: SceneSwitcherScene) =
 
 proc highlighted*(self: SceneSwitcherScene): int =
   ## The highlighted tile, the first when the highlight names no scene on the
-  ## list; -1 for an empty list.
+  ## list; the tile count for the header's gear (after the last tile for the
+  ## keys); -1 with nothing to highlight.
+  let id = self.state{"highlight"}.getStr()
+  if self.gear and (id == GearMark or self.entries.len == 0):
+    return self.entries.len
   if self.entries.len == 0:
     return -1
-  max(self.indexOf(self.state{"highlight"}.getStr()), 0)
+  max(self.indexOf(id), 0)
 
 proc touch*(self: FrameScene) =
   ## Somebody did something: the idle timeout starts over (a built-in
@@ -342,13 +361,18 @@ proc touch*(self: FrameScene) =
   self.state.put("touchedAt", newJFloat(epochTime()))
 
 proc highlight(self: SceneSwitcherScene, index: int) =
-  ## The tile at `index` (wrapping around) highlighted, and its page shown.
-  let count = self.entries.len
+  ## The tile at `index` (wrapping around, through the gear where there is
+  ## one) highlighted, and its page shown. The gear is on every page: the
+  ## page stays.
+  let count = self.entries.len + ord(self.gear)
   if count == 0:
     return
   let i = ((index mod count) + count) mod count
-  self.state.put("highlight", newJString(self.entries[i].id))
-  self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
+  if i == self.entries.len:
+    self.state.put("highlight", newJString(GearMark))
+  else:
+    self.state.put("highlight", newJString(self.entries[i].id))
+    self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
 
 proc turnPage(self: SceneSwitcherScene, delta: int): bool {.discardable.} =
   ## Another page (wrapping around), its first tile highlighted. False when
@@ -374,22 +398,35 @@ var wentBack {.threadvar.}: bool
   ## (docs/scene-layouts.md "Windows").
 
 proc choose(self: SceneSwitcherScene, index: int) =
-  ## Show the scene at `index`.
+  ## Show the scene at `index`, or at the tile count the frame page (the
+  ## gear): the dispatcher opens it over the scene this was opened from, in
+  ## its layout, so a layout that broke every scene can still be changed.
+  let payload = newJObject()
   if index >= 0 and index < self.entries.len:
-    let payload = newJObject()
     payload.put("sceneId", newJString(self.entries[index].id))
     wentBack = true
     sendEvent(evSetCurrentScene, payload, eoScene)
+  elif index == self.entries.len and self.gear:
+    payload.put("page", newJString("frame"))
+    sendEvent(evSceneSettings, payload, eoScene)
 
 proc leave() =
   ## Back to the scene it was opened from: the dispatcher knows which.
   wentBack = true
   sendEvent(evSceneSwitcher, newJObject(), eoScene)
 
+proc framePageOffered(): bool =
+  ## Whether the frame offers its own page here (frame_settings_hooks): not
+  ## where no host has one (an editor's preview), and not while the frame's
+  ## control plane turned the settings on the screen off. Then there is no
+  ## gear: the page would not open.
+  not frameSettingsRead.isNil and not frameSettingsRead().isNil
+
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
   ## first when there is none or it is gone (then Close goes to the first).
   self.entries = listEntries()
+  self.gear = framePageOffered()
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
@@ -402,8 +439,9 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## A key, by its role (the input state gives every `button` one): next /
   ## down and prev / up walk the tiles, a press one step and a double press
   ## two, so every tap counts; primary, refresh and menu (OK, REFRESH, BOOT)
-  ## show the highlighted scene, back goes back. A long press is the frame's
-  ## (its event map walks the scenes) or nothing.
+  ## show the highlighted scene (open the frame page on the gear), back goes
+  ## back. A long press is the frame's (its event map walks the scenes) or
+  ## nothing.
   # One way out (no early `return`): each one repeats the clean-up of what
   # was read so far.
   let action = payload{"action"}.getStr()
@@ -466,14 +504,15 @@ proc square(c: var string, size: int) =
   c.px("w", size)
   c.px("h", size)
 
-proc iconNode(icon: string, side: int): SvgNode =
+proc iconNode(icon: string, side: int, box = "0 0 24 24"): SvgNode =
   ## A scene's icon (docs/scene-icons.md), `side` px square: its one path in
   ## the 24 box, filled with the text color, so it reads on e-paper (black,
   ## white on the highlighted tile) as on an LCD. scene_icon.nim checked the
-  ## path when the scene was read, so drawing it raises nothing.
+  ## path when the scene was read, so drawing it raises nothing. The gear's
+  ## path is in a box of its own.
   var c = "shrink-0"
   c.square(side)
-  SvgNode(tag: "svg", attrs: @[("class", c), ("viewBox", "0 0 24 24")],
+  SvgNode(tag: "svg", attrs: @[("class", c), ("viewBox", box)],
     children: @[SvgNode(tag: "path", attrs: @[("d", icon), ("fill", "currentColor")])])
 
 proc onClick(node: sink SvgNode, handler: int): SvgNode =
@@ -499,6 +538,18 @@ proc arrowButton(size: int, left: bool, button: string): SvgNode =
     result.children.add chevron
   # The layout theme's look for a button (ui/theme.nim).
   result = result.role("button")
+
+proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string): SvgNode =
+  ## The frame page's gear, round like the arrows. Lit while the keys are on
+  ## it: inverted on e-paper as a tile is, ringed on an LCD.
+  var c = "shrink-0 flex items-center justify-center rounded-full"
+  c.square(size)
+  if paper and lit: c.add " bg-black text-white"
+  else:
+    c.add button
+    if lit: c.add " border-2 border-sky-400"
+  result = el("div", c, iconNode(GearPath, size * 2 div 3, "0 0 48 48"))
+  result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 3)
 
 type TileLook = object
   ## What every tile on the page shares, and the one at hand.
@@ -627,7 +678,8 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
     width, size, small: int, button: string) =
-  ## A rectangular panel's header: the title, the page and its arrows, Close.
+  ## A rectangular panel's header: the title, the page and its arrows, the
+  ## frame page's gear, Close.
   var c: string
   c.at(0, 0, width, grid.headerH)
   c.add " flex items-center"
@@ -638,13 +690,15 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   c = "grow truncate font-bold"
   c.px("text", size)
   header.children.add el("span", c, txt("Scenes"))
+  let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
   if grid.pages > 1:
-    let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
     header.children.add arrowButton(arrow, true, button).onClick(self.entries.len + 1)
     c = "shrink-0"
     c.px("text", small)
     header.children.add el("span", c, txt(pageText(page, grid.pages)))
     header.children.add arrowButton(arrow, false, button).onClick(self.entries.len + 2)
+  if self.gear:
+    header.children.add self.gearButton(arrow, paper, self.highlighted() == self.entries.len, button)
   c = "shrink-0 rounded-full"
   c.px("px", max(6, small))
   c.px("py", max(2, small div 4))
@@ -683,13 +737,22 @@ when not defined(frameosEmbedded):
     let
       closeTop = grid.y0 + grid.side + grid.gap div 2
       closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
-      closeW = min(2 * closeHalf, max(small * 6, 72))
+      # The gear left of Close, the two centred on the chord together.
+      gearW = if self.gear: rowH + grid.gap else: 0
+      closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
+      left = grid.cx - (closeW + gearW) div 2
     c = ""
-    c.at(grid.cx - closeW div 2, closeTop, closeW, rowH)
+    c.at(left + gearW, closeTop, closeW, rowH)
     c.add " flex items-center justify-center rounded-full"
     c.px("text", small)
     c.add button
     root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+    if self.gear:
+      let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
+      gear.attrs[0][1].add " absolute"
+      gear.attrs[0][1].px("left", left)
+      gear.attrs[0][1].px("top", closeTop)
+      root.children.add gear
     if grid.pages > 1:
       let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
       var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
@@ -817,6 +880,7 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   ## One render: the list read again, laid out, drawn into `image`, and the
   ## tiles left behind for the pointer.
   self.entries = listEntries()
+  self.gear = framePageOffered()
   if self.indexOf(self.opener()) < 0:
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
@@ -856,10 +920,11 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
   let count = self.entries.len
   if tapped >= 0:
-    # A tile, Close or an arrow: what it did is the next picture (a switch,
-    # or the page in the state). A tap on nothing is nothing.
+    # A tile, Close, an arrow or the gear: what it did is the next picture (a
+    # switch, or the page in the state). A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
     elif tapped == count: leave()
+    elif tapped == count + 3: self.choose(count)
     elif self.turnPage(if tapped == count + 1: -1 else: 1): showTurnedPage()
     tapped = -1
     self.touch()

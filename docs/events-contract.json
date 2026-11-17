@@ -675,6 +675,7 @@
     {
       "name": "sceneSettings",
       "class": "scene-command",
+      "$comment": "page: \"frame\" opens on the frame's own page, \"safe\" there with no layout around it. Over the scene switcher, \"frame\" goes there instead of back to the scene (the switcher's gear; the scene behind stays behind).",
       "description": "Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen.",
       "listen": false,
       "dispatch": true,
