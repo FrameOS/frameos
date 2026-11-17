@@ -104,7 +104,7 @@ proc packPalette*(
         of 8: index.uint8
         of 4: (index shl ((1 - (px mod 2)) * 4)).uint8
         of 2: (index shl ((3 - (px mod 4)) * 2)).uint8
-        else: (index shl ((7 - px) mod 8)).uint8
+        else: (index shl (7 - (px mod 8))).uint8
     if scanOrder and px mod pixelsPerByte == 0:
       buf[outputIndex] = value
     else:

@@ -41,6 +41,7 @@ proc referencePack(image: Image; palette: seq[(int, int, int)];
     of 8: result[outputIndex] = index.uint8
     of 4: result[outputIndex] = result[outputIndex] or (index shl ((1 - (px mod 2)) * 4)).uint8
     of 2: result[outputIndex] = result[outputIndex] or (index shl ((3 - (px mod 4)) * 2)).uint8
+    of 1: result[outputIndex] = result[outputIndex] or (index shl (7 - (px mod 8))).uint8
     else: discard
 
 proc canvasOver(format: PixelFormat, width, height: int, memory: var seq[uint8]): Image =
@@ -61,6 +62,7 @@ let palettes = @[
   ("Spectra 6", spectra6ColorPalette),
   ("seven colours", saturated7ColorPalette),
   ("four colours", saturated4ColorPalette),
+  ("black and white", @[(0, 0, 0), (255, 255, 255)]),
 ]
 
 suite "a colour picture packed into its own canvas":
@@ -85,6 +87,22 @@ suite "a colour picture packed into its own canvas":
               checkpoint name & " " & $format & " " & $width & "x" & $height & " amp " & $amp
               fail()
     ditherJitterAmp = DitherJitterDefaultAmp
+
+  test "two colours pack 1 bit MSB-first across the whole row":
+    let savedJitter = ditherJitterAmp
+    ditherJitterAmp = 0
+    defer: ditherJitterAmp = savedJitter
+    let rows = @[@[0xA5'u8, 0x3C, 0xF0], @[0x01'u8, 0x80, 0x58]]
+    var memory: seq[uint8]
+    let canvas = canvasOver(pfRgbx, 21, 2, memory)
+    for y in 0 ..< 2:
+      for x in 0 ..< 21:
+        let c = if ((rows[y][x div 8] shr (7 - (x mod 8))) and 1) == 1: 255'u8 else: 0'u8
+        canvas[x, y] = rgba(c, c, c, 255)
+    var own = newSeq[uint8](6)
+    check packPalette(canvas, cast[ptr UncheckedArray[uint8]](own[0].addr), own.len,
+      @[(0, 0, 0), (255, 255, 255)], 21, 2, 0)
+    check own == @[0xA5'u8, 0x3C, 0xF0, 0x01, 0x80, 0x58]
 
   test "a buffer holding an old picture is written whole, not ORed into":
     var memory: seq[uint8]
