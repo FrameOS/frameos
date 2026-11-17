@@ -356,17 +356,27 @@ class FrameAssetsCacheResponse(BaseModel):
     retry_after: Optional[int] = None
 
 
-class FrameAssetsStorageResponse(BaseModel):
-    # None whenever the source does not report it (SSH/agent/virtual frames and
-    # ESP32 firmware older than the flag). False means the SD card is missing,
-    # so an empty listing is "cannot see the card", not "the card is empty".
-    mounted: Optional[bool] = None
+class FrameAssetsStorageEntry(BaseModel):
+    # "assets" (the assets folder: an ESP32's TF card when one is mounted)
+    # or "internal" (an ESP32's own flash storage), named by the device.
+    id: Literal["assets", "internal"]
+    name: str
 
 
 class FrameAssetsResponse(BaseModel):
     assets: List[Dict[str, Any]]
     cache: Optional[FrameAssetsCacheResponse] = None
-    storage: Optional[FrameAssetsStorageResponse] = None
+    # None whenever the source does not report it (SSH/agent/virtual frames and
+    # ESP32 firmware older than the flag). False means the SD card is missing,
+    # so an empty listing is "cannot see the card", not "the card is empty".
+    mounted: Optional[bool] = None
+    # Which storage this listing is (the `storage` query parameter, "assets"
+    # by default), and every storage the frame has: the assets folder alone
+    # unless an ESP32 lists its internal storage too.
+    storage: Literal["assets", "internal"] = "assets"
+    storages: List[FrameAssetsStorageEntry] = Field(
+        default_factory=lambda: [FrameAssetsStorageEntry(id="assets", name="Internal storage")]
+    )
     # Echoed when the request named one folder (`?folder=`): the listing is
     # then that folder's direct children, not the whole tree.
     folder: Optional[str] = None
