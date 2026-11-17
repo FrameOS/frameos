@@ -22,7 +22,15 @@ import { metricsLogic } from '../Metrics/metricsLogic'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { isEsp32CloudFrame, isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
-import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
+import {
+  DEFAULT_ASSET_STORAGE,
+  assetStorageAfterListing,
+  assetStoragesFromListing,
+  frameAssetsApiPath,
+  withAssetStorage,
+  type AssetStorage,
+  type AssetStorageId,
+} from '../../../../utils/frameAssetsApi'
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
@@ -41,6 +49,42 @@ import type { FrameType } from '../../../../types'
 
 export interface AssetsLogicProps {
   frameId: FrameId
+  /** Pins the logic to one storage, whatever the panel shows: the path
+   * pickers, whose paths are the assets folder's. Absent for the panel's own
+   * logic, which shows the storage picked in its switch. */
+  storage?: AssetStorageId
+}
+
+/**
+ * Where an ESP32 mounts its internal storage (fos_assets_flash.h
+ * FOS_ASSETS_INTERNAL_PATH): what a scene reads a file there by. The
+ * listings spell its files like the assets folder's (the backend under
+ * frame.assets_path, the cloud relative), so this is for scenes and the
+ * panel's title only, never for matching paths.
+ */
+export const INTERNAL_STORAGE_PATH = '/srv/internal'
+
+/** The path a scene on the frame reads a storage's root by. */
+export function assetStorageRootPath(storage: AssetStorageId, assetsPath?: string | null): string {
+  return storage === 'internal' ? INTERNAL_STORAGE_PATH : assetsPath || '/srv/assets'
+}
+
+/**
+ * The folder-expansion path (workspaceLogic's frameAssetFolderExpansion) of
+ * a folder in a storage: the folder's own path in the assets folder, as it
+ * always was, and "<storage>:<path>" in another, so the two trees open apart.
+ */
+export function assetFolderExpansionPath(storage: AssetStorageId, path: string): string {
+  return storage === DEFAULT_ASSET_STORAGE ? path : `${storage}:${path}`
+}
+
+/** The folder an expansion path names in `storage`, or null for another storage's. */
+export function assetFolderFromExpansionPath(storage: AssetStorageId, expansionPath: string): string | null {
+  const match = /^(internal):(.*)$/.exec(expansionPath)
+  if (storage === DEFAULT_ASSET_STORAGE) {
+    return match ? null : expansionPath
+  }
+  return match && match[1] === storage ? match[2] : null
 }
 
 export interface AssetNode {
@@ -93,9 +137,14 @@ interface FrameAssetsResponse {
     refreshing?: boolean
     retry_after?: number
   }
-  /** Backend shape. Only SD-backed frames report it. */
-  storage?: { mounted?: boolean | null } | null
-  /** The on-device admin API answers with the flag at the top level. */
+  /** Which storage this listing is ("assets" / "internal"). An older
+   * backend put its mount flag here instead: `{ mounted }`, SD-backed frames
+   * only. */
+  storage?: string | { mounted?: boolean | null } | null
+  /** The places the frame keeps assets in, named by the frame. Absent from an
+   * older plane: one storage, the assets folder. */
+  storages?: unknown
+  /** The on-device admin API, and the backend now, answer with the flag at the top level. */
   mounted?: boolean | null
 }
 
@@ -106,7 +155,7 @@ interface FrameAssetsResponse {
  * "the card is empty" into "the card is not readable".
  */
 function storageMountedFromResponse(data: FrameAssetsResponse): boolean | null {
-  const mounted = data.storage?.mounted ?? data.mounted
+  const mounted = (typeof data.storage === 'object' ? data.storage?.mounted : undefined) ?? data.mounted
   return typeof mounted === 'boolean' ? mounted : null
 }
 
@@ -375,8 +424,13 @@ export interface assetsLogicValues {
   foldersLoading: Record<string, boolean>
   loadedFolders: Record<string, true>
   showHiddenFiles: boolean
+  showStorageSwitch: boolean
+  fontSyncElsewhere: boolean
   showSystemFolders: boolean
+  storage: AssetStorageId
   storageMounted: boolean | null
+  storageRootPath: string
+  storages: AssetStorage[]
   storageUnmounted: boolean
 }
 
@@ -404,8 +458,12 @@ export interface assetsLogicActions {
   createFolder: (path: string) => {
     path: string
   }
-  deleteAsset: (path: string) => {
+  deleteAsset: (
+    path: string,
+    storage?: AssetStorageId
+  ) => {
     path: string
+    storage: AssetStorageId | undefined
   }
   ensureFolderLoaded: (path: string) => {
     path: string
@@ -458,10 +516,12 @@ export interface assetsLogicActions {
   }
   renameAsset: (
     oldPath: string,
-    newPath: string
+    newPath: string,
+    storage?: AssetStorageId
   ) => {
     newPath: string
     oldPath: string
+    storage: AssetStorageId | undefined
   }
   setAssetsRefreshing: (assetsRefreshing: boolean) => {
     assetsRefreshing: boolean
@@ -473,8 +533,14 @@ export interface assetsLogicActions {
     loading: boolean
     path: string
   }
+  setStorage: (storage: AssetStorageId) => {
+    storage: AssetStorageId
+  }
   setStorageMounted: (storageMounted: boolean | null) => {
     storageMounted: boolean | null
+  }
+  storagesReported: (storages: AssetStorage[] | null) => {
+    storages: AssetStorage[] | null
   }
   syncAssets: () => {
     value: true
@@ -527,7 +593,7 @@ export interface assetsLogicActions {
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface assetsLogicMeta {
-  key: FrameId
+  key: string | number
   __keaTypeGenInternalSelectorTypes: {
     cleanedAssets: (
       assets: AssetType[],
@@ -545,7 +611,7 @@ export interface assetsLogicMeta {
         path: string
         size: number
       }[],
-      frame: FrameType,
+      storageRootPath: string,
       showSystemFolders: boolean,
       showHiddenFiles: boolean,
       loadedFolders: Record<string, true>,
@@ -554,6 +620,9 @@ export interface assetsLogicMeta {
     colorProfileKeys: (assets: AssetType[], frame: FrameType) => Set<string>
     assetStats: (assetTree: AssetNode) => AssetStats
     storageUnmounted: (storageMounted: boolean | null) => boolean
+    storageRootPath: (storage: AssetStorageId, frame: FrameType) => string
+    showStorageSwitch: (storages: AssetStorage[]) => boolean
+    fontSyncElsewhere: (storage: AssetStorageId, storages: AssetStorage[]) => boolean
     diskStats: (
       sortedMetrics: MetricsType[],
       cleanedAssets: {
@@ -576,8 +645,14 @@ export const assetsLogic = kea<assetsLogicType>([
     logic: [socketLogic],
     values: [frameLogic({ frameId }), ['frame'], metricsLogic({ frameId }), ['sortedMetrics']],
   })),
-  key((props) => props.frameId),
+  // The panel's logic is the frame's; a pinned one (a path picker's, while
+  // the panel shows another storage) is its own.
+  key((props) => (props.storage ? `${props.frameId}:${props.storage}` : props.frameId)),
   actions({
+    // The storage the panel shows (the switch above it). A pinned logic
+    // (props.storage) never changes it.
+    setStorage: (storage: AssetStorageId) => ({ storage }),
+    storagesReported: (storages: AssetStorage[] | null) => ({ storages }),
     uploadAssets: (path: string) => ({ path }),
     uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
     assetUploaded: (asset: AssetType) => ({ asset }),
@@ -587,9 +662,9 @@ export const assetsLogic = kea<assetsLogicType>([
     setAssetsRefreshing: (assetsRefreshing: boolean) => ({ assetsRefreshing }),
     setStorageMounted: (storageMounted: boolean | null) => ({ storageMounted }),
     syncAssets: true,
-    deleteAsset: (path: string) => ({ path }),
+    deleteAsset: (path: string, storage?: AssetStorageId) => ({ path, storage }),
     assetDeleted: (path: string, assetsPath?: string) => ({ path, assetsPath }),
-    renameAsset: (oldPath: string, newPath: string) => ({ oldPath, newPath }),
+    renameAsset: (oldPath: string, newPath: string, storage?: AssetStorageId) => ({ oldPath, newPath, storage }),
     assetRenamed: (oldPath: string, newPath: string, assetsPath?: string) => ({ oldPath, newPath, assetsPath }),
     createFolder: (path: string) => ({ path }),
     toggleShowSystemFolders: true,
@@ -610,12 +685,18 @@ export const assetsLogic = kea<assetsLogicType>([
             // The root folder only. A server that knows `folder=` answers
             // with the root's direct children and echoes the key; an older
             // one lists everything, which is just as welcome.
-            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?folder=`)
+            const storage = values.storage
+            const response = await apiFetch(withAssetStorage(`${frameAssetsApiPath(props.frameId)}?folder=`, storage))
             if (!response.ok) {
               throw new Error(await responseErrorMessage(response, 'Failed to fetch assets'))
             }
             const data = (await response.json()) as FrameAssetsResponse
+            if (storage !== values.storage) {
+              // The panel moved to another storage while this was on its way.
+              return values.assets
+            }
             window.clearTimeout(cache.reloadTimer)
+            actions.storagesReported(assetStoragesFromListing(data.storages))
             actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               const retryDelay = Math.max(1, data.cache.retry_after ?? 2) * 1000
@@ -650,11 +731,18 @@ export const assetsLogic = kea<assetsLogicType>([
           try {
             window.clearTimeout(cache.reloadTimer)
             actions.setAssetsRefreshing(true)
-            const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?refresh=1&folder=`)
+            const storage = values.storage
+            const response = await apiFetch(
+              withAssetStorage(`${frameAssetsApiPath(props.frameId)}?refresh=1&folder=`, storage)
+            )
             if (!response.ok) {
               throw new Error('Failed to refresh assets')
             }
             const data = (await response.json()) as FrameAssetsResponse
+            if (storage !== values.storage) {
+              return values.assets
+            }
+            actions.storagesReported(assetStoragesFromListing(data.storages))
             actions.setStorageMounted(storageMountedFromResponse(data))
             if (data.cache?.refreshing) {
               // The listing is being fetched (cloud: an assets_list command is
@@ -703,6 +791,8 @@ export const assetsLogic = kea<assetsLogicType>([
             detail: 'Preparing font sync',
           })
           try {
+            // Fonts go in the assets folder, where the renderer reads them,
+            // whichever storage the panel shows (a plane refuses `internal`).
             const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/sync'), {
               method: 'POST',
             })
@@ -758,11 +848,26 @@ export const assetsLogic = kea<assetsLogicType>([
     ],
   })),
 
-  reducers({
+  reducers(({ props }) => ({
+    storage: [
+      (props.storage ?? DEFAULT_ASSET_STORAGE) as AssetStorageId,
+      {
+        setStorage: (state, { storage }) => (props.storage ? state : storage),
+      },
+    ],
+    // What the last listing said the frame has; [] until one says (and from
+    // an older plane, which knows only the assets folder).
+    storages: [
+      [] as AssetStorage[],
+      {
+        storagesReported: (_, { storages }) => storages ?? [],
+      },
+    ],
     assetsRefreshing: [
       false,
       {
         setAssetsRefreshing: (_, { assetsRefreshing }) => assetsRefreshing,
+        setStorage: () => false,
       },
     ],
     // Which folders' own listings have been fetched. A server without
@@ -772,6 +877,7 @@ export const assetsLogic = kea<assetsLogicType>([
       {
         folderLoaded: (state, { folder }) => (state[folder] ? state : { ...state, [folder]: true }),
         refreshAssets: () => ({}),
+        setStorage: () => ({}),
       },
     ],
     allFoldersLoaded: [
@@ -779,11 +885,13 @@ export const assetsLogic = kea<assetsLogicType>([
       {
         fullListingLoaded: () => true,
         folderLoaded: () => false,
+        setStorage: () => false,
       },
     ],
     foldersLoading: [
       {} as Record<string, boolean>,
       {
+        setStorage: () => ({}),
         setFolderLoading: (state, { path, loading }) => {
           if (!loading) {
             const { [path]: _, ...rest } = state
@@ -799,6 +907,7 @@ export const assetsLogic = kea<assetsLogicType>([
       null as boolean | null,
       {
         setStorageMounted: (_, { storageMounted }) => storageMounted,
+        setStorage: () => null,
       },
     ],
     showSystemFolders: [
@@ -818,6 +927,8 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assets: {
+      // Another storage is another tree: nothing of this one's stays on screen.
+      setStorage: () => [],
       assetUploaded: (state, { asset }) =>
         state.find((a) => a.path === asset.path)
           ? state.map((a) => (a.path === asset.path ? asset : a))
@@ -853,8 +964,25 @@ export const assetsLogic = kea<assetsLogicType>([
       assetDeleted: (state, { path, assetsPath }) => withoutDeletedAsset(state, path, assetsPath),
       assetRenamed: (state, { oldPath, newPath, assetsPath }) => withRenamedAsset(state, oldPath, newPath, assetsPath),
     },
-  }),
-  selectors({
+  })),
+  selectors(({ props }) => ({
+    storageRootPath: [
+      (s) => [s.storage, s.frame],
+      (storage: assetsLogicValues['storage'], frame: assetsLogicValues['frame']): string =>
+        assetStorageRootPath(storage, frame?.assets_path),
+    ],
+    // Most frames keep their assets in one place: no switch for them.
+    showStorageSwitch: [
+      (s) => [s.storages],
+      (storages: assetsLogicValues['storages']): boolean => !props.storage && storages.length > 1,
+    ],
+    // Fonts sync into the assets folder: while the panel shows another
+    // storage beside it, Sync fonts says where they would go instead.
+    fontSyncElsewhere: [
+      (s) => [s.storage, s.storages],
+      (storage: assetsLogicValues['storage'], storages: assetsLogicValues['storages']): boolean =>
+        storage !== DEFAULT_ASSET_STORAGE && storages.some((option) => option.id === DEFAULT_ASSET_STORAGE),
+    ],
     cleanedAssets: [
       (s) => [s.assets, s.frame],
       (assets: assetsLogicValues['assets'], frame: assetsLogicValues['frame']) => {
@@ -875,10 +1003,17 @@ export const assetsLogic = kea<assetsLogicType>([
       },
     ],
     assetTree: [
-      (s) => [s.cleanedAssets, s.frame, s.showSystemFolders, s.showHiddenFiles, s.loadedFolders, s.allFoldersLoaded],
+      (s) => [
+        s.cleanedAssets,
+        s.storageRootPath,
+        s.showSystemFolders,
+        s.showHiddenFiles,
+        s.loadedFolders,
+        s.allFoldersLoaded,
+      ],
       (
         cleanedAssets: assetsLogicValues['cleanedAssets'],
-        frame: assetsLogicValues['frame'],
+        storageRootPath: assetsLogicValues['storageRootPath'],
         showSystemFolders: assetsLogicValues['showSystemFolders'],
         showHiddenFiles: assetsLogicValues['showHiddenFiles'],
         loadedFolders: assetsLogicValues['loadedFolders'],
@@ -897,7 +1032,7 @@ export const assetsLogic = kea<assetsLogicType>([
           }
           return showHiddenFiles || !isHiddenOrJunkAssetPath(asset.path)
         })
-        return buildAssetTree(visibleAssets, frame.assets_path ?? '/srv/assets', loadedFolders, allFoldersLoaded)
+        return buildAssetTree(visibleAssets, storageRootPath, loadedFolders, allFoldersLoaded)
       },
     ],
     colorProfileKeys: [
@@ -937,8 +1072,26 @@ export const assetsLogic = kea<assetsLogicType>([
         return latestDiskStats(sortedMetrics)
       },
     ],
-  }),
+  })),
   listeners(({ actions, props, values, cache }) => ({
+    setStorage: () => {
+      if (props.storage) {
+        return
+      }
+      window.clearTimeout(cache.reloadTimer)
+      actions.loadAssets()
+    },
+    // A frame that no longer has the storage shown (a card taken out, an
+    // older plane that knows only the assets folder) shows the one it has.
+    storagesReported: ({ storages }) => {
+      if (props.storage) {
+        return
+      }
+      const next = assetStorageAfterListing(values.storage, storages)
+      if (next !== values.storage) {
+        actions.setStorage(next)
+      }
+    },
     ensureFolderLoaded: ({ path }) => {
       const key = assetPathKey(path, values.frame.assets_path)
       if (values.allFoldersLoaded || values.loadedFolders[key] || values.foldersLoading[key]) {
@@ -948,13 +1101,19 @@ export const assetsLogic = kea<assetsLogicType>([
     },
     loadFolder: async ({ path }) => {
       const key = assetPathKey(path, values.frame.assets_path)
+      const storage = values.storage
       actions.setFolderLoading(key, true)
       try {
-        const response = await apiFetch(`${frameAssetsApiPath(props.frameId)}?folder=${encodeURIComponent(key)}`)
+        const response = await apiFetch(
+          withAssetStorage(`${frameAssetsApiPath(props.frameId)}?folder=${encodeURIComponent(key)}`, storage)
+        )
         if (!response.ok) {
           throw new Error(await responseErrorMessage(response, 'Failed to list the folder'))
         }
         const data = (await response.json()) as FrameAssetsResponse
+        if (storage !== values.storage) {
+          return
+        }
         if (typeof data.folder === 'string') {
           actions.loadAssetsSuccess(mergeFolderListing(values.assets, key, data.assets, values.frame.assets_path))
           actions.folderLoaded(key, data.assets)
@@ -967,7 +1126,9 @@ export const assetsLogic = kea<assetsLogicType>([
         console.error(error)
         reportAssetFailure(props.frameId, 'Listing folder', errorMessage(error, 'Failed to list the folder'))
       } finally {
-        actions.setFolderLoading(key, false)
+        if (storage === values.storage) {
+          actions.setFolderLoading(key, false)
+        }
       }
     },
     // Folders left open last time are read as soon as their parent is, so
@@ -989,7 +1150,7 @@ export const assetsLogic = kea<assetsLogicType>([
         ) {
           continue
         }
-        if (expansion[frameAssetFolderExpansionKey(props.frameId, key)]) {
+        if (expansion[frameAssetFolderExpansionKey(props.frameId, assetFolderExpansionPath(values.storage, key))]) {
           actions.ensureFolderLoaded(key)
         }
       }
@@ -1003,8 +1164,12 @@ export const assetsLogic = kea<assetsLogicType>([
       path: string
       expanded: boolean
     }) => {
-      if (expanded && frameId === props.frameId) {
-        actions.ensureFolderLoaded(path)
+      if (!expanded || frameId !== props.frameId) {
+        return
+      }
+      const folder = assetFolderFromExpansionPath(values.storage, path)
+      if (folder !== null) {
+        actions.ensureFolderLoaded(folder)
       }
     },
     uploadDroppedFiles: async ({ path, files }) => {
@@ -1017,9 +1182,11 @@ export const assetsLogic = kea<assetsLogicType>([
 
       // One toast per frame: files dropped while an upload is running join
       // the running task (queue + growing totals) instead of replacing it.
-      const queue: { file: File; path: string }[] = (cache.uploadQueue ??= [])
+      // Each file goes to the storage shown when it was dropped, even if the
+      // panel moves on before its turn comes.
+      const queue: { file: File; path: string; storage: AssetStorageId }[] = (cache.uploadQueue ??= [])
       for (const file of files) {
-        queue.push({ file, path })
+        queue.push({ file, path, storage: values.storage })
       }
       const batchBytes = files.reduce((total, file) => total + Math.max(file.size, 1), 0)
 
@@ -1064,13 +1231,18 @@ export const assetsLogic = kea<assetsLogicType>([
 
       try {
         while (queue.length > 0) {
-          const { file, path: filePath } = queue.shift()!
-          const uploadPath = frameAssetsApiPath(props.frameId, 'assets/upload')
+          const { file, path: filePath, storage } = queue.shift()!
+          // The rows on screen are the storage's shown now: another one's
+          // upload only reports its progress in the toast.
+          const shown = (): boolean => storage === values.storage
+          const uploadPath = withAssetStorage(frameAssetsApiPath(props.frameId, 'assets/upload'), storage)
           const normalizedPath = normalizeAssetPath(`${filePath ? filePath + '/' : ''}${file.name}`, assetsPath)
           const fileTaskBytes = Math.max(file.size, 1)
           const updateProgress = (fileUploadedBytes: number, detail = `Uploading ${file.name}`) => {
             const safeFileUploadedBytes = Math.max(0, Math.min(fileTaskBytes, fileUploadedBytes || 0))
-            actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
+            if (shown()) {
+              actions.uploadProgress(normalizedPath, Math.min(file.size, fileUploadedBytes || 0))
+            }
             task.lastReportedBytes = Math.min(task.totalBytes, task.completedBytes + safeFileUploadedBytes)
             longRunningTasksModel.actions.updateTaskProgress({
               taskId: task.id,
@@ -1107,6 +1279,7 @@ export const assetsLogic = kea<assetsLogicType>([
                   filename: file.name,
                   chunkSize,
                   retries: isInFrameAdminMode() ? 0 : 2,
+                  storage,
                   onProgress: (size) => updateProgress(size),
                 })
               : await (async () => {
@@ -1127,15 +1300,19 @@ export const assetsLogic = kea<assetsLogicType>([
                 })()
             task.completedBytes += fileTaskBytes
             updateProgress(fileTaskBytes, `Uploaded ${file.name}`)
-            actions.assetUploaded({
-              ...asset,
-              path: normalizeAssetPath(asset.path, assetsPath),
-            })
+            if (shown()) {
+              actions.assetUploaded({
+                ...asset,
+                path: normalizeAssetPath(asset.path, assetsPath),
+              })
+            }
           } catch (error) {
             task.failures += 1
             task.completedBytes += fileTaskBytes
             task.lastReportedBytes = Math.min(task.totalBytes, task.completedBytes)
-            actions.uploadFailure(normalizedPath)
+            if (shown()) {
+              actions.uploadFailure(normalizedPath)
+            }
             longRunningTasksModel.actions.updateTaskProgress({
               taskId: task.id,
               frameId: props.frameId,
@@ -1179,40 +1356,50 @@ export const assetsLogic = kea<assetsLogicType>([
     // Delete, rename and mkdir used to fail completely silently (a
     // console.error nobody sees) while uploads in this same file toast; now
     // a failure lands in the same task toasts.
-    deleteAsset: async ({ path }) => {
+    // `storage` is given only by the follow-up for a photo's color profile,
+    // which must land where the photo was even if the panel has moved on.
+    deleteAsset: async ({ path, storage: givenStorage }) => {
+      const storage = givenStorage ?? values.storage
       try {
-        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/delete'), {
+        const response = await apiFetch(withAssetStorage(frameAssetsApiPath(props.frameId, 'assets/delete'), storage), {
           method: 'POST',
           body: new URLSearchParams({ path }),
         })
         if (!response.ok) {
           throw new Error(await responseErrorMessage(response, 'Failed to delete asset'))
         }
-        actions.assetDeleted(path, values.frame.assets_path)
+        if (storage !== values.storage) {
+          return
+        }
         // A photo's color profile goes with the photo.
         const sidecar = sidecarEntryFor(values.assets, path, values.frame.assets_path)
+        actions.assetDeleted(path, values.frame.assets_path)
         if (sidecar) {
-          actions.deleteAsset(sidecarPathFor(path))
+          actions.deleteAsset(sidecarPathFor(path), storage)
         }
       } catch (error) {
         console.error(error)
         reportAssetFailure(props.frameId, 'Deleting asset', errorMessage(error, 'Failed to delete asset'))
       }
     },
-    renameAsset: async ({ oldPath, newPath }) => {
+    renameAsset: async ({ oldPath, newPath, storage: givenStorage }) => {
+      const storage = givenStorage ?? values.storage
       try {
-        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/rename'), {
+        const response = await apiFetch(withAssetStorage(frameAssetsApiPath(props.frameId, 'assets/rename'), storage), {
           method: 'POST',
           body: new URLSearchParams({ src: oldPath, dst: newPath }),
         })
         if (!response.ok) {
           throw new Error(await responseErrorMessage(response, 'Failed to rename asset'))
         }
-        actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
+        if (storage !== values.storage) {
+          return
+        }
         // A photo's color profile goes with the photo.
         const sidecar = sidecarEntryFor(values.assets, oldPath, values.frame.assets_path)
+        actions.assetRenamed(oldPath, newPath, values.frame.assets_path)
         if (sidecar) {
-          actions.renameAsset(sidecarPathFor(oldPath), sidecarPathFor(newPath))
+          actions.renameAsset(sidecarPathFor(oldPath), sidecarPathFor(newPath), storage)
         }
       } catch (error) {
         console.error(error)
@@ -1220,13 +1407,17 @@ export const assetsLogic = kea<assetsLogicType>([
       }
     },
     createFolder: async ({ path }) => {
+      const storage = values.storage
       try {
-        const response = await apiFetch(frameAssetsApiPath(props.frameId, 'assets/mkdir'), {
+        const response = await apiFetch(withAssetStorage(frameAssetsApiPath(props.frameId, 'assets/mkdir'), storage), {
           method: 'POST',
           body: new URLSearchParams({ path }),
         })
         if (!response.ok) {
           throw new Error(await responseErrorMessage(response, 'Failed to create folder'))
+        }
+        if (storage !== values.storage) {
+          return
         }
         const parent = parentFolderKey(assetPathKey(path, values.frame.assets_path))
         if (values.allFoldersLoaded) {
