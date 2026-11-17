@@ -104,7 +104,13 @@ the built-in screens with `frameos.dispatch('sceneSwitcher')`,
 `frameos.dispatch('sceneSettings')` and `frameos.dispatch('sceneSettings', {page:
 'frame'})` for the frame's own page, which is all the Windows 98 taskbar's Start,
 gear and tray do (on a desktop of windows, a scene's settings open from the gear
-button on its title bar). A clock that shows no seconds calls
+button on its title bar). The `Terminal` layout's prompt, its "F2 settings" at the
+top right and its status line are those three too; F2 on a keyboard is the
+button as well (its app hears `keyDown`: `events` in its config.json and an
+`onEvent`, after the scene it wraps), and while the settings show
+(`app.frame.systemScene`, an `app.frame.sceneId` that starts
+`system/sceneSettings`) the button is lit and the same command goes back. A
+clock that shows no seconds calls
 `frameos.setNextSleep` with the seconds left in the minute, and the chrome then
 costs nothing until it changes.
 
@@ -164,8 +170,8 @@ On a frame that runs its scenes side by side (a Raspberry Pi, an ESP32, and the
 browser when the page asks for it: `frameos_wasm_set_windowed`, the worker's
 `windowed`), a layout can be a desktop: every scene opened in a window or a tile
 of its own, all of them running, one with the focus. The samples `Windows 98`
-(overlapping windows that open at its "Window size", 800×480 unless set
-otherwise, filling the desktop where that does not fit, on bare desktop where
+(overlapping windows that open at their scene's own size, 800×480 where a scene
+says none, filling the desktop where that does not fit, on bare desktop where
 there is room (below), and where they were when their scene opens again; moved
 and sized with the mouse, snapped to a half or the
 whole desktop at its edges, a taskbar of what is open, a Start menu and desktop
@@ -178,8 +184,8 @@ that split, kept per arrangement; a press anywhere in a tile is its scene's at
 once and gives it the focus, a tile's bar dragged onto another tile, bar or
 picture, swaps the two, a gear on each bar opens that scene's settings as a tile
 of their own, and the top bar's gear the frame's) are two. `macOS` and `BeOS`
-are desktops of overlapping windows the way `Windows 98` is, at the same "Window
-size", moved, sized and snapped the same way, with their own chrome: on `macOS`
+are desktops of overlapping windows the way `Windows 98` is, opening at the same
+sizes, moved, sized and snapped the same way, with their own chrome: on `macOS`
 the traffic lights close, put away and zoom a window, a gear at the right of its
 title bar opens its settings, the Dock has Launchpad, the scenes that have a
 window (a dot under each) and System Settings, and the menu bar's Scenes,
@@ -219,11 +225,16 @@ beside the scene's name in `app.frame.scenes` (`windowSize`): a Pi from the
 deployed or pushed scene, an ESP32 from its scene index (`fos_scene_store.c`
 `make_entry` writes it, so the scene stays on flash), the browser from the
 loaded scenes. `Windows 98`, `macOS`, `BeOS`, `Classic Mac` and `NeXTSTEP` open
-a new window of the scene at that size in place of their own "Window size",
-made smaller with its shape kept where it does not fit the desktop; set to "The
-whole desktop", a desktop still fills it with every scene. A window's place and
-size once moved are the desktop's own, as before. `Tiling` and `Commander` have
-no window sizes.
+a new window of the scene at that size, made smaller with its shape kept where
+it does not fit the desktop and another window is open, and a scene that says
+none at 800×480, a 7.5-inch frame's. That is `ownSize`, the same text in the
+five: a desktop has no window size of its own (its "Window size" field, with
+"The whole desktop" among its choices, was taken out on 2026-11-17, and what a
+frame kept of it is never read). The first window still fills the desktop where
+its size does not fit, as the frame looked before anything else was opened, and
+any window fills it from its zoom or maximize button, or let go at the top edge,
+and opens that way again when its scene does (until a restart). A window's place and size once moved are the desktop's
+own, as before. `Tiling` and `Commander` have no window sizes.
 **A scene's icon.** `app.frame.scenes` also lists a scene's `icon`, where it
 has one (`settings.icon`, docs/scene-icons.md): one SVG path in a 24 box, for
 a desktop to draw with `fill="currentColor"` on a window's title bar, a task

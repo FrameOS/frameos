@@ -25,7 +25,7 @@ describe("parseWindowSize", () => {
 });
 
 describe("the Window size select", () => {
-  it("is the desktop's (no key) until a size is picked", () => {
+  it("is the default (no key) until a size is picked", () => {
     expect(sceneWindowSizeSelectValue(undefined)).toBe("");
     expect(sceneWindowSizeSelectValue("nonsense")).toBe("");
     expect(sceneWindowSizeFromSelect("")).toBeUndefined();
@@ -33,9 +33,9 @@ describe("the Window size select", () => {
     expect(sceneWindowSizeSelectValue(" 480 x 800 ")).toBe("480x800");
   });
 
-  it("offers the desktop's first, the presets, and a size of the scene's own that is none of them", () => {
+  it("offers the default first, the presets, and a size of the scene's own that is none of them", () => {
     const options = sceneWindowSizeOptions();
-    expect(options[0]).toEqual({ value: "", label: "The desktop's" });
+    expect(options[0]).toEqual({ value: "", label: "Default, 800 × 480" });
     expect(options.map((option) => option.value)).toContain("480x480");
     expect(options.every((option) => option.value === "" || parseWindowSize(option.value) !== null)).toBe(true);
     expect(sceneWindowSizeOptions("480x480")).toHaveLength(options.length);

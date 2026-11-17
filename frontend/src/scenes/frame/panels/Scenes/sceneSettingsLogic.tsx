@@ -223,7 +223,7 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
       (scene: sceneSettingsLogicValues['scene']): RenderScaleOption[] =>
         sceneRenderScaleOptions(scene?.settings?.renderScale),
     ],
-    // The Window size select: the desktop's, then the presets (and the scene's
+    // The Window size select: the default, then the presets (and the scene's
     // own size if it is none of them). utils/sceneWindowSize.ts.
     windowSizeOptions: [
       (s) => [s.scene],

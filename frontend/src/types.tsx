@@ -1318,8 +1318,8 @@ export interface FrameSceneSettings {
   isLayout?: boolean
   /** A layout that is a desktop of windows: the frame's settings page lists it apart (docs/scene-layouts.md). */
   desktop?: boolean
-  /** "WxH": the size this scene opens at in a desktop layout's window, over the desktop's own
-   * (utils/sceneWindowSize.ts, docs/scene-layouts.md "Windows"); unset = the desktop's. */
+  /** "WxH": the size this scene opens at in a desktop layout's window
+   * (utils/sceneWindowSize.ts, docs/scene-layouts.md "Windows"); unset = 800x480. */
   windowSize?: string
   /** Its icon: one SVG path in a 0 0 24 24 box, filled with the color around it
    * (utils/sceneIcon.ts, docs/scene-icons.md); unset = each list's own placeholder. */

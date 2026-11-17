@@ -1,7 +1,7 @@
 // A scene's own window size on a desktop (`settings.windowSize`,
-// docs/scene-layouts.md "Windows"): "WxH" in the desktop's pixels, like a
-// desktop layout's own "Window size". A desktop opens a new window of the scene
-// at that size where it fits; without one, at the desktop's size.
+// docs/scene-layouts.md "Windows"): "WxH" in the desktop's pixels. A desktop
+// opens a new window of the scene at that size where it fits; without one, at
+// 800 x 480 (a desktop has no window size of its own).
 
 export interface WindowSizeOption {
   value: string
@@ -9,7 +9,7 @@ export interface WindowSizeOption {
 }
 
 export const SCENE_WINDOW_SIZE_HELP =
-  "The size this scene opens at in a window of a desktop layout (Windows 98, macOS, BeOS, Classic Mac, NeXTSTEP), in place of the desktop's own window size. A music player opens square, a to-do list tall. It changes nothing outside a desktop."
+  "The size this scene opens at in a window of a desktop layout (Windows 98, macOS, BeOS, Classic Mac, NeXTSTEP), 800 × 480 by default. A music player opens square, a to-do list tall. It changes nothing outside a desktop."
 
 const PRESETS: WindowSizeOption[] = [
   { value: '480x480', label: '480 × 480, square' },
@@ -45,20 +45,20 @@ export function parseWindowSize(value: unknown): { width: number; height: number
   return { width, height }
 }
 
-/** A scene's `settings.windowSize` as the select's value: "" for the desktop's. */
+/** A scene's `settings.windowSize` as the select's value: "" for the default, 800 x 480. */
 export function sceneWindowSizeSelectValue(value: unknown): string {
   const size = parseWindowSize(value)
   return size ? `${size.width}x${size.height}` : ''
 }
 
-/** The select's value as a scene setting: undefined (the key is dropped) for the desktop's. */
+/** The select's value as a scene setting: undefined (the key is dropped) for the default. */
 export function sceneWindowSizeFromSelect(value: string): string | undefined {
   return sceneWindowSizeSelectValue(value) || undefined
 }
 
-/** The choices: the desktop's own size, the presets, and a size of the scene's own that is not one of them. */
+/** The choices: the default, the presets, and a size of the scene's own that is not one of them. */
 export function sceneWindowSizeOptions(current?: unknown): WindowSizeOption[] {
-  const options: WindowSizeOption[] = [{ value: '', label: "The desktop's" }, ...PRESETS]
+  const options: WindowSizeOption[] = [{ value: '', label: 'Default, 800 × 480' }, ...PRESETS]
   const own = parseWindowSize(current)
   if (own && !options.some((option) => option.value === `${own.width}x${own.height}`)) {
     options.push({ value: `${own.width}x${own.height}`, label: `${own.width} × ${own.height}` })
