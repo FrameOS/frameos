@@ -750,6 +750,21 @@ A field's text can be selected, copied, cut and pasted, as in a browser.
   tap from the dispatcher (`pointerDown` / `tap` `shift`, `ctrl`, `alt`,
   `meta`: docs/events.md "Input"). A finger dragged over a field still
   scrolls what is around it.
+- **On a touch screen**, as on a phone: a long press on a field gives it
+  the keyboard and selects the word there (a password's whole text), and
+  the finger, still down, slides the selection on to where it goes; a
+  double tap selects the word too. Its ends get handles, a bar and a knob
+  under it leaning out of the selection, which a finger drags (the other
+  end stays), and a menu comes up over it, or under it without room: Cut
+  and Copy (text selected, no password), Paste (something on the
+  clipboard), Select all (more to select). Copy keeps the selection and
+  puts the menu away; dragging a handle hides it until the finger lifts. A
+  long press where there is no word brings the menu alone, at the caret
+  (Paste). A tap on the field puts the caret there as before, and anything
+  typed, a key moved, a tap elsewhere or the frame's `back` lets the
+  selection go (`back` first, keeping the keyboard). On e-paper the
+  handles drag without a refresh until the finger lifts. Every host,
+  ESP32 touch boards included.
 - **What is typed replaces the selection**, and Backspace or Delete takes it
   out. Every edit runs `onChange` as before.
 - **The clipboard is the frame's** (`ui/events.nim` `clipboard`, 64 KiB at
@@ -768,7 +783,17 @@ caret, so everything that moves the caret moves one end of it (`selected`
 gives the bytes). A drag of a mouse places the caret as a tap does
 (`place`) and its other end where it went down (`anchor`, `anchorX`,
 `anchorY`), both from the glyph boxes at the next layout. It is kept
-between pulls with the rest of the field (`sel`).
+between pulls with the rest of the field (`sel`). A long press or a double
+tap sets `word` with `place`, and the layout widens the caret to the word
+(`isWordByte`: letters, digits, `_` and any character past ASCII). A
+selection made by touch sets `handles` and `menu`: the field's emit leaves
+its two ends as regions a pixel wide (`EndsKey`), which the boxes around it
+scroll and cut off like any region, and `layoutUi` takes them back out and
+draws the handles and the menu (`ui/keyboard.nim` `editMenuTree`, the
+keyboard's look) on top, from them. Their handlers are numbered from
+`SelectBase` (above the accents, below a `<select>`'s options): + 0 and + 1
+the handles, which a press grabs (`ui/events.nim`, the other end made the
+anchor), + `EditCut` ... the items.
 
 ## Select boxes
 

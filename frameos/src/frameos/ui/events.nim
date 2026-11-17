@@ -92,6 +92,7 @@ type
     selectPointer: int
     selectX, selectY: float32
     selectKept: bool
+    selectDX, selectDY: float32 ## a handle: from where the finger holds it to the end it drags
 
 const
   MaxTargets = when defined(frameosEmbedded): 16 else: 64
@@ -100,8 +101,6 @@ const
     ## may have any number of windows, each one a UI or more
     ## (docs/scene-layouts.md "Windows"); an ESP32 runs two to four
     ## (app_runtime.windowLimit).
-  MaxClipboard = when defined(frameosEmbedded): 4096 else: 65536
-    ## The most a copy keeps, in bytes (cut at a character).
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
   RepeatFirstMs = 100
@@ -122,22 +121,6 @@ var
     ## QR code goes up over the UI instead (docs/jsx-ui.md "Links").
   physicalKeyboard {.threadvar.}: bool
     ## A key was typed on a keyboard: fields need no keyboard on the screen.
-  clipboard {.threadvar.}: string
-    ## What Copy and Cut took, for Paste: the frame's own, every UI's.
-
-proc uiClipboard*(): string =
-  ## The frame's clipboard (a host with one of its own, the browser's
-  ## preview, mirrors it: frameos_wasm_clipboard).
-  clipboard
-
-proc setUiClipboard*(text: string) =
-  ## Copy and Cut; and a host's own clipboard handed to the frame for Paste.
-  clipboard = text
-  if clipboard.len > MaxClipboard:
-    var cut = MaxClipboard
-    while cut > 0 and (ord(clipboard[cut]) and 0xC0) == 0x80:
-      dec cut
-    clipboard.setLen(cut)
 
 when defined(testing):
   proc forgetTypedKeys*() =
@@ -341,6 +324,9 @@ proc wants(r: UiRegion, event: string): bool =
       # A field: a mouse pressed on it selects as it drags (no mouse on an ESP32).
       (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
+  of "longPress", "doubleTap":
+    # A field: the word there is selected, as on a phone.
+    r.typesIn or r.handlers[UiEvent(handlerKind(event))] > 0
   of "wheel": r.scrolls
   else:
     let kind = handlerKind(event)
@@ -363,6 +349,8 @@ proc uiListens*(sceneId, event: string): bool =
         return true
       if target.selectPointer >= 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]:
         return true
+      if target.input.handles and event == "pointerDown":
+        return true # a selection's handle may be dragged
       if event == "uiTimer" and target.timerPending:
         return true
       for r in target.regions:
@@ -420,7 +408,7 @@ proc accentNear(target: UiTarget, lx, ly: float32): int =
         x = lx - target.input.accentFrom + r.x + r.w / 2
   for r in target.regions:
     let handler = r.handlers[ueClick] - 1
-    if handler < AccentBase or handler >= OptionBase:
+    if handler < AccentBase or handler >= SelectBase:
       continue
     top = min(top, r.y)
     bottom = max(bottom, r.y + r.h)
@@ -478,6 +466,9 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32, extend = false) 
   else:
     i.sel = 0
   i.anchor = false
+  i.word = false
+  i.handles = false
+  i.menu = false
   i.caret = i.text.len
   i.place = true
   i.goal = false
@@ -496,6 +487,9 @@ proc blurField(target: UiTarget) =
   target.input.accents = 0
   target.input.sel = 0
   target.input.anchor = false
+  target.input.word = false
+  target.input.handles = false
+  target.input.menu = false
   target.selectPointer = -1
   target.inputOnly = true
 
@@ -508,6 +502,13 @@ proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
     return false
   if target.input.link.len > 0:
     target.input.link = "" # a link's QR code goes first
+    target.inputOnly = true
+    return true
+  if target.input.handles or target.input.menu:
+    # A selection made by touch lets go first, the field keeps the keyboard.
+    target.input.handles = false
+    target.input.menu = false
+    target.input.sel = 0
     target.inputOnly = true
     return true
   if target.input.accents > 0:
@@ -571,6 +572,8 @@ proc changed(target: UiTarget) =
   i.goal = false
   i.lineStep = 0
   i.reveal = true
+  i.handles = false # typed over: the selection's handles and menu go
+  i.menu = false
   target.fieldCall(ueChange, "change", changeOf(i.text))
   target.inputOnly = false
 
@@ -774,6 +777,8 @@ proc moveCaret(target: UiTarget, key: string, extend = false) =
   ## it putting the caret at that end, as on a desktop.
   template i: untyped = target.input
   let (a, z) = i.selected
+  i.handles = false
+  i.menu = false
   if not defined(frameosEmbedded) and extend: # shift: no keyboard on an ESP32
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
@@ -834,7 +839,7 @@ proc copySelected(target: UiTarget, cut: bool) =
 proc paste(target: UiTarget) =
   ## The clipboard typed at the caret, over what is selected. A field of
   ## one line takes the first line of it.
-  var text = clipboard
+  var text = uiClipboard()
   let r = target.regionOf(target.input.focus - 1)
   if r >= 0 and target.regions[r].field != 2:
     let nl = text.find('\n')
@@ -842,6 +847,33 @@ proc paste(target: UiTarget) =
       text.setLen(nl)
   if text.len > 0:
     target.insert(text)
+
+proc selectWord(target: UiTarget, r: UiRegion, lx, ly: float32) =
+  ## A long press or a double tap on a field, as on a phone: it has the
+  ## keyboard, the word there is selected (by the next layout, which knows
+  ## the glyphs), with handles at its ends and its menu over it. On no
+  ## word, the menu alone, at the caret (Paste, Select all).
+  target.focusField(r, lx, ly)
+  target.input.word = true
+  target.input.handles = true
+  target.input.menu = true
+
+proc editAction(target: UiTarget, item: int) =
+  ## A tap on an item of a selection's menu (ui/keyboard.nim `editMenuTree`).
+  ## A tap on a handle (0, 1) is no action: dragging it is.
+  template i: untyped = target.input
+  case item
+  of EditCut: target.copySelected(cut = true)
+  of EditCopy:
+    target.copySelected(cut = false)
+    i.menu = false
+    target.inputOnly = true
+  of EditPaste: target.paste()
+  of EditSelectAll:
+    target.selectAll()
+    i.handles = true
+    i.menu = true
+  else: discard
 
 proc spaceDrag(target: UiTarget, lx, ly: float32, slop: float32): bool =
   ## The space bar held and dragged, as on a phone: the caret follows the
@@ -1202,13 +1234,17 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             target.input.anchorX = target.selectX
             target.input.anchorY = target.selectY
         target.input.place = true
-        target.input.placeX = lx - box.x
-        target.input.placeY = ly - box.y
+        target.input.placeX = lx - target.selectDX - box.x
+        target.input.placeY = ly - target.selectDY - box.y
         target.inputOnly = true
-        # A slow panel shows the selection once the pointer lets go.
-        moved = not target.input.slow
+        # A slow panel shows the selection once the pointer lets go. The
+        # drag is the field's: nothing under it hears the move.
+        result = result or not target.input.slow
+        continue
       elif released:
         target.selectPointer = -1
+        if target.input.handles:
+          target.input.menu = true # let go: the menu comes back
         moved = true
     if target.spacePointer == pointer and (follows or down):
       if down:
@@ -1291,8 +1327,31 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             box = i
           if takes >= 0 and box >= 0:
             break
+        var grabbed = false
+        if target.input.handles and target.input.focus > 0:
+          # A handle of a selection made by touch: the finger drags that end,
+          # the other stays. The menu waits until it lets go.
+          for i in countdown(target.regions.high, 0):
+            let
+              r = target.regions[i]
+              handle = r.handlers[ueClick] - 1 - SelectBase
+            if (handle == 0 or handle == 1) and r.inside(lx, ly):
+              let (a, z) = target.input.selected
+              target.input.sel = (if handle == 0: z else: a) + 1
+              target.input.caret = if handle == 0: a else: z
+              target.input.menu = false
+              target.selectPointer = pointer
+              target.selectKept = true
+              # The end is at the handle's middle, its line's middle at its top.
+              target.selectDX = lx - (r.x + r.w / 2)
+              target.selectDY = ly - r.y
+              grabbed = true
+              takes = -1
+              box = -1
+              moved = true
+              break
         when not defined(frameosEmbedded):
-          if payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
+          if not grabbed and payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
             # A mouse (or a pen) on a field: it has the keyboard at once, the
             # caret where it went down, and a drag from there selects, as on
             # a desktop. Shift extends what was selected.
@@ -1312,6 +1371,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
               target.selectX = lx - r.x
               target.selectY = ly - r.y
               target.selectKept = extend
+              target.selectDX = 0
+              target.selectDY = 0
               takes = -1
               box = -1
               moved = true
@@ -1345,6 +1406,26 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.inputOnly = true
         result = true
       continue
+    if (kind == ord(ueLongPress) or kind == ord(ueDoubleClick)) and placed and target.input.open == 0 and
+        target.input.accents == 0:
+      # On a field, the word there: as on a phone.
+      for i in countdown(target.regions.high, 0):
+        let r = target.regions[i]
+        if r.overScene(lx, ly):
+          break
+        if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[UiEvent(kind)] > 0) and r.inside(lx, ly):
+          if r.typesIn:
+            target.selectWord(r, lx, ly)
+            if kind == ord(ueLongPress):
+              # Still down: a slide from here selects on to where it goes.
+              target.selectPointer = pointer
+              target.selectKept = true
+              target.selectDX = 0
+              target.selectDY = 0
+              if target.dragPointer == pointer:
+                target.dragKey = -1 # no scroll of the box around it
+            moved = true
+          break
     if kind == ord(ueClick) and placed:
       # A tap on a field gives it the keyboard; one anywhere else but the
       # keyboard takes it away, and then does what it does.
@@ -1358,7 +1439,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           break
       if target.input.accents > 0 and (hit < 0 or
           target.regions[hit].handlers[ueClick] - 1 < AccentBase or
-          target.regions[hit].handlers[ueClick] - 1 >= OptionBase):
+          target.regions[hit].handlers[ueClick] - 1 >= SelectBase):
         # A key's accents are up: a tap on one picks it (below); one
         # anywhere else puts the row away, and then does what it does.
         target.input.accents = 0
@@ -1424,6 +1505,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           break
         if handler - 1 >= OptionBase:
           target.pickOption(handler - 1 - OptionBase)
+          result = true
+          break
+        if handler - 1 >= SelectBase:
+          target.editAction(handler - 1 - SelectBase)
           result = true
           break
         if handler - 1 >= AccentBase:

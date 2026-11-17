@@ -75,6 +75,9 @@ type
     anchor*: bool        ## a drag selects: the next layout puts `sel` at anchorX, anchorY ...
     anchorX*, anchorY*: float32 ## ... from the field's corner, as `place` puts the caret
     secret*: bool        ## the focused field is a password's, as the last layout found it: never copied
+    word*: bool          ## the caret's next placing selects the word there (a long press, a double tap)
+    handles*: bool       ## the selection was made by touch: handles at its ends to drag ...
+    menu*: bool          ## ... and its menu over it (Cut, Copy, Paste, Select all)
     text*: string        ## its text as the last layout found it, with the edits since
     place*: bool         ## a tap focused it: the caret goes to placeX, placeY ...
     placeX*, placeY*: float32 ## ... from the field's corner
@@ -136,6 +139,7 @@ type
     keyboard: UiNode     ## the on-screen keyboard's, likewise
     popup: UiNode        ## an open <select>'s list, likewise
     accents: UiNode      ## a held key's accents, likewise
+    menu: UiNode         ## a selection's menu, likewise
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -215,6 +219,8 @@ const
   LinkKey = 1 shl 24     ## a link's QR code, likewise
   PopupKey = 1 shl 22    ## an open <select>'s list, likewise
   AccentKey = 1 shl 23   ## a held key's accents, likewise
+  EndsKey = 1 shl 25     ## where a selection made by touch starts and ends (+ 1), as its field shows them
+  MenuKey = 1 shl 26     ## its menu
   Unbounded = 1e9'f32
   MaxDepth = 64
 
@@ -252,6 +258,26 @@ proc links(n: SvgNode): bool {.noinline.} =
   ## An `<a>` that opens its href on a tap: one with an onClick of its own
   ## does what that says instead.
   n.tag == "a" and n.attr("on-click").len == 0 and n.attr("href").isLink
+
+const MaxClipboard = when defined(frameosEmbedded): 4096 else: 65536
+  ## The most a copy keeps, in bytes (cut at a character).
+
+var clipboard {.threadvar.}: string
+  ## What Copy and Cut took, for Paste: the frame's own, every UI's.
+
+proc uiClipboard*(): string =
+  ## The frame's clipboard (a host with one of its own, the browser's
+  ## preview, mirrors it).
+  clipboard
+
+proc setUiClipboard*(text: string) =
+  ## Copy and Cut; and a host's own clipboard handed to the frame for Paste.
+  clipboard = text
+  if clipboard.len > MaxClipboard:
+    var cut = MaxClipboard
+    while cut > 0 and (ord(clipboard[cut]) and 0xC0) == 0x80:
+      dec cut
+    clipboard.setLen(cut)
 
 proc selected*(input: UiInput): (int, int) =
   ## The bytes of the focused field's text that are selected, from and to;
@@ -390,6 +416,9 @@ var
   ui {.threadvar.}: ptr UiInput ## and the input it was asked for
   focusSeen {.threadvar.}: bool ## the focused field was laid out
   revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
+  ends {.threadvar.}: array[2, array[4, float32]] ## a selection made by touch: its start and end
+                                                  ## (x, y, -, line height), as emitField found them ...
+  endsFound {.threadvar.}: bool                   ## ... when it did
 
 proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, rootH: float32,
     input: UiInput) =
@@ -1591,6 +1620,11 @@ proc viewport(x, y, w, h, sx, sy: float32): SvgNode =
   SvgNode(tag: "svg", attrs: @[("x", num(x)), ("y", num(y)), ("width", num(w)),
     ("height", num(h)), ("viewBox", nums([x + sx, y + sy, w, h]))])
 
+proc isWordByte(c: char): bool {.inline.} =
+  ## Part of a word: a letter, a digit, `_`, or any byte of a character past
+  ## ASCII (é, ł, 字 are letters; a selection's ends are never inside one).
+  c in {'a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'} or ord(c) >= 0x80
+
 proc runeIndex(text: string, at: int): int {.inline.} =
   ## How many runes come before byte `at`.
   text.toOpenArray(0, min(at, text.len) - 1).runeLen
@@ -1619,6 +1653,19 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
     ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
   ui.caret = clamp(ui.caret, 0, n.value.len)
   ui.secret = n.src.attr("type") == "password"
+  if ui.word:
+    # The word at the caret (the one before it at its end): a password's
+    # whole text, whose words are not shown.
+    ui.word = false
+    var (a, z) = (ui.caret, ui.caret)
+    if ui.secret:
+      (a, z) = (0, n.value.len)
+    else:
+      while a > 0 and n.value[a - 1].isWordByte: dec a
+      while z < n.value.len and n.value[z].isWordByte: inc z
+    if z > a:
+      ui.sel = a + 1
+      ui.caret = z
   var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
@@ -1674,6 +1721,17 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
         inc j
       band.paint(t.text.color, if ui.paper: 1'f32 else: 0.3)
       result[2] = 0 # no caret while text is selected
+      if ui.handles:
+        # Its ends, for the handles a finger drags (layoutUi draws them).
+        let
+          first = arrangement.selectionRects[min(n.value.runeIndex(a), arrangement.runes.high)]
+          final = arrangement.selectionRects[max(last, 0)]
+        ends = [[tx + first.x, ty + first.y, 0, first.h], [tx + final.x + final.w, ty + final.y, 0, final.h]]
+        endsFound = true
+  if ui.menu and not endsFound:
+    # A menu with nothing selected (Paste): at the caret.
+    ends = [[result[0], result[1], 0, r.h], [result[0], result[1], 0, r.h]]
+    endsFound = true
   if not revealCaret:
     # Scrolled by a finger or the wheel: the caret may be out of sight, as
     # in a browser, until the next edit or key brings it back.
@@ -1844,6 +1902,12 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         bar.paint(n.text.color, op)
         view.children.add bar
       drawn.add view
+      if endsFound and n.field > 0 and n.key == ui.focus - 1:
+        # Where the selection ends, as a region a pixel wide that the boxes
+        # around scroll and cut off like any: layoutUi takes them back out.
+        for e in 0 .. 1:
+          regions.add UiRegion(x: ends[e][0], y: ends[e][1], w: 1, h: ends[e][3], key: EndsKey + e,
+            visible: [ends[e][0], ends[e][1], ends[e][0] + 1, ends[e][1] + ends[e][3]])
       # What is inside answers the pointer where it shows, scrolled.
       var k = kids
       for i in kids ..< regions.len:
@@ -2110,6 +2174,72 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     memo.accents = shown
   true
 
+proc selectionChrome(at: array[2, UiRegion], seen, width, height: int, input: var UiInput,
+    drawn: var seq[SvgNode], gradients: var int, regions: var seq[UiRegion]) =
+  ## A selection made by touch, `at` its start and end as its field showed
+  ## them (`seen`: 1 the start, 2 the end; an end scrolled out of sight is
+  ## not): a handle under each end that shows (ui/events.nim drags them,
+  ## SelectBase + 0 and + 1), and its menu over it, or under it without room
+  ## (Cut and Copy with text selected and no password, Paste with something
+  ## on the clipboard, Select all with more to select).
+  let
+    lineH = max(at[0].h, at[1].h)
+    radius = clamp(round(lineH * 0.4), 7, 14)
+    ink = if input.paper: rgba(0, 0, 0, 255) else: rgba(14, 165, 233, 255) # sky-500
+    (a, z) = input.selected
+  var lowest = 0'f32
+  if z > a and input.handles:
+    for e in 0 .. 1:
+      if (seen and (1 shl e)) == 0:
+        continue
+      let
+        r = at[e]
+        x = r.x
+        bottom = r.y + r.h
+        knob = SvgNode(tag: "path", path: newPath())
+      # A bar on the end and a knob under it, leaning out of the selection
+      # (left at its start, right at its end), so two that meet both show.
+      knob.path.rect(x - 1, r.y, 2, r.h)
+      knob.path.circle(x + (if e == 0: -0.7 else: 0.7) * radius, bottom + radius, radius)
+      knob.paint(ink, 1)
+      drawn.add knob
+      lowest = max(lowest, bottom + 2 * radius)
+      var handle = UiRegion(x: x - 2 * radius, y: bottom - r.h / 2, w: 4 * radius, h: r.h / 2 + 2.5 * radius,
+        key: EndsKey + e)
+      handle.visible = [handle.x, handle.y, handle.x + handle.w, handle.y + handle.h]
+      handle.handlers[ueClick] = SelectBase + e + 1
+      regions.add handle
+  if not input.menu:
+    return
+  var items: set[EditCut .. EditSelectAll]
+  if z > a and not input.secret: items.incl {EditCut, EditCopy}
+  if clipboard.len > 0: items.incl EditPaste
+  if input.text.len > 0 and (a > 0 or z < input.text.len): items.incl EditSelectAll
+  if items.card == 0:
+    return
+  let
+    size = int(clamp(round(lineH * 0.6), 12, 22))
+    shown = editMenuTree(items, size, input.paper)
+      .build(initText(), width.float32, height.float32, 0, MenuKey, input, false,
+        if memo.isNil: nil else: memo.menu)
+    first = if (seen and 1) != 0: at[0] else: at[1]
+    final = if (seen and 2) != 0: at[1] else: at[0]
+    edge = 4'f32
+    gap = max(lineH / 4, 4)
+  shown.size = shown.layout(Unbounded, Unbounded, false, false)
+  let
+    w = min(shown.size.x, width.float32 - 2 * edge)
+    h = shown.size.y
+    above = first.y - gap - h
+    centre = if first.y == final.y: (first.x + final.x) / 2 else: first.x
+  if w < shown.size.x:
+    shown.size = shown.layout(w, h, true, true)
+  shown.x = clamp(round(centre - w / 2), edge, max(width.float32 - edge - w, edge))
+  shown.y = round(if above >= edge: above else: min(max(final.y + final.h, lowest) + gap, height.float32 - edge - h))
+  shown.emit(0, 0, 1, drawn, gradients, regions)
+  if not memo.isNil:
+    memo.menu = shown
+
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
@@ -2121,6 +2251,7 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   memo = textMemo
   ui = addr input
   focusSeen = false
+  endsFound = false
   var kbTop, kb: int
   if input.keyboard and input.focus > 0: (kbTop, kb) = keyboardBox(width, height, input.round)
   else: kbTop = height
@@ -2202,6 +2333,21 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     input.accents = 0
   if input.accents == 0:
     input.accentLit = -1
+  if input.handles or input.menu:
+    # A selection made by touch: its handles and its menu, on top of it all.
+    var
+      at: array[2, UiRegion]
+      seen = 0
+    for i in countdown(regions.high, 0):
+      if regions[i].key == EndsKey or regions[i].key == EndsKey + 1:
+        at[regions[i].key - EndsKey] = regions[i]
+        seen = seen or (1 shl (regions[i].key - EndsKey))
+        regions.delete(i)
+    if seen != 0:
+      selectionChrome(at, seen, width, height, input, result.children, gradients, regions)
+    elif not endsFound:
+      input.handles = false
+      input.menu = false
   if input.focus > 0 and not focusSeen:
     # The field is gone: nothing has the keyboard.
     input.focus = 0
