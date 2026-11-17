@@ -839,13 +839,11 @@ async def test_render_end_to_end_wasm_scene(async_client, no_auth_client, db):
 
     if not thin_client_renderer_available():
         pytest.skip('node + wasm bundle not available')
-    fixture = Path(__file__).resolve().parents[4] / 'e2e' / 'generated' / 'scenes.json'
-    if not fixture.is_file():
-        pytest.skip('e2e scenes fixture not available')
-
-    scenes = jsonlib.loads(fixture.read_text())
-    gradient = [scene for scene in scenes if scene.get('id') == 'dataGradient_interpreted']
-    assert gradient, 'expected dataGradient_interpreted in the e2e fixture'
+    # The fixture's source, not e2e/generated/scenes.json: that file is the
+    # last e2e run's build output (gitignored), and a run filtered to other
+    # scenes leaves it without this one.
+    fixture = Path(__file__).resolve().parents[4] / 'e2e' / 'scenes' / 'dataGradient.json'
+    gradient = [jsonlib.loads(fixture.read_text())]
 
     frame = await device_frame(async_client, db)
     frame.scenes = gradient

@@ -2104,7 +2104,10 @@ proc warpCenter(): seq[array[4, float32]] =
 
 proc warpRows(): seq[array[4, float32]] =
   ## The rows of the menu open, top to bottom (rules and headings take no press).
-  byY(rectsOf(Os2).filterIt(abs(it[3] - it[1] - 22) < 0.6 and it[2] - it[0] > 150))
+  ## Below the WarpCenter: its clock is as tall as a row, and on a date whose
+  ## text is long enough (Wed 18 Nov) as wide as one too.
+  byY(rectsOf(Os2).filterIt(it[1] >= Os2BarH.float32 and abs(it[3] - it[1] - 22) < 0.6 and
+    it[2] - it[0] > 150))
 
 proc warpTitle(win: JsonNode): seq[array[4, float32]] =
   ## What takes a press on a window's title bar, left to right: the system

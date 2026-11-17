@@ -332,7 +332,9 @@ suite "data/localImage app":
   test "bounds offered by the consumer cap the decode":
     let root = uniqueTempDir("frameos-local-image-bounds")
     defer: removeDir(root)
-    copyFile("src/frameos/tests/fixtures/large-gradient.jpg", root / "photo.jpg")
+    # Beside this file, wherever the test runs from.
+    copyFile(currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "frameos" / "tests" /
+      "fixtures" / "large-gradient.jpg", root / "photo.jpg")
     let scene = FrameScene(state: %*{}, logger: newLogger(LogStore(items: @[])))
     let app = App(
       scene: scene,

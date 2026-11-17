@@ -436,16 +436,19 @@ static void test_unresolvable_is_not_a_block(void)
      * which is the rebinding hole - but it is a DNS failure the scene must hear
      * as one. 2026-10-10: a cloud frame woke, asked for gallery.frameos.net
      * before its DNS was ready, and the panel said the gallery was "blocked on
-     * cloud-managed frames". */
+     * cloud-managed frames".
+     * The name is fully qualified (the trailing dot): the resolver then never
+     * tries the host's search domains, one of which answered every name with a
+     * wildcard record on a developer's machine (gallery.invalid.<domain>). */
     fos_netguard_set_policy(true);
     fos_netguard_clear_exempt();
     char reason[96] = "";
     fos_netguard_verdict_t verdict =
-        fos_netguard_check_url("http://gallery.invalid/image.png", reason, sizeof(reason));
+        fos_netguard_check_url("http://gallery.invalid./image.png", reason, sizeof(reason));
     CHECK(verdict == FOS_NETGUARD_UNRESOLVED, "verdict %d, want UNRESOLVED", (int)verdict);
     CHECK(strstr(reason, "could not resolve gallery.invalid") != NULL, "reason %s", reason);
     CHECK(strstr(reason, "block") == NULL, "a DNS failure must not read as a block: %s", reason);
-    CHECK(!fos_netguard_url_allowed("http://gallery.invalid/image.png", reason, sizeof(reason)),
+    CHECK(!fos_netguard_url_allowed("http://gallery.invalid./image.png", reason, sizeof(reason)),
           "the bool view still refuses what it cannot classify");
 
     /* The policy answers stay distinct from it. */
