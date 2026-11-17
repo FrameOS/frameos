@@ -359,20 +359,23 @@ proc accentTree*(code, shift, keyW, keyH, gap: int, paper: bool, page: KeyboardP
     result.children.add key.role(if i == lit: "keyLit" else: "key")
 
 proc editMenuTree*(items: set[EditCut .. EditSelectAll], size: int, paper: bool): SvgNode =
-  ## The menu over a selection made by touch, in the keyboard's look: a row
-  ## of `items` (Cut, Copy, Paste, Select all) with text `size` px tall, each
-  ## a handler of its own (SelectBase + the item). ui/layout.nim places it.
-  var c = "flex rounded-lg border leading-none"
+  ## The menu over a selection made by touch, in the keyboard's look (the
+  ## accents' row's classes, the same strings in flash): a row of `items`
+  ## (Cut, Copy, Paste, Select all) with text `size` px tall, each a handler
+  ## of its own (SelectBase + the item). ui/layout.nim places it. E-paper
+  ## shows no press, as on its keyboard.
+  var c = "flex rounded-lg border-2"
   c.px("text", size)
   c.px("p", max(size div 6, 2))
   if paper: c.add " bg-white text-black border-black"
   else: c.add " bg-zinc-800 text-white border-zinc-500"
   result = el("div", move c).role("keyboard")
   for item in items:
-    c = "flex items-center rounded-md whitespace-nowrap"
+    c = "flex items-center justify-center rounded-md"
+    c.add " whitespace-nowrap"
     c.px("px", size * 2 div 3)
     c.px("h", size * 2)
-    c.add(if paper: " active:bg-black active:text-white" else: " active:bg-zinc-600")
+    if not paper: c.add " active:bg-zinc-400"
     let button = el("div", move c, SvgNode(text: EditWords[item]))
     button.attrs.add(("on-click", $(SelectBase + item)))
     result.children.add button.role("key")
