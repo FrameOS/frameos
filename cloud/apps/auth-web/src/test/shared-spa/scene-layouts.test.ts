@@ -99,6 +99,7 @@ describe("what can be a layout", () => {
       "Commander",
       "macOS",
       "NeXTSTEP",
+      "Omarchy",
       "OS/2 Warp",
       "Tiling",
       "Windows 98",
@@ -122,7 +123,7 @@ describe("what can be a layout", () => {
   it("lists the desktops apart from the full screen layouts, as the frame's settings page does", () => {
     const groups = layoutGroups(LAYOUT_STARTERS, (starter) => isDesktopLayout(starter.scene));
     expect(groups.map((group) => [group.title, group.items.map((starter) => starter.name)])).toEqual([
-      ["Desktops", ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "OS/2 Warp", "Tiling", "Windows 98"]],
+      ["Desktops", ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "Omarchy", "OS/2 Warp", "Tiling", "Windows 98"]],
       [
         "Full screen",
         ["Bottom bar", "E-reader", "Front page", "Gallery wall", "Polaroid", "Side rail", "Teletext", "Terminal", "Top bar"],

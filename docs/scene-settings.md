@@ -81,7 +81,9 @@ This Frame, the clock and the Frame icon; in NeXTSTEP from the gear on the title
 bar and Info's Inspector, the frame's from Info Panel and the Dock's clock; in
 OS/2 Warp from the gear on the title bar and the window's system menu, the
 frame's from System Setup (an icon, the LaunchPad, the Desktop menu) and the
-WarpCenter's clock; in Commander from F4, the frame's from F1 and the clock.
+WarpCenter's clock; in Omarchy from the window's name in the bar and the menu, the
+frame's from Setup in the menu, the bar's signal and battery and Super+Ctrl+W; in
+Commander from F4, the frame's from F1 and the clock.
 
 ## The frame page
 

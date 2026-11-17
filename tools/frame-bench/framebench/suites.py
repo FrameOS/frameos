@@ -568,7 +568,7 @@ def suite_thin(ctx, frame):
 
 
 DESKTOP_LAYOUTS = ['layout-windows-98', 'layout-tiling', 'layout-macos', 'layout-beos', 'layout-classic-mac',
-                   'layout-nextstep', 'layout-os2-warp', 'layout-commander']
+                   'layout-nextstep', 'layout-os2-warp', 'layout-omarchy', 'layout-commander']
 # Scenes cheap to keep open as windows, tried first (by name); then the frame's first ones.
 LIGHT_SCENES = ['Clock', 'Counter', 'Calculator', 'Tap counter', 'Touch test', 'Colors', 'Steps', 'To-do', 'Now playing']
 

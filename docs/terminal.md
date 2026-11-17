@@ -22,8 +22,8 @@ On the desktops (`docs/scene-layouts.md`) it is one of the frame's own apps,
 found by its id or its name like the scene store: on Windows 98's Start and
 desktop, a prompt in Tiling's top bar, macOS's Dock and the mark's menu, BeOS's
 Be menu and Tracker, Classic Mac's mark's menu and icons, NeXTSTEP's Services and
-Dock, OS/2 Warp's Desktop menu, WarpCenter, icons and LaunchPad, and Commander's
-F8 and command line.
+Dock, OS/2 Warp's Desktop menu, WarpCenter, icons and LaunchPad, Omarchy's menu and
+Super+Return, and Commander's F8 and command line.
 
 ## The commands
 

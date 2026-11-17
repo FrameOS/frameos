@@ -27,6 +27,7 @@ const
   ClassicMac = "layout-classic-mac"
   NeXT = "layout-nextstep"
   Os2 = "layout-os2-warp"
+  Omarchy = "layout-omarchy"
   Commander = "layout-commander"
   Teletext = "layout-teletext"
   EReader = "layout-e-reader"
@@ -103,6 +104,8 @@ let nextstep = parseFile(Samples / "NeXTSTEP layout" / "scenes.json")[0]
 doAssert nextstep["id"].getStr() == NeXT
 let os2 = parseFile(Samples / "OS2 Warp layout" / "scenes.json")[0]
 doAssert os2["id"].getStr() == Os2
+let omarchy = parseFile(Samples / "Omarchy layout" / "scenes.json")[0]
+doAssert omarchy["id"].getStr() == Omarchy
 let commander = parseFile(Samples / "Commander layout" / "scenes.json")[0]
 doAssert commander["id"].getStr() == Commander
 let teletext = parseFile(Samples / "Teletext layout" / "scenes.json")[0]
@@ -111,7 +114,7 @@ let eReader = parseFile(Samples / "E-reader layout" / "scenes.json")[0]
 doAssert eReader["id"].getStr() == EReader
 let terminalLayout = parseFile(Samples / "Terminal layout" / "scenes.json")[0]
 doAssert terminalLayout["id"].getStr() == TerminalLayout
-var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, commander, teletext, eReader, terminalLayout,
+var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, omarchy, commander, teletext, eReader, terminalLayout,
   panel("tests/red", "Red", "#ff0000"), panel("tests/green", "Green", "#00ff00"),
   panel("tests/blue", "Blue", "#0000ff"),
   panel("tests/sky", "Sky", "#38bdf8", Tiling), panel("tests/grass", "Grass", "#4ade80", Tiling),
@@ -126,12 +129,16 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, comma
   panel("tests/next-c", "Charlie", "#0000ff", NeXT),
   panel("tests/os2-red", "Red", "#ff0000", Os2), panel("tests/os2-green", "Green", "#00ff00", Os2),
   panel("tests/os2-blue", "Blue", "#0000ff", Os2),
+  panel("tests/om-red", "Red", "#ff0000", Omarchy), panel("tests/om-green", "Green", "#00ff00", Omarchy),
+  panel("tests/om-blue", "Blue", "#0000ff", Omarchy),
   # The scene store and the terminal, as each desktop finds them: by their names.
   panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
   panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS),
   panel("tests/store-cm", "Scene store", "#3b82f6", ClassicMac), panel("tests/store-next", "Scene store", "#3b82f6", NeXT),
   panel("tests/store-os2", "Scene store", "#3b82f6", Os2), panel("tests/term-os2", "Terminal", "#111111", Os2),
   panel("tests/files-os2", "Files", "#a3e635", Os2),
+  panel("tests/store-om", "Scene store", "#3b82f6", Omarchy), panel("tests/term-om", "Terminal", "#111111", Omarchy),
+  panel("tests/files-om", "Files", "#a3e635", Omarchy),
   panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
   panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS),
   panel("tests/term-cm", "Terminal", "#111111", ClassicMac), panel("tests/term-next", "Terminal", "#111111", NeXT),
@@ -2447,6 +2454,269 @@ suite "the OS/2 Warp desktop":
     check problems.len == 0
 
 const
+  OmBarH = 26 ## the Omarchy bar at 800 x 480, the desktop the 454 px under it
+  OmAccent = "#7aa2f7" ## Tokyo Night's, the tile with the focus
+  OmMuted = "#565f89" ## and the others'
+
+proc omKey(name: string, shift = false, ctrl = false, alt = false, code = ""): seq[string] =
+  ## A key with Super held.
+  send("keyDown", %*{"key": name, "code": (if code.len > 0: code else: name), "repeat": false, "shift": shift,
+    "ctrl": ctrl, "alt": alt, "meta": true})
+
+proc omRows(): seq[array[4, float32]] =
+  ## The rows of the menu, top to bottom (headings take no press).
+  byY(rectsOf(Omarchy).filterIt(abs(it[3] - it[1] - 28) < 0.6 and it[2] - it[0] > 150))
+
+proc omField(): array[4, float32] =
+  ## The menu's field.
+  rectsOf(Omarchy).filterIt(abs(it[3] - it[1] - 36) < 0.6 and it[2] - it[0] > 150)[0]
+
+proc omMenu(): seq[string] =
+  ## The bar's menu ring, pressed.
+  click(18, 13)
+
+proc omTile(id: string): (int, int) =
+  ## The middle of a window's tile, on the panel.
+  let slot = desk().slots.filterIt(it.child == hosted[id])
+  if slot.len == 0: return (-1, -1)
+  let v = slot[0].visible
+  (int((v[0] + v[2]) / 2), int((v[1] + v[3]) / 2))
+
+proc omDrawn(): seq[string] =
+  ## The scenes drawn on the desktop now, by id.
+  for slot in desk().slots:
+    if slot.child.id.string.startsWith("tests/"): result.add slot.child.id.string
+  result.sort()
+
+suite "the Omarchy desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/om-red", "name": "Red"}, {"id": "tests/om-green", "name": "Green"},
+        {"id": "tests/om-blue", "name": "Blue"}]
+
+  test "the first scene is one tile under the bar, its border the accent":
+    current = hostScene("tests/om-red")
+    let image = pass()
+    shot(image, "o1-first")
+    check problems.len == 0
+    check desk().id.string == Omarchy
+    check wins().len == 1
+    check isHole(current)
+    check image.color(W div 2, H div 2) == colored("#ff0000")
+    check image.color(11, 200) == colored(OmAccent) # its border, 10 px in from the edge
+    check image.color(650, 13) == colored("#16161e") # the bar
+    check desk().state{"ws"}.isNil or desk().state{"ws"}.getInt() == 1
+
+  test "the menu opens a scene as a tile beside the other, and a third under it":
+    discard omMenu()
+    check desk().state{"menu"}.getStr() == "palette"
+    shot(pass(), "o2-menu")
+    var rows = omRows()
+    check rows.len == 10 # Red, Green, Blue, Setup, Scenes, Window, Layout, Theme, Transparent bar, Keybindings
+    check acted(clickRect(rows[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/om-green"
+    check desk().state{"menu"}.kind == JNull
+    var image = pass()
+    check isHole(current) and isHole(hosted["tests/om-red"])
+    check image.color(202, 253) == colored("#ff0000")
+    check image.color(597, 253) == colored("#00ff00")
+    check image.color(406, 253) == colored(OmAccent) # green's border
+    check image.color(394, 253) == colored(OmMuted) # red's
+    discard omMenu()
+    discard pass()
+    check acted(clickRect(omRows()[2])) == @["setCurrentScene"]
+    image = pass()
+    shot(image, "o3-three")
+    check image.color(202, 253) == colored("#ff0000")
+    check image.color(597, 152) == colored("#00ff00")
+    check image.color(597, 374) == colored("#0000ff")
+    check problems.len == 0
+
+  test "a press in a tile gives it the focus, and the arrows with Super move it and swap the tiles":
+    check "setCurrentScene" in click(202, 253)
+    check current.id.string == "tests/om-red"
+    discard pass()
+    check acted(omKey("ArrowRight")) == @["setCurrentScene"]
+    check current.id.string == "tests/om-green"
+    discard pass()
+    check acted(omKey("ArrowDown")) == @["setCurrentScene"]
+    check current.id.string == "tests/om-blue"
+    discard pass()
+    discard omKey("ArrowLeft", shift = true) # blue and red trade places
+    let image = pass()
+    check current.id.string == "tests/om-blue"
+    check image.color(202, 253) == colored("#0000ff")
+    check image.color(597, 374) == colored("#ff0000")
+    check problems.len == 0
+
+  test "workspaces: Super+2 shows an empty one, Super+Shift+2 takes the window there, the bar's numbers go back":
+    discard omKey("2", code = "Digit2")
+    check desk().state{"ws"}.getInt() == 2
+    var image = pass()
+    shot(image, "o4-empty")
+    check omDrawn().len == 0
+    discard omKey("1", code = "Digit1")
+    check desk().state{"ws"}.getInt() == 1
+    discard pass()
+    check omDrawn() == @["tests/om-blue", "tests/om-green", "tests/om-red"]
+    discard omKey("@", shift = true, code = "Digit2") # blue, with the focus, to workspace 2
+    check winOf("tests/om-blue"){"ws"}.getInt() == 2
+    check desk().state{"ws"}.getInt() == 2
+    image = pass()
+    check omDrawn() == @["tests/om-blue"]
+    check image.color(W div 2, H div 2) == colored("#0000ff")
+    # The bar's 1 shows workspace 1 again, its window that had the focus last forward.
+    check acted(click(48, 13)) == @["setCurrentScene"]
+    image = pass()
+    check omDrawn() == @["tests/om-green", "tests/om-red"]
+    check problems.len == 0
+
+  test "Super+L goes from dwindle to scrolling, a strip that scrolls to the window with the focus, and to floating":
+    discard focusOn("tests/om-blue")
+    discard pass()
+    discard omKey("!", shift = true, code = "Digit1") # blue back to workspace 1, last in its order
+    discard pass()
+    check omDrawn().len == 3
+    discard omKey("l")
+    check desk().state{"layouts"}{"1"}.getStr() == "scrolling"
+    var image = pass()
+    shot(image, "o5-scrolling")
+    # Columns in the windows' order (blue first since it swapped with red): blue
+    # has the focus, in the first; red, the third, is off the strip.
+    check omDrawn() == @["tests/om-blue", "tests/om-green"]
+    check image.color(202, 253) == colored("#0000ff")
+    check acted(omKey("ArrowRight")) == @["setCurrentScene"]
+    discard pass()
+    # Red is off the strip: Alt+Tab-like, the menu brings it; the strip follows.
+    discard omMenu()
+    discard pass()
+    check acted(clickRect(omRows()[0])) == @["setCurrentScene"]
+    check current.id.string == "tests/om-red"
+    image = pass()
+    shot(image, "o5b-scrolled")
+    check omDrawn() == @["tests/om-green", "tests/om-red"]
+    check image.color(202, 253) == colored("#00ff00")
+    check image.color(597, 253) == colored("#ff0000")
+    discard omKey("l")
+    check desk().state{"layouts"}{"1"}.getStr() == "floating"
+    image = pass()
+    shot(image, "o6-floating")
+    check problems.len == 0
+
+  test "a floating window has a title bar, goes into the dock with Super+M and comes back from it":
+    let r = winOf("tests/om-red")
+    check not r.isNil
+    # The dock: the windows open (no frame's own apps here) and the whole menu.
+    let dock = byX(rectsOf(Omarchy).filterIt(abs(it[2] - it[0] - 42) < 0.6 and it[1] > float32(H - 70)))
+    check dock.len == 4
+    discard omKey("m")
+    check winOf("tests/om-red"){"min"}.getBool()
+    check current.id.string != "tests/om-red"
+    discard pass()
+    check "tests/om-red" notin omDrawn()
+    # The dock lists the windows in their order: blue, green, red, then the menu.
+    check acted(clickRect(dock[2])) == @["setCurrentScene"]
+    check current.id.string == "tests/om-red"
+    check not winOf("tests/om-red"){"min"}.getBool()
+    discard pass()
+    # Back to dwindle for what follows.
+    discard omKey("l")
+    discard pass()
+    check desk().state{"layouts"}{"1"}.getStr() == "dwindle"
+    check problems.len == 0
+
+  test "the menu's field filters it, and the theme page changes the colours":
+    discard omMenu()
+    discard pass()
+    discard clickRect(omField())
+    discard send("textInput", %*{"text": "gre"})
+    discard pass()
+    check omRows().len == 1
+    check acted(send("keyDown", %*{"key": "Enter", "code": "Enter", "repeat": false, "shift": false, "ctrl": false,
+      "alt": false, "meta": false})) == @["setCurrentScene"]
+    check current.id.string == "tests/om-green"
+    discard pass()
+    discard omMenu()
+    discard pass()
+    discard clickRect(omRows()[7]) # Theme
+    check desk().state{"page"}.getStr() == "theme"
+    discard pass()
+    let themes = omRows()
+    check themes.len == 12 # Back and eleven themes
+    discard clickRect(themes[9]) # Nord
+    check desk().state{"scheme"}.getStr() == "nord"
+    discard key("Escape")
+    var image = pass()
+    shot(image, "o7-nord")
+    let (gx, gy) = omTile("tests/om-green")
+    check gx > 0
+    discard omKey(" ", shift = true, ctrl = true, code = "Space") # the next theme
+    check desk().state{"scheme"}.getStr() == "ristretto"
+    desk().state["scheme"] = %"tokyo-night"
+    discard pass()
+    check problems.len == 0
+
+  test "Super+W closes, Super+F gives the panel to the window and Escape takes it back":
+    let front = current.id.string
+    discard omKey("f")
+    check desk().state{"full"}.getBool()
+    var image = pass()
+    check image.color(W div 2, 4) == image.color(W div 2, H div 2)
+    discard key("Escape")
+    check not desk().state{"full"}.getBool()
+    discard pass()
+    check acted(omKey("w")) == @["setCurrentScene"]
+    check winOf(front).isNil
+    discard pass()
+    check problems.len == 0
+
+  test "a double click on the bar's empty stretch makes it transparent, a swipe across it goes to the next workspace":
+    discard send("doubleTap", at(650, 13))
+    check desk().state{"clear"}.getBool()
+    let image = pass()
+    check image.color(650, 13) != colored("#16161e")
+    discard send("doubleTap", at(650, 13))
+    check not desk().state{"clear"}.getBool()
+    discard send("swipe", %*{"x": 400, "y": 13, "startX": 500, "startY": 13, "direction": "left", "pointerId": 0,
+      "pointerType": "touch"})
+    check desk().state{"ws"}.getInt() == 2
+    discard omKey("1", code = "Digit1")
+    discard pass()
+    check problems.len == 0
+
+  test "the scene store, Files and the terminal: in the menu, and Super+Return and Super+Shift+F":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/om-red", "name": "Red"}, {"id": "tests/om-green", "name": "Green"},
+        {"id": "tests/om-blue", "name": "Blue"}, {"id": "tests/store-om", "name": "Scene store"},
+        {"id": "tests/files-om", "name": "Files"}, {"id": "tests/term-om", "name": "Terminal"}]
+    discard pass()
+    discard omMenu()
+    discard pass()
+    # The frame's own apps first, then the scenes and the commands.
+    check acted(clickRect(omRows()[0])) == @["setCurrentScene"]
+    check current.id.string == "tests/store-om"
+    discard pass()
+    check acted(omKey("Enter")) == @["setCurrentScene"]
+    check current.id.string == "tests/term-om"
+    discard pass()
+    check acted(omKey("F", shift = true, code = "KeyF")) == @["setCurrentScene"]
+    check current.id.string == "tests/files-om"
+    discard pass()
+    check problems.len == 0
+
+  test "with Windows off, the bar and one tile around the scene":
+    desk().state["windows"] = %false
+    let image = pass()
+    shot(image, "o8-one-scene")
+    check desk().state{"openScenes"} == %*[]
+    check image.color(W div 2, H div 2) == image.color(W div 2, H div 2 + 40)
+    check image.color(11, 200) == colored(OmAccent)
+    check acted(click(18, 13)) == @["sceneSwitcher"]
+    desk().state["windows"] = %true
+    discard pass()
+    check problems.len == 0
+
+const
   KeyY = H - 10 ## the Commander's function keys at 800 x 480, ten of them 80 px wide
   LeftPanel = (200, 200) ## a point inside each of its panels' scenes
   RightPanel = (600, 200)
@@ -2714,7 +2984,7 @@ suite "another layout chosen on the frame":
     check desk().state{"openScenes"} == %*["tests/red", "tests/blue", "tests/green"]
     let all = @["tests/blue", "tests/green", "tests/red"]
     for (layoutId, name) in [(MacOS, "15-to-macos"), (Tiling, "16-to-tiling"), (BeOS, "17-to-beos"),
-        (ClassicMac, "17a-to-classic-mac"), (NeXT, "17b-to-nextstep"), (Os2, "17c-to-os2-warp"), (Layout, "18-back")]:
+        (ClassicMac, "17a-to-classic-mac"), (NeXT, "17b-to-nextstep"), (Os2, "17c-to-os2-warp"), (Omarchy, "17d-to-omarchy"), (Layout, "18-back")]:
       chooseLayout(layoutId)
       let image = pass()
       shot(image, name)
@@ -2854,7 +3124,7 @@ suite "a scene's own window size (settings.windowSize)":
   test "is the same function, word for word, in every desktop of windows, and no desktop has a size of its own":
     # A scene cannot share code with another: each carries its own copy.
     var copies: seq[string]
-    for scene in [layout, macos, beos, classicMac, nextstep, os2, tiling, commander]:
+    for scene in [layout, macos, beos, classicMac, nextstep, os2, omarchy, tiling, commander]:
       for field in scene["fields"]: check field["name"].getStr() != "windowSize"
       var source = ""
       for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
@@ -2865,7 +3135,7 @@ suite "a scene's own window size (settings.windowSize)":
         continue
       check start >= 0
       copies.add source[start ..< source.find("\n}\n", start)]
-    check copies.len == 6
+    check copies.len == 7
     for text in copies: check text == copies[0]
 
 proc boxOf(win: JsonNode): (int, int, int, int) =
@@ -2946,7 +3216,7 @@ suite "where a new window opens (each desktop's freeSpot)":
   test "is the same function, word for word, in every desktop of windows":
     # A scene cannot share code with another: each carries its own copy.
     var copies: seq[string]
-    for scene in [layout, macos, beos, classicMac, nextstep, os2]:
+    for scene in [layout, macos, beos, classicMac, nextstep, os2, omarchy]:
       var source = ""
       for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
       let start = source.find("// Where a new window w by h goes")
@@ -2981,7 +3251,7 @@ proc groupedBy(scenes: string): JsonNode =
 
 suite "a long list of scenes, by category (each desktop's grouped)":
   test "is the same function, word for word, in every desktop with a list of scenes":
-    let copies = copiesOf(GroupedStart, [layout, macos, beos, classicMac, nextstep, os2, tiling])
+    let copies = copiesOf(GroupedStart, [layout, macos, beos, classicMac, nextstep, os2, omarchy, tiling])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
 
@@ -3024,6 +3294,7 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       of ClassicMac: discard clickRect(macTitles()[2]) # Scenes
       of NeXT: discard clickRect(nextMenu()[1]) # Scenes
       of Os2: discard clickRect(warpCenter()[0]) # the Desktop menu
+      of Omarchy: discard omMenu() # the menu
       else: discard clickRect(topBar()[0]) # Tiling's +
     proc rows(layoutId: string): seq[array[4, float32]] =
       case layoutId
@@ -3033,14 +3304,16 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       of ClassicMac: macDrop(macTitles()[2])
       of NeXT: nextSubmenu()
       of Os2: warpRows()
+      of Omarchy: omRows()
       else: byY(rectsOf(Tiling).filterIt(it[0] >= 8 and it[0] <= 12 and it[1] >= 24 and it[3] - it[1] < 60 and
         it[2] - it[0] > 40 and it[2] < 200))
     proc isOpen(layoutId: string): bool =
       case layoutId
       of Layout, BeOS: desk().state{"menu"}.getBool()
+      of Omarchy: desk().state{"menu"}.getStr() == "palette"
       of Tiling: desk().state{"adding"}.getBool()
       else: desk().state{"menu"}.getStr() == "scenes"
-    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Tiling]:
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Omarchy, Tiling]:
       # A desktop of its own, one window open.
       discard focusOn("tests/red")
       desk().state["openScenes"] = %*[]
@@ -3089,7 +3362,7 @@ suite "a scene's own icon (app.frame.scenes[i].icon)":
         {"id": "tests/blue", "name": "Blue", "icon": "M0 0H24V24H0Z"}]
 
   test "is the same function, word for word, in every desktop that draws its scenes' icons":
-    let copies = copiesOf("// A scene's own icon (`icon` on its entry", [layout, macos, beos, classicMac, nextstep, os2, tiling])
+    let copies = copiesOf("// A scene's own icon (`icon` on its entry", [layout, macos, beos, classicMac, nextstep, os2, omarchy, tiling])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
 
@@ -3178,7 +3451,7 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
   test "a third scene opened closes the one that had the focus longest ago, on every desktop":
     deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
     check windowLimit() == 2
-    for layoutId in [Layout, MacOS, BeOS, Tiling, ClassicMac, NeXT, Os2]:
+    for layoutId in [Layout, MacOS, BeOS, Tiling, ClassicMac, NeXT, Os2, Omarchy]:
       # A desktop of its own, nothing carried over from the one before.
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)
@@ -3269,7 +3542,7 @@ suite "a new render scale on a desktop of windows":
     result.sort(proc(a, b: (string, array[4, float32])): int = cmp(a[0], b[0]))
 
   test "keeps every window where it was on the panel, in every desktop of windows":
-    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2]:
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Omarchy]:
       checkpoint layoutId
       config.renderScale = 0.0
       chooseLayout(layoutId)
@@ -3309,6 +3582,6 @@ suite "a new render scale on a desktop of windows":
     discard pass()
 
   test "is the same function, word for word, in every desktop of windows":
-    let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep, os2])
+    let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep, os2, omarchy])
     check copies[0].len > 0
     for text in copies: check text == copies[0]

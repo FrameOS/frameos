@@ -617,7 +617,7 @@
   (`takePanelRegion`): a new way to write a rectangle's pixels without a render
   of it takes that record too.
 - **Windows** (`docs/scene-layouts.md` "Windows"; the `Windows 98`, `Tiling`,
-  `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`, `OS/2 Warp` and `Commander` samples): on a Pi, an ESP32 and in the browser when the
+  `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`, `OS/2 Warp`, `Omarchy` and `Commander` samples): on a Pi, an ESP32 and in the browser when the
   page turns it on (`frameos_wasm_set_windowed`; the windowed
   `single_scene_host` is the ESP32's and the browser's), a layout can run the
   frame's scenes side by side. The runtime adds three things and no
@@ -639,10 +639,10 @@
   puts it (bare desktop first, then the least overlap), and a desktop of
   another size (a new render scale, a resize) puts every window at the same
   share of it (`refit`), each the same text in
-  all six desktops of windows, and a list of scenes
+  all seven desktops of windows, and a list of scenes
   goes by category through `grouped` (the `category` name on each
   `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
-  `ownIcon`, each the same text in all seven with a list: change any of them in
+  `ownIcon`, each the same text in all eight with a list: change any of them in
   every copy
   (`test_windowed_desktops.nim` checks they match).
   Where memory is short only so many run at once (`app_runtime.windowLimit`, by

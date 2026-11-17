@@ -40,7 +40,7 @@ import Testing
         // the desktops (`settings.desktop`), then the rest.
         #expect(LayoutStarters.groups.map(\.title) == ["Desktops", "Full screen"])
         let desktops = try #require(LayoutStarters.groups.first).items.map(\.name)
-        #expect(desktops == ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "OS/2 Warp", "Tiling", "Windows 98"])
+        #expect(desktops == ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "Omarchy", "OS/2 Warp", "Tiling", "Windows 98"])
         for group in LayoutStarters.groups {
             for starter in group.items {
                 #expect(SceneLayouts.isDesktop(starter.scene) == (group.kind == "desktops"), "\(starter.name)")
