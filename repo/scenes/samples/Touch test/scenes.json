@@ -67,7 +67,7 @@
     ],
     "fields": [],
     "settings": {
-      "category": "Demos & examples",
+      "category": "Real time",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#ffffff",

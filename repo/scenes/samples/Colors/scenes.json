@@ -3,7 +3,7 @@
     "id": "colors",
     "name": "Colors",
     "settings": {
-      "category": "Demos & examples",
+      "category": "Real time",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#18181b",
