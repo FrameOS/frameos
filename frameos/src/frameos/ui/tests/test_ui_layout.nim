@@ -148,9 +148,12 @@ suite "ui layout":
       check s[0].geom == (0, 0, 200, 20)
       check s[1].geom == (0, 20, 200, 20)
       check s[2].geom == (0, 40, 200, 20)
-    # shrink-0 is as before: an item that does not shrink.
+    # shrink-0 is as before: an item that does not shrink; nor does one with a
+    # set size, unless a min-h-* says how far it may.
     let k = layoutUi(column("shrink-0"), 200, 100).rects
     check k[2].geom == (0, 48, 200, 24)
+    check layoutUi(column("h-[24px]"), 200, 100).rects[2].geom == (0, 48, 200, 24)
+    check layoutUi(column("h-[24px] min-h-0"), 200, 100).rects[2].geom == (0, 40, 200, 20)
     # The same column scrolling: what overflows is what it scrolls by.
     var
       regions: seq[UiRegion]
@@ -201,6 +204,16 @@ suite "ui layout":
       el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
       el("span", "bg-blue-500", txt("a b c d e f g h i j k"))), 200, 100).rects
     check w[1].geom[2] == 50
+    # truncate is overflow: hidden: it gives way and cuts, in the row or in a
+    # box inside it.
+    let cut = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("span", "truncate bg-blue-500", txt("A long line that does not fit"))), 200, 100).rects
+    check cut[1].geom == (100, 0, 50, 24)
+    let inside = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("div", "bg-blue-500", el("div", "truncate", txt("A long line that does not fit")))), 200, 100).rects
+    check inside[1].geom == (100, 0, 50, 24)
 
   test "a block stacks and stretches; padding is inside the size":
     let r = layoutUi(el("div", "w-20 p-2 bg-black",

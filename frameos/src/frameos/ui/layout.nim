@@ -924,6 +924,11 @@ proc stretches(parent: Box, c: UiNode, cs, ce: int): bool {.inline.} =
   alignOf(parent, c.box) == alStretch and c.fixedCross < 0 and
     cs notin c.autos and ce notin c.autos
 
+template clips(n: UiNode): bool =
+  ## overflow-hidden, a scroller, or text cut to its lines (truncate,
+  ## line-clamp-N, which are overflow: hidden in Tailwind too).
+  n.box.overflowX != ovVisible or n.box.overflowY != ovVisible or n.text.lines > 0
+
 proc minContentW(n: UiNode): float32 =
   ## CSS's min-content width: the narrowest `n` is with nothing sticking out
   ## of it, text at its longest word (all of it, `whitespace-nowrap`). What
@@ -933,7 +938,7 @@ proc minContentW(n: UiNode): float32 =
   let own = b.w.resolve(-1)
   if own >= 0:
     return own
-  if b.overflowX != ovVisible or b.overflowY != ovVisible or n.kind != ukBox and n.kind != ukText:
+  if n.clips or n.kind != ukBox and n.kind != ukText:
     return 0
   if n.kind == ukText:
     let a = if n.arrangement.isNil: n.arrange(Unbounded, LeftAlign) else: n.arrangement
@@ -1038,12 +1043,13 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
         measured = true
     c.main = basis
     # The least it may be: its `min-*`, else CSS's automatic minimum, its
-    # content (the longest word in a row) unless it clips or has a size. A
-    # picture scales, so it has none.
+    # content (the longest word in a row) unless it clips. A picture scales,
+    # so it has none; one with a set size keeps it unless a `min-*` says
+    # how far it may shrink (frozen below).
     let least = if row: cb.minW else: cb.minH
     c.least = max(least.resolve(mainAvail), 0)
     if flexing and least.isAuto and c.fixedMain < 0 and c.kind < ukImage and
-        (cb.overflowX == ovVisible and cb.overflowY == ovVisible or not row and c.field in {1'u8, 3, 4}):
+        (not c.clips or not row and c.field in {1'u8, 3, 4}):
       c.least =
         if row: min(c.minContentW(), mainAvail)
         elif measured: basis
@@ -1096,7 +1102,8 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     for i in s ..< e:
       template c: untyped = n.children[i]
       c.frozen = not flexing or (if growing: c.box.grow <= 0 or c.base > c.main
-        else: c.box.shrink <= 0 or c.fixedMain >= 0 or c.base < c.main)
+        else: c.box.shrink <= 0 or c.base < c.main or
+          c.fixedMain >= 0 and (if row: c.box.minW else: c.box.minH).isAuto)
     for _ in 0 .. count:
       var
         free = room - gaps
