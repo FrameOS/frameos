@@ -402,9 +402,14 @@ proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
       abs(rec.y - rec.downY) > GestureTapSlopPx):
     rec.moved = true
   # The cursor follows every pointer, so a mouse picked up after a touch
-  # continues from where the finger was. Only a relative mouse SHOWS it.
+  # continues from where the finger was. Only a relative mouse SHOWS it, and
+  # a finger or a pen puts it away, as on a laptop with a touch screen.
   state.cursorX = rec.x
   state.cursorY = rec.y
+  when not defined(frameosEmbedded):
+    if rec.id != 0 and state.cursorShown:
+      state.cursorShown = false
+      state.cursorDirty = true
 
 proc edgeAt(state: InputState, x, y: int): string =
   ## The edge of the screen within `GestureEdgePx` of (x, y), the nearest
@@ -662,6 +667,12 @@ proc cancelPointers*(state: var InputState, origin: EventOrigin, output: var seq
     state.pointerCancel(id, origin, output)
   if deviceId < 0:
     state.pointerInputLost = false
+  when not defined(frameosEmbedded):
+    # A mouse that went away (or lost input) takes its cursor along; the
+    # next move of any mouse brings it back.
+    if deviceId >= 0 and mouseToo and state.cursorShown:
+      state.cursorShown = false
+      state.cursorDirty = true
 
 when not defined(frameosEmbedded):
   proc wheel(state: var InputState, deltaX, deltaY: float, origin: EventOrigin, output: var seq[InputDelivery]) =
@@ -900,6 +911,10 @@ else:
   proc takeCursorDirty*(state: var InputState): bool =
     result = state.cursorDirty
     state.cursorDirty = false
+
+proc cursorSpace*(state: InputState): (int, int) =
+  ## The scene's size in pixels: what `cursorX` / `cursorY` are positions in.
+  (state.width, state.height)
 
 proc pointersDown*(state: InputState): int =
   ## How many pointers are held: what a host asks to know whether to tick.

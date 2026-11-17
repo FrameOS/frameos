@@ -28,6 +28,9 @@ import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/scene_icon
 import frameos/ui/events as ui_events
+when not defined(frameosEmbedded):
+  import frameos/cursor_shape
+  export cursor_shape
 from frameos/ui/theme import themeSource
 import frameos/utils/canvas_log
 from frameos/utils/svg_frames import takePanelRegion, forgetPanelRegions
@@ -1992,6 +1995,32 @@ proc pressTakenIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: i
         break
       return pressTakenIn(s.child, x - s.x.float32, y - s.y.float32, wearer, depth + 1)
   uiTakesPressAt(scene.id.string, x, y)
+
+when not defined(frameosEmbedded):
+  proc cursorIn(scene: FrameScene; x, y: float32; wearer: FrameScene; depth: int): CursorShape =
+    ## The way a pointer goes (pressTakenIn): into the scene's layout, the
+    ## layout's own UI where it draws over the scenes, else the panel under it
+    ## in that panel's coordinates, else the scene's own UI.
+    if scene.isNil or depth > 8:
+      return csArrow
+    if scene != wearer and not scene.wornLayout.isNil:
+      return cursorIn(scene.wornLayout, x, y, scene, depth + 1)
+    let own = uiCursorAt(scene.id.string, x, y)
+    if own >= 0:
+      return CursorShape(own)
+    for i in countdown(scene.slots.high, 0):
+      template s: untyped = scene.slots[i]
+      if x >= s.visible[0] and y >= s.visible[1] and x < s.visible[2] and y < s.visible[3]:
+        return cursorIn(s.child, x - s.x.float32, y - s.y.float32, wearer, depth + 1)
+    csArrow
+
+  proc cursorShapeAt*(scene: FrameScene; x, y: int): CursorShape =
+    ## The mouse cursor's shape at (x, y), the scene's pixels: what the JSX
+    ## UI under it asks for (`cursor-*` classes, ui/events.uiCursorAt), through
+    ## the layout and the scenes it shows, as the last render drew them; the
+    ## arrow where nothing asks. What the Linux runner draws
+    ## (frameos/cursor_panel.nim) and the browser preview shows.
+    cursorIn(scene, x.float32, y.float32, nil, 0)
 
 proc pressTakenAt*(scene: FrameScene; x, y: int): bool =
   ## Whether something on the frame does something with a press at (x, y), the

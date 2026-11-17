@@ -32,6 +32,14 @@ export {
   type DevicePreset,
   type DevicePresetKey,
 } from './devices'
+export {
+  PreviewCursor,
+  composeCursor,
+  cssCursor,
+  cursorRect,
+  type CursorRect,
+  type CursorSprite,
+} from './cursor'
 export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } from './dither'
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'

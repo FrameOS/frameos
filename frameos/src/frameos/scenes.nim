@@ -551,8 +551,8 @@ proc setLastImage*(image: Image) =
 
 proc getLastImageCopy*(): Image =
   ## The last rendered picture, unrotated and unflipped (as `setLastImage`
-  ## stored it), for a caller that wants to draw over it — the runner's cursor
-  ## overlay. nil before the first render.
+  ## stored it): the scene switcher's snapshot of it. nil before the first
+  ## render.
   if not lastImagePresent:
     return nil
   withLock lastImageLock:

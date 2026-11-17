@@ -8,6 +8,7 @@ import frameos/ui/events
 import frameos/ui/layout
 import frameos/ui/keyboard
 import frameos/utils/font
+import frameos/cursor_shape
 
 # A JSX UI's handlers and pointer classes (docs/jsx-ui.md "Events"): what the
 # last render left where, a tap or a move over it, and the next render.
@@ -431,6 +432,41 @@ proc keyAt(id: string, code: int): JsonNode =
       return %*{"x": r.x + r.w / 2 + target.offsetX, "y": r.y + r.h / 2 + target.offsetY,
         "pointerId": 0, "pointerType": "touch"}
   raise newException(ValueError, "no key " & $code)
+
+const cursors = """
+export function get(app) {
+  return (
+    <div className="relative w-full h-full bg-white">
+      <div className="absolute left-0 top-0 w-[40px] h-[20px] cursor-col-resize" />
+      <div className="absolute left-[40px] top-0 w-[40px] h-[20px] cursor-text" />
+      <div className="absolute left-[80px] top-0 w-[40px] h-[20px] cursor-none" />
+      <div className="absolute left-[120px] top-0 w-[40px] h-[20px] cursor-wait" onClick={() => {}} />
+      <div className="absolute left-0 top-[40px] w-[100px] h-[60px] cursor-resize" />
+    </div>
+  )
+}
+"""
+
+suite "jsx cursor":
+  test "a cursor-* class is the mouse cursor over its element, and takes nothing from the pointer":
+    let ui = newUi(cursors, "tests/jsx-cursor")
+    discard ui.render()
+    check uiCursorAt("tests/jsx-cursor", 10, 10) == ord(csEwResize)
+    check uiCursorAt("tests/jsx-cursor", 50, 10) == ord(csText)
+    check uiCursorAt("tests/jsx-cursor", 90, 10) == ord(csNone)
+    # A name this does not know is the arrow, as an element with no class.
+    check uiCursorAt("tests/jsx-cursor", 130, 10) == ord(csArrow)
+    check uiCursorAt("tests/jsx-cursor", 180, 10) == -1 # no element there
+    # cursor-resize: 12 px of edge by default, a corner where two meet.
+    check uiCursorAt("tests/jsx-cursor", 2, 42) == ord(csNwseResize)
+    check uiCursorAt("tests/jsx-cursor", 98, 42) == ord(csNeswResize)
+    check uiCursorAt("tests/jsx-cursor", 50, 98) == ord(csNsResize)
+    check uiCursorAt("tests/jsx-cursor", 98, 70) == ord(csEwResize)
+    # Only the class: no press is taken there and no event is asked for.
+    check not uiTakesPressAt("tests/jsx-cursor", 10, 10)
+    check not uiTakesPressAt("tests/jsx-cursor", 50, 70)
+    check not uiListens("tests/jsx-cursor", "pointerMove")
+    check not dispatchUiEvent("tests/jsx-cursor", "tap", at(10, 10))
 
 suite "jsx fields":
   test "a tap on a field brings up the keyboard, and its keys type into it":

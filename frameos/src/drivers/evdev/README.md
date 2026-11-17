@@ -28,12 +28,10 @@ Everything a device reports in one input frame is sent at the frame's
 
 Rules worth knowing:
 
-- **A relative mouse moves a cursor the driver owns**: panel pixels, one count
-  per pixel, starting at the centre, clamped to the panel. It is one cursor for
-  all devices, and an absolute device moves it too, so a mouse picked up after
-  a touch continues from the touch. Nothing draws the cursor. The driver knows
-  the panel's size but not the frame's `rotate`, so on a rotated frame the
-  mouse's axes are the panel's, not the scene's.
+- **A relative mouse's counts go to the host as they are**: the dispatcher
+  owns the one cursor (`frameos/input_state.nim`, scene pixels, one count per
+  pixel, starting at the centre), and the runner draws it on a framebuffer
+  panel (`frameos/cursor_panel.nim`; docs/events.md "The cursor").
 - **Key auto-repeat is dropped.** The kernel sends `value == 2` while a key is
   held; the payload has no `repeat` flag yet, so a held key is one `keyDown`
   and one `keyUp`.
