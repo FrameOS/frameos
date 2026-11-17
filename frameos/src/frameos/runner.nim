@@ -20,6 +20,7 @@ import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
 import frameos/loading_mark_panel
+import frameos/cursor_panel
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -43,7 +44,6 @@ import frameos/watchdog
 import drivers/drivers as drivers
 
 proc sceneEvents*(self: RunnerThread): EventLoop
-proc cursorCanShow(self: RunnerThread): bool
 proc presentCursor(self: RunnerThread)
 
 # How fast must a scene render to be condidered fast. Two in a row pauses logging for 10s.
@@ -77,10 +77,16 @@ proc pushToPanel(image: Image, rotation: int, markSwitch = -1) =
   ## can, drivers.render turns it first when it cannot. The loading mark is
   ## off the panel while the driver writes, and a frame rendered for the
   ## newest scene switch (`markSwitch`) ends it (frameos/loading_mark_panel).
+  ## So is the mouse cursor, drawn back over the new picture after
+  ## (frameos/cursor_panel): the driver's copy of the panel never has it.
   noteDriverRenderStarted()
   try:
     withLoadingMarkAway(markSwitch):
-      drivers.render(image, rotation)
+      putCursorAway()
+      try:
+        drivers.render(image, rotation)
+      finally:
+        putCursorBack()
   finally:
     noteDriverRendered()
 
@@ -801,8 +807,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         # A relative mouse moved: draw the cursor over the frame already on
         # the panel, without re-running the scene (frameos/input_state.nim
         # owns the position). Only where a cursor makes sense: a screen that
-        # can redraw in a blink, never e-paper or an upload target.
-        if self.cursorCanShow and self.sceneEvents.inputState.takeCursorDirty():
+        # shows a write the moment it is made, never e-paper or an upload
+        # target (cursorPanelDevice).
+        if self.sceneEvents.inputState.takeCursorDirty() and cursorPanelDevice(self.frameConfig.device):
           self.presentCursor()
         let nextSleepMs = min(remainingSleepMs,
           if self.sceneEvents.inputState.cursorVisible: CURSOR_SLEEP_SLICE_MS else: RENDER_SLEEP_SLICE_MS)
@@ -828,41 +835,18 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         discard
       await sleepAsync(RENDER_SLEEP_SLICE_MS)
 
-proc cursorCanShow(self: RunnerThread): bool =
-  ## A drawn cursor belongs on a screen that redraws in a blink. E-paper holds
-  ## a picture for seconds per refresh, and an upload target or a headless
-  ## frame has no screen at all.
-  let device = self.frameConfig.device
-  not (device.startsWith("waveshare.") or device.startsWith("pimoroni.inky") or device.startsWith("inky") or
-    device == "web_only" or device == "http.upload" or device == "wasm" or device.len == 0)
-
 proc presentCursor(self: RunnerThread) =
-  ## The last frame with the cursor drawn over it, to the panel. The held
-  ## copy is unrotated and unflipped (setLastImage), so the cursor — in scene
-  ## pixels, like every pointer position — goes on before the panel transform.
-  let image = getLastImageCopy()
-  if image.isNil:
-    return
+  ## The mouse cursor where the dispatcher has it, straight onto the panel
+  ## over the frame it shows (frameos/cursor_panel): no scene runs and no
+  ## frame is pushed, and nothing but the panel ever holds it. Under the
+  ## loading mark's lock, like a push.
   let state = addr self.sceneEvents.inputState
-  if state[].cursorVisible:
-    drawCursor(image, state[].cursorX, state[].cursorY)
-  # The stored frame has no local network access code (it is drawn after the store), so
-  # put it back while one is up, over the cursor like over the scene.
-  let codeDrawn = self.localAccessDrawn and
-    self.drawLocalAccessCode(image, self.localAccessShownFor)
-  case self.frameConfig.flip:
-  of "horizontal": image.flipHorizontal()
-  of "vertical": image.flipVertical()
-  of "both":
-    image.flipHorizontal()
-    image.flipVertical()
-  else: discard
+  let (sceneWidth, sceneHeight) = state[].cursorSpace
   try:
-    if codeDrawn:
-      markLocalAccessCodeOnPanel()
-    pushToPanel(image, self.frameConfig.rotate)
-    if not codeDrawn:
-      clearLocalAccessCodeOnPanel()
+    withLoadingMarkAway(-1):
+      presentPanelCursor(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip,
+        state[].cursorVisible, CursorAt(x: int32(state[].cursorX), y: int32(state[].cursorY),
+          sceneWidth: int32(sceneWidth), sceneHeight: int32(sceneHeight)))
   except Exception as e:
     self.logger.log(%*{"event": "render:cursor:error", "error": $e.msg})
 

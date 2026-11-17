@@ -36,7 +36,7 @@ import ./scene_rhythm
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
-export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty,
+export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty, input_state.cursorSpace,
   input_state.pointersDown, input_state.buttonsHeld, input_state.buttonsBusy
 export uiTimersPending
 

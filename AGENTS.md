@@ -801,6 +801,12 @@
   firmware builds RGB565 alone, with no flip, round panel or log line
   (`Only565`, `Flips`, `RoundPanels`, for flash): an option added later is
   the Pi's unless the ESP32 needs it, and the PR says what it cost there.
+  A Pi's **mouse cursor** writes behind the driver the same way
+  (`frameos/cursor_panel.nim`, docs/events.md "The cursor"): drawn into
+  `/dev/fb0` over a kept copy, never into the canvas or any image, and
+  `pushToPanel` puts it away before the driver writes and back after
+  (`putCursorAway` / `putCursorBack`, inside `withLoadingMarkAway`): a new
+  push path does both.
 - **The 8-bit palette mode** (`frameos.pixels(cells, palette, options)`,
   `imageFromPixels` in `app_runtime.nim`, docs/realtime-rendering.md): a byte
   a cell into up to 256 colors, written into the panel buffer, which keeps the

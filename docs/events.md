@@ -305,9 +305,19 @@ its position — in scene pixels, so it moves along the picture's axes on a
 rotated frame — clamps it to the picture, and emits `pointerMove` for pointer
 0. It starts at the centre and follows every pointer (a mouse picked up after
 a touch continues from where the finger was). On a Linux frame with a screen
-that redraws in a blink (a framebuffer, a HyperPixel) the runner draws it over
-the frame already on the panel, without re-running the scene, for
-`CursorHideMs` (5 s) after it last moved; never on e-paper or an upload target.
+that shows a write the moment it is made (the framebuffer family: HDMI, DPI,
+the HyperPixels; `cursorPanelDevice`) the runner draws it as a classic
+desktop's software cursor: a pixel-art arrow (`frameos/cursor_sprite.nim`,
+bigger in whole steps from a 1080-pixel short side) straight into
+`/dev/fb0` over the frame already there, the pixels under it kept and written
+back before the next push (`frameos/cursor_panel.nim`, under the loading
+mark's lock; docs/realtime-rendering.md "The mouse cursor"). A move writes
+the cursor's old rectangle and its new one: no scene runs, nothing is pushed,
+and the cursor is never in the canvas, the stored frame (`GET /image`,
+snapshots) or the driver's copy of the panel. It shows for `CursorHideMs`
+(5 s) after a mouse last moved it, and goes when a finger or a pen touches
+the screen or the mouse is unplugged; a touch-only frame never shows one,
+and neither does e-paper or an upload target.
 
 **Gestures.** Made by the dispatcher from a pointer's primary button, with the
 contract's `gestures` numbers, so every host agrees: `tap {x, y, pointerId,
