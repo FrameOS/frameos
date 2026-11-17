@@ -374,19 +374,26 @@ proc actionWords(action: string): string =
   if action.startsWith(ShowScene): "Show " & sceneName(action[ShowScene.len .. ^1])
   else: ActionWords[max(Actions.find(action), 0)]
 
-proc buttonRow(self: SceneSettingsScene, info, rows, rules: JsonNode, event: string, match: JsonNode,
-    label: string, always, voice: bool) =
+proc buttonRow(self: SceneSettingsScene, info, rows, rules: JsonNode, event, key, press, label: string,
+    always, voice: bool) =
   ## One row of the Buttons section: a press of a key, or a swipe in from an
   ## edge, and a select box of what it does, as the first rule for exactly
   ## that press has it (None without one, and then a row only when
   ## `always`). A press another kind of rule takes has no row: that rule is
-  ## the owner's own, as in "Button actions".
+  ## the owner's own, as in "Button actions". The press is `key` and its
+  ## `press`, or an edge (`key`, no `press`); the row's name is `ButtonRow`,
+  ## the event and those, "\1" between.
   var
     at = -1
     action = "none"
-    name = ButtonRow & event
-  for key, value in match.pairs:
-    name.add "\1" & value.getStr()
+    name = ButtonRow & event & "\1" & key
+  let match = newJObject()
+  if press.len > 0:
+    name.add "\1" & press
+    match.put("label", newJString(key))
+    match.put("action", newJString(press))
+  else:
+    match.put("edge", newJString(key))
   for i in 0 ..< rows.elems.len:
     if rows.elems[i].str("name") == name:
       return
@@ -433,8 +440,7 @@ proc buttonFields(self: SceneSettingsScene, info, rows: JsonNode) =
   for k in 0 ..< keys.elems.len:
     let key = keys.elems[k].getStr()
     for p in 0 ..< Presses.len:
-      self.buttonRow(info, rows, rules, "button", %*{"label": key, "action": Presses[p]}, key & PressWords[p],
-        p == 1, voice and p == 1)
+      self.buttonRow(info, rows, rules, "button", key, Presses[p], key & PressWords[p], p == 1, voice and p == 1)
   var touch = buttons.child("touch").getBool()
   for i in 0 ..< rules.elems.len:
     let
@@ -446,11 +452,11 @@ proc buttonFields(self: SceneSettingsScene, info, rows: JsonNode) =
       let p = Presses.find(match.str("action"))
       let label = match.child("label")
       if p >= 0 and not label.isNil and label.kind == JString:
-        self.buttonRow(info, rows, rules, event, %*{"label": label, "action": Presses[p]},
-          label.getStr() & PressWords[p], false, voice and p == 1)
+        self.buttonRow(info, rows, rules, event, label.getStr(), Presses[p], label.getStr() & PressWords[p], false,
+          voice and p == 1)
   if touch:
     for e in 0 ..< Edges.len:
-      self.buttonRow(info, rows, rules, "edgeSwipe", %*{"edge": Edges[e]}, EdgeWords[e], true, false)
+      self.buttonRow(info, rows, rules, "edgeSwipe", Edges[e], "", EdgeWords[e], true, false)
 
 proc opensSettings(rules: JsonNode): bool =
   ## A rule that opens the scene switcher or the settings (the switcher's
