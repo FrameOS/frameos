@@ -10,6 +10,8 @@ import ../types
 import ../channels
 import ../local_access
 import ../loading_mark_panel
+import ../cursor_panel
+import ../driver_abi
 
 
 type LogStore = ref object
@@ -799,6 +801,56 @@ suite "runner loop safety":
     check animationFrames >= 3
     check markPanelWrites == 0
     check store.countEvent("render:loadingMark") == 0
+
+  test "a mouse's cursor is drawn on the panel alone, and moving it runs no scene":
+    clearEventChannel()
+    for i in 0 ..< markPanelBytes.len:
+      markPanelBytes[i] = uint8(17 + i mod 200) # never pure black or white
+    let picture = markPanelBytes
+    let panel = MarkPanel(io: MarkPanelIo(read: markPanelRead, write: markPanelWrite),
+      lineLength: MarkPanelSide * 4, pixels: RgbMarkPixels,
+      view: MarkView(panelWidth: MarkPanelSide, panelHeight: MarkPanelSide))
+    cursorTestPanel = panel
+    let sceneId = "tests/runner/mouse-cursor".SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      uploaded[sceneId] = ExportedInterpretedScene(name: "Sixty second scene", publicStateFields: @[],
+        persistedStateKeys: @[], init: sixtySecondInit, render: fastRender,
+        runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+      updateUploadedScenes(uploaded)
+      var config = loadConfig()
+      config.device = "framebuffer"
+      config.controlCode = ControlCode(enabled: false, position: "center",
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+      let store = LogStore(entries: @[])
+      var runnerThread = RunnerThread(frameConfig: config, scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneId, lastRenderAt: 0.0, sleepFuture: none(Future[void]),
+        isRendering: false, triggerRenderNext: false, logger: testLogger(config, store))
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 2)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 4000)
+      check waitUntil(proc(): bool = store.countEvent("render:done") == 1, steps = 400)
+      # No mouse yet: nothing on the panel but what the driver put there.
+      check markPanelBytes == picture
+      sendInputEvent(DriverInputEvent(kind: ord(dikPointerRel).cint, x: 5, y: 5))
+      check waitUntil(proc(): bool = markPanelBytes != picture, steps = 400)
+      check panelCursorDrawn()
+      # Drawn without a render, and never into the stored frame.
+      check store.countEvent("render:done") == 1
+      let stored = getLastImageCopy().toContiguousSeq()
+      check stored.allIt(it == stored[0])
+      # Unplugged, the mouse takes it along and the picture is back, exactly.
+      sendInputEvent(DriverInputEvent(kind: ord(dikPointerCancel).cint, deviceId: 4, pointerId: -1,
+        pointerType: ord(dptMouse).cint))
+      check waitUntil(proc(): bool = markPanelBytes == picture, steps = 400)
+      check not panelCursorDrawn()
+      check store.countEvent("render:done") == 1
+      sendEvent("render", %*{}, eoHttpAdmin)
+      check waitFor withTimeout(renderLoop, 5000)
+      runnerThread.stopMessageLoop = true
+      waitFor messageLoop
+    finally:
+      cursorTestPanel = MarkPanel()
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
   test "a key event is logged by name, never with what was typed":
     clearEventChannel()

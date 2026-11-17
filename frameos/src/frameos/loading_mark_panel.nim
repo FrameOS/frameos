@@ -211,8 +211,9 @@ when defined(linux):
   proc fbWrite(handle: cint, offset: int, src: pointer, len: int): bool {.nimcall, gcsafe, raises: [].} =
     pwrite(handle, src, len, Off(offset)) == len
 
-  proc framebufferPanel(rotation: int, flip: string, round: bool): MarkPanel =
-    ## /dev/fb0 as it is now; `io.write` nil when it does not answer.
+  proc framebufferPanel*(rotation: int, flip: string, round: bool): MarkPanel =
+    ## /dev/fb0 as it is now; `io.write` nil when it does not answer. Runner
+    ## thread (the mouse cursor, cursor_panel.nim, draws on it too).
     if fbHandle < 0:
       fbHandle = posix.open("/dev/fb0", O_RDWR)
       if fbHandle < 0:

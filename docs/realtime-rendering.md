@@ -881,6 +881,21 @@ That costs 2,192 bytes of the S3 image (2026-10-28, against #642): 1.3 KB of
 Nim drawing (0.7 KB of it the per-pixel loop) and 0.9 KB of C state, task
 and the calls at a switch.
 
+### The mouse cursor
+
+A Pi with a mouse draws its cursor the way the mark is drawn, and for the
+same reason (`frameos/cursor_panel.nim`, `frameos/cursor_sprite.nim`;
+docs/events.md "The cursor"): straight into `/dev/fb0`, composed over a copy
+of what was there, never in the canvas. It is the runner thread's, not a
+thread of its own: a move the dispatcher reports (`takeCursorDirty`) writes
+back the old rectangle and draws the new one, inside `withLoadingMarkAway`,
+and `pushToPanel` puts it away before the driver writes and back over the
+new picture after (`putCursorAway` / `putCursorBack`), so the driver's copy
+of the panel never holds it and its row diff stays exact
+(`test_cursor_panel.nim` replays the driver's staging around it). Its
+rectangle is 12x19 sprite pixels at 1x (2x from a 1080-pixel short side, 3x
+at 4K), turned and flipped with the picture.
+
 On a Pi a switch slow enough to show the mark logs it once it lands:
 `render:loadingMark` with the scene and `ms`, from the switch being asked
 for to its first frame. A switch that never lands stops showing it after two

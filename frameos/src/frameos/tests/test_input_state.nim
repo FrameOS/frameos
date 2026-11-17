@@ -110,6 +110,31 @@ block test_a_mouse_picked_up_after_a_touch_continues_from_the_finger:
   state.applyDriverInput(rel(1, 1), eoDriver, at(1), output)
   doAssert output[1].payload["x"].getInt() == 1 and output[1].payload["y"].getInt() == 1
 
+block test_a_touch_or_a_mouse_going_away_puts_the_drawn_cursor_away:
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  doAssert state.cursorSpace == (800, 480)
+  # A touch-only frame never shows one.
+  state.applyDriverInput(abs(17, 4000, 4000), eoDriver, at(0), output)
+  doAssert not state.cursorVisible and not state.takeCursorDirty()
+  # A mouse shows it; a finger then puts it away, as on a touch laptop.
+  state.applyDriverInput(rel(3, 3), eoDriver, at(1), output)
+  doAssert state.cursorVisible and state.takeCursorDirty()
+  state.applyDriverInput(abs(17, 8000, 8000), eoDriver, at(2), output)
+  doAssert not state.cursorVisible and state.takeCursorDirty()
+  # The mouse brings it back; unplugged, the mouse takes it along.
+  state.applyDriverInput(rel(3, 3), eoDriver, at(3), output)
+  doAssert state.cursorVisible and state.takeCursorDirty()
+  state.applyDriverInput(DriverInputEvent(kind: ord(dikPointerCancel).cint, deviceId: 2, pointerId: -1,
+    pointerType: ord(dptMouse).cint), eoDriver, at(4), output)
+  doAssert not state.cursorVisible and state.takeCursorDirty()
+  # A touch device going away leaves a mouse's cursor alone.
+  state.applyDriverInput(rel(3, 3), eoDriver, at(5), output)
+  discard state.takeCursorDirty()
+  state.applyDriverInput(DriverInputEvent(kind: ord(dikPointerCancel).cint, deviceId: 3, pointerId: -1,
+    pointerType: ord(dptTouch).cint), eoDriver, at(6), output)
+  doAssert state.cursorVisible and not state.takeCursorDirty()
+
 block test_a_tap_is_a_down_and_an_up_in_one_place:
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
