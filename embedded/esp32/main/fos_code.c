@@ -97,17 +97,21 @@ static void drop_draft(void)
     S->draft = S->draft_id = S->draft_name = S->summary = NULL;
 }
 
+/* `text` copied into a big block; NULL without memory. */
+static char *copy_big(const char *text)
+{
+    size_t n = strlen(text) + 1;
+    char *copy = fos_big_malloc(n);
+    if (copy != NULL) memcpy(copy, text, n);
+    return copy;
+}
+
 /* A JSON string's text (a value span as fos_store_find_key gives it),
  * malloc'd; NULL when it is not a string. */
 static char *text_of(const char *span, size_t len)
 {
     cJSON *value = span ? cJSON_ParseWithLength(span, len) : NULL;
-    char *text = NULL;
-    if (cJSON_IsString(value)) {
-        size_t n = strlen(value->valuestring);
-        text = fos_big_malloc(n + 1);
-        if (text != NULL) memcpy(text, value->valuestring, n + 1);
-    }
+    char *text = cJSON_IsString(value) ? copy_big(value->valuestring) : NULL;
     cJSON_Delete(value);
     return text;
 }
@@ -158,11 +162,7 @@ char *fos_code_source(const char *what)
     if (strcmp(what, "\x01" "draft") != 0) return fos_scenes_get_json(what, NULL);
     char *text = NULL;
     lock();
-    if (S != NULL && S->draft != NULL) {
-        size_t n = strlen(S->draft);
-        text = fos_big_malloc(n + 1);
-        if (text != NULL) memcpy(text, S->draft, n + 1);
-    }
+    if (S != NULL && S->draft != NULL) text = copy_big(S->draft);
     unlock();
     return text;
 }
@@ -328,9 +328,7 @@ void fos_code_action(const char *asker, const char *action, const char *args)
     if (s_lock == NULL || action == NULL || !fos_config_frame_page_offered()) return;
     bool clear = strcmp(action, "clear") == 0;
     if (!clear && strcmp(action, "ask") != 0 && strcmp(action, "save") != 0) return;
-    size_t len = args ? strlen(args) : 0;
-    char *copy = clear ? NULL : fos_big_malloc(len + 1);
-    if (copy != NULL) memcpy(copy, args ? args : "", len + 1);
+    char *copy = clear ? NULL : copy_big(args ? args : "");
     lock();
     /* One thing at a time: the app says what is running. */
     if (ready() && !S->busy[0]) {
