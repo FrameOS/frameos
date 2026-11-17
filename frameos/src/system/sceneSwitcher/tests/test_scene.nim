@@ -522,6 +522,11 @@ block it_is_a_built_in_scene:
   doAssert paperPanel(config(800, 480, "embedded"), newImageGray8(8, 8)), "an ESP32 e-paper"
   doAssert not paperPanel(config(800, 480, "pimoroni.hyperpixel4"))
   doAssert paperPanel(config(800, 480, "pimoroni.inky_impression_7"))
+  # What a press costs is asked apart from the look; today they are opposites.
+  doAssert fastPanel(config(800, 480, "embedded"), newImage565(8, 8)), "an ESP32 LCD"
+  doAssert not fastPanel(config(800, 480, "embedded"), newImageGray8(8, 8)), "an ESP32 e-paper"
+  doAssert fastPanel(config(800, 480, "pimoroni.hyperpixel4"))
+  doAssert not fastPanel(config(800, 480, "pimoroni.inky_impression_7"))
 
 block desktopUnit:
   # Full screen a built-in scene's sizes are a share of the panel; in a desktop's

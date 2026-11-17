@@ -557,8 +557,11 @@
   taken (`X-FrameOS-Press`, the runtime's `frameos_wasm_press_map`), and the
   board clicks from its touch task at once. And the runtime is told the
   board's panel (`set_frame`'s `pixelFormat` → `panel_shape.boardPanelFormat`):
-  `app.frame.color` / `paper` and the built-in scenes' look are the board's,
-  never the plane's RGBX canvas.
+  `app.frame.fast` / `paper` / `color` and the built-in scenes' look are the board's,
+  never the plane's RGBX canvas. An ESP32 sets the same from its own panel at
+  init, and nothing a scene asks of its panel reads a canvas: an event,
+  init() and what runs after an await have none, and a 13.3" color e-paper
+  on 8 MB draws in RGB565 like an LCD.
 - The battery popover's offer reads `renderSceneMs` from the metrics
   (`serverRenderForecast` in `utils/batteryForecast.ts`).
 - A board rendered on the server is sent nothing a scene holds ("Nothing
@@ -677,6 +680,13 @@
   automatic: 1, and 2 on a 4K or larger screen on HDMI; the SPA's copy
   is `utils/renderScale.ts`). Never scale by rasterizing small and
   stretching: pass the smaller size to the layout and the full one to pixie.
+- **A panel's speed is not its material.** `app.frame.fast`
+  (`panel_shape.panelIsFast`, `UiInput.slow`) decides when and how often to
+  draw: presses, a drag taken whole, animation, `<img>` in the render, a
+  split's interval, the built-in scenes' taps. `paper` (`panelIsPaper`) and
+  `color` decide how it looks. Today fast is paper's opposite on every
+  panel; a fast e-paper changes `panelIsFast` alone, so never key a speed
+  decision on paper.
 - Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
   class or element goes in `tailwind.nim` / `layout.nim`, `docs/jsx-ui.md`
   and the scene guide's JSX section, and the PR says what it cost (the

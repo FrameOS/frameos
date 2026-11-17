@@ -50,7 +50,7 @@ import system/sceneSwitcher/scene as switcher
 
 type
   SceneSettingsScene* = SceneSwitcherScene
-    ## The switcher's own type, its `entries` unused and `paper` the panel's:
+    ## The switcher's own type, its `entries` unused, `paper` and `slow` the panel's:
     ## one set of destroy and trace hooks in flash for the two built-in scenes.
 
 const
@@ -904,7 +904,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for
   ## the pointer and the keyboard; back by itself once nobody has touched it
   ## for a while (the switcher's `drawUi`).
-  self.paper = paperPanel(self.frameConfig, image)
+  (self.paper, self.slow) = panelLook(self.frameConfig, image)
   let round = isRound(self.frameConfig)
   # At the frame's render scale, as its scenes are (sceneSwitcher's uiRoom).
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
@@ -918,7 +918,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
   if info.isNil and self.onFrame():
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,
-      keyboardTop, info, self.sizeUnit(image)), image, self.paper, onHandler, IdleSeconds,
+      keyboardTop, info, self.sizeUnit(image)), image, self.paper, self.slow, onHandler, IdleSeconds,
       roomW, roomH):
     leave()
 
@@ -1007,15 +1007,15 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     else:
       self.back()
   else:
-    # The pointer, and keys for a field (ui/events.nim hit-tests them). E-paper
-    # shows no press: what only moves the press waits for a tap.
+    # The pointer, and keys for a field (ui/events.nim hit-tests them). A slow
+    # panel shows no press: what only moves the press waits for a tap.
     acted = -1
     let changed = dispatchUiEvent(self.uiId, context.event, context.payload)
     if acted >= 0:
       self.acting()
     if changed or acted >= 0:
       self.touch()
-      if not self.paper or context.event in ["tap", "pointerUp", "keyDown", "textInput"]:
+      if not self.slow or context.event in ["tap", "pointerUp", "keyDown", "textInput"]:
         sendEvent(evRender, newJObject(), eoScene)
 
 proc runSettings(self: FrameScene, context: ExecutionContext) =
@@ -1029,9 +1029,10 @@ proc renderSettings(self: FrameScene, context: ExecutionContext): Image =
 
 proc initSettings(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
   ## Nothing persisted to start from: what it shows comes with the switch.
-  let paper = paperPanel(frameConfig)
+  let (paper, slow) = panelLook(frameConfig)
   SceneSettingsScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(), ownRun: settingsOwnRun,
-    shownName: "Scene settings", refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper)
+    shownName: "Scene settings", refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper,
+    slow: slow)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene settings",

@@ -14,6 +14,7 @@ import pixie
 
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
+import frameos/panel_shape
 import frameos/utils/svg_frames
 import frameos/types
 import frameos/values
@@ -146,7 +147,6 @@ suite "Touch test":
 
   test "a held drag on an LCD draws every move, from the ring at the press to the dot":
     let t = newTouch("tests/touch-lcd", Lcd)
-    discard t.render() # a render finds out what the panel is
     check t.down(60, 150)
     check t.drag() == 28 # a render a move
     let held = t.render()
@@ -175,7 +175,6 @@ suite "Touch test":
 
   test "e-paper waits for the finger to lift, then draws the whole drag":
     let t = newTouch("tests/touch-paper", Paper)
-    discard t.render()
     check not t.down(60, 150)
     check t.drag() == 0
     check t.up(340, 150)
@@ -189,6 +188,17 @@ suite "Touch test":
     check not t.down(200, 60)
     check t.up(200, 60)
     check t.event("tap", %*{"x": 200, "y": 60, "pointerId": 1, "pointerType": "touch"})
+
+  test "an ESP32 knows its panel in an event, before any render":
+    # app.frame.fast is the board's panel (embedded_main says it at init):
+    # an event has no canvas, and asked one it said e-paper on an LCD.
+    for (format, fast) in [(PanelFormatRgb565, true), (8, false), (7, false)]:
+      boardPanelFormat = format
+      let t = newTouch("tests/touch-esp32-" & $format, "embedded")
+      check t.down(60, 150) == fast
+      check t.drag() == (if fast: 28 else: 0)
+      check t.up(340, 150)
+    boardPanelFormat = 0
 
   test "a mouse moving with nothing pressed, or another finger, draws nothing":
     let t = newTouch("tests/touch-hover", Lcd)
