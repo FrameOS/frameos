@@ -1,4 +1,4 @@
-import std/[json, options, strformat, times, unittest]
+import std/[json, options, strformat, unittest]
 import pixie
 
 import ../app
@@ -257,6 +257,8 @@ suite "render/zoomPan render":
     # On a device an error frame is drawn into the 565 canvas, and anything
     # not RGBX went through pixie's float sampler: 2.25 s a frame for a
     # 472x405 picture on the SenseCAP Indicator's 480x480 panel (2026-11-15).
+    # The draw counts what it read, so the test asks which path ran instead
+    # of timing the two (a loaded CI runner timed them 0.167 s and 0.152 s).
     let photo = newImage(472, 405)
     for y in 0 ..< 405:
       for x in 0 ..< 472:
@@ -272,9 +274,10 @@ suite "render/zoomPan render":
     # The draw is the one an RGBX photo gets, on the dithered 565 canvas.
     let canvas = newImage565(480, 480)
     canvas.ditherStores = true
-    let started = cpuTime()
+    var oneDrawFrom565 = testDrawsFrom
+    inc oneDrawFrom565[pfRgb565]
     app.renderAt(ExecutionContext(hasImage: false), canvas, now)
-    let fast = cpuTime() - started
+    check testDrawsFrom == oneDrawFrom565
     let expected = newImage565(480, 480)
     expected.ditherStores = true
     drawRectBilinear(expected, source.toRgbxImage(), sx, sy, sw, sh)
@@ -285,20 +288,17 @@ suite "render/zoomPan render":
     app.appConfig.image = source
     app.renderAt(ExecutionContext(hasImage: false), drawn, now)
     let sampled = newImage(480, 480)
-    let started2 = cpuTime()
     for y in 0 ..< 480:
       let fy = (sy + (y.float + 0.5) * (sh / 480.0) - 0.5).float32
       for x in 0 ..< 480:
         let fx = (sx + (x.float + 0.5) * (sw / 480.0) - 0.5).float32
         sampled.unsafe[x, y] = source.getRgbaSmooth(fx, fy)
-    let slow = cpuTime() - started2
     var worst = 0
     for y in 1 ..< 479:
       for x in 1 ..< 479:
         let (a, b) = (drawn.unsafe[x, y], sampled.unsafe[x, y])
         worst = max(worst, max(abs(a.r.int - b.r.int), max(abs(a.g.int - b.g.int), abs(a.b.int - b.b.int))))
     check worst <= 2
-    check fast * 4 < slow
 
   test "a picture already in the canvas is left as it is":
     # The node cache hands an error frame drawn into the canvas back as a new
