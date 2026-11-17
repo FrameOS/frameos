@@ -9,6 +9,7 @@ import frameos/ui/layout
 import frameos/ui/keyboard
 import frameos/utils/font
 import frameos/cursor_shape
+import frameos/utils/qr
 
 # A JSX UI's handlers and pointer classes (docs/jsx-ui.md "Events"): what the
 # last render left where, a tap or a move over it, and the next render.
@@ -817,3 +818,119 @@ suite "jsx select boxes":
     check target.input.open == 0
     image = ui.render()
     check image.width == 320
+
+const links = """
+let taps = 0
+export function get(app) {
+  return (
+    <div className="flex flex-col gap-2 h-full p-2 bg-white text-black">
+      <a href="https://frameos.net/docs" className="h-10 shrink-0 bg-sky-500">Docs</a>
+      <p className="h-10 shrink-0">Write to <a href="mailto:hello@frameos.net">us</a></p>
+      <a href="javascript:alert(1)" className="h-10 shrink-0 bg-red-500">Nope</a>
+      <a href="https://example.com" className="h-10 shrink-0 bg-green-500"
+        onClick={() => { taps++; frameos.setState('taps', taps) }}>Own</a>
+    </div>
+  )
+}
+"""
+
+proc firstDark(image: Image): (int, int) =
+  for y in 0 ..< image.height:
+    for x in 0 ..< image.width:
+      let c = image[x, y]
+      if c.a > 0 and c.r < 64 and c.g < 64 and c.b < 64:
+        return (x, y)
+  (-1, -1)
+
+proc uiOpenLinkForTest(url: string): bool {.nimcall, raises: [].} =
+  {.cast(gcsafe).}:
+    logged.add "open " & url
+  true
+
+suite "jsx links":
+  test "a tapped link puts its QR code up, and a tap puts it away":
+    let id = "tests/jsx-link"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    var linkRows: seq[UiRegion]
+    for r in target.regions:
+      if r.handlers[ueClick] == LinkOpen + 1: linkRows.add r
+    # The block link and the text the mailto: runs in; not javascript:, and
+    # not the one with an onClick of its own.
+    check linkRows.len == 2
+    check uiCursorAt(id, 160, 28) == ord(csPointer) # a link shows the hand, as in a browser
+    check isLink("https://a.b") and isLink("HTTP://a.b") and isLink("mailto:a@b.c") and isLink("tel:+3712")
+    check not isLink("javascript:alert(1)") and not isLink("") and not isLink("ftp://a") and
+      not isLink("https://a\nb") and not isLink("https://" & "a".repeat(1100)) and
+      not isLink("http:/a") and not isLink("httpx://a") and not isLink("mailt:a") and not isLink(":a") and
+      isLink("Mailto:x@y.z") and isLink("https://")
+    check dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    check target.input.link == "https://frameos.net/docs"
+    let image = ui.render()
+    # All there is to touch: one region, the card's, which closes it.
+    check target.regions.len == 1
+    check target.regions[0].handlers[ueClick] == LinkClose + 1
+    check target.regions[0].w == 320 and target.regions[0].h == 240
+    # The QR code, every module where the encoder put it, centred, and as
+    # large as the room the URL's one line and the button leave: 26 rows of
+    # 240 for those and the padding, not a fixed three lines (2 px modules
+    # for a long URL on a small panel).
+    let qr = qrEncode("https://frameos.net/docs")
+    let (gx, gy) = image.firstDark() # the top-left finder's corner
+    var unit = 0
+    while gx + unit < image.width and image[gx + unit, gy].r < 128: inc unit
+    unit = unit div 7 # a finder is 7 modules across
+    check unit >= 5
+    let extent = unit * qr.size
+    check extent >= 125 # 100 (4 px modules) when 96 px were kept for three lines of text
+    check abs(gx - (320 - extent) div 2) <= 1
+    var wrong = 0
+    for y in 0 ..< qr.size:
+      for x in 0 ..< qr.size:
+        if qr[x, y] != (image[gx + x * unit + unit div 2, gy + y * unit + unit div 2].r < 128): inc wrong
+    check wrong == 0
+    # A tap on the card puts it away; the UI is back.
+    check dispatchUiEvent(id, "tap", at(5, 5, "touch"))
+    check target.input.link == ""
+    discard ui.render()
+    check target.regions.len > 1
+    check ui.scene.state{"taps"}.isNil
+
+  test "a link in running text, javascript: and a link with an onClick":
+    let id = "tests/jsx-link-text"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check dispatchUiEvent(id, "tap", at(40, 76, "touch")) # the paragraph's text
+    check target.input.link == "mailto:hello@frameos.net"
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
+    check target.input.link == ""
+    discard ui.render()
+    discard dispatchUiEvent(id, "tap", at(160, 124, "touch")) # javascript:
+    check target.input.link == ""
+    check dispatchUiEvent(id, "tap", at(160, 172, "touch")) # its own onClick
+    check target.input.link == ""
+    check ui.scene.state{"taps"}.getInt() == 1
+    # Back puts a link's QR code away, as it does the keyboard.
+    check dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    # Kept between a plane's pulls, as an open <select> is.
+    var kept = ""
+    for entry in lastingUiInput()["targets"]:
+      if entry{"sceneId"}.getStr() == id: kept = entry{"link"}.getStr()
+    check kept == "https://frameos.net/docs"
+    check dismissKeyboard(id, 1)
+    check target.input.link == ""
+
+  test "a host that opens links itself gets the URL, and no QR code goes up":
+    let id = "tests/jsx-link-host"
+    let ui = newUi(links, id, 320, 240)
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    uiOpenLink = uiOpenLinkForTest
+    logged.setLen(0)
+    discard dispatchUiEvent(id, "tap", at(160, 28, "touch"))
+    uiOpenLink = nil
+    check "open https://frameos.net/docs" in logged
+    check target.input.link == ""

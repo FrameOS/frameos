@@ -20,8 +20,10 @@ import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
 import frameos/render_probe
+import frameos/utils/qr
 when not defined(frameosEmbedded):
   import frameos/panel_shape
+  from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
 
@@ -90,6 +92,7 @@ type
     goal*: bool
     open*: int           ## the <select> whose list is up: its key + 1; 0 for none
     fresh*: bool         ## it just opened: the next layout scrolls to what it holds
+    link*: string        ## the link whose QR code is up over the UI ("Links"); "" for none
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -197,13 +200,53 @@ const
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
     "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
     "on-pinch", "on-change", "on-key-down"]
+  LinkOpen* = KeyBase div 2
+    ## The tap handler of a link (`<a href>`, "Links" in docs/jsx-ui.md): its
+    ## QR code goes up over the UI. Past every handler a tree can hold.
+  LinkClose* = LinkOpen + 1 ## the QR code's: it goes away
+  LinkCloseAttr = $LinkClose
+  MaxLink = 1024 ## a longer href is no link: its QR code would be too dense to scan
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
+  LinkKey = 1 shl 24     ## a link's QR code, likewise
   PopupKey = 1 shl 22    ## an open <select>'s list, likewise
   AccentKey = 1 shl 23   ## a held key's accents, likewise
   Unbounded = 1e9'f32
   MaxDepth = 64
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
+
+func scheme(name: string): uint64 =
+  for c in name: result = result shl 8 or uint64(ord(c))
+
+proc isLink*(href: string): bool =
+  ## Whether an `<a href>` opens: http(s)://, mailto: and tel: only (never
+  ## `javascript:`), no control characters, at most MaxLink bytes. The scheme
+  ## is read into a number, lowercased, and compared with four: no copy of the
+  ## href, no string compares (flash on an ESP32).
+  if href.len > MaxLink:
+    return false
+  var
+    name = 0'u64
+    colon = -1
+  for i, c in href:
+    if c < ' ' or c == '\x7f':
+      return false
+    if colon < 0:
+      if c == ':': colon = i
+      elif i == 6: return false # longer than any scheme here
+      else: name = name shl 8 or uint64(ord(c) or 0x20)
+  case name
+  of scheme("http"), scheme("https"):
+    colon + 2 < href.len and href[colon + 1] == '/' and href[colon + 2] == '/'
+  of scheme("mailto"), scheme("tel"):
+    true
+  else:
+    false
+
+proc links(n: SvgNode): bool {.noinline.} =
+  ## An `<a>` that opens its href on a tap: one with an onClick of its own
+  ## does what that says instead.
+  n.tag == "a" and n.attr("on-click").len == 0 and n.attr("href").isLink
 
 proc scrolled*(input: UiInput, key: int): (float32, float32) =
   ## How far the box at `key` is scrolled: (0, 0) until something scrolls it.
@@ -502,6 +545,9 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     let value = n.attr(if event == ueChange and n.attr("on-input").len > 0: "on-input" else: handlerAttrs[event])
     if value.len > 0 and number(value, 0, value.len, id):
       result.handlers[event] = int(id) + 1
+  if n.links:
+    # A link: a tap puts its QR code up (an onClick of its own replaces that).
+    result.handlers[ueClick] = LinkOpen + 1
   var states: set[UiState]
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
@@ -547,6 +593,12 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
         run = newUiNode(ukText, result.text)
         run.inGroup = childGroup
         result.children.add run
+      if run.src.isNil and child.links:
+        # A link in running text: the text it runs in is what a tap opens it
+        # from (the first link there), keyed by the link's place in the tree.
+        run.src = child
+        run.key = (key * 31 + i + 1) and 0x3fff_ffff
+        run.handlers[ueClick] = LinkOpen + 1
       child.addRuns(result.text, run, rootW, rootH, depth + 1, inlineStates)
       if run.pointer:
         result.pointer = true
@@ -1197,6 +1249,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var
+  linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
+  linkQrUrl {.threadvar.}: string ## ... its URL ...
+  linkQrSide {.threadvar.}: int ## ... and the room it was made for
 
 proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opacity: float32] =
   ## `c` at `opacity`, as the colour it makes over the backdrop.
@@ -1629,7 +1685,9 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     scrollsY = b.overflowY == ovScroll or n.field == 2
     scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
-  let cursor = when defined(frameosEmbedded): 0'u8 else: b.cursor
+  # A link with no `cursor-*` of its own shows the hand, as in a browser.
+  let cursor = when defined(frameosEmbedded): 0'u8
+    else: (if b.cursor == 0 and n.handlers[ueClick] == LinkOpen + 1: csPointer.cursorCode else: b.cursor)
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
       n.field > 0 or scrolls or cursor != 0:
     # In paint order: whatever comes later is on top.
@@ -1792,6 +1850,52 @@ proc selectOption*(memo: UiMemo, key, option: int, handler: var int): string =
   if not n.isNil:
     handler = n.handlers[ueChange]
     result = n.src.children[option].attr("value")
+
+proc linkAt*(memo: UiMemo, key: int): string =
+  ## The href of the link at `key` as the last layout had it ("" for none).
+  if not memo.isNil:
+    let n = memo.root.fieldIn(key) # a link's key is its own, as a field's is
+    if not n.isNil and not n.src.isNil:
+      result = n.src.attr("href")
+
+proc linkCard(url: string, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
+    gradients: var int, regions: var seq[UiRegion]) =
+  ## A link's QR code over the whole UI, for a phone to open it: the code as
+  ## large as fits, its URL under it and a Close button. Black on white, as a
+  ## camera reads it best, on every panel. A tap anywhere puts it away, and
+  ## it is all there is to touch while it is up. The code gets all the room
+  ## the URL (two lines at most) and the button leave: a first pass lays the
+  ## card out with the code as a box that grows into it, the second draws the
+  ## code at the size that box got.
+  let
+    code = el("img", "flex-1 min-h-0 w-full")
+    card = el("div", "flex flex-col items-center justify-center gap-2 p-3 bg-white text-black text-sm", code)
+  card.attrs.add(("on-click", LinkCloseAttr))
+  card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
+  card.children.add el("div", "px-4 py-1 border border-black rounded font-bold", SvgNode(text: "Close"))
+  var shown: UiNode
+  for pass in 0 .. 1:
+    shown = card.build(initText(), width, height, 0, LinkKey, input, false, nil)
+    shown.size = shown.layout(width, height, true, true)
+    if pass == 0:
+      let
+        room = shown.children[0].size
+        side = max(int(min(room.x, room.y)), 32)
+      if linkQr.isNil or linkQrUrl != url or linkQrSide != side:
+        linkQrUrl = url
+        linkQrSide = side
+        try:
+          linkQr = qrImage(qrEncode(url), side)
+        except Exception:
+          linkQr = nil
+      var classes = "shrink-0"
+      let at = if linkQr.isNil: side else: linkQr.width
+      classes.px("w", at)
+      classes.px("h", at)
+      code.attrs[0][1] = move classes
+      code.image = linkQr
+  regions.setLen(0)
+  shown.emit(0, 0, 1, drawn, gradients, regions)
 
 proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInput, drawn: var seq[SvgNode],
     gradients: var int, regions: var seq[UiRegion]): bool =
@@ -1991,7 +2095,13 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
           break
     if not shown:
       input.open = 0
-  if kb > 0:
+  if input.link.len == 0:
+    linkQr = nil # no card up: its picture goes
+  if input.link.len > 0:
+    # A link's QR code: over everything, the keyboard gone (events.openLink).
+    input.open = 0
+    linkCard(input.link, w, height.float32, input, result.children, gradients, regions)
+  elif kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
       height, input.accents, input.flash).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
       if memo.isNil: nil else: memo.keyboard)
@@ -2091,7 +2201,7 @@ proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
   if memo.isNil or memo.root.isNil:
     return
   memo.root.seekHoles(0, 0, 1, false, yieldReady, result)
-  if input.open > 0 or input.accents > 0:
+  if input.open > 0 or input.accents > 0 or input.link.len > 0:
     for i in 0 ..< result.count:
       result.items[i].clean = false
 

@@ -108,6 +108,10 @@ const
 
 var
   targets {.threadvar.}: seq[UiTarget]
+  uiOpenLink* {.threadvar.}: proc(url: string): bool {.nimcall, raises: [].}
+    ## A host that can open a link itself (the browser's preview, which opens
+    ## a tab: wasm_main.nim): true when it did. Nil, or false, and the link's
+    ## QR code goes up over the UI instead (docs/jsx-ui.md "Links").
   physicalKeyboard {.threadvar.}: bool
     ## A key was typed on a keyboard: fields need no keyboard on the screen.
 
@@ -166,7 +170,7 @@ when not defined(frameosEmbedded):
       for (key, x, y) in i.scrolls:
         if (x != 0 or y != 0) and scrolls.len < MaxKeptScrolls:
           scrolls.add %*[newJInt(key), newJFloat(x.float), newJFloat(y.float)]
-      if i.focus <= 0 and i.open <= 0 and scrolls.len == 0:
+      if i.focus <= 0 and i.open <= 0 and i.link.len == 0 and scrolls.len == 0:
         continue
       var entry = newJObject()
       entry["sceneId"] = newJString(target.sceneId)
@@ -180,6 +184,8 @@ when not defined(frameosEmbedded):
         entry["shift"] = newJInt(i.shift)
       if i.open > 0:
         entry["open"] = newJInt(i.open)
+      if i.link.len > 0:
+        entry["link"] = newJString(i.link)
       if scrolls.len > 0:
         entry["scrolls"] = scrolls
       kept.add entry
@@ -222,6 +228,9 @@ when not defined(frameosEmbedded):
         i.caret = 0
         i.keyboard = false
       i.open = max(entry{"open"}.getInt(), 0)
+      let link = entry{"link"}.getStr()
+      if link.isLink:
+        i.link = link
       i.scrolls.setLen(0)
       let scrolls = entry{"scrolls"}
       if not scrolls.isNil and scrolls.kind == JArray:
@@ -447,8 +456,12 @@ proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
   ## phone: the field lets go and the keyboard goes away, or the list closes.
   ## With a key's accents up, those go first. False when none was up.
   let target = uiTarget(sceneId, nodeId, create = false)
-  if target.isNil or (target.input.focus == 0 and target.input.open == 0):
+  if target.isNil or (target.input.focus == 0 and target.input.open == 0 and target.input.link.len == 0):
     return false
+  if target.input.link.len > 0:
+    target.input.link = "" # a link's QR code goes first
+    target.inputOnly = true
+    return true
   if target.input.accents > 0:
     target.input.accents = 0
     target.inputOnly = true
@@ -456,6 +469,21 @@ proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
   target.input.open = 0
   target.blurField()
   true
+
+proc openLink(target: UiTarget, key: int) =
+  ## A tap on a link: the host opens it if it can (a browser tab), else its
+  ## QR code goes up over the UI for a phone to open it, the keyboard and
+  ## any <select>'s list put away first.
+  let url = target.memo.linkAt(key)
+  if not url.isLink:
+    return
+  if not uiOpenLink.isNil and uiOpenLink(url):
+    return
+  if target.input.focus > 0:
+    target.blurField()
+  target.input.open = 0
+  target.input.link = url
+  target.inputOnly = true
 
 proc changeOf(value: string): JsonNode =
   ## What a field's or a <select>'s onChange hears.
@@ -949,8 +977,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       continue
     when not defined(frameosEmbedded):
       if event in ["keyDown", "textInput"]:
-        if target.input.open > 0 and payload{"key"}.getStr() == "Escape":
+        if (target.input.open > 0 or target.input.link.len > 0) and payload{"key"}.getStr() == "Escape":
           target.input.open = 0
+          target.input.link = ""
           target.inputOnly = true
           result = true
         elif target.input.focus > 0:
@@ -1198,6 +1227,15 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and r.inside(lx, ly):
         handled = true
+        if handler - 1 == LinkOpen or handler - 1 == LinkClose:
+          # Only a tap: a link has no other handler.
+          if handler - 1 == LinkOpen:
+            target.openLink(r.key)
+          else:
+            target.input.link = ""
+            target.inputOnly = true
+          result = true
+          break
         if handler - 1 >= OptionBase:
           target.pickOption(handler - 1 - OptionBase)
           result = true
