@@ -1111,3 +1111,138 @@ suite "jsx selection":
     check uiClipboard().len <= 65536 and uiClipboard().len mod 2 == 0
     setUiClipboard("")
     forgetTypedKeys()
+
+const wordsForm = """
+let words = 'hello big world'
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <input className="h-10 px-2 shrink-0 bg-slate-100 text-black" value={words}
+        onChange={(e) => { words = e.target.value; frameos.setState('words', words) }} />
+      <input className="h-10 px-2 shrink-0 bg-slate-200 text-black" value="" placeholder="Empty"
+        onChange={(e) => frameos.setState('other', e.target.value)} />
+    </div>
+  )
+}
+"""
+
+proc selectAt(id: string, handler: int): JsonNode =
+  ## A touch at the middle of the region with this tap handler (an item of
+  ## a selection's menu, or a handle), or nil when the last render drew none.
+  let target = uiTarget(id, 1, create = false)
+  for r in target.regions:
+    if r.handlers[ueClick] == SelectBase + handler + 1:
+      return %*{"x": r.x + r.w / 2 + target.offsetX, "y": r.y + r.h / 2 + target.offsetY,
+        "pointerId": 1, "pointerType": "touch"}
+
+proc touch(x, y: float, id = 1): JsonNode =
+  %*{"x": x, "y": y, "pointerId": id, "pointerType": "touch", "buttons": 1, "button": 0}
+
+suite "jsx selection by touch":
+  test "a long press selects the word, with handles and a menu; Copy, then Paste over another":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-touch-select"
+    let ui = newUi(wordsForm, id, 320, 240)
+    let before = ui.render()
+    check uiListens(id, "longPress") and uiListens(id, "doubleTap")
+    discard dispatchUiEvent(id, "pointerDown", touch(60, 20))
+    var hold = touch(60, 20)
+    hold["durationMs"] = %600
+    check dispatchUiEvent(id, "longPress", hold)
+    let target = uiTarget(id, 1, create = false)
+    check target.input.focus > 0 and target.input.handles and target.input.menu
+    let shown = ui.render()
+    check target.input.selected == (6, 9) # "big"
+    check not selectAt(id, 0).isNil and not selectAt(id, 1).isNil # its handles
+    check not selectAt(id, EditCopy).isNil and not selectAt(id, EditCut).isNil
+    check selectAt(id, EditPaste).isNil # nothing on the clipboard yet
+    check not selectAt(id, EditSelectAll).isNil
+    check differs(before, shown, 0, 0, 320, 40) > 0
+    # Lifted where it held: the menu stays, no tap.
+    check dispatchUiEvent(id, "pointerUp", touch(60, 20))
+    discard ui.render()
+    check target.input.menu
+    check dispatchUiEvent(id, "tap", selectAt(id, EditCopy))
+    check uiClipboard() == "big"
+    discard ui.render()
+    check not target.input.menu and target.input.selected == (6, 9) # the selection stays
+    check selectAt(id, EditCopy).isNil
+    # A long press on the empty field: no word, the menu alone, with Paste.
+    discard dispatchUiEvent(id, "pointerDown", touch(60, 60, 2))
+    hold = touch(60, 60, 2)
+    hold["durationMs"] = %600
+    check dispatchUiEvent(id, "longPress", hold)
+    discard ui.render()
+    check target.input.selected[0] == target.input.selected[1]
+    check selectAt(id, EditCopy).isNil and selectAt(id, 0).isNil
+    discard dispatchUiEvent(id, "pointerUp", touch(60, 60, 2))
+    check dispatchUiEvent(id, "tap", selectAt(id, EditPaste))
+    check ui.scene.state{"other"}.getStr() == "big"
+    discard ui.render()
+    check not target.input.menu and not target.input.handles
+    setUiClipboard("")
+
+  test "a double tap selects the word; its handles drag its ends; Select all and Cut":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-touch-handles"
+    let ui = newUi(wordsForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(20, 20, "touch"))
+    discard ui.render()
+    check dispatchUiEvent(id, "doubleTap", at(20, 20, "touch"))
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.selected == (0, 5) # "hello"
+    # The end's handle, dragged far right: to the end of the text.
+    let grip = selectAt(id, 1)
+    check not grip.isNil
+    let (gx, gy) = (grip["x"].getFloat(), grip["y"].getFloat())
+    check uiListens(id, "pointerDown")
+    check dispatchUiEvent(id, "pointerDown", touch(gx, gy, 3))
+    check not target.input.menu # it waits for the finger to lift
+    check dispatchUiEvent(id, "pointerMove", touch(300, gy, 3))
+    discard ui.render()
+    check target.input.selected == (0, 15)
+    check dispatchUiEvent(id, "pointerUp", touch(300, gy, 3))
+    discard ui.render()
+    check target.input.menu
+    # The start's handle, dragged right past "hello ": from "big".
+    let start = selectAt(id, 0)
+    check dispatchUiEvent(id, "pointerDown", touch(start["x"].getFloat(), start["y"].getFloat(), 4))
+    check dispatchUiEvent(id, "pointerMove", touch(start["x"].getFloat() + 42, start["y"].getFloat(), 4))
+    discard ui.render()
+    check target.input.selected == (6, 15)
+    discard dispatchUiEvent(id, "pointerUp", touch(start["x"].getFloat() + 42, start["y"].getFloat(), 4))
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", selectAt(id, EditSelectAll))
+    discard ui.render()
+    check target.input.selected == (0, 15) and target.input.handles and target.input.menu
+    check selectAt(id, EditSelectAll).isNil # all of it already
+    check dispatchUiEvent(id, "tap", selectAt(id, EditCut))
+    check uiClipboard() == "hello big world" and ui.scene.state{"words"}.getStr() == ""
+    discard ui.render()
+    check not target.input.handles and not target.input.menu
+
+  test "a key typed replaces a selection made by touch; back lets it go before the keyboard":
+    forgetTypedKeys()
+    let id = "tests/jsx-touch-type"
+    let ui = newUi(wordsForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(20, 20, "touch"))
+    discard ui.render()
+    check dispatchUiEvent(id, "doubleTap", at(20, 20, "touch"))
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('x')))
+    check ui.scene.state{"words"}.getStr() == "x big world"
+    discard ui.render()
+    check not target.input.handles and not target.input.menu and target.input.sel == 0
+    check dispatchUiEvent(id, "doubleTap", at(30, 20, "touch"))
+    discard ui.render()
+    check target.input.selected == (2, 5)
+    check dismissKeyboard(id, 1)
+    check target.input.focus > 0 and target.input.sel == 0 and not target.input.menu
+    check dismissKeyboard(id, 1)
+    check target.input.focus == 0
