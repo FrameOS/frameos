@@ -1263,7 +1263,52 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         keep = options{"keep"}.getBool(false)
         sizedWidth = options{"width"}.getInt(0)
         sizedHeight = options{"height"}.getInt(0)
+        entry = options{"entry"}.getStr()
+        background = options{"background"}.getStr()
       var image: Image
+      if entry.len > 0:
+        # A picture inside a ZIP (an EPUB's illustration): the member whole,
+        # under the read limit, decoded at the size asked (a JPEG scaled as
+        # it decodes, a PNG a row at a time) into a picture of its own, then
+        # put over `background` where it is transparent: a canvas without
+        # alpha (an ESP32's) would otherwise show those parts black.
+        var member: string
+        try:
+          let size = zipEntrySize(full, entry)
+          if size <= 0 or size > jsAssetReadMaxBytes(e).int64:
+            return jsNull(ctx)
+          member = readZipEntry(full, entry, 0, size.int)
+        except ZipEntryError:
+          return jsNull(ctx)
+        if sizedWidth <= 0 or sizedHeight <= 0:
+          image = decodeImageWithDisplayBounds(member)
+        else:
+          let
+            context = e.context
+            like =
+              if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+              elif context.isNil: nil
+              else: context.contextImage()
+          var decoded = newImage(sizedWidth, sizedHeight)
+          discard decodeImageWithFallback(member, decoded,
+            if options{"fit"}.getStr("cover") == "contain": fitContain else: fitCover)
+          member = ""
+          image =
+            if keep: e.runtime.keptPictureTarget(e.owner, like, sizedWidth, sizedHeight, (0, 0))
+            elif like.isNil: newImage(sizedWidth, sizedHeight)
+            else: newImageLike(like, sizedWidth, sizedHeight)
+          if image.isNil:
+            return jsNull(ctx)
+          if background.len > 0:
+            image.fill(parseHtmlColor(background).rgbx)
+            image.draw(decoded, blendMode = NormalBlend)
+          else:
+            image.draw(decoded, blendMode = OverwriteBlend)
+        if image.isNil:
+          return jsNull(ctx)
+        if keep:
+          return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
+        return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
       if sizedWidth > 0 and sizedHeight > 0:
         # At the size asked, in the canvas's format, as fetchImage's kept
         # pictures are: a browser's thumbnail of a 12-megapixel photo is a

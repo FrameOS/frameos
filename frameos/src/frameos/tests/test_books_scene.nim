@@ -134,6 +134,33 @@ writeFile(assets / "Books" / "zz-one-file.epub", makeZip([
   ("OEBPS/after.xhtml", xhtml("After", "<p>What comes after.</p>")),
 ]))
 
+# A picture book: a cover (EPUB 2's <meta name="cover">), and a chapter with
+# a line drawing on nothing (a transparent PNG, as Standard Ebooks ship
+# Tenniel's), an <svg><image> page and a picture that is not there.
+let drawing = newImage(300, 200)
+drawing.fill(rgbx(0, 0, 0, 0))
+let pen = newContext(drawing)
+pen.fillStyle = rgba(0, 0, 0, 255)
+pen.fillRect(rect(vec2(0, 0), vec2(300, 40)))
+let coverImage = newImage(120, 180)
+coverImage.fill(rgba(200, 30, 30, 255))
+writeFile(assets / "Books" / "zy-pictures.epub", makeZip([
+  ("mimetype", "application/epub+zip"),
+  ("META-INF/container.xml", container),
+  ("OEBPS/content.opf", "<package version=\"2.0\"><metadata><dc:title>Pictures</dc:title>" &
+    "<meta name=\"cover\" content=\"cov\"/></metadata><manifest>" &
+    "<item id=\"cov\" href=\"img/cover.png\" media-type=\"image/png\"/>" &
+    "<item id=\"t\" href=\"text/one.xhtml\" media-type=\"application/xhtml+xml\"/>" &
+    "<item id=\"u\" href=\"text/two.xhtml\" media-type=\"application/xhtml+xml\"/>" &
+    "</manifest><spine><itemref idref=\"t\"/><itemref idref=\"u\"/></spine></package>"),
+  ("OEBPS/img/cover.png", encodeImage(coverImage, PngFormat)),
+  ("OEBPS/img/drawing.png", encodeImage(drawing, PngFormat)),
+  ("OEBPS/text/one.xhtml", xhtml("One", "<p>Above the drawing.</p><figure><img src=\"../img/drawing.png\" alt=\"A bar\"/>" &
+    "<figcaption>A bar, drawn.</figcaption></figure><p><img src=\"../img/missing.png\" alt=\"Gone\"/></p>")),
+  ("OEBPS/text/two.xhtml", xhtml("Two", "<div><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 180\">" &
+    "<image width=\"120\" height=\"180\" xlink:href=\"../img/cover.png\"/></svg></div>")),
+]))
+
 writeFile(assets / "Books" / "broken.epub", "this is not a zip file at all")
 writeFile(assets / "notes.txt", "not a book")
 
@@ -163,7 +190,7 @@ suite "the Books scene":
     result = render(scene, context)
     inc shot
     let dir = getEnv("FRAMEOS_BOOK_SHOTS")
-    if dir.len > 0:
+    if dir.len > 0 and name.len > 0:
       createDir(dir)
       result.writeFile(dir / ($shot & "-" & name & ".png"))
     rhythmClockOverride += 1.0
@@ -378,5 +405,86 @@ suite "the Books scene":
     check scene.spot{"view"}.getStr() == "book"
     check page[400, 470] == rgbx(255, 255, 255, 255)
     noProblems()
+
+  test "a book's pictures: on the page at their shape, over the page's colour, and its cover in the library":
+    problems = @[]
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"view": "library"}
+    let library = draw(scene, config, "pictures-library")
+    # Sorted by name: broken, old-tales, the-long-walk, zy-pictures, zz-one-file.
+    # The cover sits at the left of its row, red.
+    let cover = library[16 + 10 + 20, 56 + 60 * 3 + 30]
+    check cover.r > 150 and cover.g < 80
+    scene.tap(400, 56 + 60 * 3 + 30)
+    let page = draw(scene, config, "pictures-page")
+    check scene.spot{"book"}.getStr() == "Books/zy-pictures.epub"
+    # The drawing is 300x200 laid out centred under one line of text: its bar
+    # black, the rest of it the page's colour (never black from no alpha).
+    var black = 0
+    var paperBelow = 0
+    for y in 60 ..< 400:
+      let p = page[400, y]
+      if p.r < 40 and p.g < 40 and p.b < 40: inc black
+      elif p.r > 230 and p.g > 230: inc paperBelow
+    check black >= 35
+    check black <= 60
+    check paperBelow > 200
+    # The next part: the <svg><image> page, the cover alone on it, as tall
+    # as the page.
+    scene.press("DOWN")
+    let second = draw(scene, config, "pictures-svg-page")
+    for y in [70, 240, 400]:
+      let red = second[400, y]
+      check red.r > 150 and red.g < 80
+    noProblems()
+
+  test "real books (FRAMEOS_BOOK_FILES=<a.epub>:<b.epub>, else skipped)":
+    # Books from elsewhere, read through: every chapter's first pages, the
+    # contents, timings on the way. For trying a change on books nobody made
+    # for this test; CI has none.
+    let files = getEnv("FRAMEOS_BOOK_FILES")
+    if files.len == 0:
+      skip()
+    else:
+      createDir(assets / "Real")
+      for file in files.split(':'):
+        copyFile(file, assets / "Real" / file.extractFilename)
+      for file in files.split(':'):
+        problems = @[]
+        let config = frame(800, 480)
+        let scene = load(config)
+        let path = "Real/" & file.extractFilename
+        scene.state["spot"] = %*{"view": "book", "book": path}
+        var started = epochTime()
+        discard draw(scene, config, file.extractFilename & "-open")
+        echo "  ", file.extractFilename, ": opened in ", int((epochTime() - started) * 1000), " ms"
+        check scene.spot{"view"}.getStr() == "book"
+        var slowest = 0.0
+        var turns = 0
+        var chapters = 0
+        var last = -1
+        started = epochTime()
+        while turns < 2000:
+          let before = scene.at
+          let t0 = epochTime()
+          scene.press("DOWN")
+          discard draw(scene, config, if turns < 30: file.extractFilename & "-page" else: "")
+          slowest = max(slowest, epochTime() - t0)
+          inc turns
+          if scene.at[0] != last:
+            inc chapters
+            last = scene.at[0]
+          if scene.at == before: break
+        echo "  ", file.extractFilename, ": ", turns, " pages, ", chapters, " chapters, ",
+          int((epochTime() - started) * 1000 / max(1, turns).float), " ms a page, slowest ",
+          int(slowest * 1000), " ms"
+        # Back across a chapter's start, then the contents.
+        for i in 0 ..< 3:
+          scene.press("UP")
+          discard draw(scene, config, "")
+        scene.send("keyDown", %*{"key": "Escape"})
+        discard draw(scene, config, file.extractFilename & "-library")
+        noProblems()
 
 removeDir(assets)

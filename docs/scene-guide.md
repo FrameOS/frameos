@@ -1417,7 +1417,16 @@ declare const frameos: {
    * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
   loadAssetImage(
     path: string,
-    options?: { keep?: boolean; width?: number; height?: number; fit?: "cover" | "contain" }
+    options?: {
+      keep?: boolean;
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
+      /** A picture inside a ZIP file (an EPUB's illustration or cover), as readAsset's entry (FrameOS 2026.11.11+). */
+      entry?: string;
+      /** With entry and a size: the colour under the picture's transparent parts (FrameOS 2026.11.11+). */
+      background?: string;
+    }
   ): FrameOSImageRef | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
   createStream(base64: string): FrameOSStreamRef | null;
