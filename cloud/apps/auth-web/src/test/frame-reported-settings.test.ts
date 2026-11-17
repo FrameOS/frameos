@@ -17,6 +17,23 @@ describe("settingsWithReported", () => {
     expect(settingsWithReported({}, { rotate: 0, renderScale: 0 })).toBeUndefined();
   });
 
+  it("takes the event map set on the frame's page, by value, into a mirror that holds one", () => {
+    const left = { event: "button", match: { label: "LEFT", action: "longPress" }, emit: "sceneSwitcher", as: {} };
+    const top = { event: "edgeSwipe", match: { edge: "top" }, emit: "sceneSettings", as: {} };
+    expect(settingsWithReported({ event_map: [top] }, { eventMap: [left, top] })).toEqual({ event_map: [left, top] });
+    expect(settingsWithReported({ event_map: [top] }, { eventMap: [] })).toEqual({ event_map: [] });
+    // The same rules, their keys in another order, change nothing.
+    expect(
+      settingsWithReported(
+        { event_map: [{ as: {}, emit: "sceneSettings", match: { edge: "top" }, event: "edgeSwipe" }] },
+        { eventMap: [top] },
+      ),
+    ).toBeUndefined();
+    // A mirror that never held one shows the reported map already: the board's
+    // own stays the board's.
+    expect(settingsWithReported({ rotate: 0 }, { eventMap: [left] })).toBeUndefined();
+  });
+
   it("ignores a report without them, as older firmware's, and nonsense", () => {
     expect(settingsWithReported({ rotate: 90 }, { platform: "esp32" })).toBeUndefined();
     expect(settingsWithReported({ rotate: 90 }, { rotate: 45 })).toBeUndefined();

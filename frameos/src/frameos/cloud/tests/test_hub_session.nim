@@ -287,6 +287,18 @@ suite "cloud hub session over a live socket":
           return true
       false)
 
+  test "an event map set on the frame page reaches the provider as a state":
+    # The page's Buttons rows set it in the live config (frame_settings_linux).
+    withLiveConfigLock:
+      frameConfig.eventMap = %*[{"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "render", "as": {}}]
+    noteFrameConfigChanged()
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      for state in repliesOfType("state"):
+        let map = state{"hardware"}{"eventMap"}
+        if not map.isNil and map.kind == JArray and map.len == 1 and map[0]{"emit"}.getStr() == "render":
+          return true
+      false)
+
   test "an oversized inbound message drops the session instead of allocating":
     # ws 0.5.0 would happily assemble whatever length the provider claims; the
     # client caps inbound messages at 4 MiB, closes and reconnects instead.

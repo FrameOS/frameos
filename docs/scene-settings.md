@@ -103,8 +103,8 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`; `buttons` on a frame with a key, a touch screen or an event map: `keys` (the labels of its keys: gpioButtons, the board's), `touch` (it swipes in from its edges), `voice` (a microphone) and `map`, the frame's event map as it runs it (its own, else its device's or board's) |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock`, `eventMap` (the whole map, the Buttons rows' edits in it) |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
@@ -148,6 +148,22 @@ What the page holds, top to bottom:
   an install, nothing downloaded). **Install update** asks for a second tap and
   takes the same path as the plane's own update (`fos_ota_request_for_control_plane`).
   A frame with no plane shows neither.
+- **Buttons** (a frame with a key or a touch screen): what each key and swipe
+  does whatever scene shows, the frame's event map (docs/events.md "Event
+  map") as "Button actions" in the Settings panel shows it, one select box a
+  row. A row for each key held (`LEFT held`: a long press), for each other
+  press the map binds (`BUTTON pressed twice`), and on a touch screen for the
+  swipe in from each edge. The actions are the panel's: None (no rule: the
+  scene hears it), Next scene, Previous scene, Back, Forward, Scene switcher,
+  Scene settings, Refresh, Display on / off / on/off where the display
+  switches (not e-paper), Voice chat on a key held where there is a
+  microphone, and a "Show scene" rule as it is. A press another kind of rule
+  takes (a rewrite, say) has no row, and its rule stays.
+  Save hands the host the whole map: a row's rule changed where it was, a new
+  one added at the end, a None taken out, every other rule kept. A map that
+  would leave no rule for the scene switcher or the settings, where there was
+  one, is not saved, and the page says why: on a touch screen with no keys
+  that is the only way back here.
 - **Render again**, **Restart FrameOS** (where the host lists it) and
   **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
   anything else in between asks again. They send the
@@ -163,7 +179,9 @@ it again (the ESP32 while `fos_scenes_settings_shown`, a Linux frame between
 `open` and `close`). A rotation restarts the frame on an ESP32. A new scale is
 drawn at once, this page included (the ESP32 hands it to the runtime every
 pass; a Linux frame sets it in the live config instead of reloading, which
-would rebuild every scene, this page among them).
+would rebuild every scene, this page among them). The event map is live the
+same way: the ESP32 hands it to the runtime on the next pass (and the button
+task its voice key), a Linux frame sets it in the live config.
 
 **At the frame's scale.** The settings panel and the scene switcher are laid
 out at the frame's render scale as a scene is, sized from the panel
@@ -193,18 +211,22 @@ was off can still be fixed at the frame, the device has the last word:
   another network without a reboot: `frame_host` moves under the bootup's rule
   (the claim must be the address the request came from, a hostname stays;
   `backend/app/utils/embedded_report.py`).
-- **Rotation and scale: the plane adopts them**, so the next deploy keeps what
-  the person at the frame chose:
-  - The cloud's settings mirror follows `hardware.rotate` and
-    `hardware.renderScale` in every hello and `state`, unless a `set_settings`
-    is still on its way (`settingsWithReported` in `frames.ts`, the hub's
-    `followReportedSettings`). An ESP32 sends a `state` after a scale change
+- **Rotation, scale and buttons: the plane adopts them**, so the next deploy
+  keeps what the person at the frame chose:
+  - The cloud's settings mirror follows `hardware.rotate`,
+    `hardware.renderScale` and `hardware.eventMap` in every hello and `state`,
+    unless a `set_settings` is still on its way (`settingsWithReported` in
+    `frames.ts`, the hub's `followReportedSettings`). The map is compared by
+    value, and only a mirror that holds one takes it: one that never did shows
+    the reported map already, and the board's own map stays the board's. An
+    ESP32 sends a `state` after a scale or a map change
     (`fos_cloud_request_state`); a Pi's hub client sends one when its config's
-    rotation or scale moved.
+    rotation, scale or map moved.
   - A backend takes them from the frame's log line `{"event":
-    "settings:frame", "origin": "panel", "rotate": 90, "renderScale": 1.5}`
-    onto the row and the deploy baseline, so the drawer offers nothing to
-    deploy for them (`backend/app/utils/frame_settings_adopt.py`).
+    "settings:frame", "origin": "panel", "rotate": 90, "renderScale": 1.5,
+    "eventMap": [...]}` onto the row (`event_map`, which a frame that ran its
+    device's map now holds) and the deploy baseline, so the drawer offers
+    nothing to deploy for them (`backend/app/utils/frame_settings_adopt.py`).
 - **Flashing an ESP32 again** erases its network, and the browser flasher sends
   the plane's stored one (the backend's Network settings).
 

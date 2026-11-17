@@ -219,6 +219,17 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         f = facts
       result = %*{"rotate": config.rotate, "renderScale": config.renderScale,
         "version": installedFrameOSVersion(), "actions": ["restart"]}
+      # The frame's keys (gpioButtons) and swipes, and the event map it runs
+      # (its own, else its device's: config.nim setConfigDefaults), for the
+      # Buttons rows. No microphone on a Pi: voice chat is the ESP32's.
+      var keys = newJArray()
+      for button in config.gpioButtons:
+        if button != nil and button.label.len > 0:
+          keys.add(%button.label)
+      let map = if config.eventMap.isNil or config.eventMap.kind != JArray: newJArray() else: copy(config.eventMap)
+      let touch = config.device.startsWith("pimoroni.hyperpixel")
+      if keys.len > 0 or touch or map.len > 0:
+        result["buttons"] = %*{"keys": keys, "touch": touch, "voice": false, "map": map}
       let manager = managedBy(config)
       if manager.len > 0:
         result["managedBy"] = %manager
@@ -297,6 +308,10 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
       if not scale.isNil and scale.kind in {JInt, JFloat} and scale.getFloat() >= 0 and scale.getFloat() <= 4 and
           (config.isNil or scale.getFloat() != config.renderScale):
         payload["render_scale"] = %scale.getFloat()
+      # The Buttons rows' event map, whole (frame.json eventMap).
+      let eventMap = changes{"eventMap"}
+      if not eventMap.isNil and eventMap.kind == JArray and (config.isNil or config.eventMap != eventMap):
+        payload["event_map"] = eventMap
       if payload.len == 0:
         return
       let preview = previewFrameApiUpdate(payload)
@@ -308,14 +323,20 @@ proc linuxFrameSettingsApply*(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
         line["rotate"] = payload["rotate"]
       if payload.hasKey("render_scale"):
         line["renderScale"] = payload["render_scale"]
+      if payload.hasKey("event_map"):
+        line["eventMap"] = payload["event_map"]
       log(line)
       if not payload.hasKey("rotate") and not liveConfig.isNil:
-        # The scale alone: every render reads it off the live config, so it is
+        # The scale and the event map: every render reads the scale off the
+        # live config and the dispatcher the map at every event, so they are
         # set there and drawn now. A reload would rebuild every scene, this
         # page among them, which would come back empty.
         let live {.cursor.} = cast[FrameConfig](liveConfig)
         withLiveConfigLock:
-          live.renderScale = payload["render_scale"].getFloat()
+          if payload.hasKey("render_scale"):
+            live.renderScale = payload["render_scale"].getFloat()
+          if payload.hasKey("event_map"):
+            live.eventMap = copy(payload["event_map"])
         noteFrameConfigChanged()
         sendEvent(evRender, newJObject(), eoSystem)
       else:

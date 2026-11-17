@@ -99,6 +99,47 @@ suite "the frame page on a Linux frame":
     check logged("settings:frame").len == 0
     check sent.len == 0
 
+  test "the Buttons facts: the keys, a HyperPixel's swipes, the map it runs":
+    writeFile(configPath, $(%*{"name": "Test", "mode": "rpios", "device": "web_only", "width": 800,
+      "height": 480, "gpioButtons": [{"pin": 5, "label": "A"}, {"pin": 6, "label": "B"}]}))
+    noteFrameConfigChanged()
+    var facts = linuxFrameSettingsRead()
+    check facts["buttons"]["keys"] == %*["A", "B"]
+    check not facts["buttons"]["touch"].getBool(true)
+    check facts["buttons"]["map"].len == 0
+    # A HyperPixel never given a map runs its device's (device_event_map.nim).
+    writeFile(configPath, $(%*{"name": "Test", "mode": "rpios", "device": "pimoroni.hyperpixel4", "width": 800,
+      "height": 480}))
+    noteFrameConfigChanged()
+    facts = linuxFrameSettingsRead()
+    check facts["buttons"]["touch"].getBool()
+    check facts["buttons"]["map"].len == 4
+    # Nothing to press: no section.
+    writeFile(configPath, $(%*{"name": "Test", "mode": "rpios", "device": "web_only", "width": 800,
+      "height": 480, "eventMap": []}))
+    noteFrameConfigChanged()
+    check linuxFrameSettingsRead(){"buttons"}.isNil
+
+  test "Save sets the event map in frame.json and the live config, and says so":
+    let live = FrameConfig(renderScale: 0)
+    setLiveConfigForTest(live)
+    discard logged("settings:frame")
+    sent.setLen(0)
+    let map = %*[{"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSwitcher", "as": {}}]
+    linuxFrameSettingsApply(%*{"eventMap": map})
+    check parseFile(configPath)["eventMap"] == map
+    check live.eventMap == map
+    check sent.len == 1 and sent[0][0] == evRender
+    let lines = logged("settings:frame")
+    check lines.len == 1 and lines[0]["eventMap"] == map
+    # The same map again changes nothing.
+    linuxFrameSettingsApply(%*{"eventMap": map})
+    check logged("settings:frame").len == 0
+    setLiveConfigForTest(nil)
+    writeConfig(true)
+    linuxFrameSettingsApply(%*{"renderScale": 1.5, "rotate": 90})
+    discard logged("settings:frame")
+
   test "nonsense is not saved":
     linuxFrameSettingsApply(%*{"rotate": 45, "renderScale": 9})
     let saved = parseFile(configPath)

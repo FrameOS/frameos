@@ -616,6 +616,8 @@ static bool mic_configured(void)
     return (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) || fos_codec_has_mic();
 }
 
+bool fos_voice_has_microphone(void) { return mic_configured(); }
+
 bool fos_voice_available(void)
 {
     if (!s_lock) return false;

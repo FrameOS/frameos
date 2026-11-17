@@ -265,9 +265,11 @@
   device commands from the origin `panel`. A touch LCD ESP32 (`touch_setup` in
   `main.c`) boots without waiting for Wi-Fi and never opens the hotspot: the
   page is where it joins. **No plane is ever told the Wi-Fi network** (a
-  backend learns the address alone); rotation and scale set there are ADOPTED
-  by the plane: the cloud mirror follows `hardware.rotate` / `renderScale`,
-  a backend the `settings:frame` log line (`frame_settings_adopt.py`). The
+  backend learns the address alone); rotation, scale and the Buttons rows
+  (the frame's event map, written whole) set there are ADOPTED by the plane:
+  the cloud mirror follows `hardware.rotate` / `renderScale` / `eventMap`
+  (the map by value, into a mirror that holds one), a backend the
+  `settings:frame` log line (`frame_settings_adopt.py`). The
   plane can turn the page off (`frame_settings_on_screen`); the device keeps
   the last word (a Pi's `frameos-settings-unlock` file on the boot partition,
   an ESP32's `set settings_unlock 1`).

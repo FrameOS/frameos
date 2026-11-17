@@ -33,6 +33,8 @@
 #include "fos_ota.h"
 #include "fos_rtc.h"
 #include "fos_scenes.h"
+#include "fos_touch.h"
+#include "fos_voice.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -62,8 +64,11 @@ static const char *manager(void)
 /* The page's facts as JSON, written as text: the keys are literals, and what
  * the frame says (a network's name) is escaped on its way in. A buffer of
  * JSON_CAP holds the worst case: every name in range and the saved one, 32
- * bytes each, every byte escaped to \u00XX. */
-#define JSON_CAP (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+ * bytes each, every byte escaped to \u00XX, and the Buttons facts (every key's
+ * label escaped the same way, and the event map as it is stored). */
+#define JSON_CAP                                                                                                       \
+    (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4) + FOS_GPIO_BUTTONS_MAX * (FOS_GPIO_BUTTON_LABEL_LEN * 6 + 4) +     \
+     FOS_EVENT_MAP_LEN + 64)
 
 typedef struct {
     char *buf;
@@ -176,6 +181,28 @@ char *fos_frame_settings_json(void)
         if (version[0]) put_pair(&out, "updateVersion", version);
     }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
+    /* The Buttons rows: the board's keys, its touch screen, its microphone and
+     * the event map it runs (NVS's, else the board's: fos_config.c). The map
+     * goes in as stored, which is JSON a plane or the board table wrote; one
+     * that does not parse (a console typo) goes as none rather than take the
+     * whole page with it. */
+    cJSON *map = config->event_map[0] ? cJSON_Parse(config->event_map) : NULL;
+    bool rules = cJSON_IsArray(map) && cJSON_GetArraySize(map) > 0;
+    cJSON_Delete(map);
+    bool touch = fos_touch_present();
+    if (config->gpio_button_count > 0 || touch || rules) {
+        put(&out, ",\"buttons\":{\"keys\":[");
+        for (size_t i = 0; i < config->gpio_button_count && i < FOS_GPIO_BUTTONS_MAX; i++) {
+            put_string(&out, config->gpio_buttons[i].label);
+            put(&out, ",");
+        }
+        trim_comma(&out);
+        snprintf(line, sizeof(line), "],\"touch\":%s,\"voice\":%s,\"map\":", touch ? "true" : "false",
+                 fos_voice_has_microphone() ? "true" : "false");
+        put(&out, line);
+        put(&out, rules ? config->event_map : "[]");
+        put(&out, "}");
+    }
     /* Restart is a reboot here: the page shows Reboot alone. */
     put(&out, ",\"actions\":[]}");
     return out.buf;
@@ -191,20 +218,28 @@ static void restart_task(void *arg)
 /* One `settings:frame` line for what was saved, with the values a control
  * plane adopts (a backend reads it from the log, app/models/log.py; the cloud
  * follows the hardware report instead). Never the network's name. */
-static void log_applied(const char *changes, bool rotate, bool scale)
+static void log_applied(const char *changes, bool rotate, bool scale, bool buttons)
 {
     const fos_config_t *config = fos_config();
-    char line[224];
-    int n = snprintf(line, sizeof(line), "{\"event\":\"settings:frame\",\"source\":\"esp32\",\"origin\":\"panel\","
+    /* The event map as stored (compact JSON from cJSON), whole: a backend
+     * takes it as the frame's (frame_settings_adopt.py). */
+    size_t cap = 224 + (buttons ? FOS_EVENT_MAP_LEN : 0);
+    char *line = malloc(cap);
+    if (line == NULL) return;
+    int n = snprintf(line, cap, "{\"event\":\"settings:frame\",\"source\":\"esp32\",\"origin\":\"panel\","
                      "\"changes\":\"%s\"", changes);
-    if (rotate && n > 0 && n < (int)sizeof(line)) {
-        n += snprintf(line + n, sizeof(line) - n, ",\"rotate\":%u", (unsigned)config->rotate);
+    if (rotate && n > 0 && n < (int)cap) {
+        n += snprintf(line + n, cap - n, ",\"rotate\":%u", (unsigned)config->rotate);
     }
-    if (scale && n > 0 && n < (int)sizeof(line)) {
-        n += snprintf(line + n, sizeof(line) - n, ",\"renderScale\":%g", config->render_scale_milli / 1000.0);
+    if (scale && n > 0 && n < (int)cap) {
+        n += snprintf(line + n, cap - n, ",\"renderScale\":%g", config->render_scale_milli / 1000.0);
     }
-    if (n > 0 && n < (int)sizeof(line) - 1) strlcat(line, "}", sizeof(line));
+    if (buttons && n > 0 && n < (int)cap) {
+        n += snprintf(line + n, cap - n, ",\"eventMap\":%s", config->event_map[0] ? config->event_map : "[]");
+    }
+    if (n > 0 && n < (int)cap - 1) strlcat(line, "}", cap);
     frameos_nim_log_hook(line);
+    free(line);
 }
 
 void fos_frame_settings_apply(const char *json)
@@ -276,8 +311,25 @@ void fos_frame_settings_apply(const char *json)
             clock_changed = true;
         }
     }
+    /* What the keys and swipes do (the page's Buttons rows): the whole event
+     * map, live from the next pass (fos_client.c hands it to the runtime, the
+     * button task reads its voice key off it), adopted by the plane. */
+    const cJSON *event_map = cJSON_GetObjectItem(root, "eventMap");
+    bool buttons = false;
+    if (cJSON_IsArray(event_map)) {
+        char *printed = cJSON_GetArraySize(event_map) > 0 ? cJSON_PrintUnformatted(event_map) : NULL;
+        const char *next = printed ? printed : "";
+        if (strlen(next) >= sizeof(config->event_map)) {
+            strlcpy(s_refused, "Too many button actions to keep", sizeof(s_refused));
+        } else if (strcmp(next, config->event_map) != 0) {
+            strlcpy(config->event_map, next, sizeof(config->event_map));
+            buttons = true;
+        }
+        free(printed);
+    }
     cJSON_Delete(root);
 
+    if (buttons) strlcat(changes, "buttons,", sizeof(changes));
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
     if (restart) strlcat(changes, "rotate,", sizeof(changes));
@@ -289,7 +341,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale);
+    log_applied(changes, restart, scale, buttons);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -299,7 +351,8 @@ void fos_frame_settings_apply(const char *json)
         if (xTaskCreate(restart_task, "fos_fs_restart", 2048, NULL, 5, NULL) != pdPASS) esp_restart();
         return;
     }
-    if (scale) {
+    if (scale || buttons) {
+        /* The cloud's mirror follows the report (hardware.eventMap too). */
         fos_cloud_request_state();
         fos_client_render_now();
     } else if (clock_changed) {

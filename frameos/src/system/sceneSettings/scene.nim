@@ -93,6 +93,23 @@ const
   WifiStates = ["connected", "hotspot", "notFound", "auth", "connecting", "unset"]
   WifiBefore = ["Connected to ", "Setup hotspot ", "Can't find ", "Wrong password for ", "Connecting to "]
   WifiAfter = ["", "", "", "?", "\xe2\x80\xa6"]
+  # The Buttons rows (the frame's event map, docs/events.md "Event map"): a
+  # row's field name starts with this, which no host setting's does, and its
+  # value is one of these (the first: no rule, the scene hears the press), or
+  # `ShowScene` and a scene's id: the actions the Settings panel's "Button
+  # actions" offers (frontend/src/utils/frameEventMap.ts).
+  ButtonRow = "\3"
+  ShowScene = "scene:"
+  Actions = ["none", "next", "prev", "back", "forward", "sceneSwitcher", "sceneSettings", "render", "turnOn", "turnOff",
+    "toggleScreen", "voiceChat"]
+  ActionWords = ["None", "Next scene", "Previous scene", "Back", "Forward", "Scene switcher", "Scene settings",
+    "Refresh", "Display on", "Display off", "Display on/off", "Voice chat"]
+  APower = 8 ## Actions from here to the voice chat switch a display: not e-paper's
+  Presses = ["press", "longPress", "doublePress"]
+  PressWords = [" pressed", " held", " pressed twice"]
+  Edges = ["left", "right", "top", "bottom"]
+  EdgeWords = ["Swipe in from the left", "Swipe in from the right", "Swipe down from the top",
+    "Swipe up from the bottom"]
 
 var
   # What the last handler did: its number and the text it carried. Read by
@@ -314,6 +331,169 @@ proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   if not worn.isNil and worn.id.string == held and InterpretedFrameScene(worn).publicStateFields.len > 0:
     result.put("button", newJInt(ALayout))
 
+proc sceneName(id: string): string =
+  ## A scene's name, from the host's scene list (its id without one).
+  result = id
+  if not sceneSwitcherListing.isNil:
+    try:
+      let entries = sceneSwitcherListing()
+      for i in 0 ..< entries.len:
+        if entries[i].id == id and entries[i].name.len > 0:
+          return entries[i].name
+    except Exception:
+      discard
+
+proc actionOf(rule: JsonNode): string =
+  ## What a rule the Buttons rows write means (`Actions`, or `ShowScene` and
+  ## an id); "?" for any other rule, a rewrite or one with more in its `as`,
+  ## which the rows leave alone, as "Button actions" does.
+  let
+    emit = rule{"emit"}.getStr()
+    write = rule{"as"}
+    n = if write.isNil or write.kind != JObject: 0 else: write.len
+  result = "?"
+  if emit == "setCurrentScene" and n == 1:
+    let direction = write{"direction"}.getStr()
+    if direction in ["next", "prev"]: result = direction
+    elif write{"sceneId"}.getStr().len > 0: result = ShowScene & write{"sceneId"}.getStr()
+  elif n == 0 and Actions.find(emit) >= 3:
+    result = emit
+
+proc actionWords(action: string): string =
+  if action.startsWith(ShowScene): "Show " & sceneName(action[ShowScene.len .. ^1])
+  else: ActionWords[max(Actions.find(action), 0)]
+
+proc buttonRow(self: SceneSettingsScene, info, rows, rules: JsonNode, event: string, match: JsonNode,
+    label: string, always, voice: bool) =
+  ## One row of the Buttons section: a press of a key, or a swipe in from an
+  ## edge, and a select box of what it does, as the first rule for exactly
+  ## that press has it (None without one, and then a row only when
+  ## `always`). A press another kind of rule takes has no row: that rule is
+  ## the owner's own, as in "Button actions".
+  var
+    at = -1
+    action = "none"
+    name = ButtonRow & event
+  for key, value in match.pairs:
+    name.add "\1" & value.getStr()
+  for i in 0 ..< rows.elems.len:
+    if rows.elems[i]{"name"}.getStr() == name:
+      return
+  for i in 0 ..< rules.elems.len:
+    let rule = rules.elems[i]
+    if rule{"event"}.getStr() == event and rule{"match"} == match:
+      at = i
+      action = rule.actionOf()
+      break
+  if action == "?" or (at < 0 and not always):
+    return
+  let row = field(name, label, "string")
+  let options = newJArray()
+  var listed = false
+  for i in 0 ..< Actions.len:
+    # A display switch where there is a display to switch (not e-paper), and
+    # voice chat on a key held, on a frame with a microphone.
+    if (i < APower or i == Actions.len - 1 or not self.paper) and (i < Actions.len - 1 or voice):
+      options.elems.add option(Actions[i], ActionWords[i])
+      listed = listed or Actions[i] == action
+  if not listed:
+    options.elems.add option(action, actionWords(action))
+  row.put("options", options)
+  row.put("event", newJString(event))
+  row.put("match", match)
+  row.put("at", newJInt(at))
+  info.put(name, newJString(action))
+  rows.elems.add row
+
+proc buttonFields(self: SceneSettingsScene, info, rows: JsonNode) =
+  ## The Buttons section: each of the frame's keys held (a long press; a
+  ## press is the scene's until the owner binds one, and then it is a row
+  ## too), the presses the map binds on keys the frame did not list, and on
+  ## a touch screen the swipe in from each edge. From the host's `buttons`:
+  ## its `keys`, `touch`, `voice` (a microphone: voice chat on a key held) and
+  ## the event map the frame runs, `map` (its own, else its device's).
+  let buttons = info{"buttons"}
+  if buttons.isNil or buttons.kind != JObject:
+    return
+  let
+    rules = arrayOf(buttons{"map"})
+    keys = arrayOf(buttons{"keys"})
+    voice = buttons{"voice"}.getBool()
+  for k in 0 ..< keys.elems.len:
+    let key = keys.elems[k].getStr()
+    for p in 0 ..< Presses.len:
+      self.buttonRow(info, rows, rules, "button", %*{"label": key, "action": Presses[p]}, key & PressWords[p],
+        p == 1, voice and p == 1)
+  var touch = buttons{"touch"}.getBool()
+  for i in 0 ..< rules.elems.len:
+    let
+      match = rules.elems[i]{"match"}
+      event = rules.elems[i]{"event"}.getStr()
+    if event == "edgeSwipe":
+      touch = true
+    elif event == "button" and not match.isNil and match.kind == JObject and match.len == 2:
+      let p = Presses.find(match{"action"}.getStr())
+      let label = match{"label"}
+      if p >= 0 and not label.isNil and label.kind == JString:
+        self.buttonRow(info, rows, rules, event, %*{"label": label, "action": Presses[p]},
+          label.getStr() & PressWords[p], false, voice and p == 1)
+  if touch:
+    for e in 0 ..< Edges.len:
+      self.buttonRow(info, rows, rules, "edgeSwipe", %*{"edge": Edges[e]}, EdgeWords[e], true, false)
+
+proc opensSettings(rules: JsonNode): bool =
+  ## A rule that opens the scene switcher or the settings (the switcher's
+  ## gear opens the frame page): the way back to this page.
+  for i in 0 ..< rules.elems.len:
+    if rules.elems[i]{"emit"}.getStr() in ["sceneSwitcher", "sceneSettings"]:
+      return true
+
+proc buttonMap(fields, changes, info: JsonNode): JsonNode =
+  ## The frame's event map with the Buttons rows' edits, which it takes out
+  ## of `changes`: a row's rule changed in its place, a new one added at the
+  ## end, one set to None taken out, and every other rule as it was. nil
+  ## when no row changed.
+  let rules = arrayOf(info{"buttons", "map"})
+  result = copy(rules)
+  var
+    gone: seq[int]
+    changed = false
+  for i in 0 ..< fields.elems.len:
+    let row = fields.elems[i]
+    let name = row{"name"}.getStr()
+    if not name.startsWith(ButtonRow) or changes{name}.isNil:
+      continue
+    let action = changes{name}.getStr()
+    changes.fields.del(name)
+    let at = row{"at"}.getInt(-1)
+    if at >= rules.elems.len or action == (if at < 0: "none" else: rules.elems[at].actionOf()):
+      continue
+    changed = true
+    if action == "none":
+      gone.add at
+      continue
+    let
+      rule = newJObject()
+      write = newJObject()
+    rule.put("event", row{"event"})
+    rule.put("match", row{"match"})
+    if action in ["next", "prev"]:
+      rule.put("emit", newJString("setCurrentScene"))
+      write.put("direction", newJString(action))
+    elif action.startsWith(ShowScene):
+      rule.put("emit", newJString("setCurrentScene"))
+      write.put("sceneId", newJString(action[ShowScene.len .. ^1]))
+    else:
+      rule.put("emit", newJString(action))
+    rule.put("as", write)
+    if at < 0: result.elems.add rule
+    else: result.elems[at] = rule
+  if not changed:
+    return nil
+  for i in countdown(result.elems.len - 1, 0):
+    if i in gone:
+      result.elems.delete(i)
+
 proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, unit = 0): JsonNode =
   ## The page's fields, in the shape of a scene's, from the host's facts:
   ## the network (those in range, the saved one first when it is not among
@@ -374,6 +554,7 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
     let clock = field("clock", "Date and time", "string")
     clock.put("placeholder", newJString("YYYY-MM-DD HH:MM"))
     result.elems.add clock
+  self.buttonFields(info, result)
 
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
@@ -421,13 +602,22 @@ proc save(self: SceneSettingsScene) =
   wentBack = true
   sendEvent(evSetCurrentScene, payload, eoScene)
 
-proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
+proc saveFrame(self: SceneSettingsScene, fields, info: JsonNode) =
   ## The frame page's Save: what was edited there to the host, which applies
   ## what differs from what it has (Wi-Fi joins in the background, the scale
   ## is drawn at once, a rotation restarts the frame) and takes a password
   ## alone for the saved network. The page stays up so what it did shows.
+  ## The Buttons rows go as the whole event map (`eventMap`), unless they
+  ## leave no way to open the switcher or these settings that there was.
   let changes = collect(fields, self.objectAt("frameValues"))
   self.state.put("frameValues", newJObject())
+  self.state.fields.del("buttonsNote")
+  let map = buttonMap(fields, changes, info)
+  if not map.isNil:
+    if opensSettings(arrayOf(info{"buttons", "map"})) and not opensSettings(map):
+      self.state.put("buttonsNote", newJString("Keep a button or a swipe for the scene switcher or settings"))
+    else:
+      changes.put("eventMap", map)
   let layout = changes{"layout"}
   if not layout.isNil:
     # The frame's own to keep: no host setting.
@@ -506,7 +696,7 @@ proc acting(self: SceneSettingsScene) =
     else: leave()
   elif handler == HSave:
     if self.onLayoutPage(): self.saveLayoutPage()
-    elif frame: self.saveFrame(fields)
+    elif frame: self.saveFrame(fields, info)
     else: self.save()
   elif handler == HGear:
     if self.ownWindow():
@@ -788,6 +978,15 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
+    if i > 0 and name.startsWith(ButtonRow) and not fields.elems[i - 1]{"name"}.getStr().startsWith(ButtonRow):
+      # What the frame's keys and swipes do, whatever scene shows, and why
+      # the last Save kept them.
+      result.children.add el("div", "font-bold", SvgNode(text: "Buttons"))
+      let kept = self.state{"buttonsNote"}.getStr()
+      if kept.len > 0:
+        var c = look.grey
+        c.px("text", look.size * 3 div 4)
+        result.children.add el("div", move c, SvgNode(text: kept)).role("muted")
     result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
     # A turned LCD copies every frame to its place (embedded_main.nim
     # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
@@ -915,15 +1114,7 @@ proc title(self: SceneSettingsScene): string =
   ## The scene's name, from the host's scene list (its id without one).
   if self.onLayoutPage():
     return "Layout settings"
-  result = self.opener()
-  if not sceneSwitcherListing.isNil:
-    try:
-      let entries = sceneSwitcherListing()
-      for i in 0 ..< entries.len:
-        if entries[i].id == result and entries[i].name.len > 0:
-          return entries[i].name
-    except Exception:
-      discard
+  sceneName(self.opener())
 
 proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for

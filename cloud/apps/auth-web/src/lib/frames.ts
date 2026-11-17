@@ -4,6 +4,7 @@
 // (apps/frame-hub) can share the pure helpers via direct source import.
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import {
   createDb,
@@ -630,14 +631,18 @@ export function mergeFrameSettings(
 const reportedFrameSettings: ReadonlyArray<readonly [string, string]> = [
   ["rotate", "rotate"],
   ["renderScale", "render_scale"],
+  ["eventMap", "event_map"],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is
 // nothing to change. The mirror follows the device: without this the Settings
 // panel showed a rotation the frame no longer had, and the next save pushed it
 // back. A key the mirror never had is the device's default (0) and stays
-// unwritten while the device reports 0. The hub leaves the mirror alone while
-// a push is on its way.
+// unwritten while the device reports 0. The event map (the frame page's
+// Buttons rows) is compared by value, and only a mirror that holds one takes
+// it: one that never did shows the reported map already ("Button actions"),
+// and writing the board's own map into it would make it the owner's. The hub
+// leaves the mirror alone while a push is on its way.
 export function settingsWithReported(
   stored: unknown,
   hardware: unknown,
@@ -653,7 +658,10 @@ export function settingsWithReported(
     if (value === undefined || !allowedFrameSettings.get(key)!(value)) {
       continue;
     }
-    if (settings[key] === value || (settings[key] === undefined && value === 0)) {
+    if (settings[key] === value || (settings[key] === undefined && (value === 0 || key === "event_map"))) {
+      continue;
+    }
+    if (key === "event_map" && isDeepStrictEqual(settings[key], value)) {
       continue;
     }
     next[key] = value;

@@ -16,14 +16,18 @@ type
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
     ## renderScale, battery: {percent}, managedBy, version,
-    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
+    ## actions: ["restart"…], note, buttons: {keys: [label…], touch, voice,
+    ## map: [rule…]}}: `buttons` absent on a frame with no key, no touch
+    ## screen and no event map (`map` the one the frame runs: its own, else
+    ## its device's; `voice` a microphone); `battery` absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
     ## reboot; `note` what the last Save could not do.
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
-    ## for the same network, none for another), rotate, renderScale.
+    ## for the same network, none for another), rotate, renderScale, clock,
+    ## eventMap (the frame's whole event map, the Buttons rows' edits in it).
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
     ## "open" when the page comes up, "close" when it goes, "scan" for the
     ## networks in range.

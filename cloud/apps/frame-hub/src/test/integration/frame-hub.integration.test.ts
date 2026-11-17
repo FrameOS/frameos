@@ -1535,6 +1535,29 @@ describe("What a frame reports of itself", () => {
     device.ws.close();
   });
 
+  it("the settings mirror follows the event map set on the frame page", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const top = { as: {}, emit: "sceneSettings", event: "edgeSwipe", match: { edge: "top" } };
+    const left = { as: {}, emit: "sceneSwitcher", event: "button", match: { action: "longPress", label: "LEFT" } };
+    await db.update(frames).set({ settings: { event_map: [top] } }).where(eq(frames.id, frame.id));
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { hardware: { eventMap: [top], platform: "esp32s3" } });
+    // The page's Buttons rows changed it, live: the `state` that follows says so.
+    device.send({
+      hardware: { eventMap: [top, left], platform: "esp32s3" },
+      id: randomUUID(),
+      states: { active_scene: "clock" },
+      type: "state",
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      const map = (r?.settings as Record<string, unknown> | null)?.event_map;
+      return Array.isArray(map) && map.length === 2 ? r : undefined;
+    }, "the event map from state");
+    expect(row.settings).toMatchObject({ event_map: [top, left] });
+    device.ws.close();
+  });
+
   it("leaves the mirror alone while a settings push is on its way", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     await db.update(frames).set({ settings: { rotate: 180 } }).where(eq(frames.id, frame.id));

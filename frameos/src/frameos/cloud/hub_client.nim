@@ -1976,7 +1976,8 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   # changes it — the `lan_access_set` verb, the frame's admin page — the
   # provider learns it from the next `state` message.
   var lastReportedLanAccess = lanAccessEnabled(frameConfig)
-  var lastReportedLooks = $frameConfig.rotate & "/" & $frameConfig.renderScale
+  var lastReportedLooks = $frameConfig.rotate & "/" & $frameConfig.renderScale & "/" &
+    (if frameConfig.eventMap.isNil: "" else: $frameConfig.eventMap)
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2154,9 +2155,10 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
         let (sceneId, _) = getAllPublicStates()
         let display = $frameConfig.width & "x" & $frameConfig.height
         let lanAccess = lanAccessEnabled(frameConfig)
-        # A rotation or scale set on the frame's own screen: the provider's
+        # A rotation, scale or event map set on the frame's own screen: the provider's
         # mirror follows the report (hardwarePayload).
-        let looks = $frameConfig.rotate & "/" & $frameConfig.renderScale
+        let looks = $frameConfig.rotate & "/" & $frameConfig.renderScale & "/" &
+          (if frameConfig.eventMap.isNil: "" else: $frameConfig.eventMap)
         if sceneId.string != lastActiveScene or display != lastReportedDisplay or
             lanAccess != lastReportedLanAccess or looks != lastReportedLooks:
           lastActiveScene = sceneId.string

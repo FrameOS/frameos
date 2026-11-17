@@ -706,7 +706,9 @@ the preview alike. There are two, applied in this order:
   no `eventMap`; the backend leaves the key out until the owner saves one,
   the frame API reports it as `null`, and the cloud sees it in what the frame
   reports). An empty list is a choice and stays empty. It needs no scene: it
-  is checked before the scene is looked up.
+  is checked before the scene is looked up. The person at the frame can set
+  it too, on the frame page's Buttons rows (docs/scene-settings.md), and the
+  plane adopts what they chose.
 - **The installed scene's** (`eventMap` next to `nodes` in what a frame
   receives; the backend keeps it on the installed entry of `frame.scenes`, the
   cloud on the assignment row): how one installed copy of a scene is told that

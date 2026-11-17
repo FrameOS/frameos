@@ -711,3 +711,32 @@ async def test_the_frame_page_rotation_and_scale_land_on_the_row_and_baseline(_p
                                          'renderScale': 9})
     db.refresh(frame)
     assert frame.rotate == 90 and frame.render_scale == 1.5
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_buttons_land_on_the_row_and_baseline(_pub, async_client, db, redis):
+    # The page's Buttons rows: the frame's whole event map, as it now runs it.
+    frame = await _embedded_frame(async_client, db)
+    frame.event_map = None
+    frame.last_successful_deploy = {"event_map": None, "interval": 300}
+    db.commit()
+    rules = [
+        {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
+    ]
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'buttons', 'eventMap': rules,
+    })
+    db.refresh(frame)
+    assert frame.event_map == rules
+    assert frame.last_successful_deploy == {"event_map": rules, "interval": 300}
+
+    # An empty map is a choice too; not from a scene, and never a non-list.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'eventMap': []})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'eventMap': {"a": 1}})
+    db.refresh(frame)
+    assert frame.event_map == rules
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'eventMap': []})
+    db.refresh(frame)
+    assert frame.event_map == []

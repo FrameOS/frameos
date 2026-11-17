@@ -844,6 +844,96 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsAction = nil
   echo "clock and update ok"
 
+block the_frame_page_sets_what_the_buttons_do:
+  # The Buttons section (docs/scene-settings.md "The frame page"): a row for
+  # each key held, for each press the map binds and for each swipe, its select
+  # box what the first rule for it does; Save hands the host the whole map,
+  # each row's rule changed in its place, a new one at the end, None taken out
+  # and every other rule as it was.
+  var
+    applied: seq[JsonNode]
+    map = %*[
+      {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene",
+        "as": {"direction": "prev"}},
+      {"event": "button", "match": {"label": "REFRESH", "action": "press"}, "as": {"label": "A"}},
+      {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+      {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+      {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
+      {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "setCurrentScene", "as": {"sceneId": "scenes/weather"}}]
+    keys = %*["LEFT", "RIGHT", "REFRESH"]
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"rotate": 0, "renderScale": 0, "version": "2026.11.10",
+        "buttons": {"keys": keys, "touch": false, "voice": true, "map": map}}
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} = discard
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  var image = scene.draw()
+  scene.scrollTo(400)
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-buttons.png")
+  # Rotation, scale, then the rows: LEFT, RIGHT and REFRESH held, BUTTON
+  # pressed twice (a key the map names), and the four swipes (an edge rule
+  # makes it a touch screen). REFRESH pressed is the owner's rewrite: no row.
+  let rowNames = ["LEFT\1longPress", "RIGHT\1longPress", "REFRESH\1longPress", "BUTTON\1doublePress"]
+  # LEFT held is now the scene switcher, REFRESH held nothing, a swipe in from
+  # the left back, and BUTTON pressed twice as it was.
+  scene.state["frameValues"] = %*{
+    "\3button\1" & rowNames[0]: "sceneSwitcher", "\3button\1" & rowNames[2]: "none",
+    "\3edgeSwipe\1left": "back", "\3button\1" & rowNames[3]: "sceneSwitcher"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1, $applied
+  doAssert applied[0] == %*{"eventMap": [
+    {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "sceneSwitcher", "as": {}},
+    map[1], map[3], map[4], map[5],
+    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}}]}, $applied[0]
+  doAssert scene.state["frameValues"].len == 0
+  # A map that would leave no way to the switcher or these settings is kept,
+  # and the page says why.
+  map = %*[{"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}}]
+  keys = newJArray()
+  discard scene.draw()
+  scene.state["frameValues"] = %*{"\3edgeSwipe\1top": "render"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1, $applied
+  doAssert scene.state{"buttonsNote"}.getStr().len > 0
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-buttons-kept.png")
+  # Another way back makes it fine.
+  scene.state["frameValues"] = %*{"\3edgeSwipe\1top": "render", "\3edgeSwipe\1bottom": "sceneSwitcher"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 2 and applied[1] == %*{"eventMap": [
+    {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "render", "as": {}},
+    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}}]}, $applied[1]
+  doAssert scene.state{"buttonsNote"}.isNil
+  # A row the map does not have and the host did not list is no row: RIGHT
+  # held is gone with the key, and no swipe on a frame with no touch screen.
+  map = newJArray()
+  discard scene.draw()
+  scene.state["frameValues"] = %*{"\3button\1" & rowNames[1]: "next", "\3edgeSwipe\1left": "back"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 2, $applied
+  # The frame's keys are rows even before a rule names them.
+  keys = %*["RIGHT"]
+  discard scene.draw()
+  scene.state["frameValues"] = %*{"\3button\1" & rowNames[1]: "next"}
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 3 and applied[2] == %*{"eventMap": [{"event": "button",
+    "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}}]},
+    $applied
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+  echo "buttons ok"
+
 block a_layout_theme:
   # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its
   # colors, Cancel as boxes inside each other that take its press as a whole.

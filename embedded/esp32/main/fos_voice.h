@@ -32,6 +32,9 @@ void fos_voice_init(void);
 /* This frame can take a session: voice chat on, microphone pins set, a
  * control plane to send to, and no session running. */
 bool fos_voice_available(void);
+/* The board has a microphone (PDM pins or a codec's), whatever `voice_chat`
+ * says: the frame page offers voice chat on a key held. */
+bool fos_voice_has_microphone(void);
 /* The voice key held: start listening. False when fos_voice_available() is
  * false (the caller sounds the refusal). Returns at once. */
 bool fos_voice_begin(void);
