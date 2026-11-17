@@ -277,6 +277,10 @@ static int cmd_status(int argc, char **argv)
         printf("assets_flash: on the state partition, %lld KB free for assets\n",
                (long long)(fos_assets_flash_free_bytes() / 1024));
     }
+    if (fos_assets_internal_active()) {
+        printf("internal:    %s, on the state partition, %lld KB free\n", FOS_ASSETS_INTERNAL_PATH,
+               (long long)(fos_assets_flash_free_bytes() / 1024));
+    }
     if (fos_assets_sd_last_error()[0]) {
         printf("sd_error:    %s\n", fos_assets_sd_last_error());
     }

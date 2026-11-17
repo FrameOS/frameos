@@ -606,6 +606,17 @@ proc uncompressStreamZlib*(
   var b = initBitStreamReader(pull)
   uncompressZlibFrom(onData, b)
 
+proc uncompressStreamDeflate*(
+  onData: InflateOnData,
+  pull: InflatePull
+) {.raises: [PixieError].} =
+  ## Uncompresses a raw deflate stream (no zlib header or trailer: a ZIP
+  ## member's data) whose input arrives on demand from `pull`, as the zlib
+  ## overload does. onData may raise to stop early: nothing past the bytes it
+  ## has been handed is decompressed.
+  var b = initBitStreamReader(pull)
+  inflateStream(onData, b)
+
 proc uncompressStreamZlib*(
   onData: InflateOnData,
   src: pointer,

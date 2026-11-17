@@ -31,8 +31,8 @@ type Ui = object
   owner: AppRoot
   scene: FrameScene
 
-proc newUi(source: string, id: string, width = 200, height = 100): Ui =
-  let config = FrameConfig(width: width, height: height, rotate: 0, scalingMode: "cover", debug: true,
+proc newUi(source: string, id: string, width = 200, height = 100, device = ""): Ui =
+  let config = FrameConfig(device: device, width: width, height: height, rotate: 0, scalingMode: "cover", debug: true,
     saveAssets: %*false, assetsPath: "/tmp")
   result.scene = FrameScene(id: id.SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
   result.owner = AppRoot(nodeId: 1.NodeId, nodeName: "ui", scene: result.scene, frameConfig: config)
@@ -73,6 +73,35 @@ suite "jsx events":
     # The span inside takes the tap to the element with the handler.
     check dispatchUiEvent("tests/jsx-click", "tap", at(72, 37))
     check ui.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
+
+  test "on e-paper a hold on what only clicks is a click; what has onLongPress keeps its hold":
+    # No press shows on a slow panel, so people hold until something does.
+    let fast = newUi(counter, "tests/jsx-hold-fast")
+    discard fast.render()
+    check not uiListens("tests/jsx-hold-fast", "longPress") # a phone's rule: a long press is no click
+    check not dispatchUiEvent("tests/jsx-hold-fast", "longPress", at(100, 50, "touch"))
+    check fast.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
+    let ui = newUi(counter, "tests/jsx-hold", device = "waveshare.EPD_7in5_V2")
+    check ui.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
+    check uiListens("tests/jsx-hold", "longPress")
+    check dispatchUiEvent("tests/jsx-hold", "longPress", at(100, 50, "touch"))
+    check ui.render()[100, 50] == rgbx(0x22, 0xc5, 0x5e, 255) # one click
+    check not dispatchUiEvent("tests/jsx-hold", "longPress", at(10, 10, "touch")) # beside it
+    let both = newUi("""
+      let clicks = 0
+      let holds = 0
+      export function get(app) {
+        return (
+          <div className="flex bg-white">
+            <div className={`w-20 h-10 ${clicks ? 'bg-green-500' : holds ? 'bg-blue-500' : 'bg-red-500'}`}
+              onClick={() => { clicks++ }} onLongPress={() => { holds++ }} />
+          </div>
+        )
+      }
+    """, "tests/jsx-hold-both", device = "waveshare.EPD_7in5_V2")
+    discard both.render()
+    check dispatchUiEvent("tests/jsx-hold-both", "longPress", at(10, 5, "touch"))
+    check both.render()[10, 5] == rgbx(0x3b, 0x82, 0xf6, 255) # held, not clicked
 
   test "a scene loaded again takes its taps to its new app":
     # Switched away and back: the scene and its app are new, the UI's target

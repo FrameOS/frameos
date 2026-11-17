@@ -49,7 +49,15 @@ static const char *TAG = "fos_assets_flash";
 #define FLASH_FULL_MAX 64
 #define FLASH_SEEN_MAX 32
 
-static bool s_active = false;
+static bool s_active = false;   /* the assets path is on the flash */
+static bool s_internal = false; /* FOS_ASSETS_INTERNAL_PATH is mounted */
+/* Where the VFS is registered: the frame's internal storage
+ * (FOS_ASSETS_INTERNAL_PATH) on every board with the state partition, and the
+ * assets path too on a board with no card slot in use. The same operations
+ * behind each: ESP-IDF hands them the path below the prefix. */
+#define FLASH_MOUNTS_MAX 2
+static char s_mounts[FLASH_MOUNTS_MAX][16];
+static int s_mount_count = 0;
 static int s_fds[FLASH_MAX_FDS];
 static SemaphoreHandle_t s_lock = NULL;
 
@@ -388,14 +396,21 @@ static int fv_closedir(DIR *pdir)
 
 esp_err_t fos_assets_flash_mount(const char *assets_path)
 {
-    if (s_active) return ESP_OK;
+    for (int i = 0; i < s_mount_count; i++) {
+        if (strcmp(s_mounts[i], assets_path) == 0) return ESP_OK;
+    }
+    if (s_mount_count >= FLASH_MOUNTS_MAX || strlen(assets_path) >= sizeof(s_mounts[0])) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (partition_free() < 0) {
         ESP_LOGW(TAG, "state partition not mounted; no assets");
         return ESP_ERR_INVALID_STATE;
     }
-    s_lock = xSemaphoreCreateMutex();
-    if (!s_lock) return ESP_ERR_NO_MEM;
-    for (int i = 0; i < FLASH_MAX_FDS; i++) s_fds[i] = -1;
+    if (!s_lock) {
+        s_lock = xSemaphoreCreateMutex();
+        if (!s_lock) return ESP_ERR_NO_MEM;
+        for (int i = 0; i < FLASH_MAX_FDS; i++) s_fds[i] = -1;
+    }
     esp_vfs_t vfs = {
         .flags = ESP_VFS_FLAG_DEFAULT,
         .open = fv_open,
@@ -418,9 +433,10 @@ esp_err_t fos_assets_flash_mount(const char *assets_path)
         ESP_LOGW(TAG, "could not mount assets at %s: %s", assets_path, esp_err_to_name(err));
         return err;
     }
-    s_active = true;
-    ESP_LOGI(TAG, "no SD card: assets at %s live on the state partition (%lld KB free for them, "
-                  "paths up to %d bytes)",
+    strlcpy(s_mounts[s_mount_count++], assets_path, sizeof(s_mounts[0]));
+    if (strcmp(assets_path, FOS_ASSETS_INTERNAL_PATH) == 0) s_internal = true;
+    else s_active = true;
+    ESP_LOGI(TAG, "%s lives on the state partition (%lld KB free for files, paths up to %d bytes)",
              assets_path, (long long)(fos_assets_flash_free_bytes() / 1024), FLASH_PATH_MAX);
     return ESP_OK;
 }
@@ -430,9 +446,14 @@ bool fos_assets_flash_active(void)
     return s_active;
 }
 
+bool fos_assets_internal_active(void)
+{
+    return s_internal;
+}
+
 int64_t fos_assets_flash_free_bytes(void)
 {
-    if (!s_active) return -1;
+    if (!s_active && !s_internal) return -1;
     int64_t free_bytes = partition_free();
     if (free_bytes < 0) return -1;
     return free_bytes > FLASH_RESERVE ? free_bytes - FLASH_RESERVE : 0;

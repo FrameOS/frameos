@@ -315,7 +315,7 @@ template typesIn(r: UiRegion): bool =
   ## A field that holds text: an <input> or a <textarea>, not a <select>.
   r.field > 0 and r.field < 4
 
-proc wants(r: UiRegion, event: string): bool =
+proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
   case event
   of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0 or r.scrolls
   of "pointerDown", "pointerUp", "pointerCancel":
@@ -325,8 +325,10 @@ proc wants(r: UiRegion, event: string): bool =
       (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
   of "longPress", "doubleTap":
-    # A field: the word there is selected, as on a phone.
-    r.typesIn or r.handlers[UiEvent(handlerKind(event))] > 0
+    # A field: the word there is selected, as on a phone. On a slow panel a
+    # hold on what only clicks is its click (dispatchUiEvent).
+    r.typesIn or r.handlers[UiEvent(handlerKind(event))] > 0 or
+      event == "longPress" and slowPanel and r.handlers[ueClick] > 0
   of "wheel": r.scrolls
   else:
     let kind = handlerKind(event)
@@ -354,7 +356,7 @@ proc uiListens*(sceneId, event: string): bool =
       if event == "uiTimer" and target.timerPending:
         return true
       for r in target.regions:
-        if r.wants(event):
+        if r.wants(event, target.input.slow):
           return true
 
 proc keyboardAt*(sceneId: string, x, y: float32): bool =
@@ -1012,7 +1014,7 @@ proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
       if r.inside(lx, ly):
         if r.scene:
           break
-        if r.wants(event):
+        if r.wants(event, target.input.slow):
           return true
 
 proc uiHoldsPointer*(sceneId: string, pointer: int): bool =
@@ -1183,6 +1185,23 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       scale = if target.scale > 0: target.scale else: 1'f32
       lx = (x - target.offsetX) / scale
       ly = (y - target.offsetY) / scale
+    # On a slow panel a hold on what only clicks is a click: no press shows
+    # there (showsPress below), so people hold until something does, and a
+    # hold was a longPress that clicked nothing. A fast panel keeps a phone's
+    # rule: a long press is no click. What has its own onLongPress, a field (the
+    # word there is selected) and the keyboard's keys (their accents) keep it.
+    var kind = kind
+    if kind == ord(ueLongPress) and placed and target.input.slow:
+      for i in countdown(target.regions.high, 0):
+        let r = target.regions[i]
+        if r.overScene(lx, ly):
+          break
+        if r.inside(lx, ly) and (r.handlers[ueLongPress] > 0 or r.handlers[ueClick] > 0 or r.field > 0):
+          # A field keeps its hold: the word there is selected.
+          if r.handlers[ueLongPress] == 0 and r.field == 0 and
+              r.handlers[ueClick] > 0 and r.handlers[ueClick] - 1 < KeyBase:
+            kind = ord(ueClick)
+          break
     # A press on a box that scrolls drags it once it moves: from then on the
     # moves scroll it and press nothing.
     if target.dragKey >= 0 and target.dragPointer == pointer and (follows or down):

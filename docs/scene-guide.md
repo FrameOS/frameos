@@ -1107,6 +1107,10 @@ interface FrameOSApp {
     height: number;
     rotate: number;
     assetsPath: string;
+    /** The places the asset calls reach, each with the name to show it by. The assets folder ("assets", the
+     * default) and, on an ESP32 with a TF card in, its internal storage ("internal") beside it. Pass an id as
+     * listAssets', readAsset's and loadAssetImage's storage option (FrameOS 2026.11.11+; undefined before). */
+    storages?: { id: "assets" | "internal"; name: string }[];
     timeZone: string;
     /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
     debug?: boolean;
@@ -1403,10 +1407,18 @@ declare const frameos: {
   };
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
    * ending in "/" (FrameOS 2026.11.8+). */
-  listAssets(dir?: string, options?: { shallow?: boolean }): string[];
+  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
-  readAsset(path: string, options?: { offset?: number; length?: number }): string | null;
+  /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its
+   * ends). entry reads that member of a ZIP file instead (an EPUB's chapter, inflated by the frame a window at a
+   * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
+   * A slice over the frame's limit (2 MB on an ESP32) is null: read it in parts with offset and length
+   * (entry and text: FrameOS 2026.11.11+). */
+  readAsset(
+    path: string,
+    options?: { offset?: number; length?: number; text?: boolean; entry?: string; storage?: "assets" | "internal" }
+  ): string | null;
   writeAsset(path: string, base64: string): boolean;
   appendAsset(path: string, base64: string): boolean;
   deleteAsset(path: string): boolean;
@@ -1417,7 +1429,18 @@ declare const frameos: {
    * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
   loadAssetImage(
     path: string,
-    options?: { keep?: boolean; width?: number; height?: number; fit?: "cover" | "contain" }
+    options?: {
+      keep?: boolean;
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
+      /** A picture inside a ZIP file (an EPUB's illustration or cover), as readAsset's entry (FrameOS 2026.11.11+). */
+      entry?: string;
+      /** With entry and a size: the colour under the picture's transparent parts (FrameOS 2026.11.11+). */
+      background?: string;
+      /** Which of app.frame.storages the path is in (FrameOS 2026.11.11+). */
+      storage?: "assets" | "internal";
+    }
   ): FrameOSImageRef | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
   createStream(base64: string): FrameOSStreamRef | null;

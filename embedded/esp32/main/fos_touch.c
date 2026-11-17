@@ -660,11 +660,15 @@ esp_err_t fos_touch_start(void)
     }
     /* Core 0: on an RGB LCD core 1 is the render task's and the panel's
      * refill interrupt's (fos_client.c), and a poll every 10 ms must not
-     * take turns there. */
+     * take turns there. Above the render task (5): a press wakes that task
+     * from here, and it ran its render on this core, so the lift was read,
+     * and stamped, only once the render was done: on the reTerminal Sticky a
+     * quick tap on Start was a 4.5 s long press and clicked nothing
+     * (2026-11-17). What this task does a poll is an I2C read and a queue. */
 #if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
-    if (xTaskCreatePinnedToCore(touch_task, "fos_touch", 3072, NULL, 4, NULL, 0) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreatePinnedToCore(touch_task, "fos_touch", 3072, NULL, 6, NULL, 0) != pdPASS) return ESP_ERR_NO_MEM;
 #else
-    if (xTaskCreate(touch_task, "fos_touch", 3072, NULL, 4, NULL) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(touch_task, "fos_touch", 3072, NULL, 6, NULL) != pdPASS) return ESP_ERR_NO_MEM;
 #endif
     s_present = true;
     char line[256];

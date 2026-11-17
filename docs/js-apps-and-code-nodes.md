@@ -101,7 +101,14 @@ calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `makeAssetFolder`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
 `streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out; see "Big
-text" below for text a line at a time). Asset
+text" below for text a line at a time). `readAsset(path, {text: true})` gives
+the bytes as a string instead of base64, and `{entry: "OEBPS/ch1.xhtml"}`
+reads one member of a ZIP file (an EPUB, an .odt), inflated by the frame a
+window at a time so only the slice asked for is held
+(`frameos/src/frameos/utils/zip_entry.nim`; the Books sample reads its
+chapters so). `loadAssetImage(path, {entry, width, height, background})`
+decodes a picture inside a ZIP the same way, at the size asked, over
+`background` where it is transparent (an ESP32's canvas has no alpha). Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,

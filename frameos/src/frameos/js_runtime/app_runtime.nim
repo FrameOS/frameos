@@ -10,6 +10,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/line_reader
+import frameos/utils/zip_entry
 import frameos/spool
 import lib/tz
 from chrono import findTimeZone, findDstChanges, valid
@@ -603,6 +604,26 @@ proc utf8Boundary(s: string, index: int): int =
   while result > 0 and result < s.len and (s[result].uint8 and 0xC0) == 0x80:
     dec result
 
+proc utf8Whole*(s: string, cutStart: bool): string =
+  ## A slice of text without the halves of characters at its ends: a
+  ## `readAsset(..., {text: true})` slice read at an offset may start inside
+  ## one (cutStart), and any slice may end inside another.
+  var first = 0
+  if cutStart:
+    while first < s.len and first < 3 and (s[first].uint8 and 0xC0) == 0x80:
+      inc first
+  var last = s.len
+  # The lead byte of the last character, and whether its sequence fits.
+  var i = s.len - 1
+  while i > first and s.len - i < 4 and (s[i].uint8 and 0xC0) == 0x80:
+    dec i
+  if i >= first and s.len > first:
+    let lead = s[i].uint8
+    let need = if lead >= 0xF0: 4 elif lead >= 0xE0: 3 elif lead >= 0xC0: 2 else: 1
+    if s.len - i < need:
+      last = i
+  if first == 0 and last == s.len: s else: s[first ..< last]
+
 proc findSnippets*(body, needle: string, length, limit: int): JsonNode =
   ## The text at each occurrence of `needle` (needle included), `length`
   ## bytes at most, for `httpRequest`'s `find`. Lets a JS app scrape a page
@@ -988,12 +1009,44 @@ proc attrFloat(node: SvgNode, name: string): float32 =
 proc closeLineStreams(runtime: JsAppRuntime)
 include frameos/js_runtime/js_async
 
-proc assetsRoot(e: JsAppEvalEnv): string =
+var
+  storageInternalPath* = ""
+    ## The frame's internal storage beside its assets folder, where it has one
+    ## (an ESP32's state partition at /srv/internal, fos_assets_flash.c; set
+    ## once at boot by the firmware, embedded_runtime's
+    ## fos_nim_set_storages_impl). "" on a Pi and in the browser.
+  storageCardMounted* = false
+    ## Whether the assets folder is a card that mounted (an ESP32's TF slot).
+
+proc frameStorages*(): JsonNode =
+  ## `app.frame.storages`: the places a JS app's asset calls reach, each with
+  ## the name to show it by, the assets folder (`storage` "assets", the
+  ## default) first. The internal storage is listed only where it is not the
+  ## assets folder itself: an ESP32 with no card uses it for both.
+  if storageInternalPath.len > 0 and storageCardMounted:
+    %*[{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal storage"}]
+  elif storageInternalPath.len > 0:
+    %*[{"id": "internal", "name": "Internal storage"}]
+  elif storageCardMounted:
+    %*[{"id": "assets", "name": "TF card"}]
+  else:
+    %*[{"id": "assets", "name": "Internal storage"}]
+
+proc assetsRoot(e: JsAppEvalEnv, storage = ""): string =
   ## The sandbox root for this app's asset calls: the frame-wide assets
   ## folder, or the scene's own subtree for an app that asks for no assets
   ## permission (agOwnFolder) and for every app on a frame whose
-  ## `js.assetSandbox` is "scene".
+  ## `js.assetSandbox` is "scene". `storage` "internal" is the frame's
+  ## internal storage (frameStorages), for an app with the assets permission
+  ## on a frame that has one; "" where it has none.
   let frameConfig = e.owner.frameConfig
+  if storage == "internal":
+    if storageInternalPath.len == 0 or e.runtime.assetGrant == agOwnFolder or
+        (frameConfig != nil and frameConfig.js != nil and frameConfig.js.assetSandbox == "scene"):
+      return ""
+    return storageInternalPath
+  elif storage.len > 0 and storage != "assets":
+    return ""
   result = if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets"
            else: frameConfig.assetsPath
   result.removeSuffix('/')
@@ -1016,7 +1069,7 @@ proc containsPathTraversal(relPath: string): bool =
       return true
   return false
 
-proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false): string =
+proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false, storage = ""): string =
   ## Absolute path inside the assets folder, or "" when the path is empty,
   ## absolute, or escapes the folder, or is a `write` from an app that asks
   ## only to read the folder (agRead). One check here rather than one per
@@ -1029,7 +1082,9 @@ proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false): string =
   if relPath.len == 0 or relPath.startsWith("/") or relPath.isAbsolute() or
       containsPathTraversal(relPath) or (write and e.runtime.assetGrant == agRead):
     return ""
-  let root = assetsRoot(e)
+  let root = assetsRoot(e, storage)
+  if root.len == 0:
+    return ""
   let full = normalizedPath(root / relPath)
   if not (full == root or full.startsWith(root & "/")):
     return ""
@@ -1108,8 +1163,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   ## Asset management scoped to the frame's assets folder. Ops:
   ## list (dir, options JSON {shallow} -> JSON array of relative paths: every
   ## file below, or with shallow the folder's own entries, a folder's with a
-  ## trailing "/"), exists, size, read (options JSON {offset, length} ->
-  ## base64), write/append (path, base64), delete, image (options JSON {keep,
+  ## trailing "/"), exists, size, read (options JSON {offset, length, text,
+  ## entry} -> base64, or a string with text; entry reads that member of a
+  ## ZIP file, utils/zip_entry.nim), write/append (path, base64), delete, image (options JSON {keep,
   ## width, height, fit} -> imageRef decoded within display bounds, or at that
   ## size, as fetchImage's are).
   let e = env(ctx)
@@ -1122,10 +1178,12 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   try:
     case opStr
     of "list":
-      let root = assetsRoot(e)
-      let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
+      let options = optionsArg(ctx, data)
+      let storage = options{"storage"}.getStr()
+      let root = assetsRoot(e, storage)
+      let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = storage)
       var files: seq[string] = @[]
-      let shallow = toNimString(ctx, data).contains("\"shallow\":true")
+      let shallow = options{"shallow"}.getBool(false)
       if dir.len > 0 and dirExists(dir):
         # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
         # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
@@ -1155,13 +1213,34 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         return nimIntToJS(ctx, -1)
       return nimFloatToJS(ctx, getFileSize(full).float)
     of "read":
-      let full = resolveAssetPath(e, pathStr)
+      let options = optionsArg(ctx, data)
+      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
       if full.len == 0 or not fileExists(full):
         return jsNull(ctx)
-      let options = optionsArg(ctx, data)
-      let fileSize = getFileSize(full)
       let offset = max(0, options{"offset"}.getInt(0))
       let readMax = jsAssetReadMaxBytes(e)
+      # text: the bytes as a string (UTF-8, without the halves of characters
+      # a slice cuts at its ends) instead of base64.
+      let asText = options{"text"}.getBool(false)
+      if options{"entry"}.getStr().len > 0:
+        # One member of a ZIP (an EPUB's chapter), inflated a window at a
+        # time: only the slice asked for is ever held.
+        let entry = options{"entry"}.getStr()
+        try:
+          let contents = readZipEntry(full, entry, offset, options{"length"}.getInt(-1), readMax)
+          return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
+        except ZipEntryTooBig as error:
+          frameos_apps.logError(e.owner,
+            "JS app readAsset: " & pathStr & " entry " & entry & " slice is " & $error.size &
+            " bytes, over the " & $readMax & " byte limit; read it in chunks" &
+            " with {offset, length}")
+          return jsNull(ctx)
+        except ZipEntryError:
+          # Not a ZIP, no such member, a damaged one: null, as for a file
+          # that is not there. What the file is is the app's to say (a
+          # library shows "not an EPUB" on the book), not the frame's log.
+          return jsNull(ctx)
+      let fileSize = getFileSize(full)
       var length = options{"length"}.getInt(int(fileSize) - offset)
       length = min(length, int(fileSize) - offset)
       if length <= 0:
@@ -1180,7 +1259,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       var contents = newString(length)
       let bytesRead = file.readBuffer(addr contents[0], length)
       contents.setLen(bytesRead)
-      return nimStringToJS(ctx, encode(contents))
+      return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
     of "write", "append":
       let contents = decode(toNimString(ctx, data))
       return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
@@ -1201,9 +1280,6 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         return nimBoolToJS(ctx, false)
       return nimBoolToJS(ctx, not existsOrCreateDir(full))
     of "image":
-      let full = resolveAssetPath(e, pathStr)
-      if full.len == 0 or not fileExists(full):
-        return jsNull(ctx)
       var options = newJObject()
       try:
         let optionsStr = toNimString(ctx, data)
@@ -1211,11 +1287,58 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
           options = parseJson(optionsStr)
       except CatchableError:
         discard
+      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
+      if full.len == 0 or not fileExists(full):
+        return jsNull(ctx)
       let
         keep = options{"keep"}.getBool(false)
         sizedWidth = options{"width"}.getInt(0)
         sizedHeight = options{"height"}.getInt(0)
+        entry = options{"entry"}.getStr()
+        background = options{"background"}.getStr()
       var image: Image
+      if entry.len > 0:
+        # A picture inside a ZIP (an EPUB's illustration): the member whole,
+        # under the read limit, decoded at the size asked (a JPEG scaled as
+        # it decodes, a PNG a row at a time) into a picture of its own, then
+        # put over `background` where it is transparent: a canvas without
+        # alpha (an ESP32's) would otherwise show those parts black.
+        var member: string
+        try:
+          member = readZipEntry(full, entry, 0, -1, jsAssetReadMaxBytes(e))
+        except ZipEntryError:
+          return jsNull(ctx)
+        if member.len == 0:
+          return jsNull(ctx)
+        if sizedWidth <= 0 or sizedHeight <= 0:
+          image = decodeImageWithDisplayBounds(member)
+        else:
+          let
+            context = e.context
+            like =
+              if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+              elif context.isNil: nil
+              else: context.contextImage()
+          var decoded = newImage(sizedWidth, sizedHeight)
+          discard decodeImageWithFallback(member, decoded,
+            if options{"fit"}.getStr("cover") == "contain": fitContain else: fitCover)
+          member = ""
+          image =
+            if keep: e.runtime.keptPictureTarget(e.owner, like, sizedWidth, sizedHeight, (0, 0))
+            elif like.isNil: newImage(sizedWidth, sizedHeight)
+            else: newImageLike(like, sizedWidth, sizedHeight)
+          if image.isNil:
+            return jsNull(ctx)
+          if background.len > 0:
+            image.fill(parseHtmlColor(background).rgbx)
+            image.draw(decoded, blendMode = NormalBlend)
+          else:
+            image.draw(decoded, blendMode = OverwriteBlend)
+        if image.isNil:
+          return jsNull(ctx)
+        if keep:
+          return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
+        return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
       if sizedWidth > 0 and sizedHeight > 0:
         # At the size asked, in the canvas's format, as fetchImage's kept
         # pictures are: a browser's thumbnail of a 12-megapixel photo is a
@@ -1639,6 +1762,8 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
   of "assetsPath":
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
+  of "storages":
+    return jsonToJS(ctx, frameStorages())
   of "timeZone":
     return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
   of "debug":
@@ -1783,7 +1908,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "fast",
+    keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
       "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
@@ -3565,7 +3690,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   of JBool:
     return VBool(payload.getBool())
   of JInt:
-    return VInt(payload.getInt())
+    return VInt(payload.getBiggestInt().int64)
   of JFloat:
     return VFloat(payload.getFloat())
   of JObject, JArray:

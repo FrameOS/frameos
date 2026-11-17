@@ -1,0 +1,10 @@
+{
+  "name": "Books",
+  "description": "EPUB books from the frame's card, read on the frame: a library of every .epub on it with their covers, pages laid out to fit the screen (two columns on a wide one) with the books' own pictures, the contents, the text size, and each book opened where you left it. Tap or swipe to turn pages, or use the keys.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
