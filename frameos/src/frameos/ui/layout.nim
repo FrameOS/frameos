@@ -2174,68 +2174,69 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
     memo.accents = shown
   true
 
-proc selectionChrome(at: array[2, UiRegion], seen, width, height: int, input: var UiInput,
-    drawn: var seq[SvgNode], gradients: var int, regions: var seq[UiRegion]) =
-  ## A selection made by touch, `at` its start and end as its field showed
-  ## them (`seen`: 1 the start, 2 the end; an end scrolled out of sight is
-  ## not): a handle under each end that shows (ui/events.nim drags them,
-  ## SelectBase + 0 and + 1), and its menu over it, or under it without room
-  ## (Cut and Copy with text selected and no password, Paste with something
-  ## on the clipboard, Select all with more to select).
+proc selectionChrome(at: array[2, array[3, float32]], seen: array[2, bool], width, height: int,
+    input: var UiInput, drawn: var seq[SvgNode], gradients: var int, regions: var seq[UiRegion]) =
+  ## A selection made by touch, `at` its start and end (x, top, line height)
+  ## as its field showed them (`seen`: an end scrolled out of sight is not;
+  ## its place is the other's): a handle under each end that shows
+  ## (ui/events.nim drags them, SelectBase + 0 and + 1), and its menu over
+  ## it, or under it without room (Cut and Copy with text selected and no
+  ## password, Paste with something on the clipboard, Select all with more
+  ## to select). Plain numbers, not regions: on an ESP32 every region copied
+  ## is a hundred bytes of code.
   let
-    lineH = max(at[0].h, at[1].h)
+    lineH = max(at[0][2], at[1][2])
     radius = clamp(round(lineH * 0.4), 7, 14)
-    ink = if input.paper: rgba(0, 0, 0, 255) else: rgba(14, 165, 233, 255) # sky-500
     (a, z) = input.selected
   var lowest = 0'f32
   if z > a and input.handles:
+    let knobs = SvgNode(tag: "path", path: newPath())
     for e in 0 .. 1:
-      if (seen and (1 shl e)) == 0:
+      if not seen[e]:
         continue
       let
-        r = at[e]
-        x = r.x
-        bottom = r.y + r.h
-        knob = SvgNode(tag: "path", path: newPath())
+        x = at[e][0]
+        bottom = at[e][1] + at[e][2]
       # A bar on the end and a knob under it, leaning out of the selection
       # (left at its start, right at its end), so two that meet both show.
-      knob.path.rect(x - 1, r.y, 2, r.h)
-      knob.path.circle(x + (if e == 0: -0.7 else: 0.7) * radius, bottom + radius, radius)
-      knob.paint(ink, 1)
-      drawn.add knob
+      knobs.path.rect(x - 1, at[e][1], 2, at[e][2])
+      knobs.path.circle(x + float32(e * 2 - 1) * 0.7 * radius, bottom + radius, radius)
       lowest = max(lowest, bottom + 2 * radius)
-      var handle = UiRegion(x: x - 2 * radius, y: bottom - r.h / 2, w: 4 * radius, h: r.h / 2 + 2.5 * radius,
-        key: EndsKey + e)
+      regions.setLen(regions.len + 1)
+      template handle: untyped = regions[^1]
+      handle.x = x - 2 * radius
+      handle.y = bottom - at[e][2] / 2
+      handle.w = 4 * radius
+      handle.h = at[e][2] / 2 + 2.5 * radius
+      handle.key = EndsKey + e
       handle.visible = [handle.x, handle.y, handle.x + handle.w, handle.y + handle.h]
       handle.handlers[ueClick] = SelectBase + e + 1
-      regions.add handle
+    knobs.paint(if input.paper: rgba(0, 0, 0, 255) else: rgba(14, 165, 233, 255), 1) # sky-500
+    drawn.add knobs
   if not input.menu:
     return
   var items: set[EditCut .. EditSelectAll]
   if z > a and not input.secret: items.incl {EditCut, EditCopy}
   if clipboard.len > 0: items.incl EditPaste
   if input.text.len > 0 and (a > 0 or z < input.text.len): items.incl EditSelectAll
-  if items.card == 0:
+  if items == {}:
     return
   let
-    size = int(clamp(round(lineH * 0.6), 12, 22))
-    shown = editMenuTree(items, size, input.paper)
+    shown = editMenuTree(items, int(clamp(round(lineH * 0.6), 12, 22)), input.paper)
       .build(initText(), width.float32, height.float32, 0, MenuKey, input, false,
         if memo.isNil: nil else: memo.menu)
-    first = if (seen and 1) != 0: at[0] else: at[1]
-    final = if (seen and 2) != 0: at[1] else: at[0]
     edge = 4'f32
     gap = max(lineH / 4, 4)
   shown.size = shown.layout(Unbounded, Unbounded, false, false)
   let
     w = min(shown.size.x, width.float32 - 2 * edge)
     h = shown.size.y
-    above = first.y - gap - h
-    centre = if first.y == final.y: (first.x + final.x) / 2 else: first.x
+    above = at[0][1] - gap - h
+    centre = if at[0][1] == at[1][1]: (at[0][0] + at[1][0]) / 2 else: at[0][0]
   if w < shown.size.x:
     shown.size = shown.layout(w, h, true, true)
   shown.x = clamp(round(centre - w / 2), edge, max(width.float32 - edge - w, edge))
-  shown.y = round(if above >= edge: above else: min(max(final.y + final.h, lowest) + gap, height.float32 - edge - h))
+  shown.y = round(if above >= edge: above else: min(max(at[1][1] + at[1][2], lowest) + gap, height.float32 - edge - h))
   shown.emit(0, 0, 1, drawn, gradients, regions)
   if not memo.isNil:
     memo.menu = shown
@@ -2335,15 +2336,23 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     input.accentLit = -1
   if input.handles or input.menu:
     # A selection made by touch: its handles and its menu, on top of it all.
+    # The selection's ends the field left (one-pixel regions), taken back out.
     var
-      at: array[2, UiRegion]
-      seen = 0
-    for i in countdown(regions.high, 0):
-      if regions[i].key == EndsKey or regions[i].key == EndsKey + 1:
-        at[regions[i].key - EndsKey] = regions[i]
-        seen = seen or (1 shl (regions[i].key - EndsKey))
-        regions.delete(i)
-    if seen != 0:
+      at: array[2, array[3, float32]]
+      seen: array[2, bool]
+      k = 0
+    for i in 0 ..< regions.len:
+      let e = regions[i].key - EndsKey
+      if e == 0 or e == 1:
+        at[e] = [regions[i].x, regions[i].y, regions[i].h]
+        seen[e] = true
+      else:
+        if k != i: regions[k] = regions[i]
+        inc k
+    regions.setLen(k)
+    if seen[0] or seen[1]:
+      if not seen[0]: at[0] = at[1]
+      if not seen[1]: at[1] = at[0]
       selectionChrome(at, seen, width, height, input, result.children, gradients, regions)
     elif not endsFound:
       input.handles = false
