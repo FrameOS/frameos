@@ -202,6 +202,26 @@ suite "the Terminal scene":
     check problems.len == 0
     if problems.len > 0: echo problems
 
+  test "its letters are a desktop's text's size on a big screen too, not grown with it":
+    # The playground fills a browser window: a frame of 1440 x 900 drew them at
+    # 1.75x, huge in a window of 640 x 480 (2026-11-17).
+    proc letterHeight(width, height: int): int =
+      let config = testConfig(width, height)
+      let image = draw(load(config), config, "letters-" & $width)
+      # The prompt's green letters on the line at the bottom.
+      var (top, bottom) = (height, -1)
+      for y in height - 80 ..< height:
+        for x in 0 ..< 240:
+          let c = image[x, y]
+          if c.g > 150 and c.r < 120 and c.b < 170:
+            top = min(top, y)
+            bottom = max(bottom, y)
+      bottom - top + 1
+    let small = letterHeight(800, 480)
+    check small > 6 and small <= 16
+    check letterHeight(1440, 900) == small
+    check problems.len == 0
+
   test "changes nothing when its app does not ask for the frame":
     let config = testConfig()
     let scene = load(config, %*[])
