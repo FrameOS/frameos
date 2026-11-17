@@ -71,8 +71,7 @@ Spectra 6.
 4. **Layout gaps** (`docs/jsx-ui.md` "Not supported"): rounded clipping
    (a picture in a `rounded-full` box; `overflow-hidden` clips to a
    rectangle), `z-*`, shadows on
-   LCDs, inline boxes with a background inside a line of text, min-content
-   sizing for flex items. Each is flash on an ESP32: measure before merging
+   LCDs, inline boxes with a background inside a line of text. Each is flash on an ESP32: measure before merging
    (the firmware-size comment on the PR).
 5. **Constant elements hoisted at compile time.** Babel's
    react-constant-elements lifts JSX with no dynamic part out of the

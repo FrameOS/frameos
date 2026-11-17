@@ -129,6 +129,92 @@ suite "ui layout":
     check r[0].geom == (0, 0, 200, 24)
     check r[1].geom == (0, 32, 200, 16)
 
+  test "a column too short keeps its items' content heights and overflows, as min-height: auto does":
+    # Three lines of 24 px in 60 px: a browser keeps each item as tall as its
+    # text and lets the column overflow. They were squashed to 20 px each, so
+    # every line of text overlapped the next item.
+    proc column(itemClasses: string, boxClasses = ""): SvgNode =
+      el("div", "flex flex-col h-[60px] w-[200px] " & boxClasses,
+        el("div", "bg-red-500 " & itemClasses, txt("One")),
+        el("div", "bg-green-500 " & itemClasses, txt("Two")),
+        el("div", "bg-blue-500 " & itemClasses, txt("Three")))
+    let r = layoutUi(column(""), 200, 100).rects
+    check r[0].geom == (0, 0, 200, 24)
+    check r[1].geom == (0, 24, 200, 24)
+    check r[2].geom == (0, 48, 200, 24)
+    # min-h-0, or an item that clips, may still be squashed.
+    for classes in ["min-h-0", "overflow-hidden", "min-h-[10px]"]:
+      let s = layoutUi(column(classes), 200, 100).rects
+      check s[0].geom == (0, 0, 200, 20)
+      check s[1].geom == (0, 20, 200, 20)
+      check s[2].geom == (0, 40, 200, 20)
+    # shrink-0 is as before: an item that does not shrink; nor does one with a
+    # set size, unless a min-h-* says how far it may.
+    let k = layoutUi(column("shrink-0"), 200, 100).rects
+    check k[2].geom == (0, 48, 200, 24)
+    check layoutUi(column("h-[24px]"), 200, 100).rects[2].geom == (0, 48, 200, 24)
+    check layoutUi(column("h-[24px] min-h-0"), 200, 100).rects[2].geom == (0, 40, 200, 20)
+    # The same column scrolling: what overflows is what it scrolls by.
+    var
+      regions: seq[UiRegion]
+      input: UiInput
+    discard layout.layoutUi(column("", "overflow-y-auto"), 200, 100, input, regions)
+    var scroll = -1'f32
+    for region in regions:
+      if region.scrollY > 0: scroll = region.scrollY
+    check scroll == 12
+
+  test "flex-1 items grow from their content, never below it":
+    # Two flex-1 items in 100 px, one holding 80 px: 50 each would cut it, so
+    # it keeps 80 and the other gets what is left, as a browser shares it.
+    let r = layoutUi(el("div", "flex flex-col h-[100px]",
+      el("div", "flex-1 bg-red-500", el("div", "h-[80px]")),
+      el("div", "flex-1 bg-blue-500", el("div", "h-[10px]"))), 200, 100).rects
+    check r[0].geom == (0, 0, 200, 80)
+    check r[1].geom == (0, 80, 200, 20)
+    let z = layoutUi(el("div", "flex flex-col h-[100px]",
+      el("div", "flex-1 min-h-0 bg-red-500", el("div", "h-[80px]")),
+      el("div", "flex-1 min-h-0 bg-blue-500", el("div", "h-[10px]"))), 200, 100).rects
+    check z[0].geom == (0, 0, 200, 50)
+    check z[1].geom == (0, 50, 200, 50)
+
+  test "a row too narrow keeps its items' min-content widths, as min-width: auto does":
+    # 80 + 60 px of boxes in 100: they keep their widths and overflow; with
+    # min-w-0 they shrink in proportion, 57 and 43.
+    proc row(itemClasses: string): seq[(int, int, int, int)] =
+      for rect in layoutUi(el("div", "flex w-[100px] h-[20px]",
+          el("div", "bg-red-500 " & itemClasses, el("div", "w-[80px] h-[20px]")),
+          el("div", "bg-blue-500 " & itemClasses, el("div", "w-[60px] h-[20px]"))), 200, 100).rects:
+        result.add rect.geom
+    check row("") == @[(0, 0, 80, 20), (80, 0, 60, 20)]
+    check row("min-w-0") == @[(0, 0, 57, 20), (57, 0, 43, 20)]
+    # A word is not broken to fit a row: beside 100 px that does not shrink,
+    # "Wonderful" in the 50 px left keeps its one line, its width its own.
+    let t = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("span", "bg-blue-500", txt("Wonderful"))), 200, 100).rects
+    check t[1].geom[1] == 0 and t[1].geom[3] == 24
+    check t[1].geom[2] > 50
+    let broken = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("span", "min-w-0 bg-blue-500", txt("Wonderful"))), 200, 100).rects
+    check broken[1].geom[2] == 50 and broken[1].geom[3] > 24
+    # Words that fit wrap as before: the floor is the longest word, not the line.
+    let w = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("span", "bg-blue-500", txt("a b c d e f g h i j k"))), 200, 100).rects
+    check w[1].geom[2] == 50
+    # truncate is overflow: hidden: it gives way and cuts, in the row or in a
+    # box inside it.
+    let cut = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("span", "truncate bg-blue-500", txt("A long line that does not fit"))), 200, 100).rects
+    check cut[1].geom == (100, 0, 50, 24)
+    let inside = layoutUi(el("div", "flex items-start w-[150px]",
+      el("div", "w-[100px] shrink-0 h-[10px] bg-red-500"),
+      el("div", "bg-blue-500", el("div", "truncate", txt("A long line that does not fit")))), 200, 100).rects
+    check inside[1].geom == (100, 0, 50, 24)
+
   test "a block stacks and stretches; padding is inside the size":
     let r = layoutUi(el("div", "w-20 p-2 bg-black",
       el("div", "h-4 bg-red-500"),
