@@ -1175,6 +1175,194 @@ proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
     writeFile(full, contents)
   return true
 
+type AssetOptions = object
+  ## An assets call's options JSON read once into plain values. Looked up
+  ## where they were used, each `options{…}` was a JsonNode alive across
+  ## every exit of one proc, and every exit destroyed them all: 625 cleanup
+  ## calls, 14.8 KB of the ESP32 image for this one bridge.
+  storage, entry, background: string
+  shallow, text, keep, contain, hasLength: bool
+  offset, length, width, height: int
+
+proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} =
+  let options = optionsArg(ctx, data)
+  result.storage = options{"storage"}.getStr()
+  result.entry = options{"entry"}.getStr()
+  result.background = options{"background"}.getStr()
+  result.shallow = options{"shallow"}.getBool(false)
+  result.text = options{"text"}.getBool(false)
+  result.keep = options{"keep"}.getBool(false)
+  result.contain = options{"fit"}.getStr("cover") == "contain"
+  result.offset = options{"offset"}.getInt(0)
+  let length = options{"length"}
+  if not length.isNil and length.kind == JInt:
+    result.hasLength = true
+    result.length = length.getInt()
+  result.width = options{"width"}.getInt(0)
+  result.height = options{"height"}.getInt(0)
+
+proc assetStorage(ctx: ptr JSContext, data: JSValue): string {.noinline.} =
+  optionsArg(ctx, data){"storage"}.getStr()
+
+proc logAssetSliceTooBig(e: JsAppEvalEnv, what: string, size: int64, readMax: int) {.noinline.} =
+  frameos_apps.logError(e.owner,
+    "JS app readAsset: " & what & " slice is " & $size &
+    " bytes, over the " & $readMax & " byte limit; read it in chunks" &
+    " with {offset, length}")
+
+proc assetsList(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
+  let options = assetOptions(ctx, data)
+  let root = assetsRoot(e, options.storage)
+  let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = options.storage)
+  var files: seq[string] = @[]
+  if dir.len > 0 and dirExists(dir):
+    # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
+    # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
+    if options.shallow:
+      # One folder's entries, as a browser walks a card a folder at a
+      # time (a recursive walk of a large SD card takes seconds).
+      for kind, entry in walkDir(dir, relative = false):
+        let name = entry.extractFilename
+        if kind in {pcDir, pcLinkToDir} and not isJunkDirName(name):
+          files.add(entry[(root.len + 1)..^1] & "/")
+        elif kind in {pcFile, pcLinkToFile} and not isHiddenOrJunkFile(name):
+          files.add(entry[(root.len + 1)..^1])
+    else:
+      for filePath in walkDirRecNoJunk(dir, relative = false):
+        files.add(filePath[(root.len + 1)..^1])
+  files.sort()
+  let arr = newJArray()
+  for file in files:
+    arr.add(newJString(file))
+  jsonToJS(ctx, arr)
+
+proc assetsRead(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
+  let options = assetOptions(ctx, data)
+  let full = resolveAssetPath(e, pathStr, storage = options.storage)
+  if full.len == 0 or not fileExists(full):
+    return jsNull(ctx)
+  let offset = max(0, options.offset)
+  let readMax = jsAssetReadMaxBytes(e)
+  # text: the bytes as a string (UTF-8, without the halves of characters
+  # a slice cuts at its ends) instead of base64.
+  var contents: string
+  if options.entry.len > 0:
+    # One member of a ZIP (an EPUB's chapter), inflated a window at a
+    # time: only the slice asked for is ever held.
+    try:
+      contents = readZipEntry(full, options.entry, offset,
+        if options.hasLength: options.length else: -1, readMax)
+    except ZipEntryTooBig as error:
+      logAssetSliceTooBig(e, pathStr & " entry " & options.entry, error.size, readMax)
+      return jsNull(ctx)
+    except ZipEntryError:
+      # Not a ZIP, no such member, a damaged one: null, as for a file
+      # that is not there. What the file is is the app's to say (a
+      # library shows "not an EPUB" on the book), not the frame's log.
+      return jsNull(ctx)
+  else:
+    let fileSize = int(getFileSize(full))
+    var length = if options.hasLength: options.length else: fileSize - offset
+    length = min(length, fileSize - offset)
+    if length <= 0:
+      return nimStringToJS(ctx, "")
+    if length > readMax:
+      logAssetSliceTooBig(e, pathStr, length, readMax)
+      return jsNull(ctx)
+    var file: File
+    if not file.open(full):
+      return jsNull(ctx)
+    defer: file.close()
+    file.setFilePos(offset)
+    contents = newString(length)
+    let bytesRead = file.readBuffer(addr contents[0], length)
+    contents.setLen(bytesRead)
+  nimStringToJS(ctx, if options.text: utf8Whole(contents, offset > 0) else: encode(contents))
+
+proc assetPicture(e: JsAppEvalEnv, keep: bool, width, height: int): Image =
+  ## A picture of that size in the canvas's format, as fetchImage's kept
+  ## pictures are; a kept one in the app's own slot.
+  let
+    context = e.context
+    like =
+      if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+      elif context.isNil: nil
+      else: context.contextImage()
+  if keep: e.runtime.keptPictureTarget(e.owner, like, width, height, (0, 0))
+  elif like.isNil: newImage(width, height)
+  else: newImageLike(like, width, height)
+
+proc assetZipImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image =
+  ## A picture inside a ZIP (an EPUB's illustration): the member whole,
+  ## under the read limit, decoded at the size asked (a JPEG scaled as
+  ## it decodes, a PNG a row at a time) into a picture of its own, then
+  ## put over `background` where it is transparent: a canvas without
+  ## alpha (an ESP32's) would otherwise show those parts black.
+  var member: string
+  try:
+    member = readZipEntry(full, options.entry, 0, -1, jsAssetReadMaxBytes(e))
+  except ZipEntryError:
+    return nil
+  if member.len == 0:
+    return nil
+  if options.width <= 0 or options.height <= 0:
+    return decodeImageWithDisplayBounds(member)
+  var decoded = newImage(options.width, options.height)
+  discard decodeImageWithFallback(member, decoded,
+    if options.contain: fitContain else: fitCover)
+  member = ""
+  result = assetPicture(e, options.keep, options.width, options.height)
+  if result.isNil:
+    return nil
+  if options.background.len > 0:
+    result.fill(parseHtmlColor(options.background).rgbx)
+    result.draw(decoded, blendMode = NormalBlend)
+  else:
+    result.draw(decoded, blendMode = OverwriteBlend)
+
+proc assetFileImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image =
+  if options.width > 0 and options.height > 0:
+    # At the size asked, in the canvas's format: a browser's thumbnail of
+    # a 12-megapixel photo is a scaled JPEG decode, never the photo.
+    let fit = if options.contain: "contain" else: "cover"
+    result = assetPicture(e, options.keep, options.width, options.height)
+    if result.isNil:
+      return nil
+    if not readImageIntoTarget(full, result, fit):
+      scaleAndDrawImage(result, readImageWithDisplayBounds(full), fit)
+  else:
+    result = readImageWithDisplayBounds(full)
+  if result.isNil:
+    return nil
+  # The photo's own colour profile, if the Assets panel wrote one
+  # (utils/asset_colors) — the same treatment data/localImage gives it.
+  # A kept picture shares its render with others (a grid of them), so it
+  # never sets the frame's dither palette.
+  let colorProfile = loadAssetColorProfile(full)
+  if colorProfile.isSome:
+    if not options.keep:
+      if colorProfile.get().hasPaletteOverride():
+        setRenderPaletteOverride(colorProfile.get().palette)
+      else:
+        clearRenderPaletteOverride()
+    if colorProfile.get().hasAdjustments():
+      applyAssetColors(result, colorProfile.get())
+      markImageGraded(result)
+
+proc assetsImage(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
+  let options = assetOptions(ctx, data)
+  let full = resolveAssetPath(e, pathStr, storage = options.storage)
+  if full.len == 0 or not fileExists(full):
+    return jsNull(ctx)
+  let image =
+    if options.entry.len > 0: assetZipImage(e, full, options)
+    else: assetFileImage(e, full, options)
+  if image.isNil:
+    return jsNull(ctx)
+  if options.keep:
+    return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
+  jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
+
 proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JSValue {.nimcall.} =
   ## Asset management scoped to the frame's assets folder. Ops:
   ## list (dir, options JSON {shallow} -> JSON array of relative paths: every
@@ -1183,7 +1371,8 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   ## entry} -> base64, or a string with text; entry reads that member of a
   ## ZIP file, utils/zip_entry.nim), write/append (path, base64), delete, image (options JSON {keep,
   ## width, height, fit} -> imageRef decoded within display bounds, or at that
-  ## size, as fetchImage's are).
+  ## size, as fetchImage's are). Each op is a proc of its own: one proc's
+  ## locals are destroyed at every one of its exits.
   let e = env(ctx)
   if e == nil:
     return jsUndefSentinel(ctx)
@@ -1194,93 +1383,22 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   try:
     case opStr
     of "list":
-      let options = optionsArg(ctx, data)
-      let storage = options{"storage"}.getStr()
-      let root = assetsRoot(e, storage)
-      let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = storage)
-      var files: seq[string] = @[]
-      let shallow = options{"shallow"}.getBool(false)
-      if dir.len > 0 and dirExists(dir):
-        # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
-        # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
-        if shallow:
-          # One folder's entries, as a browser walks a card a folder at a
-          # time (a recursive walk of a large SD card takes seconds).
-          for kind, entry in walkDir(dir, relative = false):
-            let name = entry.extractFilename
-            if kind in {pcDir, pcLinkToDir} and not isJunkDirName(name):
-              files.add(entry[(root.len + 1)..^1] & "/")
-            elif kind in {pcFile, pcLinkToFile} and not isHiddenOrJunkFile(name):
-              files.add(entry[(root.len + 1)..^1])
-        else:
-          for filePath in walkDirRecNoJunk(dir, relative = false):
-            files.add(filePath[(root.len + 1)..^1])
-      files.sort()
-      let arr = newJArray()
-      for file in files:
-        arr.add(%*file)
-      return jsonToJS(ctx, arr)
+      return assetsList(ctx, e, pathStr, data)
     of "exists":
-      let full = resolveAssetPath(e, pathStr, storage = optionsArg(ctx, data){"storage"}.getStr())
+      let full = resolveAssetPath(e, pathStr, storage = assetStorage(ctx, data))
       return nimBoolToJS(ctx, full.len > 0 and fileExists(full))
     of "size":
-      let full = resolveAssetPath(e, pathStr, storage = optionsArg(ctx, data){"storage"}.getStr())
+      let full = resolveAssetPath(e, pathStr, storage = assetStorage(ctx, data))
       if full.len == 0 or not fileExists(full):
         return nimIntToJS(ctx, -1)
       return nimFloatToJS(ctx, getFileSize(full).float)
     of "read":
-      let options = optionsArg(ctx, data)
-      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
-      if full.len == 0 or not fileExists(full):
-        return jsNull(ctx)
-      let offset = max(0, options{"offset"}.getInt(0))
-      let readMax = jsAssetReadMaxBytes(e)
-      # text: the bytes as a string (UTF-8, without the halves of characters
-      # a slice cuts at its ends) instead of base64.
-      let asText = options{"text"}.getBool(false)
-      if options{"entry"}.getStr().len > 0:
-        # One member of a ZIP (an EPUB's chapter), inflated a window at a
-        # time: only the slice asked for is ever held.
-        let entry = options{"entry"}.getStr()
-        try:
-          let contents = readZipEntry(full, entry, offset, options{"length"}.getInt(-1), readMax)
-          return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
-        except ZipEntryTooBig as error:
-          frameos_apps.logError(e.owner,
-            "JS app readAsset: " & pathStr & " entry " & entry & " slice is " & $error.size &
-            " bytes, over the " & $readMax & " byte limit; read it in chunks" &
-            " with {offset, length}")
-          return jsNull(ctx)
-        except ZipEntryError:
-          # Not a ZIP, no such member, a damaged one: null, as for a file
-          # that is not there. What the file is is the app's to say (a
-          # library shows "not an EPUB" on the book), not the frame's log.
-          return jsNull(ctx)
-      let fileSize = getFileSize(full)
-      var length = options{"length"}.getInt(int(fileSize) - offset)
-      length = min(length, int(fileSize) - offset)
-      if length <= 0:
-        return nimStringToJS(ctx, "")
-      if length > readMax:
-        frameos_apps.logError(e.owner,
-          "JS app readAsset: " & pathStr & " slice is " & $length &
-          " bytes, over the " & $readMax & " byte limit; read it in chunks" &
-          " with {offset, length}")
-        return jsNull(ctx)
-      var file: File
-      if not file.open(full):
-        return jsNull(ctx)
-      defer: file.close()
-      file.setFilePos(offset)
-      var contents = newString(length)
-      let bytesRead = file.readBuffer(addr contents[0], length)
-      contents.setLen(bytesRead)
-      return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
+      return assetsRead(ctx, e, pathStr, data)
     of "write", "append":
       let contents = decode(toNimString(ctx, data))
       return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
     of "delete":
-      let full = resolveAssetPath(e, pathStr, write = true, storage = optionsArg(ctx, data){"storage"}.getStr())
+      let full = resolveAssetPath(e, pathStr, write = true, storage = assetStorage(ctx, data))
       if full.len == 0 or not fileExists(full):
         return nimBoolToJS(ctx, false)
       removeFile(full)
@@ -1290,111 +1408,13 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       # above its assets mount fails, so there is no `-p`. A name the listing
       # would hide (".cache", "@eaDir") is refused, as the device's own write
       # paths refuse dot names. False when it was there already.
-      let full = resolveAssetPath(e, pathStr, write = true, storage = optionsArg(ctx, data){"storage"}.getStr())
+      let full = resolveAssetPath(e, pathStr, write = true, storage = assetStorage(ctx, data))
       if full.len == 0 or not assetFolderPathOk(pathStr):
         frameos_apps.logError(e.owner, "JS app makeAssetFolder" & AssetPathRefused & pathStr)
         return nimBoolToJS(ctx, false)
       return nimBoolToJS(ctx, not existsOrCreateDir(full))
     of "image":
-      var options = newJObject()
-      try:
-        let optionsStr = toNimString(ctx, data)
-        if optionsStr.len > 0:
-          options = parseJson(optionsStr)
-      except CatchableError:
-        discard
-      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
-      if full.len == 0 or not fileExists(full):
-        return jsNull(ctx)
-      let
-        keep = options{"keep"}.getBool(false)
-        sizedWidth = options{"width"}.getInt(0)
-        sizedHeight = options{"height"}.getInt(0)
-        entry = options{"entry"}.getStr()
-        background = options{"background"}.getStr()
-      var image: Image
-      if entry.len > 0:
-        # A picture inside a ZIP (an EPUB's illustration): the member whole,
-        # under the read limit, decoded at the size asked (a JPEG scaled as
-        # it decodes, a PNG a row at a time) into a picture of its own, then
-        # put over `background` where it is transparent: a canvas without
-        # alpha (an ESP32's) would otherwise show those parts black.
-        var member: string
-        try:
-          member = readZipEntry(full, entry, 0, -1, jsAssetReadMaxBytes(e))
-        except ZipEntryError:
-          return jsNull(ctx)
-        if member.len == 0:
-          return jsNull(ctx)
-        if sizedWidth <= 0 or sizedHeight <= 0:
-          image = decodeImageWithDisplayBounds(member)
-        else:
-          let
-            context = e.context
-            like =
-              if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
-              elif context.isNil: nil
-              else: context.contextImage()
-          var decoded = newImage(sizedWidth, sizedHeight)
-          discard decodeImageWithFallback(member, decoded,
-            if options{"fit"}.getStr("cover") == "contain": fitContain else: fitCover)
-          member = ""
-          image =
-            if keep: e.runtime.keptPictureTarget(e.owner, like, sizedWidth, sizedHeight, (0, 0))
-            elif like.isNil: newImage(sizedWidth, sizedHeight)
-            else: newImageLike(like, sizedWidth, sizedHeight)
-          if image.isNil:
-            return jsNull(ctx)
-          if background.len > 0:
-            image.fill(parseHtmlColor(background).rgbx)
-            image.draw(decoded, blendMode = NormalBlend)
-          else:
-            image.draw(decoded, blendMode = OverwriteBlend)
-        if image.isNil:
-          return jsNull(ctx)
-        if keep:
-          return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
-        return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
-      if sizedWidth > 0 and sizedHeight > 0:
-        # At the size asked, in the canvas's format, as fetchImage's kept
-        # pictures are: a browser's thumbnail of a 12-megapixel photo is a
-        # scaled JPEG decode, never the photo.
-        let
-          context = e.context
-          like =
-            if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
-            elif context.isNil: nil
-            else: context.contextImage()
-          fit = if options{"fit"}.getStr("cover") == "contain": "contain" else: "cover"
-        image =
-          if keep: e.runtime.keptPictureTarget(e.owner, like, sizedWidth, sizedHeight, (0, 0))
-          elif like.isNil: newImage(sizedWidth, sizedHeight)
-          else: newImageLike(like, sizedWidth, sizedHeight)
-        if image.isNil:
-          return jsNull(ctx)
-        if not readImageIntoTarget(full, image, fit):
-          scaleAndDrawImage(image, readImageWithDisplayBounds(full), fit)
-      else:
-        image = readImageWithDisplayBounds(full)
-      if image.isNil:
-        return jsNull(ctx)
-      # The photo's own colour profile, if the Assets panel wrote one
-      # (utils/asset_colors) — the same treatment data/localImage gives it.
-      # A kept picture shares its render with others (a grid of them), so it
-      # never sets the frame's dither palette.
-      let colorProfile = loadAssetColorProfile(full)
-      if colorProfile.isSome:
-        if not keep:
-          if colorProfile.get().hasPaletteOverride():
-            setRenderPaletteOverride(colorProfile.get().palette)
-          else:
-            clearRenderPaletteOverride()
-        if colorProfile.get().hasAdjustments():
-          applyAssetColors(image, colorProfile.get())
-          markImageGraded(image)
-      if keep:
-        return jsonToJS(ctx, e.runtime.storeKeptImageJson(e.owner, image))
-      return jsonToJS(ctx, e.runtime.storeTransientImageJson(image))
+      return assetsImage(ctx, e, pathStr, data)
     else:
       frameos_apps.logError(e.owner, "JS app assets: unknown operation: " & opStr)
       return jsUndefSentinel(ctx)
@@ -1547,77 +1567,84 @@ proc jsTimeZoneInfo(ctx: ptr JSContext, name: JSValue): JSValue {.nimcall.} =
         changes.add(%change.offset.int)
   return jsonToJS(ctx, %*{"name": canonical, "changes": changes})
 
+proc streamOpenAsset(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
+  let pathStr = options{"path"}.getStr("")
+  let mode = options{"mode"}.getStr("r")
+  let full = resolveAssetPath(e, pathStr, write = mode != "r")
+  if full.len == 0:
+    frameos_apps.logError(e.owner, "JS app openAssetStream" & AssetPathRefused & pathStr)
+    return jsNull(ctx)
+  var stream: Stream
+  if mode == "r":
+    if not fileExists(full):
+      return jsNull(ctx)
+    stream = newFileStream(full, fmRead)
+  elif mode in ["w", "a"]:
+    createDir(full.parentDir())
+    let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
+    if freeDiskSpace != -1 and freeDiskSpace < 100 * 1024 * 1024:
+      frameos_apps.logError(e.owner, "JS app openAssetStream: low disk space: " & pathStr)
+      return jsNull(ctx)
+    stream = newFileStream(full, if mode == "a": fmAppend else: fmWrite)
+  else:
+    frameos_apps.logError(e.owner, "JS app openAssetStream: unknown mode: " & mode)
+    return jsNull(ctx)
+  if stream.isNil:
+    return jsNull(ctx)
+  jsonToJS(ctx, registerJsStream(stream))
+
+proc streamRead(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
+  let stream = jsStreamById(options)
+  if stream.isNil:
+    return jsNull(ctx)
+  let length = clamp(options{"length"}.getInt(DefaultJsStreamChunkBytes), 1, jsAssetReadMaxBytes(e))
+  nimStringToJS(ctx, encode(stream.readStr(length)))
+
+proc streamWrite(options: JsonNode): bool =
+  let stream = jsStreamById(options)
+  if stream.isNil:
+    return false
+  stream.write(decode(options{"base64"}.getStr("")))
+  true
+
+proc streamRewind(options: JsonNode): bool =
+  let id = options{"id"}.getInt(0)
+  if not jsStreamsGlobal.hasKey(id):
+    return false
+  if jsStreamsGlobal[id].lines.isNil:
+    jsStreamsGlobal[id].stream.setPosition(0)
+  else:
+    jsStreamsGlobal[id].lines.rewind()
+  true
+
 proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Ops: openAsset {path, mode: r|w|a} -> streamRef, create {base64} -> streamRef,
   ## read {id, length} -> base64 ("" at end), write {id, base64}, atEnd {id},
-  ## close {id}. Read sizes are capped like readAsset; loop for more.
+  ## close {id}. Read sizes are capped like readAsset; loop for more. Each op
+  ## with locals of its own is a proc of its own, as in jsAssets: a proc's
+  ## locals are destroyed at every one of its exits.
   let e = env(ctx)
   if e == nil:
     return jsUndefSentinel(ctx)
 
   let opStr = toNimString(ctx, op)
-  var options = optionsArg(ctx, optionsJson)
+  let options = optionsArg(ctx, optionsJson)
 
   try:
     case opStr
     of "openAsset":
-      let pathStr = options{"path"}.getStr("")
-      let mode = options{"mode"}.getStr("r")
-      let full = resolveAssetPath(e, pathStr, write = mode != "r")
-      if full.len == 0:
-        frameos_apps.logError(e.owner, "JS app openAssetStream" & AssetPathRefused & pathStr)
-        return jsNull(ctx)
-      if mode == "r":
-        if not fileExists(full):
-          return jsNull(ctx)
-        let stream = newFileStream(full, fmRead)
-        if stream.isNil:
-          return jsNull(ctx)
-        return jsonToJS(ctx, registerJsStream(stream))
-      elif mode in ["w", "a"]:
-        createDir(full.parentDir())
-        let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
-        if freeDiskSpace != -1 and freeDiskSpace < 100 * 1024 * 1024:
-          frameos_apps.logError(e.owner, "JS app openAssetStream: low disk space: " & pathStr)
-          return jsNull(ctx)
-        let stream = newFileStream(full, if mode == "a": fmAppend else: fmWrite)
-        if stream.isNil:
-          return jsNull(ctx)
-        return jsonToJS(ctx, registerJsStream(stream))
-      else:
-        frameos_apps.logError(e.owner, "JS app openAssetStream: unknown mode: " & mode)
-        return jsNull(ctx)
+      return streamOpenAsset(ctx, e, options)
     of "create":
-      var contents = ""
-      if options{"base64"}.getStr("").len > 0:
-        contents = decode(options["base64"].getStr())
-      return jsonToJS(ctx, registerJsStream(newStringStream(contents)))
+      return jsonToJS(ctx, registerJsStream(newStringStream(decode(options{"base64"}.getStr("")))))
     of "read":
-      let stream = jsStreamById(options)
-      if stream.isNil:
-        return jsNull(ctx)
-      let length = clamp(options{"length"}.getInt(DefaultJsStreamChunkBytes), 1, jsAssetReadMaxBytes(e))
-      return nimStringToJS(ctx, encode(stream.readStr(length)))
+      return streamRead(ctx, e, options)
     of "write":
-      let stream = jsStreamById(options)
-      if stream.isNil:
-        return nimBoolToJS(ctx, false)
-      stream.write(decode(options{"base64"}.getStr("")))
-      return nimBoolToJS(ctx, true)
+      return nimBoolToJS(ctx, streamWrite(options))
     of "atEnd":
       let stream = jsStreamById(options)
-      if stream.isNil:
-        return nimBoolToJS(ctx, true)
-      return nimBoolToJS(ctx, stream.atEnd())
+      return nimBoolToJS(ctx, stream.isNil or stream.atEnd())
     of "rewind":
-      let id = options{"id"}.getInt(0)
-      if not jsStreamsGlobal.hasKey(id):
-        return nimBoolToJS(ctx, false)
-      if jsStreamsGlobal[id].lines.isNil:
-        jsStreamsGlobal[id].stream.setPosition(0)
-      else:
-        jsStreamsGlobal[id].lines.rewind()
-      return nimBoolToJS(ctx, true)
+      return nimBoolToJS(ctx, streamRewind(options))
     of "close":
       return nimBoolToJS(ctx, closeJsStream(options{"id"}.getInt(0)))
     else:

@@ -62,6 +62,7 @@ idf_component_register(
         "${QUICKJS_DIR}/libunicode.c"
         "${QUICKJS_DIR}/cutils.c"
         "fos_qjs_glue.c"
+        "fos_unicode_case.c"
     # QUICKJS_PARENT lets Nim-generated C (and the glue) include
     # "quickjs/quickjs.h" with the same path it uses on Linux.
     INCLUDE_DIRS "include" "${QUICKJS_PARENT}"
@@ -87,3 +88,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
 target_compile_options(${COMPONENT_LIB} PRIVATE
     -funsigned-char -fwrapv -fno-strict-aliasing -fno-lto -w
     -Wno-error=incompatible-pointer-types)
+
+# Nim's unicode.toUpper / toLower (Rune) go through fos_unicode_case.c, onto
+# QuickJS's case tables: std/unicode's own (~11 KB) are never linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=nuctoUpper" "-Wl,--wrap=nuctoLower")
