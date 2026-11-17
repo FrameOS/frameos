@@ -53,7 +53,12 @@ active layout does, and runs a starter's scene beside them
 (`sceneWorkspace/lib/preview-layouts.ts`); nothing the editor holds changes. It
 starts on the layout the shown scene wears (a frame's scene keeps its own), is
 not offered while the scene shown is a layout itself, and the starters load with
-the panel rather than the page.
+the panel rather than the page. While a layout is shown, Settings beside the
+select opens its public fields (the preview's own form rows): each value goes
+over the `layout.state` the scenes give that layout, and the runtime boots again
+with it (a checkbox or a menu at once, typing after a pause). The values are the
+viewer's, kept in this browser by layout id (`frameos.preview.layoutSettings`,
+unless the workspace is told not to remember), never on a scene or a frame.
 
 **In the store.** Layouts have two shelves of their own
 (`cloud/apps/auth-web/src/lib/categories.ts`): Desktop layouts (`desktops`) and
