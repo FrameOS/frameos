@@ -5,6 +5,9 @@ bool fos_partial_refresh_wanted(const fos_partial_refresh_input_t *input)
     if (!input->supported || !input->glass_known || !input->same_scene) return false;
     uint32_t most = input->input_recent ? FOS_PARTIAL_MAX_WHILE_INPUT : FOS_PARTIAL_MAX_BEFORE_FULL;
     if (input->partials_since_full >= most) return false;
+    if ((input->changed_since_full + input->changed_bytes) * 2 >= FOS_PARTIAL_GHOST_HALF_SCREENS * input->total_bytes) {
+        return false;
+    }
     return input->changed_bytes * 2 < input->total_bytes;
 }
 
