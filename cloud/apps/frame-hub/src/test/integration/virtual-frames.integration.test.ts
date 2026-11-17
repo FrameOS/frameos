@@ -11,6 +11,7 @@ import {
   accounts,
   createDb,
   frameAssetFiles,
+  frameAssets,
   frameCommands,
   frameLogs,
   frames,
@@ -390,11 +391,27 @@ describe("a virtual frame's device", () => {
       ["asset_put", { data: "aGk=", path: "a.txt" }, "unsupported_verb"],
       ["asset_get", { path: "photos/a.jpg" }, "not_found"],
       ["asset_get", { path: "../etc/passwd" }, "invalid_path"],
+      // One storage, the default (docs/cloud-frames.md "Asset storages").
+      ["assets_list", { storage: "internal" }, "storage_unavailable"],
+      ["asset_get", { path: "a.txt", storage: "internal" }, "storage_unavailable"],
+      ["asset_mkdir", { path: "dir", storage: "internal" }, "storage_unavailable"],
       ["made_up", {}, "unknown_verb"],
     ] as const) {
       const command = await enqueueFrameCommand(db, { frameId: frame.id, payload, type });
       expect(await settled(command!.id), type).toMatchObject({ error, status: "failed" });
     }
+    // Its listing says so the way a device with more storages would.
+    const listing = await enqueueFrameCommand(db, { frameId: frame.id, type: "assets_list" });
+    expect((await settled(listing!.id)).status).toBe("acked");
+    const [listed] = await waitFor(async () => {
+      const rows = await db.select().from(frameAssets).where(eq(frameAssets.frameId, frame.id));
+      return rows.length > 0 ? rows : undefined;
+    }, "the virtual frame's listing");
+    expect(listed).toMatchObject({
+      payload: [],
+      storage: "assets",
+      storages: [{ id: "assets", name: "Internal storage" }],
+    });
     const render = await enqueueFrameCommand(db, { frameId: frame.id, type: "render" });
     expect((await settled(render!.id)).status).toBe("acked");
     await waitFor(async () => (renders.length === 2 ? true : undefined), "the render that was asked for");

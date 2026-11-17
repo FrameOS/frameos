@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { normalizeAssetPath } from "../../../../../../src/lib/frame-asset-cache";
 import {
+  assetAuditMetadata,
   assetChunkRateLimit,
   assetUploadChunkBytes,
   assetWriteErrorResponse,
@@ -33,6 +34,10 @@ export const runtime = "nodejs";
 //    has. 409 tells the SPA the device lost earlier bytes (restart the file);
 //    a non-final chunk answers {pending: true}, the final one the stored entry.
 //
+// Either shape takes `?storage=` (docs/cloud-frames.md "Asset storages"):
+// which of the device's storages the file lands on, the assets folder when
+// absent. A chunked upload names it on every chunk.
+//
 // The device is the size authority (docs/cloud-frames.md `asset_put_chunk`);
 // the caps here only spare it commands it would refuse.
 export async function POST(
@@ -56,7 +61,7 @@ export async function POST(
   if (context.response) {
     return context.response;
   }
-  const { db, accountId, frame } = context;
+  const { db, accountId, frame, storage } = context;
 
   if (request.nextUrl.searchParams.has("upload_id")) {
     return uploadChunk(request, context);
@@ -89,16 +94,19 @@ export async function POST(
     frame,
     target,
     new Uint8Array(await file.arrayBuffer()),
+    { storage },
   );
   if (!result.ok) {
     return uploadErrorResponse(result);
   }
-  await invalidateCachedAssetSubtree(db, frame.id, target);
-  await queueAssetsListRefresh(db, accountId, frame.id);
-  await recordAssetWriteAudit(db, context, "frame.asset_uploaded", {
-    bytes: file.size,
-    path: target,
-  });
+  await invalidateCachedAssetSubtree(db, frame.id, target, storage);
+  await queueAssetsListRefresh(db, accountId, frame.id, storage);
+  await recordAssetWriteAudit(
+    db,
+    context,
+    "frame.asset_uploaded",
+    assetAuditMetadata(storage, { bytes: file.size, path: target }),
+  );
   return NextResponse.json(storedEntry(target, file.size));
 }
 
@@ -108,7 +116,7 @@ type UploadContext = Exclude<
 >;
 
 async function uploadChunk(request: NextRequest, context: UploadContext) {
-  const { db, accountId, frame } = context;
+  const { db, accountId, frame, storage } = context;
   const query = request.nextUrl.searchParams;
   const uploadId = query.get("upload_id");
   if (!isValidUploadId(uploadId)) {
@@ -143,6 +151,7 @@ async function uploadChunk(request: NextRequest, context: UploadContext) {
     offset,
     bytes,
     ...(complete ? { finalPath: target } : {}),
+    storage,
   });
   if (!result.ok) {
     return uploadErrorResponse(result);
@@ -150,13 +159,14 @@ async function uploadChunk(request: NextRequest, context: UploadContext) {
   if (!complete) {
     return NextResponse.json({ pending: true, received: offset + bytes.length });
   }
-  await invalidateCachedAssetSubtree(db, frame.id, target);
-  await queueAssetsListRefresh(db, accountId, frame.id);
-  await recordAssetWriteAudit(db, context, "frame.asset_uploaded", {
-    bytes: offset + bytes.length,
-    chunked: true,
-    path: target,
-  });
+  await invalidateCachedAssetSubtree(db, frame.id, target, storage);
+  await queueAssetsListRefresh(db, accountId, frame.id, storage);
+  await recordAssetWriteAudit(
+    db,
+    context,
+    "frame.asset_uploaded",
+    assetAuditMetadata(storage, { bytes: offset + bytes.length, chunked: true, path: target }),
+  );
   return NextResponse.json(storedEntry(target, offset + bytes.length));
 }
 

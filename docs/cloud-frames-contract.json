@@ -416,7 +416,36 @@
     "scenes_patch": ["invalid_patch", "base_mismatch", "no_room", "patch_refused"],
     "lan_access_challenge": ["no_panel", "rate_limited", "challenge_failed"],
     "lan_access_set": ["invalid_lan_access", "code_required", "invalid_code", "code_expired", "too_many_attempts", "rate_limited", "persist_failed"],
-    "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this"
+    "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this",
+    "asset_storage": ["storage_unavailable"]
+  },
+  "assetStorages": {
+    "$comment": [
+      "Where the asset verbs act (docs/cloud-frames.md \"Asset storages\"). Each verb",
+      "in `verbs` takes an optional string `field`; absent means `default`, the",
+      "assets folder (an ESP32's TF card when one is mounted, else its flash; a",
+      "Linux frame's assets directory). Every reply to those verbs (the `assets`",
+      "listing, `asset_chunk`, the acks) echoes it. A device asked for a storage",
+      "it lacks answers the verb's usual error reply with `storage_unavailable`.",
+      "The `assets` listing also carries `storages`, [{id, name}] (the places the",
+      "device has, names chosen by the device); a reply without it means",
+      "`defaultListing`. `ids` are the storages a plane may name, with the",
+      "profiles that have them and the same `parity` rule as verbs. A device",
+      "that does not know the field ignores it and acts on its assets folder, so",
+      "a provider sends a non-default id only to a frame whose latest listing",
+      "reported it, and never sends the field for the default."
+    ],
+    "field": "storage",
+    "default": "assets",
+    "verbs": ["assets_list", "asset_get", "asset_put", "asset_put_chunk", "asset_mkdir", "asset_delete", "asset_rename"],
+    "replies": ["assets", "asset_chunk", "ack"],
+    "defaultListing": [{"id": "assets", "name": "Internal storage"}],
+    "ids": {
+      "assets": {"profiles": ["linux", "esp32"]},
+      "internal": {"profiles": ["esp32"],
+                   "parity": {"only": "esp32",
+                              "why": "An ESP32 keeps the frame's own flash storage (/srv/internal, what scenes reach as internal storage) beside its assets folder on the TF card. A Linux frame has one filesystem: its assets directory is the only place, so it reports no storages and never gets this id."}}
+    }
   },
   "limits": {
     "$comment": "Wire caps, per profile where the small device differs.",

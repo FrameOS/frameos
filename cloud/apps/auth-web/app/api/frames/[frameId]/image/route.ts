@@ -7,6 +7,7 @@ import {
   isServableImageContentType,
   queueImageGetIfIdle,
 } from "../../../../../src/lib/frame-asset-cache";
+import { defaultAssetStorage } from "../../../../../src/lib/frame-asset-storages";
 import { frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import {
   frameForAccount,
@@ -49,6 +50,8 @@ async function cachedImage(db: Db, frameId: string) {
     .where(
       and(
         eq(frameAssetFiles.frameId, frameId),
+        // The reserved slot is the default storage's (cachedAssetFile).
+        eq(frameAssetFiles.storage, defaultAssetStorage),
         eq(frameAssetFiles.path, frameImageAssetPath),
         eq(frameAssetFiles.thumb, false),
       ),

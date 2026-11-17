@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { normalizeAssetPath } from "../../../../../../src/lib/frame-asset-cache";
+import { assetStoragePayload } from "../../../../../../src/lib/frame-asset-storages";
 import {
+  assetAuditMetadata,
   assetWriteErrorResponse,
   assetWriteRequestContext,
   hiddenWritePath,
@@ -12,8 +14,9 @@ import {
 
 export const runtime = "nodejs";
 
-// Create a folder under the frame's assets directory — form-urlencoded
-// `path`, `{message}` back, same as the self-hosted backend's mkdir.
+// Create a folder under the frame's assets directory (or the storage
+// `?storage=` names) — form-urlencoded `path`, `{message}` back, same as the
+// self-hosted backend's mkdir.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -23,7 +26,7 @@ export async function POST(
   if (context.response) {
     return context.response;
   }
-  const { db, accountId, frame } = context;
+  const { db, accountId, frame, storage } = context;
 
   let form: FormData;
   try {
@@ -41,12 +44,17 @@ export async function POST(
     accountId,
     frame.id,
     "asset_mkdir",
-    { path },
+    { path, ...assetStoragePayload(storage) },
   );
   if (!result.ok) {
     return assetWriteErrorResponse(result);
   }
-  await queueAssetsListRefresh(db, accountId, frame.id);
-  await recordAssetWriteAudit(db, context, "frame.asset_mkdir", { path });
+  await queueAssetsListRefresh(db, accountId, frame.id, storage);
+  await recordAssetWriteAudit(
+    db,
+    context,
+    "frame.asset_mkdir",
+    assetAuditMetadata(storage, { path }),
+  );
   return NextResponse.json({ message: "Created" });
 }

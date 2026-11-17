@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { normalizeAssetPath } from "../../../../../../src/lib/frame-asset-cache";
+import { assetStoragePayload } from "../../../../../../src/lib/frame-asset-storages";
 import {
+  assetAuditMetadata,
   assetWriteErrorResponse,
   assetWriteRequestContext,
   hiddenWritePath,
@@ -13,7 +15,8 @@ import {
 
 export const runtime = "nodejs";
 
-// Rename/move a file or folder under the frame's assets directory —
+// Rename/move a file or folder under the frame's assets directory (or the
+// storage `?storage=` names; both ends on that one storage) —
 // form-urlencoded `src` + `dst`, `{message}` back, same as the backend.
 export async function POST(
   request: NextRequest,
@@ -24,7 +27,7 @@ export async function POST(
   if (context.response) {
     return context.response;
   }
-  const { db, accountId, frame } = context;
+  const { db, accountId, frame, storage } = context;
 
   let form: FormData;
   try {
@@ -43,16 +46,21 @@ export async function POST(
     accountId,
     frame.id,
     "asset_rename",
-    { dst, src },
+    { dst, src, ...assetStoragePayload(storage) },
   );
   if (!result.ok) {
     return assetWriteErrorResponse(result);
   }
   // Both sides go: the src subtree is gone from the device, and any stale
   // rows under dst (a rename onto a previously cached path) are wrong now.
-  await invalidateCachedAssetSubtree(db, frame.id, src);
-  await invalidateCachedAssetSubtree(db, frame.id, dst);
-  await queueAssetsListRefresh(db, accountId, frame.id);
-  await recordAssetWriteAudit(db, context, "frame.asset_renamed", { dst, src });
+  await invalidateCachedAssetSubtree(db, frame.id, src, storage);
+  await invalidateCachedAssetSubtree(db, frame.id, dst, storage);
+  await queueAssetsListRefresh(db, accountId, frame.id, storage);
+  await recordAssetWriteAudit(
+    db,
+    context,
+    "frame.asset_renamed",
+    assetAuditMetadata(storage, { dst, src }),
+  );
   return NextResponse.json({ message: "Renamed" });
 }

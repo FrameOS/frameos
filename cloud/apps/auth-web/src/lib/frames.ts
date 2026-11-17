@@ -4,7 +4,7 @@
 // (apps/frame-hub) can share the pure helpers via direct source import.
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import {
   createDb,
   frameAssetFiles,
@@ -1196,6 +1196,9 @@ export async function supersedePendingCommands(
   db: ReturnType<typeof createDb>,
   frameId: string,
   type: string,
+  // Narrows which of them go (an assets_list of one storage leaves the
+  // other storage's alone: commandAssetStorageIs).
+  where?: SQL,
 ) {
   await db
     .update(frameCommands)
@@ -1205,6 +1208,7 @@ export async function supersedePendingCommands(
         eq(frameCommands.frameId, frameId),
         eq(frameCommands.type, type),
         inArray(frameCommands.status, ["pending", "sent"]),
+        where,
       ),
     );
 }
@@ -2403,29 +2407,36 @@ export function parseAssetEntries(value: unknown): FrameAssetEntry[] {
   return entries;
 }
 
+// One storage's listing (docs/cloud-frames.md "Asset storages"), stored
+// with the `storages` the device sent beside it (null: it sent none).
 export async function storeFrameAssetListing(
   db: ReturnType<typeof createDb>,
   frameId: string,
   entries: FrameAssetEntry[],
   truncated: boolean,
+  options: { storage?: string; storages?: { id: string; name: string }[] | null } = {},
 ) {
   const sizeBytes = Buffer.byteLength(JSON.stringify(entries), "utf8");
   if (sizeBytes > maxAssetListingBytes) {
     return false;
   }
   const now = new Date();
+  const storage = options.storage ?? "assets";
+  const storages = options.storages ?? null;
   await db
     .insert(frameAssets)
     .values({
       frameId,
       payload: entries,
       sizeBytes,
+      storage,
+      storages,
       truncated,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      set: { payload: entries, sizeBytes, truncated, updatedAt: now },
-      target: frameAssets.frameId,
+      set: { payload: entries, sizeBytes, storages, truncated, updatedAt: now },
+      target: [frameAssets.frameId, frameAssets.storage],
     });
   return true;
 }
@@ -2435,8 +2446,17 @@ export async function storeFrameAssetListing(
 export async function storeFrameAssetFile(
   db: ReturnType<typeof createDb>,
   frameId: string,
-  file: { path: string; thumb: boolean; contentType: string; content: Buffer },
+  file: {
+    path: string;
+    thumb: boolean;
+    contentType: string;
+    content: Buffer;
+    // The device storage it came from (docs/cloud-frames.md "Asset
+    // storages"); the assets folder when absent.
+    storage?: string;
+  },
 ) {
+  const storage = file.storage ?? "assets";
   if (file.content.length > maxAssetFileBytes) {
     return false;
   }
@@ -2460,6 +2480,7 @@ export async function storeFrameAssetFile(
       .where(
         and(
           eq(frameAssetFiles.frameId, frameId),
+          eq(frameAssetFiles.storage, storage),
           eq(frameAssetFiles.path, file.path),
           eq(frameAssetFiles.thumb, file.thumb),
         ),
@@ -2476,6 +2497,7 @@ export async function storeFrameAssetFile(
         objectKey: stored.objectKey,
         path: file.path,
         sizeBytes: stored.sizeBytes,
+        storage,
         thumb: file.thumb,
         updatedAt: now,
       })
@@ -2487,7 +2509,12 @@ export async function storeFrameAssetFile(
           sizeBytes: stored.sizeBytes,
           updatedAt: now,
         },
-        target: [frameAssetFiles.frameId, frameAssetFiles.path, frameAssetFiles.thumb],
+        target: [
+          frameAssetFiles.frameId,
+          frameAssetFiles.storage,
+          frameAssetFiles.path,
+          frameAssetFiles.thumb,
+        ],
       });
     // LRU prune: walk newest-first, keep rows while under both caps, delete
     // the rest. One frame's cache is at most a few dozen small rows, so

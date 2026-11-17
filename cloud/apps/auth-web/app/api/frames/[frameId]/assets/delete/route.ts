@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { normalizeAssetPath } from "../../../../../../src/lib/frame-asset-cache";
+import { assetStoragePayload } from "../../../../../../src/lib/frame-asset-storages";
 import {
+  assetAuditMetadata,
   assetWriteErrorResponse,
   assetWriteRequestContext,
   hiddenWritePath,
@@ -13,8 +15,9 @@ import {
 
 export const runtime = "nodejs";
 
-// Delete a file or folder under the frame's assets directory —
-// form-urlencoded `path`, `{message}` back, same as the backend's delete.
+// Delete a file or folder under the frame's assets directory (or the storage
+// `?storage=` names) — form-urlencoded `path`, `{message}` back, same as the
+// backend's delete.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -24,7 +27,7 @@ export async function POST(
   if (context.response) {
     return context.response;
   }
-  const { db, accountId, frame } = context;
+  const { db, accountId, frame, storage } = context;
 
   let form: FormData;
   try {
@@ -42,13 +45,18 @@ export async function POST(
     accountId,
     frame.id,
     "asset_delete",
-    { path },
+    { path, ...assetStoragePayload(storage) },
   );
   if (!result.ok) {
     return assetWriteErrorResponse(result);
   }
-  await invalidateCachedAssetSubtree(db, frame.id, path);
-  await queueAssetsListRefresh(db, accountId, frame.id);
-  await recordAssetWriteAudit(db, context, "frame.asset_deleted", { path });
+  await invalidateCachedAssetSubtree(db, frame.id, path, storage);
+  await queueAssetsListRefresh(db, accountId, frame.id, storage);
+  await recordAssetWriteAudit(
+    db,
+    context,
+    "frame.asset_deleted",
+    assetAuditMetadata(storage, { path }),
+  );
   return NextResponse.json({ message: "Deleted" });
 }

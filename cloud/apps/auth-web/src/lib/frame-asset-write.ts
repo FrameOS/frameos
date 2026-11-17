@@ -12,6 +12,12 @@ import { recordAuditEvent } from "./audit";
 import { csrfResponse } from "./csrf";
 import { jsonError, requireDatabase } from "./device-flow";
 import {
+  assetStoragePayload,
+  commandAssetStorageIs,
+  defaultAssetStorage,
+  resolveAssetStorage,
+} from "./frame-asset-storages";
+import {
   enqueueFrameCommand,
   frameForAccount,
   supersedePendingCommands,
@@ -154,13 +160,20 @@ export async function putAssetChunk(
   db: CommandDatabase,
   accountId: string,
   frameId: string,
-  chunk: { uploadId: string; offset: number; bytes: Uint8Array; finalPath?: string },
+  chunk: {
+    uploadId: string;
+    offset: number;
+    bytes: Uint8Array;
+    finalPath?: string;
+    storage?: string;
+  },
 ): Promise<AssetCommandResult> {
   const result = await runAssetWriteCommand(db, accountId, frameId, "asset_put_chunk", {
     upload_id: chunk.uploadId,
     offset: chunk.offset,
     data: Buffer.from(chunk.bytes).toString("base64"),
     ...(chunk.finalPath !== undefined ? { complete: true, path: chunk.finalPath } : {}),
+    ...assetStoragePayload(chunk.storage ?? defaultAssetStorage),
   });
   if (!result.ok && (result.error === "unknown_verb" || result.error === "unsupported_verb")) {
     return { ok: false, error: "chunked_upload_unsupported" };
@@ -191,8 +204,11 @@ export async function uploadAssetBytes(
      * the device will ack it). Answers `aborted`, never throws.
      */
     signal?: AbortSignal;
+    /** Which of the device's storages (frame-asset-storages.ts). */
+    storage?: string;
   } = {},
 ): Promise<AssetCommandResult> {
+  const storage = options.storage ?? defaultAssetStorage;
   if (bytes.length > maxChunkedAssetUploadBytes) {
     return { ok: false, error: "too_large" };
   }
@@ -203,6 +219,7 @@ export async function uploadAssetBytes(
     return runAssetWriteCommand(db, accountId, frame.id, "asset_put", {
       data: Buffer.from(bytes).toString("base64"),
       path,
+      ...assetStoragePayload(storage),
     });
   }
   const chunkBytes = assetUploadChunkBytes(frame);
@@ -219,6 +236,7 @@ export async function uploadAssetBytes(
       offset,
       bytes: bytes.subarray(offset, end),
       ...(end >= bytes.length ? { finalPath: path } : {}),
+      storage,
     });
     if (result.ok) {
       offset = end;
@@ -245,6 +263,7 @@ export async function invalidateCachedAssetSubtree(
   db: FramesDatabase,
   frameId: string,
   path: string,
+  storage: string = defaultAssetStorage,
 ) {
   // Escape LIKE metacharacters in the path so "10%" or "a_b" folders do not
   // widen the invalidation to unrelated rows.
@@ -254,6 +273,7 @@ export async function invalidateCachedAssetSubtree(
     .where(
       and(
         eq(frameAssetFiles.frameId, frameId),
+        eq(frameAssetFiles.storage, storage),
         or(
           eq(frameAssetFiles.path, path),
           like(frameAssetFiles.path, `${prefix}/%`),
@@ -288,6 +308,8 @@ export async function assetWriteRequestContext(
       accountId: string;
       actor: { accountId: string; providerSubject?: string };
       frame: NonNullable<Awaited<ReturnType<typeof frameForAccount>>>;
+      // The `storage` query parameter, checked (resolveAssetStorage).
+      storage: string;
     }
 > {
   const csrf = csrfResponse(request);
@@ -317,6 +339,14 @@ export async function assetWriteRequestContext(
   if (frame.status !== "active") {
     return { response: jsonError("frame_not_active", 409) };
   }
+  const storage = await resolveAssetStorage(
+    db,
+    frame.id,
+    request.nextUrl.searchParams.get("storage"),
+  );
+  if (!storage.ok) {
+    return { response: jsonError(storage.error, storage.status) };
+  }
   return {
     db,
     accountId: session.accountId,
@@ -325,6 +355,7 @@ export async function assetWriteRequestContext(
       providerSubject: session.providerSubject,
     },
     frame,
+    storage: storage.storage,
   };
 }
 
@@ -359,6 +390,18 @@ export async function recordAssetWriteAudit(
   });
 }
 
+/**
+ * The metadata of an asset write's audit row: what the route recorded,
+ * plus the storage when it is not the default (so the activity feed's
+ * existing rows and new default-storage rows read the same).
+ */
+export function assetAuditMetadata(
+  storage: string,
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...metadata, ...assetStoragePayload(storage) };
+}
+
 /** Map a device refusal / queue outcome onto an HTTP error response. */
 export function assetWriteErrorResponse(
   result: Extract<AssetCommandResult, { ok: false }>,
@@ -377,16 +420,23 @@ export function assetWriteErrorResponse(
   return jsonError(result.error, status);
 }
 
-/** Queue a fresh assets_list so the panel's next refresh shows the change. */
+/**
+ * Queue a fresh assets_list of the written storage so the panel's next
+ * refresh shows the change. Only that storage's pending listing is
+ * superseded: the other storage's is still somebody's question.
+ */
 export async function queueAssetsListRefresh(
   db: CommandDatabase,
   accountId: string,
   frameId: string,
+  storage: string = defaultAssetStorage,
 ) {
-  await supersedePendingCommands(db, frameId, "assets_list");
+  await supersedePendingCommands(db, frameId, "assets_list", commandAssetStorageIs(storage));
+  const payload = assetStoragePayload(storage);
   await enqueueFrameCommand(db, {
     createdByAccountId: accountId,
     frameId,
+    ...(payload.storage ? { payload } : {}),
     ttlMs: commandTtlMs,
     type: "assets_list",
   });
