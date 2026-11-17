@@ -5,6 +5,7 @@
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
 import { attachKeyboardInput, attachPointerInput } from './pointer'
+import { PreviewCursor, type CursorSprite } from './cursor'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -115,12 +116,22 @@ export interface FrameOSPreviewOptions {
    * preview. Its Restart and Reboot arrive as `onSceneEvent` `restart` /
    * `reboot`, a new render scale as `frameSettings` `{renderScale}`. */
   framePage?: boolean
+  /** Draw the frame's own mouse cursor over the picture, as a frame with a
+   * mouse draws it, with the page's cursor hidden over the canvas; off (the
+   * default) shows the page's cursor in the shape the scene asks for there
+   * (`cursor-*` classes, a window's resize edges). See ./cursor and
+   * `setDrawnCursor`. A bundle from before (`runtimeInfo.cursor`) says
+   * nothing, and the page's arrow shows. */
+  drawnCursor?: boolean
   /** The FrameOS Cloud origin the Scene store scene browses and previews
    * from; defaults to https://cloud.frameos.net. The listing is fetched from
    * the worker, so another origin needs CORS or `proxyUrl`. */
   storeUrl?: string
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
+  /** The mouse cursor over the picture took another shape (a CSS name):
+   * for a page that mirrors the picture elsewhere and shows it there. */
+  onCursor?: (shape: string) => void
   onState?: (state: Record<string, unknown>) => void
   /** The runtime changed scenes by itself (a scene switched, the scene
    * switcher, a store preview) or loaded more: what `onReady` reported, now. */
@@ -171,6 +182,12 @@ export class FrameOSPreview {
   private nextAppTestsRequestId = 1
   /** Labels of the buttons `buttonDown` pressed and `buttonUp` has not let go of. */
   private heldButtons = new Set<string>()
+  /** The mouse cursor over the canvas (./cursor). */
+  private cursor: PreviewCursor | null = null
+  private cursorDrawn: boolean
+  private cursorSprite: CursorSprite | null = null
+  /** The mouse cursor's shape over the picture, as CSS names it. */
+  cursorShape = 'default'
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
@@ -184,6 +201,7 @@ export class FrameOSPreview {
     gpioEvents: false,
     sceneStateSeeded: false,
     resize: false,
+    cursor: false,
   }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
@@ -203,6 +221,10 @@ export class FrameOSPreview {
     this.fastMode = Boolean(options.fastMode)
     this.panelPalette = options.panelPalette ?? null
     this.beforeDither = options.beforeDither ?? null
+    this.cursorDrawn = options.drawnCursor === true
+    if (this.canvas) {
+      this.cursor = new PreviewCursor(this.canvas, this.cursorDrawn)
+    }
 
     this.worker = new Worker(options.workerUrl, { type: 'module' })
     this.worker.onerror = (event: ErrorEvent) => {
@@ -249,8 +271,15 @@ export class FrameOSPreview {
           gpioEvents: msg.gpioEvents === true,
           sceneStateSeeded: msg.sceneStateSeeded === true,
           resize: msg.resize === true,
+          cursor: msg.cursor === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
+        break
+      case 'cursor':
+        this.cursorShape = typeof msg.shape === 'string' ? msg.shape : 'default'
+        this.cursorSprite = msg.sprite && typeof msg.sprite === 'object' ? (msg.sprite as CursorSprite) : null
+        this.cursor?.setShape(this.cursorShape, this.cursorSprite)
+        this.options.onCursor?.(this.cursorShape)
         break
       case 'frame':
         this.pendingFrame = { width: msg.width, height: msg.height, buffer: msg.buffer }
@@ -332,8 +361,21 @@ export class FrameOSPreview {
 
   /** Attach (or replace) the canvas frames are painted onto. */
   attachCanvas(canvas: HTMLCanvasElement | null): void {
+    if (canvas !== this.canvas) {
+      this.cursor?.detach()
+      this.cursor = canvas ? new PreviewCursor(canvas, this.cursorDrawn) : null
+      this.cursor?.setShape(this.cursorShape, this.cursorSprite)
+    }
     this.canvas = canvas
     this.paint()
+  }
+
+  /** Draw the frame's own mouse cursor over the picture (the page's hidden
+   * over the canvas), or show the page's in the scene's shape: the
+   * `drawnCursor` option, switched. */
+  setDrawnCursor(drawn: boolean): void {
+    this.cursorDrawn = drawn
+    this.cursor?.setDrawn(drawn)
   }
 
   /** Show frames through a panel's palette (or null for true colour), and
@@ -356,6 +398,9 @@ export class FrameOSPreview {
     if (!canvas || !frame || !frame.buffer.byteLength) {
       return
     }
+    // The frame's cursor is never in a frame: put away, then drawn again
+    // over the new one (./cursor).
+    this.cursor?.away()
     if (canvas.width !== frame.width) {
       canvas.width = frame.width
     }
@@ -378,6 +423,7 @@ export class FrameOSPreview {
       ditherFrame(pixels, frame.width, frame.height, panel)
     }
     context.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0)
+    this.cursor?.back()
   }
 
   /** Force a render now. */
@@ -582,6 +628,8 @@ export class FrameOSPreview {
     this.worker?.terminate()
     this.worker = null
     this.pendingFrame = null
+    this.cursor?.detach()
+    this.cursor = null
     this.canvas = null
     for (const pending of this.assetRequests.values()) {
       pending.reject(new Error('preview destroyed'))

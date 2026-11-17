@@ -624,6 +624,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
         if not self.localAccessDrawn:
           clearLocalAccessCodeOnPanel()
+        # What the new frame has under the mouse may want another shape.
+        if self.sceneEvents.inputState.cursorVisible and cursorPanelDevice(self.frameConfig.device):
+          self.presentCursor()
         let markShownMs = takeLoadingMarkShown()
         if markShownMs >= 0:
           self.logSignal(%*{"event": "render:loadingMark", "sceneId": currentScene.id.string,
@@ -840,13 +843,18 @@ proc presentCursor(self: RunnerThread) =
   ## over the frame it shows (frameos/cursor_panel): no scene runs and no
   ## frame is pushed, and nothing but the panel ever holds it. Under the
   ## loading mark's lock, like a push.
+  ## Its shape is what the UI under it asks for (interpreter.cursorShapeAt).
   let state = addr self.sceneEvents.inputState
   let (sceneWidth, sceneHeight) = state[].cursorSpace
   try:
+    let scene = self.scenes.getOrDefault(self.currentSceneId)
+    let shape = if state[].cursorVisible and not scene.isNil:
+        cursorShapeAt(scene, state[].cursorX, state[].cursorY)
+      else: csArrow
     withLoadingMarkAway(-1):
       presentPanelCursor(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip,
         state[].cursorVisible, CursorAt(x: int32(state[].cursorX), y: int32(state[].cursorY),
-          sceneWidth: int32(sceneWidth), sceneHeight: int32(sceneHeight)))
+          sceneWidth: int32(sceneWidth), sceneHeight: int32(sceneHeight), shape: shape))
   except Exception as e:
     self.logger.log(%*{"event": "render:cursor:error", "error": $e.msg})
 

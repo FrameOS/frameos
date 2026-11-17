@@ -610,7 +610,10 @@ export function get(app, context) {
   `frameos.setState`) and the frame renders again by itself. `hover:`,
   `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
   a render: on e-paper a tap answers in a refresh, so keep hover: and
-  active: for LCDs. Where `app.frame.fast` is false, take a drag whole as
+  active: for LCDs. `cursor-pointer`, `cursor-text`, `cursor-move`,
+  `cursor-ew-resize` and the other CSS cursor names set the mouse cursor over
+  an element where a frame has a mouse (`cursor-resize` on a window frame:
+  the arrows of the edge or corner under it). Where `app.frame.fast` is false, take a drag whole as
   `onSwipe` (`direction`, `startX`/`startY` to `x`/`y`) and two fingers as
   `onPinch` (`scale`, below 1 drawn together; `startX`/`startY` the point
   between them at the start, `x`/`y` at the end): one event, one refresh.

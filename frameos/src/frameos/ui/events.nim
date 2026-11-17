@@ -25,6 +25,8 @@ import std/[json, monotimes, times]
 import frameos/events_gen
 import frameos/ui/layout
 import frameos/ui/keyboard
+when not defined(frameosEmbedded):
+  import frameos/cursor_shape
 
 type
   UiHit* = array[4, float32]
@@ -832,6 +834,42 @@ proc uiSceneHandler*(sceneId, event: string, payload: JsonNode): bool =
         target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
         target.inputOnly = false # whatever the handler changed, get() shows it
         return true
+
+when not defined(frameosEmbedded):
+  proc uiCursorAt*(sceneId: string; x, y: float32; pointer = 0): int =
+    ## The mouse cursor a UI of the scene asks for at (x, y), in the scene's
+    ## pixels, as the last render drew it: the shape (`ord`) of the topmost
+    ## element there, from its `cursor-*` class, the arrow for one without.
+    ## -1 when no element is there or a `<Scene>` / `<yield />` is on top:
+    ## the scene in it, or the scene's own, decides (interpreter
+    ## `cursorShapeAt`). A press the UI holds is its element's to the end, so
+    ## a window being resized keeps its arrows wherever the pointer goes.
+    result = -1
+    for target in targets:
+      if target.sceneId != sceneId:
+        continue
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        lx = (x - target.offsetX) / scale
+        ly = (y - target.offsetY) / scale
+      var index = -1
+      let held = target.captureOf(pointer)
+      if held >= 0:
+        index = target.regionOf(held)
+      else:
+        for i in countdown(target.regions.high, 0):
+          if target.regions[i].inside(lx, ly):
+            index = i
+            break
+      if index < 0:
+        continue
+      template r: untyped = target.regions[index]
+      result =
+        if r.scene and held < 0: -1
+        elif r.cursor == CursorEdges: ord(edgeCursor(lx - r.x, ly - r.y, r.w, r.h, r.cursorBand))
+        else: ord(cursorOfCode(r.cursor))
+      if held >= 0:
+        return
 
 proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
   ## Whether a press at (x, y), in the scene's pixels, lands on something a UI

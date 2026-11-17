@@ -54,6 +54,9 @@ type
       ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
       ## order: whatever is in a region after it is drawn over the scene and
       ## takes the pointer there (ui/events.uiOverScene).
+    when not defined(frameosEmbedded):
+      cursor*: uint8       ## its `cursor-*` class (tailwind.nim Box.cursor); 0 for none
+      cursorBand*: float32 ## ... `cursor-resize`'s edge, in the UI's pixels
     # Plain values only: regions are copied by the dozen on every layout
     # and every event (a field's text is `fieldText`).
 
@@ -1626,13 +1629,17 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     scrollsY = b.overflowY == ovScroll or n.field == 2
     scrolls = b.overflowX == ovScroll and n.maxX > 0 or scrollsY and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
+  let cursor = when defined(frameosEmbedded): 0'u8 else: b.cursor
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
-      n.field > 0 or scrolls:
+      n.field > 0 or scrolls or cursor != 0:
     # In paint order: whatever comes later is on top.
     regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
       handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
       scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
       scrollY: (if scrollsY: n.maxY else: 0))
+    when not defined(frameosEmbedded):
+      regions[^1].cursor = cursor
+      regions[^1].cursorBand = b.cursorBand
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)

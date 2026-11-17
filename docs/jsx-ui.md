@@ -561,6 +561,38 @@ export const get = () => (
   sleeping frame) took its handlers with it: the tap draws the UI afresh and
   nothing else happens.
 
+### The mouse cursor
+
+A frame with a mouse draws its cursor (docs/events.md "The cursor"), and an
+element says what it looks like over it with Tailwind's `cursor-*` classes:
+`cursor-pointer` (a hand), `cursor-text` (an I-beam), `cursor-move`,
+`cursor-ew-resize` / `ns-resize` / `nwse-resize` / `nesw-resize` (and
+`col-resize`, `row-resize`, the one-sided `e-resize` ... `se-resize` as their
+axis), `cursor-grab` / `cursor-grabbing` (the hand), `cursor-default` /
+`cursor-auto` (the arrow) and `cursor-none`. One more is FrameOS's own:
+`cursor-resize` (or `cursor-resize-[14px]`) on a window's frame that resizes
+from its edges: the shape is that of the edge or corner the pointer is
+within 12 px (or the given width) of, which is how every desktop's frame
+picks the edge a press drags (`cursor_shape.nim` `edgeCursor`).
+
+- The class is the element's own: the topmost element under the pointer
+  decides, one with none is the arrow, and a child does not inherit its
+  parent's, so a title bar or a scene inside a resizing frame shows its own.
+  A `<Scene>` / `<yield />` on top hands the question to the scene in it, in
+  its own coordinates, through the layout as a press goes
+  (interpreter.nim `cursorShapeAt`, `ui/events.nim` `uiCursorAt`).
+- A press an element holds keeps its cursor until it lifts: a window being
+  resized shows its arrows wherever the mouse goes.
+- An element with a `cursor-*` class and nothing else is a region for the
+  cursor alone: it takes no press and asks for no event.
+- Not on an ESP32, which has no mouse: the class reads as nothing there.
+- In the browser preview (`frameos-wasm`, the scene workspace's "The frame's
+  mouse cursor" toggle) the runtime says the shape under the page's pointer
+  (`frameos_wasm_cursor`, the worker's `cursor` message): the page shows it
+  as its own cursor by CSS name, or hides its own over the canvas and draws
+  the frame's picture of it into the canvas (`frameos_wasm_cursor_sprite`,
+  `frameos/wasm/src/cursor.ts`), put away before each frame is painted.
+
 ## Fields and the keyboard
 
 `<input>` and `<textarea>` are fields to type into, controlled as in React:
