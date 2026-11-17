@@ -8,6 +8,7 @@ import std/[json, os, strutils, times, unittest]
 import pixie
 import zippy
 import ../interpreter
+import ../js_runtime/app_runtime
 import ../scene_rhythm
 import ../types
 
@@ -252,7 +253,7 @@ suite "the Books scene":
     # Rows are 60 px under the 56 px header, sorted by name: broken, old-tales, the-long-walk.
     scene.tap(300, 56 + 60 * 2 + 30)
     discard draw(scene, config, "opened")
-    check scene.spot{"book"}.getStr() == "Books/the-long-walk.epub"
+    check scene.spot{"book"}.getStr() == "assets:Books/the-long-walk.epub"
     check scene.spot{"view"}.getStr() == "book"
     check scene.at[0] == 1 # the cover has no text
     let first = scene.at
@@ -358,7 +359,7 @@ suite "the Books scene":
     var opened = false
     for y in countup(80, 400, 20):
       scene.tap(400, y)
-      if scene.spot{"book"}.getStr() == "Books/old-tales.epub":
+      if scene.spot{"book"}.getStr() == "assets:Books/old-tales.epub":
         opened = true
         break
       if scene.spot{"view"}.getStr() == "book":
@@ -418,7 +419,7 @@ suite "the Books scene":
     check cover.r > 150 and cover.g < 80
     scene.tap(400, 56 + 60 * 3 + 30)
     let page = draw(scene, config, "pictures-page")
-    check scene.spot{"book"}.getStr() == "Books/zy-pictures.epub"
+    check scene.spot{"book"}.getStr() == "assets:Books/zy-pictures.epub"
     # The drawing is 300x200 laid out centred under one line of text: its bar
     # black, the rest of it the page's colour (never black from no alpha).
     var black = 0
@@ -437,6 +438,41 @@ suite "the Books scene":
     for y in [70, 240, 400]:
       let red = second[400, y]
       check red.r > 150 and red.g < 80
+    noProblems()
+
+  test "a frame with a TF card and internal storage lists both, each under its name":
+    problems = @[]
+    let internal = getTempDir() / "frameos-books-internal-" & $epochTime().int
+    createDir(internal / "Books")
+    writeFile(internal / "Books" / "inner.epub", makeZip([
+      ("mimetype", "application/epub+zip"),
+      ("META-INF/container.xml", container),
+      ("OEBPS/content.opf", "<package><metadata><dc:title>Inside the Frame</dc:title></metadata><manifest>" &
+        "<item id=\"a\" href=\"a.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>" &
+        "<spine><itemref idref=\"a\"/></spine></package>"),
+      ("OEBPS/a.xhtml", xhtml("A", "<p>Kept in the frame's own flash.</p>")),
+    ]))
+    storageInternalPath = internal
+    storageCardMounted = true
+    defer:
+      storageInternalPath = ""
+      storageCardMounted = false
+      removeDir(internal)
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"view": "library"}
+    discard draw(scene, config, "two-storages")
+    # The card's five books under "TF card", then "Internal storage" and its
+    # one, on the next page: the keys walk past the heading.
+    for i in 0 ..< 5:
+      scene.press("DOWN")
+      discard draw(scene, config, "two-storages-walk")
+    check scene.spot{"sel"}.getInt() == 5
+    check scene.spot{"page"}.getInt() == 1
+    scene.press("AI")
+    discard draw(scene, config, "internal-book")
+    check scene.spot{"book"}.getStr() == "internal:Books/inner.epub"
+    check scene.spot{"view"}.getStr() == "book"
     noProblems()
 
   test "real books (FRAMEOS_BOOK_FILES=<a.epub>:<b.epub>, else skipped)":

@@ -69,6 +69,7 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
 }
 void frameos_nim_set_quiet(bool quiet) { (void)quiet; }
 void frameos_nim_set_keep_js(bool keep) { (void)keep; }
+void frameos_nim_set_storages(const char *internal_path, bool card) { (void)internal_path; (void)card; }
 size_t frameos_nim_js_runtime_bytes(void) { return 0; }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
 const char *frameos_nim_scene_info_json(void) { return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}"; }

@@ -57,6 +57,7 @@ extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
 extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format, uint32_t generation);
 extern void fos_nim_set_quiet_impl(int quiet);
 extern void fos_nim_set_keep_js_impl(int keep);
+extern void fos_nim_set_storages_impl(const char *internal_path, int card);
 extern size_t fos_nim_js_runtime_bytes_impl(void);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_repack_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
@@ -823,6 +824,14 @@ void frameos_nim_set_keep_js(bool keep)
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_set_keep_js_impl(keep ? 1 : 0);
+    nim_lock_give();
+}
+
+void frameos_nim_set_storages(const char *internal_path, bool card)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_storages_impl(internal_path ? internal_path : "", card ? 1 : 0);
     nim_lock_give();
 }
 

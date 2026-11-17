@@ -596,6 +596,64 @@ suite "js app runtime":
     check not payload["existsAfter"].getBool()
     check not fileExists(assetsDir.parentDir() / "evil.txt")
 
+  test "the internal storage beside the assets folder: listed in app.frame.storages, reached by storage":
+    let assetsDir = getTempDir() / "frameos-js-card-test"
+    let internalDir = getTempDir() / "frameos-js-internal-test"
+    createDir(assetsDir / "Books")
+    createDir(internalDir / "Books")
+    writeFile(assetsDir / "Books" / "card.txt", "on the card")
+    writeFile(internalDir / "Books" / "inside.txt", "in the flash")
+    defer:
+      removeDir(assetsDir)
+      removeDir(internalDir)
+      storageInternalPath = ""
+      storageCardMounted = false
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/storages".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 29.NodeId, nodeName: "jsStorages", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(permissions: JsonNode): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = """export function get(app, context) {
+            return {
+              storages: app.frame.storages,
+              card: frameos.listAssets("Books"),
+              internal: frameos.listAssets("Books", { storage: "internal" }),
+              read: frameos.readAsset("Books/inside.txt", { storage: "internal", text: true }),
+              notOnCard: frameos.readAsset("Books/inside.txt", { text: true }),
+              unknown: frameos.listAssets("Books", { storage: "cloud" }),
+              climbs: frameos.readAsset("../frameos-js-card-test/Books/card.txt", { storage: "internal", text: true }),
+            }
+          }""",
+        assetGrant = assetGrantFromConfig(%*{"permissions": permissions})
+      )
+      runtime.get(owner, %*{}, context).asJson()
+
+    # A Pi: the assets folder alone.
+    check run(%*["assets"])["storages"] == %*[{"id": "assets", "name": "Internal storage"}]
+
+    # An ESP32 with a TF card in and its flash beside it.
+    storageInternalPath = internalDir
+    storageCardMounted = true
+    let both = run(%*["assets"])
+    check both["storages"] == %*[{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal storage"}]
+    check both["card"].mapIt(it.getStr()) == @["Books/card.txt"]
+    check both["internal"].mapIt(it.getStr()) == @["Books/inside.txt"]
+    check both["read"].getStr() == "in the flash"
+    check both["notOnCard"].kind == JNull
+    check both["unknown"].len == 0
+    check both["climbs"].kind == JNull
+    # An app that asks for no assets lives in its scene's folder: no internal storage.
+    let own = run(%*[])
+    check own["internal"].len == 0
+    check own["read"].kind == JNull
+
   test "a symlink out of the assets folder is not a way out of the sandbox":
     let assetsDir = getTempDir() / "frameos-js-symlink-test"
     let outsideDir = getTempDir() / "frameos-js-symlink-outside"

@@ -1009,12 +1009,44 @@ proc attrFloat(node: SvgNode, name: string): float32 =
 proc closeLineStreams(runtime: JsAppRuntime)
 include frameos/js_runtime/js_async
 
-proc assetsRoot(e: JsAppEvalEnv): string =
+var
+  storageInternalPath* = ""
+    ## The frame's internal storage beside its assets folder, where it has one
+    ## (an ESP32's state partition at /srv/internal, fos_assets_flash.c; set
+    ## once at boot by the firmware, embedded_runtime's
+    ## fos_nim_set_storages_impl). "" on a Pi and in the browser.
+  storageCardMounted* = false
+    ## Whether the assets folder is a card that mounted (an ESP32's TF slot).
+
+proc frameStorages*(): JsonNode =
+  ## `app.frame.storages`: the places a JS app's asset calls reach, each with
+  ## the name to show it by, the assets folder (`storage` "assets", the
+  ## default) first. The internal storage is listed only where it is not the
+  ## assets folder itself: an ESP32 with no card uses it for both.
+  if storageInternalPath.len > 0 and storageCardMounted:
+    %*[{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal storage"}]
+  elif storageInternalPath.len > 0:
+    %*[{"id": "internal", "name": "Internal storage"}]
+  elif storageCardMounted:
+    %*[{"id": "assets", "name": "TF card"}]
+  else:
+    %*[{"id": "assets", "name": "Internal storage"}]
+
+proc assetsRoot(e: JsAppEvalEnv, storage = ""): string =
   ## The sandbox root for this app's asset calls: the frame-wide assets
   ## folder, or the scene's own subtree for an app that asks for no assets
   ## permission (agOwnFolder) and for every app on a frame whose
-  ## `js.assetSandbox` is "scene".
+  ## `js.assetSandbox` is "scene". `storage` "internal" is the frame's
+  ## internal storage (frameStorages), for an app with the assets permission
+  ## on a frame that has one; "" where it has none.
   let frameConfig = e.owner.frameConfig
+  if storage == "internal":
+    if storageInternalPath.len == 0 or e.runtime.assetGrant == agOwnFolder or
+        (frameConfig != nil and frameConfig.js != nil and frameConfig.js.assetSandbox == "scene"):
+      return ""
+    return storageInternalPath
+  elif storage.len > 0 and storage != "assets":
+    return ""
   result = if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets"
            else: frameConfig.assetsPath
   result.removeSuffix('/')
@@ -1037,7 +1069,7 @@ proc containsPathTraversal(relPath: string): bool =
       return true
   return false
 
-proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false): string =
+proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false, storage = ""): string =
   ## Absolute path inside the assets folder, or "" when the path is empty,
   ## absolute, or escapes the folder, or is a `write` from an app that asks
   ## only to read the folder (agRead). One check here rather than one per
@@ -1050,7 +1082,9 @@ proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false): string =
   if relPath.len == 0 or relPath.startsWith("/") or relPath.isAbsolute() or
       containsPathTraversal(relPath) or (write and e.runtime.assetGrant == agRead):
     return ""
-  let root = assetsRoot(e)
+  let root = assetsRoot(e, storage)
+  if root.len == 0:
+    return ""
   let full = normalizedPath(root / relPath)
   if not (full == root or full.startsWith(root & "/")):
     return ""
@@ -1144,10 +1178,12 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   try:
     case opStr
     of "list":
-      let root = assetsRoot(e)
-      let dir = if pathStr.len == 0: root else: resolveAssetPath(e, pathStr)
+      let options = optionsArg(ctx, data)
+      let storage = options{"storage"}.getStr()
+      let root = assetsRoot(e, storage)
+      let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = storage)
       var files: seq[string] = @[]
-      let shallow = toNimString(ctx, data).contains("\"shallow\":true")
+      let shallow = options{"shallow"}.getBool(false)
       if dir.len > 0 and dirExists(dir):
         # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
         # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
@@ -1177,10 +1213,10 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         return nimIntToJS(ctx, -1)
       return nimFloatToJS(ctx, getFileSize(full).float)
     of "read":
-      let full = resolveAssetPath(e, pathStr)
+      let options = optionsArg(ctx, data)
+      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
       if full.len == 0 or not fileExists(full):
         return jsNull(ctx)
-      let options = optionsArg(ctx, data)
       let offset = max(0, options{"offset"}.getInt(0))
       let readMax = jsAssetReadMaxBytes(e)
       # text: the bytes as a string (UTF-8, without the halves of characters
@@ -1244,9 +1280,6 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         return nimBoolToJS(ctx, false)
       return nimBoolToJS(ctx, not existsOrCreateDir(full))
     of "image":
-      let full = resolveAssetPath(e, pathStr)
-      if full.len == 0 or not fileExists(full):
-        return jsNull(ctx)
       var options = newJObject()
       try:
         let optionsStr = toNimString(ctx, data)
@@ -1254,6 +1287,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
           options = parseJson(optionsStr)
       except CatchableError:
         discard
+      let full = resolveAssetPath(e, pathStr, storage = options{"storage"}.getStr())
+      if full.len == 0 or not fileExists(full):
+        return jsNull(ctx)
       let
         keep = options{"keep"}.getBool(false)
         sizedWidth = options{"width"}.getInt(0)
@@ -1726,6 +1762,8 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
   of "assetsPath":
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
+  of "storages":
+    return jsonToJS(ctx, frameStorages())
   of "timeZone":
     return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
   of "debug":
@@ -1870,7 +1908,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale", "fast",
+    keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
       "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:

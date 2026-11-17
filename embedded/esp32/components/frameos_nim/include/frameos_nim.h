@@ -75,6 +75,11 @@ void frameos_nim_set_quiet(bool quiet);
  * into them instead of building and compiling them again. They still go
  * before a render or decode that finds headroom short. */
 void frameos_nim_set_keep_js(bool keep);
+
+/* The storages a JS app has (app.frame.storages, the asset calls' `storage`):
+ * the internal storage's path, or NULL without one, and whether the assets
+ * path is a card that mounted. */
+void frameos_nim_set_storages(const char *internal_path, bool card);
 /* What the live JS app interpreters hold (walks their heaps: not per frame). */
 size_t frameos_nim_js_runtime_bytes(void);
 /* Backward-compatible 1bpp entrypoint used by older builds/tests. */

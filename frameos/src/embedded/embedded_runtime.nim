@@ -491,6 +491,14 @@ proc fos_nim_js_runtime_bytes_impl(): csize_t {.exportc, cdecl.} =
   ## What the live JS app interpreters hold, for the render:animation line.
   liveJsAppRuntimeBytes().csize_t
 
+proc fos_nim_set_storages_impl(internalPath: cstring, card: cint) {.exportc, cdecl.} =
+  ## The firmware's storages, once at boot (main.c): the internal storage's
+  ## path ("" without one) and whether the assets folder is a card that
+  ## mounted. What `app.frame.storages` lists and the asset calls' `storage`
+  ## reaches (js_runtime/app_runtime.nim).
+  storageInternalPath = $internalPath
+  storageCardMounted = card != 0
+
 proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
   ## An animation's quiet frame (fos_animation.h): no `render #N` line and no
   ## scene log lines until the next frame that logs in full.

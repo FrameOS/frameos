@@ -638,13 +638,22 @@ void app_main(void)
 
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
-    } else if (!config->assets_sd.enabled &&
-               fos_assets_flash_mount(config->assets_path[0] ? config->assets_path : "/srv/assets") == ESP_OK) {
-        /* No SD card wired (the SenseCAP Indicator's slot is the RP2040's):
-         * the assets directory lives on the state partition. A board with a
-         * slot and no card keeps waiting for one. */
-        fos_assets_cleanup_stale_uploads();
+    } else {
+        /* The frame's internal storage, card or none: JS apps list it beside
+         * the card (Books' "Internal storage"), as the storage "internal". */
+        fos_assets_flash_mount(FOS_ASSETS_INTERNAL_PATH);
+        if (!config->assets_sd.enabled &&
+            fos_assets_flash_mount(config->assets_path[0] ? config->assets_path : "/srv/assets") == ESP_OK) {
+            /* No SD card wired (the SenseCAP Indicator's slot is the RP2040's):
+             * the assets directory is the internal storage too. A board with a
+             * slot and no card keeps waiting for one. */
+            fos_assets_cleanup_stale_uploads();
+        }
     }
+    /* Which storages a JS app has (app.frame.storages): the card when it
+     * mounted, the internal storage when it did. */
+    frameos_nim_set_storages(fos_assets_internal_active() ? FOS_ASSETS_INTERNAL_PATH : NULL,
+                             fos_assets_sd_mounted());
     /* The other half of what the Nim dispatcher hands back to the firmware:
      * fos_scenes_init installed the scene-select hook, this installs the
      * device-command one. Before any producer (HTTP, cloud, console) exists. */
