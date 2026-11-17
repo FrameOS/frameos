@@ -57,8 +57,9 @@ copied verbatim, so `"HH:mm"` prints the text `HH:mm`.
 
 Examples: `format(now(), "{hour/2}:{minute/2}")` → `09:05`;
 `format(now(), "{weekday}, {month/n} {day}")` → `Monday, August 24`;
-`Number(format(now(), "{hour}"))` → `9`. For a plain clock, the `data/clock`
-app is simpler than a code node.
+`Number(format(now(), "{hour}"))` → `9`. For a plain clock, the Clock app
+(`repo/apps/text/clock`, the same tokens in its `format`) is simpler than a
+code node.
 
 ## Scene-local JS apps
 
@@ -130,13 +131,13 @@ editor and the store are its apps' lists together
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers
 (`format`, `now`, `parseTs`); take such values in through a field fed by a
-code node or `data/clock`. `Date` reads local time in the frame's zone,
+code node, or use the Clock app. `Date` reads local time in the frame's zone,
 like Nim's `now()` (the process zone on a Pi, the frame's time zone setting
 on an ESP32).
 
 JavaScript is the format apps are written in. The Nim apps under
 `frameos/src/apps/` are the built-in catalog that ships inside the FrameOS
-binary (`render/text`, `data/clock`, …) — not something a scene carries or a
+binary (`render/text`, `data/qr`, …) — not something a scene carries or a
 user edits. A scene that still holds Nim sources or Nim code nodes is a
 legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
 

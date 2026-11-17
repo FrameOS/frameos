@@ -1,0 +1,48 @@
+{
+  "name": "Clock",
+  "description": "The current time as text, in the frame's time zone",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "markdown": "Tokens in braces: `{year/4}` `{year/2}` `{month}` `{month/2}` `{month/n}` `{month/n/3}` `{day}` `{day/2}` `{weekday}` `{weekday/3}` `{weekday/2}` `{hour}` `{hour/2}` `{hour/ap}` `{hour/2/ap}` `{am/pm}` `{minute}` `{minute/2}` `{second}` `{second/2}` `{tzName}`; anything else is written as it is."
+    },
+    {
+      "name": "format",
+      "type": "select",
+      "options": [
+        "{hour/2}:{minute/2}",
+        "{hour/2}:{minute/2}:{second/2}",
+        "{hour/ap}:{minute/2} {am/pm}",
+        "{year/4}-{month/2}-{day/2}",
+        "{year/4}-{month/2}-{day/2} {hour/2}:{minute/2}",
+        "{weekday} {day} {month/n} {year/4}",
+        "custom"
+      ],
+      "value": "{hour/2}:{minute/2}",
+      "required": true,
+      "label": "Format"
+    },
+    {
+      "name": "formatCustom",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "Custom format",
+      "placeholder": "{weekday/3} {day/2}.{month/2}",
+      "showIf": [
+        {
+          "field": "format",
+          "operator": "eq",
+          "value": "custom"
+        }
+      ]
+    }
+  ],
+  "output": [
+    {
+      "name": "time",
+      "type": "string"
+    }
+  ]
+}

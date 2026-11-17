@@ -460,7 +460,7 @@ export function lintJsAppSource(source: string, category?: string): string[] {
   }
   if (/(^|[^.\w])(?:format|now|parseTs)\s*\(/.test(source)) {
     problems.push(
-      "JS apps have no format()/now()/parseTs() (those exist only in code nodes). Use Date, which reads the frame's local time, or take the formatted value in through a field fed by a code node or data/clock.",
+      "JS apps have no format()/now()/parseTs() (those exist only in code nodes). Use Date, which reads the frame's local time, or take the formatted value in through a field fed by a code node or the Clock app (repo/apps/text/clock).",
     );
   }
   return problems;

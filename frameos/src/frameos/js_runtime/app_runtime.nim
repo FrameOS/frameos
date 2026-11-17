@@ -28,6 +28,8 @@ import frameos/js_runtime/pixel_ops
 import frameos/js_runtime/typed_ops
 import frameos/js_runtime/jsx_native
 import frameos/render_probe
+when not defined(frameosEmbedded):
+  from frameos/utils/frame_time import frameEpochPinned
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import std/hashes
@@ -3106,6 +3108,13 @@ proc evalAppPrelude(js: QuickJS) =
     discard js.evalBytecode(appPreludeBytecode.toOpenArrayByte(0, appPreludeBytecode.high))
   else:
     discard js.eval(appJsPrelude)
+  when not defined(frameosEmbedded):
+    # The snapshot harness pins the clock (utils/frame_time.nim), for the
+    # JavaScript apps too: a clock or a calendar's "today" renders the same
+    # picture on every run (e2e/makesnapshots.py also sets TZ=UTC).
+    let pinned = frameEpochPinned()
+    if pinned > 0:
+      discard js.eval("Date.now=()=>" & $(pinned * 1000) & ";")
 
 proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
   ## `sceneId` joins this runtime to the owning scene's shared heap budget

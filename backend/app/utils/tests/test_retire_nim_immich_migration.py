@@ -41,7 +41,7 @@ def test_migration_rewrites_frames_baselines_and_templates():
         sa.Column("scenes", sa.JSON()),
     )
     meta.create_all(engine)
-    untouched = {"id": "clock", "nodes": [{"id": "c", "type": "app", "data": {"keyword": "data/clock"}}]}
+    untouched = {"id": "clock", "nodes": [{"id": "c", "type": "app", "data": {"keyword": "render/text"}}]}
     with engine.begin() as connection:
         connection.execute(frame.insert(), [
             {"id": 1, "scenes": [_nim_scene("photos"), untouched],

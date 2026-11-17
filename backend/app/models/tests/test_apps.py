@@ -13,7 +13,7 @@ async def test_get_app_configs():
     configs = get_app_configs()
     assert isinstance(configs, dict)
     assert "logic/ifElse" in configs
-    assert "data/clock" in configs
+    assert "render/text" in configs
     assert "repo/apps/logic/jsLogic" not in configs
     assert "repo/apps/text/jsText" not in configs
 

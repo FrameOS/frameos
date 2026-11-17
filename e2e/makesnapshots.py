@@ -315,6 +315,9 @@ def start_frameos(upload_url, frame_size):
     # Pin the wall clock (frameos/utils/frame_time.nim): the clock and
     # calendar fixtures render 2024-03-12 14:40:00 UTC, whatever day it is.
     env["FRAMEOS_E2E_FIXED_EPOCH"] = "1710254400"
+    # ... read in UTC, by the JavaScript apps too (a JS app's Date.now() is
+    # pinned with it and its Date reads the process's zone).
+    env["TZ"] = "UTC"
     # Start the frameos binary in the background
     FRAMEOS_PROCESS_LOG.parent.mkdir(exist_ok=True)
     process_log_file = FRAMEOS_PROCESS_LOG.open("w")

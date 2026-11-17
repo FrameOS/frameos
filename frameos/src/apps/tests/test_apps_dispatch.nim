@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 import pixie
 import frameos/types
 import frameos/values
@@ -20,14 +20,15 @@ proc newTestScene(config: FrameConfig): FrameScene =
     backgroundColor: parseHtmlColor("#000000"),
   )
 
-proc newClockNode(): DiagramNode =
+proc newXmlNode(): DiagramNode =
+  # data/xmlToJson: a data app still in the registry (the program apps are run
+  # by the scene's program, docs/scene-compiler.md).
   DiagramNode(
     id: 1.NodeId,
     data: %*{
-      "name": "data/clock",
+      "name": "data/xmlToJson",
       "config": {
-        "format": "HH:mm:ss",
-        "formatCustom": "yyyy"
+        "xml": "<a>1</a>"
       }
     },
   )
@@ -48,13 +49,12 @@ suite "apps dispatch":
     let config = newTestConfig()
     let scene = newTestScene(config)
 
-    let clockApp = initApp("data/clock", newClockNode(), scene)
-    check clockApp != nil
-    setAppField("data/clock", clockApp, "format", VString("custom"))
-    setAppField("data/clock", clockApp, "formatCustom", VString("yyyy"))
-    let clockValue = getApp("data/clock", clockApp, ExecutionContext(hasImage: false))
-    check clockValue.kind == fkString
-    check clockValue.asString().len == 4
+    let xmlApp = initApp("data/xmlToJson", newXmlNode(), scene)
+    check xmlApp != nil
+    setAppField("data/xmlToJson", xmlApp, "xml", VString("<b>2</b>"))
+    let xmlValue = getApp("data/xmlToJson", xmlApp, ExecutionContext(hasImage: false))
+    check xmlValue.kind == fkJson
+    check "2" in $xmlValue.asJson()
 
     let colorApp = initApp("render/color", newColorNode(), scene)
     check colorApp != nil
@@ -81,7 +81,7 @@ suite "apps dispatch":
     let context = ExecutionContext(hasImage: false)
 
     expect(ValueError):
-      discard initApp("not/a-real-app", newClockNode(), scene)
+      discard initApp("not/a-real-app", newXmlNode(), scene)
 
     expect(ValueError):
       setAppField("not/a-real-app", nil, "format", VString("HH:mm:ss"))
@@ -91,3 +91,8 @@ suite "apps dispatch":
 
     expect(ValueError):
       discard getApp("not/a-real-app", nil, context)
+
+  test "a program app has no registry row":
+    let scene = newTestScene(newTestConfig())
+    expect(ValueError):
+      discard initApp("logic/ifElse", newXmlNode(), scene)

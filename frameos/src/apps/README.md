@@ -3,7 +3,7 @@
 The apps in this directory are the catalog compiled into every FrameOS
 binary: `render/*` draw onto the canvas, `data/*` produce values and images,
 `logic/*` branch and write state. A scene refers to them by keyword
-(`render/text`, `data/clock`, …) and the interpreter dispatches into the
+(`render/text`, `data/qr`, …) and the interpreter dispatches into the
 binary — nothing here is copied into a scene, and nothing here is edited by a
 user.
 
