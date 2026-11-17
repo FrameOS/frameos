@@ -262,16 +262,18 @@ proc links(n: SvgNode): bool {.noinline.} =
 const MaxClipboard = when defined(frameosEmbedded): 4096 else: 65536
   ## The most a copy keeps, in bytes (cut at a character).
 
-var
-  clipboard {.threadvar.}: string
-    ## What Copy and Cut took, for Paste: the frame's own, every UI's.
-  clipboardChanges {.threadvar.}: int
-    ## How many times it was set: a host with a clipboard of its own (the
-    ## browser's preview) hands it on when this moves.
+var clipboard {.threadvar.}: string
+  ## What Copy and Cut took, for Paste: the frame's own, every UI's.
 
-proc uiClipboardChanges*(): int =
-  ## Counts every `setUiClipboard`.
-  clipboardChanges
+when not defined(frameosEmbedded):
+  var clipboardChanges {.threadvar.}: int
+    ## How many times it was set: a host with a clipboard of its own (the
+    ## browser's preview) hands it on when this moves. No such host on an
+    ## ESP32: not in the firmware.
+
+  proc uiClipboardChanges*(): int =
+    ## Counts every `setUiClipboard`.
+    clipboardChanges
 
 proc uiClipboard*(): string =
   ## The frame's clipboard (a host with one of its own, the browser's
@@ -281,7 +283,8 @@ proc uiClipboard*(): string =
 proc setUiClipboard*(text: string) =
   ## Copy and Cut; and a host's own clipboard handed to the frame for Paste.
   clipboard = text
-  inc clipboardChanges
+  when not defined(frameosEmbedded):
+    inc clipboardChanges
   if clipboard.len > MaxClipboard:
     var cut = MaxClipboard
     while cut > 0 and (ord(clipboard[cut]) and 0xC0) == 0x80:
