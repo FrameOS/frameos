@@ -131,8 +131,6 @@ type
     keyboard: UiNode     ## the on-screen keyboard's, likewise
     popup: UiNode        ## an open <select>'s list, likewise
     accents: UiNode      ## a held key's accents, likewise
-    linkQr: Image        ## the QR code of the link that is up ...
-    linkQrFor: (string, int) ## ... and its URL and size
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -206,6 +204,7 @@ const
     ## The tap handler of a link (`<a href>`, "Links" in docs/jsx-ui.md): its
     ## QR code goes up over the UI. Past every handler a tree can hold.
   LinkClose* = LinkOpen + 1 ## the QR code's: it goes away
+  LinkCloseAttr = $LinkClose
   MaxLink = 1024 ## a longer href is no link: its QR code would be too dense to scan
   KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
   LinkKey = 1 shl 24     ## a link's QR code, likewise
@@ -1250,6 +1249,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var
+  linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
+  linkQrUrl {.threadvar.}: string ## ... its URL ...
+  linkQrSide {.threadvar.}: int ## ... and the room it was made for
 
 proc overBackdrop(c: ColorRGBA, opacity: float32): tuple[color: ColorRGBA, opacity: float32] =
   ## `c` at `opacity`, as the colour it makes over the backdrop.
@@ -1864,40 +1867,33 @@ proc linkCard(url: string, width, height: float32, input: var UiInput, drawn: va
   ## the URL (two lines at most) and the button leave: a first pass lays the
   ## card out with the code as a box that grows into it, the second draws the
   ## code at the size that box got.
-  var
-    image: Image
-    side = 0
-    shown: UiNode
+  let
+    code = el("img", "flex-1 min-h-0 w-full")
+    card = el("div", "flex flex-col items-center justify-center gap-2 p-3 bg-white text-black text-sm", code)
+  card.attrs.add(("on-click", LinkCloseAttr))
+  card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
+  card.children.add el("div", "px-4 py-1 border border-black rounded font-bold", SvgNode(text: "Close"))
+  var shown: UiNode
   for pass in 0 .. 1:
-    let card = el("div", "flex flex-col items-center justify-center gap-[8px] p-[12px] bg-white text-black text-sm")
-    card.attrs.add(("on-click", $LinkClose))
-    var classes = "shrink-0"
-    if pass == 0:
-      classes = "flex-1 min-h-0 w-full"
-    else:
-      let at = if image.isNil: side else: image.width
-      classes.px("w", at)
-      classes.px("h", at)
-    let code = el("img", move classes)
-    code.image = image
-    card.children.add code
-    card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
-    card.children.add el("div", "px-[16px] py-[4px] border border-black rounded font-bold", SvgNode(text: "Close"))
     shown = card.build(initText(), width, height, 0, LinkKey, input, false, nil)
     shown.size = shown.layout(width, height, true, true)
     if pass == 0:
-      let room = shown.children[0].size
-      side = max(int(min(room.x, room.y)), 32)
-      if not memo.isNil and memo.linkQrFor == (url, side):
-        image = memo.linkQr
-      else:
+      let
+        room = shown.children[0].size
+        side = max(int(min(room.x, room.y)), 32)
+      if linkQr.isNil or linkQrUrl != url or linkQrSide != side:
+        linkQrUrl = url
+        linkQrSide = side
         try:
-          image = qrImage(qrEncode(url), side)
+          linkQr = qrImage(qrEncode(url), side)
         except Exception:
-          image = nil
-        if not memo.isNil:
-          memo.linkQr = image
-          memo.linkQrFor = (url, side)
+          linkQr = nil
+      var classes = "shrink-0"
+      let at = if linkQr.isNil: side else: linkQr.width
+      classes.px("w", at)
+      classes.px("h", at)
+      code.attrs[0][1] = move classes
+      code.image = linkQr
   regions.setLen(0)
   shown.emit(0, 0, 1, drawn, gradients, regions)
 
@@ -2099,6 +2095,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
           break
     if not shown:
       input.open = 0
+  if input.link.len == 0:
+    linkQr = nil # no card up: its picture goes
   if input.link.len > 0:
     # A link's QR code: over everything, the keyboard gone (events.openLink).
     input.open = 0
