@@ -1,6 +1,6 @@
 {
   "name": "Terminal layout",
-  "description": "A shell prompt above each scene and a status line below it. Tap the prompt for the scene list and the status line for the frame settings.",
+  "description": "A shell prompt above each scene and a status line below it. Tap the prompt for the scene list, settings at the top right (or press F2) for the scene's settings, and the status line for the frame settings.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

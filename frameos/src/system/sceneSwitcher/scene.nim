@@ -50,7 +50,7 @@ import frameos/utils/svg_frames
 type
   SwitcherEntry* = object
     id*, name*: string
-    windowSize*: string ## its own size in a desktop's window, "" for the desktop's (app.frame.scenes)
+    windowSize*: string ## its own size in a desktop's window, "" for none: 800x480 (app.frame.scenes)
     icon*: string ## its icon, one path in 0 0 24 24 (scene_icon.nim), "" for none
     category*: string ## its category by its name ("Photos"), as the scene has it, "" for none
 

@@ -13,6 +13,8 @@ import ../js_runtime/app_runtime
 import ../layout_choice
 from ../ui/events import uiPressRects
 from ../utils/memory import deviceMemoryBytesOverride
+import ../events_gen
+import system/sceneSettings/scene as sceneSettings
 
 const
   Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -27,6 +29,7 @@ const
   Commander = "layout-commander"
   Teletext = "layout-teletext"
   EReader = "layout-e-reader"
+  TerminalLayout = "layout-terminal"
 
 proc panel(id, name, hex: string, layout = Layout): JsonNode =
   %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": 600,
@@ -103,7 +106,9 @@ let teletext = parseFile(Samples / "Teletext layout" / "scenes.json")[0]
 doAssert teletext["id"].getStr() == Teletext
 let eReader = parseFile(Samples / "E-reader layout" / "scenes.json")[0]
 doAssert eReader["id"].getStr() == EReader
-var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander, teletext, eReader,
+let terminalLayout = parseFile(Samples / "Terminal layout" / "scenes.json")[0]
+doAssert terminalLayout["id"].getStr() == TerminalLayout
+var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander, teletext, eReader, terminalLayout,
   panel("tests/red", "Red", "#ff0000"), panel("tests/green", "Green", "#00ff00"),
   panel("tests/blue", "Blue", "#0000ff"),
   panel("tests/sky", "Sky", "#38bdf8", Tiling), panel("tests/grass", "Grass", "#4ade80", Tiling),
@@ -131,7 +136,8 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander,
   panel("tests/tt-red", "Red", "#ff0000", Teletext), panel("tests/tt-green", "Green", "#00ff00", Teletext),
   panel("tests/tt-blue", "Blue", "#0000ff", Teletext),
   panel("tests/er-red", "Red", "#ff0000", EReader), panel("tests/er-green", "Green", "#00ff00", EReader),
-  panel("tests/er-blue", "Blue", "#0000ff", EReader)]
+  panel("tests/er-blue", "Blue", "#0000ff", EReader),
+  panel("tests/tl-red", "Red", "#ff0000", TerminalLayout)]
 # Enough BeOS scenes for a Deskbar longer than the panel.
 for i in 0 ..< 16: allScenes.add panel("tests/be-" & $i, "Scene " & $i, "#808080", BeOS)
 setUploadedInterpretedScenes(parseInterpretedScenes($allScenes))
@@ -249,6 +255,17 @@ proc shot(image: Image, name: string) =
   if shots.len > 0:
     createDir(shots)
     image.writeFile(shots / name & ".png")
+
+proc withOwnSize(size: string, ids: varargs[string]): proc(): JsonNode {.closure, gcsafe.} =
+  ## The scene listing as it is now, with `ids` (every scene, without any)
+  ## saying a window size of their own (settings.windowSize, as the hosts list
+  ## it in app.frame.scenes).
+  let listing = windowSceneListing
+  let only = @ids
+  result = proc(): JsonNode {.closure, gcsafe.} =
+    result = listing()
+    for scene in result:
+      if only.len == 0 or scene{"id"}.getStr() in only: scene["windowSize"] = %size
 
 suite "the Windows 98 desktop":
   test "the first scene fills the desktop, as the layout always looked":
@@ -486,9 +503,11 @@ suite "the Windows 98 desktop":
     shot(image, "12-max")
     check image.color(W - 10, H div 2) == colored("#00ff00")
 
-  test "a window opens at the layout's size where that fits, and where it was when it opens again":
-    # 800x480, the default, does not fit this desktop; a smaller size does.
-    desk().state["windowSize"] = %"400x240"
+  test "a window opens at its scene's own size where that fits, and where it was when it opens again":
+    # 800x480, the default, does not fit this desktop; a smaller size of the
+    # scene's own does.
+    let listing = windowSceneListing
+    windowSceneListing = withOwnSize("400x240", "tests/blue")
     desk().state.delete("boxes")
     let menuTop = H - 42 - (30 * (3 + 2) + 22)
     proc openBlue() =
@@ -518,6 +537,7 @@ suite "the Windows 98 desktop":
     check again{"y"}.getInt() == y + 20
     check again{"w"}.getInt() == 400 + 8
     check problems.len == 0
+    windowSceneListing = listing
 
   test "the gear on a window's title bar opens its scene's settings, a window behind brought forward first":
     discard pass()
@@ -1100,11 +1120,11 @@ suite "the macOS desktop":
     check not desk().state{"full"}.getBool()
     check problems.len == 0
 
-  test "a window opens at the layout's size where that fits, and where it was when it opens again":
+  test "a window opens at its scene's own size where that fits, and where it was when it opens again":
     discard key("w", meta = true) # closes ocean
     check winOf("tests/ocean").isNil
     check current.id.string != "tests/ocean"
-    desk().state["windowSize"] = %"400x240"
+    windowSceneListing = withOwnSize("400x240", "tests/ocean")
     desk().state.delete("boxes")
     discard pass()
     check dockIcons().len == 4 # ocean's icon went with its window
@@ -1299,11 +1319,11 @@ suite "the BeOS desktop":
     discard pass()
     check problems.len == 0
 
-  test "Alt+W closes the window in front, and a window opens at the layout's size where that fits":
+  test "Alt+W closes the window in front, and a window opens at its scene's own size where that fits":
     discard key("w", alt = true)
     check winOf("tests/be-blue").isNil
     check current.id.string != "tests/be-blue"
-    desk().state["windowSize"] = %"400x240"
+    windowSceneListing = withOwnSize("400x240", "tests/be-blue")
     desk().state.delete("boxes")
     discard pass()
     discard click(W - BarW div 2, 17)
@@ -1597,7 +1617,7 @@ suite "the Classic Mac desktop":
     discard pass()
     check problems.len == 0
 
-  test "File gets the info of the window in front and closes it, and a window opens at the layout's size and where it was":
+  test "File gets the info of the window in front and closes it, and a window opens at its scene's own size and where it was":
     var bar = macTitles()
     discard clickRect(bar[1])
     discard pass()
@@ -1613,7 +1633,7 @@ suite "the Classic Mac desktop":
     check winOf("tests/cm-red").isNil
     check current.id.string == "tests/cm-green"
     discard pass()
-    desk().state["windowSize"] = %"400x240"
+    windowSceneListing = withOwnSize("400x240", "tests/cm-blue")
     desk().state.delete("boxes")
     discard pass()
     check fromMacScenes(2) == @["setCurrentScene"]
@@ -1656,6 +1676,9 @@ suite "the Classic Mac desktop":
       %*[{"id": "tests/cm-red", "name": "Red"}, {"id": "tests/cm-green", "name": "Green"},
         {"id": "tests/cm-blue", "name": "Blue"}, {"id": "tests/store-cm", "name": "Scene store"},
         {"id": "tests/term-cm", "name": "Terminal"}]
+    # Every window at 400 x 240, as the desktop's own "Window size" had them
+    # here since File's test: the icons down the right stay clear.
+    windowSceneListing = withOwnSize("400x240")
     discard pass()
     let bar = macTitles()
     discard clickRect(bar[0])
@@ -1686,6 +1709,9 @@ suite "the Classic Mac desktop":
     check problems.len == 0
 
   test "two windows let go at the two sides take a half each, and both scenes are drawn as holes":
+    # Two windows of 400 x 240, as the desktop's own "Window size" had them here
+    # since File's test: each title bar where the drags below take it.
+    windowSceneListing = withOwnSize("400x240")
     desk().state["wins"] = %*[]
     desk().state.delete("boxes")
     discard focusOn("tests/cm-red")
@@ -1913,14 +1939,14 @@ suite "the NeXTSTEP desktop":
     check nextMenu().len == 4
     check problems.len == 0
 
-  test "a window opens at the layout's size where that fits, and where it was when it opens again":
+  test "a window opens at its scene's own size where that fits, and where it was when it opens again":
     check fromNextMenu(1, 2) == @["setCurrentScene"]
     check current.id.string == "tests/next-c"
     discard pass()
     discard key("w", meta = true) # closes Charlie
     check winOf("tests/next-c").isNil
     check current.id.string != "tests/next-c"
-    desk().state["windowSize"] = %"400x240"
+    windowSceneListing = withOwnSize("400x240", "tests/next-c")
     desk().state.delete("boxes")
     discard pass()
     check fromNextMenu(1, 2) == @["setCurrentScene"]
@@ -1950,7 +1976,6 @@ suite "the NeXTSTEP desktop":
     discard click(NextMenuW + c2{"x"}.getInt() + c2{"w"}.getInt() - 12, c2{"y"}.getInt() + 12)
     check winOf("tests/next-c").isNil
     check current.id.string != "tests/next-c"
-    desk().state["windowSize"] = %"800x480"
     discard pass()
     check problems.len == 0
 
@@ -2225,6 +2250,63 @@ suite "the E-reader page":
     chooseLayout("")
     discard pass()
 
+suite "the Terminal layout":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/tl-red", "name": "Red"}]
+
+  proc settingsButton(): array[4, float32] =
+    ## Where a press does something along the top: the prompt, then settings.
+    let top = byX(rectsOf(TerminalLayout).filterIt(it[3] < float32(H div 8)))
+    doAssert top.len == 2, $top
+    top[1]
+
+  proc keyF2(panel: FrameScene, alt = false): seq[string] =
+    ## F2 while the settings show: the key goes to them, then to the layout.
+    let payload = %*{"key": "F2", "code": "F2", "repeat": false, "shift": false, "ctrl": false, "alt": alt,
+      "meta": false}
+    sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: "keyDown", payload: payload,
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    acted(settle())
+
+  test "settings at the top right opens the settings of the scene it wraps, and so does F2":
+    current = hostScene("tests/tl-red")
+    let image = pass()
+    shot(image, "tl1-terminal")
+    check problems.len == 0
+    check current.wornLayout.slots.anyIt(it.hole and it.child == current)
+    check image.color(W div 2, H div 2) == colored("#ff0000")
+    let button = settingsButton()
+    check button[2] > float32(W - 20) and button[2] - button[0] < 160
+    # Not lit: the terminal's black in its padding.
+    check image.color(int(button[2]) - 2, int((button[1] + button[3]) / 2)) == colored("#0b0f0c")
+    settingsFrom = ""
+    check acted(clickRect(button)) == @["sceneSettings"]
+    check settingsFrom == "tests/tl-red"
+    check payloads["sceneSettings"]{"page"}.isNil
+    check acted(key("F2")) == @["sceneSettings"]
+    check acted(key("F2", alt = true)).len == 0
+    # The prompt is still the scene list, and the status line the frame's page.
+    check acted(click(20, 14)) == @["sceneSwitcher"]
+    check acted(click(20, H - 14)) == @["sceneSettings"]
+    check payloads["sceneSettings"]{"page"}.getStr() == "frame"
+    check problems.len == 0
+
+  test "while the settings show, the button is lit, and it or F2 goes back to the scene":
+    let panel = sceneSettings.exportedScene.init(SceneSettingsId.SceneId, config, logger(), %*{})
+    sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: "setCurrentScene",
+      payload: %*{"state": {"from": "tests/tl-red", "layout": {"sceneId": TerminalLayout}}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    let image = sceneSettings.exportedScene.render(panel, ExecutionContext(scene: panel, event: "render",
+      payload: %*{}, image: newImage(W, H), hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1))
+    shot(image, "tl2-settings")
+    check not panel.wornLayout.isNil
+    let button = settingsButton()
+    check image.color(int(button[2]) - 2, int((button[1] + button[3]) / 2)) == colored("#52f27b")
+    check panel.keyF2() == @["sceneSettings"]
+    check panel.keyF2(alt = true).len == 0
+    check problems.len == 0
+
 suite "another layout chosen on the frame":
   setup:
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
@@ -2352,6 +2434,9 @@ suite "a scene's own window size (settings.windowSize)":
       discard pass()
       desk().state["boxes"] = %*{}
       desk().state["wins"] = %*[]
+      # What a frame kept of the desktop's old "Window size", "The whole
+      # desktop" included: nothing reads it any more.
+      desk().state["windowSize"] = %"max"
       discard pass()
       check desk().id.string == layoutId
       check current.id.string == "tests/blue"
@@ -2370,6 +2455,23 @@ suite "a scene's own window size (settings.windowSize)":
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()
+
+  test "is the same function, word for word, in every desktop of windows, and no desktop has a size of its own":
+    # A scene cannot share code with another: each carries its own copy.
+    var copies: seq[string]
+    for scene in [layout, macos, beos, classicMac, nextstep, tiling, commander]:
+      for field in scene["fields"]: check field["name"].getStr() != "windowSize"
+      var source = ""
+      for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
+      check "state.windowSize" notin source
+      let start = source.find("// The scene's own area in a new window")
+      if scene["id"].getStr() in [Tiling, Commander]:
+        check start < 0 # tiles and panels, no window sizes
+        continue
+      check start >= 0
+      copies.add source[start ..< source.find("\n}\n", start)]
+    check copies.len == 5
+    for text in copies: check text == copies[0]
 
 proc boxOf(win: JsonNode): (int, int, int, int) =
   (win{"x"}.getInt(), win{"y"}.getInt(), win{"w"}.getInt(), win{"h"}.getInt())

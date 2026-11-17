@@ -633,8 +633,10 @@
   scene takes the pointer there, its tap included (`uiOverScene`,
   `UiRegion.scene`), and windows pace the frame (`windowsOf` in
   scene_rhythm.nim). Windows, positions and z-order are the layout's own state.
-  A new window goes where `freeSpot` puts it (bare desktop first, then the least
-  overlap), the same text in all five desktops of windows, and a list of scenes
+  A new window opens at the size `ownSize` gives it (the scene's own, else
+  800x480: a desktop has no "Window size" of its own any more) where `freeSpot`
+  puts it (bare desktop first, then the least overlap), both the same text in
+  all five desktops of windows, and a list of scenes
   goes by category through `grouped` (the `category` name on each
   `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
   `ownIcon`, each the same text in all six with a list: change any of them in
