@@ -141,9 +141,12 @@ struct FrameCard: View {
     }
 }
 
-/// Which account is showing, and a quick switch to another.
+/// Which account is showing, a quick switch to another, and a way to add
+/// one: the same sign-in sheets as Settings → Accounts.
 struct AccountMenu: View {
     @Environment(AppModel.self) private var app
+    @State private var adding = false
+    @State private var addingBackend = false
 
     var body: some View {
         Menu {
@@ -158,9 +161,14 @@ struct AccountMenu: View {
                     }
                 }
             }
+            Divider()
+            Button { addingBackend = true } label: { Label("Add server", systemImage: "plus") }
+            Button { adding = true } label: { Label("Add cloud", systemImage: "plus") }
         } label: {
             Image(systemName: app.current?.kind == .backend ? "server.rack" : "cloud")
                 .accessibilityLabel("Account: \(app.current?.planeLabel ?? "")")
         }
+        .sheet(isPresented: $adding) { SignInView(isSheet: true) }
+        .sheet(isPresented: $addingBackend) { SignInView(isSheet: true, startWithBackend: true) }
     }
 }
