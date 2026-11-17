@@ -14,6 +14,9 @@ ArrowDown walk the commands typed before; a swipe down on the lines (or
 PageUp) scrolls back through them. It keeps the last 200 lines and 50 commands
 with `frameos.remember`, so they outlast an interpreter the frame let go. Its
 letters keep their size wherever it shows: a bigger window shows more lines.
+The size is a desktop's own text's, by the frame and not by the window: twice
+that on a 4K screen or e-paper of 1000 pixels and up, smaller under 480, and the
+render scale on top.
 
 On the desktops (`docs/scene-layouts.md`) it is one of the frame's own apps,
 found by its id or its name like the scene store: on Windows 98's Start and
