@@ -52,6 +52,16 @@ visitor's own browser.
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),
   which accepts the playground's origin by name. The playground is no app
   origin otherwise (`getAppOrigins`): no sign-in, no return-to, no passkeys.
+- **The keyboard** is the frame's while the canvas has the focus: every key's
+  default is prevented (`startPlayground`), so a desktop's Super bindings get
+  Cmd+L, Cmd+F or Cmd+1 instead of the address bar, the find bar or a tab.
+  What a browser reserves (Cmd+W, Cmd+T, Cmd+N, Cmd+Q) only the Keyboard Lock
+  API takes, and only in full screen the page asked for: in Chromium the first
+  Super key brings an offer of full screen at the top of the page ("Full
+  screen" locks the keyboard after the browser asks; "Not now" until the next
+  load), and holding Esc leaves it. What the operating system keeps (Cmd+Space,
+  Cmd+Tab on a Mac) no page gets. Firefox and Safari have no Keyboard Lock and
+  no offer.
 - **The frame's size** is the window's in CSS pixels, capped at 2560 x 1600
   (`playgroundSize`) and stretched beyond; a resize is taken in place
   (`frameos_wasm_resize`), the windows kept.

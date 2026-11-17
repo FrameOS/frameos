@@ -10,6 +10,9 @@ import {
   playgroundLayoutId,
   playgroundSize,
   startPlayground,
+  type KeyboardLock,
+  type PlaygroundKeyboard,
+  type PlaygroundPage,
   type PlaygroundStatus,
 } from "./playground";
 
@@ -41,10 +44,63 @@ class FakePreview {
   }
 }
 
-function start(viewport = { height: 900, width: 1440 }) {
+// A page with full screen and the Keyboard Lock API, as Chromium has them.
+function fakePage() {
+  const listeners: Array<() => void> = [];
+  const page = {
+    fullscreen: false,
+    entered: 0,
+    locked: 0,
+    unlocked: 0,
+    enterFullscreen: async () => {
+      page.fullscreen = true;
+      page.entered += 1;
+      listeners.forEach((listener) => listener());
+    },
+    isFullscreen: () => page.fullscreen,
+    onFullscreenChange: (listener: () => void) => {
+      listeners.push(listener);
+      return () => listeners.splice(listeners.indexOf(listener), 1);
+    },
+    // The visitor holds Esc: the browser leaves full screen.
+    leaveFullscreen: () => {
+      page.fullscreen = false;
+      listeners.forEach((listener) => listener());
+    },
+    keyboard: {
+      lock: async () => {
+        page.locked += 1;
+      },
+      unlock: () => {
+        page.unlocked += 1;
+      },
+    } as KeyboardLock | null,
+  };
+  return page;
+}
+
+function start(viewport = { height: 900, width: 1440 }, page: PlaygroundPage | null = null) {
   const previews: FakePreview[] = [];
   const statuses: PlaygroundStatus[] = [];
-  const canvas = { focus: vi.fn(), height: 0, width: 0 } as unknown as HTMLCanvasElement;
+  const keyboards: PlaygroundKeyboard[] = [];
+  const listeners: Record<string, Array<(event: KeyboardEvent) => void>> = {};
+  const canvas = {
+    focus: vi.fn(),
+    height: 0,
+    width: 0,
+    addEventListener: (type: string, listener: (event: KeyboardEvent) => void) => {
+      (listeners[type] ??= []).push(listener);
+    },
+    removeEventListener: (type: string, listener: (event: KeyboardEvent) => void) => {
+      listeners[type] = (listeners[type] ?? []).filter((other) => other !== listener);
+    },
+  } as unknown as HTMLCanvasElement;
+  // A key on the canvas, as the browser hands it over: was its default prevented?
+  const key = (type: "keydown" | "keyup", key: string, metaKey = false) => {
+    const event = { type, key, metaKey, preventDefault: vi.fn() } as unknown as KeyboardEvent;
+    for (const listener of listeners[type] ?? []) listener(event);
+    return (event.preventDefault as ReturnType<typeof vi.fn>).mock.calls.length > 0;
+  };
   const size = { ...viewport };
   const playground = startPlayground({
     canvas,
@@ -54,11 +110,13 @@ function start(viewport = { height: 900, width: 1440 }) {
       return preview;
     }) as never,
     fetchScenes: async () => [{ id: "first" }, { id: playgroundLayoutId, settings: { isLayout: true } }],
+    onKeyboard: (keyboard) => keyboards.push(keyboard),
     onStatus: (status) => statuses.push(status),
+    page,
     storeUrl: "https://playground.frameos.net",
     viewport: () => size,
   });
-  return { canvas, playground, previews, size, statuses };
+  return { canvas, key, keyboards, listeners, playground, previews, size, statuses };
 }
 
 describe("the playground", () => {
@@ -114,6 +172,52 @@ describe("the playground", () => {
     playground.resize();
     expect(previews).toHaveLength(2);
     expect(previews[1]!.options.height).toBe(700);
+  });
+
+  it("keeps every key from the browser while the frame has the focus", () => {
+    const { key, keyboards } = start();
+    expect(key("keydown", "l", true)).toBe(true); // Cmd+L: the address bar
+    expect(key("keydown", "f", true)).toBe(true); // Cmd+F: the find bar
+    expect(key("keydown", "a")).toBe(true);
+    expect(key("keyup", "a")).toBe(true);
+    // No Keyboard Lock here (the page is null, as in Firefox): nothing to offer.
+    expect(keyboards).toEqual([]);
+  });
+
+  it("offers full screen at the first Super key, where it locks the whole keyboard; leaving it gives it back", async () => {
+    const page = fakePage();
+    const { canvas, key, keyboards, playground } = start(undefined, page);
+    key("keydown", "a");
+    expect(keyboards).toEqual([]);
+    key("keydown", "Meta");
+    expect(keyboards).toEqual(["offered"]);
+    await playground.captureKeyboard();
+    expect(page.entered).toBe(1);
+    expect(page.locked).toBe(1);
+    expect(keyboards).toEqual(["offered", "frame"]);
+    expect(canvas.focus).toHaveBeenCalled();
+    // A Super key in full screen offers nothing more.
+    key("keydown", "w", true);
+    expect(keyboards.at(-1)).toBe("frame");
+    page.leaveFullscreen();
+    expect(page.unlocked).toBe(1);
+    expect(keyboards.at(-1)).toBe("page");
+    // Back in the window, the next Super key offers it again.
+    key("keydown", "l", true);
+    expect(keyboards.at(-1)).toBe("offered");
+  });
+
+  it("does not offer it again once turned down, and lets go of the canvas when destroyed", () => {
+    const page = fakePage();
+    const { key, keyboards, listeners, playground } = start(undefined, page);
+    key("keydown", "Meta");
+    playground.declineKeyboard();
+    expect(keyboards).toEqual(["offered", "page"]);
+    key("keydown", "Meta");
+    expect(keyboards).toEqual(["offered", "page"]);
+    playground.destroy();
+    expect(listeners.keydown).toEqual([]);
+    expect(listeners.keyup).toEqual([]);
   });
 
   it("caps what the runtime draws on a huge screen", () => {
