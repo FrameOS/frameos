@@ -870,18 +870,23 @@ suite "jsx links":
     check target.regions.len == 1
     check target.regions[0].handlers[ueClick] == LinkClose + 1
     check target.regions[0].w == 320 and target.regions[0].h == 240
-    # The QR code, drawn as qrImage draws it, centred at the top of the card.
-    let side = min(320 - 24, 240 - 24 - 96)
-    let code = qrImage(qrEncode("https://frameos.net/docs"), side)
-    let (ex, ey) = code.firstDark()
-    let (gx, gy) = image.firstDark()
-    check ex >= 0 and gx >= 0
-    let (ox, oy) = (gx - ex, gy - ey)
-    check abs(ox - (320 - code.width) div 2) <= 1
+    # The QR code, every module where the encoder put it, centred, and as
+    # large as the room the URL's one line and the button leave: 26 rows of
+    # 240 for those and the padding, not a fixed three lines (2 px modules
+    # for a long URL on a small panel).
+    let qr = qrEncode("https://frameos.net/docs")
+    let (gx, gy) = image.firstDark() # the top-left finder's corner
+    var unit = 0
+    while gx + unit < image.width and image[gx + unit, gy].r < 128: inc unit
+    unit = unit div 7 # a finder is 7 modules across
+    check unit >= 5
+    let extent = unit * qr.size
+    check extent >= 125 # 100 (4 px modules) when 96 px were kept for three lines of text
+    check abs(gx - (320 - extent) div 2) <= 1
     var wrong = 0
-    for y in 0 ..< code.height:
-      for x in 0 ..< code.width:
-        if (code[x, y].r < 128) != (image[ox + x, oy + y].r < 128): inc wrong
+    for y in 0 ..< qr.size:
+      for x in 0 ..< qr.size:
+        if qr[x, y] != (image[gx + x * unit + unit div 2, gy + y * unit + unit div 2].r < 128): inc wrong
     check wrong == 0
     # A tap on the card puts it away; the UI is back.
     check dispatchUiEvent(id, "tap", at(5, 5, "touch"))

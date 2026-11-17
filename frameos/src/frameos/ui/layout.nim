@@ -1847,35 +1847,44 @@ proc linkCard(url: string, width, height: float32, input: var UiInput, drawn: va
   ## A link's QR code over the whole UI, for a phone to open it: the code as
   ## large as fits, its URL under it and a Close button. Black on white, as a
   ## camera reads it best, on every panel. A tap anywhere puts it away, and
-  ## it is all there is to touch while it is up.
-  const pad = 12'f32
-  let
-    textRoom = 96'f32 # three lines of the URL and the button
-    side = max(int(min(width - 2 * pad, height - 2 * pad - textRoom)), 32)
-  var image: Image
-  if not memo.isNil and memo.linkQrFor == (url, side):
-    image = memo.linkQr
-  else:
-    try:
-      image = qrImage(qrEncode(url), side)
-    except Exception:
-      image = nil
-    if not memo.isNil:
-      memo.linkQr = image
-      memo.linkQrFor = (url, side)
-  var card = el("div", "flex flex-col items-center justify-center gap-[8px] p-[12px] bg-white text-black text-sm")
-  card.attrs.add(("on-click", $LinkClose))
-  if not image.isNil:
+  ## it is all there is to touch while it is up. The code gets all the room
+  ## the URL (two lines at most) and the button leave: a first pass lays the
+  ## card out with the code as a box that grows into it, the second draws the
+  ## code at the size that box got.
+  var
+    image: Image
+    side = 0
+    shown: UiNode
+  for pass in 0 .. 1:
+    let card = el("div", "flex flex-col items-center justify-center gap-[8px] p-[12px] bg-white text-black text-sm")
+    card.attrs.add(("on-click", $LinkClose))
     var classes = "shrink-0"
-    classes.px("w", image.width)
-    classes.px("h", image.height)
+    if pass == 0:
+      classes = "flex-1 min-h-0 w-full"
+    else:
+      let at = if image.isNil: side else: image.width
+      classes.px("w", at)
+      classes.px("h", at)
     let code = el("img", move classes)
     code.image = image
     card.children.add code
-  card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
-  card.children.add el("div", "px-[16px] py-[4px] border border-black rounded font-bold", SvgNode(text: "Close"))
-  let shown = card.build(initText(), width, height, 0, LinkKey, input, false, nil)
-  shown.size = shown.layout(width, height, true, true)
+    card.children.add el("div", "text-center line-clamp-2 max-w-full", SvgNode(text: url))
+    card.children.add el("div", "px-[16px] py-[4px] border border-black rounded font-bold", SvgNode(text: "Close"))
+    shown = card.build(initText(), width, height, 0, LinkKey, input, false, nil)
+    shown.size = shown.layout(width, height, true, true)
+    if pass == 0:
+      let room = shown.children[0].size
+      side = max(int(min(room.x, room.y)), 32)
+      if not memo.isNil and memo.linkQrFor == (url, side):
+        image = memo.linkQr
+      else:
+        try:
+          image = qrImage(qrEncode(url), side)
+        except Exception:
+          image = nil
+        if not memo.isNil:
+          memo.linkQr = image
+          memo.linkQrFor = (url, side)
   regions.setLen(0)
   shown.emit(0, 0, 1, drawn, gradients, regions)
 
