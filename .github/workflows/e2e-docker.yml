@@ -271,13 +271,16 @@ jobs:
 
       # Same key as the Nim shards' (the inputs prepare_assets.py fingerprints):
       # on a hit `nimble assets` finds the frame's compiled assets current.
+      - name: Compiled assets cache key
+        id: assets_key
+        run: echo "key=${{ runner.os }}-frameos-assets-$(bash .github/ci/frameos_assets_key.sh)" >> "$GITHUB_OUTPUT"
       - name: Cache compiled assets
         uses: actions/cache@v4
         with:
           path: |
             frameos/assets/compiled
             frameos/src/assets
-          key: ${{ runner.os }}-frameos-assets-${{ hashFiles('frameos/frontend/**', 'frameos/tools/prepare_assets.py', 'frameos/tools/generate_*.py', 'frontend/src/**', 'frontend/schema/**', 'frontend/public/**', 'frontend/scripts/generateRepoApps.mjs', 'frontend/package.json', 'repo/**', 'package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'versions.json') }}
+          key: ${{ steps.assets_key.outputs.key }}
 
       # What the image's app-builder stage did for the firmware, on the runner:
       # the nimble packages (nimble.paths names them by absolute path, and the
