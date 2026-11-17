@@ -934,3 +934,180 @@ suite "jsx links":
     uiOpenLink = nil
     check "open https://frameos.net/docs" in logged
     check target.input.link == ""
+
+proc key(name: string, code = "", shift = false, ctrl = false, meta = false): JsonNode =
+  %*{"key": name, "code": (if code.len > 0: code else: name), "shift": shift, "ctrl": ctrl, "alt": false,
+    "meta": meta}
+
+proc differs(a, b: Image, x0, y0, x1, y1: int): int =
+  ## How many pixels of the box are not the same in the two pictures.
+  for y in y0 ..< y1:
+    for x in x0 ..< x1:
+      if a[x, y] != b[x, y]:
+        inc result
+
+const secretForm = """
+let pin = 'hunter2'
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <input type="password" className="h-10 px-2 shrink-0 bg-slate-100 text-black" value={pin}
+        onChange={(e) => { pin = e.target.value; frameos.setState('pin', pin) }} />
+    </div>
+  )
+}
+"""
+
+suite "jsx selection":
+  test "shift and the arrows select; Ctrl/Cmd copies, cuts, pastes and selects all":
+    forgetTypedKeys()
+    setUiClipboard("")
+    let id = "tests/jsx-select-keys"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("End")) # typed on: no keyboard on the screen
+    let plain = ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.caret == 3 and target.input.selected == (3, 3)
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    check target.input.selected == (2, 3)
+    check dispatchUiEvent(id, "keyDown", key("Home", shift = true))
+    check target.input.selected == (0, 3) and target.input.caret == 0
+    # Drawn: a band behind the text, through pixie like the rest.
+    let marked = ui.render()
+    check differs(plain, marked, 0, 0, 320, 40) > 100
+    check differs(plain, marked, 0, 40, 320, 240) == 0
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "Ann"
+    check ui.scene.state{"key"}.getStr() == "c" # onKeyDown hears the chord too
+    # Right without shift lets go at the selection's end; Cmd+V pastes there.
+    check dispatchUiEvent(id, "keyDown", key("ArrowRight"))
+    check target.input.selected == (3, 3)
+    check dispatchUiEvent(id, "keyDown", key("v", "KeyV", meta = true))
+    check ui.scene.state{"name"}.getStr() == "AnnAnn"
+    discard ui.render()
+    # Select all, and what is typed replaces it.
+    check dispatchUiEvent(id, "keyDown", key("a", "KeyA", meta = true))
+    check target.input.selected == (0, 6)
+    check dispatchUiEvent(id, "textInput", %*{"text": "Zoe"})
+    check ui.scene.state{"name"}.getStr() == "Zoe"
+    discard ui.render()
+    # Backspace takes a selection and nothing more; Cut empties it.
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    check dispatchUiEvent(id, "keyDown", key("Backspace"))
+    check ui.scene.state{"name"}.getStr() == "Zo"
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("A", "KeyA", shift = true, ctrl = true)) # shift too: still all
+    check dispatchUiEvent(id, "keyDown", key("x", "KeyX", ctrl = true))
+    check ui.scene.state{"name"}.getStr() == "" and uiClipboard() == "Zo"
+    discard ui.render()
+    # A layout that is not Latin: the key it is on.
+    check dispatchUiEvent(id, "keyDown", key("м", "KeyV", ctrl = true))
+    check ui.scene.state{"name"}.getStr() == "Zo"
+    discard ui.render()
+    # The selection outlives the process, with the rest of the field.
+    check dispatchUiEvent(id, "keyDown", key("ArrowLeft", shift = true))
+    var kept = false
+    for entry in lastingUiInput(){"targets"}.getElems():
+      if entry{"sceneId"}.getStr() == id:
+        kept = entry{"sel"}.getInt() == 3 and entry{"caret"}.getInt() == 1
+    check kept
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    check target.input.focus == 0 and target.input.sel == 0
+    forgetTypedKeys()
+
+  test "shift and a click extend the selection; a mouse dragged over the text selects it":
+    forgetTypedKeys()
+    let id = "tests/jsx-select-mouse"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check uiListens(id, "pointerDown")
+    check dispatchUiEvent(id, "tap", at(9, 20)) # before the A
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check target.input.caret == 0
+    var shifted = at(160, 20)
+    shifted["shift"] = %true
+    check dispatchUiEvent(id, "tap", shifted)
+    discard ui.render()
+    check target.input.selected == (0, 3)
+    check dispatchUiEvent(id, "tap", at(160, 20)) # without: the caret alone
+    discard ui.render()
+    check target.input.selected == (3, 3)
+    # A press of the mouse and a drag, before any tap: the field has the
+    # keyboard at once, and the drag selects from where it went down.
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    discard ui.render()
+    check target.input.focus == 0
+    var down = at(9, 20)
+    down["button"] = %0
+    check dispatchUiEvent(id, "pointerDown", down)
+    check target.input.focus > 0
+    discard ui.render()
+    check target.input.caret == 0
+    check uiListens(id, "pointerMove")
+    var move = at(160, 20)
+    move["buttons"] = %1
+    check dispatchUiEvent(id, "pointerMove", move)
+    discard ui.render()
+    check target.input.selected == (0, 3)
+    discard dispatchUiEvent(id, "pointerUp", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "Ann"
+    # A finger does not select by dragging: it scrolls, as before.
+    check dispatchUiEvent(id, "keyDown", key("Escape"))
+    discard ui.render()
+    discard dispatchUiEvent(id, "pointerDown", at(9, 20, "touch"))
+    check target.input.focus == 0
+    forgetTypedKeys()
+
+  test "on e-paper the selection is a solid band, its text inverted, never a stipple":
+    forgetTypedKeys()
+    let id = "tests/jsx-select-paper"
+    let ui = newUi(form, id, 320, 240)
+    ui.owner.frameConfig.device = "waveshare.EPD_7in5_V2"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    check dispatchUiEvent(id, "keyDown", key("End"))
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("Home", shift = true))
+    let image = ui.render()
+    check uiTarget(id, 1, create = false).input.selected == (0, 3)
+    # Over "Ann": black and white only, both of them (the band and the
+    # letters cut out of it); a third of black would be grey.
+    var black, white, grey = 0
+    for y in 8 .. 30:
+      for x in 9 .. 36:
+        let p = image[x, y]
+        if p.r < 40: inc black
+        elif p.r > 215: inc white
+        else: inc grey
+    check black > 200 and white > 40
+    check grey < (black + white) div 3 # only the glyphs' anti-aliased edges
+    forgetTypedKeys()
+
+  test "a password is never copied, and a field of one line pastes one line":
+    forgetTypedKeys()
+    setUiClipboard("kept")
+    let id = "tests/jsx-select-secret"
+    let ui = newUi(secretForm, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20))
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", key("a", "KeyA", ctrl = true))
+    check dispatchUiEvent(id, "keyDown", key("c", "KeyC", ctrl = true))
+    check uiClipboard() == "kept"
+    check dispatchUiEvent(id, "keyDown", key("x", "KeyX", ctrl = true)) # cut: only taken out
+    check uiClipboard() == "kept" and ui.scene.state{"pin"}.getStr() == ""
+    discard ui.render()
+    setUiClipboard("one\ntwo")
+    check dispatchUiEvent(id, "keyDown", key("v", "KeyV", ctrl = true))
+    check ui.scene.state{"pin"}.getStr() == "one"
+    # The clipboard keeps so much and no more, cut at a character.
+    var long = ""
+    for _ in 0 ..< 70000: long.add "é"
+    setUiClipboard(long)
+    check uiClipboard().len <= 65536 and uiClipboard().len mod 2 == 0
+    setUiClipboard("")
+    forgetTypedKeys()

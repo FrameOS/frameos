@@ -397,6 +397,49 @@ block test_a_key_from_the_preview_is_taken_as_it_is:
   doAssert output[0].payload["linuxCode"].getInt() == 25
   doAssert output[1].name == evTextInput
 
+block test_a_modifier_held_is_on_the_press_and_the_tap_only_while_held:
+  # Shift+click extends a selection in a JSX field (docs/jsx-ui.md): the
+  # press and its tap say which modifiers are down, and only those.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  proc click(state: var InputState, t: int, output: var seq[InputDelivery]) =
+    doAssert state.applyNamedInput(evPointerDown, %*{"x": 100, "y": 100, "pointerId": 0,
+      "pointerType": "mouse", "button": 0}, eoPreview, at(t), output)
+    doAssert state.applyNamedInput(evPointerUp, %*{"x": 100, "y": 100, "pointerId": 0,
+      "pointerType": "mouse", "button": 0}, eoPreview, at(t + 40), output)
+  state.click(0, output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evTap], $output.names
+  for d in output:
+    for flag in ["shift", "ctrl", "alt", "meta"]:
+      doAssert not d.payload.hasKey(flag)
+  output.setLen(0)
+  # A preview's keys carry their own flags: the modifier key itself still
+  # holds it for the pointer.
+  doAssert state.applyNamedInput(evKeyDown, %*{"code": "ShiftLeft", "key": "Shift", "shift": true,
+    "ctrl": false, "alt": false, "meta": false}, eoPreview, at(1000), output)
+  doAssert state.applyNamedInput(evKeyDown, %*{"code": "MetaLeft", "key": "Meta", "shift": true,
+    "ctrl": false, "alt": false, "meta": true}, eoPreview, at(1010), output)
+  output.setLen(0)
+  state.click(1100, output)
+  doAssert output[0].payload["shift"].getBool() and output[0].payload["meta"].getBool()
+  doAssert not output[0].payload.hasKey("ctrl") and not output[0].payload.hasKey("alt")
+  doAssert output[2].name == evTap and output[2].payload["shift"].getBool()
+  doAssert not output[1].payload.hasKey("shift") # a release says nothing of them
+  output.setLen(0)
+  doAssert state.applyNamedInput(evKeyUp, %*{"code": "ShiftLeft", "key": "Shift", "shift": false,
+    "ctrl": false, "alt": false, "meta": true}, eoPreview, at(1200), output)
+  doAssert state.applyNamedInput(evKeyUp, %*{"code": "MetaLeft", "key": "Meta", "shift": false,
+    "ctrl": false, "alt": false, "meta": false}, eoPreview, at(1210), output)
+  output.setLen(0)
+  state.click(1300, output)
+  doAssert not output[0].payload.hasKey("shift") and not output[2].payload.hasKey("meta")
+  # A request that says shift with another key holds nothing after it.
+  output.setLen(0)
+  doAssert state.applyNamedInput(evKeyDown, %*{"code": "KeyA", "shift": true}, eoHttpWrite, at(1400), output)
+  output.setLen(0)
+  state.click(1500, output)
+  doAssert not output[0].payload.hasKey("shift")
+
 proc kinds(output: seq[InputDelivery]): seq[string] =
   ## `gpio:down`, `button:press`: which event, and its action.
   for d in output:
