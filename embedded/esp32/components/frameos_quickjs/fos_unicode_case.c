@@ -21,11 +21,12 @@
  * Host test: frameos/src/embedded/tests/test_unicode_case_wrap.nim (every
  * code point against Nim's std/unicode).
  */
-#include <stddef.h>
 #include <stdint.h>
 
-#include "cutils.h"
-#include "libunicode.h"
+/* libunicode.h's, declared here: the host test compiles this file against
+   an installed QuickJS, whose headers stop at quickjs.h. */
+int lre_case_conv(uint32_t *res, uint32_t c, int conv_type);
+#define LRE_CC_RES_LEN_MAX 3
 
 int32_t __wrap_nuctoUpper(int32_t c);
 int32_t __wrap_nuctoLower(int32_t c);

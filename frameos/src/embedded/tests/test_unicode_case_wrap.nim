@@ -8,7 +8,6 @@
 import std/[unittest, unicode, strutils]
 
 const frameosDir = currentSourcePath()[0 ..< currentSourcePath().len - "src/embedded/tests/test_unicode_case_wrap.nim".len]
-{.passC: "-I" & frameosDir & "quickjs".}
 {.compile: frameosDir & "../embedded/esp32/components/frameos_quickjs/fos_unicode_case.c".}
 {.passL: frameosDir & "quickjs/libquickjs.a".}
 {.passL: "-lm".}
