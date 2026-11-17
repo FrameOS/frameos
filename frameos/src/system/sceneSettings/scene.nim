@@ -121,11 +121,22 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
   node.fields[key] = value
 
+proc child(node: JsonNode, key: string): JsonNode {.raises: [].} =
+  ## `node{key}`: nil for what is not there. json's accessor can only fail an
+  ## internal assert, so the callers here carry no error checks for it.
+  {.cast(raises: []).}:
+    result = node{key}
+
+proc str(node: JsonNode, key: string): string {.raises: [].} =
+  ## `node{key}.getStr()`, as `child`.
+  {.cast(raises: []).}:
+    result = node{key}.getStr()
+
 # ------------------------------------------------------------------ values
 
 proc form(self: SceneSettingsScene): JsonNode =
   ## What the page's fields live in: the layout's on its page, else the scene's.
-  result = if self.state{"page"}.getStr() == "layout": self.state{"layoutForm"} else: self.state
+  result = if self.state.str("page") == "layout": self.state.child("layoutForm") else: self.state
 
 proc fieldList(self: SceneSettingsScene): JsonNode =
   result = self.form(){"fields"}
@@ -133,14 +144,14 @@ proc fieldList(self: SceneSettingsScene): JsonNode =
     result = newJArray()
 
 proc objectAt(self: SceneSettingsScene, key: string): JsonNode =
-  result = self.state{key}
+  result = self.state.child(key)
   if result.isNil or result.kind != JObject:
     result = newJObject()
     self.state.put(key, result)
 
 proc formObject(self: SceneSettingsScene, key: string): JsonNode =
   let form = self.form()
-  result = form{key}
+  result = form.child(key)
   if result.isNil or result.kind != JObject:
     result = newJObject()
     form.put(key, result)
@@ -159,10 +170,10 @@ proc frameInfo(): JsonNode =
       result = nil
 
 proc onFrame(self: SceneSettingsScene): bool =
-  self.state{"page"}.getStr() == "frame"
+  self.state.str("page") == "frame"
 
 proc onLayoutPage(self: SceneSettingsScene): bool =
-  self.state{"page"}.getStr() == "layout"
+  self.state.str("page") == "layout"
 
 proc showName(self: SceneSettingsScene, name: string) =
   ## What a layout around it calls this page.
@@ -174,7 +185,7 @@ proc showName(self: SceneSettingsScene, name: string) =
 proc openedOnFrame(self: SceneSettingsScene): bool =
   ## Opened straight on the frame page (`sceneSettings {page: "frame"}`): Back
   ## goes to the scene, not by way of its form.
-  self.state{"opened"}.getStr() == "frame"
+  self.state.str("opened") == "frame"
 
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
@@ -210,9 +221,9 @@ proc showPage(self: SceneSettingsScene, frame: bool) =
 
 proc current(edits, info: JsonNode, name: string): JsonNode =
   ## A frame field's value: as changed on the page, else as the host has it.
-  result = edits{name}
+  result = edits.child(name)
   if result.isNil:
-    result = if name == "wifiSsid": info{"wifi", "ssid"} else: info{name}
+    result = if name == "wifiSsid": info{"wifi", "ssid"} else: info.child(name)
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -234,7 +245,7 @@ proc saved(field, value: JsonNode): JsonNode =
   ## that one is not saved.
   if value.isNil:
     return nil
-  let kind = field{"type"}.getStr()
+  let kind = field.str("type")
   let text = value.text.strip()
   var
     whole: int
@@ -253,7 +264,7 @@ proc quoted(name: string): string =
 
 proc wifiLine(wifi: JsonNode): string =
   ## How the frame is doing on Wi-Fi, in words.
-  let i = WifiStates.find(wifi{"state"}.getStr())
+  let i = WifiStates.find(wifi.str("state"))
   if i < 0: "Not connected"
   elif i == WifiBefore.len: "Not set up"
   else: WifiBefore[i] & quoted(wifi{if i == 1: "hotspot" else: "ssid"}.getStr()) & WifiAfter[i]
@@ -348,14 +359,14 @@ proc actionOf(rule: JsonNode): string =
   ## an id); "?" for any other rule, a rewrite or one with more in its `as`,
   ## which the rows leave alone, as "Button actions" does.
   let
-    emit = rule{"emit"}.getStr()
-    write = rule{"as"}
+    emit = rule.str("emit")
+    write = rule.child("as")
     n = if write.isNil or write.kind != JObject: 0 else: write.len
   result = "?"
   if emit == "setCurrentScene" and n == 1:
-    let direction = write{"direction"}.getStr()
+    let direction = write.str("direction")
     if direction in ["next", "prev"]: result = direction
-    elif write{"sceneId"}.getStr().len > 0: result = ShowScene & write{"sceneId"}.getStr()
+    elif write.str("sceneId").len > 0: result = ShowScene & write.str("sceneId")
   elif n == 0 and Actions.find(emit) >= 3:
     result = emit
 
@@ -377,11 +388,11 @@ proc buttonRow(self: SceneSettingsScene, info, rows, rules: JsonNode, event: str
   for key, value in match.pairs:
     name.add "\1" & value.getStr()
   for i in 0 ..< rows.elems.len:
-    if rows.elems[i]{"name"}.getStr() == name:
+    if rows.elems[i].str("name") == name:
       return
   for i in 0 ..< rules.elems.len:
     let rule = rules.elems[i]
-    if rule{"event"}.getStr() == event and rule{"match"} == match:
+    if rule.str("event") == event and rule.child("match") == match:
       at = i
       action = rule.actionOf()
       break
@@ -412,28 +423,28 @@ proc buttonFields(self: SceneSettingsScene, info, rows: JsonNode) =
   ## a touch screen the swipe in from each edge. From the host's `buttons`:
   ## its `keys`, `touch`, `voice` (a microphone: voice chat on a key held) and
   ## the event map the frame runs, `map` (its own, else its device's).
-  let buttons = info{"buttons"}
+  let buttons = info.child("buttons")
   if buttons.isNil or buttons.kind != JObject:
     return
   let
-    rules = arrayOf(buttons{"map"})
-    keys = arrayOf(buttons{"keys"})
-    voice = buttons{"voice"}.getBool()
+    rules = arrayOf(buttons.child("map"))
+    keys = arrayOf(buttons.child("keys"))
+    voice = buttons.child("voice").getBool()
   for k in 0 ..< keys.elems.len:
     let key = keys.elems[k].getStr()
     for p in 0 ..< Presses.len:
       self.buttonRow(info, rows, rules, "button", %*{"label": key, "action": Presses[p]}, key & PressWords[p],
         p == 1, voice and p == 1)
-  var touch = buttons{"touch"}.getBool()
+  var touch = buttons.child("touch").getBool()
   for i in 0 ..< rules.elems.len:
     let
-      match = rules.elems[i]{"match"}
-      event = rules.elems[i]{"event"}.getStr()
+      match = rules.elems[i].child("match")
+      event = rules.elems[i].str("event")
     if event == "edgeSwipe":
       touch = true
     elif event == "button" and not match.isNil and match.kind == JObject and match.len == 2:
-      let p = Presses.find(match{"action"}.getStr())
-      let label = match{"label"}
+      let p = Presses.find(match.str("action"))
+      let label = match.child("label")
       if p >= 0 and not label.isNil and label.kind == JString:
         self.buttonRow(info, rows, rules, event, %*{"label": label, "action": Presses[p]},
           label.getStr() & PressWords[p], false, voice and p == 1)
@@ -445,7 +456,7 @@ proc opensSettings(rules: JsonNode): bool =
   ## A rule that opens the scene switcher or the settings (the switcher's
   ## gear opens the frame page): the way back to this page.
   for i in 0 ..< rules.elems.len:
-    if rules.elems[i]{"emit"}.getStr() in ["sceneSwitcher", "sceneSettings"]:
+    if rules.elems[i].str("emit") in ["sceneSwitcher", "sceneSettings"]:
       return true
 
 proc buttonMap(fields, changes, info: JsonNode): JsonNode =
@@ -460,12 +471,12 @@ proc buttonMap(fields, changes, info: JsonNode): JsonNode =
     changed = false
   for i in 0 ..< fields.elems.len:
     let row = fields.elems[i]
-    let name = row{"name"}.getStr()
-    if not name.startsWith(ButtonRow) or changes{name}.isNil:
+    let name = row.str("name")
+    if not name.startsWith(ButtonRow) or changes.child(name).isNil:
       continue
-    let action = changes{name}.getStr()
+    let action = changes.child(name).getStr()
     changes.fields.del(name)
-    let at = row{"at"}.getInt(-1)
+    let at = row.child("at").getInt(-1)
     if at >= rules.elems.len or action == (if at < 0: "none" else: rules.elems[at].actionOf()):
       continue
     changed = true
@@ -475,8 +486,8 @@ proc buttonMap(fields, changes, info: JsonNode): JsonNode =
     let
       rule = newJObject()
       write = newJObject()
-    rule.put("event", row{"event"})
-    rule.put("match", row{"match"})
+    rule.put("event", row.child("event"))
+    rule.put("match", row.child("match"))
     if action in ["next", "prev"]:
       rule.put("emit", newJString("setCurrentScene"))
       write.put("direction", newJString(action))
@@ -502,11 +513,11 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   ## shorter edge `unit` (uiScale's floor: past it the page itself stops
   ## following), and the scale set elsewhere stays as it is.
   result = newJArray()
-  let wifi = info{"wifi"}
+  let wifi = info.child("wifi")
   if not wifi.isNil and wifi.kind == JObject:
     let
-      saved = wifi{"ssid"}.getStr()
-      networks = arrayOf(wifi{"networks"})
+      saved = wifi.str("ssid")
+      networks = arrayOf(wifi.child("networks"))
       network = field("wifiSsid", "Wi-Fi network", "string")
       options = newJArray()
     var listed = saved.len == 0
@@ -528,7 +539,7 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
     let password = field("wifiPassword", "Password", "string")
     password.put("secret", newJBool(true))
     password.put("placeholder", newJString(
-      if wifi{"password"}.getBool(): "Saved (type to change)" else: "Password"))
+      if wifi.child("password").getBool(): "Saved (type to change)" else: "Password"))
     result.elems.add password
   let layout = self.layoutField(info)
   if not layout.isNil:
@@ -543,13 +554,13 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   var scale = field("renderScale", "Scale", "float")
   options = newJArray()
   options.elems.add option("0", "Automatic (" & scaleLabel(autoScale) & ")")
-  let held = info{"renderScale"}.text
+  let held = info.child("renderScale").text
   for step in Scales:
     if unit == 0 or parseFloat(step) * 320 <= max(unit, 320).float or step == held:
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
-  if not info{"clock"}.isNil:
+  if not info.child("clock").isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")
     clock.put("placeholder", newJString("YYYY-MM-DD HH:MM"))
@@ -557,7 +568,7 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
   self.buttonFields(info, result)
 
 proc opener(self: SceneSettingsScene): string =
-  self.state{"from"}.getStr()
+  self.state.str("from")
 
 var wentBack {.threadvar.}: bool
   ## It went back by itself (Save, Cancel, its timeout), not merely lost the
@@ -575,8 +586,8 @@ proc collect(fields, values: JsonNode): JsonNode =
   result = newJObject()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    let name = field{"name"}.getStr()
-    let value = field.saved(values{name})
+    let name = field.str("name")
+    let value = field.saved(values.child(name))
     if not value.isNil:
       result.put(name, value)
 
@@ -620,7 +631,7 @@ proc saveFrame(self: SceneSettingsScene, fields, info: JsonNode) =
       return
     changes.put("eventMap", map)
   self.state.put("frameValues", newJObject())
-  let layout = changes{"layout"}
+  let layout = changes.child("layout")
   if not layout.isNil:
     # The frame's own to keep: no host setting.
     chooseLayout(layout.getStr())
@@ -667,7 +678,7 @@ proc press(self: SceneSettingsScene, action: int) =
     self.openLayoutPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
-  elif self.state{"confirm"}.getInt(-1) == action:
+  elif self.state.child("confirm").getInt(-1) == action:
     if action == AInstallUpdate:
       frameAction("installUpdate")
     else:
@@ -714,21 +725,21 @@ proc acting(self: SceneSettingsScene) =
       let
         field = fields.elems[index]
         other = actedText == OtherValue
-      values.put(field{"name"}.getStr(), newJString(if other: "" else: actedText))
+      values.put(field.str("name"), newJString(if other: "" else: actedText))
       if not frame:
-        self.formObject("edited").put(field{"name"}.getStr(), newJBool(true))
+        self.formObject("edited").put(field.str("name"), newJBool(true))
       # Beside the values, on a field that has an `other`: the frame page's,
       # whose names it knows, never a scene's, which could be called anything.
-      if field{"other"}.getStr().len > 0:
+      if field.str("other").len > 0:
         values.put("typing", newJBool(other))
   else:
     let
       index = if handler >= HToggle: handler - HToggle else: handler - HText
     if index >= 0 and index < fields.elems.len:
       let field = fields.elems[index]
-      let name = field{"name"}.getStr()
+      let name = field.str("name")
       if handler >= HToggle:
-        values.put(name, newJBool(not values{name}.isOn))
+        values.put(name, newJBool(not values.child(name).isOn))
       else:
         values.put(name, newJString(actedText))
       if not frame:
@@ -739,7 +750,7 @@ proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises
   ## The form's one handler, run by the hit test (ui/events.nim): what it
   ## was and a field's text, for `acting` once the hit test is done.
   acted = handler
-  actedText = event{"value"}.getStr()
+  actedText = event.str("value")
 
 # --------------------------------------------------------------- the picture
 #
@@ -827,17 +838,17 @@ proc selectBox(look: Look, field: JsonNode, options: JsonNode, held: string, ind
   c.px("h", look.line)
   result = el("select", move c)
   result.attrs.add(("value", held))
-  result.attrs.add(("placeholder", field{"placeholder"}.getStr()))
+  result.attrs.add(("placeholder", field.str("placeholder")))
   discard result.on("on-change", HSelect + index)
   for j in 0 ..< options.elems.len:
     let option = options.elems[j]
-    let name = if option.kind == JObject: option{"value"}.text else: option.text
-    let label = option{"label"}.getStr()
-    if option{"heading"}.getBool():
+    let name = if option.kind == JObject: option.child("value").text else: option.text
+    let label = option.str("label")
+    if option.child("heading").getBool():
       result.children.add look.headingRow(label)
     else:
       result.children.add look.optionRow(name, if label.len > 0: label else: name, name == held)
-  let other = field{"other"}.getStr()
+  let other = field.str("other")
   if other.len > 0:
     result.children.add look.optionRow(OtherValue, other, held == OtherValue)
   result = result.role("field")
@@ -846,11 +857,11 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   ## One field: its label and what changes it. `typing`: its select box's
   ## `other` option is picked, and its own value is typed under it.
   let
-    kind = field{"type"}.getStr()
-    options = field{"options"}
-  var label = field{"label"}.getStr()
+    kind = field.str("type")
+    options = field.child("options")
+  var label = field.str("label")
   if label.len == 0:
-    label = field{"name"}.getStr()
+    label = field.str("name")
   var c = "flex flex-col"
   c.px("gap", look.gap div 3)
   result = el("div", move c)
@@ -879,9 +890,9 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   c.px("text", look.size * 4 div 5)
   result.children.add el("span", move c, SvgNode(text: label)).role("muted")
   let choices = arrayOf(options)
-  if field{"select"}.getBool() or choices.elems.len > 0:
+  if field.child("select").getBool() or choices.elems.len > 0:
     let box = look.selectBox(field, choices, if typing: OtherValue else: value.text, index)
-    let action = field{"button"}.getInt(-1)
+    let action = field.child("button").getInt(-1)
     if action < 0:
       result.children.add box
     else:
@@ -902,7 +913,7 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int, typing = fals
   let input = el(if lines: "textarea" else: "input", move c)
   input.attrs.add(("value", value.text))
   input.attrs.add(("placeholder", field{if typing: "otherPlaceholder" else: "placeholder"}.getStr()))
-  if field{"secret"}.getBool(): input.attrs.add(("type", "password"))
+  if field.child("secret").getBool(): input.attrs.add(("type", "password"))
   elif kind in ["integer", "float"]: input.attrs.add(("type", "number"))
   result.children.add input.on("on-change", HText + index).role("field")
 
@@ -918,8 +929,8 @@ proc fieldList(self: SceneSettingsScene, look: Look, padX, padY: int): SvgNode =
     values = self.valueMap()
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    if field.kind == JObject and field{"type"}.getStr() notin Unedited:
-      result.children.add look.row(field, values{field{"name"}.getStr()}, i)
+    if field.kind == JObject and field.str("type") notin Unedited:
+      result.children.add look.row(field, values{field.str("name")}, i)
   if result.children.len == 0:
     c = "text-center"
     if not look.paper: c.add " text-zinc-400"
@@ -952,34 +963,34 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       row.children.add el("div", "grow min-w-0 flex justify-end",
         el("span", "truncate", SvgNode(text: text)))
       card.children.add row
-  let wifi = info{"wifi"}
+  let wifi = info.child("wifi")
   if not wifi.isNil and wifi.kind == JObject:
     card.line(look, "Wi-Fi", wifiLine(wifi))
-    if wifi{"state"}.getStr() == "connected":
-      let rssi = wifi{"rssi"}
+    if wifi.str("state") == "connected":
+      let rssi = wifi.child("rssi")
       if not rssi.isNil and rssi.kind == JInt:
         card.line(look, "Signal", $rssi.getInt() & " dBm")
-      card.line(look, "Address", wifi{"ip"}.getStr())
+      card.line(look, "Address", wifi.str("ip"))
   let battery = info{"battery", "percent"}
   if not battery.isNil and battery.kind == JInt:
     card.line(look, "Battery", $battery.getInt() & "%")
-  card.line(look, "Not saved", info{"note"}.getStr())
-  card.line(look, "Managed by", info{"managedBy"}.getStr())
-  card.line(look, "Version", info{"version"}.getStr())
-  let update = info{"updateState"}.getInt(-1)
+  card.line(look, "Not saved", info.str("note"))
+  card.line(look, "Managed by", info.str("managedBy"))
+  card.line(look, "Version", info.str("version"))
+  let update = info.child("updateState").getInt(-1)
   if update == UpdateAvailable:
-    card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
+    card.line(look, "Update", info.str("updateVersion") & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
   result.children.add card.role("card")
   let
     fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
-    typing = edits{"typing"}.getBool()
-    asking = self.state{"confirm"}.getInt(-1)
+    typing = edits.child("typing").getBool()
+    asking = self.state.child("confirm").getInt(-1)
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
-    let name = field{"name"}.getStr()
+    let name = field.str("name")
     if i > 0 and name.startsWith(ButtonRow) and not fields.elems[i - 1]{"name"}.getStr().startsWith(ButtonRow):
       # What the frame's keys and swipes do, whatever scene shows.
       result.children.add el("div", "font-bold", SvgNode(text: "Buttons"))
@@ -1002,7 +1013,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
   elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
     buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
-  if %"restart" in arrayOf(info{"actions"}).elems:
+  if %"restart" in arrayOf(info.child("actions")).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
   result.children.add buttons
@@ -1099,13 +1110,13 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
       header.children.add look.gear(frame, named = not frame and width >= look.size * 30)
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
-  let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
+  let edits = if frame: self.state.child("frameValues") else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
   # Why the frame page's last Save kept the Buttons as they were, under Save
   # where the press was, wherever the list is scrolled. Hidden, not left out:
   # an element's key is its place in the tree, and the list keeps its scroll.
-  let kept = if frame: self.state{"buttonsNote"}.getStr() else: ""
+  let kept = if frame: self.state.str("buttonsNote") else: ""
   c = "shrink-0"
   c.px("px", look.pad)
   c.px("py", look.size div 2)
@@ -1190,13 +1201,13 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     # It opens on the scene's form; with no scene showing there is nothing
     # on that one, and the frame page is what the status screen sent you here
     # for.
-    if (self.state{"page"}.isNil or not payload{"state", "noLayout"}.isNil) and
+    if (self.state.child("page").isNil or not payload{"state", "noLayout"}.isNil) and
         (self.opener().len == 0 or self.openedOnFrame()) and not frameInfo().isNil:
       self.showPage(true)
   of "open":
     self.touch()
     wentBack = false
-    if self.state{"away"}.getBool():
+    if self.state.child("away").getBool():
       # Brought forward from a window: the host's news for the frame page
       # again.
       self.state.delete("away")
@@ -1219,7 +1230,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     if context.hasImage and not context.image.isNil:
       self.drawForm(context.image)
   of "button":
-    if payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press":
+    if payload.str("role") == "back" and payload.str("action") == "press":
       self.back()
   of evBack:
     # The frame's back (a swipe in from the left), as on a phone: the
