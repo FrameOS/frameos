@@ -35,6 +35,7 @@
 #include "fos_netguard.h"
 #include "fos_ota_download.h"
 #include "fos_ota_pubkey.h"
+#include "fos_restart.h"
 #include "fos_url_guard.h"
 #include "fos_version.h"
 #include "fos_wifi.h"
@@ -43,7 +44,7 @@
 static const char *TAG = "fos_ota";
 #define FOS_OTA_BOOT_REQUEST_KEY "ota_req"
 #define FOS_OTA_REBOOT_DELAY_MS 1000
-#define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
+#define FOS_OTA_REBOOT_TASK_STACK_SIZE FOS_RESTART_TASK_STACK
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
 #define FOS_OTA_CHUNK (8 * 1024)
 /* A dropped socket or a short read is resumed within one run, after the

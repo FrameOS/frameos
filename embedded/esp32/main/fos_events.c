@@ -1,4 +1,5 @@
 #include "fos_events.h"
+#include "fos_restart.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -199,7 +200,7 @@ static void restart_firmware(bool on_render_task)
         esp_restart();
         return;
     }
-    if (xTaskCreate(restart_task, "fos_restart", 2048, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(restart_task, "fos_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
         esp_restart();
     }
 }

@@ -1,4 +1,5 @@
 #include "fos_settings.h"
+#include "fos_restart.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -1316,7 +1317,7 @@ esp_err_t fos_settings_apply(fos_settings_fetched_t *fetched)
     if (s_restart_after_apply) {
         s_restart_after_apply = false;
         ESP_LOGW(TAG, "settings need a restart (rotation, battery wiring, TLS or the HTTP cap); restarting");
-        if (xTaskCreate(settings_restart_task, "fos_set_restart", 2048, NULL, 5, NULL) != pdPASS) {
+        if (xTaskCreate(settings_restart_task, "fos_set_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
             esp_restart();
         }
     }

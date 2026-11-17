@@ -1,4 +1,5 @@
 #include "fos_http.h"
+#include "fos_restart.h"
 #include "fos_json_guard.h"
 
 #include <stdio.h>
@@ -2012,7 +2013,7 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
     log_http_command_from_path(req, 0);
     httpd_resp_set_type(req, "application/json");
     esp_err_t err = httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
-    if (xTaskCreate(restart_task, "fos_restart", 2048, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(restart_task, "fos_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
         esp_restart();
     }
     return err;
