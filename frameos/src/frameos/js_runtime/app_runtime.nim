@@ -1191,19 +1191,14 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         # time: only the slice asked for is ever held.
         let entry = options{"entry"}.getStr()
         try:
-          var length = options{"length"}.getInt(-1)
-          if length < 0:
-            length = int(zipEntrySize(full, entry)) - offset
-          if length <= 0:
-            return nimStringToJS(ctx, "")
-          if length > readMax:
-            frameos_apps.logError(e.owner,
-              "JS app readAsset: " & pathStr & " entry " & entry & " slice is " & $length &
-              " bytes, over the " & $readMax & " byte limit; read it in chunks" &
-              " with {offset, length}")
-            return jsNull(ctx)
-          let contents = readZipEntry(full, entry, offset, length)
+          let contents = readZipEntry(full, entry, offset, options{"length"}.getInt(-1), readMax)
           return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
+        except ZipEntryTooBig as error:
+          frameos_apps.logError(e.owner,
+            "JS app readAsset: " & pathStr & " entry " & entry & " slice is " & $error.size &
+            " bytes, over the " & $readMax & " byte limit; read it in chunks" &
+            " with {offset, length}")
+          return jsNull(ctx)
         except ZipEntryError:
           # Not a ZIP, no such member, a damaged one: null, as for a file
           # that is not there. What the file is is the app's to say (a
@@ -1274,11 +1269,10 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         # alpha (an ESP32's) would otherwise show those parts black.
         var member: string
         try:
-          let size = zipEntrySize(full, entry)
-          if size <= 0 or size > jsAssetReadMaxBytes(e).int64:
-            return jsNull(ctx)
-          member = readZipEntry(full, entry, 0, size.int)
+          member = readZipEntry(full, entry, 0, -1, jsAssetReadMaxBytes(e))
         except ZipEntryError:
+          return jsNull(ctx)
+        if member.len == 0:
           return jsNull(ctx)
         if sizedWidth <= 0 or sizedHeight <= 0:
           image = decodeImageWithDisplayBounds(member)
@@ -3658,7 +3652,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   of JBool:
     return VBool(payload.getBool())
   of JInt:
-    return VInt(payload.getInt())
+    return VInt(payload.getBiggestInt().int64)
   of JFloat:
     return VFloat(payload.getFloat())
   of JObject, JArray:

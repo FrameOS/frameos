@@ -87,4 +87,24 @@ suite "zip_entry":
       failed = true
     check failed
 
+suite "zip_entry, what it keeps and refuses":
+  test "a slice over the limit is refused with its size; a negative length reads to the end":
+    var refused = false
+    try:
+      discard readZipEntry(book, "OEBPS/chapter 1.xhtml", 0, -1, 1000)
+    except ZipEntryTooBig as error:
+      refused = error.size == chapter.len
+    check refused
+    check readZipEntry(book, "OEBPS/chapter 1.xhtml", 100, -1) == chapter[100 .. ^1]
+
+  test "the directory kept for a path is read again when the file changes":
+    let path = dir / "changing.epub"
+    writeFile(path, makeZip([(name: "a.txt", data: "first", deflate: true)]))
+    check readZipEntry(path, "a.txt", 0, 100) == "first"
+    writeFile(path, makeZip([(name: "padding.bin", data: "0123456789", deflate: false),
+      (name: "a.txt", data: "second, longer", deflate: true)]))
+    check readZipEntry(path, "a.txt", 0, 100) == "second, longer"
+    forgetZipDirectory()
+    check readZipEntry(path, "a.txt", 0, 100) == "second, longer"
+
 removeDir(dir)
