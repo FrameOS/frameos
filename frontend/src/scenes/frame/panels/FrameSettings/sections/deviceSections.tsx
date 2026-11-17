@@ -516,6 +516,15 @@ export function VirtualFrameSection(): JSX.Element | null {
             )}
           </Field>
         </Group>
+        <Group name="network">
+          <Field
+            name="allowLocalNetworkAccess"
+            label="Local network access"
+            tooltip="Lets this frame's scenes reach addresses on the backend's own network (a Home Assistant, a NAS, an Immich at 192.168.x.x), in its renders and in the editor's live preview. Off: public addresses only."
+          >
+            <Switch name="allowLocalNetworkAccess" fullWidth />
+          </Field>
+        </Group>
       </SectionBody>
     </>
   )

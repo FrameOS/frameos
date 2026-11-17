@@ -16,7 +16,8 @@ It also means the scene runs where the plane is, and fetches from there:
   have no block). What is the backend host's own and never the frame's
   network stays refused: loopback, link-local and the metadata address,
   unless the frame's `network.allowLocalNetworkAccess` is on; set to `false`
-  it refuses private ranges too. A virtual frame keeps its opt-in rule.
+  it refuses private ranges too. A virtual frame keeps its opt-in rule (the
+  "Local network access" switch in its settings).
 - **On FrameOS Cloud** a scene reaches public addresses only: the cloud's
   renderer refuses every private one, whatever the frame's local network
   access says (that switch is about the frame's own network, which the cloud
