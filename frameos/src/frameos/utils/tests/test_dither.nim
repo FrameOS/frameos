@@ -71,6 +71,31 @@ suite "dither helpers":
     let packed8 = ditherPaletteIndexed(image8Bit, palette8Bit)
     check packed8 == @[0'u8, 16'u8]
 
+  test "ditherPaletteIndexed packs 1 bit MSB-first past the first byte of a row":
+    # (7 - x) mod 8 was negative for every x >= 8 in Nim, so only the first
+    # byte of each row (and the last pixel of every later byte) survived:
+    # unpacked, a two-colour picture came back as vertical stripes.
+    let savedJitter = ditherJitterAmp
+    ditherJitterAmp = 0
+    defer: ditherJitterAmp = savedJitter
+    let bwPalette = @[(0, 0, 0), (255, 255, 255)]
+    # 21 pixels: three bytes a row, the last one padded.
+    let rows = @[@[0xA5'u8, 0x3C, 0xF0], @[0x01'u8, 0x80, 0x58]]
+    let width = 21
+    let image = newImage(width, rows.len)
+    for y in 0 ..< rows.len:
+      for x in 0 ..< width:
+        let on = ((rows[y][x div 8] shr (7 - (x mod 8))) and 1) == 1
+        let c = if on: 255'u8 else: 0'u8
+        setPixel(image, x, y, c, c, c)
+    let packed = ditherPaletteIndexed(image, bwPalette)
+    check packed == @[0xA5'u8, 0x3C, 0xF0, 0x01, 0x80, 0x58]
+    # And unpacked it is the picture again, pixel for pixel.
+    for y in 0 ..< rows.len:
+      for x in 0 ..< width:
+        let bit = (packed[y * 3 + x div 8] shr (7 - (x mod 8))) and 1
+        check bit == (if image.data[image.dataIndex(x, y)].r == 255: 1'u8 else: 0'u8)
+
 # ---------------------------------------------------------------------------
 # The row-streamed dither must produce the bytes the in-place version did.
 # The reference below IS the old implementation, kept here so the equivalence
@@ -112,7 +137,7 @@ proc referencePaletteIndexed(image: Image, palette: seq[(int, int, int)]): seq[u
         of 8: output[outputIndex] = index.uint8
         of 4: output[outputIndex] = output[outputIndex] or (index shl ((1 - (x mod 2)) * 4)).uint8
         of 2: output[outputIndex] = output[outputIndex] or (index shl ((3 - (x mod 4)) * 2)).uint8
-        of 1: output[outputIndex] = output[outputIndex] or (index shl ((7 - x) mod 8)).uint8
+        of 1: output[outputIndex] = output[outputIndex] or (index shl (7 - (x mod 8))).uint8
         else: discard
       for i in 0..<4:
         if (x + dx[i] >= 0) and (x + dx[i] < width) and (y + dy[i] < height):

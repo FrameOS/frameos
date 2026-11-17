@@ -486,7 +486,7 @@ proc ditherPaletteIndexed*(image: Image, palette: seq[(int, int, int)]): seq[uin
         let bitPosition = (3 - (x mod 4)) * 2
         output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
       of 1:
-        let bitPosition = (7 - x) mod 8
+        let bitPosition = 7 - (x mod 8)
         output[outputIndex] = output[outputIndex] or (index shl bitPosition).uint8
       else: discard
 
