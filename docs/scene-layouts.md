@@ -271,7 +271,16 @@ windows open, each a sum over the boxes, and only when a window opens, so it
 costs an ESP32's JavaScript next to nothing.
 Windows that do not overlap are holes, each scene drawn straight into its window
 (below): a window opened clear of the others costs no picture of its own. A
-scene that had a window before opens where it was, as before. `Tiling` tiles,
+scene that had a window before opens where it was, as before.
+**A desktop of another size.** The windows' boxes are in the desktop's pixels,
+and the desktop is the panel over the render scale (docs/jsx-ui.md "Scale"): a
+new scale, a turn or a browser window resized gives it another size. Each of
+the five keeps the size its boxes were made for (`room` in its state) and, on
+another, puts every window, and every closed window's box, at the same share of
+the desktop (`refit`, the same text in each), so a window stays where it was on
+the glass, its scene drawn at the new scale inside it. Before, a scale of 0.5
+left every window in the top left quarter and one of 2 put them off the panel.
+`Tiling` tiles,
 its tiles never over one another and a new one the next place in the
 arrangement, so it has nothing to choose; `Commander` has its two panels.
 **Long lists of scenes.** Each desktop's list of the frame's scenes (`Windows
