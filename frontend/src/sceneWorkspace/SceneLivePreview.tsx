@@ -48,6 +48,7 @@ import {
   RectangleHorizontal,
   RectangleVertical,
   RotateCw,
+  Settings,
   X,
   Zap,
 } from "lucide-react";
@@ -61,6 +62,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   embeddedSourceSettingsForScenes,
   gatedServicesForScenes,
@@ -77,13 +79,20 @@ import {
 } from "./lib/preview-devices";
 import {
   isPreviewLayout,
+  layoutSettingAppliesAtOnce,
   loadLayoutStarters,
+  parsePreviewLayoutSettings,
+  PREVIEW_LAYOUT_SETTINGS_STORAGE_KEY,
   previewLayoutGroups,
   previewLayouts,
+  previewLayoutScene,
   scenesWithPreviewLayout,
+  withoutPreviewLayoutSettings,
+  withPreviewLayoutSetting,
   wornPreviewLayout,
+  wornPreviewLayoutState,
 } from "./lib/preview-layouts";
-import type { PreviewLayout } from "./lib/preview-layouts";
+import type { PreviewLayout, PreviewLayoutScene, PreviewLayoutSettings } from "./lib/preview-layouts";
 import type { LayoutStarter } from "../generated/layoutStarters";
 import { isReauthRequired, reauthHref } from "./lib/reauth-client";
 import { selectFieldOptions } from "./lib/select-options";
@@ -144,6 +153,9 @@ export const AUTO_APPLY_DEBOUNCE_MS = 400;
  * a second; the panel batches those into one React update per this long.
  * The first report after a quiet spell goes through at once. */
 export const UI_FLUSH_INTERVAL_MS = 200;
+/** A layout setting typed or dragged reaches the runtime (which boots again
+ * with it) this long after the last change; a checkbox or a menu at once. */
+export const LAYOUT_SETTINGS_DEBOUNCE_MS = 400;
 /** Where "Auto apply" is remembered between editor sessions (this browser). */
 const AUTO_APPLY_STORAGE_KEY = "frameos.preview.autoApply";
 /** Where the panel simulation is remembered (this browser). Empty means off;
@@ -178,7 +190,6 @@ function beforeDitherFor(fitPhotos: boolean, correction: AssetColorProfile): Bef
 }
 const DEVICE_STORAGE_KEY = "frameos.preview.device";
 
-/** Megabytes with one decimal below 10 — the scale these numbers live at. */
 /** The Layout select's options for these layouts. */
 function layoutOptions(layouts: readonly PreviewLayout[]) {
   return layouts.map((layout) => (
@@ -188,10 +199,23 @@ function layoutOptions(layouts: readonly PreviewLayout[]) {
   ));
 }
 
+/** The layout settings this browser remembers; none when storage is blocked. */
+function readRememberedLayoutSettings(): PreviewLayoutSettings {
+  try {
+    return parsePreviewLayoutSettings(window.localStorage.getItem(PREVIEW_LAYOUT_SETTINGS_STORAGE_KEY));
+  } catch {
+    return {};
+  }
+}
+
+/** Megabytes with one decimal below 10 — the scale these numbers live at. */
 function formatMegabytes(bytes: number): string {
   const mb = Math.max(0, bytes) / (1024 * 1024);
   return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
 }
+
+/** No layouts to choose among: one value, so the panel's scenes memo keeps its result. */
+const NO_LAYOUTS: readonly PreviewLayout[] = [];
 
 /** Which device the memory checkbox turns on first — the tightest one, and
  * the class of frame a scene is most likely to be too heavy for. */
@@ -382,13 +406,34 @@ export function SceneLivePreviewPanel({
   );
   const layoutGroups = useMemo(() => previewLayoutGroups(layouts), [layouts]);
   const [layoutChoice, setLayoutChoice] = useState<string | null>(null);
-  // What the runtime runs: the editor's scenes, each wearing the chosen layout.
+  // "Layout settings": the layout's fields as tried here, by layout id, over
+  // what each scene gives the layout it wears. Remembered per browser (read
+  // before the first boot: nothing on the page shows them until the dialog
+  // opens). The runtime runs `ranLayoutSettings`, which follows a pause in
+  // the typing.
+  const [layoutSettings, setLayoutSettings] = useState<PreviewLayoutSettings>(() =>
+    rememberSettings ? readRememberedLayoutSettings() : {},
+  );
+  const [ranLayoutSettings, setRanLayoutSettings] = useState(layoutSettings);
+  const [layoutSettingsOpen, setLayoutSettingsOpen] = useState(false);
+  useEffect(() => {
+    if (ranLayoutSettings === layoutSettings) {
+      return;
+    }
+    const timer = setTimeout(() => setRanLayoutSettings(layoutSettings), LAYOUT_SETTINGS_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [layoutSettings, ranLayoutSettings]);
+  // With no choice made the starters do not matter: their load must not boot
+  // the runtime again.
+  const chosenAmong = layoutChoice === null ? NO_LAYOUTS : layouts;
+  // What the runtime runs: the editor's scenes, each wearing the chosen layout
+  // (or its own) with the settings tried here.
   const scenes = useMemo(
     () =>
-      editorScenes && layoutChoice !== null
-        ? scenesWithPreviewLayout(editorScenes, layouts, layoutChoice)
+      editorScenes
+        ? scenesWithPreviewLayout(editorScenes, chosenAmong, layoutChoice, ranLayoutSettings)
         : editorScenes,
-    [editorScenes, layouts, layoutChoice],
+    [editorScenes, chosenAmong, layoutChoice, ranLayoutSettings],
   );
   // A starter runs beside the scenes; it is no scene to pick.
   const addedLayoutIds = useMemo(
@@ -1279,6 +1324,38 @@ export function SceneLivePreviewPanel({
     layoutChoice ?? (editorScenes ? wornPreviewLayout(editorScenes, currentScene?.id) : "");
   const shownLayoutId = layouts.some((layout) => layout.id === wantedLayoutId) ? wantedLayoutId : "";
   const layoutSelectShown = layouts.length > 0 && !isPreviewLayout(currentScene);
+  // The Layout settings of the layout shown: its fields, the values the scene
+  // gives it (a frame's install) and what was set here.
+  const shownLayout = layouts.find((layout) => layout.id === shownLayoutId) ?? null;
+  const shownLayoutScene =
+    shownLayout && editorScenes ? previewLayoutScene(editorScenes, layouts, shownLayout.id) : null;
+  const layoutSettingsShown = layoutSelectShown && shownLayoutScene !== null;
+
+  function rememberLayoutSettings(next: PreviewLayoutSettings, atOnce: boolean) {
+    setLayoutSettings(next);
+    if (atOnce) {
+      setRanLayoutSettings(next);
+    }
+    if (!rememberSettings) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(PREVIEW_LAYOUT_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage blocked: the settings still apply for this session.
+    }
+  }
+
+  function changeLayoutSetting(field: StateField, value: unknown) {
+    rememberLayoutSettings(
+      withPreviewLayoutSetting(layoutSettings, shownLayoutId, field.name, value),
+      layoutSettingAppliesAtOnce(field.type),
+    );
+  }
+
+  function resetLayoutSettings() {
+    rememberLayoutSettings(withoutPreviewLayoutSettings(layoutSettings, shownLayoutId), true);
+  }
 
   // A settings group whose every field is saved on the account is shown as
   // "from your account" until "Use another key"; a group with a missing
@@ -1665,7 +1742,37 @@ export function SceneLivePreviewPanel({
                 ))
               : layoutOptions(layouts)}
           </select>
+          {layoutSettingsShown ? (
+            <button
+              aria-label="Layout settings"
+              className="button button--subtle button--small"
+              onClick={() => setLayoutSettingsOpen(true)}
+              title="Layout settings: try the layout's own settings in this preview"
+              type="button"
+            >
+              <Settings aria-hidden size={16} />
+              Settings
+            </button>
+          ) : null}
         </div>
+      ) : null}
+      {layoutSettingsOpen && layoutSettingsShown && shownLayout && shownLayoutScene ? (
+        <PreviewLayoutSettingsDialog
+          // Inside the workspace's root where there is one (a backend's page
+          // scopes the dialog's styles to it), else over the whole page.
+          container={canvasRef.current?.closest(".frameos-scene-workspace") ?? document.body}
+          idPrefix={`${fieldIdPrefix}-layout-setting`}
+          layoutScene={shownLayoutScene}
+          name={shownLayout.name}
+          onChange={changeLayoutSetting}
+          onClose={() => setLayoutSettingsOpen(false)}
+          onReset={resetLayoutSettings}
+          remembered={rememberSettings}
+          setValues={layoutSettings[shownLayoutId] ?? {}}
+          wornState={
+            editorScenes ? wornPreviewLayoutState(editorScenes, currentScene?.id, shownLayoutId) : {}
+          }
+        />
       ) : null}
       <div className="viewport-controls">
         <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-width`}>
@@ -2053,6 +2160,109 @@ export function normalizeHexColor(text: string): string | null {
       .join("")}`;
   }
   return null;
+}
+
+type PreviewLayoutSettingsDialogProps = {
+  /** Where the dialog is put (see the panel). */
+  container: Element;
+  idPrefix: string;
+  layoutScene: PreviewLayoutScene;
+  name: string;
+  /** What the scene gives the layout (a frame's install), under `setValues`. */
+  wornState: Record<string, unknown>;
+  /** What was set here. */
+  setValues: Record<string, unknown>;
+  /** Whether this browser keeps them (the panel's rememberSettings). */
+  remembered: boolean;
+  onChange: (field: StateField, value: unknown) => void;
+  onReset: () => void;
+  onClose: () => void;
+};
+
+// The Layout settings: the layout's public fields, the same rows as the
+// scene's form below the preview. Every change goes to the preview;
+// nothing reaches a frame or the scene.
+function PreviewLayoutSettingsDialog({
+  container,
+  idPrefix,
+  layoutScene,
+  name,
+  wornState,
+  setValues,
+  remembered,
+  onChange,
+  onReset,
+  onClose,
+}: PreviewLayoutSettingsDialogProps) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCloseRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const publicFields = sceneStateFields(layoutScene as unknown as FrameOSScene).filter(
+    (field) => field.access === "public" && field.name,
+  );
+  const values = stateFieldShowIfValues(publicFields, wornState, setValues);
+  const fields = publicFields.filter((field) => evaluateShowIf(field.showIf, values, field.name));
+  const title = `Layout settings: ${name}`;
+
+  return createPortal(
+    <div aria-label={title} aria-modal className="dialog" onClick={onClose} role="dialog">
+      <div
+        className="dialog__panel layout-settings-dialog"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="dialog__head">
+          <h2>{title}</h2>
+          <button aria-label="Close" className="dialog__close" onClick={onClose} type="button">
+            <X aria-hidden size={16} />
+          </button>
+        </div>
+        <p className="copy layout-settings-dialog__intro">
+          {remembered
+            ? "These change the preview only. This browser remembers them for this layout."
+            : "These change the preview only."}
+        </p>
+        {fields.length === 0 ? (
+          <p className="copy layout-settings-dialog__intro">This layout has no settings to change.</p>
+        ) : (
+          <div className="live-preview__form">
+            {fields.map((field) => (
+              <StateFieldRow
+                field={field}
+                id={`${idPrefix}-${field.name}`}
+                key={field.name}
+                onChange={(value) => onChange(field, value)}
+                value={field.name in setValues ? setValues[field.name] : values[field.name]}
+              />
+            ))}
+          </div>
+        )}
+        <div className="button-row layout-settings-dialog__actions">
+          <button
+            className="button button--subtle button--small"
+            disabled={Object.keys(setValues).length === 0}
+            onClick={onReset}
+            title="Back to the values the layout and the scene give it"
+            type="button"
+          >
+            Reset
+          </button>
+          <button className="button button-primary button--small" onClick={onClose} type="button">
+            Done
+          </button>
+        </div>
+      </div>
+    </div>,
+    container,
+  );
 }
 
 type StateFieldRowProps = {

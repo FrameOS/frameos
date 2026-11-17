@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeviceLimits } from "frameos-wasm";
 import {
   AUTO_APPLY_DEBOUNCE_MS,
   EDITOR_RELOAD_DEBOUNCE_MS,
+  LAYOUT_SETTINGS_DEBOUNCE_MS,
   measureFps,
   normalizeHexColor,
   NOTICE_HIDE_MS,
   SceneLivePreviewPanel,
 } from "../../../../../frontend/src/sceneWorkspace/SceneLivePreview";
+import { loadLayoutStarters } from "../../../../../frontend/src/sceneWorkspace/lib/preview-layouts";
 
 type PreviewMemoryUsage = {
   limitBytes: number;
@@ -758,6 +760,128 @@ describe("SceneLivePreviewPanel layout", () => {
     await screen.findByText(/Runs in your browser/);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByLabelText("Layout")).toBeNull();
+  });
+});
+
+describe("SceneLivePreviewPanel layout settings", () => {
+  type RunScene = { id: string; layout?: { sceneId: string; state?: Record<string, unknown> } };
+  const ranLayout = (index: number) => (previews[index]!.options.scenes as RunScene[])[0]!.layout;
+  const frameLayout = {
+    fields: [
+      { access: "public", label: "Look", name: "look", options: ["standard", "contrast"], type: "select", value: "standard" },
+      { access: "public", label: "24-hour clock", name: "twentyFourHour", type: "boolean", value: "false" },
+      { access: "public", label: "Title", name: "title", type: "string", value: "Home" },
+      { access: "private", name: "openScenes", type: "json", value: "[]" },
+    ],
+    id: "frame-chrome",
+    name: "My chrome",
+    nodes: [],
+    settings: { isLayout: true, refreshInterval: 1 },
+  };
+  // A frame's scene, wearing the frame's layout with a setting of its own.
+  const worn = { ...clockScene, layout: { sceneId: "frame-chrome", state: { twentyFourHour: true } } };
+  const settingsButton = () => screen.queryByRole("button", { name: "Layout settings" });
+  const openDialog = async (name: string) => {
+    fireEvent.click(await waitFor(() => settingsButton()!));
+    return screen.getByRole("dialog", { name: `Layout settings: ${name}` });
+  };
+
+  it("offers the settings only while a layout is shown, and lists the chosen starter's fields", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    expect(settingsButton()).toBeNull();
+
+    fireEvent.change(select, { target: { value: "layout-windows-98" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    const dialog = await openDialog("Windows 98");
+    const starter = (await loadLayoutStarters()).find((entry) => entry.scene.id === "layout-windows-98")!;
+    const firstPublic = starter.scene.fields!.find((field) => field.access === "public")!;
+    expect(within(dialog).getByText(firstPublic.label || firstPublic.name)).toBeTruthy();
+    // A layout's last row is its refresh interval, as every scene's is.
+    expect(within(dialog).getByLabelText(/^Refresh interval/)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.change(select, { target: { value: "" } });
+    expect(settingsButton()).toBeNull();
+  });
+
+  it("runs the preview with the values set, over the scene's own, and remembers them per layout", async () => {
+    const scenes = [worn, frameLayout];
+    render(<SceneLivePreviewPanel editorSceneId="scene-runtime-1" sceneId={null} scenes={scenes} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(previews[0]!.options.scenes).toBe(scenes);
+    const dialog = await openDialog("My chrome");
+    // The layout's public fields, with what the scene gives it.
+    expect((within(dialog).getByLabelText("Look") as HTMLSelectElement).value).toBe("standard");
+    expect((within(dialog).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect((within(dialog).getByLabelText("Title") as HTMLInputElement).value).toBe("Home");
+    expect(within(dialog).queryByText("openScenes")).toBeNull();
+    expect((within(dialog).getByRole("button", { name: "Reset" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // A menu goes to the preview at once.
+    fireEvent.change(within(dialog).getByLabelText("Look"), { target: { value: "contrast" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(ranLayout(1)).toEqual({ sceneId: "frame-chrome", state: { look: "contrast", twentyFourHour: true } });
+    expect(JSON.parse(window.localStorage.getItem("frameos.preview.layoutSettings")!)).toEqual({
+      "frame-chrome": { look: "contrast" },
+    });
+    // What the editor holds is left as it was.
+    expect(worn.layout).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
+
+    // Typing waits for a pause.
+    vi.useFakeTimers();
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Ho" } });
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Hotel" } });
+    act(() => vi.advanceTimersByTime(LAYOUT_SETTINGS_DEBOUNCE_MS - 50));
+    expect(previews).toHaveLength(2);
+    act(() => vi.advanceTimersByTime(100));
+    expect(previews).toHaveLength(3);
+    expect(ranLayout(2)!.state).toEqual({ look: "contrast", title: "Hotel", twentyFourHour: true });
+    vi.useRealTimers();
+
+    // The scene's own values again.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset" }));
+    await waitFor(() => expect(previews).toHaveLength(4));
+    expect(ranLayout(3)).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
+    expect((within(dialog).getByLabelText("Look") as HTMLSelectElement).value).toBe("standard");
+    expect(JSON.parse(window.localStorage.getItem("frameos.preview.layoutSettings")!)).toEqual({});
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("starts with the values this browser remembers, and keeps none when told not to", async () => {
+    window.localStorage.setItem(
+      "frameos.preview.layoutSettings",
+      JSON.stringify({ "frame-chrome": { look: "contrast" }, "layout-top-bar": { title: "Hi" } }),
+    );
+    render(<SceneLivePreviewPanel editorSceneId="scene-runtime-1" sceneId={null} scenes={[worn, frameLayout]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(ranLayout(0)).toEqual({ sceneId: "frame-chrome", state: { look: "contrast", twentyFourHour: true } });
+    cleanup();
+    previews.length = 0;
+
+    render(
+      <SceneLivePreviewPanel
+        editorSceneId="scene-runtime-1"
+        rememberSettings={false}
+        sceneId={null}
+        scenes={[worn, frameLayout]}
+      />,
+    );
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect(ranLayout(0)).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
+    const dialog = await openDialog("My chrome");
+    expect(within(dialog).getByText("These change the preview only.")).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText("Look"), { target: { value: "standard" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(ranLayout(1)!.state).toEqual({ look: "standard", twentyFourHour: true });
+    expect(JSON.parse(window.localStorage.getItem("frameos.preview.layoutSettings")!)).toEqual({
+      "frame-chrome": { look: "contrast" },
+      "layout-top-bar": { title: "Hi" },
+    });
   });
 });
 

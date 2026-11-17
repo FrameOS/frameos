@@ -1,11 +1,17 @@
 // The live preview's Layout select (docs/scene-layouts.md "In the preview").
 import { describe, expect, it } from "vitest";
 import {
+  layoutSettingAppliesAtOnce,
   loadLayoutStarters,
+  parsePreviewLayoutSettings,
   previewLayoutGroups,
   previewLayouts,
+  previewLayoutScene,
   scenesWithPreviewLayout,
+  withoutPreviewLayoutSettings,
+  withPreviewLayoutSetting,
   wornPreviewLayout,
+  wornPreviewLayoutState,
 } from "../../../../../../frontend/src/sceneWorkspace/lib/preview-layouts";
 
 const starter = (id: string, name: string) => ({
@@ -100,5 +106,78 @@ describe("scenesWithPreviewLayout", () => {
       expect(ran.map((scene) => scene.id)).toEqual(["clock", "photos", "chrome"]);
       expect(ran.every((scene) => !("layout" in scene))).toBe(true);
     }
+  });
+});
+
+describe("the preview's Layout settings", () => {
+  const scenes = [
+    { id: "clock", nodes: [], layout: { sceneId: "chrome", state: { height: 40, title: "Clock" } } },
+    { id: "photos", nodes: [], layout: { sceneId: "chrome" } },
+    { id: "notes", nodes: [] },
+    { id: "chrome", nodes: [], settings: { isLayout: true } },
+  ];
+  const layouts = previewLayouts(scenes, starters);
+
+  it("go over the state each scene gives the layout it wears, and leave the scenes as they were when none apply", () => {
+    const settings = { chrome: { title: "Home", dark: true }, "layout-top-bar": { title: "Bar" } };
+    expect(scenesWithPreviewLayout(scenes, layouts, null, settings).map((scene) => scene.layout)).toEqual([
+      { sceneId: "chrome", state: { height: 40, title: "Home", dark: true } },
+      { sceneId: "chrome", state: { title: "Home", dark: true } },
+      undefined,
+      undefined,
+    ]);
+    expect(scenes[0]!.layout).toEqual({ sceneId: "chrome", state: { height: 40, title: "Clock" } });
+    // Nothing for the layouts worn: the very list, so the runtime is not booted again.
+    expect(scenesWithPreviewLayout(scenes, layouts, null, { "layout-top-bar": { title: "Bar" } })).toBe(scenes);
+    expect(scenesWithPreviewLayout(scenes, layouts, null)).toBe(scenes);
+  });
+
+  it("go on every scene with the layout chosen, a starter's included", () => {
+    const ran = scenesWithPreviewLayout(scenes, layouts, "layout-top-bar", { "layout-top-bar": { title: "Bar" } });
+    expect(ran.map((scene) => [scene.id, scene.layout])).toEqual([
+      ["clock", { sceneId: "layout-top-bar", state: { title: "Bar" } }],
+      ["photos", { sceneId: "layout-top-bar", state: { title: "Bar" } }],
+      ["notes", { sceneId: "layout-top-bar", state: { title: "Bar" } }],
+      ["chrome", undefined],
+      ["layout-top-bar", undefined],
+    ]);
+    expect(scenesWithPreviewLayout(scenes, layouts, "chrome", { chrome: { title: "Home" } })[0]!.layout).toEqual({
+      sceneId: "chrome",
+      state: { height: 40, title: "Home" },
+    });
+    const none = scenesWithPreviewLayout(scenes, layouts, "", { chrome: { title: "Home" } });
+    expect(none.every((scene) => !("layout" in scene))).toBe(true);
+  });
+
+  it("find the layout's scene and what the shown scene gives it", () => {
+    expect(previewLayoutScene(scenes, layouts, "chrome")).toBe(scenes[3]);
+    expect(previewLayoutScene(scenes, layouts, "layout-top-bar")).toBe(starters[1]!.scene);
+    expect(previewLayoutScene(scenes, layouts, "clock")).toBeNull();
+    expect(wornPreviewLayoutState(scenes, "clock", "chrome")).toEqual({ height: 40, title: "Clock" });
+    expect(wornPreviewLayoutState(scenes, "photos", "chrome")).toEqual({});
+    expect(wornPreviewLayoutState(scenes, "clock", "layout-top-bar")).toEqual({});
+    expect(wornPreviewLayoutState(scenes, null, "chrome")).toEqual({});
+  });
+
+  it("are kept per layout, and read back from storage whatever it holds", () => {
+    const one = withPreviewLayoutSetting({}, "chrome", "title", "Home");
+    const two = withPreviewLayoutSetting(one, "chrome", "dark", true);
+    expect(two).toEqual({ chrome: { title: "Home", dark: true } });
+    expect(one).toEqual({ chrome: { title: "Home" } });
+    expect(withoutPreviewLayoutSettings(two, "chrome")).toEqual({});
+    expect(withoutPreviewLayoutSettings(two, "other")).toBe(two);
+
+    expect(parsePreviewLayoutSettings(JSON.stringify(two))).toEqual(two);
+    for (const stored of [null, "", "undefined", "[1]", '"text"', "{not json"]) {
+      expect(parsePreviewLayoutSettings(stored)).toEqual({});
+    }
+    const mixed = JSON.stringify({ chrome: { a: 1 }, bad: [1], empty: {}, none: null });
+    expect(parsePreviewLayoutSettings(mixed)).toEqual({ chrome: { a: 1 } });
+  });
+
+  it("reach the preview at once from a checkbox or a menu, after a pause from typing", () => {
+    expect(["boolean", "select", "font"].map(layoutSettingAppliesAtOnce)).toEqual([true, true, true]);
+    const typed = ["string", "text", "integer", "float", "color", "json", undefined];
+    expect(typed.map(layoutSettingAppliesAtOnce)).toEqual(typed.map(() => false));
   });
 });

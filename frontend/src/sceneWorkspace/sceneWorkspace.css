@@ -1213,6 +1213,22 @@ canvas.lightbox__image {
   font-size: 13px;
 }
 
+/* The preview's Layout settings dialog (SceneLivePreview): the layout's
+   fields in the rows of the preview's own form. */
+.layout-settings-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.layout-settings-dialog__intro {
+  font-size: 13px;
+}
+
+.layout-settings-dialog__actions {
+  justify-content: flex-end;
+}
+
 /* The browser asset folder dialog (PreviewAssetsDialog). */
 .assets-dialog {
   display: flex;
