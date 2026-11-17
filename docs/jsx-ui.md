@@ -536,11 +536,12 @@ export const get = () => (
   refresh, so e-paper draws no `hover:` or `active:` at all (a press asked
   for a refresh of its own, and the tap's render waited behind it:
   `ui/events.nim`). Every handler is a render, so an app
-  that follows a finger checks `app.frame.paper` (2026.11.5+) and takes the
-  whole drag as one `onSwipe` there, as the Map scene does, and two fingers
-  as one `onPinch` (2026.11.10+): a frame rendered on its plane hears a
-  gesture only when the fingers are off the glass, so there it is the one
-  way to zoom.
+  that follows a finger checks `app.frame.fast` (2026.11.10+, the same in a
+  handler, `onEvent` and `get()`; before it, `!app.frame.paper`, where an
+  ESP32 said paper on an LCD outside a render) and takes the whole drag as
+  one `onSwipe` where it is false, as the Map scene does, and two fingers as one `onPinch`
+  (2026.11.10+): a frame rendered on its plane hears a gesture only when the
+  fingers are off the glass, so there it is the one way to zoom.
 - **Where the events come from**: the dispatcher's pointer events and
   gestures (`docs/events.md` "Input"), on every host: a Pi's touch screen or
   mouse, the touch glass of an ESP32 LCD board (the SenseCAP Indicator, the

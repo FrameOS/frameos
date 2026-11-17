@@ -93,6 +93,10 @@ var
   # 7.3 MB: an out-of-memory the frame never has.
   deviceCanvas: Image
   deviceCanvasBitsPerPixel = 32
+  # The board's panel as `frameos_wasm_set_frame` named it (`pixelFormat`), 0
+  # when it did not: panel_shape.boardPanelFormat is this, or what the
+  # canvas of the board the preview runs as says (syncBoardPanel).
+  namedPanelFormat = 0
   # A 565 or luma canvas expanded to RGBA for the page (frameos_wasm_buffer).
   # It stands in for the panel buffer, which the device's heap leaves out, so
   # it comes from plain malloc, outside the simulated ceiling.
@@ -175,6 +179,19 @@ proc previewCanvas(): Image =
     of pfRgbx: "rgbx"
   log(&"canvas: {width}x{height} {described}")
   deviceCanvas
+
+proc syncBoardPanel() =
+  ## The board's panel for `app.frame.paper` and `color` and the built-in
+  ## scenes' look (panel_shape.boardPanelFormat): the one set_frame named,
+  ## else, running as an ESP32, a grey panel where its canvas is 4 or 8 bits
+  ## (frameos_display.c `fos_render_canvas_bits_per_pixel`). A 16 or 32 bit
+  ## canvas could be an LCD's or a color e-paper's: the device "wasm" answers.
+  boardPanelFormat =
+    if namedPanelFormat > 0: namedPanelFormat
+    elif not runsAsEmbedded(): 0
+    elif deviceCanvasBitsPerPixel == 4: 8 # FOS_PIXEL_4BPP_GRAY
+    elif deviceCanvasBitsPerPixel == 8: 4 # FOS_PIXEL_2BPP_GRAY, a grey like any
+    else: 0
 
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
@@ -307,6 +324,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     lastImage = nil
     dropDeviceCanvas()
     deviceCanvasBitsPerPixel = 32
+    namedPanelFormat = 0
     boardPanelFormat = 0
     boardRotate = 0
     pendingSceneStates = initTable[string, JsonNode]()
@@ -492,6 +510,7 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
   ## a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
   host.keepJsRuntimes = enabled
+  syncBoardPanel()
 
 # ------------------------------------------------------------- frame page
 # The frame's own page in the scene settings (docs/scene-settings.md "The frame
@@ -598,7 +617,9 @@ proc frameos_wasm_set_canvas_bits_per_pixel(bitsPerPixel: cint) {.exportc, cdecl
   ## The canvas the device keeps, while running as an ESP32 (eight times
   ## devices.ts `canvasBytesPerPixel`): 16 RGB565, 8 luma, 4 sixteen greys, 32
   ## RGBX, the default every frameos_wasm_init restores. Anything else is RGBX.
+  ## A 4 or 8 bit one is a grey panel's, which scenes hear (syncBoardPanel).
   deviceCanvasBitsPerPixel = if bitsPerPixel in [4.cint, 8.cint, 16.cint]: bitsPerPixel.int else: 32
+  syncBoardPanel()
 
 proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
   ## The frame's render scale (frame.json renderScale, render_scale.nim): what
@@ -697,7 +718,8 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
     if not format.isNil and format.kind == JInt:
       # What the board's own runtime says of its panel: `app.frame.color` and
       # `paper`, the switcher's and the settings' look (panel_shape.nim).
-      boardPanelFormat = max(format.getInt(), 0)
+      namedPanelFormat = max(format.getInt(), 0)
+      syncBoardPanel()
       let stock = panelTable(format.getInt())
       setAssetColorsPanelPalette(if stock.len == 0: stock
         else: fitPaletteOverride(frameConfig.palette.colors, stock))

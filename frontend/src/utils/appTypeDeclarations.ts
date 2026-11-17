@@ -287,12 +287,20 @@ interface FrameOSApp {
     /** The render scale that applies to the scene. A .tsx or .jsx app's sizes are the panel's
      * divided by it, and its JSX is drawn that many times larger (FrameOS 2026.10.22+; undefined before). */
     scale?: number;
-    /** A panel that shows a change only in a refresh, as e-paper and a monochrome OLED do. An app that follows
-     * a finger waits for it to lift there (FrameOS 2026.11.5+; undefined before). */
+    /** Whether a change shows as soon as it is drawn (an LCD, an HDMI screen). False where each change costs a
+     * refresh, as on e-paper today. Follow a finger, animate and show presses only where it is true, and wait
+     * for a finger to lift where it is false (FrameOS 2026.11.10+; undefined before, where paper is its
+     * opposite, so read app.frame.fast ?? !app.frame.paper). The same in get(), init(), onEvent, a handler
+     * and after an await. */
+    fast?: boolean;
+    /** Whether the panel draws in inks, as e-paper (and a monochrome OLED) does, with few colors, greys
+     * dithered and nothing faint, so draw solid colors there. It says how the panel looks. Whether a change
+     * costs a refresh is fast, which a fast e-paper would say true with paper true (FrameOS 2026.11.5+;
+     * undefined before; until 2026.11.10 it stood for both, and an ESP32 said true on an LCD outside get()). */
     paper?: boolean;
     /** Whether the panel shows colors (an LCD, an HDMI screen, a four-, six- or seven-ink e-paper). False on
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
-     * undefined before, so treat undefined as color). */
+     * undefined before, so treat undefined as color). The same in every phase, as fast. */
     color?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */

@@ -18,6 +18,7 @@ import embedded_scene
 import embedded_runtime
 import frameos/scene_rhythm
 from frameos/apps import applyServiceSettings
+from frameos/panel_shape import boardPanelFormat
 import frameos/utils/asset_colors
 import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
@@ -577,6 +578,9 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 # once a second, with no line saying why). Seen on the E1004 when a split's
 # panel was not resident: interpreter.init raised a root `Exception`, which
 # `except CatchableError` lets through. So these handlers catch `Exception`.
+proc displayPresent(): bool {.importc: "fos_display_present", cdecl.}
+proc displayFormat(): cint {.importc: "fos_display_format", cdecl.}
+
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
     rotate: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
@@ -585,6 +589,10 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   if frameRotate notin [0, 90, 180, 270]:
     frameRotate = 0
   frameName = $name
+  # The panel, for `app.frame.paper` and `color` and the built-in scenes'
+  # look (panel_shape.nim): the canvas cannot say, an event has none and a
+  # 13.3" color e-paper on 8 MB draws in RGB565 like an LCD.
+  boardPanelFormat = if displayPresent(): displayFormat().int else: 0
   try:
     when defined(memProbe): memProbe("INIT start")
     armEmergencyReserve()

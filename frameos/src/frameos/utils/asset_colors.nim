@@ -391,20 +391,17 @@ proc panelPaletteForDevice*(device: string, custom: seq[(int, int, int)] = @[]):
     return saturated4ColorPalette
   @[]
 
-proc panelShowsColor*(device: string, canvasFormat: PixelFormat): bool =
+proc panelShowsColor*(device: string, canvasFormat = pfRgbx): bool =
   ## Whether the panel shows colors (an LCD, a four-, six- or seven-ink
   ## e-paper), as a scene asks through `app.frame.color`: false on a
   ## black-and-white or grey panel, where the real-time scenes' "auto" draws
-  ## in high contrast. An ESP32 (and the preview running as one) says by its
-  ## canvas: an LCD's RGB565 and a color e-paper's RGBX, where every grey
-  ## and black-and-white panel draws in pixie's grey surfaces. A Pi says by
-  ## its device: anything that is not e-paper, or e-paper with a palette. A
-  ## control plane drawing for a board says what the board's runtime would
-  ## (panel_shape.boardPanelFormat): no color on a grey or black-and-white
-  ## panel.
-  when defined(frameosWasm):
-    if boardPanelFormat > 0:
-      return boardPanelFormat notin PanelFormatsGrey
+  ## in high contrast. A board says by its panel (panel_shape.boardPanelFormat:
+  ## an ESP32's own, the one a control plane draws for). A Pi says by its
+  ## device: anything that is not e-paper, or e-paper with a palette. Without
+  ## either, the canvas: an LCD's RGB565 and a color e-paper's RGBX, where
+  ## every grey and black-and-white panel draws in pixie's grey surfaces.
+  if boardPanelFormat > 0:
+    return boardPanelFormat notin PanelFormatsGrey
   if canvasFormat == pfRgb565:
     return true
   # A grey canvas shows no color anywhere: the preview running as a grey
