@@ -10,6 +10,7 @@ import frameos/types
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/line_reader
+import frameos/utils/zip_entry
 import frameos/spool
 import lib/tz
 from chrono import findTimeZone, findDstChanges, valid
@@ -603,6 +604,26 @@ proc utf8Boundary(s: string, index: int): int =
   while result > 0 and result < s.len and (s[result].uint8 and 0xC0) == 0x80:
     dec result
 
+proc utf8Whole*(s: string, cutStart: bool): string =
+  ## A slice of text without the halves of characters at its ends: a
+  ## `readAsset(..., {text: true})` slice read at an offset may start inside
+  ## one (cutStart), and any slice may end inside another.
+  var first = 0
+  if cutStart:
+    while first < s.len and first < 3 and (s[first].uint8 and 0xC0) == 0x80:
+      inc first
+  var last = s.len
+  # The lead byte of the last character, and whether its sequence fits.
+  var i = s.len - 1
+  while i > first and s.len - i < 4 and (s[i].uint8 and 0xC0) == 0x80:
+    dec i
+  if i >= first and s.len > first:
+    let lead = s[i].uint8
+    let need = if lead >= 0xF0: 4 elif lead >= 0xE0: 3 elif lead >= 0xC0: 2 else: 1
+    if s.len - i < need:
+      last = i
+  if first == 0 and last == s.len: s else: s[first ..< last]
+
 proc findSnippets*(body, needle: string, length, limit: int): JsonNode =
   ## The text at each occurrence of `needle` (needle included), `length`
   ## bytes at most, for `httpRequest`'s `find`. Lets a JS app scrape a page
@@ -1108,8 +1129,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
   ## Asset management scoped to the frame's assets folder. Ops:
   ## list (dir, options JSON {shallow} -> JSON array of relative paths: every
   ## file below, or with shallow the folder's own entries, a folder's with a
-  ## trailing "/"), exists, size, read (options JSON {offset, length} ->
-  ## base64), write/append (path, base64), delete, image (options JSON {keep,
+  ## trailing "/"), exists, size, read (options JSON {offset, length, text,
+  ## entry} -> base64, or a string with text; entry reads that member of a
+  ## ZIP file, utils/zip_entry.nim), write/append (path, base64), delete, image (options JSON {keep,
   ## width, height, fit} -> imageRef decoded within display bounds, or at that
   ## size, as fetchImage's are).
   let e = env(ctx)
@@ -1159,9 +1181,35 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       if full.len == 0 or not fileExists(full):
         return jsNull(ctx)
       let options = optionsArg(ctx, data)
-      let fileSize = getFileSize(full)
       let offset = max(0, options{"offset"}.getInt(0))
       let readMax = jsAssetReadMaxBytes(e)
+      # text: the bytes as a string (UTF-8, without the halves of characters
+      # a slice cuts at its ends) instead of base64.
+      let asText = options{"text"}.getBool(false)
+      if options{"entry"}.getStr().len > 0:
+        # One member of a ZIP (an EPUB's chapter), inflated a window at a
+        # time: only the slice asked for is ever held.
+        let entry = options{"entry"}.getStr()
+        try:
+          var length = options{"length"}.getInt(-1)
+          if length < 0:
+            length = int(zipEntrySize(full, entry)) - offset
+          if length <= 0:
+            return nimStringToJS(ctx, "")
+          if length > readMax:
+            frameos_apps.logError(e.owner,
+              "JS app readAsset: " & pathStr & " entry " & entry & " slice is " & $length &
+              " bytes, over the " & $readMax & " byte limit; read it in chunks" &
+              " with {offset, length}")
+            return jsNull(ctx)
+          let contents = readZipEntry(full, entry, offset, length)
+          return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
+        except ZipEntryError:
+          # Not a ZIP, no such member, a damaged one: null, as for a file
+          # that is not there. What the file is is the app's to say (a
+          # library shows "not an EPUB" on the book), not the frame's log.
+          return jsNull(ctx)
+      let fileSize = getFileSize(full)
       var length = options{"length"}.getInt(int(fileSize) - offset)
       length = min(length, int(fileSize) - offset)
       if length <= 0:
@@ -1180,7 +1228,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       var contents = newString(length)
       let bytesRead = file.readBuffer(addr contents[0], length)
       contents.setLen(bytesRead)
-      return nimStringToJS(ctx, encode(contents))
+      return nimStringToJS(ctx, if asText: utf8Whole(contents, offset > 0) else: encode(contents))
     of "write", "append":
       let contents = decode(toNimString(ctx, data))
       return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))

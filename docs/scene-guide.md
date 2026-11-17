@@ -1401,7 +1401,12 @@ declare const frameos: {
   listAssets(dir?: string, options?: { shallow?: boolean }): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
-  readAsset(path: string, options?: { offset?: number; length?: number }): string | null;
+  /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its
+   * ends). entry reads that member of a ZIP file instead (an EPUB's chapter, inflated by the frame a window at a
+   * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
+   * A slice over the frame's limit (2 MB on an ESP32) is null: read it in parts with offset and length
+   * (entry and text: FrameOS 2026.11.11+). */
+  readAsset(path: string, options?: { offset?: number; length?: number; text?: boolean; entry?: string }): string | null;
   writeAsset(path: string, base64: string): boolean;
   appendAsset(path: string, base64: string): boolean;
   deleteAsset(path: string): boolean;
