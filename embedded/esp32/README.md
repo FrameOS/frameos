@@ -57,7 +57,7 @@ main/                     boot orchestration + platform modules
   fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename)
   fos_assets_path.c       the assets-path rule behind every asset verb (host-tested)
   fos_assets_sd.c         SD card mount/probe/format for the assets root
-  fos_assets_flash.c      assets on the state partition for a board with no SD card the S3 reaches
+  fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
@@ -473,6 +473,21 @@ for the two Spectra boards most of the bench work runs on:
   partition, names of 28 bytes at most (`photos/kitchen.jpg` fits; longer is
   refused, never truncated), and every write leaves 128 KB free for the
   scenes. `status` prints `assets_flash:` with what is left.
+
+  **The internal storage beside a card** (PR #863): those same files are
+  mounted at `/srv/internal` (`FOS_ASSETS_INTERNAL_PATH`) on every board with
+  the state partition, card or none; `status` prints `internal:`. Where the
+  card slot is off they are the assets folder as well. JS apps see the places
+  as `app.frame.storages` ("TF card", "Internal storage"; the internal storage
+  alone where it is the assets folder too) and reach one with the asset
+  calls' `storage` option: Books and Files list both. The control planes
+  browse both too: every device asset route takes a `storage` query
+  parameter (`assets` by default, `internal`), every cloud asset command a
+  `storage` field, echoed in its replies, and listings report `storages` and
+  `storage`. A request or a cloud job runs in its storage through a per-task
+  scope (`fos_assets_use_storage`; `fos_http.c`'s `IN_ASSET_STORAGE`,
+  `fos_cloud.c`'s `ws_handle_asset_verb`), so the rest of `fos_assets.c` is
+  unchanged; a storage the frame lacks is `storage_unavailable`.
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not
