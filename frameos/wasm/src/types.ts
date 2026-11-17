@@ -116,6 +116,9 @@ export interface PreviewRuntimeInfo {
   /** Whether the bundle can take a new size without starting over
    * (`FrameOSPreview.resize`). */
   resize: boolean
+  /** Whether the bundle says what the mouse cursor looks like over the
+   * picture (`FrameOSPreview.cursorShape`, the `drawnCursor` option). */
+  cursor: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */

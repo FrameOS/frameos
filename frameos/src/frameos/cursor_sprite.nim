@@ -185,6 +185,13 @@ proc sprite(shape: CursorShape): CursorSprite =
   of csNeswResize: NeswSprite
   of csNone: NoSprite
 
+proc cursorPicture*(shape: CursorShape): tuple[width, height, hotX, hotY: int, pixels: string] =
+  ## The shape's picture at 1x, for a host that draws it itself (the browser
+  ## preview, wasm_main `frameos_wasm_cursor_sprite`): `pixels` a row after
+  ## the other, '.' clear, 'X' black, 'o' white. Empty for `csNone`.
+  let s = sprite(shape)
+  (int(s.width), int(s.height), int(s.hotX), int(s.hotY), s.pixels)
+
 when defined(testing):
   proc spriteRows*(shape: CursorShape): seq[string] =
     ## The tests' look at a shape.

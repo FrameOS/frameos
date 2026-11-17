@@ -86,6 +86,18 @@ Nothing is forwarded to a runtime bundle from before pointer input
 and render on every move. `mountFrameOSManager` attaches this for you, and scene event buttons
 skip the three pointer events.
 
+### The mouse cursor
+
+The runtime says what the mouse cursor looks like where the pointer is over the picture: what
+the scene's UI asks for with its `cursor-*` classes, a desktop window's edges their resize arrows
+(`preview.cursorShape`, a CSS name; `onCursor`). On the canvas the preview paints, it shows one of
+two ways: the browser's cursor in that shape (the default), or, with `drawnCursor: true` /
+`preview.setDrawnCursor(true)`, the frame's own cursor drawn into the picture the way a frame with a
+mouse draws it, with the browser's hidden over the canvas (`cursor: none`). Exactly one shows; a
+touch shows neither, and the frame's hides 5 s after the mouse last moved, as on a frame. The
+frame's cursor is put away before every frame is painted, so it is never in a frame the page keeps.
+A bundle from before (`runtimeInfo.cursor === false`) says nothing and the browser's arrow shows.
+
 ### A frame of its own
 
 ```ts

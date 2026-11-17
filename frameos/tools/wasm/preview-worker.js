@@ -35,6 +35,7 @@
 //        the scene raw 0..32767 coordinates and render on every move, so a page must not forward pointers to it.
 //        gpioEvents: true when a held button is sent as its `gpio` edges, `down` and `up`. A bundle without it
 //        gets one `button` for the whole press.
+//        cursor: true when this bundle says what the mouse cursor looks like (the `cursor` messages below).
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
 //   {type: 'sceneInfo', sceneInfo}           the runtime changed scenes by itself (a scene's setCurrentScene, the
@@ -44,6 +45,10 @@
 //   {type: 'error', message}
 //   {type: 'fastRenderRequest', intervalMs}   the scene wants to render faster than the throttle allows
 //   {type: 'assetsChanged'}                   files under /srv/assets changed (a scene wrote, or an op ran)
+//   {type: 'cursor', shape, sprite}           the mouse cursor over the picture changed: `shape` as CSS names it
+//                                            (what the UI under the pointer asks for, docs/jsx-ui.md "The mouse
+//                                            cursor"), `sprite` the frame's picture of it at this size ({width, height,
+//                                            hotX, hotY, pixels, scale, hideMs}; null for "none")
 //   {type: 'assetsResult', requestId, ok, ...} reply to an 'assets' request
 //
 // Browser asset folder: the runtime's /srv/assets (the same path a real frame
@@ -132,6 +137,30 @@ function postSceneInfo() {
     }
     lastSceneInfoKey = key
     post({ type: 'sceneInfo', sceneInfo: info })
+  } catch (e) {
+    // informational, like the state
+  }
+}
+
+// The mouse cursor's shape under the page's pointer, posted when it changes
+// (a move onto a window's edge, a render that put a button under a still
+// mouse), with the frame's picture of it at the frame's size for a page that
+// draws the frame's cursor (frameos_wasm_cursor, frameos_wasm_cursor_sprite).
+let lastCursorKey = null
+let frameSize = ''
+function postCursor() {
+  if (!Module || typeof Module._frameos_wasm_cursor !== 'function') {
+    return
+  }
+  try {
+    const shape = call('frameos_wasm_cursor', 'string', [], [])
+    const key = shape + '@' + frameSize
+    if (key === lastCursorKey) {
+      return
+    }
+    lastCursorKey = key
+    const text = call('frameos_wasm_cursor_sprite', 'string', ['string'], [shape])
+    post({ type: 'cursor', shape, sprite: text ? JSON.parse(text) : null })
   } catch (e) {
     // informational, like the state
   }
@@ -711,8 +740,10 @@ function renderNow() {
     // Copy out of the wasm heap; the buffer is transferred to the page.
     const buffer = Module.HEAPU8.buffer.slice(ptr, ptr + len)
     post({ type: 'frame', width, height, buffer, renderMs: Date.now() - started }, [buffer])
+    frameSize = width + 'x' + height
     postSceneInfo()
     postState()
+    postCursor()
     postMemory(0)
   } catch (e) {
     post({ type: 'error', message: 'render crashed: ' + e })
@@ -884,6 +915,7 @@ async function init(msg) {
       call('frameos_wasm_select_scene', 'boolean', ['string'], [msg.sceneId])
     }
     lastPostedState = null
+    lastCursorKey = null
     const sceneInfo = JSON.parse(call('frameos_wasm_scene_info', 'string', [], []))
     lastSceneInfoKey = sceneInfoKey(sceneInfo)
     // Values the page keeps across a reboot (a Resize, an edit, Restart):
@@ -919,6 +951,7 @@ async function init(msg) {
       // a `button` press, doublePress or longPress, each key by its pin and label.
       gpioEvents: true,
       resize: typeof Module._frameos_wasm_resize === 'function',
+      cursor: typeof Module._frameos_wasm_cursor === 'function',
     })
     renderNow()
   } catch (e) {
@@ -955,10 +988,14 @@ function flushPendingMoves() {
     clearTimeout(pendingMoveTimer)
     pendingMoveTimer = null
   }
+  const moved = pendingMoves.size > 0
   for (const [name, payload] of pendingMoves.values()) {
     dispatchEvent(name, payload)
   }
   pendingMoves.clear()
+  if (moved) {
+    postCursor()
+  }
 }
 
 // While a pointer or a GPIO button is held, or a button press waits out its
@@ -997,6 +1034,10 @@ function handleEvent(name, payload) {
   }
   flushPendingMoves()
   dispatchEvent(name, payload)
+  if (name === 'pointerDown' || name === 'pointerUp' || name === 'pointerCancel') {
+    // A press held keeps its element's cursor; its release gives it back.
+    postCursor()
+  }
   if ((name === 'pointerDown' || name === 'mouseDown' || name === 'button') && tickTimer === null && Module &&
       typeof Module._frameos_wasm_tick === 'function') {
     tickTimer = setInterval(tickWhileHeld, 50)

@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FrameOSPreview, POINTER_AXIS_MAX, pointerAxis, pointerButton, pointerPictureRect } from "frameos-wasm";
+import {
+  FrameOSPreview,
+  POINTER_AXIS_MAX,
+  composeCursor,
+  cssCursor,
+  cursorRect,
+  pointerAxis,
+  pointerButton,
+  pointerPictureRect,
+  type CursorSprite,
+} from "frameos-wasm";
 
 // The frameos-wasm package's typed wrapper around the preview worker: the
 // init message it sends, the fast-mode switch, and the request/reply
@@ -122,6 +132,7 @@ describe("FrameOSPreview init", () => {
     // bundle is a release asset and the preview shows "runtime <version>");
     // a worker that names none reports null rather than an absent field.
     expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets, {
+      cursor: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -132,6 +143,7 @@ describe("FrameOSPreview init", () => {
     expect(preview.assetsInfo).toEqual(browserAssets);
     expect(preview.currentSceneId).toBe("scene-1");
     expect(preview.runtimeInfo).toEqual({
+      cursor: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -146,6 +158,7 @@ describe("FrameOSPreview init", () => {
     const { preview, worker } = makePreview({ onReady });
     worker.reply({ runtimeVersion: "2026.9.2", type: "ready" });
     expect(onReady).toHaveBeenLastCalledWith(undefined, null, {
+      cursor: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -154,6 +167,7 @@ describe("FrameOSPreview init", () => {
       version: "2026.9.2",
     });
     expect(preview.runtimeInfo).toEqual({
+      cursor: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -420,5 +434,82 @@ describe("FrameOSPreview browser assets", () => {
     preview.destroy();
     await expect(pending).rejects.toThrow("preview destroyed");
     await expect(preview.listAssets()).rejects.toThrow("preview is not running");
+  });
+});
+
+// The mouse cursor over the picture (frameos/wasm/src/cursor.ts): the runtime
+// says its shape, and the page shows it as its own cursor, or hides its own
+// and draws the frame's. Exactly one shows.
+describe("FrameOSPreview mouse cursor", () => {
+  const arrow: CursorSprite = { height: 3, hideMs: 5000, hotX: 0, hotY: 0, pixels: "X..XoXXXX", scale: 2, width: 3 };
+
+  class CursorCanvas extends EventTarget {
+    width = 800;
+    height = 480;
+    style: { cursor: string } = { cursor: "" };
+    setPointerCapture = vi.fn();
+    getContext() {
+      return null;
+    }
+    getBoundingClientRect() {
+      return { height: 480, left: 0, top: 0, width: 800 };
+    }
+  }
+
+  it("names a CSS cursor, and the arrow for a name it does not know", () => {
+    expect(cssCursor("nwse-resize")).toBe("nwse-resize");
+    expect(cssCursor("pointer")).toBe("pointer");
+    expect(cssCursor("none")).toBe("none");
+    expect(cssCursor("url(evil)")).toBe("default");
+    expect(cssCursor(undefined)).toBe("default");
+  });
+
+  it("places the frame's picture by its hot spot and scale, clipped to the canvas", () => {
+    expect(cursorRect(arrow, 10, 20, 800, 480)).toEqual({ h: 6, w: 6, x: 10, y: 20 });
+    expect(cursorRect(arrow, 797, 478, 800, 480)).toEqual({ h: 2, w: 3, x: 797, y: 478 });
+    expect(cursorRect(arrow, 900, 900, 800, 480)).toBeNull();
+    // Black and white where it draws, the picture elsewhere, at 2x.
+    const rect = cursorRect(arrow, 0, 0, 800, 480)!;
+    const under = new Uint8ClampedArray(rect.w * rect.h * 4).fill(100);
+    const out = composeCursor(under, rect, arrow, 0, 0);
+    const at = (x: number, y: number) => Array.from(out.slice((y * rect.w + x) * 4, (y * rect.w + x) * 4 + 4));
+    expect(at(0, 0)).toEqual([0, 0, 0, 255]); // 'X'
+    expect(at(1, 1)).toEqual([0, 0, 0, 255]); // the same sprite pixel, doubled
+    expect(at(2, 0)).toEqual([100, 100, 100, 100]); // '.'
+    expect(at(2, 2)).toEqual([255, 255, 255, 255]); // 'o'
+    expect(Array.from(under.slice(0, 4))).toEqual([100, 100, 100, 100]); // the picture kept as it was
+  });
+
+  it("shows the page's cursor in the shape the scene asks for, by default", () => {
+    const canvas = new CursorCanvas();
+    const onCursor = vi.fn();
+    const { preview, worker } = makePreview({ canvas: canvas as unknown as HTMLCanvasElement, onCursor });
+    worker.reply({ cursor: true, type: "ready" });
+    expect(preview.runtimeInfo.cursor).toBe(true);
+    expect(canvas.style.cursor).toBe("default");
+    worker.reply({ shape: "ew-resize", sprite: arrow, type: "cursor" });
+    expect(canvas.style.cursor).toBe("ew-resize");
+    expect(preview.cursorShape).toBe("ew-resize");
+    expect(onCursor).toHaveBeenLastCalledWith("ew-resize");
+    preview.destroy();
+    expect(canvas.style.cursor).toBe("");
+  });
+
+  it("hides the page's cursor while the frame's is drawn, and shows it again when switched off", () => {
+    const canvas = new CursorCanvas();
+    const { preview, worker } = makePreview({ canvas: canvas as unknown as HTMLCanvasElement, drawnCursor: true });
+    // An older runtime says nothing: no picture to draw, so the page's shows.
+    expect(canvas.style.cursor).toBe("default");
+    worker.reply({ shape: "pointer", sprite: arrow, type: "cursor" });
+    expect(canvas.style.cursor).toBe("none");
+    preview.setDrawnCursor(false);
+    expect(canvas.style.cursor).toBe("pointer");
+    preview.setDrawnCursor(true);
+    expect(canvas.style.cursor).toBe("none");
+    // A scene asking for no cursor gets none either way.
+    worker.reply({ shape: "none", sprite: null, type: "cursor" });
+    expect(canvas.style.cursor).toBe("none");
+    preview.setDrawnCursor(false);
+    expect(canvas.style.cursor).toBe("none");
   });
 });
