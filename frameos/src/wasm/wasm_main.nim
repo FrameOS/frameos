@@ -141,6 +141,15 @@ proc dropDeviceCanvas() =
   deviceCanvas = nil
   fosWasmMemorySetHeld(0)
 
+# What the panel takes of the simulated ceiling before any scene runs, for
+# the window limit (memory.sceneMemoryBytes): the RGBX canvas the ceiling
+# was worked out for (devices.ts esp32PreviewMemoryBytes: the device's heap
+# plus what its canvas costs extra here), so the preview leaves its scenes
+# what the device does (embedded_runtime.nim sets the device's).
+panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    if frameConfig.isNil: 0 else: max(0, frameConfig.width) * max(0, frameConfig.height) * 4
+
 proc previewCanvas(): Image =
   ## The canvas the next render draws into, or nil for a fresh RGBX one per
   ## render, which is what a Pi's runner does. Made on first use, reused

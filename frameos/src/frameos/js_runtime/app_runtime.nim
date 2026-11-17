@@ -1604,17 +1604,21 @@ var
 proc windowLimit*(): int =
   ## How many of the frame's scenes may run as windows at once, the one in
   ## front included (`app.frame.windows`, docs/scene-layouts.md "Windows"): 0
-  ## where there is no limit (a Pi, the browser preview), 2 on an ESP32 with 8
-  ## MB of PSRAM (the preview simulating one included), 4 with more, 1 with
-  ## less. Each one is a scene running: its program, its JS apps'
-  ## interpreters and its UI, beside the panel's buffers, the layout and what
-  ## the scene in front draws.
-  let memory = deviceMemoryBytes()
+  ## where there is no limit (a Pi, the browser preview), else by the memory
+  ## the device leaves its scenes once the panel has its canvas and buffers
+  ## (memory.sceneMemoryBytes; the preview simulating one counts the same):
+  ## 4 from 9 MB, 2 from 4 MB (an 8 MB board with a panel up to 10.3"), 1
+  ## below (the 13.3" colour E1004 on 8 MB, whose 3.84 MB canvas leaves about
+  ## 2.5 MB: a second scene beside the one in front ran it out of memory,
+  ## the hardware bench, 2026-11-17). Each one is a scene running: its
+  ## program, its JS apps' interpreters and its UI, beside the layout and
+  ## what the scene in front draws.
+  let memory = sceneMemoryBytes()
   when not defined(frameosEmbedded):
     if memory <= 0:
       return 0
-  if memory > 8 * 1024 * 1024: 4
-  elif memory >= 6 * 1024 * 1024: 2
+  if memory >= 9 * 1024 * 1024: 4
+  elif memory >= 4 * 1024 * 1024: 2
   else: 1
 
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =

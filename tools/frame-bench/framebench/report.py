@@ -38,8 +38,16 @@ def scene_table(frame_res):
     return '\n'.join(out)
 
 
-def best_warm(scene: dict):
+def ran_apps(scene: dict) -> bool:
+    return any('app' in (w.get('probe') or {}) for w in scene.get('warm') or [])
+
+
+def best_warm(scene: dict, drew_only: bool = False):
     warm = scene.get('warm') or []
+    if drew_only:
+        # Only the renders whose probe ran the scene's apps: one that held its
+        # result from the pass before draws nothing. See compare().
+        warm = [w for w in warm if 'app' in (w.get('probe') or {})]
     times = [w.get('render_ms') for w in warm if w.get('render_ms') is not None]
     if not times:
         times = [w.get('done_ms') for w in warm if w.get('done_ms') is not None]
@@ -64,7 +72,13 @@ def compare(current: dict, baseline: dict) -> list[dict]:
             # one (an e-paper `done` adds a partial or a full panel refresh, which
             # alternate), the fastest of the warm renders (the first after a
             # switch can rebuild an interpreter the switch let go).
-            cm, om = best_warm(r), best_warm(o)
+            # Where both runs have renders that ran the scene's apps, only
+            # those: one 112 ms render that held its result made a scene that
+            # draws in 330 ms every time read as a 3x regression (the
+            # SenseCAP's "Slideshow with motion", 2026-11-17). A scene that
+            # holds its result on most passes (Steps) compares like with like.
+            drew_only = ran_apps(r) and ran_apps(o)
+            cm, om = best_warm(r, drew_only), best_warm(o, drew_only)
             if cm and om and cm > om * REGRESS_RATIO and cm - om >= REGRESS_MIN_MS:
                 issues.append({'severity': 'slow', 'kind': 'regression', 'where': f"{f['name']}: scene {name}",
                                'detail': f'fastest warm render {om} ms -> {cm} ms'})
