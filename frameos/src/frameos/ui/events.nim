@@ -475,7 +475,7 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32, extend = false) 
     i.accents = 0
     i.sel = 0
     i.secret = true # until a layout says what it is: nothing copied before
-  elif extend:
+  elif not defined(frameosEmbedded) and extend: # shift: no keyboard on an ESP32
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
   else:
@@ -777,7 +777,7 @@ proc moveCaret(target: UiTarget, key: string, extend = false) =
   ## it putting the caret at that end, as on a desktop.
   template i: untyped = target.input
   let (a, z) = i.selected
-  if extend:
+  if not defined(frameosEmbedded) and extend: # shift: no keyboard on an ESP32
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
   elif i.sel > 0:
@@ -1379,7 +1379,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         moved = true
       elif hit >= 0 and target.regions[hit].field > 0:
         let r = target.regions[hit]
-        target.focusField(r, lx, ly, payload{"shift"}.getBool() and target.input.focus == r.key + 1)
+        # Shift+click extends; a tap on an ESP32 has no shift to hold.
+        target.focusField(r, lx, ly, not defined(frameosEmbedded) and payload{"shift"}.getBool() and
+          target.input.focus == r.key + 1)
         moved = true
       elif target.input.focus > 0 and (hit < 0 or target.regions[hit].handlers[ueClick] <= KeyBase):
         target.blurField()
