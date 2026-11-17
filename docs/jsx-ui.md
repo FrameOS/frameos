@@ -846,7 +846,7 @@ desktop's (`frameos/ui/theme.nim`), and so does a JS app that gives its
 elements a `look` ([below](#a-js-app-in-the-desktops-look)). A layout gives its theme in its state as
 **`theme`**, an object of roles; the samples set it from their "Look of the
 settings pages" field (`Windows 98`: Windows Standard, `macOS`: Light and Dark,
-`BeOS`, `Classic Mac`: Classic, `NeXTSTEP`, `Commander`, each with High contrast
+`BeOS`, `Classic Mac`: Classic, `NeXTSTEP`, `OS/2 Warp`: Warp 4, `Commander`, each with High contrast
 and FrameOS, the built-in look; `Tiling`: FrameOS and High contrast):
 
 ```js

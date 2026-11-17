@@ -64,7 +64,7 @@ Exit code 2 means a `crash` or `fail` issue.
 | `scenes` | every scene: switch (wall vs render time), an LCD's animation for `--passive` s (fps vs the scene's period, stalls), `--warm` renders with the per-phase probe (`set debug 1` for the run), the render path (`in place` on an LCD), a tap on touch boards | local |
 | `builtin` | scene switcher and scene settings open / close | local |
 | `input` | a drag across the panel, next / previous scene | touch |
-| `desktop` | every scene dressed in each desktop layout (Windows 98, Tiling, macOS, BeOS, Classic Mac, NeXTSTEP, Commander samples), pushed through the backend, four scenes opened as windows, a tap in each, refocus; the window limit and memory; the frame's own scenes restored after | local + backend |
+| `desktop` | every scene dressed in each desktop layout (Windows 98, Tiling, macOS, BeOS, Classic Mac, NeXTSTEP, OS/2 Warp, Commander samples), pushed through the backend, four scenes opened as windows, a tap in each, refocus; the window limit and memory; the frame's own scenes restored after | local + backend |
 | `storm` | eight switches 300 ms apart: alive, showing the last | local |
 | `soak` | every scene each round (3): memory after each round; a steady fall is a leak | local |
 | `offline` | the backend hangs (a tarpit port): switches must stay prompt | local + backend |

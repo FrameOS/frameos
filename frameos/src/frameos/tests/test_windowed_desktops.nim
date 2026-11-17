@@ -26,6 +26,7 @@ const
   BeOS = "layout-beos"
   ClassicMac = "layout-classic-mac"
   NeXT = "layout-nextstep"
+  Os2 = "layout-os2-warp"
   Commander = "layout-commander"
   Teletext = "layout-teletext"
   EReader = "layout-e-reader"
@@ -100,6 +101,8 @@ let classicMac = parseFile(Samples / "Classic Mac layout" / "scenes.json")[0]
 doAssert classicMac["id"].getStr() == ClassicMac
 let nextstep = parseFile(Samples / "NeXTSTEP layout" / "scenes.json")[0]
 doAssert nextstep["id"].getStr() == NeXT
+let os2 = parseFile(Samples / "OS2 Warp layout" / "scenes.json")[0]
+doAssert os2["id"].getStr() == Os2
 let commander = parseFile(Samples / "Commander layout" / "scenes.json")[0]
 doAssert commander["id"].getStr() == Commander
 let teletext = parseFile(Samples / "Teletext layout" / "scenes.json")[0]
@@ -108,7 +111,7 @@ let eReader = parseFile(Samples / "E-reader layout" / "scenes.json")[0]
 doAssert eReader["id"].getStr() == EReader
 let terminalLayout = parseFile(Samples / "Terminal layout" / "scenes.json")[0]
 doAssert terminalLayout["id"].getStr() == TerminalLayout
-var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander, teletext, eReader, terminalLayout,
+var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, commander, teletext, eReader, terminalLayout,
   panel("tests/red", "Red", "#ff0000"), panel("tests/green", "Green", "#00ff00"),
   panel("tests/blue", "Blue", "#0000ff"),
   panel("tests/sky", "Sky", "#38bdf8", Tiling), panel("tests/grass", "Grass", "#4ade80", Tiling),
@@ -121,10 +124,14 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, commander,
   panel("tests/cm-blue", "Blue", "#0000ff", ClassicMac),
   panel("tests/next-a", "Alpha", "#ff0000", NeXT), panel("tests/next-b", "Bravo", "#00ff00", NeXT),
   panel("tests/next-c", "Charlie", "#0000ff", NeXT),
+  panel("tests/os2-red", "Red", "#ff0000", Os2), panel("tests/os2-green", "Green", "#00ff00", Os2),
+  panel("tests/os2-blue", "Blue", "#0000ff", Os2),
   # The scene store and the terminal, as each desktop finds them: by their names.
   panel("tests/store-98", "Scene store", "#3b82f6"), panel("tests/store-tiling", "Scene store", "#3b82f6", Tiling),
   panel("tests/store-mac", "Scene store", "#3b82f6", MacOS), panel("tests/store-be", "Scene store", "#3b82f6", BeOS),
   panel("tests/store-cm", "Scene store", "#3b82f6", ClassicMac), panel("tests/store-next", "Scene store", "#3b82f6", NeXT),
+  panel("tests/store-os2", "Scene store", "#3b82f6", Os2), panel("tests/term-os2", "Terminal", "#111111", Os2),
+  panel("tests/files-os2", "Files", "#a3e635", Os2),
   panel("tests/term-98", "Terminal", "#111111"), panel("tests/term-tiling", "Terminal", "#111111", Tiling),
   panel("tests/term-mac", "Terminal", "#111111", MacOS), panel("tests/term-be", "Terminal", "#111111", BeOS),
   panel("tests/term-cm", "Terminal", "#111111", ClassicMac), panel("tests/term-next", "Terminal", "#111111", NeXT),
@@ -2079,6 +2086,367 @@ suite "the NeXTSTEP desktop":
     check problems.len == 0
 
 const
+  Os2BarH = 28 ## the WarpCenter at 800 x 480, the desktop the 452 px under it
+  Os2IconX = 8 + 42 ## the middle of the column of icons down the desktop's left
+  Os2IconTop = Os2BarH + 8 ## the first icon's top, one every 70 px
+
+proc warpCenter(): seq[array[4, float32]] =
+  ## What takes a press on the WarpCenter, left to right: the Desktop menu, the
+  ## Window List, the frame's own apps in its tray, the clock.
+  byX(rectsOf(Os2).filterIt(it[3] <= Os2BarH.float32 and it[2] - it[0] < 400))
+
+proc warpRows(): seq[array[4, float32]] =
+  ## The rows of the menu open, top to bottom (rules and headings take no press).
+  byY(rectsOf(Os2).filterIt(abs(it[3] - it[1] - 22) < 0.6 and it[2] - it[0] > 150))
+
+proc warpTitle(win: JsonNode): seq[array[4, float32]] =
+  ## What takes a press on a window's title bar, left to right: the system
+  ## menu's icon, the gear (on a scene's), hide, maximize, close.
+  let maxed = win{"max"}.getBool()
+  let x = (if maxed: 0 else: win{"x"}.getInt()).float32
+  let y = (Os2BarH + (if maxed: 0 else: win{"y"}.getInt())).float32
+  let w = (if maxed: W else: win{"w"}.getInt()).float32
+  byX(rectsOf(Os2).filterIt(it[0] >= x and it[2] <= x + w and it[1] >= y and it[3] <= y + 30 and
+    it[2] - it[0] >= 18 and it[2] - it[0] <= 24 and it[3] - it[1] >= 18 and it[3] - it[1] <= 22))
+
+proc launchButtons(): seq[array[4, float32]] =
+  ## The LaunchPad's buttons, left to right: Windows, Scenes, the frame's own apps, Setup.
+  byX(rectsOf(Os2).filterIt(abs(it[2] - it[0] - 56) < 0.6 and abs(it[3] - it[1] - 50) < 0.6))
+
+proc drawerArrow(): array[4, float32] =
+  ## The arrow over the LaunchPad's Scenes button.
+  rectsOf(Os2).filterIt(abs(it[2] - it[0] - 56) < 0.6 and abs(it[3] - it[1] - 12) < 0.6)[0]
+
+proc warpBare(): (int, int) =
+  ## A point of bare desktop: no window, icon or LaunchPad over it.
+  for (x, y) in [(W - 30, H - 30), (30, H - 30), (W - 30, Os2BarH + 200), (W div 2, H - 4)]:
+    var free = x >= 100 or y > Os2BarH + 8 + 3 * 70
+    if x >= 300 and x <= 500 and y >= Os2BarH + 372: free = false
+    for w in wins():
+      if w{"min"}.getBool(): continue
+      let (wx, wy, ww, wh) = (if w{"max"}.getBool(): (0, 0, W, H - Os2BarH) else:
+        (w{"x"}.getInt(), w{"y"}.getInt(), w{"w"}.getInt(), w{"h"}.getInt()))
+      if x >= wx and x < wx + ww and y >= Os2BarH + wy and y < Os2BarH + wy + wh: free = false
+    if free: return (x, y)
+  doAssert false, "no bare desktop"
+
+suite "the OS/2 Warp desktop":
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/os2-red", "name": "Red"}, {"id": "tests/os2-green", "name": "Green"},
+        {"id": "tests/os2-blue", "name": "Blue"}]
+
+  test "the first scene fills the desktop under the WarpCenter":
+    current = hostScene("tests/os2-red")
+    let image = pass()
+    shot(image, "w1-first")
+    check problems.len == 0
+    check desk().id.string == Os2
+    check wins().len == 1
+    check winOf("tests/os2-red"){"max"}.getBool()
+    check isHole(current)
+    check image.color(W div 2, H div 2) == colored("#ff0000")
+    check image.color(W div 2, 14) == colored("#cccccc") # the WarpCenter
+    check image.color(W div 2, Os2BarH - 1) == colored("#404040") # and its line
+    check image.color(W div 2 + 150, Os2BarH + 14) == colored("#20406f") # the title bar of the window in front
+    check warpCenter().len == 3 # the Desktop menu, the Window List, the clock
+    check launchButtons().len == 3 # Windows, Scenes, Setup: under the window
+
+  test "the Desktop menu opens a scene in a window of its own":
+    discard clickRect(warpCenter()[0])
+    check desk().state{"menu"}.getStr() == "scenes"
+    shot(pass(), "w2-desktop-menu")
+    let rows = warpRows()
+    check rows.len == 6 # Red, Green, Blue, Scenes - Icon View, Full screen, System Setup
+    check acted(clickRect(rows[1])) == @["setCurrentScene"]
+    check current.id.string == "tests/os2-green"
+    check desk().state{"menu"}.kind == JNull
+    let image = pass()
+    check problems.len == 0
+    check wins().len == 2
+    check isHole(current)
+    let g = winOf("tests/os2-green")
+    check not g{"max"}.getBool()
+    let (gx, gy, gw, gh) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt())
+    check image.color(gx + gw div 2, Os2BarH + gy + gh div 2) == colored("#00ff00")
+
+  test "a window dragged by its title bar follows the pointer":
+    let g = winOf("tests/os2-green")
+    let (x0, y0, w) = (g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt())
+    let (grabX, grabY) = (x0 + w div 2, Os2BarH + y0 + 16)
+    discard send("pointerDown", at(grabX, grabY))
+    discard send("pointerMove", at(grabX + 20, grabY + 10))
+    discard send("pointerMove", at(grabX + 40, grabY + 30))
+    discard send("pointerUp", at(grabX + 40, grabY + 30, %*{"buttons": 0}))
+    check winOf("tests/os2-green"){"x"}.getInt() == x0 + 40
+    check winOf("tests/os2-green"){"y"}.getInt() == y0 + 30
+    check pass().color(x0 + 40 + 30, Os2BarH + y0 + 30 + 80) == colored("#00ff00")
+
+  test "a press on a window behind brings it forward, and a tap reaches no scene":
+    let x = (if winOf("tests/os2-green"){"x"}.getInt() > 30: 15 else: W - 15)
+    check "setCurrentScene" in click(x, 300)
+    check current.id.string == "tests/os2-red"
+    check pass().color(x, 300) == colored("#ff0000")
+
+  test "the system menu hides a window, and the Window List shows it grey and brings it back":
+    let parts = warpTitle(winOf("tests/os2-red"))
+    check parts.len == 5 # the system menu's icon, the gear, hide, maximize, close
+    discard clickRect(parts[0])
+    check desk().state{"menu"}.getStr() == "sys"
+    check desk().state{"sysOf"}.getStr() == "tests/os2-red"
+    shot(pass(), "w3-system-menu")
+    var rows = warpRows()
+    check rows.len == 6 # Restore, Hide, Maximize, Settings, Window list, Close
+    check acted(clickRect(rows[1])) == @["setCurrentScene"] # Hide
+    check winOf("tests/os2-red"){"min"}.getBool()
+    check current.id.string == "tests/os2-green"
+    let (bx, by) = warpBare()
+    check pass().color(bx, by) == colored("#3b7090") # the desktop where red was
+    discard clickRect(warpCenter()[1])
+    check desk().state{"menu"}.getStr() == "windows"
+    shot(pass(), "w4-window-list")
+    rows = warpRows()
+    check rows.len == 5 # Red (hidden), Green, Tile, Cascade, Show all
+    check acted(clickRect(rows[0])) == @["setCurrentScene"]
+    check current.id.string == "tests/os2-red"
+    check not winOf("tests/os2-red"){"min"}.getBool()
+    check desk().state{"menu"}.kind == JNull
+    discard pass()
+    check problems.len == 0
+
+  test "the gear on a scene's title bar opens its settings":
+    let parts = warpTitle(winOf("tests/os2-red"))
+    settingsFrom = ""
+    check acted(clickRect(parts[1])) == @["sceneSettings"]
+    check settingsFrom == "tests/os2-red"
+    check desk().state{"asked"}.getStr() == "system/sceneSettings#tests/os2-red"
+    discard pass()
+
+  test "the maximize button and a double click on the title bar size a window back and fill the desktop again":
+    discard clickRect(warpTitle(winOf("tests/os2-red"))[3])
+    check not winOf("tests/os2-red"){"max"}.getBool()
+    discard pass()
+    let r = winOf("tests/os2-red")
+    discard send("doubleTap", at(r{"x"}.getInt() + 60, Os2BarH + r{"y"}.getInt() + 16))
+    check winOf("tests/os2-red"){"max"}.getBool()
+    discard pass()
+    discard send("doubleTap", at(60, Os2BarH + 16))
+    check not winOf("tests/os2-red"){"max"}.getBool()
+    discard pass()
+    check problems.len == 0
+
+  test "a right click or a long press on bare desktop opens its pop-up menu":
+    let (bx, by) = warpBare()
+    discard send("pointerDown", at(bx, by, %*{"button": 1, "buttons": 2}))
+    discard send("pointerUp", at(bx, by, %*{"button": 1, "buttons": 0}))
+    check desk().state{"menu"}.getStr() == "popup"
+    shot(pass(), "w5-popup")
+    let rows = warpRows()
+    check rows.len == 6 # Scenes - Icon View, Window list, Tile, Cascade, Show all, System Setup
+    check acted(clickRect(rows[5])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check desk().state{"menu"}.kind == JNull
+    discard pass()
+    discard send("longPress", at(bx, by))
+    check desk().state{"menu"}.getStr() == "popup"
+    discard key("Escape")
+    check desk().state{"menu"}.kind == JNull
+    # A left press there opens nothing.
+    discard click(bx, by)
+    check desk().state{"menu"}.kind == JNull
+    discard pass()
+    check problems.len == 0
+
+  test "the icons down the left are the frame's own apps, and a double click opens one":
+    # The scenes' folder and System Setup (no store, no Files, no terminal here).
+    check byY(rectsOf(Os2).filterIt(it[0] == 8 and it[2] == 92)).len == 2
+    discard send("tap", at(Os2IconX, Os2IconTop + 70 + 16))
+    check desk().state{"picked"}.getStr() == "system/sceneSettings"
+    shot(pass(), "w6-icons")
+    check acted(send("doubleTap", at(Os2IconX, Os2IconTop + 70 + 16))) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    check acted(send("doubleTap", at(Os2IconX, Os2IconTop + 16))) == @["sceneSwitcher"]
+    check desk().state{"asked"}.getStr() == "system/sceneSwitcher"
+    discard pass()
+    check problems.len == 0
+
+  test "the LaunchPad opens the Window List, the scene list and System Setup, and its drawer the frame's scenes":
+    check launchButtons().len == 3
+    discard clickRect(launchButtons()[0])
+    check desk().state{"menu"}.getStr() == "windows"
+    discard key("Escape")
+    discard pass()
+    check acted(clickRect(launchButtons()[1])) == @["sceneSwitcher"]
+    discard pass()
+    check acted(clickRect(launchButtons()[2])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    discard pass()
+    discard clickRect(drawerArrow())
+    check desk().state{"menu"}.getStr() == "drawer"
+    shot(pass(), "w7-drawer")
+    let rows = warpRows()
+    check rows.len == 3 # Red, Green, Blue
+    check rows[^1][3] <= drawerArrow()[1] + 1 # over the LaunchPad
+    check acted(clickRect(rows[2])) == @["setCurrentScene"]
+    check current.id.string == "tests/os2-blue"
+    discard pass()
+    check problems.len == 0
+
+  test "the Window List tiles the windows side by side, each scene a hole, and cascades them":
+    discard clickRect(warpCenter()[1])
+    discard pass()
+    var rows = warpRows()
+    check rows.len == 6 # Red, Green, Blue, Tile, Cascade, Show all
+    discard clickRect(rows[3])
+    check desk().state{"menu"}.kind == JNull
+    let image = pass()
+    shot(image, "w8-tiled")
+    # Blue, in front, the top left quarter; the others beside it and under it.
+    let b = winOf("tests/os2-blue")
+    check (b{"x"}.getInt(), b{"y"}.getInt(), b{"w"}.getInt(), b{"h"}.getInt()) == (0, 0, 400, 226)
+    for id in ["tests/os2-red", "tests/os2-green", "tests/os2-blue"]:
+      check isHole(hosted[id])
+      let w = winOf(id)
+      check image.color(w{"x"}.getInt() + w{"w"}.getInt() div 2, Os2BarH + w{"y"}.getInt() + w{"h"}.getInt() div 2) ==
+        colored(if id == "tests/os2-red": "#ff0000" elif id == "tests/os2-green": "#00ff00" else: "#0000ff")
+    discard clickRect(warpCenter()[1])
+    discard pass()
+    rows = warpRows()
+    discard clickRect(rows[4])
+    # Down and right from the top left, blue, in front, last.
+    check (winOf("tests/os2-blue"){"x"}.getInt(), winOf("tests/os2-blue"){"y"}.getInt()) == (76, 64)
+    discard pass()
+    check problems.len == 0
+
+  test "OS/2's keys: Ctrl+Esc, Alt+F10, Alt+F5, F11 and Escape, Alt+F9 and Alt+F4":
+    discard send("keyDown", %*{"key": "Escape", "code": "Escape", "repeat": false, "shift": false, "ctrl": true,
+      "alt": false, "meta": false})
+    check desk().state{"menu"}.getStr() == "windows"
+    discard key("Escape")
+    check desk().state{"menu"}.kind == JNull
+    discard key("F10", alt = true)
+    check winOf("tests/os2-blue"){"max"}.getBool()
+    discard key("F5", alt = true)
+    check not winOf("tests/os2-blue"){"max"}.getBool()
+    discard key("F11")
+    check desk().state{"full"}.getBool()
+    let full = pass()
+    shot(full, "w9-full")
+    check full.color(W div 2, 4) == colored("#0000ff")
+    check full.color(W div 2, H - 4) == colored("#0000ff")
+    discard key("Escape")
+    check not desk().state{"full"}.getBool()
+    discard pass()
+    discard key("F9", alt = true)
+    check winOf("tests/os2-blue"){"min"}.getBool()
+    check current.id.string != "tests/os2-blue"
+    discard pass()
+    let next = current.id.string
+    discard key("F4", alt = true)
+    check winOf(next).isNil
+    check current.id.string != next
+    check wins().len == 2
+    discard pass()
+    check problems.len == 0
+
+  test "a window opens at its scene's own size where that fits, and where it was when it opens again":
+    windowSceneListing = withOwnSize("400x240", "tests/os2-blue")
+    desk().state["wins"] = %*[]
+    desk().state["boxes"] = %*{}
+    discard focusOn("tests/os2-red")
+    discard pass()
+    discard focusOn("tests/os2-blue")
+    discard pass()
+    let o = winOf("tests/os2-blue")
+    check not o{"max"}.getBool()
+    check o{"w"}.getInt() == 400 + 8
+    check o{"h"}.getInt() == 240 + 34
+    check sceneSize("tests/os2-blue") == (400, 240)
+    let (x, y) = (o{"x"}.getInt(), o{"y"}.getInt())
+    dragBy(x + 150, Os2BarH + y + 16, 30, 20)
+    discard key("F4", alt = true)
+    check winOf("tests/os2-blue").isNil
+    discard pass()
+    discard focusOn("tests/os2-blue")
+    discard pass()
+    check winOf("tests/os2-blue"){"x"}.getInt() == x + 30
+    check winOf("tests/os2-blue"){"y"}.getInt() == y + 20
+    check problems.len == 0
+
+  test "the scene store, Files and the terminal are in the Desktop menu, the WarpCenter's tray, the icons and the LaunchPad":
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/os2-red", "name": "Red"}, {"id": "tests/os2-green", "name": "Green"},
+        {"id": "tests/os2-blue", "name": "Blue"}, {"id": "tests/store-os2", "name": "Scene store"},
+        {"id": "tests/files-os2", "name": "Files"}, {"id": "tests/term-os2", "name": "Terminal"}]
+    # Windows of 400 x 240, which leave the icons and the LaunchPad clear.
+    windowSceneListing = withOwnSize("400x240")
+    desk().state["wins"] = %*[]
+    desk().state["boxes"] = %*{}
+    discard pass()
+    check warpCenter().len == 6 # the Desktop menu, the Window List, the store, Files, the terminal, the clock
+    check launchButtons().len == 6 # Windows, Scenes, the store, Files, the terminal, Setup
+    discard clickRect(warpCenter()[0])
+    shot(pass(), "w10-apps-menu")
+    check warpRows().len == 3 + 3 + 3 # the three apps, the three scenes, the folder, Full screen, System Setup
+    discard key("Escape")
+    discard pass()
+    check acted(clickRect(warpCenter()[2])) == @["setCurrentScene"]
+    check current.id.string == "tests/store-os2"
+    discard pass()
+    check acted(clickRect(launchButtons()[4])) == @["setCurrentScene"]
+    check current.id.string == "tests/term-os2"
+    discard pass()
+    # The icons: the scenes' folder, the store, Files, the terminal, System Setup.
+    check byY(rectsOf(Os2).filterIt(it[0] == 8 and it[2] == 92)).len == 5
+    check acted(send("doubleTap", at(Os2IconX, Os2IconTop + 2 * 70 + 16))) == @["setCurrentScene"]
+    check current.id.string == "tests/files-os2"
+    shot(pass(), "w11-files")
+    check problems.len == 0
+
+  test "two windows let go at the two sides take a half each, and both scenes are drawn as holes":
+    windowSceneListing = withOwnSize("400x240")
+    desk().state["wins"] = %*[]
+    desk().state["boxes"] = %*{}
+    discard focusOn("tests/os2-red")
+    discard pass()
+    discard focusOn("tests/os2-green")
+    discard pass()
+    check wins().len == 2
+    # Green, in front, to the right; then red, whose title bar it leaves free, to the left.
+    let g = winOf("tests/os2-green")
+    dragBy(g{"x"}.getInt() + 60, Os2BarH + g{"y"}.getInt() + 16, W - 1 - (g{"x"}.getInt() + 60), 0)
+    check winOf("tests/os2-green"){"snap"}.getStr() == "r"
+    discard pass()
+    let r = winOf("tests/os2-red")
+    dragBy(r{"x"}.getInt() + 60, Os2BarH + r{"y"}.getInt() + 16, -(r{"x"}.getInt() + 60), 0)
+    check winOf("tests/os2-red"){"snap"}.getStr() == "l"
+    let image = pass()
+    shot(image, "w12-halves")
+    check current.id.string == "tests/os2-red"
+    check isHole(current)
+    check isHole(hosted["tests/os2-green"])
+    check image.color(W div 4, H div 2) == colored("#ff0000")
+    check image.color(3 * W div 4, H div 2) == colored("#00ff00")
+    check problems.len == 0
+
+  test "with Windows off, the WarpCenter and one window around the scene, its settings from the gear":
+    desk().state["windows"] = %false
+    let image = pass()
+    shot(image, "w13-one-scene")
+    check desk().state{"openScenes"} == %*[]
+    check image.color(W div 2, H div 2 + 20) == colored("#ff0000")
+    check image.color(W div 2 + 150, Os2BarH + 14) == colored("#20406f") # its title bar
+    let center = warpCenter()
+    check center.len == 4 # the scene list, the scene's button, the gear, the clock
+    check acted(clickRect(center[0])) == @["sceneSwitcher"]
+    check acted(clickRect(center[2])) == @["sceneSettings"]
+    check acted(clickRect(center[3])) == @["sceneSettings"]
+    check payloads["sceneSettings"] == %*{"page": "frame"}
+    desk().state["windows"] = %true
+    discard pass()
+    check problems.len == 0
+
+const
   KeyY = H - 10 ## the Commander's function keys at 800 x 480, ten of them 80 px wide
   LeftPanel = (200, 200) ## a point inside each of its panels' scenes
   RightPanel = (600, 200)
@@ -2346,7 +2714,7 @@ suite "another layout chosen on the frame":
     check desk().state{"openScenes"} == %*["tests/red", "tests/blue", "tests/green"]
     let all = @["tests/blue", "tests/green", "tests/red"]
     for (layoutId, name) in [(MacOS, "15-to-macos"), (Tiling, "16-to-tiling"), (BeOS, "17-to-beos"),
-        (ClassicMac, "17a-to-classic-mac"), (NeXT, "17b-to-nextstep"), (Layout, "18-back")]:
+        (ClassicMac, "17a-to-classic-mac"), (NeXT, "17b-to-nextstep"), (Os2, "17c-to-os2-warp"), (Layout, "18-back")]:
       chooseLayout(layoutId)
       let image = pass()
       shot(image, name)
@@ -2407,6 +2775,11 @@ suite "another layout chosen on the frame":
     discard pass()
     g = winOf("tests/green")
     check (NextMenuW + g{"x"}.getInt(), g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
+    # OS/2 Warp, under its WarpCenter.
+    chooseLayout(Os2)
+    discard pass()
+    g = winOf("tests/green")
+    check (g{"x"}.getInt(), Os2BarH + g{"y"}.getInt(), g{"w"}.getInt(), g{"h"}.getInt()) == (200, 100, 300, 200)
     chooseLayout(Layout)
     discard pass()
     g = winOf("tests/green")
@@ -2448,7 +2821,7 @@ suite "a scene's own window size (settings.windowSize)":
         {"id": "tests/green", "name": "Green", "windowSize": "1200x1200"}, {"id": "tests/blue", "name": "Blue"}]
 
   test "opens at it on every desktop of windows, and one too big for the desktop smaller and its shape kept":
-    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT]:
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2]:
       # A desktop of its own, blue in front: nothing carried over, no window kept from before.
       discard focusOn("tests/blue")
       desk().state["openScenes"] = %*[]
@@ -2481,7 +2854,7 @@ suite "a scene's own window size (settings.windowSize)":
   test "is the same function, word for word, in every desktop of windows, and no desktop has a size of its own":
     # A scene cannot share code with another: each carries its own copy.
     var copies: seq[string]
-    for scene in [layout, macos, beos, classicMac, nextstep, tiling, commander]:
+    for scene in [layout, macos, beos, classicMac, nextstep, os2, tiling, commander]:
       for field in scene["fields"]: check field["name"].getStr() != "windowSize"
       var source = ""
       for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
@@ -2492,7 +2865,7 @@ suite "a scene's own window size (settings.windowSize)":
         continue
       check start >= 0
       copies.add source[start ..< source.find("\n}\n", start)]
-    check copies.len == 5
+    check copies.len == 6
     for text in copies: check text == copies[0]
 
 proc boxOf(win: JsonNode): (int, int, int, int) =
@@ -2523,7 +2896,8 @@ suite "where a new window opens (each desktop's freeSpot)":
       (MacOS, (0, 0, W, H - MenuH - DockH), none),
       (BeOS, (0, 0, W - BarW, H), none),
       (ClassicMac, (0, 0, W, H - CMenuH), @[(W - 4 - 84, 10, 84, 2 * 62)]),
-      (NeXT, (0, 0, NextDeskW, H), none)]
+      (NeXT, (0, 0, NextDeskW, H), none),
+      (Os2, (0, 0, W, H - Os2BarH), @[(8, 8, 84, 2 * 70), (307, 372, 186, 72)])]
     let ids = ["tests/red", "tests/green", "tests/blue", "tests/apple", "tests/lime", "tests/ocean"]
     for (layoutId, area, icons) in desks:
       # A desktop of its own: nothing carried over, no window kept from before.
@@ -2572,7 +2946,7 @@ suite "where a new window opens (each desktop's freeSpot)":
   test "is the same function, word for word, in every desktop of windows":
     # A scene cannot share code with another: each carries its own copy.
     var copies: seq[string]
-    for scene in [layout, macos, beos, classicMac, nextstep]:
+    for scene in [layout, macos, beos, classicMac, nextstep, os2]:
       var source = ""
       for _, app in scene["apps"]: source = app["sources"]["app.tsx"].getStr()
       let start = source.find("// Where a new window w by h goes")
@@ -2607,7 +2981,7 @@ proc groupedBy(scenes: string): JsonNode =
 
 suite "a long list of scenes, by category (each desktop's grouped)":
   test "is the same function, word for word, in every desktop with a list of scenes":
-    let copies = copiesOf(GroupedStart, [layout, macos, beos, classicMac, nextstep, tiling])
+    let copies = copiesOf(GroupedStart, [layout, macos, beos, classicMac, nextstep, os2, tiling])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
 
@@ -2649,6 +3023,7 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       of BeOS: discard click(W - BarW div 2, 17) # the gem
       of ClassicMac: discard clickRect(macTitles()[2]) # Scenes
       of NeXT: discard clickRect(nextMenu()[1]) # Scenes
+      of Os2: discard clickRect(warpCenter()[0]) # the Desktop menu
       else: discard clickRect(topBar()[0]) # Tiling's +
     proc rows(layoutId: string): seq[array[4, float32]] =
       case layoutId
@@ -2657,6 +3032,7 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       of BeOS: rowsIn(BeOS, float32(W - BarW - 220), float32(W - BarW - 200))
       of ClassicMac: macDrop(macTitles()[2])
       of NeXT: nextSubmenu()
+      of Os2: warpRows()
       else: byY(rectsOf(Tiling).filterIt(it[0] >= 8 and it[0] <= 12 and it[1] >= 24 and it[3] - it[1] < 60 and
         it[2] - it[0] > 40 and it[2] < 200))
     proc isOpen(layoutId: string): bool =
@@ -2664,7 +3040,7 @@ suite "a long list of scenes, by category (each desktop's grouped)":
       of Layout, BeOS: desk().state{"menu"}.getBool()
       of Tiling: desk().state{"adding"}.getBool()
       else: desk().state{"menu"}.getStr() == "scenes"
-    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Tiling]:
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Tiling]:
       # A desktop of its own, one window open.
       discard focusOn("tests/red")
       desk().state["openScenes"] = %*[]
@@ -2713,7 +3089,7 @@ suite "a scene's own icon (app.frame.scenes[i].icon)":
         {"id": "tests/blue", "name": "Blue", "icon": "M0 0H24V24H0Z"}]
 
   test "is the same function, word for word, in every desktop that draws its scenes' icons":
-    let copies = copiesOf("// A scene's own icon (`icon` on its entry", [layout, macos, beos, classicMac, nextstep, tiling])
+    let copies = copiesOf("// A scene's own icon (`icon` on its entry", [layout, macos, beos, classicMac, nextstep, os2, tiling])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
 
@@ -2802,7 +3178,7 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
   test "a third scene opened closes the one that had the focus longest ago, on every desktop":
     deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
     check windowLimit() == 2
-    for layoutId in [Layout, MacOS, BeOS, Tiling, ClassicMac, NeXT]:
+    for layoutId in [Layout, MacOS, BeOS, Tiling, ClassicMac, NeXT, Os2]:
       # A desktop of its own, nothing carried over from the one before.
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)
@@ -2893,7 +3269,7 @@ suite "a new render scale on a desktop of windows":
     result.sort(proc(a, b: (string, array[4, float32])): int = cmp(a[0], b[0]))
 
   test "keeps every window where it was on the panel, in every desktop of windows":
-    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT]:
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2]:
       checkpoint layoutId
       config.renderScale = 0.0
       chooseLayout(layoutId)
@@ -2933,6 +3309,6 @@ suite "a new render scale on a desktop of windows":
     discard pass()
 
   test "is the same function, word for word, in every desktop of windows":
-    let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep])
+    let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep, os2])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
