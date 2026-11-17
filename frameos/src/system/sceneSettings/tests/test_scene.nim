@@ -1,4 +1,4 @@
-import std/[json, options, os, sequtils]
+import std/[json, options, os, sequtils, strutils]
 import pixie
 import frameos/channels
 import frameos/types
@@ -898,11 +898,29 @@ block the_frame_page_sets_what_the_buttons_do:
   discard scene.draw()
   scene.state["frameValues"] = %*{"\3edgeSwipe\1top": "render"}
   discard scene.draw()
+  # Saved from the bottom of the list, where the rows are.
+  scene.scrollToEnd()
   scene.tap(regionWith(1))
   doAssert applied.len == 1, $applied
   doAssert scene.state{"buttonsNote"}.getStr().len > 0
+  # Nothing saved, and the edit is still there to put right.
+  doAssert scene.state["frameValues"] == %*{"\3edgeSwipe\1top": "render"}, $scene.state["frameValues"]
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-buttons-kept.png")
+  # The reason is under Save, not up with the Buttons heading out of sight:
+  # a red bar right under the header, wherever the list is scrolled.
+  block note_in_sight:
+    var red = 0
+    for x in 0 ..< 480:
+      let px = image[x, 72]
+      if px.r > 100 and px.g < 60 and px.b < 60: inc red
+    doAssert red > 400, "no note under the header: " & $red
+    let page = settings.SceneSettingsScene(scene).tree(480, 480, false, "Weather", info = frameSettingsRead())
+    doAssert page.children[1].children[0].text == scene.state["buttonsNote"].getStr()
+    scene.state["buttonsNote"] = newJString("")
+    let quiet = settings.SceneSettingsScene(scene).tree(480, 480, false, "Weather", info = frameSettingsRead())
+    doAssert "hidden" in quiet.children[1].attrs[0][1]
+    scene.state["buttonsNote"] = page.children[1].children[0].text.newJString
   # Another way back makes it fine.
   scene.state["frameValues"] = %*{"\3edgeSwipe\1top": "render", "\3edgeSwipe\1bottom": "sceneSwitcher"}
   discard scene.draw()

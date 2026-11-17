@@ -608,16 +608,18 @@ proc saveFrame(self: SceneSettingsScene, fields, info: JsonNode) =
   ## is drawn at once, a rotation restarts the frame) and takes a password
   ## alone for the saved network. The page stays up so what it did shows.
   ## The Buttons rows go as the whole event map (`eventMap`), unless they
-  ## leave no way to open the switcher or these settings that there was.
+  ## leave no way to open the switcher or these settings that there was:
+  ## then nothing is saved, the edits stay to be put right, and the bar
+  ## under the header says why.
   let changes = collect(fields, self.objectAt("frameValues"))
-  self.state.put("frameValues", newJObject())
   self.state.fields.del("buttonsNote")
   let map = buttonMap(fields, changes, info)
   if not map.isNil:
     if opensSettings(arrayOf(info{"buttons", "map"})) and not opensSettings(map):
       self.state.put("buttonsNote", newJString("Keep a button or a swipe for the scene switcher or settings"))
-    else:
-      changes.put("eventMap", map)
+      return
+    changes.put("eventMap", map)
+  self.state.put("frameValues", newJObject())
   let layout = changes{"layout"}
   if not layout.isNil:
     # The frame's own to keep: no host setting.
@@ -979,14 +981,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
     if i > 0 and name.startsWith(ButtonRow) and not fields.elems[i - 1]{"name"}.getStr().startsWith(ButtonRow):
-      # What the frame's keys and swipes do, whatever scene shows, and why
-      # the last Save kept them.
+      # What the frame's keys and swipes do, whatever scene shows.
       result.children.add el("div", "font-bold", SvgNode(text: "Buttons"))
-      let kept = self.state{"buttonsNote"}.getStr()
-      if kept.len > 0:
-        var c = look.grey
-        c.px("text", look.size * 3 div 4)
-        result.children.add el("div", move c, SvgNode(text: kept)).role("muted")
     result.children.add look.row(field, current(edits, info, name), i, typing and name == "wifiSsid")
     # A turned LCD copies every frame to its place (embedded_main.nim
     # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
@@ -1106,6 +1102,17 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
   header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
+  # Why the frame page's last Save kept the Buttons as they were, under Save
+  # where the press was, wherever the list is scrolled. Hidden, not left out:
+  # an element's key is its place in the tree, and the list keeps its scroll.
+  let kept = if frame: self.state{"buttonsNote"}.getStr() else: ""
+  c = "shrink-0"
+  c.px("px", look.pad)
+  c.px("py", look.size div 2)
+  if kept.len == 0: c.add " hidden"
+  elif paper: c.add " border-b-2 border-black font-bold"
+  else: c.add " bg-red-900"
+  result.children.add el("div", move c, SvgNode(text: kept)).role("muted")
   let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
