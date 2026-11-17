@@ -11,6 +11,17 @@ def virtual_assets_dir(tmp_path, monkeypatch):
     return root
 
 
+@pytest.fixture
+def no_wasm_bundle(monkeypatch):
+    """No wasm runtime, as on CI: with a bundle in the checkout
+    (frameos/wasm/dist/assets after an npm build) the virtual frame renders
+    for real and the state it reads back gains the implicit refreshInterval,
+    which a test of the public-field filter must not depend on."""
+    from app.utils import embedded_render
+
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: None)
+
+
 async def create_virtual_frame(async_client, db) -> Frame:
     response = await async_client.post('/api/frames/new', json={
         'name': 'Virtual Frame',
@@ -333,7 +344,7 @@ def _stateful_scene(scene_id='scene-a'):
 
 
 @pytest.mark.asyncio
-async def test_virtual_set_scene_state_roundtrip(async_client, db, redis):
+async def test_virtual_set_scene_state_roundtrip(async_client, db, redis, no_wasm_bundle):
     frame = await create_virtual_frame(async_client, db)
     frame.scenes = [_stateful_scene()]
     db.add(frame)
@@ -387,7 +398,7 @@ async def test_virtual_state_accepts_the_refresh_interval(async_client, db, redi
 
 
 @pytest.mark.asyncio
-async def test_virtual_state_merges_and_parses_json_fields(async_client, db, redis):
+async def test_virtual_state_merges_and_parses_json_fields(async_client, db, redis, no_wasm_bundle):
     frame = await create_virtual_frame(async_client, db)
     frame.scenes = [_stateful_scene()]
     db.add(frame)
@@ -407,7 +418,7 @@ async def test_virtual_state_merges_and_parses_json_fields(async_client, db, red
 
 
 @pytest.mark.asyncio
-async def test_virtual_set_current_scene_applies_state(async_client, db, redis):
+async def test_virtual_set_current_scene_applies_state(async_client, db, redis, no_wasm_bundle):
     frame = await create_virtual_frame(async_client, db)
     frame.scenes = [_stateful_scene('scene-a'), _stateful_scene('scene-b')]
     db.add(frame)

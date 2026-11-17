@@ -1,4 +1,6 @@
+import asyncio
 import ipaddress
+import socket
 
 import pytest
 import pytest_asyncio
@@ -69,6 +71,14 @@ async def test_names_are_resolved_and_every_address_must_pass(monkeypatch):
 @pytest.mark.asyncio
 async def test_unresolvable_names_are_blocked(monkeypatch):
     monkeypatch.setattr(network, "resolve_target", network.resolve_target_dns)
+
+    # The lookup itself fails here, not on the network: a resolver with search
+    # domains and a wildcard record answers even `.invalid` (one did, with
+    # 10.4.0.14, so this test passed on CI and failed on that machine).
+    async def no_such_host(*args, **kwargs):
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", no_such_host)
     with pytest.raises(TargetBlocked):
         await check_target_host("definitely-not-a-real-host.invalid")
 
