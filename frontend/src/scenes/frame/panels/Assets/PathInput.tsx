@@ -4,6 +4,7 @@ import { DocumentIcon, FolderIcon, FolderOpenIcon } from '@heroicons/react/24/ou
 import { assetsLogic, AssetNode } from './assetsLogic'
 import { frameLogic } from '../../frameLogic'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
+import { DEFAULT_ASSET_STORAGE } from '../../../../utils/frameAssetsApi'
 import { Button } from '../../../../components/Button'
 import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
@@ -94,7 +95,12 @@ function PathPickerModal({
   onSelect,
   onClose,
 }: PathPickerModalProps): JSX.Element {
-  const { assetTree, assetsLoading, storageUnmounted } = useValues(assetsLogic({ frameId }))
+  // A path field holds a path in the assets folder: while the Assets panel
+  // shows another storage, the picker lists the assets folder on its own.
+  const { storage: panelStorage } = useValues(assetsLogic({ frameId }))
+  const { assetTree, assetsLoading, storageUnmounted } = useValues(
+    assetsLogic(panelStorage === DEFAULT_ASSET_STORAGE ? { frameId } : { frameId, storage: DEFAULT_ASSET_STORAGE })
+  )
   const [currentPath, setCurrentPath] = useState(() => {
     // Start where the current value points: in that folder, or a file's parent.
     if (!initialPath.startsWith(`${root}/`)) {

@@ -1618,6 +1618,7 @@ typedef struct {
     long long offset;                   /* asset_put_chunk: where the bytes land */
     bool complete;                      /* asset_put_chunk: last chunk, commit to `path` */
     int64_t deadline_us;                /* image_get: how long to wait for a render */
+    bool internal;                      /* in the internal storage, not the assets folder */
 } asset_job_t;
 
 /* An image_get that arrives before this boot's first render has finished
@@ -1658,6 +1659,9 @@ static void asset_job_run_list(const asset_job_t *job)
     bool truncated = false;
     if (assets) fos_assets_list_json(assets, &truncated);
     if (truncated) cJSON_AddBoolToObject(msg, "truncated", true);
+    /* Which places a panel may browse, and which this listing is. */
+    fos_assets_storages_json(cJSON_AddArrayToObject(msg, "storages"));
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     ws_send_json(msg);
     cJSON_Delete(msg);
 }
@@ -1668,6 +1672,7 @@ static void asset_chunk_send_error(const char *id, const char *error)
     if (!msg) return;
     if (id[0]) cJSON_AddStringToObject(msg, "id", id);
     cJSON_AddStringToObject(msg, "type", "asset_chunk");
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     cJSON_AddStringToObject(msg, "error", error);
     cJSON_AddBoolToObject(msg, "done", true);
     ws_send_json(msg);
@@ -1887,6 +1892,7 @@ static void asset_job_ack(const char *id, bool ok, const char *error)
     if (id[0]) cJSON_AddStringToObject(msg, "id", id);
     cJSON_AddStringToObject(msg, "type", "ack");
     cJSON_AddBoolToObject(msg, "ok", ok);
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     if (!ok && error) cJSON_AddStringToObject(msg, "error", error);
     ws_send_json(msg);
     cJSON_Delete(msg);
@@ -1905,6 +1911,7 @@ static void asset_job_run_put(const asset_job_t *job)
     if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
     cJSON_AddStringToObject(msg, "type", "ack");
     cJSON_AddBoolToObject(msg, "ok", true);
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
     if (asset) {
         cJSON_AddStringToObject(asset, "path", job->path);
@@ -1947,6 +1954,7 @@ static void asset_job_run_put_chunk(const asset_job_t *job)
     if (job->id[0]) cJSON_AddStringToObject(msg, "id", job->id);
     cJSON_AddStringToObject(msg, "type", "ack");
     cJSON_AddBoolToObject(msg, "ok", true);
+    cJSON_AddStringToObject(msg, "storage", fos_assets_storage());
     if (job->complete) {
         struct stat st;
         cJSON *asset = cJSON_AddObjectToObject(msg, "asset");
@@ -1976,6 +1984,8 @@ static bool ws_process_asset_jobs(void)
            xQueueReceive(s_asset_jobs, &job, 0) == pdTRUE) {
         const char *err = NULL;
         s_asset_job_running = true;
+        /* The job's storage for its run (the handler checked it exists). */
+        fos_assets_use_storage(job.internal ? "internal" : NULL);
         switch (job.kind) {
             case ASSET_JOB_LIST: asset_job_run_list(&job); break;
             case ASSET_JOB_IMAGE:
@@ -2009,6 +2019,7 @@ static bool ws_process_asset_jobs(void)
                 break;
             default: break;
         }
+        fos_assets_use_storage(NULL);
         free(job.data);
         job.data = NULL;
         s_asset_job_running = false;
@@ -2040,11 +2051,13 @@ static void ws_flush_asset_jobs(void)
  * provider's queue redelivers or the browser retries. Write verbs skip the
  * handler ack entirely: their ack carries the result, so it is sent from the
  * job once the SPI write finished. */
-static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
+static void ws_handle_asset_verb_in(asset_job_kind_t kind, const cJSON *root, const cJSON *id,
+                                    bool internal)
 {
     asset_job_t job = { .kind = (uint8_t)kind, .id = "", .path = "", .dst = "",
                         .data = NULL, .data_len = 0, .offset = 0, .complete = false,
-                        .deadline_us = esp_timer_get_time() + FOS_CLOUD_IMAGE_WAIT_MAX_US };
+                        .deadline_us = esp_timer_get_time() + FOS_CLOUD_IMAGE_WAIT_MAX_US,
+                        .internal = internal };
     bool ack_now = true; /* read verbs: bare ack, then reply frames */
     if (cJSON_IsString(id) && id->valuestring &&
         strlen(id->valuestring) < sizeof(job.id)) {
@@ -2177,6 +2190,23 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
         return;
     }
     if (ack_now) ws_ack(id, true, NULL);
+}
+
+/* An asset command in the storage its `storage` names (the assets folder
+ * without one): checked and validated in it here, run in it by the cloud
+ * task (ws_process_asset_jobs). A storage this frame lacks is refused. */
+static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const cJSON *id)
+{
+    const cJSON *storage = cJSON_GetObjectItem(root, "storage");
+    const char *name = cJSON_IsString(storage) ? storage->valuestring : NULL;
+    if (kind == ASSET_JOB_IMAGE) name = NULL; /* image_get: the panel's picture */
+    if (!fos_assets_use_storage(name)) {
+        fos_assets_use_storage(NULL);
+        ws_ack(id, false, "storage_unavailable");
+        return;
+    }
+    ws_handle_asset_verb_in(kind, root, id, strcmp(fos_assets_storage(), "internal") == 0);
+    fos_assets_use_storage(NULL);
 }
 
 /* set_scenes: same storage the USB `usb_api upload-scenes` command uses —

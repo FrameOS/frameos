@@ -1205,10 +1205,10 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
         arr.add(%*file)
       return jsonToJS(ctx, arr)
     of "exists":
-      let full = resolveAssetPath(e, pathStr)
+      let full = resolveAssetPath(e, pathStr, storage = optionsArg(ctx, data){"storage"}.getStr())
       return nimBoolToJS(ctx, full.len > 0 and fileExists(full))
     of "size":
-      let full = resolveAssetPath(e, pathStr)
+      let full = resolveAssetPath(e, pathStr, storage = optionsArg(ctx, data){"storage"}.getStr())
       if full.len == 0 or not fileExists(full):
         return nimIntToJS(ctx, -1)
       return nimFloatToJS(ctx, getFileSize(full).float)
@@ -1264,7 +1264,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let contents = decode(toNimString(ctx, data))
       return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
     of "delete":
-      let full = resolveAssetPath(e, pathStr, write = true)
+      let full = resolveAssetPath(e, pathStr, write = true, storage = optionsArg(ctx, data){"storage"}.getStr())
       if full.len == 0 or not fileExists(full):
         return nimBoolToJS(ctx, false)
       removeFile(full)
@@ -1274,7 +1274,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       # above its assets mount fails, so there is no `-p`. A name the listing
       # would hide (".cache", "@eaDir") is refused, as the device's own write
       # paths refuse dot names. False when it was there already.
-      let full = resolveAssetPath(e, pathStr, write = true)
+      let full = resolveAssetPath(e, pathStr, write = true, storage = optionsArg(ctx, data){"storage"}.getStr())
       if full.len == 0 or not assetFolderPathOk(pathStr):
         frameos_apps.logError(e.owner, "JS app makeAssetFolder" & AssetPathRefused & pathStr)
         return nimBoolToJS(ctx, false)
@@ -2803,13 +2803,14 @@ const appJsPrelude* = compactJs("""
       convolve: (dst, src, width, kernel, shift) => jsTypedOps(4, dst, src, width, kernel, shift ?? 0) === true,
     },
     listAssets: (dir, options) => __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || [],
-    assetExists: (path) => __frameosAsset("exists", path) === true,
-    assetSize: (path) => __frameosAsset("size", path) ?? -1,
+    assetExists: (path, options) => __frameosAsset("exists", path, options ? JSON.stringify(options) : "") === true,
+    assetSize: (path, options) => __frameosAsset("size", path, options ? JSON.stringify(options) : "") ?? -1,
     readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,
     writeAsset: (path, base64) => __frameosAsset("write", path, String(base64 || "")) === true,
     appendAsset: (path, base64) => __frameosAsset("append", path, String(base64 || "")) === true,
-    deleteAsset: (path) => __frameosAsset("delete", path) === true,
-    makeAssetFolder: (path) => __frameosAsset("mkdir", String(path || "")) === true,
+    deleteAsset: (path, options) => __frameosAsset("delete", path, options ? JSON.stringify(options) : "") === true,
+    makeAssetFolder: (path, options) =>
+      __frameosAsset("mkdir", String(path || ""), options ? JSON.stringify(options) : "") === true,
     loadAssetImage: (path, options) => __frameosAsset("image", path, options ? JSON.stringify(options) : "") ?? null,
     openAssetStream: (path, mode) => __frameosStream("openAsset", { path: String(path || ""), mode: String(mode || "r") }) ?? null,
     createStream: (base64) => __frameosStream("create", { base64: String(base64 || "") }) ?? null,

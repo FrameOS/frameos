@@ -1241,22 +1241,37 @@ export const frameCommands = pgTable(
 );
 
 // Cached per-frame asset listing (the `assets` reply to an `assets_list`
-// verb, docs/cloud-frames.md). One row per frame — latest listing only; the
-// hub rejects oversized listings instead of storing truncated ones.
-export const frameAssets = pgTable("frame_assets", {
-  frameId: uuid("frame_id")
-    .primaryKey()
-    .references(() => frames.id, { onDelete: "cascade" }),
-  // [{path, size, mtime, is_dir}…] with device-relative paths.
-  payload: jsonb("payload").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  // The device bounded the listing (its cap, not ours): the UI may say
-  // "showing the first N files" but must never present it as complete.
-  truncated: boolean("truncated").default(false).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+// verb, docs/cloud-frames.md). One row per frame and storage (migration
+// 0083: `assets`, the assets folder, and `internal`, an ESP32's flash
+// storage) — latest listing only; the hub rejects oversized listings instead
+// of storing truncated ones.
+export const frameAssets = pgTable(
+  "frame_assets",
+  {
+    frameId: uuid("frame_id")
+      .notNull()
+      .references(() => frames.id, { onDelete: "cascade" }),
+    // Which of the device's storages this listing is of (the asked one).
+    storage: text("storage").default("assets").notNull(),
+    // [{path, size, mtime, is_dir}…] with paths relative to that storage.
+    payload: jsonb("payload").notNull(),
+    // The storages the device said it has, [{id, name}…], as sent with this
+    // listing; null when it said nothing (older firmware, Linux frames: the
+    // assets folder alone). The newest row of a frame is what the cloud
+    // believes, and the only thing that lets it send `storage: "internal"`.
+    storages: jsonb("storages"),
+    sizeBytes: integer("size_bytes").notNull(),
+    // The device bounded the listing (its cap, not ours): the UI may say
+    // "showing the first N files" but must never present it as complete.
+    truncated: boolean("truncated").default(false).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ name: "frame_assets_pkey", columns: [table.frameId, table.storage] }),
+  }),
+);
 
 // Cached asset bytes (reassembled `asset_chunk` streams). A small per-frame
 // LRU so thumbnails and repeat downloads stop round-tripping to the device;
@@ -1270,7 +1285,11 @@ export const frameAssetFiles = pgTable(
     frameId: uuid("frame_id")
       .notNull()
       .references(() => frames.id, { onDelete: "cascade" }),
-    // Device-relative path, exactly as sent in the asset_get payload.
+    // The device storage the file is on (migration 0083); `assets` for
+    // everything the cloud fetched before there was more than one, and for
+    // the reserved dot-paths (the current image, scene snapshots).
+    storage: text("storage").default("assets").notNull(),
+    // Storage-relative path, exactly as sent in the asset_get payload.
     path: text("path").notNull(),
     thumb: boolean("thumb").default(false).notNull(),
     contentType: text("content_type").notNull(),
@@ -1282,8 +1301,9 @@ export const frameAssetFiles = pgTable(
       .notNull(),
   },
   (table) => ({
-    frameAssetIdx: uniqueIndex("frame_asset_files_frame_path_thumb_idx").on(
+    frameAssetIdx: uniqueIndex("frame_asset_files_frame_storage_path_thumb_idx").on(
       table.frameId,
+      table.storage,
       table.path,
       table.thumb,
     ),

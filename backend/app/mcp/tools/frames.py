@@ -24,6 +24,14 @@ from ..registry import Tool, confirmed
 from ..result import McpInputError, failure, image, run, text
 
 FRAME_ID = {"type": "integer", "description": "Frame id from frames_list."}
+ASSET_STORAGE = {
+    "type": "string",
+    "enum": ["assets", "internal"],
+    "description": (
+        "Which storage: \"assets\" (the default: the assets folder, an ESP32's TF card when one is in) "
+        "or \"internal\" (an ESP32's own flash, where frame_assets_list's `storages` lists it)."
+    ),
+}
 SCENE_ID = {"type": "string", "description": "Scene id from frame_scenes_list."}
 DEPLOY = {
     "type": "string",
@@ -1026,26 +1034,33 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
 
     # -- assets -------------------------------------------------------------
 
-    async def frame_assets_list(frame_id: int, folder: str | None = None, refresh: bool = False, project_id: int | None = None):
+    async def frame_assets_list(
+        frame_id: int,
+        folder: str | None = None,
+        refresh: bool = False,
+        storage: str | None = None,
+        project_id: int | None = None,
+    ):
         return await run(lambda: _json(
             api, "GET", f"/api/frames/{frame_id}/assets", project_id,
-            params={"folder": folder, "refresh": "1" if refresh else None},
+            params={"folder": folder, "refresh": "1" if refresh else None, "storage": storage},
         ))
 
     server.tool(Tool(
         name="frame_assets_list",
-        description="Files under the frame's assets folder (/srv/assets on Linux, the SD card on an ESP32): path, size, mtime, is_dir. `folder` lists one folder; refresh=true asks the device instead of the cache.",
-        properties={"frame_id": FRAME_ID, "folder": {"type": "string"}, "refresh": {"type": "boolean"}},
+        description="Files under the frame's assets folder (/srv/assets on Linux, the SD card on an ESP32): path, size, mtime, is_dir. `folder` lists one folder; refresh=true asks the device instead of the cache. The answer's `storages` lists where the frame keeps files (an ESP32 may also have \"internal\" flash storage; pass `storage` to list it).",
+        properties={"frame_id": FRAME_ID, "folder": {"type": "string"}, "refresh": {"type": "boolean"}, "storage": ASSET_STORAGE},
         required=["frame_id"],
         annotations={"readOnlyHint": True},
         handler=frame_assets_list,
     ))
 
-    async def frame_asset_get(frame_id: int, path: str, project_id: int | None = None):
+    async def frame_asset_get(frame_id: int, path: str, storage: str | None = None, project_id: int | None = None):
         async def go():
             pid = await api.project_id(project_id)
             body, content_type = await api.bytes(
-                "GET", f"/api/projects/{pid}/frames/{frame_id}/asset", scoped=False, params={"path": path}
+                "GET", f"/api/projects/{pid}/frames/{frame_id}/asset", scoped=False,
+                params={"path": path, "storage": storage},
             )
             mime = content_type.split(";")[0].strip() or "application/octet-stream"
             if mime.startswith("image/"):
@@ -1064,7 +1079,11 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
     server.tool(Tool(
         name="frame_asset_get",
         description="Read one asset file from the frame: images come back as an image, text as text, other small files base64-encoded.",
-        properties={"frame_id": FRAME_ID, "path": {"type": "string", "description": "Path relative to the assets folder."}},
+        properties={
+            "frame_id": FRAME_ID,
+            "path": {"type": "string", "description": "Path relative to the assets folder."},
+            "storage": ASSET_STORAGE,
+        },
         required=["frame_id", "path"],
         annotations={"readOnlyHint": True},
         handler=frame_asset_get,
@@ -1077,6 +1096,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         content_base64: str | None = None,
         text_content: str | None = None,
         folder: str = "",
+        storage: str | None = None,
         project_id: int | None = None,
     ):
         async def go():
@@ -1091,7 +1111,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 data = (text_content or "").encode("utf-8")
             payload = await api.json(
                 "POST", f"/api/frames/{frame_id}/assets/upload", project_id=project_id,
-                data={"path": folder}, files={"file": (filename, data)},
+                data={"path": folder}, files={"file": (filename, data)}, params={"storage": storage},
             )
             return text(payload)
 
@@ -1107,36 +1127,62 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "content_base64": {"type": "string"},
             "text_content": {"type": "string"},
             "folder": {"type": "string", "description": "Folder relative to the assets root; empty for the root."},
+            "storage": ASSET_STORAGE,
         },
         required=["confirm", "frame_id", "filename"],
         handler=frame_asset_upload,
     ))
 
-    async def frame_asset_delete(confirm: bool, frame_id: int, path: str, project_id: int | None = None):
-        return await run(lambda: _json(api, "POST", f"/api/frames/{frame_id}/assets/delete", project_id, data={"path": path}))
+    async def frame_asset_delete(
+        confirm: bool, frame_id: int, path: str, storage: str | None = None, project_id: int | None = None
+    ):
+        return await run(lambda: _json(
+            api, "POST", f"/api/frames/{frame_id}/assets/delete", project_id,
+            data={"path": path}, params={"storage": storage},
+        ))
 
     server.tool(Tool(
         name="frame_asset_delete",
         description="Delete a file or folder from the frame's assets. Requires confirm=true.",
-        properties={"confirm": confirmed(), "frame_id": FRAME_ID, "path": {"type": "string", "minLength": 1}},
+        properties={
+            "confirm": confirmed(),
+            "frame_id": FRAME_ID,
+            "path": {"type": "string", "minLength": 1},
+            "storage": ASSET_STORAGE,
+        },
         required=["confirm", "frame_id", "path"],
         annotations={"destructiveHint": True},
         handler=frame_asset_delete,
     ))
 
-    async def frame_asset_mkdir(confirm: bool, frame_id: int, path: str, project_id: int | None = None):
-        return await run(lambda: _json(api, "POST", f"/api/frames/{frame_id}/assets/mkdir", project_id, data={"path": path}))
+    async def frame_asset_mkdir(
+        confirm: bool, frame_id: int, path: str, storage: str | None = None, project_id: int | None = None
+    ):
+        return await run(lambda: _json(
+            api, "POST", f"/api/frames/{frame_id}/assets/mkdir", project_id,
+            data={"path": path}, params={"storage": storage},
+        ))
 
     server.tool(Tool(
         name="frame_asset_mkdir",
         description="Create a folder under the frame's assets. Requires confirm=true.",
-        properties={"confirm": confirmed("changes what a physical frame stores"), "frame_id": FRAME_ID, "path": {"type": "string", "minLength": 1}},
+        properties={
+            "confirm": confirmed("changes what a physical frame stores"),
+            "frame_id": FRAME_ID,
+            "path": {"type": "string", "minLength": 1},
+            "storage": ASSET_STORAGE,
+        },
         required=["confirm", "frame_id", "path"],
         handler=frame_asset_mkdir,
     ))
 
-    async def frame_asset_rename(confirm: bool, frame_id: int, src: str, dst: str, project_id: int | None = None):
-        return await run(lambda: _json(api, "POST", f"/api/frames/{frame_id}/assets/rename", project_id, data={"src": src, "dst": dst}))
+    async def frame_asset_rename(
+        confirm: bool, frame_id: int, src: str, dst: str, storage: str | None = None, project_id: int | None = None
+    ):
+        return await run(lambda: _json(
+            api, "POST", f"/api/frames/{frame_id}/assets/rename", project_id,
+            data={"src": src, "dst": dst}, params={"storage": storage},
+        ))
 
     server.tool(Tool(
         name="frame_asset_rename",
@@ -1146,6 +1192,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "frame_id": FRAME_ID,
             "src": {"type": "string", "minLength": 1},
             "dst": {"type": "string", "minLength": 1},
+            "storage": ASSET_STORAGE,
         },
         required=["confirm", "frame_id", "src", "dst"],
         handler=frame_asset_rename,

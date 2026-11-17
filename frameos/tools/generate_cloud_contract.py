@@ -67,7 +67,40 @@ def load():
         if not isinstance(profiles, list) or not profiles or any(p not in doc["profiles"] for p in profiles):
             raise SystemExit(f"verb {name!r}: `profiles` must name the device planes that implement it ({doc['profiles']})")
         validate_parity(doc, f"verbs.{name}", verb)
+    validate_asset_storages(doc, seen)
     return doc
+
+
+def validate_asset_storages(doc, verbs):
+    """The optional `storage` the asset verbs carry (2026-11-17): which ids a
+    plane may name, which device planes have each, and the listing a device
+    that reports nothing stands for."""
+    spec = doc.get("assetStorages")
+    if not isinstance(spec, dict):
+        raise SystemExit("assetStorages: missing")
+    if not isinstance(spec.get("field"), str) or not re.fullmatch(r"[a-z][a-z0-9_]*", spec["field"]):
+        raise SystemExit("assetStorages.field: a snake_case wire key")
+    for verb in spec.get("verbs", []):
+        if verb not in verbs:
+            raise SystemExit(f"assetStorages.verbs: {verb!r} is not a contract verb")
+    ids = spec.get("ids")
+    if not isinstance(ids, dict) or not ids:
+        raise SystemExit("assetStorages.ids: name at least the default storage")
+    for name, entry in ids.items():
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", name):
+            raise SystemExit(f"assetStorages.ids.{name}: ids are snake_case, at most 32 characters")
+        profiles = entry.get("profiles")
+        if not isinstance(profiles, list) or not profiles or any(p not in doc["profiles"] for p in profiles):
+            raise SystemExit(f"assetStorages.ids.{name}: `profiles` must name the device planes that have it")
+        validate_parity(doc, f"assetStorages.ids.{name}", entry)
+    default = spec.get("default")
+    if default not in ids or set(ids[default]["profiles"]) != set(doc["profiles"]):
+        raise SystemExit("assetStorages.default: must be an id every profile has")
+    listing = spec.get("defaultListing")
+    if not isinstance(listing, list) or [item.get("id") for item in listing] != [default]:
+        raise SystemExit("assetStorages.defaultListing: the default storage alone, as [{id, name}]")
+    if "storage_unavailable" not in doc["errors"].get("asset_storage", []):
+        raise SystemExit("errors.asset_storage: must list storage_unavailable")
 
 
 def validate_parity(doc, name, spec):
@@ -379,11 +412,16 @@ def gen_ts_cloud(doc):
              for v in doc["verbs"]]
     limits = {k: v for k, v in doc["limits"].items() if not k.startswith("$")}
     errors = {k: v for k, v in doc["errors"].items() if not k.startswith("$")}
+    storages = doc["assetStorages"]
+    asset_storages = {"field": storages["field"], "default": storages["default"], "verbs": storages["verbs"],
+                      "defaultListing": storages["defaultListing"],
+                      "ids": {k: {"profiles": list(v["profiles"])} for k, v in storages["ids"].items()}}
     body = {"version": doc["version"], "profiles": doc["profiles"], "settings": settings,
-            "formats": doc["formats"], "verbs": verbs, "errors": errors, "limits": limits}
+            "formats": doc["formats"], "verbs": verbs, "errors": errors, "limits": limits,
+            "assetStorages": asset_storages}
     return (f"// {BANNER}\n"
             "// The cloud's copy of the verb contract: set_settings rules per profile,\n"
-            "// verb table, wire limits. Walked by cloud-frames-contract.ts.\n\n"
+            "// verb table, wire limits, asset storages. Walked by cloud-frames-contract.ts.\n\n"
             f"export const cloudFramesContract = {ts_json(body)} as const;\n")
 
 

@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import { frameLogic } from '../../frameLogic'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import {
+  assetFolderExpansionPath,
   assetsLogic,
   isInThumbsFolder,
   nodeHasPlayableImages,
@@ -38,7 +39,12 @@ import { DeferredImage } from '../../../../components/DeferredImage'
 import { buildLocalImageFolderScene, buildLocalImageScene } from '../Scenes/sceneShortcuts'
 import { v4 as uuidv4 } from 'uuid'
 import { isEmbeddedHardwareFrame, isVirtualFrame, workspaceMode } from '../../../workspace/workspaceSurfaces'
-import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
+import {
+  DEFAULT_ASSET_STORAGE,
+  frameAssetUrl,
+  type AssetStorage,
+  type AssetStorageId,
+} from '../../../../utils/frameAssetsApi'
 import { frameAssetFolderExpansionKey, workspaceLogic } from '../../../workspace/workspaceLogic'
 import type { FrameId } from '../../../../types'
 import { AssetColorsModal } from './AssetColorsModal'
@@ -74,11 +80,12 @@ function opensAsBrowserImage(name: string): boolean {
   return browserImagePattern.test(name)
 }
 
-function openFrameAsset(frameId: FrameId, path: string, name: string): void {
+function openFrameAsset(frameId: FrameId, storage: AssetStorageId, path: string, name: string): void {
   const openInline = opensAsBrowserImage(name)
   const url = frameAssetUrl(frameId, path, {
     filename: name,
     mode: openInline ? 'image' : 'download',
+    storage,
   })
 
   const anchor = document.createElement('a')
@@ -97,6 +104,7 @@ function openFrameAsset(frameId: FrameId, path: string, name: string): void {
 function TreeNode({
   node,
   frameId,
+  storage,
   uploadAssets,
   deleteAsset,
   renameAsset,
@@ -117,6 +125,8 @@ function TreeNode({
 }: {
   node: AssetNode
   frameId: FrameId
+  /** The storage the tree is (thumbnails, downloads, which folders are open). */
+  storage: AssetStorageId
   uploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
@@ -144,7 +154,8 @@ function TreeNode({
   // five at once makes the whole panel slower than asking for one.
   const { frame } = useValues(frameLogic)
   const thumbnailConcurrency = isEsp32Frame(frame) ? 1 : undefined
-  const expansionKey = frameAssetFolderExpansionKey(frameId, node.path)
+  const expansionPath = assetFolderExpansionPath(storage, node.path)
+  const expansionKey = frameAssetFolderExpansionKey(frameId, expansionPath)
   const expanded = frameAssetFolderExpansion[expansionKey] ?? node.path === ''
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -196,7 +207,7 @@ function TreeNode({
           <button
             type="button"
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
-            onClick={() => setFrameAssetFolderExpanded(frameId, node.path, !expanded)}
+            onClick={() => setFrameAssetFolderExpanded(frameId, expansionPath, !expanded)}
           >
             {expanded ? (
               <FolderOpenIcon className="asset-row-icon frameos-folder-icon h-5 w-5 shrink-0" />
@@ -314,6 +325,7 @@ function TreeNode({
                 key={child.path}
                 node={child}
                 frameId={frameId}
+                storage={storage}
                 uploadAssets={uploadAssets}
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
@@ -362,7 +374,7 @@ function TreeNode({
           !isInThumbsFolder(node.path) && (
             <div className="asset-file-thumb w-8 h-8">
               <DeferredImage
-                url={frameAssetUrl(frameId, node.path, true)}
+                url={frameAssetUrl(frameId, node.path, { thumb: true, storage })}
                 className="frameos-card-media w-8 h-8 object-cover border rounded"
                 spinnerClassName="w-4 h-4"
               />
@@ -373,7 +385,7 @@ function TreeNode({
           <button
             type="button"
             className="block max-w-full truncate text-left font-medium hover:underline"
-            onClick={() => openFrameAsset(frameId, node.path, node.name)}
+            onClick={() => openFrameAsset(frameId, storage, node.path, node.name)}
           >
             {node.name}
           </button>
@@ -442,7 +454,7 @@ function TreeNode({
                 {
                   label: opensInline ? 'Open image' : 'Download',
                   icon: <CloudArrowDownIcon className="w-4 h-4 inline-block" />,
-                  onClick: () => openFrameAsset(frameId, node.path, node.name),
+                  onClick: () => openFrameAsset(frameId, storage, node.path, node.name),
                 },
                 readOnly
                   ? null
@@ -662,6 +674,42 @@ function AssetsSummaryHeader({
   )
 }
 
+/** The places the frame keeps assets in ("TF card", "Internal storage"), by
+ * the frame's own names: shown only when it has more than one. */
+export function AssetStorageSwitch({
+  storages,
+  storage,
+  onSelect,
+}: {
+  storages: AssetStorage[]
+  storage: AssetStorageId
+  onSelect: (storage: AssetStorageId) => void
+}): JSX.Element {
+  return (
+    <div
+      className="asset-storage-switch frameos-inset mb-3 flex w-fit max-w-full rounded-lg border p-0.5 text-sm"
+      role="tablist"
+      aria-label="Storage"
+    >
+      {storages.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          role="tab"
+          aria-selected={storage === option.id}
+          onClick={() => onSelect(option.id)}
+          className={clsx(
+            'truncate rounded-md px-3 py-1 font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+            storage === option.id ? 'frameos-primary-action text-white' : 'frameos-muted'
+          )}
+        >
+          {option.name}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** Shown only when the frame explicitly reports an unmounted card. Without it
  * an empty listing reads as "the card is empty", which it is not — the files
  * are all still on the card the frame cannot see. */
@@ -697,6 +745,11 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     storageUnmounted,
     colorProfileKeys,
     foldersLoading,
+    storage,
+    storages,
+    showStorageSwitch,
+    storageRootPath,
+    fontSyncElsewhere,
   } = useValues(assetsLogic(assetsLogicProps))
   useMountedLogic(assetColorsLogic(assetsLogicProps))
   const { openEditor: openColorEditor } = useActions(assetColorsLogic(assetsLogicProps))
@@ -705,7 +758,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
   const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
     useActions(assetsLogic(assetsLogicProps))
-  const { toggleShowSystemFolders, toggleShowHiddenFiles } = useActions(assetsLogic(assetsLogicProps))
+  const { toggleShowSystemFolders, toggleShowHiddenFiles, setStorage } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync copies a control plane's font store onto the frame, into the
   // fonts/ directory the renderer reads (utils/font.nim: {assets}/fonts/<name>,
@@ -724,6 +777,10 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     ? 'Virtual frames render in your browser, with the fonts bundled into the renderer.'
     : workspaceMode() === 'frameAdmin'
     ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
+    : fontSyncElsewhere
+    ? `Fonts go in the assets folder, where the renderer reads them. Switch to ${
+        storages.find((option) => option.id === DEFAULT_ASSET_STORAGE)?.name ?? 'it'
+      } to sync them.`
     : isEmbeddedHardwareFrame(frame) && storageUnmounted
     ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
     : null
@@ -743,8 +800,13 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
     })
   }
 
+  // Where a scene on the frame finds the storage shown: the assets folder as
+  // the form has it, or the internal storage's mount.
+  const sceneRootPath =
+    storage === DEFAULT_ASSET_STORAGE ? frameForm.assets_path || frame.assets_path || '/srv/assets' : storageRootPath
+
   const createImageScene = async (path: string): Promise<void> => {
-    const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
+    const assetsPath = sceneRootPath
     const normalizedPath = path.replace(/^\.\//, '')
     const parts = normalizedPath.split('/').filter(Boolean)
     const filename = parts.pop() || normalizedPath
@@ -761,7 +823,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   }
 
   const createImageFolderScene = async (path: string): Promise<void> => {
-    const assetsPath = frameForm.assets_path || frame.assets_path || '/srv/assets'
+    const assetsPath = sceneRootPath
     const normalizedPath = path.replace(/^\.\//, '')
     const parts = normalizedPath.split('/').filter(Boolean)
     const folderPath = parts.join('/')
@@ -783,6 +845,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
         scrollContainer ? 'h-full overflow-y-auto pr-2' : 'overflow-visible'
       )}
     >
+      {showStorageSwitch ? <AssetStorageSwitch storages={storages} storage={storage} onSelect={setStorage} /> : null}
       {assetsLoading && (!assetTree.children || Object.keys(assetTree.children).length === 0) ? (
         <AssetsLoadingSkeleton />
       ) : (
@@ -802,6 +865,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
           <TreeNode
             node={assetTree}
             frameId={frame.id}
+            storage={storage}
             uploadAssets={uploadAssets}
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}

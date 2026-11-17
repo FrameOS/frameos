@@ -148,6 +148,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/home-page.test.ts",
       // Mounts scenesLogic (→ frameLogic, framesModel); out of the tsconfig too.
       "**/src/test/shared-spa/scene-preview-plane-first.test.ts",
+      // Mounts assetsLogic (→ frameLogic) and renders the Assets panel; out of the tsconfig too.
+      "**/src/test/shared-spa/asset-storages.test.tsx",
     ],
   },
   js.configs.recommended,

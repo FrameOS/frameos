@@ -1,5 +1,5 @@
 import { getBasePath } from './getBasePath'
-import { frameAssetsApiPath } from './frameAssetsApi'
+import { DEFAULT_ASSET_STORAGE, frameAssetsApiPath, type AssetStorageId } from './frameAssetsApi'
 import { secureToken } from './secureToken'
 import type { FrameId } from '../types'
 
@@ -16,6 +16,9 @@ interface UploadFileInChunksOptions {
    * overwrite itself on the backend/ESP32 protocol; keep 0 against the
    * on-device Nim admin API, which appends blindly. */
   retries?: number
+  /** The frame's storage to write into (the `storage` query parameter);
+   * absent means the assets folder. */
+  storage?: AssetStorageId
   onProgress?: (uploadedBytes: number) => void
 }
 
@@ -74,6 +77,7 @@ async function uploadOnce({
   filename,
   chunkSize = DEFAULT_UPLOAD_CHUNK_SIZE,
   retries = 0,
+  storage,
   onProgress,
 }: UploadFileInChunksOptions): Promise<any> {
   const uploadId = secureToken(18)
@@ -94,6 +98,9 @@ async function uploadOnce({
     })
     if (path) {
       params.set('path', path)
+    }
+    if (storage && storage !== DEFAULT_ASSET_STORAGE) {
+      params.set('storage', storage)
     }
     const url = `${frameAssetsApiPath(frameId, suffix)}?${params.toString()}`
     const body = file.slice(start, end)

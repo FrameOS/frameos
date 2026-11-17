@@ -394,6 +394,48 @@ describe("frameos-cloud MCP server", () => {
     });
   });
 
+  it("names the frame's storage on every asset tool only when asked (docs/cloud-frames.md \"Asset storages\")", async () => {
+    responders.push((call) => {
+      const url = new URL(call.url);
+      if (url.pathname.includes("/assets")) {
+        return json({ assets: [], storage: url.searchParams.get("storage") ?? "assets", storages: [] });
+      }
+      return undefined;
+    });
+    const client = await connect();
+    await client.callTool({ arguments: { frame_id: frameId }, name: "frame_assets_list" });
+    await client.callTool({ arguments: { frame_id: frameId, storage: "internal" }, name: "frame_assets_list" });
+    await client.callTool({
+      arguments: { confirm: true, filename: "a.txt", frame_id: frameId, storage: "internal", text: "hi" },
+      name: "frame_asset_upload",
+    });
+    await client.callTool({
+      arguments: { confirm: true, frame_id: frameId, path: "a.txt", storage: "internal" },
+      name: "frame_asset_delete",
+    });
+    await client.callTool({
+      arguments: { confirm: true, frame_id: frameId, path: "dir", storage: "internal" },
+      name: "frame_asset_mkdir",
+    });
+    await client.callTool({
+      arguments: { confirm: true, dst: "b.txt", frame_id: frameId, src: "a.txt", storage: "internal" },
+      name: "frame_asset_rename",
+    });
+    expect(calls.map((call) => new URL(call.url).searchParams.get("storage"))).toEqual([
+      null,
+      "internal",
+      "internal",
+      "internal",
+      "internal",
+      "internal",
+    ]);
+    const refused = await client.callTool({
+      arguments: { frame_id: frameId, storage: "sdcard" },
+      name: "frame_assets_list",
+    });
+    expect(refused.isError).toBe(true);
+  });
+
   it("returns screenshots as image content", async () => {
     const client = await connect();
     const result = await client.callTool({ arguments: { frame_id: frameId, refresh: true }, name: "frame_screenshot" });

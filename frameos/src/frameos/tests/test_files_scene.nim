@@ -7,6 +7,7 @@
 import std/[json, os, strutils, times, unittest]
 import pixie
 import ../interpreter
+import ../js_runtime/app_runtime
 import ../scene_rhythm
 import ../types
 import ../ui/theme
@@ -287,5 +288,61 @@ suite "the Files scene":
     discard draw(scene, config, "gone")
     check scene.spot{"dir"}.getStr() == ""
     check scene.spot{"page"}.getInt() == 1
+
+  test "a frame with a TF card and internal storage shows both as places, each browsed on its own":
+    problems = @[]
+    let internal = getTempDir() / "frameos-files-internal-" & $epochTime().int
+    picture(internal / "Saved" / "kept.png", "#dc2626", 600, 400)
+    storageInternalPath = internal
+    storageCardMounted = true
+    defer:
+      storageInternalPath = ""
+      storageCardMounted = false
+      removeDir(internal)
+    let config = frame(800, 480)
+    let scene = load(config)
+    discard draw(scene, config, "places")
+    check scene.spot{"storage"}.getStr() == ""
+    # Two places side by side: the TF card on the left, the internal storage on the right.
+    scene.tap(560, 240)
+    discard draw(scene, config, "internal")
+    check scene.spot{"storage"}.getStr() == "internal"
+    check scene.spot{"dir"}.getStr() == ""
+    # Its one folder, then its picture.
+    var opened = false
+    for x in countup(20, 780, 30):
+      scene.tap(x, 140)
+      if scene.spot{"dir"}.getStr() == "Saved":
+        opened = true
+        break
+    check opened
+    discard draw(scene, config, "internal-saved")
+    for i in 0 ..< 3:
+      discard draw(scene, config, "internal-thumbs")
+    var shown = false
+    for x in countup(20, 780, 30):
+      scene.tap(x, 140)
+      if scene.spot{"open"}.getStr() == "Saved/kept.png":
+        shown = true
+        break
+    check shown
+    let viewer = draw(scene, config, "internal-viewer")
+    let red = viewer[400, 240]
+    check red.r > 180 and red.g < 80
+    # Down closes it; up from the storage's top is the places again.
+    scene.swipe("down")
+    discard draw(scene, config, "internal-closed")
+    scene.tap(36, 30) # up
+    discard draw(scene, config, "internal-up")
+    check scene.spot{"dir"}.getStr() == ""
+    scene.tap(36, 30) # up
+    discard draw(scene, config, "places-again")
+    check scene.spot{"storage"}.getStr() == ""
+    # The card: the assets folder, as before.
+    scene.tap(240, 240)
+    discard draw(scene, config, "card")
+    check scene.spot{"storage"}.getStr() == "assets"
+    check problems.len == 0
+    if problems.len > 0: echo problems
 
 removeDir(assets)

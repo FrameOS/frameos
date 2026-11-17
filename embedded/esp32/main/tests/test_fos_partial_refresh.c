@@ -97,6 +97,27 @@ static void test_a_picture_that_mostly_changed_is_a_full_refresh(void)
     CHECK(!fos_partial_refresh_wanted(&input));
 }
 
+static void test_what_moved_since_the_last_full_refresh_counts_tapping_or_not(void)
+{
+    /* A book's page turn moves about a quarter of the panel: the sixth is a
+     * full refresh, keys pressed or not. */
+    fos_partial_refresh_input_t input = a_small_change();
+    input.input_recent = true;
+    input.changed_bytes = 12000;
+    input.partials_since_full = 4;
+    input.changed_since_full = 4 * 12000;
+    CHECK(fos_partial_refresh_wanted(&input));
+    input.partials_since_full = 5;
+    input.changed_since_full = 5 * 12000;
+    CHECK(!fos_partial_refresh_wanted(&input));
+    /* A key's light: a hundred bytes a press, a hundred presses. */
+    input = a_small_change();
+    input.input_recent = true;
+    input.partials_since_full = 100;
+    input.changed_since_full = 100 * 100;
+    CHECK(fos_partial_refresh_wanted(&input));
+}
+
 static void test_changed_bytes_are_counted(void)
 {
     const uint8_t a[] = {1, 2, 3, 4};
@@ -115,6 +136,7 @@ int main(void)
     test_a_full_refresh_clears_the_ghosts_on_a_schedule();
     test_the_ghosts_wait_while_someone_is_tapping();
     test_a_picture_that_mostly_changed_is_a_full_refresh();
+    test_what_moved_since_the_last_full_refresh_counts_tapping_or_not();
     test_changed_bytes_are_counted();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

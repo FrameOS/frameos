@@ -25,6 +25,18 @@
  * fails cleanly when it is not. */
 bool fos_assets_available(void);
 
+/* The storage this task's asset calls reach until it says otherwise:
+ * "assets" (or NULL, the assets folder: the card, or the flash on a board
+ * with no card slot in use) or "internal" (the flash, FOS_ASSETS_INTERNAL_PATH).
+ * A request or a cloud job says it at its start and goes back (NULL) at its
+ * end. False for an unknown id or a storage the frame does not have. */
+bool fos_assets_use_storage(const char *storage);
+/* This task's storage: "assets" or "internal". */
+const char *fos_assets_storage(void);
+/* The places the planes' asset panels may browse, as app.frame.storages
+ * lists them for a JS app: [{id, name}], appended to `storages`. */
+void fos_assets_storages_json(cJSON *storages);
+
 const char *fos_assets_root(void);
 
 void fos_assets_full_path(char *out, size_t out_len, const char *rel);

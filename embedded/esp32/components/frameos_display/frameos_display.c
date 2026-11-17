@@ -39,6 +39,9 @@ static const fos_panel_partial_t *s_partial = NULL;
 static uint8_t *s_glass = NULL;
 static bool s_glass_known = false;
 static uint32_t s_partials_since_full = 0;
+/* What those partial updates moved, in bytes: the ghosts are as big as that
+ * (fos_partial_refresh.h). */
+static size_t s_changed_since_full = 0;
 /* The panel is left awake after a partial update, its analog supply on: its
  * reset and deep sleep are 300 ms of every update, and the next tap is usually
  * moments away. A few idle seconds turn the supply off and keep the controller
@@ -451,6 +454,7 @@ static void note_full_refresh(const uint8_t *buf, size_t len)
         s_glass_known = s_glass != NULL;
     }
     s_partials_since_full = 0;
+    s_changed_since_full = 0;
 }
 
 /* A full refresh held whoever asked for the whole of it: the reTerminal
@@ -619,6 +623,9 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
         .same_scene = same_scene,
         .input_recent = input_recent,
         .partials_since_full = s_partials_since_full,
+        /* A controller that keeps the picture (the IT8951) settles its own
+         * ghosts (GC16 after DU, fos_display_settle_due). */
+        .changed_since_full = controller_keeps ? 0 : s_changed_since_full,
         .changed_bytes = !known ? len : controller_keeps ? (size_t)controller_changed
                                                          : fos_partial_changed_bytes(buf, s_glass, len),
         .total_bytes = len,
@@ -638,6 +645,7 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     s_panel_rested = false;
     if (!controller_keeps) memcpy(s_glass, buf, len);
     s_partials_since_full++;
+    if (!controller_keeps) s_changed_since_full += input.changed_bytes;
     if (partial) *partial = true;
     return ESP_OK;
 }
@@ -693,16 +701,18 @@ void fos_display_park_if_idle(int64_t now_us)
      * would hold the render task for the refresh after all. */
     if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
     int64_t idle_us = now_us - s_last_partial_us;
-    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 &&
-        s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+    /* Ghosts worth a flash: many updates, or half a panel moved by them. */
+    bool ghosted = s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL ||
+                   s_changed_since_full * 2 >= fos_display_buffer_size();
+    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 && ghosted) {
         DEV_SPI_Acquire();
         s_partial->clean();
         s_partial->rest();
         DEV_SPI_Release();
         s_panel_awake = false;
         s_partials_since_full = 0;
-    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known &&
-               s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL) {
+    s_changed_since_full = 0;
+    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known && s_partials_since_full > 0 && ghosted) {
         fos_display_blit(s_glass, fos_display_buffer_size());
     } else if (idle_us >= FOS_PANEL_AWAKE_US) {
         fos_display_park();

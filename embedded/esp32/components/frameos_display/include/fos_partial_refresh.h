@@ -16,6 +16,14 @@
  * either), the ghosts wait, FOS_PARTIAL_MAX_WHILE_INPUT updates at the most,
  * and the idle frame clears them (fos_display_park_if_idle).
  *
+ * A ghost is as big as what moved, though, not one per update: a key's light
+ * leaves next to nothing, a book's page turned a third of the panel. So the
+ * bytes changed since the last full refresh count too, whoever is tapping:
+ * once they would reach FOS_PARTIAL_GHOST_HALF_SCREENS halves of the panel, the
+ * update is a full refresh (a book's page moves about a quarter of it: every
+ * sixth page flashes, as an e-reader's do; the reTerminal Sticky's pages were
+ * left grey with noise at two panels' worth, a flash every ninth, 2026-11-17).
+ *
  * Pure: no IDF, so main/tests/test_fos_partial_refresh.c runs it on the host.
  */
 
@@ -25,6 +33,7 @@
 
 #define FOS_PARTIAL_MAX_BEFORE_FULL 20
 #define FOS_PARTIAL_MAX_WHILE_INPUT 120
+#define FOS_PARTIAL_GHOST_HALF_SCREENS 3
 
 typedef struct {
     bool supported;       /* the panel has a partial waveform */
@@ -32,6 +41,7 @@ typedef struct {
     bool same_scene;      /* the scene the last picture on the glass came from */
     bool input_recent;    /* someone is tapping */
     uint32_t partials_since_full;
+    size_t changed_since_full; /* bytes the partial updates since then moved */
     size_t changed_bytes;
     size_t total_bytes;
 } fos_partial_refresh_input_t;

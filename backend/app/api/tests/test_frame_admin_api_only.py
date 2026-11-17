@@ -180,7 +180,8 @@ async def test_assets_panel_verbs_ride_the_admin_api(async_client, db, redis):
         listing = await async_client.get(f"/api/frames/{frame.id}/assets?refresh=1")
         assert listing.status_code == 200, listing.text
         assert [a["path"] for a in listing.json()["assets"]] == ["/srv/assets/photos/a.jpg"]
-        assert listing.json()["storage"] is None
+        assert listing.json()["mounted"] is None
+        assert listing.json()["storage"] == "assets"
 
         made = await async_client.post(f"/api/frames/{frame.id}/assets/mkdir", data={"path": "fonts"})
         assert made.status_code == 200, made.text

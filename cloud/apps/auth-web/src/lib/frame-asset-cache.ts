@@ -1,5 +1,5 @@
 // The hub's device-asset cache, shared by the routes that read it: one row
-// per (frame, path, thumb) in frame_asset_files, filled by asset_get /
+// per (frame, storage, path, thumb) in frame_asset_files, filled by asset_get /
 // image_get chunk streams (frame-hub handleAssetChunk) and pruned LRU by
 // storeFrameAssetFile. The /asset route serves arbitrary device files from
 // it; the /scene_images route uses it for the device's own per-scene
@@ -9,6 +9,11 @@ import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import { publicSceneId } from "./frame-events";
+import {
+  assetStoragePayload,
+  commandAssetStorage,
+  defaultAssetStorage,
+} from "./frame-asset-storages";
 import {
   enqueueFrameCommand,
   maxAssetPathChars,
@@ -64,11 +69,15 @@ function hasControlCharacter(value: string) {
 }
 
 
+// `storage` is which of the device's storages (frame-asset-storages.ts);
+// the reserved dot-paths (the current image, scene snapshots) are always
+// the default's.
 export async function cachedAssetFile(
   db: FramesDatabase,
   frameId: string,
   path: string,
   thumb: boolean,
+  storage: string = defaultAssetStorage,
 ) {
   const [row] = await db
     .select()
@@ -76,6 +85,7 @@ export async function cachedAssetFile(
     .where(
       and(
         eq(frameAssetFiles.frameId, frameId),
+        eq(frameAssetFiles.storage, storage),
         eq(frameAssetFiles.path, path),
         eq(frameAssetFiles.thumb, thumb),
       ),
@@ -88,12 +98,17 @@ function payloadMatches(
   payload: unknown,
   path: string,
   thumb: boolean,
+  storage: string,
 ): boolean {
   const record =
     payload && typeof payload === "object"
       ? (payload as Record<string, unknown>)
       : {};
-  return record.path === path && (record.thumb === true) === thumb;
+  return (
+    record.path === path &&
+    (record.thumb === true) === thumb &&
+    commandAssetStorage(payload) === storage
+  );
 }
 
 export async function outstandingAssetGet(
@@ -101,6 +116,7 @@ export async function outstandingAssetGet(
   frameId: string,
   path: string,
   thumb: boolean,
+  storage: string = defaultAssetStorage,
 ) {
   // Payload equality is checked in JS: the handful of live asset_get rows per
   // frame does not justify a jsonb index.
@@ -118,7 +134,7 @@ export async function outstandingAssetGet(
         ),
       ),
     );
-  return rows.find((row) => payloadMatches(row.payload, path, thumb));
+  return rows.find((row) => payloadMatches(row.payload, path, thumb, storage));
 }
 
 /**
@@ -132,6 +148,7 @@ export async function recentFailedAssetGet(
   path: string,
   thumb: boolean,
   withinMs: number,
+  storage: string = defaultAssetStorage,
 ) {
   const rows = await db
     .select({ error: frameCommands.error, payload: frameCommands.payload })
@@ -144,7 +161,7 @@ export async function recentFailedAssetGet(
         gt(frameCommands.createdAt, new Date(Date.now() - withinMs)),
       ),
     );
-  return rows.find((row) => payloadMatches(row.payload, path, thumb));
+  return rows.find((row) => payloadMatches(row.payload, path, thumb, storage));
 }
 
 /** Queue an asset_get unless an equivalent one is already in flight. */
@@ -155,14 +172,19 @@ export async function queueAssetGetIfIdle(
   path: string,
   thumb: boolean,
   ttlMs: number = assetFetchCommandTtlMs,
+  storage: string = defaultAssetStorage,
 ) {
-  if (await outstandingAssetGet(db, frameId, path, thumb)) {
+  if (await outstandingAssetGet(db, frameId, path, thumb, storage)) {
     return;
   }
   await enqueueFrameCommand(db, {
     createdByAccountId: accountId,
     frameId,
-    payload: { path, ...(thumb ? { thumb: true } : {}) },
+    payload: {
+      path,
+      ...(thumb ? { thumb: true } : {}),
+      ...assetStoragePayload(storage),
+    },
     ttlMs,
     type: "asset_get",
   });

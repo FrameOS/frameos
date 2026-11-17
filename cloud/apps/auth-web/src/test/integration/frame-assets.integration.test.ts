@@ -33,6 +33,9 @@ import {
 import { DELETE as discardScenePreview } from "../../../app/api/frames/[frameId]/scene-preview/route";
 import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import { POST as uploadFrameAsset } from "../../../app/api/frames/[frameId]/assets/upload/route";
+import { POST as mkdirFrameAsset } from "../../../app/api/frames/[frameId]/assets/mkdir/route";
+import { POST as deleteFrameAsset } from "../../../app/api/frames/[frameId]/assets/delete/route";
+import { POST as renameFrameAsset } from "../../../app/api/frames/[frameId]/assets/rename/route";
 import {
   esp32AssetUploadChunkBytes,
   linuxAssetUploadChunkBytes,
@@ -1155,5 +1158,243 @@ describe("asset storage helpers", () => {
         true,
       ),
     ).toBe(true);
+  });
+});
+
+// docs/cloud-frames.md "Asset storages": an ESP32 has its assets folder and
+// its internal flash storage, and every asset verb names which with an
+// optional `storage`. A frame that does not know the field acts on its
+// assets folder whatever it is told, so the cloud names `internal` only to
+// a frame whose newest listing reported it.
+describe("asset storages", () => {
+  const bothStorages = [
+    { id: "assets", name: "TF card" },
+    { id: "internal", name: "Internal storage" },
+  ];
+
+  function formPost(frameId: string, verb: string, fields: Record<string, string>, storage?: string) {
+    const url = new URL(`/api/frames/${frameId}/assets/${verb}`, baseUrl);
+    if (storage !== undefined) {
+      url.searchParams.set("storage", storage);
+    }
+    return new NextRequest(url, {
+      body: new URLSearchParams(fields).toString(),
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: baseUrl },
+      method: "POST",
+    });
+  }
+
+  function multipartTo(frameId: string, storage: string, filename: string, bytes: Uint8Array<ArrayBuffer>) {
+    const form = new FormData();
+    form.append("file", new File([bytes], filename));
+    form.append("path", "");
+    return new NextRequest(new URL(`/api/frames/${frameId}/assets/upload?storage=${storage}`, baseUrl), {
+      body: form,
+      headers: { origin: baseUrl },
+      method: "POST",
+    });
+  }
+
+  async function esp32WithInternal() {
+    const { frame } = await activeFrame();
+    await db.update(frames).set({ hardware: { platform: "esp32-s3" } }).where(eq(frames.id, frame.id));
+    await storeFrameAssetListing(db, frame.id, [{ mtime: 1, path: "card.png", size: 3 }], false, {
+      storage: "assets",
+      storages: bothStorages,
+    });
+    await storeFrameAssetListing(db, frame.id, [{ mtime: 2, path: "flash.txt", size: 4 }], false, {
+      storage: "internal",
+      storages: bothStorages,
+    });
+    return frame;
+  }
+
+  it("answers the default storage alone for a frame that never reported any, and asks it without the field", async () => {
+    const { frame } = await activeFrame();
+    const response = await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets`), assetsParams(frame.id));
+    expect(await response.json()).toMatchObject({
+      assets: [],
+      storage: "assets",
+      storages: [{ id: "assets", name: "Internal storage" }],
+    });
+    const [listing] = await commandsOfType(frame.id, "assets_list");
+    // Byte-identical to what a Linux frame and older firmware always got.
+    expect(listing!.payload).toBeNull();
+
+    // A listing that came without `storages` (a Linux frame) stays that.
+    await storeFrameAssetListing(db, frame.id, [{ mtime: 1, path: "a.png", size: 1 }], false);
+    const listed = await (
+      await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets`), assetsParams(frame.id))
+    ).json();
+    expect(listed.storages).toEqual([{ id: "assets", name: "Internal storage" }]);
+  });
+
+  it("keeps one listing per storage and lists what the frame reported", async () => {
+    const frame = await esp32WithInternal();
+    const card = await (
+      await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets`), assetsParams(frame.id))
+    ).json();
+    expect(card).toMatchObject({ storage: "assets", storages: bothStorages });
+    expect(card.assets.map((entry: { path: string }) => entry.path)).toEqual(["card.png"]);
+    const flash = await (
+      await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets?storage=internal`), assetsParams(frame.id))
+    ).json();
+    expect(flash).toMatchObject({ storage: "internal", storages: bothStorages });
+    expect(flash.assets.map((entry: { path: string }) => entry.path)).toEqual(["flash.txt"]);
+    expect(flash.cache).toBeUndefined();
+  });
+
+  it("refreshes one storage without superseding or riding the other's listing", async () => {
+    const frame = await esp32WithInternal();
+    await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets?refresh=1`), assetsParams(frame.id));
+    const internal = await (
+      await getFrameAssets(
+        getRequest(`/api/frames/${frame.id}/assets?storage=internal&refresh=1`),
+        assetsParams(frame.id),
+      )
+    ).json();
+    expect(internal.cache).toEqual({ refreshing: true, retry_after: 2 });
+    const listings = await commandsOfType(frame.id, "assets_list");
+    expect(listings.map((command) => [command.status, command.payload])).toEqual([
+      ["pending", null],
+      ["pending", { storage: "internal" }],
+    ]);
+    // A second poll of either rides its own outstanding command.
+    await getFrameAssets(getRequest(`/api/frames/${frame.id}/assets?storage=internal&refresh=1`), assetsParams(frame.id));
+    expect(await commandsOfType(frame.id, "assets_list")).toHaveLength(2);
+  });
+
+  it("refuses an unknown id, and internal toward a frame that never reported it, before queueing anything", async () => {
+    const { frame } = await activeFrame();
+    // A Linux frame's listing: no storages.
+    await storeFrameAssetListing(db, frame.id, [], false);
+    const unknown = await getFrameAssets(
+      getRequest(`/api/frames/${frame.id}/assets?storage=sdcard&refresh=1`),
+      assetsParams(frame.id),
+    );
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ error: "invalid_storage" });
+    for (const response of [
+      await getFrameAssets(
+        getRequest(`/api/frames/${frame.id}/assets?storage=internal&refresh=1`),
+        assetsParams(frame.id),
+      ),
+      await getFrameAsset(getRequest(`/api/frames/${frame.id}/asset?path=a.png&storage=internal`), assetsParams(frame.id)),
+      await uploadFrameAsset(multipartTo(frame.id, "internal", "a.txt", new Uint8Array(4)), assetsParams(frame.id)),
+      await mkdirFrameAsset(formPost(frame.id, "mkdir", { path: "dir" }, "internal"), assetsParams(frame.id)),
+      await deleteFrameAsset(formPost(frame.id, "delete", { path: "a.png" }, "internal"), assetsParams(frame.id)),
+      await renameFrameAsset(formPost(frame.id, "rename", { dst: "b", src: "a" }, "internal"), assetsParams(frame.id)),
+    ]) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "storage_unavailable" });
+    }
+    const queued = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.id));
+    expect(queued).toEqual([]);
+
+    // Nor once the frame stops reporting it (a card swapped, firmware rolled
+    // back): the newest listing is what the cloud believes.
+    const esp32 = await esp32WithInternal();
+    await storeFrameAssetListing(db, esp32.id, [], false);
+    const stale = await getFrameAssets(
+      getRequest(`/api/frames/${esp32.id}/assets?storage=internal`),
+      assetsParams(esp32.id),
+    );
+    expect(stale.status).toBe(400);
+  });
+
+  it("puts every write on the storage asked for, and refreshes that storage's listing", async () => {
+    const frame = await esp32WithInternal();
+    const device = fakeDevice(frame.id, () => ({ ok: true }));
+    try {
+      expect(
+        (await uploadFrameAsset(multipartTo(frame.id, "internal", "notes.txt", new Uint8Array(8)), assetsParams(frame.id)))
+          .status,
+      ).toBe(200);
+      expect(
+        (await mkdirFrameAsset(formPost(frame.id, "mkdir", { path: "dir" }, "internal"), assetsParams(frame.id))).status,
+      ).toBe(200);
+      expect(
+        (await renameFrameAsset(formPost(frame.id, "rename", { dst: "dir/notes.txt", src: "notes.txt" }, "internal"), assetsParams(frame.id)))
+          .status,
+      ).toBe(200);
+      expect(
+        (await deleteFrameAsset(formPost(frame.id, "delete", { path: "dir" }, "internal"), assetsParams(frame.id))).status,
+      ).toBe(200);
+      // And the default, as always: no field.
+      expect(
+        (await mkdirFrameAsset(formPost(frame.id, "mkdir", { path: "card-dir" }), assetsParams(frame.id))).status,
+      ).toBe(200);
+    } finally {
+      await device.stop();
+    }
+    const writes = device.seen.filter((command) => command.type !== "assets_list");
+    expect(writes.map((command) => [command.type, (command.payload as { storage?: string }).storage])).toEqual([
+      ["asset_put", "internal"],
+      ["asset_mkdir", "internal"],
+      ["asset_rename", "internal"],
+      ["asset_delete", "internal"],
+      ["asset_mkdir", undefined],
+    ]);
+    // From the table, not from what the fake device happened to see: a
+    // refresh can be superseded by the next one before it is polled, and
+    // the last one is queued after its write's ack.
+    const refreshes = await commandsOfType(frame.id, "assets_list");
+    expect(refreshes.map((command) => command.payload)).toEqual([
+      { storage: "internal" },
+      { storage: "internal" },
+      { storage: "internal" },
+      { storage: "internal" },
+      null,
+    ]);
+  });
+
+  it("caches fetched bytes per storage, and invalidates only the written one", async () => {
+    const frame = await esp32WithInternal();
+    await storeFrameAssetFile(db, frame.id, {
+      content: Buffer.from("card-bytes"),
+      contentType: "application/octet-stream",
+      path: "same.txt",
+      thumb: false,
+    });
+    await storeFrameAssetFile(db, frame.id, {
+      content: Buffer.from("flash-bytes"),
+      contentType: "application/octet-stream",
+      path: "same.txt",
+      storage: "internal",
+      thumb: false,
+    });
+    const card = await getFrameAsset(getRequest(`/api/frames/${frame.id}/asset?path=same.txt`), assetsParams(frame.id));
+    expect(Buffer.from(await card.arrayBuffer()).toString()).toBe("card-bytes");
+    const flash = await getFrameAsset(
+      getRequest(`/api/frames/${frame.id}/asset?path=same.txt&storage=internal`),
+      assetsParams(frame.id),
+    );
+    expect(Buffer.from(await flash.arrayBuffer()).toString()).toBe("flash-bytes");
+
+    // A miss on internal asks the device for that storage's file.
+    await db.update(frames).set({ connected: false }).where(eq(frames.id, frame.id));
+    const miss = await getFrameAsset(
+      getRequest(`/api/frames/${frame.id}/asset?path=other.txt&storage=internal`),
+      assetsParams(frame.id),
+    );
+    expect(miss.status).toBe(503);
+    const [get] = await commandsOfType(frame.id, "asset_get");
+    expect(get!.payload).toEqual({ path: "other.txt", storage: "internal" });
+
+    // Deleting internal's same.txt drops its cached bytes, not the card's.
+    const device = fakeDevice(frame.id, () => ({ ok: true }));
+    try {
+      expect(
+        (await deleteFrameAsset(formPost(frame.id, "delete", { path: "same.txt" }, "internal"), assetsParams(frame.id)))
+          .status,
+      ).toBe(200);
+    } finally {
+      await device.stop();
+    }
+    const rows = await db
+      .select({ path: frameAssetFiles.path, storage: frameAssetFiles.storage })
+      .from(frameAssetFiles)
+      .where(eq(frameAssetFiles.frameId, frame.id));
+    expect(rows).toEqual([{ path: "same.txt", storage: "assets" }]);
   });
 });

@@ -46,12 +46,13 @@ function fakeDb(listing: ListingEntry[] | null) {
   };
 }
 
-function grantAccess(listing: ListingEntry[] | null = null) {
+function grantAccess(listing: ListingEntry[] | null = null, storage = "assets") {
   contextMock.mockResolvedValue({
     accountId,
     actor: { accountId },
     db: fakeDb(listing) as never,
     frame: { id: frameId, status: "active" } as never,
+    storage,
   });
 }
 
@@ -137,6 +138,19 @@ describe("font sync for a cloud frame", () => {
     await runSync();
     expect(commandMock.mock.calls[0]![3]).toBe("asset_mkdir");
     expect(commandMock.mock.calls[0]![4]).toEqual({ path: "fonts" });
+    // The default storage never goes on the wire.
+    expect(uploadMock.mock.calls[0]![5]).toMatchObject({ storage: "assets" });
+  });
+
+  it("syncs onto the storage the request names", async () => {
+    // docs/cloud-frames.md "Asset storages": the guard resolved ?storage=;
+    // every command of the run carries it.
+    grantAccess(null, "internal");
+    await runSync();
+    expect(commandMock.mock.calls[0]![4]).toEqual({ path: "fonts", storage: "internal" });
+    for (const call of uploadMock.mock.calls) {
+      expect(call[5]).toMatchObject({ storage: "internal" });
+    }
   });
 
   it("says when a frame's firmware predates chunked uploads", async () => {

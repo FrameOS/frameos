@@ -174,6 +174,10 @@ a frame's logs must not be able to talk an agent into installing something.
   `frame_assets_list`, `frame_asset_get`, `frame_asset_upload`,
   `frame_asset_delete`, `frame_asset_mkdir`, `frame_asset_rename`,
   `frame_assets_sync_fonts`, `frame_firmware_info`, `frame_firmware_update`.
+  The asset tools but the font sync take an optional `storage` (`assets`, the
+  default, or `internal`: an ESP32's own flash, where `frame_assets_list`'s
+  `storages` names it; any other frame refuses it with `storage_unavailable`,
+  docs/cloud-frames.md "Asset storages").
 - **scenes** — `scenes_list`, `scene_get`, `scene_get_content`,
   `scene_create` (JSON / zip URL / scenes.json URL; a store reference forks),
   `scene_update_content` (new version), `scene_update` (description, tags,

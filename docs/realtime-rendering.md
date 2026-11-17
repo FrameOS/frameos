@@ -916,7 +916,11 @@ a small change cost what it should:
   keeps is exact whoever drew it. `fos_partial_refresh.c` (host-tested) picks
   a full refresh instead for the first picture after a boot or a deep sleep, a
   new scene, a picture that mostly changed, and every 20th update, which
-  clears the ghosts. `render:done` says `"refresh":"partial"`. The panel
+  clears the ghosts; also, tapping or not, the update that would bring what
+  the partial updates moved since the last full refresh to a panel and a half
+  (`FOS_PARTIAL_GHOST_HALF_SCREENS`): a ghost is as big as what moved, so a
+  book flashes every sixth page (a page moves about a quarter of the panel)
+  and a key's light hardly counts. Not the IT8951, which settles its own (GC16 after DU). `render:done` says `"refresh":"partial"`. The panel
   stays awake between updates, its analog supply on and its waveform loaded.
   After ten idle seconds the supply goes off and the controller stays awake
   (`fos_display_park_if_idle`); after five minutes, or before the chip's own

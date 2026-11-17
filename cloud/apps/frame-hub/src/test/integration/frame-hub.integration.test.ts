@@ -18,6 +18,7 @@ import {
   auditEvents,
   createDb,
   frameAssetFiles,
+  frameAssets,
   frameCommands,
   frameDeviceScenes,
   frameLogs,
@@ -2539,6 +2540,91 @@ describe("inbound size limits", () => {
       "asset stored after the sweep",
     );
     expect(stored.sizeBytes).toBe(5);
+    device.ws.close();
+  });
+
+  // docs/cloud-frames.md "Asset storages": the command is the authority on
+  // which storage a reply belongs to; the field rides the wire only when it
+  // is not the default.
+  it("files listings and fetched bytes under the storage the command asked of", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+    const storages = [
+      { id: "assets", name: "TF card" },
+      { id: "internal", name: "Internal storage" },
+    ];
+
+    const internalList = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { storage: "internal" },
+      type: "assets_list",
+    });
+    const asked = await device.next((msg) => msg.type === "assets_list", "internal assets_list");
+    expect(asked).toMatchObject({ id: internalList!.id, storage: "internal" });
+    device.send({ id: asked.id, ok: true, type: "ack" });
+    device.send({
+      assets: [{ mtime: 1, path: "flash.txt", size: 4 }],
+      id: asked.id,
+      storage: "internal",
+      storages: [...storages, { id: "Not An Id", name: "x" }],
+      type: "assets",
+    });
+    const internalRow = await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameAssets)
+        .where(and(eq(frameAssets.frameId, frame.id), eq(frameAssets.storage, "internal")));
+      return row;
+    }, "the internal listing");
+    expect(internalRow.payload).toEqual([{ mtime: 1, path: "flash.txt", size: 4 }]);
+    expect(internalRow.storages).toEqual(storages);
+
+    // The default goes out without the field, and an older device's reply
+    // (no storage, no storages) is the assets folder's.
+    const defaultList = await enqueueFrameCommand(db, { frameId: frame.id, type: "assets_list" });
+    const plain = await device.next(
+      (msg) => msg.type === "assets_list" && msg.id === defaultList!.id,
+      "default assets_list",
+    );
+    expect("storage" in plain).toBe(false);
+    device.send({ id: plain.id, ok: true, type: "ack" });
+    device.send({ assets: [{ mtime: 2, path: "card.png", size: 3 }], id: plain.id, type: "assets" });
+    const assetsRow = await waitFor(async () => {
+      const [row] = await db
+        .select()
+        .from(frameAssets)
+        .where(and(eq(frameAssets.frameId, frame.id), eq(frameAssets.storage, "assets")));
+      return row;
+    }, "the assets listing");
+    expect(assetsRow.storages).toBeNull();
+    // Two rows, one per storage, not one overwritten.
+    expect(
+      await db.select({ storage: frameAssets.storage }).from(frameAssets).where(eq(frameAssets.frameId, frame.id)),
+    ).toHaveLength(2);
+
+    // A file's bytes land under the asked storage, whatever the reply says.
+    const get = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { path: "same.txt", storage: "internal" },
+      type: "asset_get",
+    });
+    const fetch = await device.next((msg) => msg.type === "asset_get", "internal asset_get");
+    expect(fetch).toMatchObject({ path: "same.txt", storage: "internal" });
+    device.send({
+      data: Buffer.from("flash").toString("base64"),
+      done: true,
+      id: get!.id,
+      seq: 0,
+      storage: "assets",
+      type: "asset_chunk",
+    });
+    const stored = await waitFor(
+      async () => await cachedAssetFile(db, frame.id, "same.txt", false, "internal"),
+      "the internal file in the cache",
+    );
+    expect(stored.sizeBytes).toBe(5);
+    expect(await cachedAssetFile(db, frame.id, "same.txt", false)).toBeUndefined();
     device.ws.close();
   });
 

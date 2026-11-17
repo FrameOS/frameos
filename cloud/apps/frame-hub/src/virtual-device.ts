@@ -29,6 +29,11 @@ import {
   sceneSnapshotAssetPath,
   sceneSnapshotAssetPrefix,
 } from "../../auth-web/src/lib/frame-asset-cache";
+import {
+  defaultAssetStorage,
+  defaultAssetStorages,
+} from "../../auth-web/src/lib/frame-asset-storages";
+import { cloudFramesContract } from "../../auth-web/src/lib/cloud-frames-contract.gen";
 import { buildServiceSettingsPayload } from "../../auth-web/src/lib/frame-service-settings";
 import {
   frameImageAssetPath,
@@ -85,6 +90,9 @@ const deviceColumns = {
   hasScenes: sql<boolean>`case when jsonb_typeof(${virtualFrames.scenes}) = 'array' then jsonb_array_length(${virtualFrames.scenes}) > 0 else false end`,
 };
 type DeviceRow = Omit<typeof virtualFrames.$inferSelect, "scenes"> & { hasScenes: boolean };
+
+// The verbs that take a `storage` (docs/cloud-frames.md "Asset storages").
+const assetStorageVerbs = new Set<string>(cloudFramesContract.assetStorages.verbs);
 
 // Every verb of the wire contract (docs/cloud-frames.md "Provider → frame
 // verbs"). One this device does not serve is `unsupported_verb`; anything
@@ -335,6 +343,16 @@ export class VirtualDevice {
       }
       return;
     }
+    // One storage, the default (docs/cloud-frames.md "Asset storages"): an
+    // asset verb naming any other is refused as hardware without it would.
+    if (
+      assetStorageVerbs.has(type) &&
+      verb.storage !== undefined &&
+      verb.storage !== defaultAssetStorage
+    ) {
+      this.ack(verb, "storage_unavailable");
+      return;
+    }
     switch (type) {
       case "set_scenes":
         return await this.setScenes(verb);
@@ -350,8 +368,15 @@ export class VirtualDevice {
         return await this.assetGet(verb);
       case "assets_list":
         // No assets directory: the fonts the runtime draws with are its own.
+        // One storage, said the way a device that has more would say it.
         this.ack(verb);
-        this.send({ assets: [], id: verb.id, type: "assets" });
+        this.send({
+          assets: [],
+          id: verb.id,
+          storage: defaultAssetStorage,
+          storages: defaultAssetStorages,
+          type: "assets",
+        });
         return;
       case "get_logs":
         // Lines go out as they are written; there is no ring to replay.
@@ -548,6 +573,7 @@ export class VirtualDevice {
       id: verb.id,
       seq: 0,
       size: content.length,
+      ...(verb.type === "asset_get" ? { storage: defaultAssetStorage } : {}),
       type: "asset_chunk",
     });
   }
