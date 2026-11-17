@@ -392,18 +392,11 @@ proc codeEditor(): string =
   ## The code editor's scene id where the frame holds it (docs/code-editor.md):
   ## the sample's id, else its name, as a plane may have given a copy another
   ## id. "" without one.
-  if sceneSwitcherListing.isNil:
-    return ""
-  try:
-    let entries = sceneSwitcherListing()
-    for i in 0 ..< entries.len:
-      if entries[i].id == CodeEditorId:
-        return CodeEditorId
-    for i in 0 ..< entries.len:
-      if entries[i].name == CodeEditorName:
-        return entries[i].id
-  except Exception:
-    discard
+  for entry in listEntries():
+    if entry.id == CodeEditorId:
+      return CodeEditorId
+    if result.len == 0 and entry.name == CodeEditorName:
+      result = entry.id
 
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
@@ -957,14 +950,9 @@ proc title(self: SceneSettingsScene): string =
   if self.onLayoutPage():
     return "Layout settings"
   result = self.opener()
-  if not sceneSwitcherListing.isNil:
-    try:
-      let entries = sceneSwitcherListing()
-      for i in 0 ..< entries.len:
-        if entries[i].id == result and entries[i].name.len > 0:
-          return entries[i].name
-    except Exception:
-      discard
+  for entry in listEntries():
+    if entry.id == result and entry.name.len > 0:
+      return entry.name
 
 proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for
