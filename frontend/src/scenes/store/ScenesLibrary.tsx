@@ -10,6 +10,7 @@ import {
   ArrowPathIcon,
   ArrowUpTrayIcon,
   BuildingStorefrontIcon,
+  CheckIcon,
   CloudIcon,
   DocumentPlusIcon,
   EllipsisHorizontalIcon,
@@ -252,7 +253,9 @@ function PageHeader({
   )
 }
 
-// The tile's last thing: a way onto a frame. The dialog asks which.
+// The tile's last thing: a way onto a frame. The dialog asks which, and the
+// tile says where the scene is already (#871): "Installed" in place of the
+// button once every frame has it, the count beside it while some do.
 function InstallButton({
   template,
   repository,
@@ -260,16 +263,41 @@ function InstallButton({
   template: TemplateType
   repository: RepositoryType | null
 }): JSX.Element {
+  const { installableFrames, installedFramesOf } = useValues(installSceneLogic)
   const { openInstall } = useActions(installSceneLogic)
+  const installedOn = installedFramesOf(template, repository)
+  const names = installableFrames
+    .filter((frame) => installedOn.some((id) => frameIdsEqual(id, frame.id)))
+    .map((frame) => frame.name || frameHost(frame))
+    .join(', ')
+  if (installedOn.length > 0 && installedOn.length === installableFrames.length) {
+    return (
+      <span
+        className="frameos-muted inline-flex h-7 items-center gap-1 px-1 text-xs font-semibold"
+        title={`Installed on ${names}`}
+      >
+        <CheckIcon className="h-3.5 w-3.5" />
+        Installed
+      </span>
+    )
+  }
   return (
-    <button
-      type="button"
-      onClick={() => openInstall(template, repository)}
-      className="frameos-form-control inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-    >
-      <ArrowDownOnSquareIcon className="h-3.5 w-3.5" />
-      Install
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => openInstall(template, repository)}
+        className="frameos-form-control inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        <ArrowDownOnSquareIcon className="h-3.5 w-3.5" />
+        Install
+      </button>
+      {installedOn.length > 0 ? (
+        <span className="frameos-muted inline-flex h-7 items-center gap-1 text-xs" title={`Installed on ${names}`}>
+          <CheckIcon className="h-3.5 w-3.5" />
+          Installed on {installedOn.length} {installedOn.length === 1 ? 'frame' : 'frames'}
+        </span>
+      ) : null}
+    </>
   )
 }
 
