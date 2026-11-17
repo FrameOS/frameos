@@ -374,10 +374,12 @@ of its own.
   longest word; one with a set size not below that size. A column or row
   too small for its items overflows instead (a scroller scrolls to it), and
   a title never ends up over the paragraph under it. `min-h-0` / `min-w-0`
-  (or any `min-*`), or an item that clips (`overflow-hidden`, `truncate`,
-  `overflow-y-auto`), may shrink to fit as before; a picture (`<img>`,
-  `<svg>`, `<Scene>`) always may, and a scroller lays its children out at
-  their own heights anyway. `flex-1` items share the room from their
+  (or any `min-*`), or an item that clips (`overflow-hidden`,
+  `overflow-y-auto`, and `truncate` / `line-clamp-*`), may shrink to fit
+  as before, and so may a set size given a `min-*` (`h-64 min-h-0`); a
+  picture (`<img>`, `<svg>`) and a box holding a `<Scene>` or `<yield />`
+  (they take the room they get) always may, and a scroller lays its
+  children out at their own heights anyway. `flex-1` items share the room from their
   content up: one holding more keeps it and the others share the rest.
   Unlike a browser, what clips inside an item counts for nothing in the
   item's minimum: a `truncate` name in a `flex-1` box cuts at the box's

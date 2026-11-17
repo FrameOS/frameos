@@ -170,6 +170,7 @@ type
     fixedMain, fixedCross, main, cross: float32
     base, least: float32  # its flex base size, and the least its main size may be
     frozen: bool          # ... while the free space is shared out (layoutFlex)
+    holds: bool           # it is or holds a <Scene> / <yield />: it takes the room it gets
     # ukText
     spans: seq[Span]
     bold: seq[Font]       # drawn with a stroke: no bold face to use
@@ -625,6 +626,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     # A picture whose size comes from the room it gets (flex-1 unless it
     # says): the scene runs once the layout knows it (app_runtime.nim).
     result.kind = ukImage
+    result.holds = true
     if result.box.grow == 0 and result.box.w.kind == lkAuto and result.box.h.kind == lkAuto:
       result.box.grow = 1
       result.box.shrink = 1
@@ -681,6 +683,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
       let built = child.build(result.text, rootW, rootH, depth + 1, childKey, input, childGroup, before)
       if built.pointer:
         result.pointer = true
+      result.holds = result.holds or built.holds
       result.children.add built
 
 # -------- Text
@@ -1044,11 +1047,12 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     c.main = basis
     # The least it may be: its `min-*`, else CSS's automatic minimum, its
     # content (the longest word in a row) unless it clips. A picture scales,
-    # so it has none; one with a set size keeps it unless a `min-*` says
-    # how far it may shrink (frozen below).
+    # and a box holding a <Scene> takes the room it gets, so they have none;
+    # one with a set size keeps it unless a `min-*` says how far it may
+    # shrink (frozen below).
     let least = if row: cb.minW else: cb.minH
     c.least = max(least.resolve(mainAvail), 0)
-    if flexing and least.isAuto and c.fixedMain < 0 and c.kind < ukImage and
+    if flexing and least.isAuto and c.fixedMain < 0 and c.kind < ukImage and not c.holds and
         (not c.clips or not row and c.field in {1'u8, 3, 4}):
       c.least =
         if row: min(c.minContentW(), mainAvail)
