@@ -31,9 +31,3 @@ void fos_store_clear_default(char *scene, size_t len);
  * object's): where it starts and how long it is, a string with its quotes.
  * False without one, or when `json` is not an object. */
 bool fos_store_find_key(const char *json, size_t len, const char *key, const char **value, size_t *value_len);
-
-/* `{"action":"<action>",` and the members of the JSON object `args`: a
- * request body made without a tree of what it carries. The length it takes
- * (without the NUL), written to `out` when it fits in `cap`; 0 when `args`
- * is not an object. */
-size_t fos_store_with_action(char *out, size_t cap, const char *action, const char *args);

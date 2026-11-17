@@ -486,7 +486,7 @@ proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.}
       facts = if frameSettingsRead.isNil: nil else: frameSettingsRead()
     answer = "true"
     if facts.isNil:
-      answer = if what == "read": "" else: "!settings on the frame's screen are off"
+      answer = if what == "read": "" else: SettingsOffCode
     elif what == "read":
       answer = $facts
     elif what == "action":
@@ -507,29 +507,13 @@ proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.}
 proc jsCode(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} =
   ## `frameos.code(op, arg)` (docs/code-editor.md): the frame's scenes as it
   ## holds them and the plane's scene AI, for an app whose permissions ask
-  ## for "code", and only while the frame offers its page (a scene's source
-  ## holds what its fields were set to). JSON text in and out: "" is null,
-  ## "!" and a reason is what the prelude throws.
+  ## for "code". The host answers everything (scene_code_hooks.nim), the
+  ## page being off its screen included; null without a host.
   let e = env(ctx)
   var answer = "!this app's permissions do not include code"
   if e != nil and e.runtime.codeGrant:
-    let
-      what = toNimString(ctx, op)
-      text = toNimString(ctx, arg)
-      read = sceneCodeRead
-      facts = if read.isNil: "" else: read(storeAsker(e))
-    answer = "true"
-    if facts.len == 0:
-      answer = if what == "read": "" else: "!settings on the frame's screen are off"
-    elif what == "read":
-      answer = facts
-    elif what in ["source", "draft"]:
-      answer = if sceneCodeSource.isNil: "" else: sceneCodeSource(if what == "draft": DraftSource else: text)
-    elif what in ["ask", "save", "clear"]:
-      if not sceneCodeAction.isNil:
-        sceneCodeAction(storeAsker(e), what, text)
-    else:
-      answer = "!no such operation: " & what
+    let host = sceneCode
+    answer = if host.isNil: "" else: host(storeAsker(e), toNimString(ctx, op), toNimString(ctx, arg))
   nimStringToJS(ctx, answer)
 
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
@@ -2819,7 +2803,7 @@ const appJsPrelude* = compactJs("""
     store: () => JSON.parse(jsStore() || "null"),
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
-    code: (op, arg) => __frameosOp(jsCode, "code", op, arg, op === "ask" || op === "save"),
+    code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(

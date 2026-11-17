@@ -83,10 +83,13 @@ in and out; it throws what the host refuses (`frameos.code: <reason>`).
 | `clear` | — | forgets the draft and the last error |
 
 One action runs at a time; one asked while another runs is dropped (`busy`
-says what runs), as `frameos.storeAction`'s are. The hooks are
-`sceneCodeRead(asker)`, `sceneCodeSource(id)` and `sceneCodeAction(asker,
-action, args)` (`scene_code_hooks.nim`); an app that asks with the hooks nil
-gets null.
+says what runs), as `frameos.storeAction`'s are; an operation the host does
+not know is ignored. The prelude puts the action into `ask`'s and `save`'s
+arguments (`{action, …}`), so they are the request body as the plane takes it.
+The host is ONE hook, `sceneCode(asker, op, arg)` (`scene_code_hooks.nim`),
+which answers every operation itself, the page being off the screen included:
+each hook was a proc and a bridge in the ESP32's flash. An app on a runtime
+without a host gets null.
 
 ## Who may use it
 
@@ -163,10 +166,15 @@ false in `read`.
 (`fos_scenes_get_json`, under the store lock), on the render task, so opening a
 scene costs a lookup by name (about half a second on the 32 MB boards). An ask
 and a save run on the request task (`fos_js_io_run`), the draft is the
-answer's own buffer in PSRAM (up to 1 MiB) with no JSON tree built, and the
-request body is the app's arguments with the action spliced in
-(`fos_store_with_action`, host-tested in `test_fos_store_scan.c`). A save with
-no plane is `fos_scenes_put`, the scene's own text as it came.
+answer's own buffer in PSRAM (up to 1 MiB) with no JSON tree built (its id,
+name and summary are the answer's own JSON values, found by
+`fos_store_find_key`, host-tested in `test_fos_store_scan.c`), and the request
+body is the app's arguments as they come. A save with no plane is
+`fos_scenes_put`, the scene's own text as it came. What the app and the plane
+already check (an empty request, a scene's id, a compiled scene; the app takes
+the `default` mark off a scene new to the frame) is not checked again on the
+device: the feature was 5.3 KB of the ESP32 image and is 4.3 KB without it and with one
+hook (2026-11-17, against the branch's base).
 
 ## Not yet
 

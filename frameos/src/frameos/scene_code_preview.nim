@@ -18,24 +18,20 @@ proc codePreviewLoaded*(payload: string) =
   ## on after it loaded them.
   loaded = payload
 
-proc previewRead(asker: string): string {.nimcall, gcsafe, raises: [].} =
-  """{"busy":"","error":"","done":"","draft":null,"ask":false,"save":false,"previewOnly":true}"""
-
-proc previewSource(what: string): string {.nimcall, gcsafe, raises: [].} =
+proc previewCode(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
-    if what == DraftSource or loaded.len == 0:
-      return ""
-    try:
-      for scene in parseJson(loaded).getElems():
-        if scene.kind == JObject and scene{"id"}.getStr() == what:
-          return $scene
-    except Exception:
-      discard
-
-proc previewAction(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
-  discard
+    case op
+    of "read":
+      result = """{"busy":"","error":"","done":"","draft":null,"ask":false,"save":false,"previewOnly":true}"""
+    of "source":
+      try:
+        for scene in parseJson(loaded).getElems():
+          if scene.kind == JObject and scene{"id"}.getStr() == arg:
+            return $scene
+      except Exception:
+        discard
+    of "draft": discard
+    else: result = "true"
 
 proc enableCodePreview*() =
-  sceneCodeRead = previewRead
-  sceneCodeSource = previewSource
-  sceneCodeAction = previewAction
+  sceneCode = previewCode

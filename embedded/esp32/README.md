@@ -1354,10 +1354,13 @@ the same plane (`fos_store_plane`, at `…/panel/code`). A scene's source is its
 file in the scene store (`fos_scenes_get_json`); `ask` waits up to 180 s for
 the plane's AI and keeps its answer's scene, up to 1 MiB, as the draft in the
 answer's own buffer; a save goes to the plane, or, with none, into the store
-(`fos_scenes_put`, only the frame's default scene keeping a `default` mark).
-No scene is made a JSON tree: the request is the app's arguments with the
-action spliced in and the answer is read by its keys (`fos_store_find_key`,
-`fos_store_with_action` in `fos_store_scan.c`, host-tested). While an ask
+(`fos_scenes_put`; the app takes the `default` mark off a new scene).
+No scene is made a JSON tree: the request is the app's arguments as they
+come (the prelude puts the action in them), the answer is read by its keys
+(`fos_store_find_key` in `fos_store_scan.c`, host-tested) and the draft's id,
+name and summary are the answer's own JSON values. What the app and the plane
+check already (an empty request, a scene's id, a compiled scene) is not
+checked again here: flash is the budget. While an ask
 waits, the request task does nothing else: a scene's `fetch` queues behind it.
 
 ## Rendering on the server

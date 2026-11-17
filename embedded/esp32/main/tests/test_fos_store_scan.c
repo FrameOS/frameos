@@ -97,18 +97,6 @@ int main(void)
     assert(!fos_store_find_key("{\"scene\":}", 11, "scene", &v, &vl));
     assert(!fos_store_find_key(NULL, 0, "scene", &v, &vl));
 
-    /* The request body: the action, then the arguments' members. */
-    char body[64];
-    const char *args = " {\"prompt\":\"hi\",\"scene\":{}}";
-    size_t need = fos_store_with_action(body, sizeof(body), "ask", args);
-    assert(strcmp(body, "{\"action\":\"ask\",\"prompt\":\"hi\",\"scene\":{}}") == 0 && need == strlen(body));
-    assert(fos_store_with_action(body, sizeof(body), "save", "{ }") == 17 && strcmp(body, "{\"action\":\"save\"}") == 0);
-    assert(fos_store_with_action(NULL, 0, "ask", args) == need);
-    char small[8] = "x";
-    assert(fos_store_with_action(small, sizeof(small), "ask", args) == need && strcmp(small, "x") == 0);
-    assert(fos_store_with_action(body, sizeof(body), "ask", "[1]") == 0);
-    assert(fos_store_with_action(body, sizeof(body), "ask", NULL) == 0);
-
     puts("fos_store_scan: ok");
     return 0;
 }

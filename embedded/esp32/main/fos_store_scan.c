@@ -141,25 +141,3 @@ bool fos_store_find_key(const char *json, size_t len, const char *key, const cha
     }
     return false;
 }
-
-size_t fos_store_with_action(char *out, size_t cap, const char *action, const char *args)
-{
-    while (args != NULL && blank(*args)) args++;
-    if (args == NULL || *args != '{') return 0;
-    const char *rest = args + 1;
-    while (blank(*rest)) rest++;
-    size_t action_len = strlen(action), rest_len = strlen(rest);
-    /* {"action":"…" then "," unless the object is empty, then the rest. */
-    size_t need = 11 + action_len + 1 + (*rest != '}') + rest_len;
-    if (out != NULL && need < cap) {
-        char *at = out;
-        memcpy(at, "{\"action\":\"", 11);
-        at += 11;
-        memcpy(at, action, action_len);
-        at += action_len;
-        *at++ = '"';
-        if (*rest != '}') *at++ = ',';
-        memcpy(at, rest, rest_len + 1);
-    }
-    return need;
-}

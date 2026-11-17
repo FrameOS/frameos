@@ -956,25 +956,15 @@ sceneStoreRead = sceneStoreJson
 sceneStoreAction = sceneStoreDo
 
 # The code editor's host (docs/code-editor.md, frameos/scene_code_hooks.nim):
-# main/fos_code.c reads a scene's file off the scene store and asks the plane
-# on the task that makes every request a scene asks for. Every call comes from
-# a JS app, on the render task.
-proc fos_code_json(asker: cstring): cstring {.importc, cdecl.}
-proc fos_code_source(what: cstring): cstring {.importc, cdecl.}
-proc fos_code_action(asker, action, args: cstring) {.importc, cdecl.}
+# main/fos_code.c answers every operation, reads a scene's file off the scene
+# store and asks the plane on the task that makes every request a scene asks
+# for. Every call comes from a JS app, on the render task.
+proc fos_code(asker, op, arg: cstring): cstring {.importc, cdecl.}
 
-proc sceneCodeJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
-  takeCString(fos_code_json(asker.cstring))
+proc sceneCodeDo(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
+  takeCString(fos_code(asker.cstring, op.cstring, arg.cstring))
 
-proc sceneCodeText(what: string): string {.nimcall, gcsafe, raises: [].} =
-  takeCString(fos_code_source(what.cstring))
-
-proc sceneCodeDo(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
-  fos_code_action(asker.cstring, action.cstring, args.cstring)
-
-sceneCodeRead = sceneCodeJson
-sceneCodeSource = sceneCodeText
-sceneCodeAction = sceneCodeDo
+sceneCode = sceneCodeDo
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

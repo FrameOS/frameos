@@ -213,60 +213,54 @@ proc queue(job: sink Job) =
 
 # ------------------------------------------------------------------ the hooks
 
-proc linuxSceneCodeRead*(scene: string): string {.nimcall, gcsafe, raises: [].} =
+proc factsJson(scene: string, config: FrameConfig): string =
+  var f: CodeFacts
+  withLock codeLock:
+    asker = scene
+    # Everything but the draft itself, which "draft" hands out alone.
+    f = CodeFacts(busy: facts.busy, error: facts.error, done: facts.done, draftId: facts.draftId,
+      draftName: facts.draftName, summary: facts.summary)
+  let answer = %*{"busy": f.busy, "error": f.error, "done": f.done,
+    "ask": cloudPanel("code").url.len > 0 or backendOf(config).url.len > 0, "save": true}
+  answer["draft"] = if f.draftId.len > 0:
+    %*{"id": f.draftId, "name": f.draftName, "summary": f.summary} else: newJNull()
+  $answer
+
+proc start(scene, action, args: string, config: FrameConfig) =
+  var job = Job(action: action, args: args)
+  (job.backendUrl, job.backendKey) = backendOf(config)
+  withLock codeLock:
+    asker = scene
+    if action == "clear":
+      if facts.busy.len == 0:
+        facts = CodeFacts()
+      return
+    # One thing at a time: the app says what is running.
+    if facts.busy.len > 0 or action notin ["ask", "save"]:
+      return
+    facts.busy = action
+    facts.error = ""
+    facts.done = ""
+  queue(job)
+
+proc linuxSceneCode*(scene, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     try:
       let config = runnerConfig()
       if config == nil or not framePageOffered(config):
-        return ""
-      var f: CodeFacts
-      withLock codeLock:
-        asker = scene
-        # Everything but the draft itself, which `source` hands out alone.
-        f = CodeFacts(busy: facts.busy, error: facts.error, done: facts.done, draftId: facts.draftId,
-          draftName: facts.draftName, summary: facts.summary)
-      let answer = %*{"busy": f.busy, "error": f.error, "done": f.done,
-        "ask": cloudPanel("code").url.len > 0 or backendOf(config).url.len > 0, "save": true}
-      answer["draft"] = if f.draftId.len > 0:
-        %*{"id": f.draftId, "name": f.draftName, "summary": f.summary} else: newJNull()
-      result = $answer
-    except Exception:
-      result = ""
-
-proc linuxSceneCodeSource*(what: string): string {.nimcall, gcsafe, raises: [].} =
-  {.cast(gcsafe).}:
-    try:
-      if what == DraftSource:
+        return if op == "read": "" else: SettingsOffCode
+      case op
+      of "read": result = factsJson(scene, config)
+      of "source": result = sceneText(arg)
+      of "draft":
         withLock codeLock:
           result = facts.draft
       else:
-        result = sceneText(what)
+        start(scene, op, arg, config)
+        result = "true"
     except Exception:
       result = ""
 
-proc linuxSceneCodeAction*(scene, action, args: string) {.nimcall, gcsafe, raises: [].} =
-  {.cast(gcsafe).}:
-    try:
-      var job = Job(action: action, args: args)
-      (job.backendUrl, job.backendKey) = backendOf(runnerConfig())
-      withLock codeLock:
-        asker = scene
-        if action == "clear":
-          if facts.busy.len == 0:
-            facts = CodeFacts()
-          return
-        # One thing at a time: the app says what is running.
-        if facts.busy.len > 0 or action notin ["ask", "save"]:
-          return
-        facts.busy = action
-        facts.error = ""
-        facts.done = ""
-      queue(job)
-    except Exception:
-      discard
-
 proc installSceneCodeHooks*() =
   ## Once, at startup, before the runner draws anything.
-  sceneCodeRead = linuxSceneCodeRead
-  sceneCodeSource = linuxSceneCodeSource
-  sceneCodeAction = linuxSceneCodeAction
+  sceneCode = linuxSceneCode

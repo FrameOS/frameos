@@ -9,6 +9,7 @@ import pixie
 import frameos/channels
 import frameos/interpreter
 import frameos/scene_code_hooks
+import frameos/scene_code_preview
 import frameos/scene_rhythm
 import frameos/types
 import frameos/js_runtime/app_runtime
@@ -28,29 +29,25 @@ var
 let held = %*{"id": "clock", "name": "Clock", "settings": {"execution": "interpreted"}, "fields": [],
   "nodes": [{"id": "c1", "type": "code", "data": {"codeJS": "return 42"}}], "edges": []}
 
-proc read(asker: string): string {.nimcall, gcsafe, raises: [].} =
+proc host(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
+  ## A host as scene_code_hooks.nim says one answers.
   {.cast(gcsafe).}:
-    if offered:
-      result = $(%*{"busy": "", "error": "", "done": "", "draft": nil, "ask": true, "save": true})
-
-proc source(what: string): string {.nimcall, gcsafe, raises: [].} =
-  {.cast(gcsafe).}:
-    if what == DraftSource: draft
-    elif what == "clock": $held
-    else: ""
-
-proc act(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
-  {.cast(gcsafe).}:
-    try: asked.add (action, parseJson(args))
-    except CatchableError: asked.add (action, newJNull())
+    if not offered:
+      return if op == "read": "" else: SettingsOffCode
+    case op
+    of "read": $(%*{"busy": "", "error": "", "done": "", "draft": nil, "ask": true, "save": true})
+    of "source": (if arg == "clock": $held else: "")
+    of "draft": draft
+    else:
+      try: asked.add (op, parseJson(arg))
+      except CatchableError: asked.add (op, newJNull())
+      "true"
 
 proc reset() =
   offered = true
   draft = ""
   asked = @[]
-  sceneCodeRead = read
-  sceneCodeSource = source
-  sceneCodeAction = act
+  sceneCode = host
 
 proc testConfig(width = 800, height = 480): FrameConfig =
   FrameConfig(name: "code", mode: "rpios", device: "framebuffer", width: width, height: height, rotate: 0,
@@ -123,11 +120,13 @@ suite "frameos.code":
     check call(%*["code"], "frameos.code('ask', { prompt: 'A clock', scene: { id: 'clock' } })")["value"].getBool()
     check call(%*["code"], "frameos.code('save', { scene: { id: 'clock' }, show: false })")["value"].getBool()
     check call(%*["code"], "frameos.code('clear')")["value"].getBool()
-    check asked.len == 3
-    check asked[0] == ("ask", %*{"prompt": "A clock", "scene": {"id": "clock"}})
-    check asked[1] == ("save", %*{"scene": {"id": "clock"}, "show": false})
+    check asked.len == 3 # the bridge hands the host what the app asked, the host decides
+    # The action rides in the arguments: the request body as the plane takes it.
+    check asked[0] == ("ask", %*{"prompt": "A clock", "scene": {"id": "clock"}, "action": "ask"})
+    check asked[1] == ("save", %*{"scene": {"id": "clock"}, "show": false, "action": "save"})
     check asked[2][0] == "clear"
-    check call(%*["code"], "frameos.code('format')")["error"].getStr() == "frameos.code: no such operation: format"
+    check call(%*["code"], "frameos.code('format')")["value"].getBool()
+    check asked[3][0] == "format"
 
   test "reads and changes nothing while the frame's settings are off its screen":
     offered = false
@@ -137,9 +136,18 @@ suite "frameos.code":
     check asked.len == 0
 
   test "is null where no host reads code":
-    sceneCodeRead = nil
+    sceneCode = nil
     check call(%*["code"], "frameos.code('read')")["value"].kind == JNull
-    check not call(%*["code"], "frameos.code('ask', { prompt: 'x' })")["ok"].getBool()
+    check call(%*["code"], "frameos.code('ask', { prompt: 'x' })")["value"].kind == JNull
+
+  test "the browser preview's host reads the page's scenes, and saves and asks nothing":
+    codePreviewLoaded($(%*[held]))
+    enableCodePreview()
+    check call(%*["code"], "frameos.code('read')")["value"]["previewOnly"].getBool()
+    check call(%*["code"], "frameos.code('source', 'clock')")["value"]["name"].getStr() == "Clock"
+    check call(%*["code"], "frameos.code('source', 'gone')")["value"].kind == JNull
+    check call(%*["code"], "frameos.code('draft')")["value"].kind == JNull
+    check call(%*["code"], "frameos.code('save', { scene: { id: 'x' } })")["value"].getBool()
 
 suite "the Code editor scene":
   setup:
