@@ -3,7 +3,7 @@
     "id": "clock",
     "name": "Clock",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Real time",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0b1020",
