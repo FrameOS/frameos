@@ -437,6 +437,18 @@ proc release(target: UiTarget, pointer: int) =
     if target.captures[i][0] == pointer:
       target.captures.delete(i)
 
+proc hitAt(target: UiTarget, lx, ly: float32, also: UiEvent): int =
+  ## The topmost field, or element with a tap handler or one for `also`,
+  ## under the point; -1 for none, or a `<Scene>` drawn over it there. One
+  ## walk for a tap, a long press, a double tap and a mouse's press.
+  for i in countdown(target.regions.high, 0):
+    template r: untyped = target.regions[i]
+    if r.overScene(lx, ly):
+      return -1
+    if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[also] > 0) and r.inside(lx, ly):
+      return i
+  -1
+
 proc regionOf(target: UiTarget, key: int): int =
   ## The last render's region for the element at `key`, -1 when it drew none.
   for i in 0 ..< target.regions.len:
@@ -1355,14 +1367,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             # A mouse (or a pen) on a field: it has the keyboard at once, the
             # caret where it went down, and a drag from there selects, as on
             # a desktop. Shift extends what was selected.
-            var hit = -1
-            for i in countdown(target.regions.high, 0):
-              let r = target.regions[i]
-              if r.overScene(lx, ly):
-                break
-              if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[uePointerDown] > 0) and r.inside(lx, ly):
-                hit = i
-                break
+            let hit = target.hitAt(lx, ly, uePointerDown)
             if hit >= 0 and target.regions[hit].typesIn and target.input.open == 0:
               let r = target.regions[hit]
               let extend = payload{"shift"}.getBool() and target.input.focus == r.key + 1
@@ -1409,34 +1414,22 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     if (kind == ord(ueLongPress) or kind == ord(ueDoubleClick)) and placed and target.input.open == 0 and
         target.input.accents == 0:
       # On a field, the word there: as on a phone.
-      for i in countdown(target.regions.high, 0):
-        let r = target.regions[i]
-        if r.overScene(lx, ly):
-          break
-        if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[UiEvent(kind)] > 0) and r.inside(lx, ly):
-          if r.typesIn:
-            target.selectWord(r, lx, ly)
-            if kind == ord(ueLongPress):
-              # Still down: a slide from here selects on to where it goes.
-              target.selectPointer = pointer
-              target.selectKept = true
-              target.selectDX = 0
-              target.selectDY = 0
-              if target.dragPointer == pointer:
-                target.dragKey = -1 # no scroll of the box around it
-            moved = true
-          break
+      let hit = target.hitAt(lx, ly, UiEvent(kind))
+      if hit >= 0 and target.regions[hit].typesIn:
+        target.selectWord(target.regions[hit], lx, ly)
+        if kind == ord(ueLongPress):
+          # Still down: a slide from here selects on to where it goes.
+          target.selectPointer = pointer
+          target.selectKept = true
+          target.selectDX = 0
+          target.selectDY = 0
+          if target.dragPointer == pointer:
+            target.dragKey = -1 # no scroll of the box around it
+        moved = true
     if kind == ord(ueClick) and placed:
       # A tap on a field gives it the keyboard; one anywhere else but the
       # keyboard takes it away, and then does what it does.
-      var hit = -1
-      for i in countdown(target.regions.high, 0):
-        let r = target.regions[i]
-        if r.overScene(lx, ly):
-          break
-        if (r.field > 0 or r.handlers[ueClick] > 0) and r.inside(lx, ly):
-          hit = i
-          break
+      let hit = target.hitAt(lx, ly, ueClick)
       if target.input.accents > 0 and (hit < 0 or
           target.regions[hit].handlers[ueClick] - 1 < AccentBase or
           target.regions[hit].handlers[ueClick] - 1 >= SelectBase):
