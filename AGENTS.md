@@ -118,6 +118,11 @@
   ESP32 image via `tools/prelude_bytecode.nim`) and handed to each program.
   A helper the glue needs goes there, not into each program's text, which
   the device parses at every scene start.
+  Seven small built-in apps (`ProgramApps`: ifElse, setAsState, log,
+  parseJson, …) are no Nim app on a frame: the program runs them as
+  JavaScript (`"program": true` in their config.json keeps them out of the
+  registry; doc section "Program apps"). Their Nim modules stay for compiled
+  scenes.
 
 ## Scene events: the contract is `docs/events-contract.json`
 

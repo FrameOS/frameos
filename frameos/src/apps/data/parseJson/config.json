@@ -2,6 +2,7 @@
   "name": "Parse JSON",
   "description": "Parse a text string and convert to JSON",
   "category": "data",
+  "program": true,
   "version": "1.0.0",
   "fields": [
     {

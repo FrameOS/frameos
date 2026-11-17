@@ -69,6 +69,10 @@
           },
           "type": "array"
         },
+        "program": {
+          "description": "A built-in app the scene's program runs itself, as JavaScript (frameos/scene_compiler.nim `ProgramApps`): no Nim app on a frame",
+          "type": "boolean"
+        },
         "settings": {
           "description": "List of top level settings exported for this app",
           "items": {

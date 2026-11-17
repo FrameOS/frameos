@@ -802,3 +802,32 @@ are each a few KB. One function was not: `jsAssets` grew 9.3 KB to 14.8 KB.*
   compares every code point with std/unicode.
 - Still on the table: `--panics:on` (−149 KB, "Measured, needs a decision"
   above).
+
+---
+
+# Program apps (2026-11-17)
+
+*Same recipe; main at 6a1aec4b9 builds at 3,285,312 bytes.*
+
+**3,285,312 → 3,280,448 bytes (−4,864).** Seven small built-in apps
+(`logic/ifElse`, `breakIfRendering`, `nextSleepDuration`, `setAsState`,
+`data/log`, `parseJson`, `prettyJson`) are run by the scene's program as
+JavaScript and left out of the registry (docs/scene-compiler.md "Program
+apps").
+
+| | Bytes |
+|---|---:|
+| the seven apps: loaders, code, destroy hooks, literals, registry rows, `toPretty` | −8,650 |
+| the kit's `AP` (all seven apps' JavaScript, bytecode) | +1,760 |
+| the compiler: a config constant, an input as a key, one call per node | +1,690 |
+| three natives (`sw`, `ns`, `ir`) | +340 |
+
+- **The first version cost bytes** (+720 net): the compiler resolved each
+  app's config, converted its inputs and wrote its lines from Nim, 7.4 KB of
+  emitter for 6.7 KB of apps. Written once in the kit, the same work is
+  1.8 KB of bytecode. A program app is worth it only when its work is a few
+  lines of JavaScript.
+- `data/clock` stays (with std/times' `formatPattern`, 3.8 KB, which nothing
+  else uses): its `HH:mm` patterns would need a translator on the device.
+  Converting stored scenes to chrono's `{hour/2}:{minute/2}` on the control
+  planes and a JS-only clock is the way to take it.

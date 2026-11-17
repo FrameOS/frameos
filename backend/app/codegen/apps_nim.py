@@ -309,6 +309,11 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
         config_path = app_dir / "config.json"
         with config_path.open("r") as f:
             config = json.load(f)
+            if config.get("program") is True:
+                # Run by the scene's program itself (frameos/scene_compiler.nim
+                # `ProgramApps`): no registry row, so no Nim code in an image.
+                # The module stays for compiled scenes, which import it.
+                continue
             all_apps[app_id] = config
             app_modules[app_id] = _module_from_app_dir(source_dir, app_dir)
             app_capabilities[app_id] = _app_capabilities(app_dir, config)
