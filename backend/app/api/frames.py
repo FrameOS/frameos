@@ -317,19 +317,28 @@ def _task_id_param(task_id: str | None) -> str | None:
     return value
 
 
-def _frame_assets_cache_key(frame_id: int, assets_path: str) -> str:
+def _frame_assets_cache_key(
+    frame_id: int, assets_path: str, storage: str = embedded_assets.ASSETS_STORAGE
+) -> str:
+    """One cached listing per frame, assets root and storage. The assets
+    folder keeps the key it always had; another storage (an ESP32's internal
+    flash) gets one of its own."""
     path_hash = hashlib.sha1(assets_path.encode()).hexdigest()
-    return f"frame:{frame_id}:assets:list:{path_hash}"
+    if storage == embedded_assets.ASSETS_STORAGE:
+        return f"frame:{frame_id}:assets:list:{path_hash}"
+    return f"frame:{frame_id}:assets:{storage}:list:{path_hash}"
 
 
-def _frame_assets_cache_lock_key(frame_id: int, assets_path: str) -> str:
-    path_hash = hashlib.sha1(assets_path.encode()).hexdigest()
-    return f"frame:{frame_id}:assets:list:{path_hash}:refreshing"
+def _frame_assets_cache_lock_key(
+    frame_id: int, assets_path: str, storage: str = embedded_assets.ASSETS_STORAGE
+) -> str:
+    return f"{_frame_assets_cache_key(frame_id, assets_path, storage)}:refreshing"
 
 
-def _frame_assets_cache_invalidated_key(frame_id: int, assets_path: str) -> str:
-    path_hash = hashlib.sha1(assets_path.encode()).hexdigest()
-    return f"frame:{frame_id}:assets:list:{path_hash}:invalidated"
+def _frame_assets_cache_invalidated_key(
+    frame_id: int, assets_path: str, storage: str = embedded_assets.ASSETS_STORAGE
+) -> str:
+    return f"{_frame_assets_cache_key(frame_id, assets_path, storage)}:invalidated"
 
 
 def _frame_states_cache_key(frame_id: int) -> str:
@@ -425,6 +434,10 @@ async def _read_frame_assets_cache(redis: Redis, cache_key: str) -> dict[str, An
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get("assets"), list):
         return None
+    if not isinstance(payload.get("storages"), list):
+        # Written before listings named their storages: ask the frame again,
+        # or an ESP32's internal storage stays hidden until the next refresh.
+        return None
     return payload
 
 
@@ -444,9 +457,13 @@ async def _write_frame_assets_cache(
         # a card that comes back shows up on the very next listing.
         await redis.delete(cache_key)
         return cache_time
-    payload: dict[str, Any] = {"assets": listing.assets, "fetched_at": cache_time}
-    if listing.storage is not None:
-        payload["storage"] = listing.storage
+    payload: dict[str, Any] = {
+        "assets": listing.assets,
+        "fetched_at": cache_time,
+        "mounted": listing.mounted,
+        "storage": listing.storage,
+        "storages": listing.storages,
+    }
     await redis.set(
         cache_key,
         json.dumps(payload).encode(),
@@ -456,15 +473,44 @@ async def _write_frame_assets_cache(
 
 
 async def _invalidate_frame_assets_cache(redis: Redis, frame: Frame, assets_path: str) -> None:
-    await redis.set(
-        _frame_assets_cache_invalidated_key(frame.id, assets_path),
-        str(time.time()),
-        ex=FRAME_ASSETS_CACHE_TTL_SECONDS,
-    )
-    await redis.delete(
-        _frame_assets_cache_key(frame.id, assets_path),
-        _frame_assets_cache_lock_key(frame.id, assets_path),
-    )
+    """Drop every storage's cached listing, not only the one written: on an
+    ESP32 without a card the assets folder IS the internal flash, so a write
+    to either changes both listings."""
+    now = str(time.time())
+    for storage in embedded_assets.STORAGE_IDS:
+        await redis.set(
+            _frame_assets_cache_invalidated_key(frame.id, assets_path, storage),
+            now,
+            ex=FRAME_ASSETS_CACHE_TTL_SECONDS,
+        )
+        await redis.delete(
+            _frame_assets_cache_key(frame.id, assets_path, storage),
+            _frame_assets_cache_lock_key(frame.id, assets_path, storage),
+        )
+
+
+def _frame_has_storages(frame: Frame) -> bool:
+    """Only an ESP32's own HTTP API knows storages besides its assets folder."""
+    return _is_embedded_frame(frame) and not is_virtual_frame(frame)
+
+
+def _asset_storage(frame: Frame, storage: str | None) -> str:
+    """The storage a request names (``assets`` when none), checked against the
+    two ids there are and against the frame: a Linux or virtual frame has its
+    assets folder and nothing else."""
+    storage_id = embedded_assets.normalize_storage(storage)
+    if storage_id != embedded_assets.ASSETS_STORAGE and not _frame_has_storages(frame):
+        _bad_request(
+            f'This frame has no "{storage_id}" storage: only ESP32 frames have storage '
+            'besides their assets folder, so use storage "assets" (or leave it out)'
+        )
+    return storage_id
+
+
+def _storage_kw(frame: Frame, storage: str) -> dict[str, str]:
+    """The storage argument for the device asset module, which only the
+    ESP32's takes (every other frame was refused anything but `assets`)."""
+    return {"storage": storage} if _frame_has_storages(frame) else {}
 
 
 def _normalise_frame_states_payload(payload: Any) -> dict[str, Any]:
@@ -2124,6 +2170,7 @@ async def _embedded_asset_file_response(
     mode: str,
     filename: str,
     thumb: bool,
+    storage: str = embedded_assets.ASSETS_STORAGE,
 ) -> StreamingResponse:
     """Serve one asset from an embedded frame by proxying the device HTTP API.
 
@@ -2131,9 +2178,11 @@ async def _embedded_asset_file_response(
     cached in redis keyed by the md5 of the original bytes, mirroring the
     SSH/agent code path's `asset:thumb:{md5}` cache."""
     try:
-        data, _device_content_type = await _device_assets(frame).download_asset(frame, redis, full_path)
+        data, _device_content_type = await _device_assets(frame).download_asset(
+            frame, redis, full_path, **_storage_kw(frame, storage)
+        )
     except HTTPException as exc:
-        if exc.status_code == HTTPStatus.NOT_FOUND:
+        if exc.status_code == HTTPStatus.NOT_FOUND and exc.detail != embedded_assets.STORAGE_UNAVAILABLE:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
         raise
 
@@ -2296,6 +2345,7 @@ async def api_frame_get_asset(
     mode = request.query_params.get("mode", "download")
     filename = request.query_params.get("filename", os.path.basename(rel_path))
     thumb = request.query_params.get("thumb") == "1"
+    storage = _asset_storage(frame, request.query_params.get("storage"))
 
     full_path = os.path.normpath(os.path.join(assets_path, rel_path))
     # Trailing separator so "/srv/assets-other" can't pass as "/srv/assets",
@@ -2323,6 +2373,7 @@ async def api_frame_get_asset(
             mode=mode,
             filename=filename,
             thumb=thumb,
+            storage=storage,
         )
 
     if not frame_has_shell_access(frame):
@@ -3039,12 +3090,16 @@ async def _load_frame_assets(
     redis: Redis,
     frame: Frame,
     assets_path: str,
+    storage: str = embedded_assets.ASSETS_STORAGE,
 ) -> embedded_assets.AssetListing:
     if _assets_over_device_http(frame):
-        # Embedded devices report whether their SD card is mounted; virtual
-        # frames answer with a plain list (their store is always there); a
-        # Linux frame reached over its admin API lists through that.
-        return _as_asset_listing(await _device_assets(frame).list_assets(frame, redis))
+        # Embedded devices report whether their SD card is mounted and which
+        # storages they have; virtual frames answer with a plain list (their
+        # store is always there); a Linux frame reached over its admin API
+        # lists through that.
+        return _as_asset_listing(
+            await _device_assets(frame).list_assets(frame, redis, **_storage_kw(frame, storage))
+        )
 
     if _frame_admin_api_available(frame):
         try:
@@ -3131,15 +3186,31 @@ async def _load_frame_assets_folder(
     frame: Frame,
     assets_path: str,
     folder_full: str,
-) -> list[dict[str, Any]]:
-    """One folder's direct children. Over SSH this is a bounded `find`, the
-    reason the panel loads a folder at a time: a card with thousands of
-    photos used to be walked whole (and its listing polled) on every visit.
-    The other sources answer with a full listing in one call anyway, so the
-    folder is cut out of that."""
+    storage: str = embedded_assets.ASSETS_STORAGE,
+) -> embedded_assets.AssetListing:
+    """One folder's direct children, with the storage state of a full
+    listing (`_load_frame_assets_folder_entries` is the folder itself)."""
     if _assets_over_device_http(frame):
-        listing = await _load_frame_assets(db, redis, frame, assets_path)
-        return _direct_children(listing.assets, folder_full)
+        listing = await _load_frame_assets(db, redis, frame, assets_path, storage)
+        listing.assets = _direct_children(listing.assets, folder_full)
+        return listing
+    return _as_asset_listing(
+        await _load_frame_assets_folder_entries(db, redis, frame, assets_path, folder_full)
+    )
+
+
+async def _load_frame_assets_folder_entries(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    assets_path: str,
+    folder_full: str,
+) -> list[dict[str, Any]]:
+    """One folder's direct children on a frame with a shell. Over SSH this is
+    a bounded `find`, the reason the panel loads a folder at a time: a card
+    with thousands of photos used to be walked whole (and its listing polled)
+    on every visit. The other sources answer with a full listing in one call
+    anyway, so the folder is cut out of that."""
 
     # A frame whose admin session the backend holds lists its own folder
     # over one HTTP GET (the runtime walks the directory itself); SSH and the
@@ -3193,6 +3264,7 @@ async def _refresh_frame_assets_cache(
     lock_key: str,
     invalidated_key: str,
     started_at: float,
+    storage: str = embedded_assets.ASSETS_STORAGE,
 ) -> None:
     redis = create_redis_connection()
     db = SessionLocal()
@@ -3201,7 +3273,7 @@ async def _refresh_frame_assets_cache(
         frame = db.get(Frame, frame_id)
         if frame is None:
             return
-        listing = await _load_frame_assets(db, redis, frame, assets_path)
+        listing = await _load_frame_assets(db, redis, frame, assets_path, storage)
         invalidated_at = await redis.get(invalidated_key)
         if invalidated_at:
             invalidated_at = (
@@ -3232,8 +3304,9 @@ async def _schedule_frame_assets_cache_refresh(
     assets_path: str,
     cache_key: str,
     lock_key: str,
+    storage: str = embedded_assets.ASSETS_STORAGE,
 ) -> bool:
-    invalidated_key = _frame_assets_cache_invalidated_key(frame_id, assets_path)
+    invalidated_key = _frame_assets_cache_invalidated_key(frame_id, assets_path, storage)
     started_at = time.time()
     acquired = await redis.set(
         lock_key,
@@ -3250,6 +3323,7 @@ async def _schedule_frame_assets_cache_refresh(
                 lock_key,
                 invalidated_key,
                 started_at,
+                storage,
             )
         )
     return True
@@ -3270,33 +3344,50 @@ def _frame_assets_cache_meta(
     }
 
 
+def _frame_assets_listing_fields(listing: embedded_assets.AssetListing) -> dict[str, Any]:
+    return {
+        "assets": listing.assets,
+        # None for every source that says nothing about a card (SSH, agent,
+        # virtual, pre-flag firmware) — the UI only warns on False.
+        "mounted": listing.mounted,
+        "storage": listing.storage,
+        "storages": listing.storages,
+    }
+
+
 @api_project.get("/frames/{id:int}/assets", response_model=FrameAssetsResponse)
 async def api_frame_get_assets(
     id: int,
     refresh: bool = Query(False),
     folder: str | None = Query(None),
+    storage: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
+    """The frame's assets. ``storage`` picks which of its places
+    (``assets``, the default, or an ESP32's ``internal`` flash); the answer
+    names it (``storage``), every place the frame has (``storages``, id and
+    display name) and whether a card is mounted (``mounted``, null when the
+    frame does not say)."""
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
 
+    storage_id = _asset_storage(frame, storage)
     assets_path = frame.assets_path or "/srv/assets"
     if folder is not None:
         # One folder at a time, uncached: the panel asks for a folder when it
         # is opened, and the answer says which folder it is so an older
         # server's full listing (no `folder` key) is still told apart.
         folder_full = _normalize_asset_folder(assets_path, folder)
-        assets = await _load_frame_assets_folder(db, redis, frame, assets_path, folder_full)
+        listing = await _load_frame_assets_folder(db, redis, frame, assets_path, folder_full, storage_id)
         return {
-            "assets": assets,
+            **_frame_assets_listing_fields(listing),
             "folder": folder,
-            "storage": None,
             "cache": _frame_assets_cache_meta(cached=False, refreshing=False, fetched_at=time.time()),
         }
-    cache_key = _frame_assets_cache_key(frame.id, assets_path)
-    lock_key = _frame_assets_cache_lock_key(frame.id, assets_path)
+    cache_key = _frame_assets_cache_key(frame.id, assets_path, storage_id)
+    lock_key = _frame_assets_cache_lock_key(frame.id, assets_path, storage_id)
     cached = None if refresh else await _read_frame_assets_cache(redis, cache_key)
 
     if cached is not None:
@@ -3309,11 +3400,14 @@ async def api_frame_get_assets(
                 assets_path,
                 cache_key,
                 lock_key,
+                storage_id,
             )
-        cached_storage = cached.get("storage")
+        cached_mounted = cached.get("mounted")
         return {
             "assets": cached["assets"],
-            "storage": cached_storage if isinstance(cached_storage, dict) else None,
+            "mounted": cached_mounted if isinstance(cached_mounted, bool) else None,
+            "storage": storage_id,
+            "storages": cached["storages"],
             "cache": _frame_assets_cache_meta(
                 cached=True,
                 refreshing=refreshing,
@@ -3321,13 +3415,10 @@ async def api_frame_get_assets(
             ),
         }
 
-    listing = await _load_frame_assets(db, redis, frame, assets_path)
+    listing = await _load_frame_assets(db, redis, frame, assets_path, storage_id)
     fetched_at = await _write_frame_assets_cache(redis, cache_key, listing)
     return {
-        "assets": listing.assets,
-        # None for every source that says nothing about its storage (SSH,
-        # agent, virtual, pre-flag firmware) — the UI only warns on False.
-        "storage": listing.storage,
+        **_frame_assets_listing_fields(listing),
         "cache": _frame_assets_cache_meta(
             cached=False,
             refreshing=False,
@@ -3338,11 +3429,17 @@ async def api_frame_get_assets(
 
 @api_project.post("/frames/{id:int}/assets/sync")
 async def api_frame_assets_sync(
-    id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    id: int,
+    storage: str | None = Query(None),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id)
     if frame is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    if _asset_storage(frame, storage) != embedded_assets.ASSETS_STORAGE:
+        # The renderer looks for fonts in the assets folder alone.
+        _bad_request('Fonts are synced to the assets folder, where scenes find them: use storage "assets"')
     if is_virtual_frame(frame):
         # Nowhere to sync to: a virtual frame renders in the browser with the
         # fonts bundled into the wasm build.
@@ -3357,7 +3454,6 @@ async def api_frame_assets_sync(
         # card there is no filesystem at all, and saying so beats pretending
         # the sync worked.
         from app.models.assets import sync_embedded_font_assets
-        from app.utils import embedded_assets
 
         listing = await embedded_assets.list_assets(frame, redis)
         if listing.mounted is False:
@@ -3408,11 +3504,13 @@ async def api_frame_assets_upload_image(
     id: int,
     request: Request,
     file: UploadFile = File(...),
+    storage: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     frame = _project_frame(db, id) or _not_found()
+    storage_id = _asset_storage(frame, storage)
 
     data = await read_upload_limited(file, MAX_ASSET_UPLOAD_BYTES)
     if not data:
@@ -3435,7 +3533,9 @@ async def api_frame_assets_upload_image(
     if _assets_over_device_http(frame):
         # The device API creates parent dirs and replaces in place; the
         # md5-derived filename keeps re-uploads of identical bytes idempotent.
-        await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
+        await _device_assets(frame).upload_asset(
+            frame, redis, combined_path, data, **_storage_kw(frame, storage_id)
+        )
         uploaded = True
     else:
         await make_dir(db, redis, frame, upload_dir)
@@ -3481,10 +3581,17 @@ def _asset_upload_combined_path(frame: Frame, subdir: str, filename: str) -> tup
 
 
 async def _asset_upload_store(
-    db: Session, redis: Redis, frame: Frame, combined_path: str, data: bytes
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    combined_path: str,
+    data: bytes,
+    storage: str = embedded_assets.ASSETS_STORAGE,
 ) -> None:
     if _assets_over_device_http(frame):
-        await _device_assets(frame).upload_asset(frame, redis, combined_path, data)
+        await _device_assets(frame).upload_asset(
+            frame, redis, combined_path, data, **_storage_kw(frame, storage)
+        )
     else:
         await upload_file(db, redis, frame, combined_path, data)
 
@@ -3523,6 +3630,7 @@ async def _chunked_asset_upload(
     upload_id = qp.get("upload_id") or ""
     if not embedded_assets.valid_upload_id(upload_id):
         _bad_request("Invalid upload id")
+    storage = _asset_storage(frame, qp.get("storage"))
     filename = os.path.basename((qp.get("filename") or "").strip()) or "uploaded_file"
     try:
         chunk_index = int(qp.get("chunk_index") or "0")
@@ -3559,6 +3667,7 @@ async def _chunked_asset_upload(
             chunk_index=chunk_index,
             offset=offset,
             complete=complete,
+            storage=storage,
         )
         if payload is not None:
             if not complete:
@@ -3602,7 +3711,7 @@ async def _chunked_asset_upload(
     with open(part_path, "rb") as fh:
         data = fh.read()
     os.unlink(part_path)
-    await _asset_upload_store(db, redis, frame, combined_path, data)
+    await _asset_upload_store(db, redis, frame, combined_path, data, storage)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
     rel = os.path.relpath(combined_path, assets_path)
     return {
@@ -3633,6 +3742,7 @@ async def api_frame_assets_upload(
     if "upload_id" in request.query_params:
         return await _chunked_asset_upload(request, frame, db, redis)
 
+    storage = _asset_storage(frame, request.query_params.get("storage"))
     reject_oversized_content_length(request, MAX_ASSET_UPLOAD_BYTES)
     form = await request.form()
     upload = form.get("file")
@@ -3643,7 +3753,7 @@ async def api_frame_assets_upload(
     )
 
     data = await read_upload_limited(upload, MAX_ASSET_UPLOAD_BYTES)
-    await _asset_upload_store(db, redis, frame, combined_path, data)
+    await _asset_upload_store(db, redis, frame, combined_path, data, storage)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
 
     rel = os.path.relpath(combined_path, assets_path)
@@ -3659,10 +3769,12 @@ async def api_frame_assets_upload(
 async def api_frame_assets_mkdir(
     id: int,
     path: str = Form(...),
+    storage: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
+    storage_id = _asset_storage(frame, storage)
 
     rel_path = path.lstrip("/")
     if ".." in rel_path or "*" in rel_path or os.path.isabs(rel_path):
@@ -3677,7 +3789,7 @@ async def api_frame_assets_mkdir(
         _bad_request("Invalid asset path")
 
     if _assets_over_device_http(frame):
-        await _device_assets(frame).make_dir(frame, redis, full_path)
+        await _device_assets(frame).make_dir(frame, redis, full_path, **_storage_kw(frame, storage_id))
     else:
         await make_dir(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
@@ -3688,10 +3800,12 @@ async def api_frame_assets_mkdir(
 async def api_frame_assets_delete(
     id: int,
     path: str = Form(...),
+    storage: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
+    storage_id = _asset_storage(frame, storage)
 
     rel_path = path.lstrip("/")
     if ".." in rel_path or "*" in rel_path or os.path.isabs(rel_path):
@@ -3706,7 +3820,7 @@ async def api_frame_assets_delete(
         _bad_request("Invalid asset path")
 
     if _assets_over_device_http(frame):
-        await _device_assets(frame).delete_path(frame, redis, full_path)
+        await _device_assets(frame).delete_path(frame, redis, full_path, **_storage_kw(frame, storage_id))
     else:
         await delete_path(db, redis, frame, full_path)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)
@@ -3718,10 +3832,12 @@ async def api_frame_assets_rename(
     id: int,
     src: str = Form(...),
     dst: str = Form(...),
+    storage: str | None = Query(None),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     frame = _project_frame(db, id) or _not_found()
+    storage_id = _asset_storage(frame, storage)
 
     s_rel = src.lstrip("/")
     d_rel = dst.lstrip("/")
@@ -3739,7 +3855,9 @@ async def api_frame_assets_rename(
         _bad_request("Invalid asset path")
 
     if _assets_over_device_http(frame):
-        await _device_assets(frame).rename_path(frame, redis, src_full, dst_full)
+        await _device_assets(frame).rename_path(
+            frame, redis, src_full, dst_full, **_storage_kw(frame, storage_id)
+        )
     else:
         await rename_path(db, redis, frame, src_full, dst_full)
     await _invalidate_frame_assets_cache(redis, frame, assets_path)

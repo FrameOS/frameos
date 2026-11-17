@@ -101,7 +101,7 @@ async def test_list_assets_unmounted_sd_card_reports_storage_state(async_client,
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["assets"] == []
-    assert payload["storage"] == {"mounted": False}
+    assert payload["mounted"] is False
     # Nothing cached: 30 days of "no assets" is the bug this fixes.
     assert await redis.get(cache_key) is None
 
@@ -121,7 +121,7 @@ async def test_unmounted_listing_does_not_replace_a_good_cached_listing(async_cl
         response = await async_client.get(f'/api/frames/{frame.id}/assets?refresh=1')
 
     assert response.status_code == 200, response.text
-    assert response.json()["storage"] == {"mounted": False}
+    assert response.json()["mounted"] is False
     assert await redis.get(cache_key) is None
 
 
@@ -143,13 +143,13 @@ async def test_list_assets_returning_card_shows_files_on_the_next_request(async_
         after_reinsert = await async_client.get(f'/api/frames/{frame.id}/assets')
 
     assert while_unmounted.json()["assets"] == []
-    assert while_unmounted.json()["storage"] == {"mounted": False}
+    assert while_unmounted.json()["mounted"] is False
     assert len(device.calls) == 2  # the device is re-asked, not served from cache
     payload = after_reinsert.json()
     assert payload["assets"] == [
         {"path": "/srv/assets/photo.jpg", "size": 10, "mtime": 200, "is_dir": False},
     ]
-    assert payload["storage"] == {"mounted": True}
+    assert payload["mounted"] is True
 
 
 @pytest.mark.asyncio
@@ -166,9 +166,9 @@ async def test_list_assets_mounted_card_is_cached_with_storage_state(async_clien
         first = await async_client.get(f'/api/frames/{frame.id}/assets')
         second = await async_client.get(f'/api/frames/{frame.id}/assets')
 
-    assert first.json()["storage"] == {"mounted": True}
+    assert first.json()["mounted"] is True
     assert second.json()["cache"]["cached"] is True
-    assert second.json()["storage"] == {"mounted": True}
+    assert second.json()["mounted"] is True
     assert len(device.calls) == 1
 
 
@@ -185,12 +185,12 @@ async def test_list_assets_without_mounted_flag_keeps_old_behaviour(async_client
         first = await async_client.get(f'/api/frames/{frame.id}/assets')
         second = await async_client.get(f'/api/frames/{frame.id}/assets')
 
-    assert first.json()["storage"] is None
+    assert first.json()["mounted"] is None
     assert first.json()["assets"] == [
         {"path": "/srv/assets/a.txt", "size": 1, "mtime": 1, "is_dir": False},
     ]
     assert second.json()["cache"]["cached"] is True
-    assert second.json()["storage"] is None
+    assert second.json()["mounted"] is None
     assert len(device.calls) == 1
 
 
@@ -206,7 +206,7 @@ async def test_empty_mounted_card_is_cached_as_empty(async_client, db, redis):
         response = await async_client.get(f'/api/frames/{frame.id}/assets')
 
     assert response.json()["assets"] == []
-    assert response.json()["storage"] == {"mounted": True}
+    assert response.json()["mounted"] is True
     assert await redis.get(cache_key) is not None
 
 
@@ -865,3 +865,327 @@ async def test_get_asset_active_types_are_downloads_even_in_image_mode(async_cli
         assert f'filename="{name}"' in disposition
         assert response.headers["content-security-policy"] == "default-src 'none'; sandbox"
         assert response.headers["x-content-type-options"] == "nosniff"
+
+
+# ---------------------------------------------------------------------------
+# storages: the assets folder and an ESP32's internal flash
+# ---------------------------------------------------------------------------
+
+TWO_STORAGES = [{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal storage"}]
+OLD_FIRMWARE_STORAGES = [{"id": "assets", "name": "Internal storage"}]
+
+
+def storage_unavailable_response():
+    return 404, b'{"error":"storage_unavailable"}', {"content-type": "application/json"}
+
+
+@pytest.mark.asyncio
+async def test_list_internal_storage_asks_the_device_for_it(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({
+            "assets": [{"path": "notes.txt", "size": 5, "mtime": 10, "is_dir": False}],
+            "storages": TWO_STORAGES,
+            "storage": "internal",
+        })
+    ])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    # Same assets-root prefix whichever storage it is: paths stay relative to
+    # the storage on the wire.
+    assert payload["assets"] == [{"path": "/srv/assets/notes.txt", "size": 5, "mtime": 10, "is_dir": False}]
+    assert payload["storage"] == "internal"
+    assert payload["storages"] == TWO_STORAGES
+    assert device.calls[0]["path"] == f"/api/frames/{frame.id}/assets?storage=internal"
+
+
+@pytest.mark.asyncio
+async def test_default_listing_names_the_devices_storages(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [], "mounted": True, "storages": TWO_STORAGES, "storage": "assets"})])
+
+    with patch(FETCH, new=device):
+        first = await async_client.get(f'/api/frames/{frame.id}/assets')
+        cached = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert first.json()["storage"] == "assets"
+    assert first.json()["storages"] == TWO_STORAGES
+    assert cached.json()["cache"]["cached"] is True
+    assert cached.json()["storages"] == TWO_STORAGES
+    assert cached.json()["mounted"] is True
+    # The default never puts a storage in the URL older firmware gets.
+    assert device.calls[0]["path"] == f"/api/frames/{frame.id}/assets"
+
+
+@pytest.mark.asyncio
+async def test_device_without_a_card_lists_internal_alone(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    internal_only = [{"id": "internal", "name": "Internal storage"}]
+    device = FakeDevice([json_response({"assets": [], "storages": internal_only, "storage": "assets"})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    # `assets` is always there: with no card it is the same flash.
+    assert response.status_code == 200, response.text
+    assert response.json()["storage"] == "assets"
+    assert response.json()["storages"] == internal_only
+
+
+@pytest.mark.asyncio
+async def test_older_firmware_listing_defaults_its_storages(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [], "mounted": True})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.json()["storage"] == "assets"
+    assert response.json()["storages"] == OLD_FIRMWARE_STORAGES
+
+
+@pytest.mark.asyncio
+async def test_older_firmware_never_passes_its_assets_off_as_internal(async_client, db, redis):
+    # Firmware that predates storages ignores the parameter and lists its
+    # assets folder: that answer must not read as the internal storage.
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([json_response({"assets": [{"path": "a.jpg", "size": 1, "mtime": 1, "is_dir": False}]})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "storage_unavailable"
+    assert await redis.get(frames_api._frame_assets_cache_key(frame.id, "/srv/assets", "internal")) is None
+
+
+@pytest.mark.asyncio
+async def test_device_storage_unavailable_is_a_404(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([storage_unavailable_response(), storage_unavailable_response()])
+
+    with patch(FETCH, new=device):
+        listing = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+        file = await async_client.get(asset_url(async_client, frame, "path=a.txt&storage=internal"))
+
+    assert listing.status_code == 404
+    assert listing.json()["detail"] == "storage_unavailable"
+    # Not "Asset not found": the storage is what is missing.
+    assert file.status_code == 404
+    assert file.json()["detail"] == "storage_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_listing_cache_is_kept_per_storage(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({"assets": [{"path": "card.jpg", "size": 1, "mtime": 1, "is_dir": False}],
+                       "storages": TWO_STORAGES, "storage": "assets"}),
+        json_response({"assets": [{"path": "flash.txt", "size": 2, "mtime": 2, "is_dir": False}],
+                       "storages": TWO_STORAGES, "storage": "internal"}),
+    ])
+
+    with patch(FETCH, new=device):
+        card = await async_client.get(f'/api/frames/{frame.id}/assets')
+        flash = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+        card_again = await async_client.get(f'/api/frames/{frame.id}/assets?storage=assets')
+        flash_again = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+
+    assert [a["path"] for a in card.json()["assets"]] == ["/srv/assets/card.jpg"]
+    assert [a["path"] for a in flash.json()["assets"]] == ["/srv/assets/flash.txt"]
+    assert card_again.json()["assets"] == card.json()["assets"] and card_again.json()["cache"]["cached"] is True
+    assert flash_again.json()["assets"] == flash.json()["assets"] and flash_again.json()["cache"]["cached"] is True
+    assert flash_again.json()["storage"] == "internal"
+    assert len(device.calls) == 2
+    assets_key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets")
+    internal_key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets", "internal")
+    assert assets_key != internal_key
+    assert await redis.get(assets_key) is not None and await redis.get(internal_key) is not None
+
+
+@pytest.mark.asyncio
+async def test_a_write_to_one_storage_invalidates_every_storage(async_client, db, redis):
+    # Without a card the assets folder IS the internal flash, so a write to
+    # either changes both listings.
+    frame = await create_embedded_frame(async_client, db)
+    keys = [frames_api._frame_assets_cache_key(frame.id, "/srv/assets", s) for s in ("assets", "internal")]
+    for key in keys:
+        await frames_api._write_frame_assets_cache(redis, key, [])
+        assert await redis.get(key) is not None
+
+    device = FakeDevice([json_response({"ok": True})])
+    with patch(FETCH, new=device):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/assets/mkdir?storage=internal',
+            data={"path": "notes"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert device.calls[0]["path"] == f"/api/frames/{frame.id}/assets/mkdir?storage=internal"
+    assert parse_qs(device.calls[0]["body"]) == {"path": ["notes"]}
+    for key in keys:
+        assert await redis.get(key) is None
+
+
+@pytest.mark.asyncio
+async def test_internal_storage_reaches_every_device_write(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({"path": "sub/pic.png", "size": 3, "mtime": 1, "is_dir": False}),
+        json_response({"ok": True}),
+        json_response({"ok": True}),
+        (200, b"abc", {"content-type": "image/png"}),
+    ])
+
+    with patch(FETCH, new=device):
+        upload = await async_client.post(
+            f'/api/frames/{frame.id}/assets/upload?storage=internal',
+            data={"path": "sub"},
+            files={"file": ("pic.png", b"abc", "image/png")},
+        )
+        rename = await async_client.post(
+            f'/api/frames/{frame.id}/assets/rename?storage=internal',
+            data={"src": "sub/pic.png", "dst": "sub/pic2.png"},
+        )
+        delete = await async_client.post(
+            f'/api/frames/{frame.id}/assets/delete?storage=internal',
+            data={"path": "sub/pic2.png"},
+        )
+        fetched = await async_client.get(asset_url(async_client, frame, "path=sub/pic.png&storage=internal"))
+
+    assert [r.status_code for r in (upload, rename, delete, fetched)] == [200, 200, 200, 200]
+    assert _device_query(device.calls[0]) == {"path": "sub/pic.png", "storage": "internal"}
+    assert device.calls[1]["path"] == f"/api/frames/{frame.id}/assets/rename?storage=internal"
+    assert parse_qs(device.calls[1]["body"]) == {"src": ["sub/pic.png"], "dst": ["sub/pic2.png"]}
+    assert device.calls[2]["path"] == f"/api/frames/{frame.id}/assets/delete?storage=internal"
+    assert _device_query(device.calls[3]) == {"path": "sub/pic.png", "storage": "internal"}
+    assert device.calls[3]["path"].startswith(f"/api/frames/{frame.id}/asset?")
+
+
+@pytest.mark.asyncio
+async def test_chunked_upload_to_internal_storage_forwards_it_on_each_chunk(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([
+        json_response({"pending": True, "received": 4}),
+        json_response({"path": "big.bin", "size": 6, "mtime": 1, "is_dir": False}),
+    ])
+
+    with patch(FETCH, new=device):
+        first = await async_client.post(
+            _chunk_url(frame.id, "flash1", "big.bin", 0, 0, False) + "&storage=internal",
+            content=b"aaaa", headers={"Content-Type": "application/octet-stream"},
+        )
+        last = await async_client.post(
+            _chunk_url(frame.id, "flash1", "big.bin", 1, 4, True) + "&storage=internal",
+            content=b"bb", headers={"Content-Type": "application/octet-stream"},
+        )
+
+    assert first.status_code == 200 and last.status_code == 200, (first.text, last.text)
+    for call in device.calls:
+        query = _device_query(call)
+        assert query["storage"] == "internal"
+        assert query["upload_id"] == "flash1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("storage", ["sd", "../assets", "internal/../x", "ASSETS"])
+async def test_unknown_storage_is_refused_before_the_device(async_client, db, redis, storage):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([])
+    encoded = quote(storage, safe="")
+
+    with patch(FETCH, new=device):
+        listing = await async_client.get(f'/api/frames/{frame.id}/assets?storage={encoded}')
+        mkdir = await async_client.post(f'/api/frames/{frame.id}/assets/mkdir?storage={encoded}', data={"path": "x"})
+        file = await async_client.get(asset_url(async_client, frame, f"path=a.txt&storage={encoded}"))
+
+    for response in (listing, mkdir, file):
+        assert response.status_code == 400, response.text
+        assert "Unknown storage" in response.json()["detail"]
+    assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_linux_frame_has_only_its_assets_folder(async_client, db, redis):
+    from app.models import new_frame
+
+    frame = await new_frame(db, redis, "Linux Assets Frame", "localhost", "localhost")
+    listed = [{"path": "/srv/assets/a.jpg", "size": 1, "mtime": 1, "is_dir": False}]
+
+    with patch("app.api.frames._frame_admin_api_available", return_value=False), \
+            patch("app.api.frames._use_remote", new=AsyncMock(return_value=True)), \
+            patch("app.api.frames.assets_list_on_frame", new=AsyncMock(return_value=listed)) as remote_list, \
+            patch("app.api.frames.make_dir", new=AsyncMock()) as remote_mkdir, \
+            patch("app.api.frames.upload_file", new=AsyncMock()) as remote_upload:
+        default = await async_client.get(f'/api/frames/{frame.id}/assets?storage=assets')
+        internal = await async_client.get(f'/api/frames/{frame.id}/assets?storage=internal')
+        mkdir = await async_client.post(f'/api/frames/{frame.id}/assets/mkdir?storage=internal', data={"path": "x"})
+        upload = await async_client.post(
+            f'/api/frames/{frame.id}/assets/upload?storage=internal',
+            files={"file": ("a.txt", b"a", "text/plain")},
+        )
+        file = await async_client.get(asset_url(async_client, frame, "path=a.jpg&storage=internal"))
+        sync = await async_client.post(f'/api/frames/{frame.id}/assets/sync?storage=internal')
+
+    assert default.status_code == 200, default.text
+    assert default.json()["assets"] == listed
+    assert default.json()["storage"] == "assets"
+    assert default.json()["storages"] == OLD_FIRMWARE_STORAGES
+    assert default.json()["mounted"] is None
+    for response in (internal, mkdir, upload, file, sync):
+        assert response.status_code == 400, response.text
+        assert 'no "internal" storage' in response.json()["detail"]
+    remote_list.assert_awaited_once()
+    remote_mkdir.assert_not_awaited()
+    remote_upload.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_virtual_frame_refuses_internal_storage(async_client, db, redis):
+    response = await async_client.post('/api/frames/new', json={
+        'name': 'Virtual Storage Frame',
+        'frame_host': '',
+        'server_host': 'localhost',
+        'mode': 'embedded',
+        'platform': 'virtual',
+    })
+    assert response.status_code == 200, response.text
+    frame_id = response.json()['frame']['id']
+
+    internal = await async_client.get(f'/api/frames/{frame_id}/assets?storage=internal')
+    default = await async_client.get(f'/api/frames/{frame_id}/assets')
+
+    assert internal.status_code == 400
+    assert default.status_code == 200, default.text
+    assert default.json()["storages"] == OLD_FIRMWARE_STORAGES
+
+
+@pytest.mark.asyncio
+async def test_fonts_sync_only_to_the_assets_folder(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    device = FakeDevice([])
+
+    with patch(FETCH, new=device):
+        response = await async_client.post(f'/api/frames/{frame.id}/assets/sync?storage=internal')
+
+    assert response.status_code == 400
+    assert device.calls == []
+
+
+@pytest.mark.asyncio
+async def test_old_cache_entries_without_storages_are_asked_again(async_client, db, redis):
+    frame = await create_embedded_frame(async_client, db)
+    key = frames_api._frame_assets_cache_key(frame.id, "/srv/assets")
+    import time as _time
+    await redis.set(key, json.dumps({"assets": [], "fetched_at": _time.time(), "storage": {"mounted": True}}).encode())
+    device = FakeDevice([json_response({"assets": [], "storages": TWO_STORAGES, "storage": "assets"})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(f'/api/frames/{frame.id}/assets')
+
+    assert response.json()["storages"] == TWO_STORAGES
+    assert len(device.calls) == 1

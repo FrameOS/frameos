@@ -15,6 +15,16 @@ mount):
 * ``POST /api/frames/{id}/assets/delete``             → form ``path=<rel>`` (recursive)
 * ``POST /api/frames/{id}/assets/rename``             → form ``src=<rel>&dst=<rel>``
 
+Every one of them takes an optional ``storage`` query parameter: ``assets``
+(the default, the assets folder: the TF card when one is mounted, else the
+flash) or ``internal`` (the board's flash storage, ``/srv/internal``, only
+where the device lists it). The listing names the places the device has
+(``"storages": [{"id", "name"}]``) and which one it is (``"storage"``); a
+storage the device does not have is ``404 {"error": "storage_unavailable"}``.
+Firmware older than that sends neither key and knows only ``assets``. Paths
+are relative to the chosen storage's root on the wire and carry the same
+``frame.assets_path`` prefix in backend responses whichever storage it is.
+
 The helpers below accept/return the ABSOLUTE paths the rest of the backend
 (and the frontend) already uses — prefixed with ``frame.assets_path`` — and
 convert to device-relative paths on the wire.
@@ -70,6 +80,71 @@ UPLOAD_TIMEOUT = httpx.Timeout(
 _UPLOAD_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,47}$")
 
 
+ASSETS_STORAGE = "assets"
+INTERNAL_STORAGE = "internal"
+# The only ids that ever reach a device URL: a free string never does.
+STORAGE_IDS = (ASSETS_STORAGE, INTERNAL_STORAGE)
+_STORAGE_NAME_MAX = 64
+STORAGE_UNAVAILABLE = "storage_unavailable"
+
+
+def default_storages() -> list[dict[str, str]]:
+    """What a frame has when it names nothing: its assets folder alone (every
+    Linux and virtual frame, and ESP32 firmware older than storages)."""
+    return [{"id": ASSETS_STORAGE, "name": "Internal storage"}]
+
+
+def normalize_storage(value: Optional[str]) -> str:
+    """The storage id a request names, ``assets`` when it names none. Anything
+    but the known ids is a 400, so nothing else is ever put in a device URL."""
+    if value is None:
+        return ASSETS_STORAGE
+    text = str(value).strip()
+    if not text:
+        return ASSETS_STORAGE
+    if text not in STORAGE_IDS:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail='Unknown storage: expected "assets" or "internal"',
+        )
+    return text
+
+
+def storage_unavailable() -> HTTPException:
+    return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=STORAGE_UNAVAILABLE)
+
+
+def _storage_param(storage: str, sep: str) -> str:
+    """``<sep>storage=<id>`` for a storage other than the default, nothing for
+    ``assets`` (so the URLs older firmware gets are the ones it always got)."""
+    storage = normalize_storage(storage)
+    if storage == ASSETS_STORAGE:
+        return ""
+    return f"{sep}storage={_quote_rel(storage)}"
+
+
+def _parse_storages(raw: Any) -> Optional[list[dict[str, str]]]:
+    """The device's ``storages``, known ids only, or None when it sent none
+    (older firmware)."""
+    if not isinstance(raw, list):
+        return None
+    storages: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        storage_id = entry.get("id")
+        if storage_id not in STORAGE_IDS or storage_id in seen:
+            continue
+        name = entry.get("name")
+        name = name.strip()[:_STORAGE_NAME_MAX] if isinstance(name, str) else ""
+        if not name:
+            name = "Internal storage" if storage_id == INTERNAL_STORAGE else "Assets"
+        seen.add(storage_id)
+        storages.append({"id": storage_id, "name": name})
+    return storages
+
+
 def valid_upload_id(upload_id: str) -> bool:
     return bool(_UPLOAD_ID_RE.fullmatch(upload_id or ""))
 
@@ -97,6 +172,10 @@ def to_relative_asset_path(frame: Frame, full_path: str, *, allow_root: bool = F
 
 
 def _device_error(status: int, body: bytes) -> HTTPException:
+    if status == HTTPStatus.NOT_FOUND:
+        payload = _parse_device_payload(body)
+        if payload.get("error") == STORAGE_UNAVAILABLE:
+            return storage_unavailable()
     detail = body.decode("utf-8", errors="replace").strip()
     if status in _PASSTHROUGH_STATUSES:
         return HTTPException(status_code=status, detail=detail or f"Device returned HTTP {status}")
@@ -122,24 +201,26 @@ class AssetListing:
     ``False`` means "the SD card is missing", and that is the one case worth
     telling the user about: an empty list then means "cannot see the card",
     not "the card is empty".
+
+    ``storage`` is which of the frame's places this listing is, ``storages``
+    every place the frame has (the assets folder alone unless an ESP32 says
+    otherwise).
     """
 
     assets: list[dict[str, Any]] = field(default_factory=list)
     mounted: Optional[bool] = None
-
-    @property
-    def storage(self) -> Optional[dict[str, Any]]:
-        """The storage state for API responses, or None when unknown."""
-        return None if self.mounted is None else {"mounted": self.mounted}
+    storage: str = ASSETS_STORAGE
+    storages: list[dict[str, str]] = field(default_factory=default_storages)
 
 
-async def list_assets(frame: Frame, redis: Redis) -> AssetListing:
+async def list_assets(frame: Frame, redis: Redis, storage: str = ASSETS_STORAGE) -> AssetListing:
     """List every file/directory on the device, with paths made absolute so the
     response matches the SSH/agent shape the frontend already renders."""
+    storage = normalize_storage(storage)
     status, body, _headers = await _fetch_frame_http_bytes(
         frame,
         redis,
-        path=f"/api/frames/{frame.id}/assets",
+        path=f"/api/frames/{frame.id}/assets{_storage_param(storage, '?')}",
     )
     if status != HTTPStatus.OK:
         raise _device_error(status, body)
@@ -154,6 +235,23 @@ async def list_assets(frame: Frame, redis: Redis) -> AssetListing:
         raise HTTPException(
             status_code=HTTPStatus.BAD_GATEWAY,
             detail="Device returned an invalid asset listing",
+        )
+
+    storages = _parse_storages(payload.get("storages"))
+    if storages is None:
+        # Older firmware ignores the parameter and lists its assets folder:
+        # that must never pass for its internal storage.
+        if storage != ASSETS_STORAGE:
+            raise storage_unavailable()
+        storages = default_storages()
+    elif storage != ASSETS_STORAGE and storage not in {s["id"] for s in storages}:
+        # (`assets` is always there: with no card it is the same flash.)
+        raise storage_unavailable()
+    reported = payload.get("storage")
+    if isinstance(reported, str) and reported in STORAGE_IDS and reported != storage:
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_GATEWAY,
+            detail=f"Device listed its {reported} storage when asked for {storage}",
         )
 
     assets_root = embedded_assets_path(frame)
@@ -182,16 +280,23 @@ async def list_assets(frame: Frame, redis: Redis) -> AssetListing:
     # Only SD-backed devices report "mounted"; a missing key stays unknown so
     # nothing warns about frames that never had a card to begin with.
     mounted = payload.get("mounted")
-    return AssetListing(assets=assets, mounted=mounted if isinstance(mounted, bool) else None)
+    return AssetListing(
+        assets=assets,
+        mounted=mounted if isinstance(mounted, bool) else None,
+        storage=storage,
+        storages=storages,
+    )
 
 
-async def download_asset(frame: Frame, redis: Redis, full_path: str) -> tuple[bytes, str]:
+async def download_asset(
+    frame: Frame, redis: Redis, full_path: str, storage: str = ASSETS_STORAGE
+) -> tuple[bytes, str]:
     """Fetch one file's raw bytes from the device. Returns (bytes, content_type)."""
     rel = to_relative_asset_path(frame, full_path)
     status, body, headers = await _fetch_frame_http_bytes(
         frame,
         redis,
-        path=f"/api/frames/{frame.id}/asset?path={_quote_rel(rel)}",
+        path=f"/api/frames/{frame.id}/asset?path={_quote_rel(rel)}{_storage_param(storage, '&')}",
     )
     if status != HTTPStatus.OK:
         raise _device_error(status, body)
@@ -212,12 +317,12 @@ def _parse_device_payload(body: bytes) -> dict[str, Any]:
 
 
 async def _upload_asset_single(
-    frame: Frame, redis: Redis, rel: str, data: bytes
+    frame: Frame, redis: Redis, rel: str, data: bytes, storage: str = ASSETS_STORAGE
 ) -> dict[str, Any]:
     status, body, _headers = await _fetch_frame_http_bytes(
         frame,
         redis,
-        path=f"/api/frames/{frame.id}/assets/upload?path={_quote_rel(rel)}",
+        path=f"/api/frames/{frame.id}/assets/upload?path={_quote_rel(rel)}{_storage_param(storage, '&')}",
         method="POST",
         body=data,
         headers=dict(_OCTET_STREAM),
@@ -238,6 +343,7 @@ async def upload_asset_chunk(
     chunk_index: int,
     offset: int,
     complete: bool,
+    storage: str = ASSETS_STORAGE,
 ) -> Optional[dict[str, Any]]:
     """Forward one chunk of a chunked upload to the device.
 
@@ -258,6 +364,7 @@ async def upload_asset_chunk(
             f"/api/frames/{frame.id}/assets/upload?path={_quote_rel(rel)}"
             f"&upload_id={upload_id}&chunk_index={int(chunk_index)}"
             f"&offset={int(offset)}&complete={1 if complete else 0}"
+            f"{_storage_param(storage, '&')}"
         ),
         method="POST",
         body=chunk,
@@ -272,15 +379,18 @@ async def upload_asset_chunk(
     return payload
 
 
-async def upload_asset(frame: Frame, redis: Redis, full_path: str, data: bytes) -> dict[str, Any]:
+async def upload_asset(
+    frame: Frame, redis: Redis, full_path: str, data: bytes, storage: str = ASSETS_STORAGE
+) -> dict[str, Any]:
     """Upload raw bytes to the device (parent dirs auto-created, existing file
     replaced). Returns the device's stat dict for the new file when parseable.
 
     Payloads larger than EMBEDDED_UPLOAD_CHUNK_BYTES are streamed as several
     chunk requests so no single device request outlives the HTTP timeouts."""
+    storage = normalize_storage(storage)
     rel = to_relative_asset_path(frame, full_path)
     if len(data) <= EMBEDDED_UPLOAD_CHUNK_BYTES:
-        return await _upload_asset_single(frame, redis, rel, data)
+        return await _upload_asset_single(frame, redis, rel, data, storage)
 
     upload_id = uuid.uuid4().hex[:32]
     chunk_size = EMBEDDED_UPLOAD_CHUNK_BYTES
@@ -297,11 +407,12 @@ async def upload_asset(frame: Frame, redis: Redis, full_path: str, data: bytes) 
             chunk_index=index,
             offset=offset,
             complete=index == total_chunks - 1,
+            storage=storage,
         )
         if payload is None:
             # Legacy firmware without chunk support: one big request is the
             # only option it understands.
-            return await _upload_asset_single(frame, redis, rel, data)
+            return await _upload_asset_single(frame, redis, rel, data, storage)
     return payload or {}
 
 
@@ -310,13 +421,15 @@ async def _post_form(
     redis: Redis,
     action: str,
     fields: dict[str, str],
+    storage: str = ASSETS_STORAGE,
 ) -> None:
     from urllib.parse import urlencode
 
     status, body, _headers = await _fetch_frame_http_bytes(
         frame,
         redis,
-        path=f"/api/frames/{frame.id}/assets/{action}",
+        # The storage is a query parameter even here, beside the form fields.
+        path=f"/api/frames/{frame.id}/assets/{action}{_storage_param(storage, '?')}",
         method="POST",
         body=urlencode(fields),
         headers=dict(_FORM_URLENCODED),
@@ -325,25 +438,29 @@ async def _post_form(
         raise _device_error(status, body)
 
 
-async def make_dir(frame: Frame, redis: Redis, full_path: str) -> None:
+async def make_dir(frame: Frame, redis: Redis, full_path: str, storage: str = ASSETS_STORAGE) -> None:
     await _post_form(
         frame,
         redis,
         "mkdir",
         {"path": to_relative_asset_path(frame, full_path, allow_root=True)},
+        storage,
     )
 
 
-async def delete_path(frame: Frame, redis: Redis, full_path: str) -> None:
+async def delete_path(frame: Frame, redis: Redis, full_path: str, storage: str = ASSETS_STORAGE) -> None:
     await _post_form(
         frame,
         redis,
         "delete",
         {"path": to_relative_asset_path(frame, full_path)},
+        storage,
     )
 
 
-async def rename_path(frame: Frame, redis: Redis, src_full: str, dst_full: str) -> None:
+async def rename_path(
+    frame: Frame, redis: Redis, src_full: str, dst_full: str, storage: str = ASSETS_STORAGE
+) -> None:
     await _post_form(
         frame,
         redis,
@@ -352,6 +469,7 @@ async def rename_path(frame: Frame, redis: Redis, src_full: str, dst_full: str) 
             "src": to_relative_asset_path(frame, src_full),
             "dst": to_relative_asset_path(frame, dst_full),
         },
+        storage,
     )
 
 

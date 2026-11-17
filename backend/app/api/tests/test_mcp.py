@@ -624,6 +624,40 @@ def test_duplicate_scenes_keeps_an_app_named_like_its_scene():
     assert copied["origin"] == origin
 
 
+@pytest.mark.asyncio
+async def test_frame_asset_tools_pass_the_storage(async_client, db: Session, redis):
+    from unittest.mock import patch
+
+    created = await async_client.post("/api/frames/new", json={
+        "name": "Sticky", "frame_host": "", "server_host": "localhost", "mode": "embedded", "platform": "esp32-s3",
+    })
+    assert created.status_code == 200, created.text
+    frame_id = created.json()["frame"]["id"]
+    storages = [{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal storage"}]
+    calls: list[str] = []
+
+    async def device(frame, redis, *, path, method="GET", body=None, headers=None, timeout=None):
+        calls.append(path)
+        if path.startswith(f"/api/frames/{frame_id}/assets?"):
+            payload = {"assets": [{"path": "a.txt", "size": 1, "mtime": 1, "is_dir": False}],
+                       "storages": storages, "storage": "internal"}
+        else:
+            payload = {"ok": True}
+        return 200, json.dumps(payload).encode(), {"content-type": "application/json"}
+
+    with patch("app.utils.embedded_assets._fetch_frame_http_bytes", new=device):
+        listed = result_json(await call(async_client, "frame_assets_list", {"frame_id": frame_id, "storage": "internal"}))
+        await call(async_client, "frame_asset_mkdir", {"confirm": True, "frame_id": frame_id, "path": "notes", "storage": "internal"})
+        unknown = (await rpc(async_client, "tools/call", {
+            "name": "frame_assets_list", "arguments": {"frame_id": frame_id, "storage": "sd"},
+        })).json()
+
+    assert listed["storage"] == "internal"
+    assert listed["storages"] == storages
+    assert calls == [f"/api/frames/{frame_id}/assets?storage=internal", f"/api/frames/{frame_id}/assets/mkdir?storage=internal"]
+    assert "error" in unknown or unknown["result"].get("isError") is True
+
+
 def test_schema_validation_subset():
     schema = {
         "type": "object",
