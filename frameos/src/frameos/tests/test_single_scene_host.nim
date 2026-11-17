@@ -12,6 +12,10 @@ import ../utils/http_client
 import ../utils/memory
 import pixie
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
+from ../layout_choice import layoutListing
+from ../ui/events import uiTarget
+from ../ui/layout import ueClick
 
 # The ESP32 and the wasm preview hold one scene, built on first use. A battery
 # ESP32 reads the button that woke it before its first render, so the press is
@@ -752,3 +756,84 @@ block windows_where_memory_is_short:
   lim.setWindowed(false)
   deviceMemoryBytesOverride = 0
   echo "windows where memory is short ok"
+
+# ------------------------------------------- the frame page beside the focus
+#
+# Two windows, a scene and the frame page, and the focus moved from the page to
+# the scene: the page stays open in its window and still holds the frame's
+# layout, with that layout's gear. The one layout instance goes along with the
+# focus, so the page wears none there, and read off its own it said "No
+# layout" (the Windows 98 Control Panel beside the Welcome, 2026-11-17).
+block the_frame_page_keeps_the_frame_layout_when_the_focus_moves:
+  let deskJsx = "export function get(app) { return <div className=\"flex w-full h-full\">" &
+    "<div className=\"w-1/2 h-full\"><yield /></div>" &
+    "<div className=\"w-1/2 h-full\"><Scene id=\"system/sceneSettings\" /></div></div> }"
+  let desk = %*{"id": "tests/deskTwo", "name": "Desk two", "settings": {"execution": "interpreted",
+    "refreshInterval": 60, "backgroundColor": "#000000", "isLayout": true, "desktop": true},
+    "fields": [{"name": "look", "label": "Look", "type": "string", "value": "plain", "access": "public"}],
+    "apps": {"ui": {"name": "ui", "category": "data", "version": "1.0.0", "fields": [],
+      "output": [{"name": "image", "type": "image"}],
+      "sources": {"app.tsx": deskJsx, "config.json": "{\"name\": \"ui\", \"output\": [{\"name\": \"image\", \"type\": \"image\"}], \"fields\": []}"}}},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
+      {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+  let welcome = "tests/welcome".SceneId
+  let shown = %*{"id": welcome.string, "name": "Welcome", "settings": {"execution": "interpreted",
+    "refreshInterval": 300, "backgroundColor": "#000000"}, "fields": [], "apps": {},
+    "layout": {"sceneId": "tests/deskTwo", "state": {}},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": "#ff0000"}}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}]}
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[desk, shown]))))
+  let savedRead = sceneSettings.frameSettingsRead
+  sceneSettings.frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"rotate": 0, "renderScale": 0}
+  let w = SingleSceneHost(frameConfig: FrameConfig(width: 400, height: 240, rotate: 0,
+    scalingMode: "cover", debug: false, saveAssets: %*false), logger: logger)
+  w.requestSelect = proc (sceneId: string): bool =
+    w.makeCurrent(sceneId.SceneId)
+    true
+  w.sceneOrder = proc (): seq[SceneId] = @[welcome]
+  w.start()
+  w.setWindowed(true)
+  proc render() =
+    discard w.renderScene(ExecutionContext(scene: w.scene, event: "render",
+      payload: %*{}, image: newImage(400, 240), hasImage: true, loopIndex: 0, loopKey: "."))
+  proc layoutGear(): bool =
+    ## The gear beside Layout (the frame page's handler 20004), in what the
+    ## page's last render laid out.
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.handlers[ueClick] == 20004 + 1:
+        return true
+  w.makeCurrent(welcome)
+  doAssert w.ensureScene()
+  render()
+  # The frame page, opened over the Welcome: its window has the focus.
+  doAssert w.send(eoHttpAdmin, "sceneSettings", %*{"page": "frame"})
+  doAssert w.ensureScene() and w.scene.id.string == SceneSettingsId
+  let page = SceneSettingsScene(w.scene)
+  render()
+  doAssert page.state{"page"}.getStr() == "frame"
+  doAssert not page.wornLayout.isNil and page.wornLayout.id.string == "tests/deskTwo"
+  doAssert page.heldLayout(layoutListing()) == "tests/deskTwo"
+  doAssert layoutGear(), "the layout's gear beside its select"
+  # The focus to the Welcome: the page stays open in its window, drawn there.
+  doAssert w.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": welcome.string})
+  doAssert w.ensureScene() and w.scene.id == welcome
+  doAssert page.state{"away"}.getBool() and page.wornLayout.isNil, $page.state
+  uiTarget(SceneSettingsId, 1).regions.setLen(0)
+  render()
+  doAssert uiTarget(SceneSettingsId, 1).regions.len > 0, "the page was drawn in its window"
+  doAssert page.heldLayout(layoutListing()) == "tests/deskTwo", "the frame's layout, not none"
+  doAssert layoutGear(), "and its gear"
+  # And back: the same.
+  doAssert w.send(eoHttpAdmin, "setCurrentScene", %*{"sceneId": SceneSettingsId})
+  doAssert w.ensureScene() and w.scene == page
+  render()
+  doAssert page.heldLayout(layoutListing()) == "tests/deskTwo" and layoutGear()
+  w.setWindowed(false)
+  sceneSettings.frameSettingsRead = savedRead
+  echo "the frame page keeps the frame's layout ok"

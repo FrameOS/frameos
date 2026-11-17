@@ -415,9 +415,10 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         }
         /* Its icon: the switcher's tile and app.frame.scenes, read off the index. */
         keep_text(entry, settings, "icon", ICON_MAX_LEN);
-        /* Its category: a desktop groups its scene lists by it. */
-        keep_text(entry, settings, "category", CATEGORY_MAX_LEN);
     }
+    /* Its category: a desktop groups its scene lists by it, and the frame
+     * page its layouts. */
+    keep_text(entry, settings, "category", CATEGORY_MAX_LEN);
     return entry;
 }
 

@@ -39,8 +39,8 @@ and "Add a layout" in its Settings under Layouts. The iOS app offers the same
 list (the script also writes `ios/FrameOSKit/.../LayoutStarters.json`): "New
 layout" under a frame's Layouts, "Add layout" in Add scene while it has none. Each sample's `thumb.jpg` is
 shown in those lists and saved as the added layout's picture. Every list of
-starters shows the desktops apart from the full screen layouts, each by name,
-as the frame's own settings page does (the script's order; `layoutGroups` in
+starters shows the desktops apart from the full screen layouts, each by name
+(the script's order; `layoutGroups` in
 `frontend/src/utils/sceneLayouts.ts`, `SceneLayouts.groups` in the app), and so
 do the layout selects of a frame's Settings, of each scene and of the preview:
 under "Desktops" and "Full screen" when a frame has both kinds.
@@ -87,11 +87,19 @@ opened over (a layout is made afresh around it), for a taskbar to keep that
 scene's button.
 
 **On the frame.** Frame settings has a Layout select, with a gear for that
-layout's fields. It lists the desktops (`settings.desktop`) under "Desktops"
-and the rest under "Full screen", each by name (`layoutsInOrder`; one kind
-alone has no heading). A host lists its layouts in no order of its own (a Pi's
-tables), so the page sorts; an ESP32's scene index keeps `desktop` beside
-`isLayout` (`fos_scene_store.c` `make_entry`). The choice covers every scene
+layout's fields. It lists the layouts by category, a heading over each: a
+layout's `settings.category` ("Desktop layouts", "Full screen layouts", the
+store's two layout shelves, or a name of the owner's own), else the shelf for
+its kind (`settings.desktop`); the groups by name, and in each the layouts by
+name, whatever the case (`layoutsInOrder`, `layoutGroup`; one group alone has
+no heading). A host lists its layouts in no order of its own (a Pi's tables),
+so the page sorts; an ESP32's scene index keeps `desktop` beside `isLayout`,
+and a layout's category as a scene's (`fos_scene_store.c` `make_entry`). The
+select holds the frame's layout whatever has the focus: on a desktop the one
+layout instance goes along with the focus, so the frame page in a window
+beside it wears none itself, and reads what it holds from the frame's choice
+and the scene it was opened from (`heldLayout`), and its gear's fields from
+the layout around the scene in front (`types.frameLayoutShown`). The choice covers every scene
 until "As each scene says" is picked, and what the gear sets overlays the install's `layout.state`. Both are
 the frame's to keep (`layout_choice.nim`, in the hosts' per-scene state files under
 `frame-layout` and the layout's id). No plane is told: the selects in the
