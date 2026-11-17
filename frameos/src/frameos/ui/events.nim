@@ -549,9 +549,9 @@ proc enter(target: UiTarget, heard = false) =
 
 proc flashKey(target: UiTarget, code: int) =
   ## The key just typed stays lit for a moment once a render shows it
-  ## (`uiTimerDue`), so a quick tap says which key it was. Not on e-paper,
-  ## where a refresh to put the light out costs seconds.
-  if target.input.paper:
+  ## (`uiTimerDue`), so a quick tap says which key it was. Not on a slow
+  ## panel (e-paper), where a refresh to put the light out costs seconds.
+  if target.input.slow:
     return
   target.input.flash = code
   target.input.flashDrawn = false
@@ -612,7 +612,7 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
   template i: untyped = target.input
   if code == ord(kBackspace):
     target.pressKey(code)
-    if i.paper:
+    if i.slow:
       return # one: a refresh a character is seconds
     target.repeatPointer = pointer
     target.repeatCode = code
@@ -948,8 +948,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             if box.scrollX > 0: clamp(target.dragSX - dx / scale, 0, box.scrollX) else: target.dragSX,
             if box.scrollY > 0: clamp(target.dragSY - dy / scale, 0, box.scrollY) else: target.dragSY)
           target.inputOnly = true
-          # E-paper shows where it got to when the finger lifts.
-          result = result or not target.input.paper
+          # A slow panel shows where it got to when the finger lifts.
+          result = result or not target.input.slow
           continue
       elif released:
         target.dragKey = -1
@@ -971,8 +971,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         let near = target.accentNear(lx, ly)
         target.input.accentX = if near == -1: -1 else: lx
         if near >= -1 and near != target.input.accentLit:
-          # E-paper shows which once the finger lifts on it.
-          moved = not target.input.paper
+          # A slow panel shows which once the finger lifts on it.
+          moved = not target.input.slow
       elif released:
         target.holdPointer = -1
         # Lifted on the row's x, the accent there; far from it, or before a
@@ -995,12 +995,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.swallowTap = pointer # its tap types no space
         target.spacePointer = -1
     # What the pointer is over or pressing is drawn (`hover:`, `active:`),
-    # but not on e-paper, as the scene switcher's and the keyboard's presses
+    # but not on a slow panel, as the scene switcher's and the keyboard's presses
     # are not: a render to show one is a refresh of seconds, and the tap's
     # own render waited behind it. On the reTerminal E1003 every tap through
     # a layout cost two renders, the page it turned showing only with the
     # second (2026-11-10). The two lists are for drawing alone.
-    let showsPress = not target.input.paper
+    let showsPress = not target.input.slow
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
