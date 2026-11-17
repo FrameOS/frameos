@@ -176,6 +176,18 @@ suite "the cursor sprite":
     check spriteRows(csNwseResize) == spriteRows(csNwseResize).transposed
     check spriteRows(csNeswResize) == spriteRows(csNwseResize).mirrored
 
+  test "the picture a browser preview draws is the frame's, row for row":
+    for shape in CursorShape:
+      let picture = cursorPicture(shape)
+      var rows: seq[string]
+      for row in 0 ..< picture.height:
+        rows.add picture.pixels[row * picture.width ..< (row + 1) * picture.width]
+      check rows == spriteRows(shape)
+      check picture.pixels.len == picture.width * picture.height
+    check cursorPicture(csArrow).hotX == 0 and cursorPicture(csArrow).hotY == 0
+    check cursorPicture(csNone).pixels.len == 0
+    check $csNwseResize == "nwse-resize" and $csArrow == "default" # the CSS names the page uses
+
   test "a shape is drawn with its hot spot on the cursor, and no cursor draws nothing":
     let panel = fakePanel()
     paintPanel(9)

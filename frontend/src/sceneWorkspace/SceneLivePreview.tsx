@@ -467,6 +467,12 @@ export function SceneLivePreviewPanel({
   // visitor once, and only runs at full speed after "Run at full speed".
   // The answer survives runtime restarts (editor edits, Restart, Resize).
   const [fastMode, setFastMode] = useState(false);
+  // The mouse cursor over the picture: the browser's, in the shape the scene
+  // asks for (the default), or the frame's own drawn into the picture with
+  // the browser's hidden (frameos-wasm's cursor.ts). Survives restarts like
+  // fastMode; offered once the runtime says it knows the cursor.
+  const [drawnCursor, setDrawnCursor] = useState(false);
+  const [cursorKnown, setCursorKnown] = useState(false);
   const [fastRenderRequest, setFastRenderRequest] = useState<{
     intervalMs: number;
     answered: boolean;
@@ -883,6 +889,7 @@ export function SceneLivePreviewPanel({
         // routes just CORS-blocked hosts through this endpoint.
         ...(sceneWorkspaceHost().previewProxyUrl ? { proxyUrl: sceneWorkspaceHost().previewProxyUrl! } : {}),
         fastMode,
+        drawnCursor,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
         deviceLimits: deviceLimitsFor(
@@ -928,6 +935,7 @@ export function SceneLivePreviewPanel({
           setSceneInfo(info ?? null);
           setRuntimeVersion(runtime?.version ?? null);
           setPointerInput(runtime?.pointerEvents === true);
+          setCursorKnown(runtime?.cursor === true);
           setStatus("");
           // Show the scene being edited, not the default one, when the
           // editor has several (an older bundle may not have started on it).
@@ -1019,14 +1027,20 @@ export function SceneLivePreviewPanel({
       }
       setPreviewInstance((current) => (current === preview ? null : current));
     };
-    // fastMode reaches a running runtime through setFastMode below; only a
-    // fresh runtime reads it from the options, so it is no dependency here.
+    // fastMode and drawnCursor reach a running runtime through their setters
+    // below; only a fresh runtime reads them from the options, so they are
+    // no dependency here.
   }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     return canvas ? forwardPointer(canvas, previewRef) : undefined;
   }, []);
+
+  function chooseDrawnCursor(drawn: boolean) {
+    setDrawnCursor(drawn);
+    previewRef.current?.setDrawnCursor(drawn);
+  }
 
   function answerFastRender(enabled: boolean) {
     setFastMode(enabled);
@@ -1649,6 +1663,19 @@ export function SceneLivePreviewPanel({
           {fastMode && measuredFps !== null
             ? ` · ${formatFps(measuredFps)} fps`
             : ` (the scene asks for ~${formatFps(1000 / Math.max(1, fastRenderRequest.intervalMs))} fps)`}
+        </label>
+      ) : null}
+      {pointerInput && cursorKnown ? (
+        <label
+          className="live-preview-panel__auto-apply live-preview__cursor-toggle"
+          title="Draw the frame's own mouse cursor over the picture, as a frame with a mouse shows it, instead of the browser's"
+        >
+          <input
+            checked={drawnCursor}
+            onChange={(event) => chooseDrawnCursor(event.target.checked)}
+            type="checkbox"
+          />
+          The frame's mouse cursor
         </label>
       ) : null}
       <div className="live-preview">

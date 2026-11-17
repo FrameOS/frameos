@@ -18,7 +18,9 @@ import frameos/single_scene_host
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/relayed_input
-from frameos/input_state import initInputState
+from frameos/input_state import initInputState, CursorHideMs
+import frameos/cursor_sprite
+from frameos/loading_mark import MarkView
 from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
@@ -81,6 +83,8 @@ var
   keptStateBuffer: string
   renderPaletteBuffer: string
   pressMapBuffer: string
+  cursorBuffer: string
+  cursorSpriteBuffer: string
   # The board's rotation (frameos_wasm_set_frame): what turns the scene's
   # canvas back into its panel for the press map.
   boardRotate = 0
@@ -832,6 +836,52 @@ proc frameos_wasm_press_map(): cstring {.exportc, cdecl.} =
   except Exception:
     pressMapBuffer = ""
   pressMapBuffer.cstring
+
+# ------------------------------------------------------------- the cursor
+
+proc frameos_wasm_cursor(): cstring {.exportc, cdecl.} =
+  ## The mouse cursor's shape where the page's pointer last was, as CSS names
+  ## it ("default", "pointer", "nwse-resize", ...): what the UI there asks for
+  ## with its `cursor-*` classes as the last render drew it, through the
+  ## layout and its windows (interpreter.cursorShapeAt, docs/jsx-ui.md "The
+  ## mouse cursor"). The page shows it as its own cursor, or draws the frame's
+  ## picture of it (frameos_wasm_cursor_sprite) while the frame's cursor is on.
+  cursorBuffer = $csArrow
+  try:
+    if not host.scene.isNil and not host.events.isNil:
+      let state = host.events.inputState
+      cursorBuffer = $cursorShapeAt(host.scene, state.cursorX, state.cursorY)
+  except Exception:
+    cursorBuffer = $csArrow
+  cursorBuffer.cstring
+
+proc frameos_wasm_cursor_sprite(shape: cstring): cstring {.exportc, cdecl.} =
+  ## The frame's picture of the cursor `shape` (a CSS name, as
+  ## frameos_wasm_cursor says it), as a Linux frame of this size draws it on
+  ## its panel (frameos/cursor_sprite.nim): `{width, height, hotX, hotY,
+  ## pixels, scale, hideMs}`, `pixels` a row after the other ('.' clear, 'X'
+  ## black, 'o' white) and `scale` the panel pixels a sprite pixel takes; the
+  ## cursor hides `hideMs` after the mouse last moved, as on the frame. "" for
+  ## a shape with no picture ("none") or a name it does not know.
+  cursorSpriteBuffer = ""
+  try:
+    var found = false
+    var picked = csArrow
+    for candidate in CursorShape:
+      if $candidate == $shape:
+        picked = candidate
+        found = true
+    if found and picked != csNone:
+      let picture = cursorPicture(picked)
+      let (width, height) = if not lastImage.isNil: (lastImage.width, lastImage.height)
+        elif not frameConfig.isNil: (frameConfig.width, frameConfig.height)
+        else: (0, 0)
+      let scale = cursorScale(MarkView(panelWidth: int32(width), panelHeight: int32(height)))
+      cursorSpriteBuffer = $(%*{"width": picture.width, "height": picture.height, "hotX": picture.hotX,
+        "hotY": picture.hotY, "pixels": picture.pixels, "scale": scale, "hideMs": CursorHideMs})
+  except Exception:
+    cursorSpriteBuffer = ""
+  cursorSpriteBuffer.cstring
 
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:

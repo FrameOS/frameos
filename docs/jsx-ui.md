@@ -586,6 +586,12 @@ picks the edge a press drags (`cursor_shape.nim` `edgeCursor`).
 - An element with a `cursor-*` class and nothing else is a region for the
   cursor alone: it takes no press and asks for no event.
 - Not on an ESP32, which has no mouse: the class reads as nothing there.
+- In the browser preview (`frameos-wasm`, the scene workspace's "The frame's
+  mouse cursor" toggle) the runtime says the shape under the page's pointer
+  (`frameos_wasm_cursor`, the worker's `cursor` message): the page shows it
+  as its own cursor by CSS name, or hides its own over the canvas and draws
+  the frame's picture of it into the canvas (`frameos_wasm_cursor_sprite`,
+  `frameos/wasm/src/cursor.ts`), put away before each frame is painted.
 
 ## Fields and the keyboard
 
