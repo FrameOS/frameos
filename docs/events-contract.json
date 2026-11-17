@@ -249,10 +249,10 @@
         {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
-        {"name": "shift", "label": "Shift", "type": "boolean", "required": false},
-        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false},
-        {"name": "alt", "label": "Alt", "type": "boolean", "required": false},
-        {"name": "meta", "label": "Meta", "type": "boolean", "required": false}
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": false, "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
@@ -383,10 +383,10 @@
         {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
-        {"name": "shift", "label": "Shift", "type": "boolean", "required": false},
-        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false},
-        {"name": "alt", "label": "Alt", "type": "boolean", "required": false},
-        {"name": "meta", "label": "Meta", "type": "boolean", "required": false}
+        {"name": "shift", "label": "Shift", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "ctrl", "label": "Ctrl", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "alt", "label": "Alt", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "meta", "label": "Meta", "type": "boolean", "required": false, "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",

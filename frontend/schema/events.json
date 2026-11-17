@@ -230,25 +230,29 @@
         "name": "shift",
         "label": "Shift",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "ctrl",
         "label": "Ctrl",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "alt",
         "label": "Alt",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "meta",
         "label": "Meta",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       }
     ]
   },
@@ -434,25 +438,29 @@
         "name": "shift",
         "label": "Shift",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "ctrl",
         "label": "Ctrl",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "alt",
         "label": "Alt",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "meta",
         "label": "Meta",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       }
     ]
   },
