@@ -39,7 +39,8 @@ type
     ## field's change and keys (onChange, onKeyDown) come from its edits.
     ueClick = "tap", ueDoubleClick = "doubleTap", ueLongPress = "longPress",
     uePointerDown = "pointerDown", uePointerUp = "pointerUp", uePointerMove = "pointerMove",
-    ueSwipe = "swipe", uePinch = "pinch", ueChange = "change", ueKeyDown = "keyDown"
+    ueSwipe = "swipe", uePinch = "pinch", ueChange = "change", ueKeyDown = "keyDown",
+    ueScroll = "scroll"
 
   UiRegion* = object
     ## An element the pointer can do something to, where the layout put it:
@@ -211,7 +212,7 @@ const
   # The attributes the JSX walker turns onClick, onLongPress, ... into.
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
     "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
-    "on-pinch", "on-change", "on-key-down"]
+    "on-pinch", "on-change", "on-key-down", "on-scroll"]
   LinkOpen* = KeyBase div 2
     ## The tap handler of a link (`<a href>`, "Links" in docs/jsx-ui.md): its
     ## QR code goes up over the UI. Past every handler a tree can hold.
@@ -431,6 +432,7 @@ var
   ui {.threadvar.}: ptr UiInput ## and the input it was asked for
   focusSeen {.threadvar.}: bool ## the focused field was laid out
   revealCaret {.threadvar.}: bool ## and is scrolled to show its caret (an edit, a key, a tap)
+  revealLine {.threadvar.}: array[2, float32] ## reveal(): the caret's line in the field, y and height
   ends {.threadvar.}: array[2, array[4, float32]] ## a selection made by touch: its start and end
                                                   ## (x, y, -, line height), as emitField found them ...
   endsFound {.threadvar.}: bool                   ## ... when it did
@@ -458,10 +460,30 @@ proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, 
       result.value = input.text
     elif result.value != input.text and not ui.isNil:
       # What the app made of the edit is what the next edit starts from, as
-      # in React: a line emptied on Enter (the Terminal), a length kept.
+      # in React: a line emptied on Enter (the Terminal), a length kept. The
+      # caret (and a selection) stays on its text when what is before it, or
+      # what is after it, is unchanged (lines added above or below, as a code
+      # editor's window of lines slides); otherwise it goes to the end.
+      template old: untyped = ui.text
+      template now: untyped = result.value
+      let
+        c = clamp(ui.caret, 0, old.len)
+        o = if ui.sel > 0: clamp(ui.sel - 1, 0, old.len) else: c
+      var same = 0
+      while same < max(c, o) and same < now.len and old[same] == now[same]: inc same
+      var shift = 0
+      if same < max(c, o):
+        var tail = 0
+        let need = old.len - min(c, o)
+        while tail < need and tail < now.len and old[old.len - 1 - tail] == now[now.len - 1 - tail]: inc tail
+        shift = if tail == need: now.len - old.len else: int.high
+      if shift == int.high:
+        ui.caret = now.len
+        ui.sel = 0
+      else:
+        ui.caret = c + shift
+        if ui.sel > 0: ui.sel = o + shift + 1
       ui.text = result.value
-      ui.caret = result.value.len
-      ui.sel = 0
   var
     style = result.text
     shown = result.value
@@ -486,8 +508,29 @@ proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, 
   let run = newUiNode(ukText, style)
   run.box.grow = 1
   run.keep = true
-  run.runs.add SvgNode(tag: "&", text: shown)
-  run.styles.add style
+  if shown.startsWith(result.value) and result.value.len > 0 and n.children.len > 0:
+    # Its value in colors: the `<span>`s inside it, whose text is the value
+    # (a code editor's tokens), each run in the style it was written in. What
+    # does not spell the value (an edit the app has not seen yet) is one run.
+    for child in n.children:
+      child.addRuns(style, run, rootW, rootH, 1, result.states)
+    var at = 0
+    for i in 0 ..< run.runs.len:
+      let t = run.runs[i].text
+      if run.runs[i].tag == "br" or not result.value.continuesWith(t, at):
+        at = -1
+        break
+      run.runs[i] = SvgNode(tag: "&", text: t) # its spaces kept as typed
+      at += t.len
+    if at != result.value.len:
+      run.runs.setLen(0)
+      run.styles.setLen(0)
+    elif shown.len > at:
+      run.runs.add SvgNode(tag: "&", text: " ")
+      run.styles.add style
+  if run.runs.len == 0:
+    run.runs.add SvgNode(tag: "&", text: shown)
+    run.styles.add style
   result.children.add run
 
 proc heldOption(n: SvgNode): int =
@@ -2050,6 +2093,20 @@ proc reveal(n: UiNode, key: int, r: var array[4, float32]): bool =
   ## is in sight, a little room around it.
   if n.key == key and n.field > 0:
     r = [0'f32, 0, n.size.x, n.size.y]
+    revealLine = [0'f32, n.size.y]
+    if n.field == 2 and n.children.len > 0 and not n.children[0].arrangement.isNil:
+      # Its line with the caret (the tap's, which placed it), for a box
+      # around that cannot show it all (a code editor's lines).
+      let
+        t = n.children[0]
+        a = t.arrangement
+        lineH = if a.selectionRects.len > 0: a.selectionRects[0].h else: t.text.size
+      revealLine[1] = lineH
+      if ui.place:
+        revealLine[0] = ui.placeY - lineH / 2
+      elif a.runes.len > 0:
+        let i = min(n.value.toOpenArray(0, clamp(ui.caret, 0, n.value.len) - 1).runeLen, a.runes.high)
+        revealLine[0] = t.y + a.selectionRects[i].y - scrollOf(n.key)[1]
     return true
   if n.kind != ukBox:
     return false
@@ -2058,6 +2115,11 @@ proc reveal(n: UiNode, key: int, r: var array[4, float32]): bool =
       template b: untyped = n.box
       r[0] += c.x
       r[1] += c.y
+      if b.overflowY == ovScroll and r[3] > n.size.y - b.border[0] - b.border[2] - 16:
+        # Taller than this box shows: the caret's line in sight, not its top.
+        r[1] += revealLine[0]
+        r[3] = revealLine[1]
+        revealLine = [0'f32, r[3]]
       if b.overflowX == ovScroll or b.overflowY == ovScroll:
         var (sx, sy) = scrollOf(n.key)
         const room = 8'f32

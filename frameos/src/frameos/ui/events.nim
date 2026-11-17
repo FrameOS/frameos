@@ -572,6 +572,17 @@ proc fieldCall(target: UiTarget, kind: UiEvent, name: string, payload: JsonNode)
       [0'f32, 0, target.regions[i].w, target.regions[i].h])
     target.inputOnly = false # whatever the handler changed, get() shows it
 
+proc scrolledBy(target: UiTarget, r: UiRegion) =
+  ## A finger or the wheel scrolled the box: its onScroll hears where to, as
+  ## `scrollTop` and `scrollLeft` (a code editor's lines that show).
+  if r.handlers[ueScroll] > 0 and not target.call.isNil:
+    let (x, y) = target.input.scrolled(r.key)
+    let payload = newJObject()
+    payload["scrollTop"] = newJFloat(y)
+    payload["scrollLeft"] = newJFloat(x)
+    target.call(r.handlers[ueScroll] - 1, "scroll", payload, [0'f32, 0, r.w, r.h])
+    target.inputOnly = false # whatever the handler changed, get() shows it
+
 proc keyDown(target: UiTarget, key: string) =
   let payload = newJObject()
   payload["key"] = newJString(key)
@@ -987,6 +998,7 @@ when not defined(frameosEmbedded):
       return false
     target.input.scrollTo(r.key, sx, sy)
     target.inputOnly = true
+    target.scrolledBy(r)
     wheelScrolled = true
     true
 
@@ -1212,7 +1224,22 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         let
           dx = x - target.dragX
           dy = y - target.dragY
-          box = target.regions[r]
+        var box = target.regions[r]
+        if not target.dragging and max(abs(dx), abs(dy)) > GestureTapSlopPx and
+            (if abs(dy) > abs(dx): box.scrollY == 0 else: box.scrollX == 0):
+          # Along a way this box does not scroll (a code editor's lines that
+          # scroll sideways, in a page that scrolls down): the box around it
+          # that does, under where the press went down, as in a browser.
+          let
+            downX = (target.dragX - target.offsetX) / scale
+            downY = (target.dragY - target.offsetY) / scale
+          for i in countdown(r - 1, 0):
+            let o = target.regions[i]
+            if (if abs(dy) > abs(dx): o.scrollY > 0 else: o.scrollX > 0) and o.inside(downX, downY):
+              box = o
+              target.dragKey = o.key
+              (target.dragSX, target.dragSY) = target.input.scrolled(o.key)
+              break
         if not target.dragging and (box.scrollX > 0 and abs(dx) > GestureTapSlopPx or
             box.scrollY > 0 and abs(dy) > GestureTapSlopPx):
           target.dragging = true
@@ -1224,13 +1251,17 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             if box.scrollY > 0: clamp(target.dragSY - dy / scale, 0, box.scrollY) else: target.dragSY)
           target.inputOnly = true
           # A slow panel shows where it got to when the finger lifts.
-          result = result or not target.input.slow
+          if not target.input.slow:
+            target.scrolledBy(box)
+            result = true
           continue
       elif released:
         target.dragKey = -1
         if target.dragging:
           target.dragging = false
           target.dragged = true
+          if target.input.slow:
+            target.scrolledBy(target.regions[r])
           result = true
     if target.repeatPointer == pointer and (released or down):
       target.repeatPointer = -1 # backspace let go

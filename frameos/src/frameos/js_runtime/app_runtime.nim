@@ -3056,7 +3056,7 @@ const appJsPrelude* = compactJs("""
     const handler = (globalThis.__frameosHandlers || [])[id];
     if (typeof handler !== "function") return;
     const e = { ...JSON.parse(event), type, localX, localY, width, height };
-    if (type === "change") e.target = { value: e.value }; // React's e.target.value
+    e.target = { ...e }; // React's e.target.value (a field), e.target.scrollTop (a box)
     handler(e);
   };
   function __frameosInvoke(name) {
