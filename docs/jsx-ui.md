@@ -813,7 +813,8 @@ URL in a new tab instead.
   keyboard and an open `<select>` go first. A board its plane renders keeps
   it between pulls (`lastingUiInput`).
 - `<a>` has no look of its own: give it `underline`, a color, or a button's
-  classes.
+  classes. Under a mouse it shows the hand (`cursor-pointer`) unless it has a
+  `cursor-*` class of its own (not on an ESP32, which draws no cursor).
 - No `<Link>` component: none exists in the runtime or the repo's apps.
 
 How: the walker keeps `href` as a plain attribute (a string; an image ref in
