@@ -492,14 +492,15 @@ proc square(c: var string, size: int) =
   c.px("w", size)
   c.px("h", size)
 
-proc iconNode(icon: string, side: int): SvgNode =
+proc iconNode(icon: string, side: int, box = "0 0 24 24"): SvgNode =
   ## A scene's icon (docs/scene-icons.md), `side` px square: its one path in
   ## the 24 box, filled with the text color, so it reads on e-paper (black,
   ## white on the highlighted tile) as on an LCD. scene_icon.nim checked the
-  ## path when the scene was read, so drawing it raises nothing.
+  ## path when the scene was read, so drawing it raises nothing. The gear's
+  ## path is in a box of its own.
   var c = "shrink-0"
   c.square(side)
-  SvgNode(tag: "svg", attrs: @[("class", c), ("viewBox", "0 0 24 24")],
+  SvgNode(tag: "svg", attrs: @[("class", c), ("viewBox", box)],
     children: @[SvgNode(tag: "path", attrs: @[("d", icon), ("fill", "currentColor")])])
 
 proc onClick(node: sink SvgNode, handler: int): SvgNode =
@@ -535,10 +536,7 @@ proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: s
   else:
     c.add button
     if lit: c.add " border-2 border-sky-400"
-  var s = "shrink-0"
-  s.square(size * 2 div 3)
-  result = el("div", c, SvgNode(tag: "svg", attrs: @[("class", s), ("viewBox", "0 0 48 48")],
-    children: @[SvgNode(tag: "path", attrs: @[("d", GearPath), ("fill", "currentColor")])]))
+  result = el("div", c, iconNode(GearPath, size * 2 div 3, "0 0 48 48"))
   result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 3)
 
 type TileLook = object
