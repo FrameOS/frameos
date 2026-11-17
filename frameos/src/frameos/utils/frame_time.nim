@@ -26,3 +26,8 @@ else:
     if fixed > 0:
       return fromUnix(fixed).utc()
     now()
+
+  proc frameEpochPinned*(): int64 =
+    ## The instant the snapshot harness pinned, 0 when it did not: a JS
+    ## app's `Date.now()` is pinned to it too (js_runtime/app_runtime.nim).
+    fixedEpoch()

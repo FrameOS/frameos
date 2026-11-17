@@ -111,7 +111,7 @@
         "width": 418
       },
       {
-        "data": { "config": { "format": "HH:mm:ss" }, "keyword": "data/clock" },
+        "data": { "config": { "format": "{hour/2}:{minute/2}:{second/2}" }, "keyword": "clock" },
         "dragging": false,
         "height": 140,
         "id": "59df2876-6c74-49df-8090-e62cbbd7f8ff",
@@ -316,22 +316,55 @@
             "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
           }
         ],
-        "output": [
-          {
-            "name": "image",
-            "type": "image"
-          }
-        ],
-        "cache": {
-          "enabled": true,
-          "inputEnabled": true,
-          "durationEnabled": true,
-          "duration": "900"
-        },
+        "output": [{ "name": "image", "type": "image" }],
+        "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" },
         "origin": "repo/apps/image/unsplash",
         "sources": {
           "app.ts": "// A random Unsplash photo for a search; frameos.fetchImage decodes it natively.\nconst enc = (s) =>\n  encodeURIComponent(s)\n    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n    .replace(/%20/g, '+')\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  // The size the photo is drawn at: the box it feeds, else the canvas. Both\n  // are in scene pixels, already turned with the frame.\n  const w = context.targetWidth || context.imageWidth || 0\n  const h = context.targetHeight || context.imageHeight || 0\n  if (!(w > 0 && h > 0)) throw new Error('No canvas to draw on: this app runs on render.')\n  const search = c.search.trim()\n  const stateKey = c.metadataStateKey.trim()\n  const fail = (m) => {\n    throw new Error(`Error fetching image from Unsplash: ${m}`)\n  }\n\n  const key = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (!key) throw new Error('Please provide an Unsplash API key in the settings.')\n  const o = c.orientation\n  const orientation = o === 'auto' ? (h > w ? 'portrait' : w > h ? 'landscape' : 'squarish') : o === 'any' ? '' : o\n  const url = `https://api.unsplash.com/photos/random/?orientation=${enc(orientation)}&query=${enc(search)}`\n  if (f.debug) frameos.log(`API request: ${url}`)\n  const r = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: 60000,\n  })\n  if (!r.status) fail(r.error)\n  if (r.status !== 200) {\n    let detail = r.body\n    try {\n      const j = JSON.parse(r.body)\n      detail = str(j?.error?.message, str(j?.error, JSON.stringify(j)))\n    } catch {}\n    throw new Error(`Error making request ${r.status}: ${detail}`)\n  }\n  let j\n  try {\n    j = JSON.parse(r.body)\n  } catch (e) {\n    fail(e.message)\n  }\n  const raw = str(j?.urls?.raw)\n  if (!raw) throw new Error('No image URL returned from Unsplash.')\n  const imageUrl = `${raw}&w=${w}&h=${h}&fit=crop&crop=faces,edges`\n  const description = str(j.description, str(j.alt_description))\n  const meta = stateKey && {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(j.id),\n    title: str(j.slug, description),\n    description,\n    altDescription: str(j.alt_description),\n    location: str(j.location?.name),\n    createdAt: str(j.created_at),\n    photoUrl: str(j.links?.html),\n    author: str(j.user?.name),\n    authorUsername: str(j.user?.username),\n    authorUrl: str(j.user?.links?.html),\n  }\n  j = null\n\n  if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const mode = c.saveAssets\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      mode === 'auto' || mode === 'always' ? { name: `${search} ${w}x${h}`, extension: '.jpg', mode } : undefined,\n  })\n  if (!photo.image) fail(photo.error)\n  if (meta) frameos.setState(stateKey, meta)\n  return photo.image\n}\n",
           "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random Unsplash photo\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    { \"name\": \"search\", \"type\": \"string\", \"value\": \"nature\", \"label\": \"Search\", \"placeholder\": \"e.g. nature, birds\" },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"label\": \"Orientation\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {search, title, description, location, author, links, ...} under this key.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+        }
+      },
+      "clock": {
+        "name": "Clock",
+        "description": "The current time as text, in the frame's time zone",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "markdown": "Tokens in braces: `{year/4}` `{year/2}` `{month}` `{month/2}` `{month/n}` `{month/n/3}` `{day}` `{day/2}` `{weekday}` `{weekday/3}` `{weekday/2}` `{hour}` `{hour/2}` `{hour/ap}` `{hour/2/ap}` `{am/pm}` `{minute}` `{minute/2}` `{second}` `{second/2}` `{tzName}`; anything else is written as it is."
+          },
+          {
+            "name": "format",
+            "type": "select",
+            "options": [
+              "{hour/2}:{minute/2}",
+              "{hour/2}:{minute/2}:{second/2}",
+              "{hour/ap}:{minute/2} {am/pm}",
+              "{year/4}-{month/2}-{day/2}",
+              "{year/4}-{month/2}-{day/2} {hour/2}:{minute/2}",
+              "{weekday} {day} {month/n} {year/4}",
+              "custom"
+            ],
+            "value": "{hour/2}:{minute/2}",
+            "required": true,
+            "label": "Format"
+          },
+          {
+            "name": "formatCustom",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Custom format",
+            "placeholder": "{weekday/3} {day/2}.{month/2}",
+            "showIf": [{ "field": "format", "operator": "eq", "value": "custom" }]
+          }
+        ],
+        "output": [{ "name": "time", "type": "string" }],
+        "origin": "repo/apps/text/clock",
+        "sources": {
+          "app.test.ts": "import { formatTime, get } from './app'\n\n// Tuesday 12 March 2024, 14:40:37 in the zone the test runs in.\nconst at = new Date(2024, 2, 12, 14, 40, 37)\n\nfunction clock(config: Record<string, unknown>, frame: Record<string, unknown> = {}) {\n  const real = Date.now\n  Date.now = () => at.getTime()\n  try {\n    return get(makeApp({ config, frame }))\n  } finally {\n    Date.now = real\n  }\n}\n\ndescribe('clock', () => {\n  it('shows its presets', () => {\n    expect(clock({ format: '{hour/2}:{minute/2}' })).toBe('14:40')\n    expect(clock({ format: '{hour/2}:{minute/2}:{second/2}' })).toBe('14:40:37')\n    expect(clock({ format: '{hour/ap}:{minute/2} {am/pm}' })).toBe('2:40 pm')\n    expect(clock({ format: '{year/4}-{month/2}-{day/2}' })).toBe('2024-03-12')\n    expect(clock({ format: '{weekday} {day} {month/n} {year/4}' })).toBe('Tuesday 12 March 2024')\n  })\n\n  it('takes a custom format, the frame\\'s zone by name, and leaves the rest as written', () => {\n    expect(clock({ format: 'custom', formatCustom: '{weekday/3} {day/2}.{month/2} {tzName} {nope}' },\n      { timeZone: 'Europe/Brussels' })).toBe('Tue 12.03 Europe/Brussels {nope}')\n  })\n\n  it('writes every chrono token', () => {\n    const early = new Date(2009, 0, 5, 0, 7, 3)\n    expect(formatTime(early, '{year} {year/2} {month} {month/n/3} {day} {weekday/2}')).toBe('2009 09 1 Jan 5 Mo')\n    expect(formatTime(early, '{hour} {hour/2/ap} {am/pm} {minute} {second}')).toBe('0 12 am 7 3')\n  })\n})\n",
+          "app.ts": "// Clock: the frame's time as text, in chrono's format: \"{hour/2}:{minute/2}\",\n// the tokens a code node's format helper takes. A JavaScript app's Date is\n// in the frame's zone. A scene made with the built-in clock of FrameOS\n// 2026.11.10 and earlier runs Clock (std/times format) instead\n// (repo/apps/text/clockStdTimes).\n\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\n  'October', 'November', 'December']\n\nconst pad = (value: number, width = 2) => String(value).padStart(width, '0')\n\n/** `date` in a chrono format; a token it does not know is left as written. */\nexport function formatTime(date: Date, format: string, timeZone = ''): string {\n  return format.replace(/\\{([^{}]+)\\}/g, (written, token: string) => {\n    const hour = date.getHours()\n    switch (token) {\n      case 'year': return String(date.getFullYear())\n      case 'year/2': return pad(date.getFullYear() % 100)\n      case 'year/4': return pad(date.getFullYear(), 4)\n      case 'month': return String(date.getMonth() + 1)\n      case 'month/2': return pad(date.getMonth() + 1)\n      case 'month/n': return MONTHS[date.getMonth()]\n      case 'month/n/3': return MONTHS[date.getMonth()].slice(0, 3)\n      case 'day': return String(date.getDate())\n      case 'day/2': return pad(date.getDate())\n      case 'weekday': return WEEKDAYS[date.getDay()]\n      case 'weekday/3': return WEEKDAYS[date.getDay()].slice(0, 3)\n      case 'weekday/2': return WEEKDAYS[date.getDay()].slice(0, 2)\n      case 'hour': return String(hour)\n      case 'hour/2': return pad(hour)\n      case 'hour/ap': return String(hour % 12 || 12)\n      case 'hour/2/ap': return pad(hour % 12 || 12)\n      case 'am/pm': return hour < 12 ? 'am' : 'pm'\n      case 'minute': return String(date.getMinutes())\n      case 'minute/2': return pad(date.getMinutes())\n      case 'second': return String(date.getSeconds())\n      case 'second/2': return pad(date.getSeconds())\n      case 'tzName': return timeZone\n      default: return written\n    }\n  })\n}\n\nexport function get(app) {\n  const c = app.config\n  const format = c.format === 'custom' ? c.formatCustom : c.format\n  return formatTime(new Date(Date.now()), typeof format === 'string' ? format : '', app.frame?.timeZone ?? '')\n}\n",
+          "config.json": "{\n  \"name\": \"Clock\",\n  \"description\": \"The current time as text, in the frame's time zone\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"markdown\": \"Tokens in braces: `{year/4}` `{year/2}` `{month}` `{month/2}` `{month/n}` `{month/n/3}` `{day}` `{day/2}` `{weekday}` `{weekday/3}` `{weekday/2}` `{hour}` `{hour/2}` `{hour/ap}` `{hour/2/ap}` `{am/pm}` `{minute}` `{minute/2}` `{second}` `{second/2}` `{tzName}`; anything else is written as it is.\"\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\n        \"{hour/2}:{minute/2}\",\n        \"{hour/2}:{minute/2}:{second/2}\",\n        \"{hour/ap}:{minute/2} {am/pm}\",\n        \"{year/4}-{month/2}-{day/2}\",\n        \"{year/4}-{month/2}-{day/2} {hour/2}:{minute/2}\",\n        \"{weekday} {day} {month/n} {year/4}\",\n        \"custom\"\n      ],\n      \"value\": \"{hour/2}:{minute/2}\",\n      \"required\": true,\n      \"label\": \"Format\"\n    },\n    {\n      \"name\": \"formatCustom\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Custom format\",\n      \"placeholder\": \"{weekday/3} {day/2}.{month/2}\",\n      \"showIf\": [\n        {\n          \"field\": \"format\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"time\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
         }
       }
     }

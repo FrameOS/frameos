@@ -45,7 +45,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "HH:mm:ss"
         }
@@ -78,7 +78,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "HH:mm"
         }
@@ -111,7 +111,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "yyyy-MM-dd"
         }
@@ -144,7 +144,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "yyyy-MM-dd HH:mm:ss"
         }
@@ -177,7 +177,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "HH:mm:ss:fff"
         }
@@ -210,7 +210,7 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/clock",
+        "keyword": "clockStdTimes",
         "config": {
           "format": "custom",
           "formatCustom": "dddd d MMMM yyyy"
@@ -342,5 +342,61 @@
       "targetHandle": "prev",
       "type": "appNodeEdge"
     }
-  ]
+  ],
+  "apps": {
+    "clockStdTimes": {
+      "name": "Clock (std/times format)",
+      "description": "The current time as text, its format as the built-in clock of FrameOS 2026.11.10 and earlier wrote it (\"HH:mm:ss\"). A scene made with that clock runs this app; a new scene uses Clock, whose format is chrono's (\"{hour/2}:{minute/2}\").",
+      "category": "data",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "markdown": "[Date format syntax](https://nim-lang.org/2.0.2/times.html)"
+        },
+        {
+          "name": "format",
+          "type": "select",
+          "options": [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd HH:mm:ss",
+            "HH:mm:ss:fff",
+            "HH:mm:ss",
+            "HH:mm",
+            "custom"
+          ],
+          "value": "HH:mm:ss",
+          "required": true,
+          "label": "Format",
+          "placeholder": "HH:mm:ss"
+        },
+        {
+          "name": "formatCustom",
+          "type": "string",
+          "value": "",
+          "required": false,
+          "label": "Custom format",
+          "placeholder": "",
+          "showIf": [
+            {
+              "field": "format",
+              "operator": "eq",
+              "value": "custom"
+            }
+          ]
+        }
+      ],
+      "output": [
+        {
+          "name": "time",
+          "type": "string"
+        }
+      ],
+      "origin": "repo/apps/text/clockStdTimes",
+      "sources": {
+        "app.test.ts": "import { formatStdTimes, get } from './app'\n\n// Tuesday 12 March 2024, 14:40:37.123 in the zone the test runs in: the\n// expected strings are what std/times printed for the same fields.\nconst at = new Date(2024, 2, 12, 14, 40, 37, 123)\n\nfunction clock(config: Record<string, unknown>, when = at) {\n  const real = Date.now\n  Date.now = () => when.getTime()\n  try {\n    return get(makeApp({ config }))\n  } finally {\n    Date.now = real\n  }\n}\n\ndescribe('clockStdTimes', () => {\n  it('shows the built-in clock\\'s presets as std/times did', () => {\n    expect(clock({ format: 'HH:mm:ss' })).toBe('14:40:37')\n    expect(clock({ format: 'HH:mm' })).toBe('14:40')\n    expect(clock({ format: 'yyyy-MM-dd' })).toBe('2024-03-12')\n    expect(clock({ format: 'yyyy-MM-dd HH:mm:ss' })).toBe('2024-03-12 14:40:37')\n    expect(clock({ format: 'HH:mm:ss:fff' })).toBe('14:40:37:123')\n  })\n\n  it('takes a custom format, and nothing when it is empty', () => {\n    expect(clock({ format: 'custom', formatCustom: 'dddd d MMMM yyyy' })).toBe('Tuesday 12 March 2024')\n    expect(clock({ format: 'custom', formatCustom: '' })).toBe('')\n  })\n\n  it('writes the tokens std/times writes', () => {\n    expect(formatStdTimes(at, 'ddd, d MMM yy')).toBe('Tue, 12 Mar 24')\n    expect(formatStdTimes(at, 'h:mm tt')).toBe('2:40 PM')\n    expect(formatStdTimes(at, 'hh:mm t')).toBe('02:40 P')\n    expect(formatStdTimes(at, 'H:m:s')).toBe('14:40:37')\n    expect(formatStdTimes(at, 'M/d/yy')).toBe('3/12/24')\n    expect(formatStdTimes(at, \"'Week of' MMM d\")).toBe('Week of Mar 12')\n    expect(formatStdTimes(at, \"HH'h'mm\")).toBe('14h40')\n    expect(formatStdTimes(at, \"HH''mm\")).toBe(\"14'40\")\n    expect(formatStdTimes(at, 'ss.ffffff')).toBe('37.123000')\n    expect(formatStdTimes(at, 'YYYY uuuu g')).toBe('2024 2024 AD')\n    expect(formatStdTimes(at, 'V VV GGGG')).toBe('11 11 2024')\n    expect(formatStdTimes(new Date(2024, 2, 12, 0, 5), 'h hh tt')).toBe('12 12 AM')\n    expect(formatStdTimes(new Date(2024, 2, 12, 12, 5), 'h tt')).toBe('12 PM')\n  })\n\n  it('refuses what std/times refused', () => {\n    expect(() => formatStdTimes(at, 'yyyy-MM-ddTHH')).toThrow(\"'T' is not a valid pattern\")\n    expect(() => formatStdTimes(at, \"HH 'oops\")).toThrow('Unclosed')\n  })\n})\n",
+        "app.ts": "// Clock (std/times format): the frame's time as text, its format written as\n// the built-in data/clock of FrameOS 2026.11.10 and earlier wrote it\n// (\"HH:mm:ss\", \"dddd d MMMM yyyy\", 'quoted' text). A scene made with that\n// clock runs this app (docs/retired-apps.json); a new scene uses Clock\n// (repo/apps/text/clock), whose format is chrono's.\n//\n// A port of std/times' `format`: its tokens, its literals and its errors. A\n// JavaScript app's Date is in the frame's zone, as the Nim clock's was.\n\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\n  'October', 'November', 'December']\n// Written as they are between tokens; any other character is part of one.\nconst LITERALS = ' -/:()[],.'\n\nconst pad = (value: number, width: number) => String(value).padStart(width, '0')\n\n// The ISO 8601 week and the year it belongs to (V, VV, GG, GGGG).\nfunction isoWeek(date: Date): { week: number; year: number } {\n  const day = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))\n  const weekday = day.getUTCDay() || 7\n  day.setUTCDate(day.getUTCDate() + 4 - weekday)\n  const yearStart = Date.UTC(day.getUTCFullYear(), 0, 1)\n  return { week: Math.ceil(((day.getTime() - yearStart) / 86400000 + 1) / 7), year: day.getUTCFullYear() }\n}\n\nfunction offset(date: Date, token: string): string {\n  const east = -date.getTimezoneOffset() * 60\n  const abs = Math.abs(east)\n  const sign = east >= 0 ? '+' : '-'\n  const hours = Math.floor(abs / 3600)\n  const minutes = pad(Math.floor(abs / 60) % 60, 2)\n  const seconds = pad(abs % 60, 2)\n  switch (token) {\n    case 'z': return sign + hours\n    case 'zz': return sign + pad(hours, 2)\n    case 'zzz': return `${sign}${pad(hours, 2)}:${minutes}`\n    case 'ZZZ': return `${sign}${pad(hours, 2)}${minutes}`\n    case 'zzzz': return `${sign}${pad(hours, 2)}:${minutes}:${seconds}`\n    default: return `${sign}${pad(hours, 2)}${minutes}${seconds}`\n  }\n}\n\nfunction pattern(date: Date, token: string): string {\n  const year = date.getFullYear()\n  const hour = date.getHours()\n  const millis = date.getMilliseconds()\n  switch (token) {\n    case 'd': return String(date.getDate())\n    case 'dd': return pad(date.getDate(), 2)\n    case 'ddd': return WEEKDAYS[date.getDay()].slice(0, 3)\n    case 'dddd': return WEEKDAYS[date.getDay()]\n    case 'h': return String(hour % 12 || 12)\n    case 'hh': return pad(hour % 12 || 12, 2)\n    case 'H': return String(hour)\n    case 'HH': return pad(hour, 2)\n    case 'm': return String(date.getMinutes())\n    case 'mm': return pad(date.getMinutes(), 2)\n    case 'M': return String(date.getMonth() + 1)\n    case 'MM': return pad(date.getMonth() + 1, 2)\n    case 'MMM': return MONTHS[date.getMonth()].slice(0, 3)\n    case 'MMMM': return MONTHS[date.getMonth()]\n    case 's': return String(date.getSeconds())\n    case 'ss': return pad(date.getSeconds(), 2)\n    case 'fff': return pad(millis, 3)\n    case 'ffffff': return pad(millis * 1000, 6)\n    case 'fffffffff': return pad(millis * 1000000, 9)\n    case 't': return hour >= 12 ? 'P' : 'A'\n    case 'tt': return hour >= 12 ? 'PM' : 'AM'\n    case 'yy': return pad(year % 100, 2)\n    case 'yyyy':\n    case 'uuuu': return year < 10000 ? pad(year, 4) : `+${year}`\n    case 'YYYY':\n    case 'UUUU': return String(year)\n    case 'V': return String(isoWeek(date).week)\n    case 'VV': return pad(isoWeek(date).week, 2)\n    case 'GG': return pad(isoWeek(date).year % 100, 2)\n    case 'GGGG': return String(isoWeek(date).year)\n    case 'z': case 'zz': case 'zzz': case 'zzzz': case 'ZZZ': case 'ZZZZ': return offset(date, token)\n    case 'g': return year < 1 ? 'BC' : 'AD'\n    default: throw new Error(`'${token}' is not a valid pattern`)\n  }\n}\n\n/** `date` in a std/times pattern. */\nexport function formatStdTimes(date: Date, format: string): string {\n  let out = ''\n  let run = ''\n  const flush = () => {\n    if (run) out += pattern(date, run)\n    run = ''\n  }\n  for (let i = 0; i < format.length; i++) {\n    const c = format[i]\n    if (c === \"'\") {\n      flush()\n      if (format[i + 1] === \"'\") {\n        out += \"'\"\n        i++\n        continue\n      }\n      const close = format.indexOf(\"'\", i + 1)\n      if (close < 0) throw new Error(\"Unclosed ' in time format string. For a literal ', use ''.\")\n      out += format.slice(i + 1, close)\n      i = close\n    } else if (LITERALS.includes(c)) {\n      flush()\n      out += c\n    } else {\n      if (run && run[0] !== c) flush()\n      run += c\n    }\n  }\n  flush()\n  return out\n}\n\nexport function get(app) {\n  const c = app.config\n  const format = c.format === 'custom' ? c.formatCustom : c.format\n  return formatStdTimes(new Date(Date.now()), typeof format === 'string' ? format : 'HH:mm:ss')\n}\n",
+        "config.json": "{\n  \"name\": \"Clock (std/times format)\",\n  \"description\": \"The current time as text, its format as the built-in clock of FrameOS 2026.11.10 and earlier wrote it (\\\"HH:mm:ss\\\"). A scene made with that clock runs this app; a new scene uses Clock, whose format is chrono's (\\\"{hour/2}:{minute/2}\\\").\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"markdown\": \"[Date format syntax](https://nim-lang.org/2.0.2/times.html)\"\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\n        \"yyyy-MM-dd\",\n        \"yyyy-MM-dd HH:mm:ss\",\n        \"HH:mm:ss:fff\",\n        \"HH:mm:ss\",\n        \"HH:mm\",\n        \"custom\"\n      ],\n      \"value\": \"HH:mm:ss\",\n      \"required\": true,\n      \"label\": \"Format\",\n      \"placeholder\": \"HH:mm:ss\"\n    },\n    {\n      \"name\": \"formatCustom\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Custom format\",\n      \"placeholder\": \"\",\n      \"showIf\": [\n        {\n          \"field\": \"format\",\n          \"operator\": \"eq\",\n          \"value\": \"custom\"\n        }\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"time\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
+      }
+    }
+  }
 }

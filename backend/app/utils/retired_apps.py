@@ -118,6 +118,12 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "runtime": "2026.11.6",
         "needs": "frameos.openLines and a spooled field reaching a JS app (byteIter), so a feed never has to fit the JS heap",
     },
+    "data/clock": {
+        "replacement": "repo/apps/text/clockStdTimes",
+        "sceneAppKey": "clockStdTimes",
+        "runtime": "2026.11.11",
+        "needs": "nothing new: an older frame keeps the built-in clock it has",
+    },
 }
 
 

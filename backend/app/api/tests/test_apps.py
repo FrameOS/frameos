@@ -15,7 +15,7 @@ async def test_api_apps(async_client):
     assert len(data['apps']) > 0, "Expected at least one app in the 'apps' dictionary"
     # Check for known apps (example: 'logic/ifElse' is from the sample code)
     assert 'logic/ifElse' in data['apps'], "Expected 'logic/ifElse' to be listed among apps"
-    assert 'data/clock' in data['apps'], "Expected 'data/clock' to be listed among apps"
+    assert 'render/text' in data['apps'], "Expected 'render/text' to be listed among apps"
     assert 'repo/apps/logic/jsLogic' not in data['apps'], "Expected JS templates to be frontend-only"
     assert 'repo/apps/text/jsText' not in data['apps'], "Expected JS templates to be frontend-only"
 

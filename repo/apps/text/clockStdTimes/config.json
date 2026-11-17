@@ -1,6 +1,6 @@
 {
-  "name": "Clock",
-  "description": "Return the current time",
+  "name": "Clock (std/times format)",
+  "description": "The current time as text, its format as the built-in clock of FrameOS 2026.11.10 and earlier wrote it (\"HH:mm:ss\"). A scene made with that clock runs this app; a new scene uses Clock, whose format is chrono's (\"{hour/2}:{minute/2}\").",
   "category": "data",
   "version": "1.0.0",
   "fields": [
@@ -10,7 +10,14 @@
     {
       "name": "format",
       "type": "select",
-      "options": ["yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "HH:mm:ss:fff", "HH:mm:ss", "HH:mm", "custom"],
+      "options": [
+        "yyyy-MM-dd",
+        "yyyy-MM-dd HH:mm:ss",
+        "HH:mm:ss:fff",
+        "HH:mm:ss",
+        "HH:mm",
+        "custom"
+      ],
       "value": "HH:mm:ss",
       "required": true,
       "label": "Format",

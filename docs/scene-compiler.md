@@ -136,9 +136,9 @@ A new one is an entry in `ProgramApps`, a case in `AP`, `"program": true` in
 its `config.json`, and a test. Only an app whose work is a few lines of
 JavaScript; per-app code in the compiler (a first version emitted each app's
 lines from Nim) cost more flash than the apps it replaced.
-`data/clock` stays a Nim app until stored scenes carry chrono's format
-(`{hour/2}:{minute/2}`) instead of std/times' (`HH:mm`), converted by the
-control planes.
+The clock went the other way: `data/clock` is retired to JavaScript apps
+(docs/retired-apps.md), since its std/times patterns would have needed a
+translator in the kit.
 
 ## Where a program runs
 

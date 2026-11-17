@@ -20,6 +20,14 @@ noticing. `docs/retired-apps.json` lists them:
 | `data/eventsToAgenda` | `repo/apps/text/eventsToAgenda` | 2026.10.22 | nothing new: an older frame keeps the built-in agenda it has |
 | `render/calendar` | `repo/apps/image/calendar` | 2026.11.5 | nothing new: an older frame keeps the built-in calendar it has |
 | `data/icalJson` | `repo/apps/json/icalJson` | 2026.11.6 | `frameos.openLines` and a spooled field reaching a JS app (`byteIter`) |
+| `data/clock` | `repo/apps/text/clockStdTimes` | 2026.11.11 | nothing new: an older frame keeps the built-in clock it has |
+
+The clock's replacement keeps the std/times format its scenes were written in
+(`HH:mm`, a port of std/times' `format` in JavaScript); a new scene uses
+Clock (`repo/apps/text/clock`), whose format is chrono's
+(`{hour/2}:{minute/2}`, the code nodes' tokens), and the samples do. A JS
+app's `Date.now()` is pinned with the snapshot harness's clock
+(`FRAMEOS_E2E_FIXED_EPOCH`, read in UTC), so the e2e clock stays still.
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.

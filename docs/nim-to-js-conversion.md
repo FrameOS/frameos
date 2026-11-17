@@ -105,7 +105,7 @@ node) and feeds problems back for up to three attempts.
 | pixie newImage, fill, draw, fillPath, strokePath, drawText, typeset, newFont, rgb() | an SVG string via frameos.svg(): <rect>, <path>, <text> with font-family/font-size, #rrggbb |
 | renderError(...) | return an SVG with the message, or frameos.error() |
 | scaleAndDrawImage, decodeImageWithDisplayBounds | frameos.image({dataUrl|base64, width, height}) and let the runtime scale |
-| times.now().format, chrono | NO equivalent in an app — feed a data/clock or a format() code node into a field |
+| times.now().format, chrono | NO equivalent in an app — feed the Clock app (repo/apps/text/clock) or a format() code node into a field |
 | runShellWithParentStreams, EXIF, dither, blake2b, files outside assets, frameConfig.debug, decode-target hints | NO equivalent — do not fake it; report it as unsupported |
 
 For every "no equivalent" the model must say so through `unsupported` — never a

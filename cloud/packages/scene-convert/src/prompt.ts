@@ -33,7 +33,7 @@ export const appMappings: Mapping[] = [
   { js: "an SVG string via frameos.svg(): <rect>, <path>, <text> with font-family/font-size, #rrggbb", nim: "pixie newImage, fill, draw, fillPath, strokePath, drawText, typeset, newFont, rgb()" },
   { js: "return an SVG with the message, or frameos.error()", nim: "renderError(...)" },
   { js: "frameos.image({dataUrl|base64, width, height}) and let the runtime scale", nim: "scaleAndDrawImage, decodeImageWithDisplayBounds" },
-  { js: "NO equivalent in an app — feed a data/clock or a format() code node into a field", nim: "times.now().format, chrono" },
+  { js: "NO equivalent in an app — feed the Clock app (repo/apps/text/clock) or a format() code node into a field", nim: "times.now().format, chrono" },
   { js: "NO equivalent — do not fake it; report it as unsupported", nim: "runShellWithParentStreams, EXIF, dither, blake2b, files outside assets, frameConfig.debug, decode-target hints" },
 ];
 

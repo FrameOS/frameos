@@ -162,6 +162,21 @@ suite "js app runtime":
     check imageValue.asImage().width == 3
     check imageValue.asImage().height == 2
 
+  test "the snapshot harness's pinned clock is a JS app's Date.now()":
+    # e2e/makesnapshots.py pins it so a clock renders the same picture on
+    # every run (utils/frame_time.nim); an unpinned frame reads the real one.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-app-clock".SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
+    let owner = AppRoot(nodeId: 8.NodeId, nodeName: "clock", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let source = "export const get = () => String(Date.now())"
+    putEnv("FRAMEOS_E2E_FIXED_EPOCH", "1710254400")
+    let pinned = newJsAppRuntime(category = "data", outputType = "text", source = source)
+    check pinned.get(owner, %*{}, context).asString() == "1710254400000"
+    delEnv("FRAMEOS_E2E_FIXED_EPOCH")
+    let free = newJsAppRuntime(category = "data", outputType = "text", source = source)
+    check free.get(owner, %*{}, context).asString() != "1710254400000"
+
   test "run can set next sleep, state, and draw a render image":
     let config = testConfig()
     let logger = testLogger(config)

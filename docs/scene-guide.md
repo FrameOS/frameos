@@ -138,10 +138,12 @@ cover, contain, stretch, center…), `render/text` (wrapping text, with
 `richText: "basic-caret"` for caret styling), `render/svg` (fixed SVG markup
 someone pasted, never markup a scene builds), `render/gradient`
 (`startColor`, `endColor`, `angle`), `render/color`, `render/split` (`rows`,
-`columns`, cells as above), `data/clock` (the time as a string; its `format`
-options are its own, not the code-node tokens), `data/downloadUrl` (a URL's
+`columns`, cells as above), `data/downloadUrl` (a URL's
 body as text), `data/parseJson`, `logic/setAsState` (a value into state,
-`stateKey` plus `valueString` or `valueJson`) and `logic/ifElse`. For a chart,
+`stateKey` plus `valueString` or `valueJson`) and `logic/ifElse`. For the
+time as text, copy the `repo/apps/text/clock` JS app into the scene: its
+`format` takes the code-node tokens (`{hour/2}:{minute/2}`,
+`{weekday} {day} {month/n}`). For a chart,
 copy the `repo/apps/image/chart` JS app into the scene: line, bar or area, from
 a `data` field, wired into `render/image`. `render/color` and `render/gradient`
 fill the whole canvas and hide whatever was drawn before them, so they go first

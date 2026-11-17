@@ -163,7 +163,7 @@ def test_native_app_output_field_input_keeps_native_return_type():
         "nodes": [
             {"id": "event", "type": "event", "data": {"keyword": "render"}, "position": {"x": 0, "y": 0}},
             {"id": "text", "type": "app", "data": {"keyword": "render/text", "config": {}}, "position": {"x": 1, "y": 1}},
-            {"id": "clock", "type": "app", "data": {"keyword": "data/clock", "config": {}}, "position": {"x": 2, "y": 2}},
+            {"id": "clock", "type": "app", "data": {"keyword": "data/prettyJson", "config": {}}, "position": {"x": 2, "y": 2}},
         ],
         "edges": [
             {"source": "event", "sourceHandle": "next", "target": "text", "targetHandle": "prev"},
@@ -236,7 +236,7 @@ def test_event_listener_filters_match_configured_payload_fields():
                 "data": {"keyword": "keyUp", "config": {"key": "Enter", "code": "13"}},
                 "position": {"x": 0, "y": 0},
             },
-            {"id": "clock", "type": "app", "data": {"keyword": "data/clock", "config": {}}, "position": {"x": 1, "y": 1}},
+            {"id": "clock", "type": "app", "data": {"keyword": "data/prettyJson", "config": {}}, "position": {"x": 1, "y": 1}},
         ],
         "edges": [
             {"source": "event", "sourceHandle": "next", "target": "clock", "targetHandle": "prev"},
@@ -264,7 +264,7 @@ def _button_listener_scene(config: dict) -> dict:
                 "data": {"keyword": "button", "config": config},
                 "position": {"x": 0, "y": 0},
             },
-            {"id": "clock", "type": "app", "data": {"keyword": "data/clock", "config": {}}, "position": {"x": 1, "y": 1}},
+            {"id": "clock", "type": "app", "data": {"keyword": "data/prettyJson", "config": {}}, "position": {"x": 1, "y": 1}},
         ],
         "edges": [
             {"source": "event", "sourceHandle": "next", "target": "clock", "targetHandle": "prev"},

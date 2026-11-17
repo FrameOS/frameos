@@ -40,7 +40,7 @@ suite "retired Nim apps":
     let gallery = retiredAppSources("data/frameOSGallery")
     check not gallery.isNil
     check gallery{"app.ts"}.getStr().contains("https://gallery.frameos.net/image")
-    check retiredAppSources("data/clock").isNil
+    check retiredAppSources("render/text").isNil
     check retiredAppSources("immich").isNil
     check retiredAppSources("frameOSGallery").isNil
 

@@ -827,7 +827,28 @@ apps").
   emitter for 6.7 KB of apps. Written once in the kit, the same work is
   1.8 KB of bytecode. A program app is worth it only when its work is a few
   lines of JavaScript.
-- `data/clock` stays (with std/times' `formatPattern`, 3.8 KB, which nothing
-  else uses): its `HH:mm` patterns would need a translator on the device.
-  Converting stored scenes to chrono's `{hour/2}:{minute/2}` on the control
-  planes and a JS-only clock is the way to take it.
+- `data/clock` stayed here: its `HH:mm` patterns would have needed a
+  translator in the kit. It is retired to JavaScript apps instead (below).
+
+---
+
+# The clock retired to JavaScript (2026-11-17)
+
+*Same recipe, on top of the program apps (3,280,448 bytes).*
+
+**3,280,448 → 3,264,288 bytes (−16,160).** `data/clock` is retired
+(docs/retired-apps.json) to `repo/apps/text/clockStdTimes`, a JavaScript port
+of std/times' `format` that keeps the scenes' `HH:mm` patterns; a new scene
+uses `repo/apps/text/clock`, whose format is chrono's. Both are scene data, no
+flash. The Nim clock was the last ESP32 user of std/times' calendar and
+formatter, so most of that module goes with it: `formatPattern` (−3,841),
+`stringToPattern`, `initTimeFormat`, the epoch-day and local-zone helpers,
+the locale table and their literals.
+
+- What it costs instead is memory, not flash: a JS app node runs in a QuickJS
+  runtime of its own on an ESP32 (docs/scene-compiler.md "Next"), so a scene
+  whose only JS app is its clock now starts one.
+- A first take kept the clock in the program (a kit case) and had both
+  planes add each clock's pattern translated to chrono's on delivery
+  (−15,520): three translators and a delivery rule for one app. Retiring it
+  is what the other Nim apps with a JS replacement did.
