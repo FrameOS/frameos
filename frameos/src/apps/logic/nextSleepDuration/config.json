@@ -2,6 +2,7 @@
   "name": "Next sleep duration",
   "description": "Override the delay between renders",
   "category": "logic",
+  "program": true,
   "version": "1.0.0",
   "fields": [
     {

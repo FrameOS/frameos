@@ -2,6 +2,7 @@
   "name": "Log JSON",
   "description": "Log a JSON object",
   "category": "data",
+  "program": true,
   "version": "1.0.0",
   "fields": [
     {

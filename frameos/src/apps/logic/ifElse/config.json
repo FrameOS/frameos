@@ -2,6 +2,7 @@
   "name": "If-Else",
   "description": "If Condition Then Node Else Node",
   "category": "logic",
+  "program": true,
   "version": "1.0.0",
   "settings": [],
   "fields": [
