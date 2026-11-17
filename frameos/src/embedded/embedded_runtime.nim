@@ -940,11 +940,14 @@ sceneSettings.frameSettingsAction = frameSettingsDo
 proc fos_store_json(asker: cstring): cstring {.importc, cdecl.}
 proc fos_store_action(asker, action, args: cstring) {.importc, cdecl.}
 
-proc sceneStoreJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
-  let raw = fos_store_json(asker.cstring)
+proc takeCString(raw: cstring): string =
+  ## A string the firmware malloc'd, as Nim's, the C one freed.
   if not raw.isNil:
     result = $raw
     cFree(raw)
+
+proc sceneStoreJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
+  takeCString(fos_store_json(asker.cstring))
 
 proc sceneStoreDo(asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
   fos_store_action(asker.cstring, action.cstring, args.cstring)
@@ -959,11 +962,6 @@ sceneStoreAction = sceneStoreDo
 proc fos_code_json(asker: cstring): cstring {.importc, cdecl.}
 proc fos_code_source(what: cstring): cstring {.importc, cdecl.}
 proc fos_code_action(asker, action, args: cstring) {.importc, cdecl.}
-
-proc takeCString(raw: cstring): string =
-  if not raw.isNil:
-    result = $raw
-    cFree(raw)
 
 proc sceneCodeJson(asker: string): string {.nimcall, gcsafe, raises: [].} =
   takeCString(fos_code_json(asker.cstring))
