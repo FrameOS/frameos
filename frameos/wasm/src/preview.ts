@@ -138,6 +138,9 @@ export interface FrameOSPreviewOptions {
   onSceneInfo?: (sceneInfo: SceneInfo) => void
   onLog?: (message: string) => void
   onSceneEvent?: (name: string, payload: Record<string, unknown>) => void
+  /** A link (`<a href>`) was tapped in a scene's UI. Defaults to opening it
+   * in a new tab; a frame shows its QR code instead (docs/jsx-ui.md "Links"). */
+  onOpenLink?: (url: string) => void
   onError?: (message: string) => void
   /** The render ran out of memory under the simulated device ceiling. The
    * runtime's heap is not recoverable afterwards (the same longjmp-and-reboot
@@ -302,6 +305,19 @@ export class FrameOSPreview {
       case 'log':
         this.options.onLog?.(String(msg.message ?? ''))
         break
+      case 'openLink': {
+        const url = String(msg.url ?? '')
+        // The runtime opens only these (ui/layout.nim isLink); never a javascript: URL.
+        if (!/^(https?:\/\/|mailto:|tel:)/i.test(url)) {
+          break
+        }
+        if (this.options.onOpenLink) {
+          this.options.onOpenLink(url)
+        } else if (typeof window !== 'undefined') {
+          window.open(url, '_blank', 'noopener,noreferrer')
+        }
+        break
+      }
       case 'sceneEvent':
         this.options.onSceneEvent?.(String(msg.name ?? ''), msg.payload ?? {})
         break

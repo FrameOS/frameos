@@ -156,7 +156,7 @@ shows no select pays only the code.
 |---|---|
 | `svg` | A drawing. At the root, the whole image; inside a UI, a leaf whose `viewBox` is fitted into its box (centered, whole; `preserveAspectRatio="none"` stretches), sized by its classes, else its `width`/`height`, else its viewBox. `currentColor` in it is the text color. |
 | `img` | A picture: `src` is what `frameos.fetchImage` (its result, or its `image`) or `frameos.loadAssetImage` returned, or a URL, which the runtime fetches at the size the `<img>` is laid out at (give it one: `w-[…] h-[…]`), off the render where it can, and draws nothing until it is in (`docs/async-js.md`). `object-cover` / `object-contain` / `object-fill` (the default, as in CSS). One size given, the other follows the picture's aspect. |
-| `span`, `b`, `strong`, `i`, `em`, `u`, `s`, `small`, `a`, `code`, `label`, `mark` | Inline: in a block they flow with the text around them and only their text classes count (color, size, weight, ...). In a flex or grid container they are items, like any element. |
+| `span`, `b`, `strong`, `i`, `em`, `u`, `s`, `small`, `a`, `code`, `label`, `mark` | Inline: in a block they flow with the text around them and only their text classes count (color, size, weight, ...). In a flex or grid container they are items, like any element. An `<a href>` opens its link on a tap ([Links](#links)). |
 | `br` | A line break. |
 | `input`, `textarea` | A field to type into ([Fields and the keyboard](#fields-and-the-keyboard)). |
 | `select`, `option` | A select box ([Select boxes](#select-boxes)). |
@@ -784,6 +784,53 @@ where the select's region landed, so a scrolled or moved select needs no
 second pass; its regions are then the only ones, so the page under it needs no
 guard. A row's handler is `OptionBase` + its number (`ui/events.nim`
 `pickOption`).
+
+## Links
+
+`<a href="https://…">` opens on a tap. A frame has no browser, so on a Pi and
+an ESP32 (and a board its control plane renders for) the link's **QR code**
+goes up over the whole UI, as large as fits, black on white on every panel,
+with its URL under it and a Close button: a phone scans it and opens the page
+there. In the browser (the editor's preview, the playground) the tap opens the
+URL in a new tab instead.
+
+```tsx
+<p>Tickets at <a href="https://example.com/tickets" className="underline">example.com</a></p>
+<a href="tel:+37120000000" className="px-4 py-2 rounded bg-sky-600">Call us</a>
+```
+
+- **Only `http://`, `https://`, `mailto:` and `tel:`**, at most 1024 bytes
+  with no control characters (`ui/layout.nim` `isLink`); any other href
+  (`javascript:` above all) is no link and a tap on it does nothing.
+- **An `onClick` of its own replaces it**: the handler runs and nothing
+  opens, so an app that routes its own links keeps them.
+- **The target** is the `<a>` itself where it is a box (an item of a flex or
+  grid container, the outermost element), and in running text (a `<p>`, a
+  block) the run of text it is in: a tap anywhere on that text opens the first
+  link there. Two links in one sentence want two elements.
+- **While the code is up nothing else answers**: a tap anywhere on it, the
+  frame's `back` in a built-in scene or Escape puts it away. A field's
+  keyboard and an open `<select>` go first. A board its plane renders keeps
+  it between pulls (`lastingUiInput`).
+- `<a>` has no look of its own: give it `underline`, a color, or a button's
+  classes.
+- No `<Link>` component: none exists in the runtime or the repo's apps.
+
+How: the walker keeps `href` as a plain attribute (a string; an image ref in
+`href` is still a picture). The layout gives a linking `<a>`, or the run of
+text holding one, the tap handler `LinkOpen` (past every handler number a tree
+can hold, as `OptionBase` is), so a link is a `UiRegion` like any element and
+needs no `UiEvent` of its own: it has no JavaScript to call. A tap on it
+(`ui/events.nim` `openLink`) asks the host's `uiOpenLink` hook first: the wasm
+runtime sets it (`wasm_main.nim` → `frameos_wasm_js_open_link` →
+`Module.onFrameosOpenLink`), and only the browser preview's worker defines
+that, posting `openLink` to `FrameOSPreview` (`onOpenLink`, default
+`window.open`); a plane's renderer defines none, so its boards get the QR code.
+Otherwise the URL goes into `UiInput.link` and `layoutUi` draws the card after
+the UI (`linkCard`), as it does a `<select>`'s list, its one region
+`LinkClose`. The code is `utils/qr.nim`, the encoder the frame's setup screens
+already use, so the ESP32 image carries no second one; it is encoded once per
+URL and size (`UiMemo.linkQr`).
 
 ## Scrolling and clipping
 

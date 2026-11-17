@@ -822,6 +822,8 @@ async function init(msg) {
     Module = await createFrameOS({
       locateFile: (path) => new URL(path, import.meta.url).href,
       onFrameosLog: (message) => post({ type: 'log', message }),
+      // A tapped link (docs/jsx-ui.md "Links"): the page opens it in a tab.
+      onFrameosOpenLink: (url) => post({ type: 'openLink', url: String(url) }),
       onFrameosEvent: (name, payload) => {
         let parsed = {}
         try {

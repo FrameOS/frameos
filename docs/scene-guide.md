@@ -633,6 +633,11 @@ export function get(app, context) {
   above or below it, stays on the screen and scrolls; style the chosen one
   through the `<option>`'s own `className`, and use it when the choices are
   many (a few fit better as buttons on a touch screen).
+- Links: `<a href="https://…">` (or `mailto:`, `tel:`) opens on a tap: a
+  frame shows its QR code over the UI for a phone to scan (tap to close), the
+  browser preview opens a tab. Other schemes (`javascript:`) do nothing, an
+  `onClick` on the `<a>` replaces it, and in running text the whole run of
+  text holding the link is its target. Style it yourself (`underline`).
 - Lists longer than the screen: give the box a height (`flex-1` in a
   column, `h-*`, `max-h-*`) and `overflow-y-auto`, and a finger (or a wheel)
   scrolls it; no paging needed on an LCD. `overflow-hidden` clips.
