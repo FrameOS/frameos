@@ -9,7 +9,7 @@ export interface WindowSizeOption {
 }
 
 export const SCENE_WINDOW_SIZE_HELP =
-  "The size this scene opens at in a window of a desktop layout (Windows 98, macOS, BeOS, Classic Mac, NeXTSTEP), 800 × 480 by default. A music player opens square, a to-do list tall. It changes nothing outside a desktop."
+  "The size this scene opens at in a window of a desktop layout (Windows 98, macOS, BeOS, Classic Mac, NeXTSTEP, OS/2 Warp), 800 × 480 by default. A music player opens square, a to-do list tall. It changes nothing outside a desktop."
 
 const PRESETS: WindowSizeOption[] = [
   { value: '480x480', label: '480 × 480, square' },

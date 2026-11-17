@@ -79,7 +79,9 @@ window's tab, the frame's from Preferences and the Deskbar's tray; in Classic Ma
 from the gear box on the title bar and File's Get Info, the frame's from About
 This Frame, the clock and the Frame icon; in NeXTSTEP from the gear on the title
 bar and Info's Inspector, the frame's from Info Panel and the Dock's clock; in
-Commander from F4, the frame's from F1 and the clock.
+OS/2 Warp from the gear on the title bar and the window's system menu, the
+frame's from System Setup (an icon, the LaunchPad, the Desktop menu) and the
+WarpCenter's clock; in Commander from F4, the frame's from F1 and the clock.
 
 ## The frame page
 

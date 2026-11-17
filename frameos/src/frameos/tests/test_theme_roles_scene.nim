@@ -27,6 +27,7 @@ const
     ("beos", "BeOS layout", "layout-beos", "beos"),
     ("classic-mac", "Classic Mac layout", "layout-classic-mac", "classic"),
     ("nextstep", "NeXTSTEP layout", "layout-nextstep", "nextstep"),
+    ("os2-warp", "OS2 Warp layout", "layout-os2-warp", "warp"),
     ("commander", "Commander layout", "layout-commander", "commander"),
     ("high-contrast", "Windows 98 layout", "layout-windows-98", "contrast"),
     ("frameos", "Windows 98 layout", "layout-windows-98", "frameos"),

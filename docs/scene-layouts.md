@@ -30,7 +30,7 @@ or a saved scene is edited, the cloud refuses a store version
 to the AI. The runtime does not check: a layout with no yield shows no content.
 
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
-`Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`,
+`Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`, `OS/2 Warp`,
 `Commander`, `Teletext`, `E-reader`, `Polaroid`, `Front page`, `Terminal`,
 `Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
@@ -222,7 +222,20 @@ window goes under (Info, Scenes, Windows, Services for the frame's own apps,
 Hide), the Dock down the right edge has the scenes that have run there (a window
 open, or one closed) with an ellipsis under those not running now and a clock
 tile for the frame's page, and a window put away is a miniwindow under the main
-menu. `Commander` is a desktop of two panels and no
+menu. `OS/2 Warp` is a desktop of 1996: the WarpCenter along the top (its first
+button the Desktop menu of the frame's scenes, the second the Window List, the
+frame's own apps in its tray, and the signal, the battery, the date and the clock,
+which open System Setup, the frame's page), icons down the left, and the
+LaunchPad at the bottom of the desktop, under the windows (Windows, Scenes with
+the arrow to its drawer of scenes, the frame's own apps, Setup; "Show LaunchPad"
+turns it off). A window's title is in the middle of its bar; the icon at the
+bar's left opens its system menu (Restore, Hide, Maximize, Settings, Window list,
+Close), and its buttons are the gear, hide, maximize and close. A hidden window
+is in the Window List alone, grey, and comes back from there; the Window List
+also tiles the windows in a grid and cascades them. A right click or a long press
+on bare desktop opens the desktop's pop-up menu. The keys are OS/2's: Ctrl+Esc
+the Window List, Alt+F9 hides, Alt+F10 maximizes, Alt+F5 restores, Alt+F4
+closes, Alt+Tab, F11. `Commander` is a desktop of two panels and no
 windows: the scene with the focus in one, a second scene running in the other
 (two at most, which every host can run), a press or Tab giving the other the
 focus, and the function keys along the bottom (F5 swaps the panels, F6 shows the
@@ -237,11 +250,11 @@ settings, on both planes and on the store's scene page). The hosts list it
 beside the scene's name in `app.frame.scenes` (`windowSize`): a Pi from the
 deployed or pushed scene, an ESP32 from its scene index (`fos_scene_store.c`
 `make_entry` writes it, so the scene stays on flash), the browser from the
-loaded scenes. `Windows 98`, `macOS`, `BeOS`, `Classic Mac` and `NeXTSTEP` open
+loaded scenes. `Windows 98`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP` and `OS/2 Warp` open
 a new window of the scene at that size, made smaller with its shape kept where
 it does not fit the desktop and another window is open, and a scene that says
 none at 800×480, a 7.5-inch frame's. That is `ownSize`, the same text in the
-five: a desktop has no window size of its own (its "Window size" field, with
+six: a desktop has no window size of its own (its "Window size" field, with
 "The whole desktop" among its choices, was taken out on 2026-11-17, and what a
 frame kept of it is never read). The first window still fills the desktop where
 its size does not fit, as the frame looked before anything else was opened, and
@@ -254,7 +267,7 @@ a desktop to draw with `fill="currentColor"` on a window's title bar, a task
 button or a menu. Every host lists it from the same place as `windowSize`
 (an ESP32 from its scene index), checked: a value that is not an icon is left
 out, so a layout never has to check it.
-**Where a new window opens.** Those five put a new window where it covers the
+**Where a new window opens.** Those six put a new window where it covers the
 least of the windows open: all of it on bare desktop where there is room, the
 highest such spot first, then the leftmost, a small gap from the others and from
 the desktop's edges. Where nothing is free, it keeps off the desktop's icons if
@@ -263,7 +276,9 @@ it can (`Windows 98`'s down the left, `Classic Mac`'s down the right, and on
 Deskbar grows), then covers as little of the windows as it can, a title bar
 counting five times over, so no window opens right over another and every title
 bar stays in reach. The taskbar, the menu bars, the Deskbar's column, the Docks
-and `NeXTSTEP`'s main menu are not part of the desktop at all. The rule is one
+and `NeXTSTEP`'s main menu are not part of the desktop at all, nor is `OS/2
+Warp`'s WarpCenter (its icons down the left and its LaunchPad are kept clear like
+the others' icons). The rule is one
 function, `freeSpot`, the same text in each layout (a scene cannot share code
 with another): it tries the desktop's corners and thirds, the spots beside each
 window and icon, and a title bar down from each window, a few hundred with a few
@@ -275,7 +290,7 @@ scene that had a window before opens where it was, as before.
 **A desktop of another size.** The windows' boxes are in the desktop's pixels,
 and the desktop is the panel over the render scale (docs/jsx-ui.md "Scale"): a
 new scale, a turn or a browser window resized gives it another size. Each of
-the five keeps the size its boxes were made for (`room` in its state) and, on
+the six keeps the size its boxes were made for (`room` in its state) and, on
 another, puts every window, and every closed window's box, at the same share of
 the desktop (`refit`, the same text in each), so a window stays where it was on
 the glass, its scene drawn at the new scale inside it. Before, a scale of 0.5
@@ -285,7 +300,7 @@ its tiles never over one another and a new one the next place in the
 arrangement, so it has nothing to choose; `Commander` has its two panels.
 **Long lists of scenes.** Each desktop's list of the frame's scenes (`Windows
 98`'s Start, the Scenes menus of `macOS`, `Classic Mac` and `NeXTSTEP`, `BeOS`'s
-Be menu, `Tiling`'s +) scrolls where it is longer than the screen, under a
+Be menu, `OS/2 Warp`'s Desktop menu and LaunchPad drawer, `Tiling`'s +) scrolls where it is longer than the screen, under a
 finger as under a wheel, and so does `BeOS`'s Deskbar with many windows open.
 The lists go by category: a scene's `settings.category`, its category by name
 ("Photos", "Real time"; docs/scene-icons.md "Category"), reaches a layout as
@@ -294,17 +309,17 @@ each category, under that name, the categories by name whatever the case, and
 the scenes with none last as Other. Nothing maps a category: a name of the
 owner's own is a heading like the store's. Where no scene has a category (an
 older runtime lists none), the list is as it always was. That is `grouped`, one more function the same text in each of those
-six layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
+seven layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
 `docs/scene-icons.md`) is drawn, in the color of the text around it, wherever a
 desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,
 the `macOS` Dock and Scenes menu, `BeOS`'s Be menu, Deskbar and Tracker's icons,
-the `Classic Mac` menus and icons, `NeXTSTEP`'s Dock and miniwindows, `Tiling`'s
-+. A scene without one gets the desktop's own, as before, and the scene store,
+the `Classic Mac` menus and icons, `NeXTSTEP`'s Dock and miniwindows, `OS/2
+Warp`'s menus, title bars and Window List, `Tiling`'s +. A scene without one gets the desktop's own, as before, and the scene store,
 Files and the terminal keep the desktop's drawings of them even where they have an icon of their own. That is `ownIcon`, the
-same text in the six. `Commander` draws no icons. Launchpad and the Scenes icons open the
+same text in the seven. `Commander` draws no icons. Launchpad and the Scenes icons open the
 frame's own scene list (the scene switcher, `docs/scene-switcher.md`), which is
 the runtime's, not a layout's.
-The desktop icons of `Windows 98`, `BeOS` and `Classic Mac` are those apps alone, never the
+The desktop icons of `Windows 98`, `BeOS`, `Classic Mac` and `OS/2 Warp` are those apps alone, never the
 frame's scenes (the menus have those): the scene list, the scene store,
 Files, the terminal and the frame's settings. The **Scene store**,
 **Files** (`docs/scene-store.md`) and the **Terminal**
@@ -314,7 +329,8 @@ has them each desktop has entries of its own for them and leaves them out of its
 scene lists: the top of `Windows 98`'s Start, a bag for the store and a prompt
 for the terminal in `Tiling`'s top bar, `macOS`'s mark's menu (the store and
 the terminal; each in the Dock while it has a window), `BeOS`'s Be menu,
-`Classic Mac`'s mark's menu and icons, `NeXTSTEP`'s Services and Dock, and
+`Classic Mac`'s mark's menu and icons, `NeXTSTEP`'s Services and Dock, the top of
+`OS/2 Warp`'s Desktop menu, its WarpCenter's tray, icons and LaunchPad, and
 `Commander`'s F7 to F9. Everywhere else (an editor's preview) they draw the one
 scene, as before.
 
@@ -372,7 +388,8 @@ them a window like the others; `app.frame.sceneName` says what one shows ("Scene
 settings", "Frame settings", "Layout settings", "Scene switcher"),
 and `Windows 98` names its windows after it ("Clock Properties", "Control
 Panel"; `macOS` "Clock Settings", "System Settings"; `BeOS` "Clock Settings",
-"Preferences"), with no gear where a scene's window has one. Each
+"Preferences"; `OS/2 Warp` "Clock - Settings", "System Setup", "Scenes - Icon
+View"), with no gear where a scene's window has one. Each
 scene's settings are a scene of their own here, `app.frame.sceneId`
 `system/sceneSettings#<scene id>` (`docs/scene-settings.md` "In a window"), so a
 layout gives each its own window, named after the scene after the `#`; the plain

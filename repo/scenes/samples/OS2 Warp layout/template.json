@@ -1,0 +1,10 @@
+{
+  "name": "OS/2 Warp layout",
+  "description": "The WarpCenter along the top and a grey window with its title in the middle around each scene: its first button opens the scene list, the second the windows, and the clock the frame's page. On a Pi or an ESP32 it is a desktop: every scene opened is a window, all running at once, with the LaunchPad and its drawer, a system menu on every window, the Window List to tile or cascade them, and OS/2's keys.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.5"
+}
