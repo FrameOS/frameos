@@ -93,7 +93,7 @@ def scene_network_policy(frame: Frame) -> str:
     moving its scene onto the backend must not take its NAS or its VPN hosts
     away. The backend host's own addresses stay refused: they are not the
     frame's network. Anything else (a virtual frame, a preview) keeps the
-    opt-in rule."""
+    opt-in rule (the editor's preview: ``preview_network_policy``)."""
     from app.tasks.embedded_firmware import is_thin_client_frame
 
     network = getattr(frame, "network", None)
@@ -103,6 +103,29 @@ def scene_network_policy(frame: Frame) -> str:
     if allowed is False or getattr(frame, "mode", None) != "embedded":
         return NETWORK_POLICY_PUBLIC
     return NETWORK_POLICY_PRIVATE if is_thin_client_frame(frame) else NETWORK_POLICY_PUBLIC
+
+
+def preview_network_policy(frame: Frame) -> str:
+    """What a scene in the editor's live preview of ``frame`` may reach
+    through the backend's preview proxy (``scene_preview_proxy``): what the
+    frame itself would, so a scene that works on the frame can be previewed.
+
+    A physical frame managed by this backend has no local-network block
+    (docs/lan-access.md), so its preview reaches the LAN and VPN ranges; a
+    virtual frame keeps the opt-in rule (``network.allowLocalNetworkAccess``,
+    the switch in its settings), and ``false`` on any frame is public
+    addresses only. The proxy never goes past private ranges: loopback and
+    link-local are the backend host's own, not the frame's network, and the
+    relay forwards any method and headers."""
+    from app.tasks.embedded_firmware import is_virtual_frame
+
+    network = getattr(frame, "network", None)
+    allowed = network.get("allowLocalNetworkAccess") if isinstance(network, dict) else None
+    if allowed is False:
+        return NETWORK_POLICY_PUBLIC
+    if allowed is True or not is_virtual_frame(frame):
+        return NETWORK_POLICY_PRIVATE
+    return NETWORK_POLICY_PUBLIC
 
 
 def thin_client_renderer_available() -> bool:

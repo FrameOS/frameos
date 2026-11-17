@@ -15,6 +15,19 @@ app or a scene asks for either (weighed and dropped on 2026-10-17: scenes nest
 and copy apps, and no rule can tell from a hostname which local device a scene
 should reach).
 
+What a self-hosted backend fetches for a frame's scenes follows the same rule:
+the editor's live preview (its `scene_preview_proxy`, which relays a
+previewed scene's HTTP past the browser's CORS) and a render on the backend
+(`docs/server-rendering.md`) reach the LAN for a frame with hardware, since
+the frame itself would. A virtual frame has no network of its own, so it
+reaches public addresses only until **Local network access** is on in its
+settings (`network.allowLocalNetworkAccess`, no code: the backend is the
+owner's). `false` refuses private ranges on any frame. The preview's relay
+never reaches the backend host's own loopback or link-local addresses
+(`preview_network_policy` in `backend/app/utils/embedded_render.py`). The
+cloud's preview proxy stays public-only: the cloud is not on the frame's
+network.
+
 The switch is one extra layer, not the security boundary. Devices the frame
 should never reach belong on a different network or VLAN.
 

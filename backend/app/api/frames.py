@@ -107,7 +107,7 @@ from app.utils.network import (
     device_server_host_error,
     is_safe_host,
 )
-from app.utils.embedded_render import RenderQueueFull
+from app.utils.embedded_render import NETWORK_POLICY_PUBLIC, RenderQueueFull, preview_network_policy
 from app.utils.asset_headers import inert_asset_headers
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
@@ -2541,15 +2541,26 @@ PREVIEW_PROXY_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
 PREVIEW_PROXY_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 
 
-async def _preview_proxy_host_is_blocked(host: str) -> bool:
+def _preview_proxy_allows_private(frame: Frame) -> bool:
+    """Whether the live-preview HTTP proxy may reach private ranges for this
+    frame's scenes: what the frame itself would reach
+    (``preview_network_policy``). A frame managed by this backend has no
+    local-network block, so a scene that fetches from a NAS or a Home
+    Assistant on the LAN must preview the same way; a virtual frame only with
+    its local network access on (#868). Loopback and link-local stay refused
+    whatever the frame says: they are the backend host's own, and the proxy
+    relays any method and headers."""
+    return preview_network_policy(frame) != NETWORK_POLICY_PUBLIC
+
+
+async def _preview_proxy_host_is_blocked(host: str, *, allow_private: bool) -> bool:
     """SSRF guard for the live-preview HTTP proxy, on the shared resolver-based
-    check (app/utils/network.py) with private ranges refused as well: an
-    authenticated project user must not turn the backend into an
-    internal-network probe."""
+    check (app/utils/network.py). The connect is checked again with the same
+    settings (guarded_transport)."""
     if not host:
         return True
     try:
-        await check_target_host(host, allow_private=False, allow_loopback=False)
+        await check_target_host(host, allow_private=allow_private, allow_loopback=False)
     except TargetBlocked:
         return True
     return False
@@ -2565,7 +2576,8 @@ async def api_frame_scene_preview_proxy(
     (image galleries, weather, ...) fetch external URLs that the browser can't
     reach directly because of CORS; the preview routes those requests here so
     they behave like the device, which fetches server-side. Project-authed and
-    SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
+    SSRF-guarded: public addresses, and the LAN where the frame itself would
+    reach it (``_preview_proxy_allows_private``). Request body: {method, url, headers, bodyBase64, timeoutMs}.
     The response mirrors the upstream status code and body bytes."""
     try:
         envelope = json.loads(
@@ -2598,7 +2610,8 @@ async def api_frame_scene_preview_proxy(
     parsed = httpx.URL(url) if url else None
     if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
         _bad_request(f"Invalid proxy URL: {url}")
-    if await _preview_proxy_host_is_blocked(parsed.host):
+    allow_private = _preview_proxy_allows_private(frame)
+    if await _preview_proxy_host_is_blocked(parsed.host, allow_private=allow_private):
         raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Proxy target host is not allowed")
 
     body_bytes = base64.b64decode(body_b64) if body_b64 else None
@@ -2619,7 +2632,7 @@ async def api_frame_scene_preview_proxy(
         # streamed under a cap.
         from app.utils.network import guarded_transport
 
-        transport = guarded_transport(allow_private=False, allow_loopback=False)
+        transport = guarded_transport(allow_private=allow_private, allow_loopback=False)
         async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, transport=transport) as client:
             async with client.stream(method, url, headers=forward_headers, content=body_bytes) as upstream:
                 upstream_status = upstream.status_code

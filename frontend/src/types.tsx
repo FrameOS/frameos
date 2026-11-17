@@ -579,6 +579,11 @@ export interface FrameType {
     // ISO 3166-1 alpha-2 regulatory domain for the Wi-Fi radio ("FR"); ""
     // leaves the kernel's world domain, where channels 12/13 cannot be joined.
     wifiCountry?: string
+    // What scenes the backend runs for this frame may reach: a virtual frame's
+    // renders and every frame's live preview (backend embedded_render.py
+    // scene_network_policy / preview_network_policy). Unset: a virtual frame
+    // public addresses only, a frame with hardware its LAN too.
+    allowLocalNetworkAccess?: boolean
   }
   agent?: {
     agentEnabled?: boolean
