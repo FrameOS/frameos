@@ -433,9 +433,12 @@ change.
 **An ESP32 runs a few at once.** Each window is a scene running, its program,
 its JS apps' interpreters and its UI, beside the panel's buffers and the scene
 in front, so where memory is short the host lets only so many run at once, the
-one in front included: `app_runtime.windowLimit`, 2 on a board with 8 MB of
-PSRAM, 4 with more (the browser simulating a device too), and no limit on a Pi
-or in an ordinary preview. A layout reads it as `app.frame.windows` and opening
+one in front included: `app_runtime.windowLimit`, by what the device leaves its
+scenes once the panel has its canvas and buffers (`memory.sceneMemoryBytes`):
+2 from 4 MB (an 8 MB board with a panel up to 10.3"), 4 from 9 MB, 1 below
+(the 13.3" colour E1004 on 8 MB, whose 3.84 MB canvas leaves about 2.5 MB),
+the browser simulating a device counting the same, and no limit on a Pi or in
+an ordinary preview. A layout reads it as `app.frame.windows` and opening
 one more closes the one that had the focus longest ago (the samples: the
 lowest window, `Tiling`'s tile opened longest ago). The host holds to it
 whatever the layout does (`single_scene_host.makeRoom`): a scene brought to the

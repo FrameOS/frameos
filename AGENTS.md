@@ -645,8 +645,9 @@
   `ownIcon`, each the same text in all six with a list: change any of them in
   every copy
   (`test_windowed_desktops.nim` checks they match).
-  Where memory is short only so many run at once (`app_runtime.windowLimit`, 2
-  on an 8 MB ESP32, 4 above, `app.frame.windows`): the layouts close the one
+  Where memory is short only so many run at once (`app_runtime.windowLimit`, by
+  the PSRAM the panel leaves (`memory.sceneMemoryBytes`): 2 on an 8 MB ESP32,
+  1 on the 13.3" E1004, 4 on 16 MB, `app.frame.windows`): the layouts close the one
   that had the focus longest ago and the host holds to it whatever a layout
   does (`makeRoom`, `trimWindows`); an ESP32 without a desktop keeps one scene
   as before (`keepsInWindow`). The wheel stays off the ESP32

@@ -10,6 +10,7 @@
  * changes under it (a join, a scan), and main.c renders the panel again when
  * it does (fos_wifi_set_change_hook, fos_scenes_settings_shown).
  */
+#include "fos_restart.h"
 #include "fos_frame_settings.h"
 
 #include <stdio.h>
@@ -296,7 +297,7 @@ void fos_frame_settings_apply(const char *json)
          * comes back without it, as the portal's own form does. The new
          * network is joined after it; the hello after it reports the
          * rotation. */
-        if (xTaskCreate(restart_task, "fos_fs_restart", 2048, NULL, 5, NULL) != pdPASS) esp_restart();
+        if (xTaskCreate(restart_task, "fos_fs_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) esp_restart();
         return;
     }
     if (scale) {

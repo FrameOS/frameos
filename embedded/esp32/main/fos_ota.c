@@ -35,6 +35,7 @@
 #include "fos_netguard.h"
 #include "fos_ota_download.h"
 #include "fos_ota_pubkey.h"
+#include "fos_restart.h"
 #include "fos_url_guard.h"
 #include "fos_version.h"
 #include "fos_wifi.h"
@@ -43,7 +44,7 @@
 static const char *TAG = "fos_ota";
 #define FOS_OTA_BOOT_REQUEST_KEY "ota_req"
 #define FOS_OTA_REBOOT_DELAY_MS 1000
-#define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
+#define FOS_OTA_REBOOT_TASK_STACK_SIZE FOS_RESTART_TASK_STACK
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
 #define FOS_OTA_CHUNK (8 * 1024)
 /* A dropped socket or a short read is resumed within one run, after the
@@ -230,10 +231,34 @@ RTC_DATA_ATTR static uint8_t s_ota_failures;
  * hole. An offer strictly below the running release is therefore refused
  * unless the local admin asked for exactly that with `ota downgrade` on the
  * console, which arms this for one manifest fetch. RTC memory: the console
- * command may be followed by the request being served after a deep-sleep
- * wake. A dev build ("dev", no dotted version) never refuses — see
- * fos_version_is_downgrade. */
-RTC_DATA_ATTR static uint8_t s_ota_allow_downgrade;
+ * command is followed by a restart into the early updater (or the request is
+ * served after a deep-sleep wake). A dev build ("dev", no dotted version)
+ * never refuses — see fos_version_is_downgrade.
+ *
+ * RTC_NOINIT, not RTC_DATA: the bootloader loads RTC_DATA's initial values
+ * on every reset but a deep-sleep wake, so the esp_restart that follows
+ * `ota downgrade` cleared the flag and the early updater refused anyway
+ * (the bench, 2026-11-16). The magic tells kept values from power-on
+ * garbage; ota_rtc() resets them. */
+#define FOS_OTA_RTC_MAGIC 0x4F544152u /* "OTAR" */
+typedef struct {
+    uint32_t magic;
+    uint8_t allow_downgrade;
+    uint8_t last_pending;
+    char last_plane[16];
+    char last_status[24];
+    char last_detail[160];
+} ota_rtc_t;
+RTC_NOINIT_ATTR static ota_rtc_t s_ota_rtc;
+
+static ota_rtc_t *ota_rtc(void)
+{
+    if (s_ota_rtc.magic != FOS_OTA_RTC_MAGIC) {
+        memset(&s_ota_rtc, 0, sizeof(s_ota_rtc));
+        s_ota_rtc.magic = FOS_OTA_RTC_MAGIC;
+    }
+    return &s_ota_rtc;
+}
 
 /* The last `ota:<plane>` line, kept across the restart that follows it. The
  * early-boot updater (fos_ota_run_boot_request) logs before the backend log
@@ -248,15 +273,12 @@ RTC_DATA_ATTR static uint8_t s_ota_allow_downgrade;
  * live already left, and replaying it on the next wake is how an old run's
  * error would land on a deploy started since (the control planes fail a
  * firmware deploy on an `ota:error` that follows its boot). */
-RTC_DATA_ATTR static char s_ota_last_plane[16];
-RTC_DATA_ATTR static char s_ota_last_status[24];
-RTC_DATA_ATTR static char s_ota_last_detail[160];
-RTC_DATA_ATTR static uint8_t s_ota_last_pending;
+/* Kept in s_ota_rtc above (RTC_NOINIT, for the same reason). */
 static bool s_ota_in_boot_request = false;
 
 void fos_ota_allow_downgrade_once(void)
 {
-    s_ota_allow_downgrade = 1;
+    ota_rtc()->allow_downgrade = 1;
 }
 
 static void ota_note_failure(const char *version)
@@ -290,23 +312,25 @@ static void ota_log(const ota_source_t *src, const char *status, const char *det
     /* Progress is noise after a restart; every other line is the verdict. */
     if (strcmp(status, "progress") != 0 &&
         (s_ota_in_boot_request || strcmp(status, "verified") == 0)) {
-        strlcpy(s_ota_last_plane, src->plane, sizeof(s_ota_last_plane));
-        strlcpy(s_ota_last_status, status, sizeof(s_ota_last_status));
-        strlcpy(s_ota_last_detail, detail ? detail : "", sizeof(s_ota_last_detail));
-        s_ota_last_pending = 1;
+        ota_rtc_t *rtc = ota_rtc();
+        strlcpy(rtc->last_plane, src->plane, sizeof(rtc->last_plane));
+        strlcpy(rtc->last_status, status, sizeof(rtc->last_status));
+        strlcpy(rtc->last_detail, detail ? detail : "", sizeof(rtc->last_detail));
+        rtc->last_pending = 1;
     }
 }
 
 void fos_ota_replay_last_line(void)
 {
-    if (!s_ota_last_pending) return;
-    s_ota_last_pending = 0;
-    if (s_ota_last_plane[0] == '\0' || s_ota_last_status[0] == '\0') return;
+    ota_rtc_t *rtc = ota_rtc();
+    if (!rtc->last_pending) return;
+    rtc->last_pending = 0;
+    if (rtc->last_plane[0] == '\0' || rtc->last_status[0] == '\0') return;
     char line[352];
     snprintf(line, sizeof(line),
              "{\"event\":\"ota:%s\",\"source\":\"esp32\",\"status\":\"%s\","
              "\"detail\":\"%s\",\"replayed\":true}",
-             s_ota_last_plane, s_ota_last_status, s_ota_last_detail);
+             rtc->last_plane, rtc->last_status, rtc->last_detail);
     frameos_nim_log_hook(line);
 }
 
@@ -414,7 +438,7 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         return ESP_OK;
     }
     if (fos_version_is_downgrade(out->version, running)) {
-        if (!s_ota_allow_downgrade) {
+        if (!ota_rtc()->allow_downgrade) {
             ESP_LOGW(TAG, "ota (%s): refusing downgrade %s -> %s (console `ota downgrade` to allow once)",
                      src->plane, running, out->version);
             ota_log(src, "downgrade-refused", out->version);
@@ -424,7 +448,7 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
         }
         ESP_LOGW(TAG, "ota (%s): downgrade %s -> %s allowed once by the console", src->plane,
                  running, out->version);
-        s_ota_allow_downgrade = 0;
+        ota_rtc()->allow_downgrade = 0;
     }
 
     /* base64(ED + keyid8 + sig64) over the image bytes (fos_minisig.c,
@@ -884,7 +908,7 @@ esp_err_t fos_ota_run_boot_request(void)
     }
     /* This run's lines are the ones the first pass replays; an older
      * verdict still waiting in RTC memory is not this run's to report. */
-    s_ota_last_pending = 0;
+    ota_rtc()->last_pending = 0;
     s_ota_in_boot_request = true;
     esp_err_t err = fos_ota_check_and_apply();
     s_ota_in_boot_request = false;

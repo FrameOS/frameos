@@ -109,6 +109,25 @@ proc deviceMemoryBytes*(): int =
   else:
     0
 
+var panelMemoryBytes*: proc(): int {.nimcall, gcsafe, raises: [].}
+  ## Set by a host whose memory is a device's: what the panel takes of
+  ## `deviceMemoryBytes` before any scene runs. On an ESP32 the scene canvas,
+  ## the packed panel buffer, an RGB LCD's frame buffers and the emergency
+  ## reserve (embedded_runtime.nim, from fos_display_render_psram_bytes); in
+  ## the preview running as one, its RGBX canvas (wasm_main.nim): the
+  ## simulated ceiling is the device's heap plus what the canvas costs extra
+  ## there (devices.ts esp32PreviewMemoryBytes), so both leave the same.
+
+proc sceneMemoryBytes*(): int =
+  ## What a device leaves its scenes once the panel has what it needs
+  ## (`panelMemoryBytes`), or 0 for a host that has plenty. A 13.3" colour
+  ## e-paper on 8 MB of PSRAM has 8 MB in all and about 2.5 MB of it for
+  ## scenes, beside a 3.84 MB canvas.
+  let memory = deviceMemoryBytes()
+  if memory <= 0 or panelMemoryBytes.isNil:
+    return memory
+  max(1, memory - panelMemoryBytes())
+
 when defined(memProbe):
   proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}
   when defined(frameosEmbedded):

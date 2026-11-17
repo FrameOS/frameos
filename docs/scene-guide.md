@@ -1152,9 +1152,9 @@ interface FrameOSApp {
      * (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
-     * ESP32 with 8 MB of PSRAM, 4 with more). A desktop opening one more closes the one that had the focus
-     * longest ago. Undefined where there is no limit (a Raspberry Pi) (FrameOS 2026.11.8+; undefined
-     * before). */
+     * ESP32 with 8 MB of PSRAM, 1 beside a 13.3-inch colour panel's canvas, 4 with more). A desktop opening
+     * one more closes the one that had the focus longest ago. Undefined where there is no limit (a Raspberry
+     * Pi) (FrameOS 2026.11.8+; undefined before). */
     windows?: number;
     /** The theme of the desktop around the scene, its roles' classes (a string, or a list of boxes one inside the
      * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in

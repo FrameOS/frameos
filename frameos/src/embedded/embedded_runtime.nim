@@ -25,6 +25,7 @@ import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_icon
+from frameos/utils/memory import panelMemoryBytes
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -1039,6 +1040,17 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 
 proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer", cdecl.}
 proc canvasBitsPerPixel(): csize_t {.importc: "fos_display_canvas_bits_per_pixel", cdecl.}
+proc displayRenderPsramBytes(): csize_t {.importc: "fos_display_render_psram_bytes", cdecl.}
+
+# What the panel takes of the PSRAM before any scene runs, for the window
+# limit (memory.sceneMemoryBytes): the canvas, the packed buffer and an RGB
+# LCD's frame buffers (fos_display_render_psram_bytes, less the 1.5 MiB of
+# render headroom it adds) and the emergency reserve the glue arms at boot
+# (FOS_NIM_EMERGENCY_RESERVE_BYTES). The same sum as devices.ts
+# esp32DeviceHeapBytes less the canvas, which the preview charges the same way.
+panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+  let panel = displayRenderPsramBytes().int
+  if panel <= 0: 0 else: max(0, panel - 1536 * 1024) + 1024 * 1024
 
 var sceneCanvas: Image
 

@@ -534,8 +534,12 @@ def suite_thin(ctx, frame):
             nxt = headers.get('x-frameos-next-render') or headers.get('X-FrameOS-Next-Render')
         entry = {'scene': s.get('name'), 'pulls': times, 'next_render_s': nxt}
         # Only a picture that did not change between the first two pulls owes a 304
-        # (a clock with a seconds hand is a new picture every pull).
-        if times[0]['etag'] and times[0]['etag'] == times[1]['etag'] and times[2]['status'] != 304:
+        # (a clock with a seconds hand is a new picture every pull), and only if
+        # it had not changed by the third either: an answer with another ETag is
+        # a new picture (a clock's minute turning over between the pulls, sent
+        # as a FOSB v2 delta), not a missed 304.
+        if (times[0]['etag'] and times[0]['etag'] == times[1]['etag'] and times[2]['status'] != 304
+                and times[2]['etag'] in (None, times[1]['etag'])):
             issues.append(issue('note', 'no_304', f"scene {s.get('name')}",
                                 f"a pull with the ETag of an unchanged picture got {times[2]['status']}, {times[2]['bytes']} bytes"))
         try:

@@ -1,4 +1,5 @@
 #include "fos_cloud.h"
+#include "fos_restart.h"
 #include "fos_cloud_contract.h"
 #include "fos_cloud_contract_gen.h"
 #include "fos_json_guard.h"
@@ -1527,7 +1528,7 @@ static void ws_reboot_task(void *arg)
 
 static void ws_schedule_reboot(void)
 {
-    if (xTaskCreate(ws_reboot_task, "fos_cloud_reboot", 2048, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(ws_reboot_task, "fos_cloud_reboot", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
         esp_restart();
     }
 }

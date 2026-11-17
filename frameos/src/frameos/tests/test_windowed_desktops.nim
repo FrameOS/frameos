@@ -12,7 +12,7 @@ import ../types
 import ../js_runtime/app_runtime
 import ../layout_choice
 from ../ui/events import uiPressRects
-from ../utils/memory import deviceMemoryBytesOverride
+from ../utils/memory import deviceMemoryBytesOverride, panelMemoryBytes
 import ../events_gen
 import system/sceneSettings/scene as sceneSettings
 
@@ -1754,6 +1754,28 @@ suite "the Classic Mac desktop":
     check open.sorted() == @["tests/cm-blue", "tests/cm-red"]
     check problems.len == 0
     deviceMemoryBytesOverride = 0
+
+  test "the window limit counts what the panel leaves the scenes, not all of the PSRAM":
+    # fos_display_render_psram_bytes less its 1.5 MiB headroom, plus the
+    # 1 MiB emergency reserve, as embedded_runtime.nim hands it over.
+    const MiB = 1024 * 1024
+    deviceMemoryBytesOverride = 8 * MiB
+    panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+      1200 * 1600 * 2 + 1200 * 1600 div 2 + MiB # the E1004: a 565 canvas, its packed buffer
+    check windowLimit() == 1
+    panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+      2 * ((1872 + 1) div 2) * 1404 + MiB # the E1003: a 4-bit canvas, its panel buffer
+    check windowLimit() == 2
+    panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+      480 * 480 * 2 * 5 + MiB # the SenseCAP Indicator: canvas, packed buffer, three frame buffers
+    check windowLimit() == 2
+    deviceMemoryBytesOverride = 16 * MiB
+    panelMemoryBytes = proc(): int {.nimcall, gcsafe, raises: [].} =
+      800 * 480 * 4 + 800 * 480 div 2 + MiB
+    check windowLimit() == 4
+    panelMemoryBytes = nil
+    deviceMemoryBytesOverride = 0
+    check windowLimit() == 0
 
 const
   NextMenuW = 118 ## the NeXTSTEP main menu's column at 800 x 480
