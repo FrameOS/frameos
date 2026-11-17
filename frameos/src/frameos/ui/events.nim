@@ -860,6 +860,15 @@ proc paste(target: UiTarget) =
   if text.len > 0:
     target.insert(text)
 
+proc follow(target: UiTarget, pointer: int, dx, dy = 0'f32, kept = true) =
+  ## From now on `pointer` moves an end of the focused field's selection,
+  ## `dx`, `dy` from where it holds it; `kept` (a touch's, or shift's) keeps
+  ## the other end, else (a mouse's drag) it is where the press went down.
+  target.selectPointer = pointer
+  target.selectKept = kept
+  target.selectDX = dx
+  target.selectDY = dy
+
 proc selectWord(target: UiTarget, r: UiRegion, lx, ly: float32) =
   ## A long press or a double tap on a field, as on a phone: it has the
   ## keyboard, the word there is selected (by the next layout, which knows
@@ -1343,25 +1352,24 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if target.input.handles and target.input.focus > 0:
           # A handle of a selection made by touch: the finger drags that end,
           # the other stays. The menu waits until it lets go.
-          for i in countdown(target.regions.high, 0):
+          # The handles are drawn over all but the menu, which keeps clear of
+          # them: the one under the finger is the topmost there.
+          let
+            hit = target.hitAt(lx, ly, ueClick)
+            handle = if hit >= 0: target.regions[hit].handlers[ueClick] - 1 - SelectBase else: -1
+          if handle == 0 or handle == 1:
             let
-              r = target.regions[i]
-              handle = r.handlers[ueClick] - 1 - SelectBase
-            if (handle == 0 or handle == 1) and r.inside(lx, ly):
-              let (a, z) = target.input.selected
-              target.input.sel = (if handle == 0: z else: a) + 1
-              target.input.caret = if handle == 0: a else: z
-              target.input.menu = false
-              target.selectPointer = pointer
-              target.selectKept = true
-              # The end is at the handle's middle, its line's middle at its top.
-              target.selectDX = lx - (r.x + r.w / 2)
-              target.selectDY = ly - r.y
-              grabbed = true
-              takes = -1
-              box = -1
-              moved = true
-              break
+              r = target.regions[hit]
+              (a, z) = target.input.selected
+            target.input.sel = (if handle == 0: z else: a) + 1
+            target.input.caret = if handle == 0: a else: z
+            target.input.menu = false
+            # The end is at the handle's middle, its line's middle at its top.
+            target.follow(pointer, lx - (r.x + r.w / 2), ly - r.y)
+            grabbed = true
+            takes = -1
+            box = -1
+            moved = true
         when not defined(frameosEmbedded):
           if not grabbed and payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
             # A mouse (or a pen) on a field: it has the keyboard at once, the
@@ -1372,12 +1380,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
               let r = target.regions[hit]
               let extend = payload{"shift"}.getBool() and target.input.focus == r.key + 1
               target.focusField(r, lx, ly, extend)
-              target.selectPointer = pointer
+              target.follow(pointer, kept = extend)
               target.selectX = lx - r.x
               target.selectY = ly - r.y
-              target.selectKept = extend
-              target.selectDX = 0
-              target.selectDY = 0
               takes = -1
               box = -1
               moved = true
@@ -1419,10 +1424,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.selectWord(target.regions[hit], lx, ly)
         if kind == ord(ueLongPress):
           # Still down: a slide from here selects on to where it goes.
-          target.selectPointer = pointer
-          target.selectKept = true
-          target.selectDX = 0
-          target.selectDY = 0
+          target.follow(pointer)
           if target.dragPointer == pointer:
             target.dragKey = -1 # no scroll of the box around it
         moved = true
