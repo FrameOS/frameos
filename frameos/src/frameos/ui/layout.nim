@@ -659,7 +659,14 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   result.box.readClasses(result.text, classes, rootW, rootH, states)
   if result.box.overflowX != ovVisible or result.box.overflowY != ovVisible:
     result.pointer = true # a scroll builds it again (samePointer)
-    result.scrollAt = input.scrolled(key)
+    # scrollTop={y}: scrolled there when the app changes it (a code editor
+    # opening another file, or where a file was left), else where it was.
+    let top = n.attr("scroll-top")
+    var y: float32
+    if top.len > 0 and not ui.isNil and number(top, 0, top.len, y) and
+        (prev.isNil or prev.src.isNil or prev.src.attr("scroll-top") != top):
+      ui[].scrollTo(key, ui[].scrolled(key)[0], y)
+    result.scrollAt = if ui.isNil: input.scrolled(key) else: ui[].scrolled(key)
   # A hovered `group` lights its descendants' group-hover: classes.
   let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":

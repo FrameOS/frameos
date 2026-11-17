@@ -759,6 +759,29 @@ suite "fields, clipping and scrolling":
     discard at("pointerUp", 40)
     check heard == @[(4, 122.0 + 40.0)]
 
+  test "scrollTop scrolls a box when the app changes it":
+    proc page(top: string): SvgNode =
+      result = input("div", "h-[100px] w-[100px] overflow-y-auto", {"scroll-top": top})
+      result.children.add el("div", "h-[400px]")
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let memo = UiMemo()
+    discard layout.layoutUi(page("50"), 100, 100, state, regions, memo)
+    let key = regions[0].key
+    check state.scrolled(key) == (0'f32, 50'f32)
+    # Scrolled by hand since, the same scrollTop leaves it where it went.
+    state.scrollTo(key, 0, 80)
+    regions.setLen(0)
+    discard layout.layoutUi(page("50"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 80'f32)
+    regions.setLen(0)
+    discard layout.layoutUi(page("0"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 0'f32)
+    regions.setLen(0)
+    discard layout.layoutUi(page("9000"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 300'f32) # kept in range
+
   test "a drag along a way the box under it does not scroll scrolls the box around it":
     let target = uiTarget("nested", 6)
     target.input.slow = false
