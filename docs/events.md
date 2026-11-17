@@ -314,7 +314,10 @@ back before the next push (`frameos/cursor_panel.nim`, under the loading
 mark's lock; docs/realtime-rendering.md "The mouse cursor"). A move writes
 the cursor's old rectangle and its new one: no scene runs, nothing is pushed,
 and the cursor is never in the canvas, the stored frame (`GET /image`,
-snapshots) or the driver's copy of the panel. It shows for `CursorHideMs`
+snapshots) or the driver's copy of the panel. Its shape is what the JSX UI
+under it asks for with a `cursor-*` class (docs/jsx-ui.md "The mouse
+cursor"; a window's frame its resize arrows), the arrow elsewhere, asked
+again after every move and every render. It shows for `CursorHideMs`
 (5 s) after a mouse last moved it, and goes when a finger or a pen touches
 the screen or the mouse is unplugged; a touch-only frame never shows one,
 and neither does e-paper or an upload target.

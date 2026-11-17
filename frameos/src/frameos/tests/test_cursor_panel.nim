@@ -147,6 +147,57 @@ suite "the cursor sprite":
     check not s.drawn
     check s.cursorShow(panel, false, at(0, 0, panel))
 
+  test "every shape draws something but none, and the double arrows are as symmetric as they look":
+    for shape in CursorShape:
+      let rows = spriteRows(shape)
+      if shape == csNone:
+        check rows.len == 0
+        continue
+      checkpoint($shape)
+      check rows.len > 0 and rows[0].len > 0
+      for row in rows:
+        check row.len == rows[0].len
+    proc mirrored(rows: seq[string]): seq[string] =
+      for row in rows:
+        var m = ""
+        for i in countdown(row.high, 0): m.add row[i]
+        result.add m
+    proc flipped(rows: seq[string]): seq[string] =
+      for i in countdown(rows.high, 0): result.add rows[i]
+    proc transposed(rows: seq[string]): seq[string] =
+      for x in 0 ..< rows[0].len:
+        var line = ""
+        for y in 0 ..< rows.len: line.add rows[y][x]
+        result.add line
+    for shape in [csEwResize, csNsResize, csMove]:
+      check spriteRows(shape) == spriteRows(shape).mirrored
+      check spriteRows(shape) == spriteRows(shape).flipped
+    check spriteRows(csNsResize) == spriteRows(csEwResize).transposed
+    check spriteRows(csNwseResize) == spriteRows(csNwseResize).transposed
+    check spriteRows(csNeswResize) == spriteRows(csNwseResize).mirrored
+
+  test "a shape is drawn with its hot spot on the cursor, and no cursor draws nothing":
+    let panel = fakePanel()
+    paintPanel(9)
+    let picture = fakeBytes
+    var s: CursorPanelState
+    var hand = at(40, 30, panel)
+    hand.shape = csPointer
+    check s.cursorShow(panel, true, hand)
+    check panel.pixelAt(40, 30).isBlack       # the fingertip's outline
+    check panel.pixelAt(40, 31).isWhite       # the finger
+    var resize = at(40, 30, panel)
+    resize.shape = csEwResize
+    check s.cursorShow(panel, true, resize)
+    check panel.pixelAt(40, 30).isWhite       # the middle of the shaft
+    check panel.pixelAt(32, 30).isWhite       # its left head
+    check panel.pixelAt(30, 30).isBlack       # ... outlined
+    check panel.pixelAt(48, 30).isWhite       # its right head
+    var none = at(40, 30, panel)
+    none.shape = csNone
+    check s.cursorShow(panel, true, none)
+    check fakeBytes == picture
+
 suite "the cursor on a panel":
   test "it goes away leaving the picture exactly as it was":
     for bpp in [2, 3, 4]:

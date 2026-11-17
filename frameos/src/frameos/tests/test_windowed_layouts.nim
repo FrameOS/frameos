@@ -112,6 +112,33 @@ export function get(app) {
 }
 """
 
+# A window on the right that resizes from its edges, with a title strip that
+# moves it, around a scene whose own UI asks for a hand on its left half.
+const cursorDeskUi = """
+export function get(app) {
+  return (
+    <div className="relative w-full h-full bg-white">
+      <div className="absolute left-0 top-0 w-[20px] h-[40px] flex"><yield /></div>
+      <div className="absolute left-[20px] top-0 w-[20px] h-[40px] flex flex-col cursor-resize-[4px]"
+        onPointerDown={() => frameos.setState("sizing", true)}>
+        <div className="h-[6px] cursor-move" onPointerDown={() => frameos.setState("moving", true)} />
+        <div className="flex flex-1 m-[2px]"><Scene id="tests/pointing" /></div>
+      </div>
+    </div>
+  )
+}
+"""
+
+const pointingUi = """
+export function get(app) {
+  return (
+    <div className="w-full h-full flex bg-white">
+      <div className="w-1/2 h-full cursor-pointer bg-black" onClick={() => {}} />
+    </div>
+  )
+}
+"""
+
 let scenesJson = "[" & [
   jsxScene("tests/desk", deskUi, 300.0, ""","isLayout": true"""),
   panel("tests/blue", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/yellow"]}"""),
@@ -136,6 +163,9 @@ let scenesJson = "[" & [
   jsxScene("tests/counter4", counterUi, 3000.0).withLayout("tests/desk"),
   jsxScene("tests/typer", typerUi, 86400.0).withLayout("tests/desk"),
   panel("tests/hearing", "#0000ff", 600.0).withLayout("tests/desk", """{"open": ["tests/counter4"], "hearing": true}"""),
+  jsxScene("tests/cursordesk", cursorDeskUi, 300.0, ""","isLayout": true"""),
+  jsxScene("tests/pointing", pointingUi, 3000.0),
+  panel("tests/cursored", "#0000ff", 600.0).withLayout("tests/cursordesk"),
   panel("tests/wheeling", "#0000ff", 600.0).withLayout("tests/desk",
     """{"open": ["tests/scroller"], "pressCover": true}"""),
 ].join(",") & "]"
@@ -296,6 +326,29 @@ suite "windows":
     check pressing.wornLayout.state{"pressed"}.getInt() == 1
     rhythmClockOverride = 1000.01
     check pass(pressing).color(30, 30) == colored("#ef4444") # the counter heard no tap
+
+  test "the mouse cursor's shape is what the UI under it asks for, through the layout and its windows":
+    let scene = hostScene("tests/cursored")
+    discard pass(scene)
+    check cursorShapeAt(scene, 5, 20) == csArrow        # the scene it wraps: no UI
+    check cursorShapeAt(scene, 30, 3) == csMove         # the title strip
+    check cursorShapeAt(scene, 21, 20) == csEwResize    # the frame's left edge
+    check cursorShapeAt(scene, 39, 20) == csEwResize    # ... and its right
+    check cursorShapeAt(scene, 30, 39) == csNsResize    # ... its bottom
+    check cursorShapeAt(scene, 21, 39) == csNeswResize  # ... a corner
+    check cursorShapeAt(scene, 39, 39) == csNwseResize
+    check cursorShapeAt(scene, 25, 20) == csPointer     # the window's scene's own UI
+    check cursorShapeAt(scene, 35, 20) == csArrow       # ... where it asks for nothing
+    # A press the frame holds keeps its arrows wherever the mouse goes.
+    let payload = %*{"x": 21, "y": 20, "pointerId": 0, "pointerType": "mouse"}
+    runEvent(scene, ExecutionContext(scene: scene, event: "pointerDown", payload: payload, loopIndex: 0,
+      loopKey: ".", nextSleep: -1))
+    check scene.wornLayout.state{"sizing"}.getBool()
+    check cursorShapeAt(scene, 5, 20) == csEwResize
+    let up = %*{"x": 5, "y": 20, "pointerId": 0, "pointerType": "mouse"}
+    runEvent(scene, ExecutionContext(scene: scene, event: "pointerUp", payload: up, loopIndex: 0,
+      loopKey: ".", nextSleep: -1))
+    check cursorShapeAt(scene, 5, 20) == csArrow
 
   test "a window hanging off the left edge is cut there, not squeezed into what shows":
     let hanging = hostScene("tests/hanging")

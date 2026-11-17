@@ -15,21 +15,91 @@
 ## puts it away by writing that copy back. It allocates nothing and touches
 ## no ref.
 
+import std/math
 import ./loading_mark
+import ./cursor_shape
 
-{.push checks: off, stackTrace: off, raises: [].}
+export cursor_shape
 
 type
-  CursorShape* = enum
-    csArrow ## the default arrow
-
   CursorSprite = object
     width, height: int32
     hotX, hotY: int32 ## the pixel that points
-    rows: array[19, string] ## '.' clear, 'X' black, 'o' white
+    pixels: string ## a row after the other: '.' clear, 'X' black, 'o' white
+
+# ------------------------------------------------- the shapes, at compile time
+
+type Poly = seq[(float, float)]
+
+proc insidePoly(poly: Poly, x, y: float): bool =
+  ## Even-odd: whether (x, y) is inside the polygon.
+  var j = poly.high
+  for i in 0 .. poly.high:
+    let (xi, yi) = poly[i]
+    let (xj, yj) = poly[j]
+    if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+      result = not result
+    j = i
+
+proc turned(poly: Poly, degrees: float): Poly =
+  let (c, s) = (cos(degrees * PI / 180), sin(degrees * PI / 180))
+  for (x, y) in poly:
+    result.add((x * c - y * s, x * s + y * c))
+
+proc outlined(shapes: seq[Poly], radius: int): CursorSprite =
+  ## Polygons around (0, 0), white, in a one-pixel black outline: a pixel of
+  ## the sprite is white when its center is inside one of them, black when
+  ## it is not but touches a white one. The hot spot is (0, 0); the sprite is
+  ## trimmed to what it draws.
+  let size = 2 * radius + 1
+  var white = newSeq[bool](size * size)
+  for row in 0 ..< size:
+    for col in 0 ..< size:
+      # A hair off the pixel's center, so no center lies on an edge the
+      # shape is symmetric about.
+      let (x, y) = (float(col - radius) + 0.0011, float(row - radius) + 0.0017)
+      for poly in shapes:
+        if poly.insidePoly(x, y):
+          white[row * size + col] = true
+  var grid = newSeq[char](size * size)
+  var (x0, y0, x1, y1) = (size, size, -1, -1)
+  for row in 0 ..< size:
+    for col in 0 ..< size:
+      var c = '.'
+      if white[row * size + col]:
+        c = 'o'
+      else:
+        for dy in -1 .. 1:
+          for dx in -1 .. 1:
+            let (r, k) = (row + dy, col + dx)
+            if r >= 0 and r < size and k >= 0 and k < size and white[r * size + k]:
+              c = 'X'
+      grid[row * size + col] = c
+      if c != '.':
+        (x0, y0, x1, y1) = (min(x0, col), min(y0, row), max(x1, col), max(y1, row))
+  result = CursorSprite(width: int32(x1 - x0 + 1), height: int32(y1 - y0 + 1),
+    hotX: int32(radius - x0), hotY: int32(radius - y0))
+  for row in y0 .. y1:
+    for col in x0 .. x1:
+      result.pixels.add grid[row * size + col]
+
+proc art(hotX, hotY: int, rows: openArray[string]): CursorSprite =
+  ## Pixel art, a row a string.
+  result = CursorSprite(width: int32(rows[0].len), height: int32(rows.len), hotX: int32(hotX),
+    hotY: int32(hotY))
+  for row in rows:
+    doAssert row.len == rows[0].len
+    result.pixels.add row
+
+proc doubleArrow(half, head, wing, shaft: float): Poly =
+  ## An arrow both ways along x: `half` from the middle to each tip, `head`
+  ## long heads `wing` wide each side, a shaft `shaft` wide each side.
+  @[(-half, 0.0), (-half + head, -wing), (-half + head, -shaft), (half - head, -shaft),
+    (half - head, -wing), (half, 0.0), (half - head, wing), (half - head, shaft),
+    (-half + head, shaft), (-half + head, wing)]
 
 const
-  ArrowSprite = CursorSprite(width: 12, height: 19, hotX: 0, hotY: 0, rows: [
+  ArrowSprite = art(0, 0, [
     "X...........",
     "XX..........",
     "XoX.........",
@@ -50,10 +120,79 @@ const
     "......XooX..",
     ".......XX...",
   ])
+  HandSprite = art(5, 0, [
+    ".....XX..........",
+    "....XooX.........",
+    "....XooX.........",
+    "....XooX.........",
+    "....XooX.........",
+    "....XooXXX.......",
+    "....XooXooXXX....",
+    "....XooXooXooXX..",
+    "XX..XooXooXooXoX.",
+    "XoX.XooooooooXooX",
+    "XooXXoooooooooooX",
+    ".XooXoooooooooooX",
+    "..XoooooooooooooX",
+    "..XoooooooooooooX",
+    "...XooooooooooooX",
+    "...XoooooooooooX.",
+    "....XooooooooooX.",
+    "....XooooooooooX.",
+    ".....XooooooooX..",
+    ".....XooooooooX..",
+    ".....XXXXXXXXXX..",
+  ])
+  IBeamSprite = art(4, 9, [
+    "XXXX.XXXX",
+    "XoooXoooX",
+    "XXXXoXXXX",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "...XoX...",
+    "XXXXoXXXX",
+    "XoooXoooX",
+    "XXXX.XXXX",
+  ])
+  # Every edge off the pixel grid (bases at 5.5, tips at 9.5), so each shape
+  # comes out as symmetric as it is.
+  EwSprite = outlined(@[doubleArrow(9.5, 4.0, 4.5, 1.5)], 11)
+  NsSprite = outlined(@[doubleArrow(9.5, 4.0, 4.5, 1.5).turned(90)], 11)
+  NwseSprite = outlined(@[doubleArrow(8.5, 4.0, 4.5, 1.6).turned(45)], 9)
+  NeswSprite = outlined(@[doubleArrow(8.5, 4.0, 4.5, 1.6).turned(-45)], 9)
+  MoveSprite = outlined(@[doubleArrow(9.5, 4.0, 3.5, 1.5), doubleArrow(9.5, 4.0, 3.5, 1.5).turned(90)], 11)
+  NoSprite = CursorSprite()
 
 proc sprite(shape: CursorShape): CursorSprite =
   case shape
   of csArrow: ArrowSprite
+  of csPointer: HandSprite
+  of csText: IBeamSprite
+  of csMove: MoveSprite
+  of csEwResize: EwSprite
+  of csNsResize: NsSprite
+  of csNwseResize: NwseSprite
+  of csNeswResize: NeswSprite
+  of csNone: NoSprite
+
+when defined(testing):
+  proc spriteRows*(shape: CursorShape): seq[string] =
+    ## The tests' look at a shape.
+    let s = sprite(shape)
+    for row in 0 ..< int(s.height):
+      result.add s.pixels[row * int(s.width) ..< (row + 1) * int(s.width)]
+
+{.push checks: off, stackTrace: off, raises: [].}
 
 type
   CursorAt* = object
@@ -150,7 +289,7 @@ proc drawCursorSprite*(view: MarkView, at: CursorAt, rect: MarkRect, pixels: Mar
       let (cx, cy) = (sx div k, sy div k)
       if cx >= s.width or cy >= s.height:
         continue
-      let c = s.rows[cy][cx]
+      let c = s.pixels[cy * s.width + cx]
       if c == '.':
         continue
       let value = if c == 'X': 0'u8 else: 255'u8
