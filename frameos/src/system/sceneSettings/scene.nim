@@ -531,9 +531,10 @@ proc acting(self: SceneSettingsScene) =
     # The scene's code in the code editor, which opens on it (its public
     # field `open`, set as a Save sets the scene's).
     let editor = codeEditor()
-    if editor.len > 0 and self.opener().len > 0:
+    let opener = self.opener()
+    if editor.len > 0 and opener.len > 0:
       let state = newJObject()
-      state.put("open", newJString(self.opener()))
+      state.put("open", newJString(opener))
       goTo(editor, state)
   elif handler == HGear:
     if self.ownWindow():
@@ -927,8 +928,9 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
     SvgNode(text: if frame: "Frame settings" else: title))
   # The scene's code, where the frame holds the code editor (not the
   # editor's own: it is open on it already).
-  let code = not frame and not layoutPage and self.opener().len > 0 and
-    (let editor = codeEditor(); editor.len > 0 and editor != self.opener())
+  let opener = self.opener()
+  let code = not frame and not layoutPage and opener.len > 0 and
+    (let editor = codeEditor(); editor.len > 0 and editor != opener)
   if code:
     header.children.add look.iconButton(false, CodePath, HCode)
   if not info.isNil and not layoutPage:
