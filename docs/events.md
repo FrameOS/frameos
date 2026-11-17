@@ -289,7 +289,11 @@ hands the glass's reports over before it ticks the dispatcher. Before
 delivered after it, and the tap was a `longPress`. `pointerDown` / `pointerUp`
 add `button`: 0 left (and a touch, a pen tip), 1 right, 2 middle, 3 side,
 4 extra, 5 forward, 6 back, 7 task; `buttons` is the mask of what is held
-(`1 << button`). `pointerId` 0 is the one mouse cursor; a finger or a pen
+(`1 << button`). A modifier key held on a keyboard (Linux, the preview)
+adds `shift`, `ctrl`, `alt` or `meta` as true to a `pointerDown` and its
+`tap` (a JSX field's shift+click, docs/jsx-ui.md); a preview, whose keys
+carry their own flags, holds them by the modifier keys' own downs and ups.
+`pointerId` 0 is the one mouse cursor; a finger or a pen
 keeps an id while it is down (`pointerType`: `mouse`, `touch`, `pen`). Two
 fingers are two pointers. `pointerCancel {x, y, pointerId, pointerType}` is a
 pointer that was down and is lost without a release: the input lane overflowed

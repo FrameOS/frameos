@@ -21,7 +21,7 @@
 ## stays lit for a moment once a render has shown it, and backspace held
 ## erases again and again until the finger lifts.
 
-import std/[json, monotimes, times]
+import std/[json, monotimes, strutils, times]
 import frameos/events_gen
 import frameos/ui/layout
 import frameos/ui/keyboard
@@ -86,6 +86,12 @@ type
     glidePointer, glideCode: int
     glideX, glideY, glideW: float32
     glideAt: MonoTime
+    # A press that selects text in the focused field as it drags (-1: none):
+    # a mouse's on a field. Where it went down, from the field's corner,
+    # is the selection's other end, unless shift kept the one before.
+    selectPointer: int
+    selectX, selectY: float32
+    selectKept: bool
 
 const
   MaxTargets = when defined(frameosEmbedded): 16 else: 64
@@ -94,6 +100,8 @@ const
     ## may have any number of windows, each one a UI or more
     ## (docs/scene-layouts.md "Windows"); an ESP32 runs two to four
     ## (app_runtime.windowLimit).
+  MaxClipboard = when defined(frameosEmbedded): 4096 else: 65536
+    ## The most a copy keeps, in bytes (cut at a character).
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
   RepeatFirstMs = 100
@@ -114,6 +122,22 @@ var
     ## QR code goes up over the UI instead (docs/jsx-ui.md "Links").
   physicalKeyboard {.threadvar.}: bool
     ## A key was typed on a keyboard: fields need no keyboard on the screen.
+  clipboard {.threadvar.}: string
+    ## What Copy and Cut took, for Paste: the frame's own, every UI's.
+
+proc uiClipboard*(): string =
+  ## The frame's clipboard (a host with one of its own, the browser's
+  ## preview, mirrors it: frameos_wasm_clipboard).
+  clipboard
+
+proc setUiClipboard*(text: string) =
+  ## Copy and Cut; and a host's own clipboard handed to the frame for Paste.
+  clipboard = text
+  if clipboard.len > MaxClipboard:
+    var cut = MaxClipboard
+    while cut > 0 and (ord(clipboard[cut]) and 0xC0) == 0x80:
+      dec cut
+    clipboard.setLen(cut)
 
 when defined(testing):
   proc forgetTypedKeys*() =
@@ -129,7 +153,7 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
     if targets.len >= MaxTargets:
       targets.delete(0)
     result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo(), dragKey: -1, holdPointer: -1,
-      repeatPointer: -1, spacePointer: -1, swallowTap: -1, glidePointer: -1)
+      repeatPointer: -1, spacePointer: -1, swallowTap: -1, glidePointer: -1, selectPointer: -1)
     result.input.accentLit = -1
     targets.add result
 
@@ -178,6 +202,8 @@ when not defined(frameosEmbedded):
       if i.focus > 0:
         entry["focus"] = newJInt(i.focus)
         entry["caret"] = newJInt(i.caret)
+        if i.sel > 0:
+          entry["sel"] = newJInt(i.sel)
         entry["text"] = newJString(i.text)
         entry["keyboard"] = newJBool(i.keyboard)
         entry["page"] = newJInt(ord(i.page))
@@ -220,12 +246,14 @@ when not defined(frameosEmbedded):
         if i.text.len > MaxKeptText:
           i.text.setLen(MaxKeptText)
         i.caret = clamp(entry{"caret"}.getInt(i.text.len), 0, i.text.len)
+        i.sel = clamp(entry{"sel"}.getInt(), 0, i.text.len + 1)
         i.keyboard = entry{"keyboard"}.getBool()
         i.page = KeyboardPage(clamp(entry{"page"}.getInt(), ord(low(KeyboardPage)), ord(high(KeyboardPage))))
         i.shift = clamp(entry{"shift"}.getInt(), 0, 2)
       else:
         i.text = ""
         i.caret = 0
+        i.sel = 0
         i.keyboard = false
       i.open = max(entry{"open"}.getInt(), 0)
       let link = entry{"link"}.getStr()
@@ -300,10 +328,19 @@ template overScene(r: UiRegion, lx, ly: float32): bool =
   ## drew under it is covered there, and hears nothing of the pointer.
   r.scene and r.inside(lx, ly)
 
+template typesIn(r: UiRegion): bool =
+  ## A field that holds text: an <input> or a <textarea>, not a <select>.
+  r.field > 0 and r.field < 4
+
 proc wants(r: UiRegion, event: string): bool =
   case event
   of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0 or r.scrolls
-  of "pointerDown", "pointerUp", "pointerCancel":
+  of "pointerDown":
+    # A field: a mouse pressed on it selects as it drags.
+    r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
+      r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls or
+      (not defined(frameosEmbedded) and r.typesIn)
+  of "pointerUp", "pointerCancel":
     r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
@@ -326,6 +363,8 @@ proc uiListens*(sceneId, event: string): bool =
       if target.input.keyboard and event in ["pointerDown", "pointerUp", "pointerCancel"]:
         return true # a key held lets go, the space bar may be dragged
       if target.spacePointer >= 0 and event == "pointerMove":
+        return true
+      if target.selectPointer >= 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]:
         return true
       if event == "uiTimer" and target.timerPending:
         return true
@@ -422,10 +461,11 @@ proc regionOf(target: UiTarget, key: int): int =
 
 # ------------------------------------------------------------------ fields
 
-proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32) =
+proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32, extend = false) =
   ## A tap on a field: it has the keyboard, the caret where the tap landed
   ## (the next layout knows the glyphs), and the keyboard on the screen
-  ## unless the frame has one of its own.
+  ## unless the frame has one of its own. `extend` (shift held, on the field
+  ## that has it): the selection runs from where the caret was to the tap.
   template i: untyped = target.input
   if i.focus != r.key + 1:
     i.focus = r.key + 1
@@ -433,6 +473,13 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32) =
     i.page = if r.field == 3: kpNumbers else: kpLetters
     i.shift = 0
     i.accents = 0
+    i.sel = 0
+  elif extend:
+    if i.sel == 0:
+      i.sel = clamp(i.caret, 0, i.text.len) + 1
+  else:
+    i.sel = 0
+  i.anchor = false
   i.caret = i.text.len
   i.place = true
   i.goal = false
@@ -449,6 +496,9 @@ proc blurField(target: UiTarget) =
   target.input.keyboard = false
   target.input.place = false
   target.input.accents = 0
+  target.input.sel = 0
+  target.input.anchor = false
+  target.selectPointer = -1
   target.inputOnly = true
 
 proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
@@ -526,8 +576,21 @@ proc changed(target: UiTarget) =
   target.fieldCall(ueChange, "change", changeOf(i.text))
   target.inputOnly = false
 
-proc insert(target: UiTarget, text: string) =
+proc dropSelected(target: UiTarget): bool =
+  ## The selected text taken out, the caret where it was. False for none.
   template i: untyped = target.input
+  let (a, z) = i.selected
+  i.sel = 0
+  i.anchor = false
+  if z > a:
+    i.text.delete(a ..< z)
+    i.caret = a
+    result = true
+
+proc insert(target: UiTarget, text: string) =
+  ## Typed (or pasted) at the caret, over what is selected.
+  template i: untyped = target.input
+  discard target.dropSelected()
   i.caret = clamp(i.caret, 0, i.text.len)
   i.text.insert(text, i.caret)
   i.caret += text.len
@@ -549,8 +612,12 @@ proc step(text: string, at: int, forward: bool): int =
       dec result
 
 proc erase(target: UiTarget, forward: bool) =
-  ## Backspace (the rune before the caret) or Delete (the one after).
+  ## Backspace (the rune before the caret) or Delete (the one after); with
+  ## text selected, that text.
   template i: untyped = target.input
+  if target.dropSelected():
+    target.changed()
+    return
   i.caret = clamp(i.caret, 0, i.text.len)
   let
     other = step(i.text, i.caret, forward)
@@ -694,10 +761,25 @@ proc pickAccent(target: UiTarget, index: int) =
     target.keyDown(text)
     target.insert(text)
 
-proc moveCaret(target: UiTarget, key: string) =
+proc moveCaret(target: UiTarget, key: string, extend = false) =
   ## An arrow, Home or End: the caret a rune, a line or to an end. A key on a
-  ## keyboard, or the space bar dragged.
+  ## keyboard, or the space bar dragged. `extend` (shift held) selects from
+  ## where the caret was; without it a selection lets go, left or right of
+  ## it putting the caret at that end, as on a desktop.
   template i: untyped = target.input
+  let (a, z) = i.selected
+  if extend:
+    if i.sel == 0:
+      i.sel = clamp(i.caret, 0, i.text.len) + 1
+  elif i.sel > 0:
+    i.sel = 0
+    if z > a and key in ["ArrowLeft", "ArrowRight"]:
+      i.caret = if key == "ArrowLeft": a else: z
+      i.place = false
+      i.goal = false
+      i.reveal = true
+      target.inputOnly = true
+      return
   case key
   of "ArrowLeft", "ArrowRight", "Home", "End":
     i.caret =
@@ -722,6 +804,38 @@ proc moveCaret(target: UiTarget, key: string) =
     i.reveal = true
     target.inputOnly = true
   else: discard
+
+proc selectAll(target: UiTarget) =
+  ## The whole text selected, the caret at its end.
+  template i: untyped = target.input
+  i.sel = 1
+  i.caret = i.text.len
+  i.place = false
+  i.anchor = false
+  target.inputOnly = true
+
+proc copySelected(target: UiTarget, cut: bool) =
+  ## Copy (or Cut) the selected text to the frame's clipboard. Never a
+  ## password's: a cut of one only takes the text out.
+  let (a, z) = target.input.selected
+  if z <= a:
+    return
+  if not target.memo.fieldSecret(target.input.focus - 1):
+    setUiClipboard(target.input.text[a ..< z])
+  if cut and target.dropSelected():
+    target.changed()
+
+proc paste(target: UiTarget) =
+  ## The clipboard typed at the caret, over what is selected. A field of
+  ## one line takes the first line of it.
+  var text = clipboard
+  let r = target.regionOf(target.input.focus - 1)
+  if r >= 0 and target.regions[r].field != 2:
+    let nl = text.find('\n')
+    if nl >= 0:
+      text.setLen(nl)
+  if text.len > 0:
+    target.insert(text)
 
 proc spaceDrag(target: UiTarget, lx, ly: float32, slop: float32): bool =
   ## The space bar held and dragged, as on a phone: the caret follows the
@@ -769,12 +883,28 @@ when not defined(frameosEmbedded):
       target.insert(payload{"text"}.getStr())
       return
     target.fieldCall(ueKeyDown, "keyDown", payload)
-    case payload{"key"}.getStr()
+    let key = payload{"key"}.getStr()
+    if (payload{"ctrl"}.getBool() or payload{"meta"}.getBool()) and not payload{"alt"}.getBool():
+      # Ctrl (or Cmd) and a letter: the letter as the layout has it, else
+      # the key it is on (a layout that is not Latin).
+      let code = payload{"code"}.getStr()
+      let letter =
+        if key.len == 1: key[0].toLowerAscii
+        elif code.len == 4 and code.startsWith("Key"): code[3].toLowerAscii
+        else: '\0'
+      case letter
+      of 'a': target.selectAll()
+      of 'c': target.copySelected(cut = false)
+      of 'x': target.copySelected(cut = true)
+      of 'v': target.paste()
+      else: discard
+      return
+    case key
     of "Backspace": target.erase(false)
     of "Delete": target.erase(true)
     of "Enter": target.enter(heard = true)
     of "Escape": target.blurField()
-    else: target.moveCaret(payload{"key"}.getStr())
+    else: target.moveCaret(key, extend = payload{"shift"}.getBool())
 
   const WheelNotchPx = 72'f32
     ## A notch of the wheel: about three lines of text, as a browser scrolls.
@@ -1051,6 +1181,27 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           result = true
         else:
           moved = true
+    if target.selectPointer == pointer and (follows or down):
+      # A press that selects as it drags: the caret goes where the pointer
+      # is, the other end stays where it went down (or where shift kept it).
+      let r = target.regionOf(target.input.focus - 1)
+      if down or r < 0 or target.input.focus == 0:
+        target.selectPointer = -1
+      elif kind == ord(uePointerMove) and placed:
+        let box = target.regions[r]
+        if not target.selectKept:
+          target.input.anchor = true
+          target.input.anchorX = target.selectX
+          target.input.anchorY = target.selectY
+        target.input.place = true
+        target.input.placeX = lx - box.x
+        target.input.placeY = ly - box.y
+        target.inputOnly = true
+        # A slow panel shows the selection once the pointer lets go.
+        moved = not target.input.slow
+      elif released:
+        target.selectPointer = -1
+        moved = true
     if target.spacePointer == pointer and (follows or down):
       if down:
         target.spacePointer = -1
@@ -1132,6 +1283,30 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             box = i
           if takes >= 0 and box >= 0:
             break
+        when not defined(frameosEmbedded):
+          if payload{"pointerType"}.getStr() != "touch" and payload{"button"}.getInt() == 0:
+            # A mouse (or a pen) on a field: it has the keyboard at once, the
+            # caret where it went down, and a drag from there selects, as on
+            # a desktop. Shift extends what was selected.
+            var hit = -1
+            for i in countdown(target.regions.high, 0):
+              let r = target.regions[i]
+              if r.overScene(lx, ly):
+                break
+              if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[uePointerDown] > 0) and r.inside(lx, ly):
+                hit = i
+                break
+            if hit >= 0 and target.regions[hit].typesIn and target.input.open == 0:
+              let r = target.regions[hit]
+              let extend = payload{"shift"}.getBool() and target.input.focus == r.key + 1
+              target.focusField(r, lx, ly, extend)
+              target.selectPointer = pointer
+              target.selectX = lx - r.x
+              target.selectY = ly - r.y
+              target.selectKept = extend
+              takes = -1
+              box = -1
+              moved = true
         if takes >= 0 and box < takes:
           target.captures.add((pointer, target.regions[takes].key))
         elif box >= 0:
@@ -1194,7 +1369,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         target.input.fresh = true
         moved = true
       elif hit >= 0 and target.regions[hit].field > 0:
-        target.focusField(target.regions[hit], lx, ly)
+        let r = target.regions[hit]
+        target.focusField(r, lx, ly, payload{"shift"}.getBool() and target.input.focus == r.key + 1)
         moved = true
       elif target.input.focus > 0 and (hit < 0 or target.regions[hit].handlers[ueClick] <= KeyBase):
         target.blurField()

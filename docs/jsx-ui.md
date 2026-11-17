@@ -733,6 +733,41 @@ scene listens for it), which `dispatchUiEvent` turns into the next erase or
 a render. A host that ticks only while input is held (the preview) also
 ticks while `uiTimersPending`; the Pi's message loop wakes every 20 ms then.
 
+### Selecting, copying and pasting
+
+A field's text can be selected, copied, cut and pasted, as in a browser.
+
+- **On a keyboard** (a Pi's, the computer's over the preview): shift with
+  the arrows, Home or End selects from where the caret was; left or right
+  without it lets go at that end of the selection. Ctrl or Cmd (`meta`) with
+  `A` selects all, with `C` copies, `X` cuts and `V` pastes, the letter as
+  the layout has it (else the key it is on: Ctrl+V on a Cyrillic layout
+  pastes). `onKeyDown` hears the chord too, first.
+- **With a mouse**: a press on a field gives it the keyboard at once, the
+  caret where it went down, and a drag from there selects, as on a desktop.
+  Shift with a click (or a press) extends what is selected to it, on the
+  field that has the keyboard. The modifiers come with the press and its
+  tap from the dispatcher (`pointerDown` / `tap` `shift`, `ctrl`, `alt`,
+  `meta`: docs/events.md "Input"). A finger dragged over a field still
+  scrolls what is around it.
+- **What is typed replaces the selection**, and Backspace or Delete takes it
+  out. Every edit runs `onChange` as before.
+- **The clipboard is the frame's** (`ui/events.nim` `clipboard`, 64 KiB at
+  most, 4 KiB on an ESP32), shared by every UI on it. A password is never
+  copied (a cut takes it out and copies nothing), and an `<input>` pastes
+  the clipboard's first line.
+- **The selection is drawn** as a band a line behind the selected glyphs, in
+  the text's color at a third, inside the field's viewport, and the caret
+  is not drawn while text is selected: SVG nodes like the rest of the UI,
+  so it is damaged and repainted as any other change.
+
+How: the selection is `UiInput.sel`, its other end + 1 (0 for none), and the
+caret, so everything that moves the caret moves one end of it (`selected`
+gives the bytes). A drag of a mouse places the caret as a tap does
+(`place`) and its other end where it went down (`anchor`, `anchorX`,
+`anchorY`), both from the glyph boxes at the next layout. It is kept
+between pulls with the rest of the field (`sel`).
+
 ## Select boxes
 
 `<select>` holds its options, controlled as in React: it shows the `<option>`

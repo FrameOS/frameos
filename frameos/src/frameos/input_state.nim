@@ -519,6 +519,16 @@ proc unpair(state: var InputState, rec: ptr PointerRecord): int =
       result = -1
     rec.pairedWith = -1
 
+proc addModifiers(state: InputState, payload: JsonNode) =
+  ## The modifier keys held, on a press and a tap: `shift` and the rest, each
+  ## only while it is down (shift+click extends a selection in a JSX field,
+  ## docs/jsx-ui.md). No keyboard on an ESP32: never there.
+  when not defined(frameosEmbedded):
+    if state.shift: payload["shift"] = %true
+    if state.ctrl: payload["ctrl"] = %true
+    if state.altLeft or state.altRight: payload["alt"] = %true
+    if state.meta: payload["meta"] = %true
+
 proc pointerDown(state: var InputState, id: int, pointerType: string, button: int,
                  origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
   let rec = state.pointer(id, pointerType, origin)
@@ -540,6 +550,7 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
+  state.addModifiers(down.payload)
   if rec.edgeTaken:
     return
   if pressed and rec.edge.len > 0 or rec.edgeHeld.len > 0:
@@ -609,7 +620,9 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
       rec.hasLastTap = false
       return
     if held <= GestureTapMs:
-      output.add(pointerEvent(rec[], evTap, origin))
+      let tap = pointerEvent(rec[], evTap, origin)
+      state.addModifiers(tap.payload)
+      output.add(tap)
       if rec.hasLastTap and msSince(now, rec.lastTapAt) <= GestureDoubleTapMs and
           abs(rec.x - rec.lastTapX) <= GestureTapSlopPx and abs(rec.y - rec.lastTapY) <= GestureTapSlopPx:
         output.add(pointerEvent(rec[], evDoubleTap, origin))
@@ -761,7 +774,10 @@ when not defined(frameosEmbedded):
       code = "Unidentified"
     let repeat = down and payload{"repeat"}.getBool()
     let ownFlags = payload.hasKey("shift") or payload.hasKey("ctrl") or payload.hasKey("alt") or payload.hasKey("meta")
-    if not ownFlags and not repeat:
+    if not repeat and (not ownFlags or code != "CapsLock"):
+      # A modifier key itself goes down and up whoever says so: a preview,
+      # which sends its own flags with every key, holds shift for the
+      # pointer's presses too (shift+click). Caps lock is its own word then.
       state.trackModifier(code, down)
     let shift = if payload.hasKey("shift"): payload["shift"].getBool() else: state.shift
     let ctrl = if payload.hasKey("ctrl"): payload["ctrl"].getBool() else: state.ctrl

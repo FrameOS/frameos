@@ -178,7 +178,7 @@
   },
   {
     "name": "pointerDown",
-    "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event.",
+    "description": "When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds `shift`, `ctrl`, `alt` or `meta` as true.",
     "canListen": true,
     "fields": [
       {
@@ -225,6 +225,30 @@
           "touch",
           "pen"
         ]
+      },
+      {
+        "name": "shift",
+        "label": "Shift",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "ctrl",
+        "label": "Ctrl",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "alt",
+        "label": "Alt",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "meta",
+        "label": "Meta",
+        "type": "boolean",
+        "required": false
       }
     ]
   },
@@ -371,7 +395,7 @@
   },
   {
     "name": "tap",
-    "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host.",
+    "description": "A press and release in one place, within `gestures.tapMs`. Made by the dispatcher from `pointerDown` / `pointerUp` on every host. A modifier key held adds `shift`, `ctrl`, `alt` or `meta` as true, as on `pointerDown`.",
     "canListen": true,
     "fields": [
       {
@@ -405,6 +429,30 @@
           "touch",
           "pen"
         ]
+      },
+      {
+        "name": "shift",
+        "label": "Shift",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "ctrl",
+        "label": "Ctrl",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "alt",
+        "label": "Alt",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "meta",
+        "label": "Meta",
+        "type": "boolean",
+        "required": false
       }
     ]
   },
