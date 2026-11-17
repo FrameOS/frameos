@@ -474,6 +474,7 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32, extend = false) 
     i.shift = 0
     i.accents = 0
     i.sel = 0
+    i.secret = true # until a layout says what it is: nothing copied before
   elif extend:
     if i.sel == 0:
       i.sel = clamp(i.caret, 0, i.text.len) + 1
@@ -576,6 +577,14 @@ proc changed(target: UiTarget) =
   target.fieldCall(ueChange, "change", changeOf(i.text))
   target.inputOnly = false
 
+proc cut(text: var string, a, z: int) =
+  ## Bytes a ..< z taken out, in place (strutils' `delete` brings a `$` of
+  ## its slice for the error it raises: half a KiB on an ESP32).
+  let n = z - a
+  for k in a ..< text.len - n:
+    text[k] = text[k + n]
+  text.setLen(text.len - n)
+
 proc dropSelected(target: UiTarget): bool =
   ## The selected text taken out, the caret where it was. False for none.
   template i: untyped = target.input
@@ -583,7 +592,7 @@ proc dropSelected(target: UiTarget): bool =
   i.sel = 0
   i.anchor = false
   if z > a:
-    i.text.delete(a ..< z)
+    i.text.cut(a, z)
     i.caret = a
     result = true
 
@@ -624,7 +633,7 @@ proc erase(target: UiTarget, forward: bool) =
     a = min(i.caret, other)
     b = max(i.caret, other)
   if b > a:
-    i.text = i.text[0 ..< a] & i.text[b .. ^1]
+    i.text.cut(a, b)
     i.caret = a
     target.changed()
 
@@ -820,7 +829,7 @@ proc copySelected(target: UiTarget, cut: bool) =
   let (a, z) = target.input.selected
   if z <= a:
     return
-  if not target.memo.fieldSecret(target.input.focus - 1):
+  if not target.input.secret:
     setUiClipboard(target.input.text[a ..< z])
   if cut and target.dropSelected():
     target.changed()

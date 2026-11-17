@@ -74,6 +74,7 @@ type
                          ## the caret is selected (`selected`); 0 for none
     anchor*: bool        ## a drag selects: the next layout puts `sel` at anchorX, anchorY ...
     anchorX*, anchorY*: float32 ## ... from the field's corner, as `place` puts the caret
+    secret*: bool        ## the focused field is a password's, as the last layout found it: never copied
     text*: string        ## its text as the last layout found it, with the edits since
     place*: bool         ## a tap focused it: the caret goes to placeX, placeY ...
     placeX*, placeY*: float32 ## ... from the field's corner
@@ -1609,6 +1610,7 @@ proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32, marks: var s
     ui.goal = false
     ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
   ui.caret = clamp(ui.caret, 0, n.value.len)
+  ui.secret = n.src.attr("type") == "password"
   var
     i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
     r = arrangement.selectionRects[min(i, arrangement.runes.high)]
@@ -1890,12 +1892,6 @@ proc fieldText*(memo: UiMemo, key: int): string =
     let n = memo.root.fieldIn(key)
     if not n.isNil:
       result = n.value
-
-proc fieldSecret*(memo: UiMemo, key: int): bool =
-  ## Whether the field at `key` is a password's: its text is never copied.
-  if not memo.isNil:
-    let n = memo.root.fieldIn(key)
-    result = not n.isNil and not n.src.isNil and n.src.attr("type") == "password"
 
 proc selectOption*(memo: UiMemo, key, option: int, handler: var int): string =
   ## The value of option number `option` of the <select> at `key` as the last
