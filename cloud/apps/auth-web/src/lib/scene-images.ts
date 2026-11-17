@@ -27,6 +27,7 @@ import {
   sceneSnapshotAssetPath,
   sceneSnapshotAssetPrefix,
 } from "./frame-asset-cache";
+import { defaultAssetStorage } from "./frame-asset-storages";
 import { imageSetForVersion } from "./store-images";
 import {
   extractScenesJson,
@@ -426,6 +427,7 @@ export async function makeRoomForPendingSceneCover(
     .where(
       and(
         eq(frameAssetFiles.frameId, frameId),
+        eq(frameAssetFiles.storage, defaultAssetStorage),
         like(frameAssetFiles.path, `${sceneSnapshotAssetPrefix}%`),
       ),
     )

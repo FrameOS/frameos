@@ -318,7 +318,11 @@ describe("a read-only token may look but not ask the device", () => {
       params(frame.id),
     );
     expect(listing.status).toBe(200);
-    expect(await listing.json()).toEqual({ assets: [] });
+    expect(await listing.json()).toEqual({
+      assets: [],
+      storage: "assets",
+      storages: [{ id: "assets", name: "Internal storage" }],
+    });
     expect(await queued(frame.id)).toEqual([]);
 
     // A full token asks the device like the browser would.

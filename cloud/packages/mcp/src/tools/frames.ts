@@ -847,19 +847,29 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       ),
   );
 
+  // Which of the frame's storages an asset tool acts on (docs/cloud-frames.md
+  // "Asset storages"): the assets folder when absent, `internal` the flash
+  // storage of an ESP32 whose listing reports it.
+  const assetStorage = z
+    .enum(["assets", "internal"])
+    .optional()
+    .describe(
+      "Which storage: `assets` (default; the assets folder, an ESP32's TF card) or `internal` (an ESP32's flash storage, when frame_assets_list reports it in `storages`).",
+    );
+
   server.registerTool(
     "frame_assets_list",
     {
       annotations: { readOnlyHint: true },
       description:
-        "Files on the frame's asset storage (photos, fonts, saved images) with size and mtime. refresh=true asks a connected frame for a fresh listing; otherwise the cached one is returned.",
-      inputSchema: { frame_id: frameId, refresh: z.boolean().optional() },
+        "Files on the frame's asset storage (photos, fonts, saved images) with size and mtime, plus `storages`, the places the frame has. refresh=true asks a connected frame for a fresh listing; otherwise the cached one is returned.",
+      inputSchema: { frame_id: frameId, refresh: z.boolean().optional(), storage: assetStorage },
     },
-    async ({ frame_id, refresh }) =>
+    async ({ frame_id, refresh, storage }) =>
       run(async () =>
         text(
           await api.json("GET", `/api/frames/${frame_id}/assets`, {
-            query: { refresh: refresh ? 1 : undefined },
+            query: { refresh: refresh ? 1 : undefined, storage },
           }),
         ),
       ),
@@ -874,15 +884,16 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
       inputSchema: {
         frame_id: frameId,
         path: z.string().min(1).max(1024),
+        storage: assetStorage,
         thumb: z.boolean().optional(),
       },
     },
-    async ({ frame_id, path, thumb }) =>
+    async ({ frame_id, path, storage, thumb }) =>
       run(async () => {
         const { bytes, contentType } = await api.bytes(
           "GET",
           `/api/frames/${frame_id}/asset`,
-          { query: { path, thumb: thumb ? 1 : undefined } },
+          { query: { path, storage, thumb: thumb ? 1 : undefined } },
         );
         if (contentType.startsWith("image/")) {
           return image(bytes, contentType, `${path} (${contentType}, ${bytes.length} bytes)`);
@@ -910,10 +921,11 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         filename: z.string().min(1).max(255),
         frame_id: frameId,
         path: z.string().max(1024).optional().describe("Target directory on the frame."),
+        storage: assetStorage,
         text: z.string().optional(),
       },
     },
-    async ({ content_base64, filename, frame_id, path, text: textContent }) =>
+    async ({ content_base64, filename, frame_id, path, storage, text: textContent }) =>
       run(async () => {
         if (!content_base64 && textContent === undefined) {
           return failure("Provide content_base64 or text.");
@@ -929,7 +941,10 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
           filename,
         );
         return text(
-          await api.json("POST", `/api/frames/${frame_id}/assets/upload`, { raw: form }),
+          await api.json("POST", `/api/frames/${frame_id}/assets/upload`, {
+            query: { storage },
+            raw: form,
+          }),
         );
       }),
   );
@@ -939,12 +954,18 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { destructiveHint: true },
       description: "Delete a file or empty directory on the frame.",
-      inputSchema: { confirm: confirmed("deletes from the frame's storage"), frame_id: frameId, path: z.string().min(1).max(1024) },
+      inputSchema: {
+        confirm: confirmed("deletes from the frame's storage"),
+        frame_id: frameId,
+        path: z.string().min(1).max(1024),
+        storage: assetStorage,
+      },
     },
-    async ({ frame_id, path }) =>
+    async ({ frame_id, path, storage }) =>
       run(async () =>
         text(
           await api.json("POST", `/api/frames/${frame_id}/assets/delete`, {
+            query: { storage },
             raw: formBody({ path }),
           }),
         ),
@@ -955,12 +976,18 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_asset_mkdir",
     {
       description: "Create a directory on the frame's asset storage.",
-      inputSchema: { confirm: confirmed("writes to the frame's storage"), frame_id: frameId, path: z.string().min(1).max(1024) },
+      inputSchema: {
+        confirm: confirmed("writes to the frame's storage"),
+        frame_id: frameId,
+        path: z.string().min(1).max(1024),
+        storage: assetStorage,
+      },
     },
-    async ({ frame_id, path }) =>
+    async ({ frame_id, path, storage }) =>
       run(async () =>
         text(
           await api.json("POST", `/api/frames/${frame_id}/assets/mkdir`, {
+            query: { storage },
             raw: formBody({ path }),
           }),
         ),
@@ -976,12 +1003,14 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         dst: z.string().min(1).max(1024),
         frame_id: frameId,
         src: z.string().min(1).max(1024),
+        storage: assetStorage,
       },
     },
-    async ({ dst, frame_id, src }) =>
+    async ({ dst, frame_id, src, storage }) =>
       run(async () =>
         text(
           await api.json("POST", `/api/frames/${frame_id}/assets/rename`, {
+            query: { storage },
             raw: formBody({ dst, src }),
           }),
         ),

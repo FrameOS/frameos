@@ -4,6 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
 import { directChildren } from "../../../../../src/lib/frame-asset-cache";
 import {
+  assetStoragePayload,
+  commandAssetStorageIs,
+  frameAssetStorages,
+  resolveAssetStorage,
+} from "../../../../../src/lib/frame-asset-storages";
+import {
   enqueueFrameCommand,
   frameForAccount,
   supersedePendingCommands,
@@ -21,10 +27,13 @@ export const runtime = "nodejs";
 // listing yet" rather than a spinner that lies for an hour.
 const listCommandTtlMs = 2 * 60 * 1000;
 
-async function outstandingCommand(
+// A live assets_list of THIS storage: one of the other storage is a
+// different question, and must neither block this one nor make it look
+// like it is being answered.
+async function outstandingListing(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   frameId: string,
-  type: string,
+  storage: string,
 ) {
   const [row] = await db
     .select({ id: frameCommands.id })
@@ -32,7 +41,8 @@ async function outstandingCommand(
     .where(
       and(
         eq(frameCommands.frameId, frameId),
-        eq(frameCommands.type, type),
+        eq(frameCommands.type, "assets_list"),
+        commandAssetStorageIs(storage),
         inArray(frameCommands.status, ["pending", "sent"]),
         or(
           isNull(frameCommands.expiresAt),
@@ -45,12 +55,15 @@ async function outstandingCommand(
 }
 
 // The per-frame assets listing, in the exact shape the shared SPA's
-// assetsLogic speaks against the backend: {"assets": […], "cache"?:
-// {"refreshing": true, "retry_after": N}}. The listing is the hub's cached
-// copy of the device's last `assets` reply (paths relative to the device's
-// assets directory); when it is missing or a refresh is asked for, an
-// `assets_list` command is queued and the cache marker tells the panel to
-// poll again shortly.
+// assetsLogic speaks against the backend: {"assets": […], "storages":
+// [{id, name}…], "storage": "…", "cache"?: {"refreshing": true,
+// "retry_after": N}}. `?storage=` picks which of the device's storages
+// (docs/cloud-frames.md "Asset storages"; the assets folder when absent);
+// `storages` is what the frame's newest listing said it has (the assets
+// folder alone when it never said). The listing is the hub's cached copy of
+// the device's last `assets` reply for that storage (paths relative to it);
+// when it is missing or a refresh is asked for, an `assets_list` command is
+// queued and the cache marker tells the panel to poll again shortly.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
@@ -76,13 +89,23 @@ export async function GET(
     return jsonError("invalid_frame", 404);
   }
 
+  const resolved = await resolveAssetStorage(
+    db,
+    frame.id,
+    request.nextUrl.searchParams.get("storage"),
+  );
+  if (!resolved.ok) {
+    return jsonError(resolved.error, resolved.status);
+  }
+  const storage = resolved.storage;
+
   const [listing] = await db
     .select()
     .from(frameAssets)
-    .where(eq(frameAssets.frameId, frame.id))
+    .where(and(eq(frameAssets.frameId, frame.id), eq(frameAssets.storage, storage)))
     .limit(1);
   const wantRefresh = request.nextUrl.searchParams.get("refresh") === "1";
-  const outstanding = await outstandingCommand(db, frame.id, "assets_list");
+  const outstanding = await outstandingListing(db, frame.id, storage);
   let enqueued = false;
   // Only ask a frame that is actually on the hub. A disconnected frame used
   // to make this an infinite loop: every poll re-enqueued assets_list (the
@@ -99,10 +122,12 @@ export async function GET(
   ) {
     // Supersede rather than stack: expired-but-unswept rows of the same type
     // would otherwise pile up under a poller.
-    await supersedePendingCommands(db, frame.id, "assets_list");
+    await supersedePendingCommands(db, frame.id, "assets_list", commandAssetStorageIs(storage));
+    const storageField = assetStoragePayload(storage);
     await enqueueFrameCommand(db, {
       createdByAccountId: session.accountId,
       frameId: frame.id,
+      ...(storageField.storage ? { payload: storageField } : {}),
       ttlMs: listCommandTtlMs,
       type: "assets_list",
     });
@@ -119,6 +144,8 @@ export async function GET(
   const payload = Array.isArray(listing?.payload) ? listing.payload : [];
   return NextResponse.json({
     assets: folder === null ? payload : directChildren(payload, folder),
+    storage,
+    storages: await frameAssetStorages(db, frame.id),
     ...(folder === null ? {} : { folder }),
     ...(listing?.truncated ? { truncated: true } : {}),
     ...(refreshing ? { cache: { refreshing: true, retry_after: 2 } } : {}),

@@ -77,6 +77,12 @@ import {
   sceneSnapshotAssetPath,
 } from "../../auth-web/src/lib/frame-asset-cache";
 import {
+  commandAssetStorage,
+  defaultAssetStorage,
+  parseAssetStorageId,
+  parseAssetStorages,
+} from "../../auth-web/src/lib/frame-asset-storages";
+import {
   shouldRequestDeviceScenes,
   storeFrameDeviceScenes,
 } from "../../auth-web/src/lib/device-scenes";
@@ -2372,11 +2378,36 @@ export async function startFrameHub(
       return;
     }
     const entries = parseAssetEntries(msg.assets);
+    // Which storage this is a listing of (docs/cloud-frames.md "Asset
+    // storages"). The command the reply answers is the authority, as for
+    // asset_chunk: the listing lands where it was asked for. A reply that
+    // names no command (or one gone from the table) falls back to its own
+    // echo, then the default — what older firmware and Linux frames mean.
+    let storage = parseAssetStorageId(msg.storage) ?? defaultAssetStorage;
+    const commandId =
+      typeof msg.id === "string" && uuidPattern.test(msg.id) ? msg.id : undefined;
+    if (commandId) {
+      const [command] = await db
+        .select({ payload: frameCommands.payload })
+        .from(frameCommands)
+        .where(
+          and(
+            eq(frameCommands.id, commandId),
+            eq(frameCommands.frameId, session.frame.id),
+            eq(frameCommands.type, "assets_list"),
+          ),
+        )
+        .limit(1);
+      if (command) {
+        storage = commandAssetStorage(command.payload);
+      }
+    }
     const stored = await storeFrameAssetListing(
       db,
       session.frame.id,
       entries,
       msg.truncated === true,
+      { storage, storages: parseAssetStorages(msg.storages) },
     );
     if (!stored) {
       // Reject, never truncate: a listing that looks complete but is not
@@ -2384,6 +2415,7 @@ export async function startFrameHub(
       logWarn("device.assets_listing_too_large", {
         entries: entries.length,
         frameId: session.frame.id,
+        storage,
       });
     }
   }
@@ -2522,6 +2554,11 @@ export async function startFrameHub(
       content,
       contentType: cachedAssetContentType(content),
       path,
+      // The storage the command asked of (docs/cloud-frames.md "Asset
+      // storages"), never the device's echo; image_get's slot is the
+      // default's.
+      storage:
+        command.type === "asset_get" ? commandAssetStorage(payload) : defaultAssetStorage,
       thumb: command.type === "asset_get" && payload?.thumb === true,
     });
   }

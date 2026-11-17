@@ -13,6 +13,7 @@ import {
   queueAssetGetIfIdle,
   recentFailedAssetGet,
 } from "../../../../../src/lib/frame-asset-cache";
+import { resolveAssetStorage } from "../../../../../src/lib/frame-asset-storages";
 import { frameIsAsleep } from "../../../../../src/lib/frame-sleep";
 import { frameForAccount } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
@@ -84,7 +85,9 @@ async function assetResponse(
 }
 
 // One asset's bytes, in the shape the shared SPA's frameAssetUrl() requests:
-// ?path=…[&thumb=1][&mode=download|image][&filename=…]. Serves the hub's
+// ?path=…[&thumb=1][&mode=download|image][&filename=…][&storage=…] (the
+// device storage, docs/cloud-frames.md "Asset storages"; the assets folder
+// when absent). Serves the hub's
 // cached copy when there is one (refreshing it in the background once it is
 // stale) and otherwise queues an `asset_get` for the device and waits — the
 // long poll is what lets a plain <img src> work against a device that has to
@@ -122,8 +125,13 @@ export async function GET(
   const thumb = query.get("thumb") === "1";
   const mode = query.get("mode");
   const filename = query.get("filename");
+  const resolved = await resolveAssetStorage(db, frame.id, query.get("storage"));
+  if (!resolved.ok) {
+    return jsonError(resolved.error, resolved.status);
+  }
+  const storage = resolved.storage;
 
-  const cached = await cachedAssetFile(db, frame.id, path, thumb);
+  const cached = await cachedAssetFile(db, frame.id, path, thumb, storage);
   const now = Date.now();
   // A stale copy is only refreshed behind the response while the frame is
   // on the socket: a sleeping or offline frame changes nothing on its card,
@@ -145,6 +153,7 @@ export async function GET(
       path,
       thumb,
       assetFetchCommandTtlMs,
+      storage,
     );
   }
   if (cached) {
@@ -177,7 +186,7 @@ export async function GET(
   const deadline = now + longPollTotalMs;
   while (Date.now() < deadline) {
     await sleep(longPollStepMs);
-    const row = await cachedAssetFile(db, frame.id, path, thumb);
+    const row = await cachedAssetFile(db, frame.id, path, thumb, storage);
     if (row) {
       return await assetResponse(row, mode, filename);
     }
@@ -192,6 +201,7 @@ export async function GET(
       path,
       thumb,
       60_000,
+      storage,
     );
     if (refused) {
       return jsonError(refused.error ?? "asset_fetch_failed", 404);

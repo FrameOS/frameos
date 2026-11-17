@@ -423,7 +423,7 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `restart_runtime` | `{}` | restart the FrameOS process |
 | `set_display_power` | `{"on": bool}` | power the panel itself off or back on — the runtime keeps rendering either way. The flag is required; a missing or non-boolean `on` is refused with `invalid_payload` rather than guessed. **Linux only** (the ESP32 profile answers `unsupported_verb`): only the framebuffer and HyperPixel drivers can do anything with it — the framebuffer (`vcgencmd display_power`, falling back to blanking `fb0`) and the HyperPixels (2.1" Round, 4.0 and 4.0 Square: controller sleep-in plus the backlight GPIO). Every other Linux driver accepts the verb and does nothing, so a provider should offer it per **display** (`hardware.device`), not per plane. E-paper holds its image unpowered and has no backlight, which is why the microcontroller profile has nothing to switch |
 | `notify_update_available` | `{"version"?: "…"}` | nudge the device to update itself — the provider supplies no URLs and no binaries (today's provider sends a bare `{"id","type"}` frame; a `version`, if present, is logged and otherwise ignored). The full profile answers by running its own signed release upgrade (`frameos/upgrade.nim`: fetch the latest published release for its target, verify the minisign signature on-device, stage, restart — a nudge while an upgrade is in flight, or on an up-to-date install, is a logged no-op, so at-least-once redelivery is safe); the ESP32 fetches its control plane's signed OTA manifest (see the profile table; the self-hosted backend serves the same shape at `/embedded/ota/manifest`) |
-| `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping |
+| `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping. Every asset verb takes an optional `"storage"`, and the listing says which storages the device has (`"storages"`): see "Asset storages" below |
 | `image_get` | `{}` | the frame's current rendered image. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same caps); the first chunk's `content_type` says what the device produces (the Linux runtime sends `image/png` of its last render, the ESP32 packs `image/bmp` from its framebuffer). `ok: false` ack with `no_image` when nothing has rendered yet, `busy` on a small device already streaming |
 | `scenes_get` | `{}` | every interpreted scene the frame holds, as the JSON its owner would export. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same 8 MiB cap — `too_large` past it), `content_type: application/json`, carrying ONE document: `{"scenes": […scene JSON…], "active_scene": "…", "skipped_compiled": N}`. Scene ids and `active_scene` are the scenes' own ids. The uploaded set comes first and wins an id both of the device's stores hold; compiled scenes are counted in `skipped_compiled` and never sent, because a provider only takes interpreted node graphs. Read-only, and nothing the local admin page's scene export would not hand over. **Linux only** — the ESP32 profile answers `unsupported_verb` and sends no `scene_count`, so it is never asked. Errors: `read_failed`, `too_large` |
 | `asset_get` | `{"path": "…", "thumb"?: true}` | read one file from the assets directory. Failure is an ordinary `ok: false` ack: `invalid_path` (traversal, absolute, or outside the assets directory), `not_found`, `is_directory`, `too_large` (the reference cap is **8 MiB** raw), `busy` (a small device already streaming another file). Success is a bare ack followed by one or more `{"id", "type": "asset_chunk", "seq": 0…N, "data": "<base64>", "done": bool}` messages with the same `id`, in order; the first chunk also carries `"size"` (total raw bytes), `"mtime"` and `"content_type"`. A read that fails after the ack ends the stream with `{"type": "asset_chunk", "id", "error": "…", "done": true}` and the provider discards the partial file. With `thumb`, a device that can generate thumbnails (Linux) returns a small preview — the reference implementation fits it inside 320×320 and encodes PNG, and says so in `content_type`, which is what a provider should trust; a device that cannot (ESP32) returns the original bytes |
@@ -444,6 +444,40 @@ Additionally, the write verbs (`asset_put`/`asset_put_chunk`/`asset_mkdir`/
 (`.thumbs`, `.frameos`) are the device's own plumbing (thumbnail cache, scene
 snapshots) — readable via `asset_get` where the provider knows a specific
 path, but never writable from the wire.
+
+#### Asset storages
+
+An ESP32 has two places for files: its **assets folder** (`/srv/assets`: the
+TF card when one is mounted, otherwise the flash) and its **internal storage**
+(`/srv/internal`, the flash). Scenes reach both. The asset verbs
+(`assets_list`, `asset_get`, `asset_put`, `asset_put_chunk`, `asset_mkdir`,
+`asset_delete`, `asset_rename`) take an optional **`"storage"`**: absent (or
+`"assets"`) is the assets folder, `"internal"` the internal storage. Every
+path stays relative to the storage named, and the dot-component and
+traversal rules above hold in each. Every reply to those verbs (the `assets`
+listing, `asset_chunk`, the acks) echoes `"storage"`, and a storage the device
+lacks is the verb's ordinary error reply with **`storage_unavailable`**.
+
+The `assets` listing also carries **`"storages"`**: `[{"id", "name"}…]`,
+the places the device has, with display names the device chooses
+(`[{"id": "assets", "name": "TF card"}, {"id": "internal", "name": "Internal
+storage"}]`, or just the internal one with no card). A listing without it —
+older firmware, every Linux frame — means `[{"id": "assets", "name":
+"Internal storage"}]`. The machine-readable half is
+`docs/cloud-frames-contract.json` `assetStorages` (ids, which profiles have
+them, the default listing) and `errors.asset_storage`.
+
+A device that does not know the field ignores it and acts on its assets
+folder, so **a provider names `internal` only to a frame whose newest
+listing reported it, and never puts the field on the wire for the default**
+(a command for the assets folder is byte-identical to one from before
+storages). The reference provider keeps one cached listing and one file cache
+per storage, files a reply under the storage its command asked of (never the
+device's echo), and refreshes the written storage's listing after a write.
+Its HTTP routes take `?storage=` (`invalid_storage` for an id the contract
+does not know, `storage_unavailable` for one the frame did not report; both 400), and
+the listing answers `storages` and `storage` beside `assets`. A virtual frame
+has the assets folder alone and refuses the rest with `storage_unavailable`.
 
 ### Device profiles
 

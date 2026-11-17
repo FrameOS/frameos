@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { frameAssets } from "@frameos-cloud/db";
 import { NextRequest } from "next/server";
 import {
@@ -6,7 +6,9 @@ import {
   readCatalogueFont,
   type CatalogueFont,
 } from "../../../../../../src/lib/fonts";
+import { assetStoragePayload } from "../../../../../../src/lib/frame-asset-storages";
 import {
+  assetAuditMetadata,
   assetWriteRequestContext,
   invalidateCachedAssetSubtree,
   maxChunkedAssetUploadBytes,
@@ -111,12 +113,14 @@ export async function POST(
   if (context.response) {
     return context.response;
   }
-  const { db, accountId, frame } = context;
+  // `?storage=` like every asset route; the fonts the renderer reads are
+  // the assets folder's, which is the default.
+  const { db, accountId, frame, storage } = context;
 
   const [listing] = await db
     .select({ payload: frameAssets.payload })
     .from(frameAssets)
-    .where(eq(frameAssets.frameId, frame.id))
+    .where(and(eq(frameAssets.frameId, frame.id), eq(frameAssets.storage, storage)))
     .limit(1);
   const present = presentFontSizes(listing?.payload);
 
@@ -163,6 +167,7 @@ export async function POST(
       // belt-and-braces for an empty card; a refusal is not worth stopping for.
       await runAssetWriteCommand(db, accountId, frame.id, "asset_mkdir", {
         path: fontsDirectory,
+        ...assetStoragePayload(storage),
       });
 
       const skip = (font: CatalogueFont, index: number, reason: string) => {
@@ -225,7 +230,7 @@ export async function POST(
           frame,
           `${fontsDirectory}/${font.file}`,
           data,
-          { signal: request.signal },
+          { signal: request.signal, storage },
         );
         if (!result.ok && result.error === "aborted") {
           stopped = "the browser went away";
@@ -267,18 +272,18 @@ export async function POST(
       }
 
       if (uploaded > 0) {
-        await invalidateCachedAssetSubtree(db, frame.id, fontsDirectory);
-        await queueAssetsListRefresh(db, accountId, frame.id);
+        await invalidateCachedAssetSubtree(db, frame.id, fontsDirectory, storage);
+        await queueAssetsListRefresh(db, accountId, frame.id, storage);
       }
       // One row per sync, not per font: counts plus the directory are what
       // the activity feed needs; the per-font stream above is ephemeral.
       if (uploaded > 0 || failed > 0) {
-        await recordAssetWriteAudit(db, context, "frame.assets_synced", {
-          failed,
-          path: fontsDirectory,
-          skipped,
-          uploaded,
-        });
+        await recordAssetWriteAudit(
+          db,
+          context,
+          "frame.assets_synced",
+          assetAuditMetadata(storage, { failed, path: fontsDirectory, skipped, uploaded }),
+        );
       }
       emit({
         type: "done",
