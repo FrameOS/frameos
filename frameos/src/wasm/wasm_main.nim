@@ -22,6 +22,7 @@ from frameos/input_state import initInputState, CursorHideMs
 import frameos/cursor_sprite
 from frameos/loading_mark import MarkView
 from frameos/ui/events as uiEvents import uiTimersPending, lastingUiInput, restoreLastingUiInput, uiOpenLink
+from frameos/ui/layout import uiClipboard, setUiClipboard, uiClipboardChanges
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
 import frameos/interpreter
@@ -75,6 +76,7 @@ var
   lastErrorBuffer: string
   versionBuffer: string
   appTestsBuffer: string
+  clipboardBuffer: string
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
@@ -1177,6 +1179,20 @@ proc frameos_wasm_run_app_tests(appJson: cstring, testFile: cstring): cstring {.
     appTestsBuffer = $(%*{"ok": false, "error": "could not run the tests: " & e.msg,
       "counts": {"passed": 0, "failed": 0, "skipped": 0, "total": 0}, "durationMs": 0, "children": [], "logs": []})
   appTestsBuffer.cstring
+
+# The frame's clipboard (docs/jsx-ui.md "Selecting, copying and pasting"),
+# for a page with a real one: the preview worker hands a Copy or a Cut on to
+# the browser when the count of changes moves, and the browser's text to the
+# frame before a paste.
+proc frameos_wasm_clipboard(): cstring {.exportc, cdecl.} =
+  clipboardBuffer = uiClipboard()
+  clipboardBuffer.cstring
+
+proc frameos_wasm_clipboard_changes(): cint {.exportc, cdecl.} =
+  cint(uiClipboardChanges() and 0x3fffffff)
+
+proc frameos_wasm_set_clipboard(text: cstring) {.exportc, cdecl.} =
+  setUiClipboard($text)
 
 # The FrameOS version this runtime was built from, in the same published form
 # a frame reports ("2026.9.0", no build hash) — so a preview can say which

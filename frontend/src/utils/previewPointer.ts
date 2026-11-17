@@ -134,6 +134,10 @@ export interface AttachPointerOptions {
    * position, id and type; wheel; keyboard). False sends the old
    * `mouseMove` / `mouseDown` / `mouseUp` a 2026.9.21 bundle understands. */
   inputV2?: () => boolean
+  /** The keyboard only: the browser's clipboard text for the frame, handed
+   * over just before a Ctrl/Cmd+V reaches it, so the frame pastes what the
+   * computer copied (docs/jsx-ui.md "Selecting, copying and pasting"). */
+  onPaste?: (text: string) => void
 }
 
 /**
@@ -417,10 +421,32 @@ export function keyText(event: KeyboardEvent): string | null {
   return [...event.key].length === 1 ? event.key : null
 }
 
+/** Ctrl+V, or Cmd+V on a Mac: a paste. */
+export function isPasteChord(event: KeyboardEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.altKey && (event.code === 'KeyV' || event.key === 'v' || event.key === 'V')
+}
+
+/** The frame's Copy or Cut, on the browser's clipboard as well: what the
+ * worker hands on (`{type: 'clipboard', text}`). Quietly nothing where the
+ * page may not write it. */
+export function writeHostClipboard(text: string): void {
+  try {
+    void navigator.clipboard?.writeText(text)?.catch(() => undefined)
+  } catch {
+    // no clipboard here
+  }
+}
+
+/** How long a Ctrl/Cmd+V waits for the browser's `paste` event, which comes
+ * right after the key when there is text to paste. */
+const PASTE_WAIT_MS = 100
+
 /**
  * Forward the keyboard, while `canvas` has the focus, to `send` as `keyDown`
  * / `keyUp` / `textInput`. Give the canvas a `tabIndex` so it can take the
- * focus (a press on it focuses it). Returns the detach function.
+ * focus (a press on it focuses it). With `onPaste`, a Ctrl/Cmd+V's `keyDown`
+ * waits for the browser's `paste` event and goes after the text it carries.
+ * Returns the detach function.
  */
 export function attachKeyboardInput(
   canvas: HTMLCanvasElement,
@@ -430,12 +456,34 @@ export function attachKeyboardInput(
   const enabled = (): boolean =>
     (options.enabled ? options.enabled() : true) && (options.inputV2 ? options.inputV2() : true)
 
+  // A Ctrl/Cmd+V held back for its `paste` event (the text first, then the
+  // key, which pastes it on the frame); without one soon, the key alone.
+  let heldPaste: Record<string, unknown> | null = null
+  let heldTimer: ReturnType<typeof setTimeout> | null = null
+  const releasePaste = (): void => {
+    if (heldTimer !== null) {
+      clearTimeout(heldTimer)
+      heldTimer = null
+    }
+    if (heldPaste) {
+      const payload = heldPaste
+      heldPaste = null
+      send('keyDown', payload)
+    }
+  }
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (!enabled()) {
       return
     }
     if (SCROLLING_KEYS.has(event.code)) {
       event.preventDefault()
+    }
+    if (options.onPaste && isPasteChord(event)) {
+      releasePaste()
+      heldPaste = keyPayload(event, true)
+      heldTimer = setTimeout(releasePaste, PASTE_WAIT_MS)
+      return
     }
     send('keyDown', keyPayload(event, true))
     const text = keyText(event)
@@ -448,13 +496,32 @@ export function attachKeyboardInput(
     if (!enabled()) {
       return
     }
+    releasePaste() // a key's up never comes before its down
     send('keyUp', keyPayload(event, false))
+  }
+
+  const onPasteEvent = (event: ClipboardEvent): void => {
+    if (!enabled() || !options.onPaste) {
+      return
+    }
+    event.preventDefault()
+    const text = event.clipboardData?.getData('text/plain') ?? ''
+    if (text) {
+      options.onPaste(text)
+    }
+    releasePaste()
   }
 
   canvas.addEventListener('keydown', onKeyDown)
   canvas.addEventListener('keyup', onKeyUp)
+  canvas.addEventListener('paste', onPasteEvent)
   return () => {
+    if (heldTimer !== null) {
+      clearTimeout(heldTimer)
+    }
+    heldPaste = null
     canvas.removeEventListener('keydown', onKeyDown)
     canvas.removeEventListener('keyup', onKeyUp)
+    canvas.removeEventListener('paste', onPasteEvent)
   }
 }

@@ -28,8 +28,11 @@
 //   {type: 'resize', width, height}        a new size, everything kept and drawn again (`ready`'s `resize` says
 //                                          the bundle can; otherwise init again)
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
+//   {type: 'clipboard', text}              the browser's clipboard, for the frame's next Paste (docs/jsx-ui.md
+//                                          "Selecting, copying and pasting"); a bundle without it ignores it
 // Messages out:
-//   {type: 'ready', sceneInfo, sceneStateSeeded, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents}
+//   {type: 'ready', sceneInfo, sceneStateSeeded, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents,
+//    clipboard}
 //        runtimeVersion: FrameOS version of the bundle (null on older bundles)
 //        pointerEvents: true when this bundle takes pointer input as described above. A bundle without it would hand
 //        the scene raw 0..32767 coordinates and render on every move, so a page must not forward pointers to it.
@@ -50,6 +53,7 @@
 //                                            cursor"), `sprite` the frame's picture of it at this size ({width, height,
 //                                            hotX, hotY, pixels, scale, hideMs}; null for "none")
 //   {type: 'assetsResult', requestId, ok, ...} reply to an 'assets' request
+//   {type: 'clipboard', text}                 a Copy or a Cut in a JSX field: for the browser's clipboard
 //
 // Browser asset folder: the runtime's /srv/assets (the same path a real frame
 // keeps its assets at) is an emscripten IDBFS mount — files live in this
@@ -954,7 +958,10 @@ async function init(msg) {
       gpioEvents: true,
       resize: typeof Module._frameos_wasm_resize === 'function',
       cursor: typeof Module._frameos_wasm_cursor === 'function',
+      // The frame's clipboard is the browser's (2026.11.11): 'clipboard' in and out.
+      clipboard: hasClipboard(),
     })
+    clipboardChanges = hasClipboard() ? call('frameos_wasm_clipboard_changes', 'number', [], []) : -1
     renderNow()
   } catch (e) {
     post({ type: 'error', message: String(e && e.message ? e.message : e) })
@@ -963,12 +970,43 @@ async function init(msg) {
 
 // ----------------------------------------------------------------- events
 
+// The frame's clipboard as last handed on: a Copy or a Cut moves its count
+// of changes, and the page gets the text for the browser's clipboard.
+let clipboardChanges = -1
+
+function hasClipboard() {
+  return Boolean(Module && typeof Module._frameos_wasm_clipboard_changes === 'function')
+}
+
+function postClipboardIfChanged() {
+  if (!hasClipboard()) {
+    return
+  }
+  const changes = call('frameos_wasm_clipboard_changes', 'number', [], [])
+  if (clipboardChanges < 0) {
+    clipboardChanges = changes
+  } else if (changes !== clipboardChanges) {
+    clipboardChanges = changes
+    post({ type: 'clipboard', text: call('frameos_wasm_clipboard', 'string', [], []) })
+  }
+}
+
+function setClipboard(text) {
+  if (!hasClipboard()) {
+    return
+  }
+  call('frameos_wasm_set_clipboard', null, ['string'], [String(text || '')])
+  // The browser's own text: nothing to hand back.
+  clipboardChanges = call('frameos_wasm_clipboard_changes', 'number', [], [])
+}
+
 function dispatchEvent(name, payload) {
   if (!Module) {
     return
   }
   try {
     call('frameos_wasm_event', 'boolean', ['string', 'string'], [name, JSON.stringify(payload || {})])
+    postClipboardIfChanged()
   } catch (e) {
     post({ type: 'error', message: 'event failed: ' + e })
   }
@@ -1099,6 +1137,9 @@ self.onmessage = (ev) => {
       break
     case 'assets':
       void handleAssetsRequest(msg)
+      break
+    case 'clipboard':
+      setClipboard(msg.text)
       break
     case 'runAppTests':
       handleRunAppTests(msg)

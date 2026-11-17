@@ -272,7 +272,10 @@ function forwardPointer(
   const detachKeyboard = attachKeyboardInput(
     canvas,
     (name, payload) => previewRef.current?.sendEvent(name, payload),
-    { enabled: () => previewRef.current?.runtimeInfo?.inputEvents === true },
+    {
+      enabled: () => previewRef.current?.runtimeInfo?.inputEvents === true,
+      onPaste: (text) => previewRef.current?.setClipboard(text),
+    },
   );
   return () => {
     detachPointer();

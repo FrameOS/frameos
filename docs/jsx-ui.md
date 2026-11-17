@@ -770,7 +770,14 @@ A field's text can be selected, copied, cut and pasted, as in a browser.
 - **The clipboard is the frame's** (`ui/events.nim` `clipboard`, 64 KiB at
   most, 4 KiB on an ESP32), shared by every UI on it. A password is never
   copied (a cut takes it out and copies nothing), and an `<input>` pastes
-  the clipboard's first line.
+  the clipboard's first line. **In the browser's preview it is the
+  computer's**: the worker hands a Copy or a Cut on to the page
+  (`{type: 'clipboard', text}`, when `frameos_wasm_clipboard_changes`
+  moves), which writes it with `navigator.clipboard`, and a Ctrl/Cmd+V's
+  `keyDown` waits for the browser's `paste` event (100 ms at most) so the
+  frame gets its text first (`onPaste` in `attachKeyboardInput`, both
+  copies of the pointer file; `FrameOSPreview.setClipboard`). The frame's
+  own menu's Paste pastes what was last copied either way.
 - **The selection is drawn** as a band a line behind the selected glyphs, in
   the text's color at a third, inside the field's viewport (on e-paper,
   where a third dithers into a stipple that eats the glyphs, a solid band
