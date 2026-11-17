@@ -73,6 +73,31 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-click", "tap", at(72, 37))
     check ui.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
 
+  test "a hold on what only clicks is a click; what has onLongPress keeps its hold":
+    # On e-paper the pressed look takes a second to show and people hold until
+    # it does: a browser clicks at the release however long the press.
+    let ui = newUi(counter, "tests/jsx-hold")
+    check ui.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
+    check uiListens("tests/jsx-hold", "longPress")
+    check dispatchUiEvent("tests/jsx-hold", "longPress", at(100, 50, "touch"))
+    check ui.render()[100, 50] == rgbx(0x22, 0xc5, 0x5e, 255) # one click
+    check not dispatchUiEvent("tests/jsx-hold", "longPress", at(10, 10, "touch")) # beside it
+    let both = newUi("""
+      let clicks = 0
+      let holds = 0
+      export function get(app) {
+        return (
+          <div className="flex bg-white">
+            <div className={`w-20 h-10 ${clicks ? 'bg-green-500' : holds ? 'bg-blue-500' : 'bg-red-500'}`}
+              onClick={() => { clicks++ }} onLongPress={() => { holds++ }} />
+          </div>
+        )
+      }
+    """, "tests/jsx-hold-both")
+    discard both.render()
+    check dispatchUiEvent("tests/jsx-hold-both", "longPress", at(10, 5, "touch"))
+    check both.render()[10, 5] == rgbx(0x3b, 0x82, 0xf6, 255) # held, not clicked
+
   test "a scene loaded again takes its taps to its new app":
     # Switched away and back: the scene and its app are new, the UI's target
     # is not. The tap must run the new app's handler, not the old one's.

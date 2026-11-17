@@ -157,13 +157,14 @@ proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
 
   case fieldType
   of "integer":
-    var v = 0
+    # 64 bits on every host: an ESP32's int is 32 (a timestamp overflowed it).
+    var v: int64 = 0
     if j.kind == JInt:
-      v = j.getInt()
+      v = j.getBiggestInt().int64
     elif j.kind == JFloat:
-      v = int(j.getFloat())
+      v = int64(j.getFloat())
     elif j.kind == JString:
-      try: v = parseInt(j.getStr())
+      try: v = parseBiggestInt(j.getStr()).int64
       except CatchableError: discard
     return VInt(v)
 
@@ -172,7 +173,7 @@ proc valueFromJsonByType*(j: JsonNode; fieldType: string): Value =
     if j.kind == JFloat:
       v = j.getFloat()
     elif j.kind == JInt:
-      v = j.getInt().float
+      v = j.getBiggestInt().float
     elif j.kind == JString:
       try: v = parseFloat(j.getStr())
       except CatchableError: discard
@@ -295,7 +296,7 @@ proc eventFilterValue*(value: JsonNode): string =
   of JString:
     return strip(value.getStr())
   of JInt:
-    return $value.getInt()
+    return $value.getBiggestInt()
   of JFloat:
     return $value.getFloat()
   of JBool:
@@ -320,7 +321,7 @@ proc eventPayloadValueMatches*(payload: JsonNode, key: string, expected: string)
   of JString:
     return value.getStr() == expected
   of JInt:
-    return $value.getInt() == expected
+    return $value.getBiggestInt() == expected
   of JFloat:
     return $value.getFloat() == expected
   of JBool:

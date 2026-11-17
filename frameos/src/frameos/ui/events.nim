@@ -298,6 +298,8 @@ proc wants(r: UiRegion, event: string): bool =
     r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls
   of "tap": r.field > 0 or r.handlers[ueClick] > 0
+  # A hold on what only clicks is its click (dispatchUiEvent).
+  of "longPress": r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[ueLongPress] > 0
   of "wheel": r.scrolls
   else:
     let kind = handlerKind(event)
@@ -965,6 +967,22 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       scale = if target.scale > 0: target.scale else: 1'f32
       lx = (x - target.offsetX) / scale
       ly = (y - target.offsetY) / scale
+    # A hold on what only clicks is a click, as a browser's click comes at the
+    # release however long the press: on e-paper nothing shows until the
+    # pressed look is drawn a second later, and people hold until it is (the
+    # reTerminal Sticky's Start did nothing, 2026-11-17). What has its own
+    # onLongPress, and the keyboard's keys (a hold is their accents), keep it.
+    var kind = kind
+    if kind == ord(ueLongPress) and placed:
+      for i in countdown(target.regions.high, 0):
+        let r = target.regions[i]
+        if r.overScene(lx, ly):
+          break
+        if r.inside(lx, ly) and (r.handlers[ueLongPress] > 0 or r.handlers[ueClick] > 0 or r.field > 0):
+          if r.handlers[ueLongPress] == 0 and
+              (r.field > 0 or r.handlers[ueClick] > 0 and r.handlers[ueClick] - 1 < KeyBase):
+            kind = ord(ueClick)
+          break
     # A press on a box that scrolls drags it once it moves: from then on the
     # moves scroll it and press nothing.
     if target.dragKey >= 0 and target.dragPointer == pointer and (follows or down):

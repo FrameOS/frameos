@@ -488,8 +488,10 @@ export const get = () => (
 ```
 
 - **`onClick`** runs on a `tap` (a press and a release in one place, by
-  finger, pen or mouse), **`onDoubleClick`** on a `doubleTap`,
-  **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
+  finger, pen or mouse), and on a `longPress` of an element with no
+  `onLongPress` (a browser clicks at the release however long the press, and
+  on e-paper people hold until the pressed look shows), **`onDoubleClick`**
+  on a `doubleTap`, **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
   on the raw press and release, **`onPointerMove`** as the pointer moves,
   **`onSwipe`** on a `swipe` (its `direction`, to the element it began on,
   wherever it lifted), **`onPinch`** on a `pinch` (two fingers that moved,

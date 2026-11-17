@@ -205,7 +205,9 @@ proc jsonToJS*(ctx: ptr JSContext, j: JsonNode): JSValue =
   of JNull: return jsNull(ctx)
   of JBool: return nimBoolToJS(ctx, j.getBool())
   of JInt:
-    let v = j.getInt()
+    # getBiggestInt: getInt is 32 bits on an ESP32, and a millisecond
+    # timestamp in a scene's state overflowed it on the way to JS.
+    let v = j.getBiggestInt().int64
     if v >= low(int32).int64 and v <= high(int32).int64:
       return nimIntToJS(ctx, v.int32)
     else:
