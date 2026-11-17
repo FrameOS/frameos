@@ -2799,6 +2799,13 @@ const appJsPrelude* = compactJs("""
   const __frameosAsset = (op, path, data = "") => __frameosUnwrap(jsAssets(op, String(path || ""), data));
   const __frameosStream = (op, options) => __frameosUnwrap(jsStreams(op, JSON.stringify(options)));
   const __frameosStreamId = (ref) => (ref && ref.id) || ref;
+  // frameos.frame and frameos.code: arg as JSON text when json is true, else the
+  // plain string; JSON text back, "" is null and "!" a reason to throw.
+  const __frameosOp = (fn, name, op, arg, json) => {
+    const r = fn(String(op), json ? JSON.stringify(arg || {}, __jsReplacer) : String(arg ?? ""));
+    if (r[0] === "!") throw new Error("frameos." + name + ": " + r.slice(1));
+    return JSON.parse(r || "null");
+  };
   const frameos = {
     image: (spec = {}) => ({ __frameosType: "image", ...spec }),
     svg: (svg, spec = {}) => ({ __frameosType: "image", svg, ...spec }),
@@ -2811,16 +2818,8 @@ const appJsPrelude* = compactJs("""
     dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __jsReplacer)),
     store: () => JSON.parse(jsStore() || "null"),
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
-    frame: (op, arg) => {
-      const r = jsFrame(String(op), op === "apply" ? JSON.stringify(arg || {}, __jsReplacer) : String(arg ?? ""));
-      if (r[0] === "!") throw new Error("frameos.frame: " + r.slice(1));
-      return JSON.parse(r || "null");
-    },
-    code: (op, arg) => {
-      const r = jsCode(String(op), op === "ask" || op === "save" ? JSON.stringify(arg || {}, __jsReplacer) : String(arg ?? ""));
-      if (r[0] === "!") throw new Error("frameos.code: " + r.slice(1));
-      return JSON.parse(r || "null");
-    },
+    frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
+    code: (op, arg) => __frameosOp(jsCode, "code", op, arg, op === "ask" || op === "save"),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
