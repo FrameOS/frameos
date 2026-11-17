@@ -404,6 +404,14 @@ proc leave() =
   wentBack = true
   sendEvent(evSceneSettings, newJObject(), eoScene)
 
+proc goTo(sceneId: string, state: JsonNode) =
+  ## To `sceneId`, its public fields set to `state`, as a Save goes back.
+  let payload = newJObject()
+  payload.put("sceneId", newJString(sceneId))
+  payload.put("state", state)
+  wentBack = true
+  sendEvent(evSetCurrentScene, payload, eoScene)
+
 proc collect(fields, values: JsonNode): JsonNode =
   ## The values of `fields` as their owner keeps them (`saved`), by name.
   result = newJObject()
@@ -430,11 +438,7 @@ proc save(self: SceneSettingsScene) =
     self.formObject("edited").fields.clear()
     sendEvent(evRender, newJObject(), eoScene)
     return
-  let payload = newJObject()
-  payload.put("sceneId", newJString(self.opener()))
-  payload.put("state", values)
-  wentBack = true
-  sendEvent(evSetCurrentScene, payload, eoScene)
+  goTo(self.opener(), values)
 
 proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
   ## The frame page's Save: what was edited there to the host, which applies
@@ -530,11 +534,7 @@ proc acting(self: SceneSettingsScene) =
     if editor.len > 0 and self.opener().len > 0:
       let state = newJObject()
       state.put("open", newJString(self.opener()))
-      let payload = newJObject()
-      payload.put("sceneId", newJString(editor))
-      payload.put("state", state)
-      wentBack = true
-      sendEvent(evSetCurrentScene, payload, eoScene)
+      goTo(editor, state)
   elif handler == HGear:
     if self.ownWindow():
       # The frame page has a window of its own: it comes forward.
