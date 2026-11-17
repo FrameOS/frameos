@@ -2,6 +2,7 @@ import std/[json, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
+import frameos/panel_shape
 import frameos/types
 import frameos/values
 import frameos/ui/events
@@ -141,14 +142,16 @@ export function get(app, context) {
     check seen["frameWidth"].getInt() == 400
     check seen["scale"].getFloat() == 2.0
 
-  test "app.frame.paper says a change costs the panel a refresh":
+  test "app.frame.fast says a change shows at once, paper that the panel draws in inks":
     const source = """
       export function get(app) {
+        frameos.setState('fast', app.frame.fast)
         frameos.setState('paper', app.frame.paper)
         return { ok: true }
       }
     """
-    proc paper(device: string, canvas: Image, producer = false): bool =
+    proc panel(device: string, canvas: Image, producer = false): (bool, bool) =
+      ## (fast, paper), as get() read them.
       let ui = newUi(source, "tests/paper", sourceName = "app.js", outputType = "json")
       ui.owner.frameConfig.device = device
       let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
@@ -156,13 +159,20 @@ export function get(app, context) {
       if producer:
         context.decodeTargetImage = canvas
       discard ui.runtime.get(ui.owner, %*{}, context)
-      ui.scene.state["paper"].getBool()
-    check paper("waveshare.EPD_7in5_V2", newImage(400, 200))
-    check paper("pimoroni.inky_impression", newImage(400, 200))
-    check not paper("framebuffer", newImage(400, 200))
-    # An LCD's RGB565 canvas, drawn on or fed to the node that draws on it.
-    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200))
-    check not paper("waveshare.EPD_7in5_V2", newImage565(400, 200), producer = true)
+      (ui.scene.state["fast"].getBool(), ui.scene.state["paper"].getBool())
+    check panel("waveshare.EPD_7in5_V2", newImage(400, 200)) == (false, true)
+    check panel("pimoroni.inky_impression", newImage(400, 200)) == (false, true)
+    check panel("framebuffer", newImage(400, 200)) == (true, false)
+    # A board says by its panel (embedded_main at init), never by the canvas,
+    # drawn on or fed to the node that draws on it: an LCD's is RGB565, and
+    # so is a 13.3" color e-paper's on 8 MB.
+    boardPanelFormat = PanelFormatRgb565
+    check panel("embedded", newImage565(400, 200)) == (true, false)
+    check panel("embedded", newImage(400, 200), producer = true) == (true, false)
+    boardPanelFormat = 7 # Spectra 6
+    check panel("embedded", newImage565(400, 200)) == (false, true)
+    check panel("embedded", newImage565(400, 200), producer = true) == (false, true)
+    boardPanelFormat = 0
 
   test "app.frame.color says whether the panel shows colors":
     const source = """
@@ -187,7 +197,12 @@ export function get(app, context) {
     check color("pimoroni.inky_impression_7_3", newImage(400, 200))
     check color("waveshare.EPD_2in13g", newImage(400, 200))
     check color("framebuffer", newImage(400, 200))
-    check color("waveshare.EPD_7in5_V2", newImage565(400, 200))
+    # A board says by its panel, whatever its canvas.
+    boardPanelFormat = PanelFormatRgb565
+    check color("embedded", newImage565(400, 200))
+    boardPanelFormat = 8 # sixteen greys, the reTerminal E1003
+    check not color("embedded", newImage(400, 200))
+    boardPanelFormat = 0
 
   test "app.frame says nothing of a battery or Wi-Fi where the host cannot tell":
     const source = """
