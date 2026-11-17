@@ -22,11 +22,14 @@ nothing of a plane: `previewOnly`).
 
 ## Using it
 
-- **The look** is a code editor's workbench, after VS Code's Dark+: a title bar
-  with the actions (Ask AI, Save; a draft's Discard and Save & show), an
-  activity bar (the scenes, the files, the AI), the explorer, a tab with its
-  breadcrumbs over the code, and a blue status bar (purple for an AI draft):
-  the lines showing, the page, the language. Text is 13 px like other windows
+- **The look** is a code editor's workbench, after VS Code's Dark+: an
+  activity bar (the scenes, the files, the AI), the explorer, a tab bar with
+  the editor's actions (the page, Edit, Ask AI, Save; a draft's Discard and
+  Save & show) and breadcrumbs over the code, and a blue status bar (purple
+  for an AI draft). No title bar: a desktop's window has its own, and the
+  activity bar is the way back to the scenes (a narrow screen's tab bar starts
+  with a ‹). The status bar says
+  the lines showing, the page and the language. Text is 13 px like other windows
   (the frame's render scale makes it bigger on a big screen, never the app).
   The code is colored by kind (keywords, strings, numbers, calls, comments,
   JSON keys) in Cascadia Mono where the frame has it in its fonts (a Pi's
@@ -36,7 +39,9 @@ nothing of a plane: `previewOnly`).
   the files; e-paper and a grey panel are black on white, uncolored. A refusal
   or a note is a notification over the bottom right corner; a tap puts it away.
 - **The scenes.** It opens on the frame's scenes (`app.frame.scenes`) in the
-  explorer, beside a start page with **New scene with AI**.
+  explorer, a folder per category with each scene's own icon (the desktops'
+  `grouped` and `ownIcon`, the same text: Other last), beside a start page
+  with **New scene with AI**.
 - **A scene's files.** A scene opens as files in a tree: `scene.json` (the
   scene without its apps' sources and its code nodes' code: name, settings,
   fields, nodes, edges), a folder per app with its files (`config.json`,
