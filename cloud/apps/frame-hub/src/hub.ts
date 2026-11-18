@@ -63,6 +63,7 @@ import {
 } from "../../auth-web/src/lib/frames";
 import {
   foldDeployProgress,
+  failDeployProgress,
   foldDeployProgressCommand,
   foldDeployProgressLogEntries,
   isDeployProgressRecord,
@@ -91,9 +92,15 @@ import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
 import {
   buildScenesPatchMessage,
+  esp32MaxMessageBytes,
   esp32SceneStoreSlotsFor,
+  esp32SceneStoreSlotsVersion,
+  nextScenesPart,
   patchLeavesPanel,
+  scenesPartRecord,
   scenesPatchMinVersion,
+  type HeldScenes,
+  type ScenesPartRecord,
 } from "../../auth-web/src/lib/scenes-patch";
 import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
@@ -249,6 +256,12 @@ export const maxPayloadBytes = 4 * 1024 * 1024;
 // far beyond any plausible apply time and still inside the 5-minute TTL the
 // action commands (render/reboot/restart_runtime) carry.
 const commandRedeliverAfterMs = 180_000;
+// A part of a set sent in parts (scenes-patch.ts nextScenesPart) that the
+// frame took and never reported live: its scene_ack did not come before the
+// row was due again (commandRedeliverAfterMs, longer than the two minutes the
+// firmware gives an apply). Sending it again writes the same scenes to flash
+// again, so after this many times the row fails where the owner sees it.
+export const maxScenesPartAccepts = 3;
 // A `scenes_get` is only worth answering on the connection that asked: the
 // next one asks again, with the frame's scenes as they are then.
 const deviceScenesRequestTtlMs = 10 * 60 * 1000;
@@ -356,6 +369,12 @@ interface DeviceSession {
   // showing not among the scenes put): the device renders nothing for them,
   // so their scene_ack ends the deploy's bar (`scene_ack:unshown`).
   unshownPatches: Set<string>;
+  // The parts of a set sent in parts this session sent and has not seen
+  // live, by the id each went out under (its own: the row's id is the last
+  // part's, so the ack that ends the row can only be that part's). `acked`:
+  // the device took it, and the row waits for its checksum. `retry`: a
+  // refusal starts the row again without a base, instead of failing it.
+  scenesParts: Map<string, { acked: boolean; checksum: string; commandId: string; retry: boolean }>;
   draining: boolean;
   frame: FrameRow;
   hello: Record<string, unknown> | undefined;
@@ -855,7 +874,22 @@ export async function startFrameHub(
           // send again, forever, with every other command behind it stuck.
           // Fail the row instead, where the owner can see it.
           const outgoing = await outgoingCommandMessage(session, command);
-          const message = JSON.stringify(outgoing);
+          if ("fail" in outgoing) {
+            // A set this board cannot be sent, in one message or in parts,
+            // or one a part of which it took three times and never ran.
+            logWarn("command.undeliverable", {
+              commandId: command.id,
+              error: outgoing.fail,
+              frameId: session.frame.id,
+              type: command.type,
+            });
+            await failUnsentCommand(session.frame.id, command.id, outgoing.fail);
+            continue;
+          }
+          if ("skip" in outgoing) {
+            continue;
+          }
+          const message = JSON.stringify(outgoing.message);
           const messageBytes = Buffer.byteLength(message, "utf8");
           if (messageBytes > maxPayloadBytes) {
             logWarn("command.payload_too_large", {
@@ -877,24 +911,29 @@ export async function startFrameHub(
             continue;
           }
           session.ws.send(message);
-          await options.beforeMarkSent?.(command.id, String(outgoing.type));
+          await options.beforeMarkSent?.(command.id, String(outgoing.message.type));
           // The device can answer before this write. A refused patch has
           // then already been put back to pending with no_patch (handleAck),
           // and marking it sent would strand it: the pass handleAck queued
           // finds nothing pending, and the whole list waits for a reconnect.
-          // Only that refusal sets no_patch on a row that went out as a patch.
-          await db
-            .update(frameCommands)
-            .set({ sentAt: new Date(), status: "sent" })
-            .where(
-              and(
-                eq(frameCommands.id, command.id),
-                eq(frameCommands.status, "pending"),
-                outgoing.type === "scenes_patch"
-                  ? sql`coalesce(${frameCommands.payload} ->> 'no_patch', '') <> 'true'`
-                  : undefined,
-              ),
-            );
+          // Only that refusal sets no_patch on a row that went out as a patch
+          // a refusal sends again. A part of a set sent in parts was written
+          // `sent` before it went (scenesPartMessage): by now its scene_ack
+          // may have put the row back for the next part, and stays so.
+          if (!outgoing.writtenSent) {
+            await db
+              .update(frameCommands)
+              .set({ sentAt: new Date(), status: "sent" })
+              .where(
+                and(
+                  eq(frameCommands.id, command.id),
+                  eq(frameCommands.status, "pending"),
+                  outgoing.refusalRequeues
+                    ? sql`coalesce(${frameCommands.payload} ->> 'no_patch', '') <> 'true'`
+                    : undefined,
+                ),
+              );
+          }
           await moveDeployProgress(session.frame.id, (record) =>
             foldDeployProgressCommand(record, command.type, "sent", { now: new Date() }),
           );
@@ -910,14 +949,159 @@ export async function startFrameHub(
   // messageForServerRenderedBoard's.
   const boardContentVerbs = new Set(["set_scenes", "set_current_scene", "scene_event"]);
 
+  interface OutgoingCommand {
+    message: Record<string, unknown>;
+    // A refusal of this message puts the row back to go again another way
+    // (handleAck sets no_patch), instead of failing it.
+    refusalRequeues?: boolean;
+    // The row is written `sent` already (a part of a set sent in parts that
+    // is not the last): the drain leaves its status alone.
+    writtenSent?: boolean;
+  }
+
+  // A command the hub gives up on instead of sending (again) fails here, and
+  // the bar of the deploy it started says why.
+  async function failUnsentCommand(frameId: string, commandId: string, error: string) {
+    const [failed] = await db
+      .update(frameCommands)
+      .set({ error, payload: spentCommandPayload, status: "failed" })
+      .where(and(eq(frameCommands.id, commandId), eq(frameCommands.status, "pending")))
+      .returning({ id: frameCommands.id });
+    if (failed) {
+      await moveDeployProgress(frameId, (record) =>
+        isDeployProgressRecord(record) && record.id === commandId
+          ? failDeployProgress(record, error, { now: new Date() })
+          : undefined,
+      );
+    }
+  }
+
+  // The set a frame holds, for a set_scenes row about to go to it: its
+  // checksum and each scene's digest. From the row itself while it goes out in
+  // parts (`part`: the set its last part leaves, or the one that part was
+  // worked out from when the frame never took it), else from the acked row of
+  // the set the frame reports. `acked: false` is a row whose patch the frame
+  // refused: only what the row itself sent since is a base then.
+  async function scenesHeldByFrame(
+    frameId: string,
+    scenesChecksum: string | null,
+    part: ScenesPartRecord | null,
+    acked: boolean,
+  ): Promise<HeldScenes | null> {
+    if (!scenesChecksum) {
+      return null;
+    }
+    if (part?.checksum === scenesChecksum) {
+      return { checksum: part.checksum, hashes: part.hashes };
+    }
+    if (part?.from?.checksum === scenesChecksum) {
+      return part.from;
+    }
+    if (!acked) {
+      return null;
+    }
+    const [held] = await db
+      .select({ payload: frameCommands.payload })
+      .from(frameCommands)
+      .where(
+        and(
+          eq(frameCommands.frameId, frameId),
+          eq(frameCommands.type, "set_scenes"),
+          eq(frameCommands.status, "acked"),
+          sql`${frameCommands.payload} ->> 'checksum' = ${scenesChecksum}`,
+        ),
+      )
+      .orderBy(desc(frameCommands.createdAt))
+      .limit(1);
+    const hashes = isRecord(held?.payload) ? held.payload.scene_hashes : undefined;
+    return isRecord(hashes) ? { checksum: scenesChecksum, hashes: hashes as Record<string, string> } : null;
+  }
+
+  // One part of a set_scenes row that is over the board's cap as one message
+  // (docs/cloud-frames.md "A set in parts", lib/scenes-patch.ts
+  // nextScenesPart). A part that is not the last goes out under an id of its
+  // own and leaves the row waiting: handleAck takes its ack without answering
+  // the row, and the scene_ack of its checksum sends the next (handleSceneAck).
+  // The last part is the row's own message, acked as any push is.
+  async function scenesPartMessage(
+    session: DeviceSession,
+    command: { id: string; payload: unknown },
+    base: HeldScenes | null,
+    input: { part: ScenesPartRecord | null; retry: boolean; showing: unknown },
+  ): Promise<OutgoingCommand | { fail: string } | { skip: true }> {
+    const partId = randomUUID();
+    const step = nextScenesPart(command, base, { partId, showing: input.showing });
+    if (!step.ok) {
+      return { fail: step.error };
+    }
+    const patched = step.message.type === "scenes_patch";
+    // A patch the frame refuses starts the row again from nothing, once.
+    const refusalRequeues = patched && input.retry;
+    for (const [id, waiting] of session.scenesParts) {
+      if (waiting.commandId === command.id) {
+        session.scenesParts.delete(id);
+      }
+    }
+    if (step.final) {
+      if (input.part) {
+        await db
+          .update(frameCommands)
+          .set({ payload: sql`${frameCommands.payload} - 'part'` })
+          .where(eq(frameCommands.id, command.id));
+      }
+      if (refusalRequeues) {
+        session.patchedCommands.add(command.id);
+      }
+      if (patched && patchLeavesPanel(step.message, input.showing)) {
+        session.unshownPatches.add(command.id);
+      }
+      return { message: step.message, refusalRequeues };
+    }
+    // The same part again: the frame took it and it never went live.
+    const accepted = input.part?.checksum === step.holds.checksum ? (input.part.accepted ?? 0) : 0;
+    if (accepted >= maxScenesPartAccepts) {
+      return { fail: "scenes_not_applied" };
+    }
+    const record: ScenesPartRecord = {
+      ...step.holds,
+      ...(accepted > 0 ? { accepted } : {}),
+      ...(base ? { from: base } : {}),
+    };
+    // Before the part is sent, and `sent` with it: its ack and its scene_ack
+    // read this, and a frame quicker than the drain's next write must find
+    // the row waiting (the scene_ack puts it back for the next part; written
+    // `sent` after that, it waited out a redelivery). A row that is no longer
+    // pending (cancelled, superseded since the drain read it) sends nothing.
+    const [written] = await db
+      .update(frameCommands)
+      .set({
+        payload: sql`jsonb_set(${frameCommands.payload}, '{part}', ${JSON.stringify(record)}::jsonb)`,
+        sentAt: new Date(),
+        status: "sent",
+      })
+      .where(and(eq(frameCommands.id, command.id), eq(frameCommands.status, "pending")))
+      .returning({ id: frameCommands.id });
+    if (!written) {
+      return { skip: true };
+    }
+    session.scenesParts.set(partId, {
+      acked: false,
+      checksum: step.holds.checksum,
+      commandId: command.id,
+      retry: refusalRequeues,
+    });
+    return { message: step.message, refusalRequeues, writtenSent: true };
+  }
+
   // What a queued command goes out as: the row's own message, except that a
   // set_scenes to an ESP32 whose current set is known goes as the difference
-  // from it (scenes_patch, lib/scenes-patch.ts). No reason not to is a reason
-  // to send the whole list: a patch is only ever a saving.
+  // from it (scenes_patch, lib/scenes-patch.ts), and one that would be over
+  // the board's cap on a message goes in parts (scenesPartMessage). No reason
+  // not to is a reason to send the whole list: a patch is only ever a saving.
   async function outgoingCommandMessage(
     session: DeviceSession,
     command: { id: string; type: string; payload: unknown },
-  ): Promise<Record<string, unknown>> {
+  ): Promise<OutgoingCommand | { fail: string } | { skip: true }> {
     // A board the cloud renders for is sent nothing of its scenes
     // (docs/server-rendering.md "Nothing to keep on the board"), decided
     // when the command goes, so a push queued before the switch is covered.
@@ -936,10 +1120,10 @@ export async function startFrameHub(
             .set({ payload: sql`${frameCommands.payload} - 'scene_hashes'` })
             .where(eq(frameCommands.id, command.id));
         }
-        return messageForServerRenderedBoard(commandMessage(command));
+        return { message: messageForServerRenderedBoard(commandMessage(command)) };
       }
     }
-    if (command.type === "set_scenes" && isRecord(command.payload) && command.payload.no_patch !== true) {
+    if (command.type === "set_scenes" && isRecord(command.payload)) {
       const [frame] = await db
         .select({
           frameosVersion: frames.frameosVersion,
@@ -951,43 +1135,40 @@ export async function startFrameHub(
         .where(eq(frames.id, session.frame.id))
         .limit(1);
       if (
-        frame?.scenesChecksum &&
+        frame &&
         frameHardwareIsEsp32(frame) &&
         frame.frameosVersion &&
         frameosVersionSatisfies(scenesPatchMinVersion, frame.frameosVersion)
       ) {
-        const [held] = await db
-          .select({ payload: frameCommands.payload })
-          .from(frameCommands)
-          .where(
-            and(
-              eq(frameCommands.frameId, session.frame.id),
-              eq(frameCommands.type, "set_scenes"),
-              eq(frameCommands.status, "acked"),
-              sql`${frameCommands.payload} ->> 'checksum' = ${frame.scenesChecksum}`,
-            ),
-          )
-          .orderBy(desc(frameCommands.createdAt))
-          .limit(1);
-        const hashes = isRecord(held?.payload) ? held.payload.scene_hashes : undefined;
-        if (isRecord(hashes)) {
-          const patch = buildScenesPatchMessage(command, {
-            checksum: frame.scenesChecksum,
-            hashes: hashes as Record<string, string>,
-            slots: esp32SceneStoreSlotsFor(frame.frameosVersion),
-          });
-          if (patch) {
-            session.patchedCommands.add(command.id);
-            const showing = isRecord(frame.lastState) ? frame.lastState.active_scene : undefined;
-            if (patchLeavesPanel(patch, showing)) {
-              session.unshownPatches.add(command.id);
-            }
-            return patch;
+        // no_patch: the frame refused this row as a patch already.
+        const retry = command.payload.no_patch !== true;
+        const part = scenesPartRecord(command.payload.part);
+        const showing = isRecord(frame.lastState) ? frame.lastState.active_scene : undefined;
+        const base = await scenesHeldByFrame(session.frame.id, frame.scenesChecksum, part, retry);
+        const patch = base
+          ? buildScenesPatchMessage(command, { ...base, slots: esp32SceneStoreSlotsFor(frame.frameosVersion) })
+          : null;
+        // The board refuses a message over its cap, and its store takes a
+        // set bigger than one message only from esp32SceneStoreSlotsVersion:
+        // there a row whose message would be over the cap goes in parts, and
+        // goes on in parts once it has begun.
+        if (
+          frameosVersionSatisfies(esp32SceneStoreSlotsVersion, frame.frameosVersion) &&
+          (part !== null ||
+            Buffer.byteLength(JSON.stringify(patch ?? commandMessage(command)), "utf8") > esp32MaxMessageBytes)
+        ) {
+          return scenesPartMessage(session, command, base, { part, retry, showing });
+        }
+        if (patch) {
+          session.patchedCommands.add(command.id);
+          if (patchLeavesPanel(patch, showing)) {
+            session.unshownPatches.add(command.id);
           }
+          return { message: patch, refusalRequeues: true };
         }
       }
     }
-    return commandMessage(command);
+    return { message: commandMessage(command) };
   }
 
   // Revocation kick: revokeFrame() in auth-web marks the linked client and
@@ -1667,6 +1848,19 @@ export async function startFrameHub(
       return;
     }
     const ok = msg.ok === true;
+    // A part of a set sent in parts answers for itself, not for its row.
+    const part = session.scenesParts.get(commandId);
+    if (part) {
+      // Once: a repeat of the ack answers nothing.
+      if (!part.acked) {
+        part.acked = true;
+        if (!ok) {
+          session.scenesParts.delete(commandId);
+        }
+        await handleScenesPartAck(session, part, ok, msg);
+      }
+      return;
+    }
     // Sent again as the whole list, it renders after all.
     if (!ok) session.unshownPatches.delete(commandId);
     // A patch the frame refused (its set is not the one the patch was worked
@@ -1694,6 +1888,92 @@ export async function startFrameHub(
       await drainCommands(session);
       return;
     }
+    await settleCommand(session, commandId, ok, msg);
+  }
+
+  // The ack of a part of a set sent in parts that is not the last
+  // (scenesPartMessage). Taken, the part is stored and the row goes on
+  // waiting: it is live when the frame reports the part's checksum
+  // (continueScenesInParts), and only if that does not come is the row due
+  // again, counted from now and counted (`accepted`). Refused, the row starts
+  // again from nothing when the part was a patch (the frame's set is not the
+  // one it was worked out from, or has no room beside it: a set_scenes of the
+  // scenes that fit, then patches), once; any other refusal fails the row
+  // with the frame's reason, and the frame keeps the smaller set it holds.
+  async function handleScenesPartAck(
+    session: DeviceSession,
+    part: { checksum: string; commandId: string; retry: boolean },
+    ok: boolean,
+    msg: Record<string, unknown>,
+  ) {
+    const waiting = and(
+      eq(frameCommands.id, part.commandId),
+      eq(frameCommands.frameId, session.frame.id),
+      inArray(frameCommands.status, ["pending", "sent"]),
+    );
+    if (ok) {
+      await db
+        .update(frameCommands)
+        .set({
+          payload: sql`jsonb_set(${frameCommands.payload}, '{part,accepted}', to_jsonb(coalesce((${frameCommands.payload} #>> '{part,accepted}')::int, 0) + 1))`,
+          sentAt: new Date(),
+        })
+        .where(and(waiting, sql`${frameCommands.payload} #>> '{part,checksum}' = ${part.checksum}`));
+      return;
+    }
+    if (!part.retry) {
+      await settleCommand(session, part.commandId, false, msg);
+      return;
+    }
+    await db
+      .update(frameCommands)
+      .set({
+        payload: sql`(coalesce(${frameCommands.payload}, '{}'::jsonb) - 'part') || '{"no_patch":true}'::jsonb`,
+        sentAt: null,
+        status: "pending",
+      })
+      .where(waiting);
+    logInfo("command.scenes_part_refused", {
+      commandId: part.commandId,
+      error: typeof msg.error === "string" ? msg.error.slice(0, 128) : undefined,
+      frameId: session.frame.id,
+    });
+    await drainCommands(session);
+  }
+
+  // The frame reports a set live. When it is the one a part of a set sent in
+  // parts leaves, the row that sent it is due again: its next part goes out
+  // against this checksum.
+  async function continueScenesInParts(session: DeviceSession, checksum: string) {
+    for (const [id, part] of session.scenesParts) {
+      if (part.checksum === checksum) {
+        session.scenesParts.delete(id);
+      }
+    }
+    const rows = await db
+      .update(frameCommands)
+      .set({ sentAt: null, status: "pending" })
+      .where(
+        and(
+          eq(frameCommands.frameId, session.frame.id),
+          eq(frameCommands.type, "set_scenes"),
+          inArray(frameCommands.status, ["pending", "sent"]),
+          sql`${frameCommands.payload} #>> '{part,checksum}' = ${checksum}`,
+        ),
+      )
+      .returning({ id: frameCommands.id });
+    if (rows.length > 0) {
+      await drainCommands(session);
+    }
+  }
+
+  // A command the device answered: the row is acked or failed, once.
+  async function settleCommand(
+    session: DeviceSession,
+    commandId: string,
+    ok: boolean,
+    msg: Record<string, unknown>,
+  ) {
     // A failed set_scenes deliberately leaves frames.assigned_checksum as is:
     // desired != acked keeps the frame showing out-of-sync in the UI.
     const [command] = await db
@@ -1838,6 +2118,7 @@ export async function startFrameHub(
     await broadcastFrameUpdate(session.frame.id);
     if (checksum !== undefined) {
       await foldSceneAckIntoDeployProgress(session, checksum);
+      await continueScenesInParts(session, checksum);
     }
     // The device confirming the ASSIGNED set (not a preview push, not a
     // stale set) is the cloud's deploy-succeeded moment — the counterpart of
@@ -1954,6 +2235,12 @@ export async function startFrameHub(
       .where(eq(frames.id, session.frame.id));
     await followReportedSettings(session.frame.id, rest.hardware);
     await broadcastFrameUpdate(session.frame.id);
+    // A `state` names the set the frame holds too. When it is a part this
+    // session is waiting on (its scene_ack was dropped, or never sent: the
+    // firmware acks a patch it holds already without one), the row goes on.
+    if (checksum !== undefined && [...session.scenesParts.values()].some((part) => part.checksum === checksum)) {
+      await continueScenesInParts(session, checksum);
+    }
   }
 
   // The device's own forecast, sent right before esp_deep_sleep halts the CPU
@@ -2701,6 +2988,7 @@ export async function startFrameHub(
       drainQueued: false,
       patchedCommands: new Set(),
       unshownPatches: new Set(),
+      scenesParts: new Map(),
       draining: false,
       frame,
       handling: Promise.resolve(),
@@ -2926,6 +3214,7 @@ export async function startFrameHub(
         drainQueued: false,
         patchedCommands: new Set(),
         unshownPatches: new Set(),
+        scenesParts: new Map(),
         draining: false,
         frame: row.frame,
         handling: Promise.resolve(),

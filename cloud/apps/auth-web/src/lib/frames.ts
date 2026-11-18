@@ -1177,13 +1177,15 @@ function deployProgressVersionForCommand(payload: unknown): string | null {
 // once the device has answered, and a set_scenes push's scene bundle (an
 // assignment, the editor's preview, the voice chat's show_image — tens of
 // KB each, and a frame spoken to all day would stack hundreds; the checksum
-// and scene_id stay for the queue view and the deploy record). Every update
-// that moves a command out of pending/sent sets `payload: spentCommandPayload`.
+// and scene_id stay for the queue view and the deploy record; `part`, how far
+// a set sent in parts got, is the hub's and only while the row is going out).
+// Every update that moves a command out of pending/sent sets
+// `payload: spentCommandPayload`.
 export const spentCommandPayload = sql`case
   when jsonb_typeof(${frameCommands.payload}) is distinct from 'object' then ${frameCommands.payload}
   when ${frameCommands.type} = 'lan_access_set' then ${frameCommands.payload} - 'code'
   when ${frameCommands.type} in ('asset_put', 'asset_put_chunk') then ${frameCommands.payload} - 'data'
-  when ${frameCommands.type} = 'set_scenes' then ${frameCommands.payload} - 'scenes'
+  when ${frameCommands.type} = 'set_scenes' then ${frameCommands.payload} - 'scenes' - 'part'
   else ${frameCommands.payload} end`;
 
 // Supersede undelivered commands of the same type: a newer set_scenes or

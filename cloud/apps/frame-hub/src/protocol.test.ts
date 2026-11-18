@@ -132,6 +132,28 @@ describe("commandMessage", () => {
     ).toEqual({ id: "cmd-1", type: "render" });
   });
 
+  it("leaves the hub's own keys of a set_scenes row out", () => {
+    expect(
+      commandMessage({
+        id: "c",
+        payload: {
+          checksum: "sum",
+          no_patch: true,
+          part: { checksum: "between", hashes: { a: "1" } },
+          scene_hashes: { a: "1" },
+          scenes: [{ id: "a" }],
+        },
+        type: "set_scenes",
+      }),
+    ).toEqual({ checksum: "sum", id: "c", scenes: [{ id: "a" }], type: "set_scenes" });
+    // `part` is the hub's on a set_scenes row alone.
+    expect(commandMessage({ id: "c", payload: { part: 2 }, type: "scene_event" })).toEqual({
+      id: "c",
+      part: 2,
+      type: "scene_event",
+    });
+  });
+
   it("tolerates null and non-object payloads", () => {
     expect(commandMessage({ id: "c", payload: null, type: "reboot" })).toEqual({
       id: "c",

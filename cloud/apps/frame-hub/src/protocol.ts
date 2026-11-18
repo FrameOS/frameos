@@ -42,8 +42,12 @@ export function commandMessage(command: {
   type: string;
   payload: unknown;
 }): Record<string, unknown> {
-  // scene_hashes and no_patch are the hub's own bookkeeping (scenes-patch.ts).
+  // scene_hashes and no_patch are the hub's own bookkeeping (scenes-patch.ts),
+  // and so is a set_scenes row's `part` (how far a set sent in parts got).
   const { scene_hashes: _hashes, no_patch: _noPatch, ...payload } = isRecord(command.payload) ? command.payload : {};
+  if (command.type === "set_scenes") {
+    delete payload.part;
+  }
   return { ...payload, id: command.id, type: command.type };
 }
 

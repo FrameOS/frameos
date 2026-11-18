@@ -836,7 +836,11 @@ A single management WebSocket message is capped at **512 KiB**: it is held
 in memory whole, with its JSON tree beside it. Larger frames are dropped and
 acked `message_too_large`. The cap is on one message, not on what the frame
 stores ("How big a set may be" below): a set grows past it a `scenes_patch`
-at a time.
+at a time, and the cloud sends a push that would be over it as several
+(docs/cloud-frames.md "A set in parts": each patch against the checksum the
+one before left, the next sent on this firmware's `scene_ack`, so
+`base_checksum` and when `s_applied_scenes_checksum` moves are part of that
+contract).
 
 Secrets at rest: `cloud_sk` (the Ed25519 seed), `cloud_token`, the unspent
 claim token and the WiFi PSK live in NVS in plaintext unless the board is
