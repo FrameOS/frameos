@@ -14,10 +14,20 @@ import {
   imageSourcesForSettings,
   pcmToWav,
   readVoicePermissions,
+  sceneTakesVoiceMemos,
+  showingVoiceScene,
   VOICE_MAX_AUDIO_BYTES,
+  VOICE_MEMO_EVENT,
+  VOICE_MEMO_FAILED,
+  VOICE_MEMO_NOT_ALLOWED_REPLY,
+  VOICE_MEMO_PERMISSION,
+  VOICE_MEMO_REPLY,
+  VOICE_MEMO_TOOL,
   voiceChatId,
   voiceContextBlock,
   voiceHistoryForModel,
+  voiceMemoEvent,
+  voiceMemoTurn,
   voiceSessions,
   VoiceSessionStore,
   voiceToolDefinitions,
@@ -511,6 +521,93 @@ describe("the chat log", () => {
   });
 });
 
+describe("voice memos", () => {
+  const memoScene = {
+    customEvents: [{ name: "voiceMemo", origins: ["cloud"] }],
+    edges: [],
+    id: "memos-3",
+    name: "Voice memos",
+    nodes: [],
+  };
+
+  it("knows a scene that takes them by its customEvents", () => {
+    expect(sceneTakesVoiceMemos(memoScene)).toBe(true);
+    expect(sceneTakesVoiceMemos({ customEvents: [{ name: "voiceMemo" }] })).toBe(true);
+    expect(sceneTakesVoiceMemos({ customEvents: ["voiceMemo", { name: "voicememo" }] })).toBe(false);
+    expect(sceneTakesVoiceMemos({ customEvents: null })).toBe(false);
+    expect(sceneTakesVoiceMemos(null)).toBe(false);
+    expect(voiceMemoEvent("hi", new Date("2026-11-18T09:05:07.123Z"))).toEqual({
+      name: "voiceMemo",
+      payload: { at: "2026-11-18T09:05:07Z", text: "hi" },
+    });
+  });
+
+  it("finds the scene showing: the preview when it shows, else the installed one", async () => {
+    const preview = { id: "preview-1", name: "Preview" };
+    const content = async (id: string) => (id === "store-memos" ? memoScene : null);
+    expect(await showingVoiceScene({ activeSceneId: undefined, previewScene: preview, sceneContent: content })).toBe(preview);
+    expect(await showingVoiceScene({ activeSceneId: "store-memos", previewScene: preview, sceneContent: content })).toBe(
+      memoScene,
+    );
+    expect(await showingVoiceScene({ activeSceneId: undefined, previewScene: null, sceneContent: content })).toBeNull();
+  });
+
+  it("sends the words to the scene and answers without a chat", async () => {
+    const sent: unknown[] = [];
+    const memo = await voiceMemoTurn({
+      at: new Date("2026-11-18T09:05:07Z"),
+      permissions: defaultVoicePermissions,
+      scene: memoScene,
+      sendMemo: async (event) => {
+        sent.push(event);
+        return { command_id: "cmd-1", ok: true, type: "scene_event" };
+      },
+      transcript: "buy milk",
+    });
+    expect(sent).toEqual([{ name: VOICE_MEMO_EVENT, payload: { at: "2026-11-18T09:05:07Z", text: "buy milk" } }]);
+    expect(memo).toMatchObject({ reply: VOICE_MEMO_REPLY, tools: [VOICE_MEMO_TOOL], transcript: "buy milk" });
+    expect(memo.error).toBeUndefined();
+    expect(actionLine(memo.actions[0]!)).toBe(
+      'voice_memo {"scene":"Voice memos"} -> {"ok":true,"scene":"Voice memos","type":"scene_event"}',
+    );
+  });
+
+  it("answers to the use_scenes switch, refused in a sentence and nothing sent", async () => {
+    expect(VOICE_MEMO_PERMISSION).toBe("use_scenes");
+    let sent = 0;
+    const memo = await voiceMemoTurn({
+      at: new Date(),
+      permissions: { ...defaultVoicePermissions, use_scenes: false },
+      scene: memoScene,
+      sendMemo: async () => {
+        sent += 1;
+        return { ok: true };
+      },
+      transcript: "buy milk",
+    });
+    expect(sent).toBe(0);
+    expect(memo).toMatchObject({ reply: VOICE_MEMO_NOT_ALLOWED_REPLY, tools: [] });
+    expect(memo.error).toBeUndefined();
+    expect(memo.actions[0]!.result).toMatchObject({ error: "not_allowed", ok: false });
+  });
+
+  it("keeps the words and sounds an error when the scene cannot be sent one", async () => {
+    const memo = await voiceMemoTurn({
+      at: new Date(),
+      permissions: defaultVoicePermissions,
+      scene: memoScene,
+      sendMemo: async () => ({ error: "event_not_declared", ok: false }),
+      transcript: "call the plumber",
+    });
+    expect(memo).toMatchObject({
+      detail: "The memo did not reach Voice memos: event_not_declared",
+      error: VOICE_MEMO_FAILED,
+      tools: [],
+      transcript: "call the plumber",
+    });
+  });
+});
+
 describe("parity with the backend", () => {
   const python = readFileSync(
     fileURLToPath(new URL("../../../../../../backend/app/utils/voice_chat.py", import.meta.url)),
@@ -521,6 +618,15 @@ describe("parity with the backend", () => {
     for (const line of buildVoiceSystemPrompt().split("\n")) {
       expect(python).toContain(line);
     }
+  });
+
+  it("shares the voice memo's event, tool, switch and words", () => {
+    expect(python).toContain(`VOICE_MEMO_EVENT = "${VOICE_MEMO_EVENT}"`);
+    expect(python).toContain(`VOICE_MEMO_TOOL = "${VOICE_MEMO_TOOL}"`);
+    expect(python).toContain(`VOICE_MEMO_PERMISSION = "${VOICE_MEMO_PERMISSION}"`);
+    expect(python).toContain(`VOICE_MEMO_FAILED = "${VOICE_MEMO_FAILED}"`);
+    expect(python).toContain(`VOICE_MEMO_REPLY = "${VOICE_MEMO_REPLY}"`);
+    expect(python).toContain(`"${VOICE_MEMO_NOT_ALLOWED_REPLY}"`);
   });
 
   it("shares the tool names and descriptions", () => {

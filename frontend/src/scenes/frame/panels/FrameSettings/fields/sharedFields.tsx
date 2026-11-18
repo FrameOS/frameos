@@ -599,7 +599,7 @@ const VOICE_PERMISSION_ROWS: {
     key: 'use_scenes',
     name: 'voice_use_scenes',
     label: 'Use installed scenes',
-    on: 'On: a spoken request can switch scenes, set their fields and redraw',
+    on: 'On: a spoken request can switch scenes, set their fields and redraw, and a voice memos scene gets the words',
     off: 'Off: the installed scenes are left alone',
   },
   {

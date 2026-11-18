@@ -408,7 +408,11 @@
   editor and catalog tools alone, `voice_scene_builder.py` /
   `voice-scene-builder.ts`, its scene rendered in the frame's memory and
   pushed as the preview — and `rotate_frame`), never the MCP tools: a
-  frame's token is not the owner's. The turns are ONE conversation per frame:
+  frame's token is not the owner's. A scene that declares the custom event
+  `voiceMemo` (with the `cloud` origin) takes the words instead: while it
+  shows, the plane sends it the transcript as that event and runs no chat
+  (`voice_memo_turn` / `voiceMemoTurn`, on the "use installed scenes"
+  switch; doc section "Voice memos", the Voice memos sample). The turns are ONE conversation per frame:
   every exchange is three chat rows (heard, a `log` row of the tools that
   ran, the reply) and the next turn gets the last six exchanges with their
   age and actions (`voice_history_for_model` / `voiceHistoryForModel`), so a

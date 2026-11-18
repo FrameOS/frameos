@@ -21,6 +21,8 @@ import {
   MAX_VOICE_ROUNDS,
   pcmPeak,
   readVoicePermissions,
+  sceneTakesVoiceMemos,
+  showingVoiceScene,
   TRANSCRIPTION_MODEL,
   transcribePcm,
   transcriptIsHintEcho,
@@ -35,19 +37,28 @@ import {
   voiceContextBlock,
   voiceHistoryForModel,
   voiceSessions,
+  voiceMemoTurn,
   voiceTools,
   voiceTurnLog,
+  type VoiceAction,
   type VoiceAlbums,
   type VoicePreview,
   type VoiceQueue,
   type VoiceScene,
+  type VoiceSendMemo,
   type VoiceSettingsUpdate,
 } from "../../../../../../src/lib/ai/voice";
 import { meterAiUsageInBackground } from "../../../../../../src/lib/billing";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import { getPublicOrigin } from "../../../../../../src/lib/env";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
-import { cloudEventRouting, reportedActiveSceneId, sceneStateEventCommand } from "../../../../../../src/lib/frame-events";
+import {
+  cloudEventRouting,
+  customEventRouting,
+  reportedActiveSceneId,
+  sceneEventCommand,
+  sceneStateEventCommand,
+} from "../../../../../../src/lib/frame-events";
 import {
   assignScenesToFrame,
   currentSceneAssignments,
@@ -99,7 +110,7 @@ export const maxDuration = 300;
 //   -> 202 {"ok": true, "bytes": n}                  every chunk but the last
 //   -> 200 {"ok": true, "transcript", "reply", "tools": [...]}
 //   -> 200 {"ok": false, "error": "nothing_heard" | "transcription_failed" |
-//                        "chat_failed" | "ai_unavailable", "detail"}
+//                        "chat_failed" | "ai_unavailable" | "memo_failed", "detail"}
 //   -> 409 seq_mismatch / unknown_session, 413 over the caps, 429 too many
 //
 // The chunks are held in this process's memory until `done` (voiceSessions);
@@ -120,6 +131,11 @@ export const maxDuration = 300;
 // "make it bigger" has the scene the previous turn built to refer to
 // (voiceHistoryForModel). create_scene and change_scene run the scene AI as a
 // sub-turn (voice-scene-builder.ts) and push what it built as a preview.
+//
+// A scene that declares the custom event `voiceMemo` takes the words instead:
+// while it shows, the transcript goes to it as that event (scene_event, the
+// event route's way) and no chat runs (voiceMemoTurn; docs/voice-chat.md
+// "Voice memos"). Only the transcription is metered then.
 
 // "Now"-commands expire like the event route's: a scene switch spoken on
 // Monday must not fire on Friday.
@@ -230,6 +246,29 @@ export async function POST(
     ? await resolveStoreSceneForFrameScene(db, frame.id, reportedActive)
     : undefined;
   const showing = scenes.find((scene) => scene.id === activeStoreId) ?? null;
+  // The scene the frame shows for now without holding it (the editor's or
+  // an earlier turn's preview): the model is told, and change_scene edits it.
+  const preview = (await scenePreviewsByFrame(db, [frame.id])).get(frame.id) ?? null;
+  const previewScene = preview ? ((await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined) ?? null : null;
+  // An installed scene's runtime JSON, for change_scene and the memo check:
+  // the bundle the frame was sent, by the store id's device id.
+  const sceneContent = async (storeSceneId: string): Promise<JsonObject | null> => {
+    const built = await buildScenesPayloadForFrame(db, frame.id);
+    if ("error" in built) {
+      return null;
+    }
+    const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
+    const found = built.scenes.find(
+      (scene) => scene && typeof scene === "object" && (scene as JsonObject).id === deviceSceneId,
+    );
+    return (found as JsonObject | undefined) ?? null;
+  };
+  // A scene that declares the custom event `voiceMemo` takes the words: while
+  // it shows, the transcript goes to it and no chat runs (docs/voice-chat.md
+  // "Voice memos"; voiceMemoTurn).
+  const showingJson = await showingVoiceScene({ activeSceneId: showing?.id, previewScene, sceneContent });
+  const memoScene = sceneTakesVoiceMemos(showingJson) ? showingJson : null;
+  const permissions = readVoicePermissions(frame.voicePermissions);
 
   const turnId = `voice-${frame.id}-${sessionId}`;
   let transcript: string;
@@ -267,14 +306,72 @@ export async function POST(
     contextType: "frame",
     frameId: frame.id,
   });
+  // The exchange, three rows: what was heard, the log of what was done (the
+  // workspace draws it as a log bubble; the next turn reads it as history),
+  // the reply.
+  const storeExchange = async (reply: string, actions: VoiceAction[]) => {
+    if (!chat) {
+      return;
+    }
+    const seconds = (Date.now() - startedAt) / 1000;
+    await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
+    await appendChatMessage(db, chat.id, {
+      content: voiceTurnLog(actions, { at: new Date(), seconds, sessionId }),
+      role: "assistant",
+      tool: VOICE_LOG_TOOL,
+    });
+    await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: VOICE_TURN_TOOL });
+  };
+
+  if (memoScene) {
+    // The frame event route's custom event, on this frame alone: declared by
+    // the scene showing with the `cloud` origin (the device's rule) and a
+    // firmware that takes scene_event, then queued like the route queues it.
+    const sendMemo: VoiceSendMemo = async (event) => {
+      const routed = customEventRouting({
+        activeSceneId: reportedActive,
+        eventName: event.name,
+        frameosVersion: frame.frameosVersion,
+        profile: frameContractProfile(frame),
+        scenes: [memoScene],
+      });
+      if (!routed.ok) {
+        return { error: routed.error === "unsupported_event" && routed.reason ? routed.reason : routed.error, ok: false };
+      }
+      const command = sceneEventCommand(event.name, event.payload);
+      if (!command.ok) {
+        return { error: command.error, ok: false };
+      }
+      const queued = await enqueueFrameCommand(db, {
+        createdByAccountId: accountId,
+        frameId: frame.id,
+        payload: command.payload,
+        ttlMs: commandTtlMs,
+        type: routed.verb,
+      });
+      await recordAuditEvent(db, {
+        accountId,
+        actor: { accountId, frameId: frame.id, kind: "voice_chat" },
+        eventType: "frame.command_sent",
+        metadata: { event: event.name, source: "voice_chat", type: routed.verb },
+        target: { commandId: queued?.id, frameId: frame.id },
+      });
+      return { command_id: queued?.id, ok: true, type: routed.verb };
+    };
+    const memo = await voiceMemoTurn({ at: now, permissions, scene: memoScene, sendMemo, transcript });
+    await storeExchange(memo.reply, memo.actions);
+    logInfo("frames.voice_memo", { frameId: frame.id, ok: !memo.error, tools: memo.tools.join(",") });
+    if (memo.error) {
+      // The rows are kept (the words are not lost), the frame sounds an error.
+      return failure(memo.error, memo.detail ?? memo.reply);
+    }
+    return NextResponse.json({ ok: true, reply: memo.reply, tools: memo.tools, transcript });
+  }
+
   // The earlier exchanges, each with its age and the log of what was done:
   // three rows per exchange, a few more for the workspace's own messages.
   const rows = chat ? (await chatMessages(db, chat.id)).slice(-4 * MAX_VOICE_HISTORY_TURNS) : [];
   const history = voiceHistoryForModel(rows, { now });
-  // The scene the frame shows for now without holding it (the editor's or
-  // an earlier turn's preview): the model is told, and change_scene edits it.
-  const preview = (await scenePreviewsByFrame(db, [frame.id])).get(frame.id) ?? null;
-  const previewScene = preview ? ((await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined) ?? null : null;
   const context = await frameContextBlock(db, accountId, frame.id);
 
   // Each tool queues what the workspace's rail would, on this frame alone.
@@ -517,19 +614,6 @@ export async function POST(
     },
   };
 
-  // An installed scene's runtime JSON, for change_scene: the bundle the
-  // frame was sent, by the store id's device id.
-  const sceneContent = async (storeSceneId: string): Promise<JsonObject | null> => {
-    const built = await buildScenesPayloadForFrame(db, frame.id);
-    if ("error" in built) {
-      return null;
-    }
-    const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
-    const found = built.scenes.find(
-      (scene) => scene && typeof scene === "object" && (scene as JsonObject).id === deviceSceneId,
-    );
-    return (found as JsonObject | undefined) ?? null;
-  };
   // The scene AI as a sub-turn (voice-scene-builder.ts): the editor and
   // catalog tools alone, the scene rendered in the frame's memory before it
   // is handed back; the tool then pushes it as the preview above. Each of
@@ -568,7 +652,6 @@ export async function POST(
     });
   };
 
-  const permissions = readVoicePermissions(frame.voicePermissions);
   const tools = voiceTools({
     activeSceneId: showing?.id,
     albums,
@@ -635,18 +718,7 @@ export async function POST(
   });
   const reply = result.reply.trim() || "Done.";
   const seconds = (Date.now() - startedAt) / 1000;
-  if (chat) {
-    // The exchange, three rows: what was heard, the log of what was done
-    // (the workspace draws it as a log bubble; the next turn reads it as
-    // history), the reply.
-    await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
-    await appendChatMessage(db, chat.id, {
-      content: voiceTurnLog(tools.actions, { at: new Date(), seconds, sessionId }),
-      role: "assistant",
-      tool: VOICE_LOG_TOOL,
-    });
-    await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: VOICE_TURN_TOOL });
-  }
+  await storeExchange(reply, tools.actions);
   logInfo("frames.voice_turn", {
     frameId: frame.id,
     rounds: result.rounds,

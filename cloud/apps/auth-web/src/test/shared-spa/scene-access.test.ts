@@ -267,6 +267,8 @@ describe("repo sample scenes", () => {
     ["repo/scenes/samples/Files/scenes.json", ["assets", "assets-write"]],
     // Books reads the EPUBs on the card and writes nothing there.
     ["repo/scenes/samples/Books/scenes.json", ["assets"]],
+    // Voice memos lists, reads and writes its memos in the assets folder.
+    ["repo/scenes/samples/Voice memos/scenes.json", ["assets", "assets-write"]],
   ])("%s", (path, flags) => {
     expect(sceneAccessFlags(JSON.parse(repoFile(path)))).toEqual(flags);
   });

@@ -4,6 +4,7 @@ transcribed and answered by the AI chat with the frame-scoped voice tools.
 OpenAI is a scripted stream_response and a stubbed transcription."""
 
 import json
+import re
 import struct
 
 import pytest
@@ -907,6 +908,143 @@ def test_voice_history_folds_each_exchange_with_its_age_and_actions():
     ]
 
 
+MEMO_SCENE = {
+    "id": "memos-3",
+    "name": "Voice memos",
+    "nodes": [],
+    "edges": [],
+    "customEvents": [{"name": "voiceMemo", "origins": ["cloud"]}],
+}
+
+
+async def memo_frame(async_client, db, redis, **kwargs):
+    frame = await voice_frame(async_client, db, **kwargs)
+    frame.scenes = [*scenes(), MEMO_SCENE]
+    db.add(frame)
+    db.commit()
+    await redis.set(f"frame:{frame.id}:active_scene", "memos-3")
+    return frame
+
+
+@pytest.mark.asyncio
+async def test_a_scene_that_takes_voice_memos_gets_the_words_and_no_chat_runs(
+    async_client, no_auth_client, db, redis, heard, monkeypatch
+):
+    """docs/voice-chat.md "Voice memos": while a scene that declares the
+    custom event `voiceMemo` shows, what was said goes to it as that event,
+    the frame hears a fixed reply with `voice_memo` as its tool (the "did
+    something" sound), and no model is asked anything."""
+    frame = await memo_frame(async_client, db, redis)
+    openai = ScriptedOpenAi([])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    heard["text"]["value"] = "Switch to the calendar. Also buy milk."
+
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ok": True,
+        "transcript": "Switch to the calendar. Also buy milk.",
+        "reply": "Saved as a memo.",
+        "tools": ["voice_memo"],
+    }
+    # Only the transcription ran, with the scene names as its hint as ever.
+    assert openai.requests == []
+    assert heard["calls"][0]["prompt"] == "Clock, Calendar, Voice memos"
+
+    # The words are the scene's event, on the frame's queue like the event route's.
+    commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).all()
+    assert [(c.type, c.payload["name"]) for c in commands] == [("scene_event", "voiceMemo")]
+    payload = commands[0].payload["payload"]
+    assert payload["text"] == "Switch to the calendar. Also buy milk."
+    assert re.fullmatch(r"20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ", payload["at"]), payload
+
+    # The exchange is in the frame's voice chat like any other, its log row
+    # naming the memo, so the workspace shows it and the next turn knows.
+    chat = db.query(Chat).filter(Chat.project_id == frame.project_id).one()
+    messages = db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).order_by(ChatMessage.created_at).all()
+    assert [(m.role, m.tool) for m in messages] == [("user", "voice"), ("assistant", "log"), ("assistant", "voice")]
+    assert messages[0].content == "Switch to the calendar. Also buy milk."
+    assert messages[1].content.split("\n")[1].startswith(
+        'voice_memo {"scene": "Voice memos"} -> {"ok": true, "scene": "Voice memos", "status": "queued"'
+    )
+    assert messages[2].content == "Saved as a memo."
+
+
+@pytest.mark.asyncio
+async def test_a_voice_memo_answers_to_the_use_scenes_switch(async_client, no_auth_client, db, redis, heard, monkeypatch):
+    """Off, the memo is refused the way a refused tool is reported: an answer
+    in a sentence (the frame shows what it heard), nothing sent, no chat run."""
+    frame = await memo_frame(async_client, db, redis, permissions={"voiceUseScenes": False})
+    openai = ScriptedOpenAi([])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    heard["text"]["value"] = "buy milk"
+
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["ok"] is True and body["tools"] == [] and body["transcript"] == "buy milk"
+    assert body["reply"] == voice_chat.VOICE_MEMO_NOT_ALLOWED_REPLY
+    assert openai.requests == []
+    assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
+    log_row = db.query(ChatMessage).filter(ChatMessage.tool == "log").one()
+    assert '"error": "not_allowed"' in log_row.content
+
+
+@pytest.mark.asyncio
+async def test_a_memo_the_frame_refuses_keeps_the_words_and_sounds_an_error(
+    async_client, no_auth_client, db, redis, heard, monkeypatch
+):
+    from app.api import frames as frames_api
+    from fastapi import HTTPException
+
+    frame = await memo_frame(async_client, db, redis)
+
+    async def refused(db, redis, frame, event, body):
+        raise HTTPException(status_code=502, detail="The frame refused voiceMemo: event_not_allowed")
+
+    monkeypatch.setattr(frames_api, "dispatch_frame_event", refused)
+    monkeypatch.setattr(ai_chat_agent, "stream_response", ScriptedOpenAi([]))
+    heard["text"]["value"] = "call the plumber"
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ok": False,
+        "error": "memo_failed",
+        "detail": "The memo did not reach Voice memos: The frame refused voiceMemo: event_not_allowed",
+    }
+    rows = db.query(ChatMessage).order_by(ChatMessage.created_at).all()
+    assert [m.content for m in rows][0] == "call the plumber"
+
+
+@pytest.mark.asyncio
+async def test_a_scene_without_the_memo_event_gets_the_chat(async_client, no_auth_client, db, redis, heard, monkeypatch):
+    frame = await memo_frame(async_client, db, redis)
+    await redis.set(f"frame:{frame.id}:active_scene", "clock-1")
+    openai = ScriptedOpenAi([("The Clock shows.", [])])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json()["reply"] == "The Clock shows."
+    assert len(openai.requests) == 1
+    assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
+
+
+def test_which_scenes_take_voice_memos():
+    from datetime import datetime, timezone
+
+    from app.utils.voice_chat import scene_takes_voice_memos, voice_memo_event
+
+    assert scene_takes_voice_memos(MEMO_SCENE)
+    assert scene_takes_voice_memos({"customEvents": [{"name": "voiceMemo"}]})
+    assert not scene_takes_voice_memos({"customEvents": ["voiceMemo", {"name": "voicememo"}]})
+    assert not scene_takes_voice_memos({"customEvents": None})
+    assert not scene_takes_voice_memos(None)
+    assert voice_memo_event("hi", datetime(2026, 11, 18, 9, 5, 7, 123000, tzinfo=timezone.utc)) == {
+        "name": "voiceMemo",
+        "payload": {"text": "hi", "at": "2026-11-18T09:05:07Z"},
+    }
+
+
 def test_the_voice_tools_match_the_cloud():
     """The prompt and the tool definitions are the same on both planes
     (docs/voice-chat.md): the cloud's voice.ts carries copies."""
@@ -925,6 +1063,13 @@ def test_the_voice_tools_match_the_cloud():
         assert f'{tool}: "{switch}"' in cloud, tool
     for switch, value in DEFAULT_VOICE_PERMISSIONS.items():
         assert f"{switch}: {'true' if value else 'false'}" in cloud, switch
+    # Voice memos: the event, the log's name for it, its switch and its words.
+    assert f'VOICE_MEMO_EVENT = "{voice_chat.VOICE_MEMO_EVENT}"' in cloud
+    assert f'VOICE_MEMO_TOOL = "{voice_chat.VOICE_MEMO_TOOL}"' in cloud
+    assert f'VOICE_MEMO_PERMISSION: VoicePermissionKey = "{voice_chat.VOICE_MEMO_PERMISSION}"' in cloud
+    assert f'VOICE_MEMO_FAILED = "{voice_chat.VOICE_MEMO_FAILED}"' in cloud
+    for words in (voice_chat.VOICE_MEMO_REPLY, voice_chat.VOICE_MEMO_NOT_ALLOWED_REPLY):
+        assert f'"{words}"' in cloud, words
 
 
 def test_a_voice_turn_leaves_layouts_out():

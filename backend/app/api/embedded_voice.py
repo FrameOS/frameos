@@ -20,6 +20,10 @@ has the scene the previous turn built to refer to (voice_history_for_model).
 `create_scene` and `change_scene` run the scene AI as a sub-turn
 (app/utils/voice_scene_builder.py) and push what it built as a preview.
 
+A scene that declares the custom event `voiceMemo` takes the words instead:
+while it shows, the transcript goes to it as that event and no chat runs
+(voice_memo_turn; docs/voice-chat.md "Voice memos").
+
 The cloud's twin is cloud/apps/auth-web/app/api/frames/[frameId]/voice/[sessionId]/route.ts."""
 from __future__ import annotations
 
@@ -327,6 +331,25 @@ async def api_embedded_device_voice(
             split_state_nodes=_split_state_nodes_by_app,
         )
 
+    async def send_memo(event: dict[str, Any]) -> dict[str, Any]:
+        # A scene that takes voice memos (docs/voice-chat.md "Voice memos"):
+        # the transcript goes to it as its `voiceMemo` event through the frame
+        # event route's own dispatcher, so every frame kind takes it the way it
+        # takes the editor's (an ESP32's queue, origin http:admin on the device;
+        # a board rendered here holds it for its next pull).
+        from app.api.frames import dispatch_frame_event
+
+        try:
+            outcome = await dispatch_frame_event(db, redis, frame, str(event["name"]), event["payload"])
+        except HTTPException as error:
+            return {"status": "failed", "error": str(error.detail)[:300]}
+        except RuntimeError as error:
+            return {"status": "failed", "error": str(error)[:300]}
+        await new_log(db, redis, int(frame.id), "stdinfo", "Voice chat sent a memo to the scene showing")
+        if isinstance(outcome, dict):
+            return {key: outcome[key] for key in ("status", "error") if outcome.get(key) is not None}
+        return {"status": "sent"}
+
     image_sources = image_sources_for_settings(settings)
     # The owner's switches (Settings -> Voice chat): a tool they turned off is
     # not offered to the model, and refused if named anyway.
@@ -355,6 +378,8 @@ async def api_embedded_device_voice(
         ),
         history=history,
         tools=tools,
+        send_memo=send_memo,
+        now=now,
     )
     if not isinstance(outcome, VoiceTurnResult):
         error, detail = outcome
@@ -388,6 +413,9 @@ async def api_embedded_device_voice(
         json.dumps({"event": "voice:turn", "transcript": outcome.transcript[:300], "reply": outcome.reply[:300],
                     "tools": outcome.tools, "seconds": round(time.monotonic() - started, 1)}),
     )
+    if outcome.error:
+        # The rows are kept (the words are not lost), the frame sounds an error.
+        return _failure(outcome.error, outcome.detail or outcome.reply)
     return {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
 
 

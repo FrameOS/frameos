@@ -22,7 +22,10 @@ Three parts, each small:
   server's tools: a frame's credential is not the owner's;
 - the log: every exchange is three rows of the frame's voice chat (what was
   heard, a `log` row of the tools that ran, the reply); the next turn reads
-  them (voice_turn_log, voice_history_for_model).
+  them (voice_turn_log, voice_history_for_model);
+- voice memos: while a scene that declares the custom event `voiceMemo`
+  shows, the transcript goes to it as that event and no chat runs
+  (voice_memo_turn).
 
 The cloud's copy is cloud/apps/auth-web/src/lib/ai/voice.ts: the prompt, the
 tool definitions and the permission table are kept the same there."""
@@ -67,6 +70,12 @@ __all__ = [
     "pcm_to_wav",
     "run_voice_turn",
     "transcribe_pcm",
+    "transcribe_voice",
+    "scene_takes_voice_memos",
+    "voice_memo_event",
+    "voice_memo_turn",
+    "VOICE_MEMO_EVENT",
+    "VOICE_MEMO_TOOL",
     "transcript_is_hint_echo",
     "voice_chat_id",
 ]
@@ -161,6 +170,10 @@ class VoicePermissions:
         """Whether the turn may be offered (and may run) this tool."""
         key = VOICE_TOOL_PERMISSIONS.get(tool)
         return key is None or bool(getattr(self, key))
+
+    def allows_memo(self) -> bool:
+        """Whether a scene that takes memos may be sent one (VOICE_MEMO_PERMISSION)."""
+        return bool(getattr(self, VOICE_MEMO_PERMISSION))
 
     def as_dict(self) -> dict[str, bool]:
         return {key: bool(getattr(self, key)) for key in VOICE_PERMISSION_KEYS}
@@ -715,6 +728,11 @@ class VoiceTools(ToolBox):
     def scenes(self) -> list[JsonObject]:
         return voice_scenes(self._frame.scenes)
 
+    def memo_scene(self) -> JsonObject | None:
+        """The scene showing, when it takes voice memos (scene_takes_voice_memos)."""
+        scene = self.showing_scene()
+        return scene if scene_takes_voice_memos(scene) else None
+
     def showing_scene(self) -> JsonObject | None:
         """The scene on the panel: the preview when it is the one showing (or
         when the device reports no scene the saved list holds), else the saved
@@ -1023,6 +1041,90 @@ class VoiceTurnResult:
     reply: str
     tools: list[str]
     actions: list[VoiceAction] = field(default_factory=list)
+    # A turn whose rows are kept but whose answer the frame sounds as an
+    # error (a memo that did not reach the scene): `{"ok": false, error, detail}`.
+    error: str | None = None
+    detail: str | None = None
+
+
+# ------------------------------------------------------------ voice memos
+
+# docs/voice-chat.md "Voice memos: a scene that takes the words". A scene that
+# declares the custom event `voiceMemo` in its customEvents takes what is said
+# while it shows as text: the plane sends the transcript to it as that event
+# and runs no chat (no model call, only the transcription). The cloud's copy is
+# voice.ts (VOICE_MEMO_EVENT, voiceMemoTurn): the names and words are the same.
+VOICE_MEMO_EVENT = "voiceMemo"
+# The name the turn's log row and the frame's `tools` give it: a non-empty
+# `tools` is the frame's "did something" sound.
+VOICE_MEMO_TOOL = "voice_memo"
+# A memo is a use of the scene showing: the owner's "Use installed scenes".
+VOICE_MEMO_PERMISSION = "use_scenes"
+VOICE_MEMO_REPLY = "Saved as a memo."
+VOICE_MEMO_NOT_ALLOWED_REPLY = (
+    "Not saved: the owner has not allowed the voice chat to use the installed scenes on this frame."
+)
+VOICE_MEMO_FAILED = "memo_failed"
+
+
+def scene_takes_voice_memos(scene: Any) -> bool:
+    """Whether a scene declares the `voiceMemo` custom event (`{name}` in its
+    customEvents, with or without origins: the cloud's own check adds that it
+    must list `cloud`, the device's rule for an event from there)."""
+    if not isinstance(scene, dict):
+        return False
+    declared = scene.get("customEvents", scene.get("custom_events"))
+    if not isinstance(declared, list):
+        return False
+    return any(isinstance(entry, dict) and entry.get("name") == VOICE_MEMO_EVENT for entry in declared)
+
+
+def voice_memo_event(transcript: str, at: datetime) -> JsonObject:
+    """The scene event a memo is: `{name: "voiceMemo", payload: {text, at}}`,
+    `at` the moment the plane heard it, in UTC to the second."""
+    when = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return {
+        "name": VOICE_MEMO_EVENT,
+        "payload": {"text": transcript, "at": when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
+    }
+
+
+# Sends a scene event ({name, payload}) to the frame the way the frame event
+# route does; returns the queue's outcome ({status, error?}).
+SendMemo = Callable[[JsonObject], Awaitable[dict[str, Any]]]
+
+
+async def voice_memo_turn(
+    *, transcript: str, scene: JsonObject, permissions: VoicePermissions, send_memo: SendMemo, at: datetime
+) -> VoiceTurnResult:
+    """The turn for a scene that takes memos: the transcript goes to the scene
+    as `voiceMemo`, the reply is fixed, and the log row says what came of it.
+    Refused by the owner's switch: answered in a sentence like a refused tool
+    (the frame shows the words it heard; nothing is sent)."""
+    name = str(scene.get("name") or scene.get("id") or "the scene")
+    args: JsonObject = {"scene": name}
+    if not permissions.allows_memo():
+        refused: JsonObject = {
+            "ok": False,
+            "error": "not_allowed",
+            "detail": f"The owner has not allowed the voice chat to {VOICE_PERMISSION_DESCRIPTIONS[VOICE_MEMO_PERMISSION]} on this frame.",
+        }
+        return VoiceTurnResult(
+            transcript=transcript,
+            reply=VOICE_MEMO_NOT_ALLOWED_REPLY,
+            tools=[],
+            actions=[VoiceAction(name=VOICE_MEMO_TOOL, args=args, result=refused)],
+        )
+    outcome = await send_memo(voice_memo_event(transcript, at))
+    ok = outcome.get("status") != "failed" and outcome.get("ok") is not False
+    result: JsonObject = {"ok": ok, "scene": name, **{k: v for k, v in outcome.items() if k != "ok"}}
+    action = VoiceAction(name=VOICE_MEMO_TOOL, args=args, result=result)
+    if not ok:
+        detail = f"The memo did not reach {name}: {outcome.get('error') or 'the frame refused it'}"
+        return VoiceTurnResult(
+            transcript=transcript, reply=detail, tools=[], actions=[action], error=VOICE_MEMO_FAILED, detail=detail
+        )
+    return VoiceTurnResult(transcript=transcript, reply=VOICE_MEMO_REPLY, tools=[VOICE_MEMO_TOOL], actions=[action])
 
 
 def voice_frame_context(
@@ -1098,21 +1200,18 @@ async def run_voice_turn(
     )
 
 
-async def transcribe_and_answer(
-    *,
+async def transcribe_voice(
     pcm: bytes,
+    *,
     api_key: str,
-    model: str,
-    reasoning_effort: str | None,
     scene_names: list[str],
-    context_block: str,
-    history: list[dict[str, str]],
-    tools: VoiceTools,
     http_client: httpx.AsyncClient | None = None,
-) -> VoiceTurnResult | tuple[str, str]:
-    """The whole answer to a finished session, or (error, detail) for the
-    frame to sound as an error: `nothing_heard`, `transcription_failed`,
-    `chat_failed`."""
+) -> str | tuple[str, str]:
+    """What was said, or (error, detail) for the frame to sound as an error:
+    `nothing_heard`, `transcription_failed`. The scene names are the hint, for
+    a request ("the bird journal") and a memo alike: the model reads the hint
+    as earlier words, so it spells those names right and changes nothing else
+    of a dictation, and what silence makes of it (the hint echoed) is caught."""
     peak = pcm_peak(pcm)
     if peak < VOICE_SILENCE_PEAK:
         return "nothing_heard", f"silence (peak {peak})"
@@ -1127,6 +1226,40 @@ async def transcribe_and_answer(
         return "nothing_heard", "the transcription came back empty"
     if transcript_is_hint_echo(transcript, scene_names):
         return "nothing_heard", "only the scene names came back"
+    return transcript
+
+
+async def transcribe_and_answer(
+    *,
+    pcm: bytes,
+    api_key: str,
+    model: str,
+    reasoning_effort: str | None,
+    scene_names: list[str],
+    context_block: str,
+    history: list[dict[str, str]],
+    tools: VoiceTools,
+    send_memo: SendMemo | None = None,
+    now: datetime | None = None,
+    http_client: httpx.AsyncClient | None = None,
+) -> VoiceTurnResult | tuple[str, str]:
+    """The whole answer to a finished session, or (error, detail) for the
+    frame to sound as an error: `nothing_heard`, `transcription_failed`,
+    `chat_failed`. When the scene showing takes voice memos (and the route
+    can send one), the words go to it and no chat runs (voice_memo_turn)."""
+    heard = await transcribe_voice(pcm, api_key=api_key, scene_names=scene_names, http_client=http_client)
+    if isinstance(heard, tuple):
+        return heard
+    transcript = heard
+    memo_scene = tools.memo_scene() if send_memo is not None else None
+    if memo_scene is not None and send_memo is not None:
+        return await voice_memo_turn(
+            transcript=transcript,
+            scene=memo_scene,
+            permissions=tools.permissions,
+            send_memo=send_memo,
+            at=now or datetime.now(timezone.utc),
+        )
     try:
         return await run_voice_turn(
             transcript=transcript,

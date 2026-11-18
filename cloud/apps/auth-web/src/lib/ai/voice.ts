@@ -22,6 +22,9 @@
 //   Not the MCP server's tools: a frame's credential is not the owner's.
 // - the log: every exchange is three rows of the frame's voice chat (heard,
 //   a `log` row of the tools that ran, the reply); the next turn reads them.
+// - voice memos: while a scene that declares the custom event `voiceMemo`
+//   shows, the transcript goes to it as that event and no chat runs
+//   (voiceMemoTurn).
 //
 // The backend's copy is backend/app/utils/voice_chat.py: the prompt, the tool
 // definitions and the permission table are kept the same there (its test
@@ -39,6 +42,7 @@ import {
   voicePermissionContextLines,
   voicePermissionDescriptions,
   voiceToolPermissions,
+  type VoicePermissionKey,
   type VoicePermissions,
 } from "../voice-permissions";
 
@@ -690,17 +694,7 @@ export function voiceTools({
   const changed: string[] = [];
   const actions: VoiceAction[] = [];
   const text = (value: unknown): ToolOutput => ({ images: [], text: JSON.stringify(value) });
-  const showingScene = async (): Promise<JsonObject | null> => {
-    // The preview when it is the one showing (or when the device reports no
-    // scene the assigned list holds), else the assigned scene reported.
-    if (previewScene && (!activeSceneId || previewScene.id === activeSceneId)) {
-      return previewScene;
-    }
-    if (activeSceneId && sceneContent) {
-      return sceneContent(activeSceneId);
-    }
-    return null;
-  };
+  const showingScene = () => showingVoiceScene({ activeSceneId, previewScene, sceneContent });
   const run = async (name: string, args: JsonObject): Promise<ToolOutput> => {
       const gate = voiceToolPermissions[name];
       if (gate !== undefined && !voicePermissionAllows(permissions, name)) {
@@ -901,6 +895,133 @@ export function voiceTools({
     definitions: voiceToolDefinitions.filter((tool) => voicePermissionAllows(permissions, tool.name)),
     labels: voiceToolLabels,
   };
+}
+
+/** The scene on the panel: the preview when it is the one showing (or when
+ * the device reports no scene the assigned list holds), else the assigned
+ * scene reported, as its runtime JSON. The backend's VoiceTools.showing_scene. */
+export async function showingVoiceScene({
+  previewScene,
+  activeSceneId,
+  sceneContent,
+}: {
+  previewScene?: JsonObject | null | undefined;
+  activeSceneId: string | null | undefined;
+  sceneContent?: ((sceneId: string) => Promise<JsonObject | null>) | undefined;
+}): Promise<JsonObject | null> {
+  if (previewScene && (!activeSceneId || previewScene.id === activeSceneId)) {
+    return previewScene;
+  }
+  if (activeSceneId && sceneContent) {
+    return sceneContent(activeSceneId);
+  }
+  return null;
+}
+
+// ------------------------------------------------------------ voice memos
+
+// docs/voice-chat.md "Voice memos: a scene that takes the words". A scene that
+// declares the custom event `voiceMemo` in its customEvents takes what is said
+// while it shows as text: the plane sends the transcript to it as that event
+// and runs no chat (no model call, only the transcription). The backend's copy
+// is voice_chat.py (VOICE_MEMO_EVENT, voice_memo_turn): the names and words
+// are the same, its test reads these lines.
+export const VOICE_MEMO_EVENT = "voiceMemo";
+// The name the turn's log row and the frame's `tools` give it: a non-empty
+// `tools` is the frame's "did something" sound.
+export const VOICE_MEMO_TOOL = "voice_memo";
+// A memo is a use of the scene showing: the owner's "Use installed scenes".
+export const VOICE_MEMO_PERMISSION: VoicePermissionKey = "use_scenes";
+export const VOICE_MEMO_REPLY = "Saved as a memo.";
+export const VOICE_MEMO_NOT_ALLOWED_REPLY =
+  "Not saved: the owner has not allowed the voice chat to use the installed scenes on this frame.";
+export const VOICE_MEMO_FAILED = "memo_failed";
+
+/** Whether a scene declares the `voiceMemo` custom event (`{name}` in its
+ * customEvents, with or without origins: the route's routing check adds that
+ * it must list `cloud`, the device's rule for an event from here). */
+export function sceneTakesVoiceMemos(scene: unknown): boolean {
+  if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
+    return false;
+  }
+  const record = scene as Record<string, unknown>;
+  const declared = record.customEvents ?? record.custom_events;
+  return (
+    Array.isArray(declared) &&
+    declared.some(
+      (entry) =>
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        !Array.isArray(entry) &&
+        (entry as Record<string, unknown>).name === VOICE_MEMO_EVENT,
+    )
+  );
+}
+
+/** The scene event a memo is: `{name: "voiceMemo", payload: {text, at}}`, `at`
+ * the moment the plane heard it, in UTC to the second. */
+export function voiceMemoEvent(transcript: string, at: Date): { name: string; payload: { text: string; at: string } } {
+  return { name: VOICE_MEMO_EVENT, payload: { at: `${at.toISOString().slice(0, 19)}Z`, text: transcript } };
+}
+
+/** Sends a scene event to the frame the way the frame event route does: the
+ * route's own. */
+export type VoiceSendMemo = (event: { name: string; payload: JsonObject }) => Promise<VoiceQueueOutcome>;
+
+export type VoiceMemoResult = {
+  transcript: string;
+  reply: string;
+  tools: string[];
+  actions: VoiceAction[];
+  /** Set when the frame should sound an error (the rows are kept). */
+  error?: string | undefined;
+  detail?: string | undefined;
+};
+
+/** The turn for a scene that takes memos: the transcript goes to the scene as
+ * `voiceMemo`, the reply is fixed, and the log row says what came of it.
+ * Refused by the owner's switch: answered in a sentence like a refused tool
+ * (the frame shows the words it heard; nothing is sent). */
+export async function voiceMemoTurn({
+  transcript,
+  scene,
+  permissions,
+  sendMemo,
+  at,
+}: {
+  transcript: string;
+  scene: JsonObject;
+  permissions: VoicePermissions;
+  sendMemo: VoiceSendMemo;
+  at: Date;
+}): Promise<VoiceMemoResult> {
+  const name = String(scene.name || scene.id || "the scene");
+  const args: JsonObject = { scene: name };
+  if (!permissions[VOICE_MEMO_PERMISSION]) {
+    return {
+      actions: [
+        {
+          args,
+          name: VOICE_MEMO_TOOL,
+          result: {
+            detail: `The owner has not allowed the voice chat to ${voicePermissionDescriptions[VOICE_MEMO_PERMISSION]} on this frame.`,
+            error: "not_allowed",
+            ok: false,
+          },
+        },
+      ],
+      reply: VOICE_MEMO_NOT_ALLOWED_REPLY,
+      tools: [],
+      transcript,
+    };
+  }
+  const outcome = await sendMemo(voiceMemoEvent(transcript, at));
+  const action: VoiceAction = { args, name: VOICE_MEMO_TOOL, result: { ...outcome, scene: name } as JsonObject };
+  if (!outcome.ok) {
+    const detail = `The memo did not reach ${name}: ${outcome.error ?? "the frame refused it"}`;
+    return { actions: [action], detail, error: VOICE_MEMO_FAILED, reply: detail, tools: [], transcript };
+  }
+  return { actions: [action], reply: VOICE_MEMO_REPLY, tools: [VOICE_MEMO_TOOL], transcript };
 }
 
 // ------------------------------------------------------------ the chat log

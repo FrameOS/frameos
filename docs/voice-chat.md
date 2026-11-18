@@ -188,8 +188,8 @@ Content-Type: audio/L16; rate=16000; channels=1
   far>}`. The chunk with `done=1` answers when the turn is over:
   `200 {"ok":true,"transcript":"…","reply":"…","tools":["activate_scene"]}`,
   or `200 {"ok":false,"error":"nothing_heard"|"transcription_failed"|
-  "chat_failed"|"ai_unavailable","detail":"…"}` for a problem the frame should
-  sound as an error. `4xx` for an unknown or inactive frame, a body over the
+  "chat_failed"|"ai_unavailable"|"memo_failed","detail":"…"}` for a problem
+  the frame should sound as an error (`memo_failed`: "Voice memos" below). `4xx` for an unknown or inactive frame, a body over the
   caps, too many sessions.
 - Caps: a chunk is at most 64 KiB (2 s), a session at most 30 s of audio
   (960,000 bytes), 20 sessions per frame per 15 minutes, and a session
@@ -279,7 +279,7 @@ Settings → "Buzzer and microphone" ("Voice chat may"):
 | switch | default | tools |
 |---|---|---|
 | **Change settings** (`change_settings`) | on | `rotate_frame` |
-| **Use installed scenes** (`use_scenes`) | on | `activate_scene`, `set_scene_state`, `render_now` |
+| **Use installed scenes** (`use_scenes`) | on | `activate_scene`, `set_scene_state`, `render_now`, and a voice memo to the scene showing ("Voice memos" below) |
 | **Create new scenes** (`create_scenes`) | on | `show_image`, `create_scene`, `change_scene`: a picture asked for by voice, a scene built to order and a changed copy of the scene showing are scenes the frame did not hold, so they are new scenes, not a use of an installed one. All three land as the frame's preview, never on its saved list |
 | **Access photo albums** (`use_albums`) | on | `list_albums` (the library's root folders, by path, with their photo counts, as `photos_list` shows them) and `show_album {path, seconds?, order?}` (what the MCP's `photo_album_install` does for this frame, `docs/photos.md` "Installing photo scenes": the frame's own share link to the folder, made now if it has none; the album scene saved next to the frame's scenes — on the cloud as a private scene of the account through the same save the workspace uses, moderation included, published by the frame's linked client; the push with it active — the backend's a fast deploy plus `set_current_scene`, the cloud's one `set_scenes`). The voice request stands for the `confirm` the MCP tool takes. One switch for both, since the listing is what names the folder |
 
@@ -320,6 +320,83 @@ A clock or data pin of -1 is no microphone on either plane. The pins field
 itself stays on every real ESP32 board, because it is how a PDM microphone
 on a header is declared; once the clock and data pins are set the controls
 appear, and Button actions offers "Voice chat" on the same rule.
+
+## Voice memos: a scene that takes the words
+
+A scene can ask for what is said instead of the chat: one that declares the
+custom event **`voiceMemo`** in its `customEvents` gets the transcript while
+it is the scene showing (the device's report, or the standing preview: the
+same `showing_scene()` / `showingVoiceScene` that `change_scene` reads). The
+**Voice memos** sample (`repo/scenes/samples/Voice memos`, id `voice-memos`)
+is the worked example: it saves each memo as a text file in a folder of the
+frame's assets and lists them.
+
+```json
+"customEvents": [{ "name": "voiceMemo", "origins": ["cloud"] }]
+```
+
+Right after a usable transcript (the silence gate, the transcription, the
+empty and hint-echo checks are as for any turn), both planes check the scene
+showing and, when it declares the event, **run no chat**: no model call, only
+the transcription (cheaper and faster; on the cloud only the transcription is
+metered). Instead:
+
+- The transcript goes to the scene as the event `voiceMemo` with the payload
+  `{"text": "<transcript>", "at": "2026-11-18T09:05:07Z"}` (`at` is when the
+  plane heard it, UTC to the second; a scene uses its own clock when it is
+  missing). It goes the way the frame event route sends a custom event: on
+  the backend through `dispatch_frame_event` (`app/api/frames.py`; an ESP32
+  gets it on its queue as `scene_event`, which the firmware dispatches with
+  the origin `http:admin`, always allowed for a custom event; a board rendered
+  on the backend holds it for its next pull), on the cloud as `scene_event`
+  through `enqueueFrameCommand` after the event route's own check
+  (`customEventRouting`: the scene must declare the event with the `cloud`
+  origin, since the device delivers a custom event from the cloud only then,
+  `docs/events-contract.json` `customEvents.declarableOrigins`, and the
+  firmware must take `scene_event`). Hence `origins: ["cloud"]` in the
+  declaration: it is what makes a memo arrive on a cloud frame, and the
+  backend does not need it.
+- The frame is answered `{"ok": true, "transcript", "reply": "Saved as a
+  memo.", "tools": ["voice_memo"]}`: the notice shows what was heard and the
+  reply, and a non-empty `tools` is the "did something" sound (three rising
+  notes). The panel holds still until the answer as for any turn, so the
+  scene's own render of the new memo is the one that carries the notice.
+- The exchange is three rows of the frame's voice chat like any other: what
+  was heard, a `log` row (`voice_memo {"scene": "Voice memos"} -> {"ok": true,
+  …}`) and the reply. The workspace shows it, and a later chat turn has it in
+  its history.
+
+While such a scene shows, **everything said is a memo**: "switch to the
+calendar" is saved, not obeyed. Leave the scene (touch, the keys, the
+workspace) to talk to the chat again.
+
+**The switch.** A memo is a use of the scene showing, so it answers to the
+owner's **Use installed scenes** (`use_scenes`, `VOICE_MEMO_PERMISSION` on
+both planes). Off, it is refused the way a
+refused tool is reported: an answer in a sentence, `ok: true` with `tools`
+empty ("only answered", two notes) and the reply `Not saved: the owner has not
+allowed the voice chat to use the installed scenes on this frame.`; the frame
+shows the words it heard, the rows are written (the `log` row says
+`not_allowed`), nothing is sent and no chat runs. Falling back to the chat
+was not chosen: a dictation is not a request to the frame, and the model
+would act on it.
+
+**When the memo cannot be sent** (the cloud's check refuses it, e.g. a
+declaration without the `cloud` origin is `event_not_declared`, or a firmware
+before 2026.9.21; the backend's frame refuses the queued event), the frame is
+answered `{"ok": false, "error": "memo_failed", "detail": "The memo did not
+reach <scene>: <why>"}` and sounds an error, and the rows are still written,
+so the words are not lost.
+
+The transcription's hint is the frame's scene names, as for a request: the
+model reads it as earlier words, so it spells those names right and leaves a
+dictation otherwise alone, and the hint echoed back is still how silence is
+caught. The constants and the words are the same on both planes
+(`VOICE_MEMO_EVENT`, `VOICE_MEMO_TOOL`, `VOICE_MEMO_REPLY`,
+`VOICE_MEMO_NOT_ALLOWED_REPLY`, `VOICE_MEMO_FAILED` in
+`app/utils/voice_chat.py` and `src/lib/ai/voice.ts`, read by each other's
+parity test). Nothing on the device changed: the firmware already sends the
+audio, sounds the answer and dispatches a `scene_event`.
 
 ## What is not here yet
 

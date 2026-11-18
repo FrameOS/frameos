@@ -1,0 +1,10 @@
+{
+  "name": "Voice memos",
+  "description": "Hold the frame's voice key, speak, and what you said is saved as a memo: the frame's control plane transcribes it and hands the words to this scene instead of the voice chat (the scene must be the one showing, and the voice chat must be allowed to use the installed scenes). Without a microphone, type a memo and Save. Every memo is a text file in the assets folder (Voice memos/<date time>.txt, the folder is a setting), listed newest first a page at a time: tap one to read all of it, the bin to delete it (it asks first). Settings: title, folder, order, 12- or 24-hour times, and high contrast for black-and-white and grey panels (automatic by default).",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

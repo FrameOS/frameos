@@ -15,6 +15,7 @@ import {
   aiChats,
   createDb,
   frameCommands,
+  frames,
   photoShares,
   storeScenes,
   storeSceneVersions,
@@ -98,7 +99,7 @@ import { POST as setVoicePermissions } from "../../../app/api/frames/[frameId]/v
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as voiceRoute } from "../../../app/api/frames/[frameId]/voice/[sessionId]/route";
 import { POST as saveAccountSettings } from "../../../app/api/settings/route";
-import { TRANSCRIPTION_URL, voiceChatId } from "../../lib/ai/voice";
+import { TRANSCRIPTION_URL, VOICE_MEMO_NOT_ALLOWED_REPLY, voiceChatId } from "../../lib/ai/voice";
 import { buildSystemPrompt } from "../../lib/ai/prompts";
 import { GET as getScenePreview } from "../../../app/api/frames/[frameId]/scene-preview/route";
 import { waitForPendingAiMetering } from "../../lib/billing";
@@ -185,7 +186,12 @@ function devicePublicKey() {
 }
 
 // A store scene whose scenes.json carries one runtime scene, `runtimeId`.
-async function createStoreScene(accountId: string, name: string, runtimeId: string) {
+async function createStoreScene(
+  accountId: string,
+  name: string,
+  runtimeId: string,
+  extra: Record<string, unknown> = {},
+) {
   const [scene] = await db
     .insert(storeScenes)
     .values({
@@ -201,7 +207,7 @@ async function createStoreScene(accountId: string, name: string, runtimeId: stri
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  const scenes = [{ edges: [], id: runtimeId, name, nodes: [] }];
+  const scenes = [{ edges: [], id: runtimeId, name, nodes: [], ...extra }];
   await db.insert(storeSceneVersions).values({
     content: Buffer.from(zipSync({ "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)) })),
     contentType: "application/zip",
@@ -679,6 +685,74 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(newest.map((row) => row.type)).toEqual(["set_scenes", "set_scenes"]);
     const scene = ((newest[1]!.payload as { preview: { scene: { nodes: { data: { config: Record<string, string> } }[] } } }).preview.scene);
     expect(scene.nodes[1]!.data.config.fontColor).toBe("#ff0000");
+  });
+
+  it("sends the words to a scene that takes voice memos, and asks no model", async () => {
+    // docs/voice-chat.md "Voice memos": the scene showing declares the custom
+    // event `voiceMemo` for the cloud, so the transcript is its event.
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const clock = await createStoreScene(frame.accountId, "Clock", "clock-rt");
+    const memos = await createStoreScene(frame.accountId, "Voice memos", "memos-rt", {
+      customEvents: [{ name: "voiceMemo", origins: ["cloud"] }],
+    });
+    const quiet = await createStoreScene(frame.accountId, "Quiet memos", "quiet-rt", {
+      customEvents: [{ name: "voiceMemo" }],
+    });
+    await assignScenes(frame.frame_id, [clock.id, memos.id, quiet.id]);
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    await db.update(frames).set({ lastState: { active_scene: "memos-rt" } }).where(eq(frames.id, frame.frame_id));
+    heard.text = "Call the plumber about the kitchen tap.";
+
+    const response = await chunk(frame.frame_id, frame.access_token, "memo-0001", 0, true, SECOND);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      reply: "Saved as a memo.",
+      tools: ["voice_memo"],
+      transcript: "Call the plumber about the kitchen tap.",
+    });
+    expect(script.requests).toHaveLength(0);
+    expect(heard.calls).toHaveLength(1);
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    expect(commands.map((command) => command.type)).toEqual(["scene_event"]);
+    const payload = commands[0]!.payload as { name: string; payload: { text: string; at: string } };
+    expect(payload.name).toBe("voiceMemo");
+    expect(payload.payload.text).toBe("Call the plumber about the kitchen tap.");
+    expect(payload.payload.at).toMatch(/^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    const messages = await db
+      .select()
+      .from(aiChatMessages)
+      .where(eq(aiChatMessages.chatId, voiceChatId(frame.frame_id)));
+    expect(messages.map((message) => [message.role, message.tool, message.content.split("\n").at(-1)])).toEqual([
+      ["user", "voice", "Call the plumber about the kitchen tap."],
+      ["assistant", "log", 'voice_memo {"scene":"Voice memos"} -> {"ok":true,"scene":"Voice memos","type":"scene_event"}'],
+      ["assistant", "voice", "Saved as a memo."],
+    ]);
+
+    // A scene that declares the event but not for the cloud would be refused
+    // by the device: the frame sounds an error, the words stay in the chat.
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    await db.update(frames).set({ lastState: { active_scene: "quiet-rt" } }).where(eq(frames.id, frame.frame_id));
+    heard.text = "buy milk";
+    const refused = await chunk(frame.frame_id, frame.access_token, "memo-0002", 0, true, SECOND);
+    expect(await refused.json()).toEqual({
+      detail: "The memo did not reach Quiet memos: event_not_declared",
+      error: "memo_failed",
+      ok: false,
+    });
+    expect(await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).toHaveLength(0);
+    expect(script.requests).toHaveLength(0);
+
+    // Off with the owner's "Use installed scenes": answered in a sentence, nothing sent.
+    await db
+      .update(frames)
+      .set({ lastState: { active_scene: "memos-rt" }, voicePermissions: { use_scenes: false } })
+      .where(eq(frames.id, frame.frame_id));
+    const off = await chunk(frame.frame_id, frame.access_token, "memo-0003", 0, true, SECOND);
+    expect(await off.json()).toMatchObject({ ok: true, reply: VOICE_MEMO_NOT_ALLOWED_REPLY, tools: [] });
+    expect(await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).toHaveLength(0);
+    expect(script.requests).toHaveLength(0);
   });
 
   it("refuses another frame's token, a gap in the chunks and an oversized chunk", async () => {
