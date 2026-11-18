@@ -518,6 +518,13 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
+    /* What the frame sleeps by, for a plane that was never told: a board
+     * preset turns deep sleep on battery and a wake check on by itself
+     * (fos_console.c `preset`), and the cloud's Power panel said "Only wake
+     * to render" over a frame that woke every 15 minutes (2026-11-18). */
+    cJSON_AddBoolToObject(hw, "deepSleep", config->deep_sleep);
+    cJSON_AddBoolToObject(hw, "deepSleepOnBattery", config->deep_sleep_on_battery);
+    cJSON_AddNumberToObject(hw, "wakeCheckSeconds", config->wake_check_sec);
     /* The clock setting and the clock it gave (main.c, at boot). */
     cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
     cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));

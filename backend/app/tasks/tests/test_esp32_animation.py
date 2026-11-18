@@ -96,6 +96,24 @@ def test_the_scheduled_render_is_kept_without_a_set_clock():
     assert re.search(r"esp_reset_reason\(\) != ESP_RST_DEEPSLEEP\) \{\s*s_next_render_due = 0;", client)
 
 
+def test_the_frame_tells_the_cloud_what_it_sleeps_by():
+    """The console's `preset` turns deep sleep on battery and a 900 s wake
+    check on for a reTerminal, on the device alone. The cloud keeps only what
+    its owner set, so its Power panel said "Only wake to render" over a frame
+    that woke every 15 minutes, and choosing what it already showed changed
+    nothing (2026-11-18). The hello's hardware report carries the three, and
+    the panel falls back to them (frameSettingsContext.tsx `cloudPowerSettings`)."""
+    cloud = (MAIN_DIR / "fos_cloud.c").read_text()
+    for line in (
+        'cJSON_AddBoolToObject(hw, "deepSleep", config->deep_sleep);',
+        'cJSON_AddBoolToObject(hw, "deepSleepOnBattery", config->deep_sleep_on_battery);',
+        'cJSON_AddNumberToObject(hw, "wakeCheckSeconds", config->wake_check_sec);',
+    ):
+        assert line in cloud
+    console = (MAIN_DIR / "fos_console.c").read_text()
+    assert "config->wake_check_sec = presets[i].wake_check_sec;" in console
+
+
 def test_an_animation_goes_to_the_backend_once():
     """Both places a frame's picture is handed to the backend ask
     fos_animation_push_wanted first, and a push that reached the backend
