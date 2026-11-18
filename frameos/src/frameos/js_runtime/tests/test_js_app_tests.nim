@@ -8,6 +8,7 @@ import frameos/js_runtime/app_tests
 import frameos/types
 
 const RepoApps = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps"
+const RepoScenes = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "scenes"
 
 const ProbeConfig = """{"name": "Probe", "category": "data",
   "fields": [{"name": "city", "type": "string", "value": "Brussels"}, {"name": "count", "type": "integer", "value": 3}],
@@ -155,3 +156,25 @@ suite "JavaScript app tests":
           check report["counts"]["total"].getInt() > 0
     checkpoint("ran " & $ran & " repo app test files")
     check ran >= 15
+
+  test "every sample scene's own app tests pass":
+    # A sample's apps live inline in its scenes.json (sources by file name).
+    var ran = 0
+    for scenesFile in walkFiles(RepoScenes / "*" / "*" / "scenes.json"):
+      for scene in parseFile(scenesFile):
+        let apps = scene{"apps"}
+        if apps.isNil or apps.kind != JObject:
+          continue
+        for keyword, app in apps.pairs:
+          let sources = app{"sources"}
+          if sources.isNil or sources.kind != JObject:
+            continue
+          for testFile in appTestFiles(sources):
+            let report = runJsAppTests(sources, testFile, frameConfig())
+            inc ran
+            if not report["ok"].getBool():
+              checkpoint(scenesFile & " " & keyword & "/" & testFile & ": " & $report)
+            check report["ok"].getBool()
+            check report["counts"]["total"].getInt() > 0
+    checkpoint("ran " & $ran & " sample app test files")
+    check ran >= 10

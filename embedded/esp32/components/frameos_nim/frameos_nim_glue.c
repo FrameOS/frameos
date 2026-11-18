@@ -456,7 +456,7 @@ size_t fos_psram_largest_free_block(void)
 }
 
 /* main/fos_assets_flash.c, absent from a build without it. */
-extern int64_t fos_assets_flash_free_bytes(void) __attribute__((weak));
+extern int64_t fos_assets_flash_free_bytes_at(const char *path) __attribute__((weak));
 
 /* Free bytes on the filesystem holding `path`, for the Nim side's
  * getAvailableDiskSpace (utils/system.nim): the spool checks it before
@@ -474,10 +474,13 @@ int64_t fos_vfs_free_bytes(const char *path)
         if (esp_spiffs_info("state", &total, &used) != ESP_OK) return -1;
         return total > used ? (int64_t)(total - used) : 0;
     }
-    /* No SD card: the assets directory lives on the state partition, less
-     * the reserve the scene store keeps (main/fos_assets_flash.c). */
-    if (fos_assets_flash_free_bytes) {
-        int64_t flash_free = fos_assets_flash_free_bytes();
+    /* A path on the state partition's files (the internal storage, and the
+     * assets directory on a board with no card), less the reserve the scene
+     * store keeps (main/fos_assets_flash.c). Asked by path: the internal
+     * storage is mounted beside a card too, and answering its free bytes
+     * for the card's paths refused every asset write there. */
+    if (fos_assets_flash_free_bytes_at) {
+        int64_t flash_free = fos_assets_flash_free_bytes_at(path);
         if (flash_free >= 0) return flash_free;
     }
     /* esp_vfs_fat_info wants the mount point itself; walk up from the path

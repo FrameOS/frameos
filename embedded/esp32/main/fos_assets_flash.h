@@ -24,3 +24,7 @@ bool fos_assets_internal_active(void);
 /* What an asset may still take: the partition's free bytes less the reserve
  * kept for the scene store. -1 when not mounted. */
 int64_t fos_assets_flash_free_bytes(void);
+/* The same for a path on one of its mounts, and -1 for any other path: the
+ * internal storage is mounted beside an SD card on every board, and its few
+ * MB are not what the card at the assets path has free. */
+int64_t fos_assets_flash_free_bytes_at(const char *path);
