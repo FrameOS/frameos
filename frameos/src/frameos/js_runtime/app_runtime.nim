@@ -518,20 +518,16 @@ proc jsCode(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} 
     answer = if host.isNil: "" else: host(storeAsker(e), toNimString(ctx, op), toNimString(ctx, arg))
   nimStringToJS(ctx, answer)
 
-proc jsMeasureText(ctx: ptr JSContext, texts: JSValue, options: JSValue): JSValue {.nimcall.} =
+proc jsMeasureText(ctx: ptr JSContext, texts: JSValue, classes: JSValue, width: JSValue): JSValue {.nimcall.} =
   ## `frameos.measureText(texts, {className, width})` (docs/jsx-ui.md): each
-  ## text's height as a field would set it, as JSON text.
-  var heights: seq[float32]
-  try:
-    let
-      list = parseJson(toNimString(ctx, texts))
-      o = parseJson(toNimString(ctx, options))
-    var all: seq[string]
-    for t in list: all.add t.getStr()
-    heights = measureText(all, o{"className"}.getStr(), o{"width"}.getFloat().float32)
-  except CatchableError:
-    discard
-  nimStringToJS(ctx, $(%heights))
+  ## text's height as a field would set it. The texts come joined by newlines
+  ## (a line holds none) and the heights go back as whole pixels between
+  ## spaces: no JSON either way.
+  var answer = ""
+  for h in measureText(toNimString(ctx, texts).split('\n'), toNimString(ctx, classes), toNimFloat(ctx, width).float32):
+    if answer.len > 0: answer.add ' '
+    answer.addInt int(h + 0.5)
+  nimStringToJS(ctx, answer)
 
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -2848,7 +2844,9 @@ const appJsPrelude* = compactJs("""
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
-    measureText: (texts, options) => JSON.parse(jsMeasureText(JSON.stringify(texts), JSON.stringify(options || {}))),
+    measureText: (texts, o = {}) => texts.length
+      ? jsMeasureText(texts.join("\n"), String(o.className || ""), Number(o.width || 0)).split(" ").map(Number)
+      : [],
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(

@@ -144,6 +144,14 @@ suite "frameos.code":
       check call(%*["code"], expression)["error"].getStr() == "frameos.code: settings on the frame's screen are off"
     check asked.len == 0
 
+  test "frameos.measureText sets texts as a field of that width would":
+    let heights = call(%*[], "frameos.measureText(['a', 'word '.repeat(60), ''], " &
+      "{ className: 'text-[13px] leading-[19px]', width: 200 })")["value"]
+    check heights.len == 3
+    check heights[0].getInt() == 19 and heights[2].getInt() == 19
+    check heights[1].getInt() > 3 * 19 and heights[1].getInt() mod 19 == 0
+    check call(%*[], "frameos.measureText([], { width: 200 })")["value"].len == 0
+
   test "is null where no host reads code":
     sceneCode = nil
     check call(%*["code"], "frameos.code('read')")["value"].kind == JNull
