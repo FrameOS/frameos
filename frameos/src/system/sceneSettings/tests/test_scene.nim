@@ -906,7 +906,9 @@ block the_frame_page_pairs_and_forgets_bluetooth_devices:
   pairing = true
   discard scene.draw()
   scene.scrollTo(2000)
-  discard scene.draw()
+  let looking = scene.draw()
+  if previews.len > 0:
+    looking.writeFile(previews / "bluetooth-pairing.png")
   scene.tap(regionWith(20008))
   doAssert actions[^1] == "btStop", $actions
   pairing = false
@@ -932,6 +934,15 @@ block the_frame_page_pairs_and_forgets_bluetooth_devices:
   discard scene.draw()
   scene.tap(regionWith(1))
   doAssert applied.len == 1 and applied[0]{"bluetooth"} == %false, $applied
+  if previews.len > 0:
+    # The same page on e-paper: black on white.
+    let paper = FrameConfig(width: 480, height: 480, device: "pimoroni.inky_impression_7", scalingMode: "cover",
+      saveAssets: %*false)
+    let onPaper = settings.exportedScene.init(SceneSettingsId.SceneId, paper, logger, %*{})
+    onPaper.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+    discard onPaper.draw()
+    onPaper.scrollTo(2000)
+    onPaper.draw().writeFile(previews / "bluetooth-paper.png")
   frameSettingsRead = nil
   frameSettingsApply = nil
   frameSettingsAction = nil
