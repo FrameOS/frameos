@@ -293,7 +293,9 @@ def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     block of its own (fos_scene_pieces.c, host-tested in
     test_fos_scene_pieces.c), and only the patch without them is a tree."""
     http = _functions(_source("fos_backend_http.c"))
-    assert "fos_scene_pieces_read(res->content_length" in http["read_body"]
+    # One call for both ways of reading the scenes: without a sink each goes
+    # into a block of its own.
+    assert "fos_scene_pieces_read_to(res->content_length, max_body, &io, sink, req->scene_set)" in http["read_body"]
     assert "fos_http_body_read(res->content_length" in http["read_body"]
     fns = _functions(_source("fos_scenes.c"))
     assert ".scene_set = pieces," in fns["fos_scenes_backend_fetch"]
@@ -313,9 +315,13 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
     index to them in one change."""
     http = _functions(_source("fos_backend_http.c"))
     read = http["read_body"]
-    assert "fos_scene_pieces_read_to(res->content_length, max_body, &io, req->scene_sink, req->scene_set)" in read
-    assert "req->scene_held_max == 0 || res->content_length > (int64_t)req->scene_held_max" in read
-    assert "res->spooled = true;" in read
+    assert "const fos_scene_sink_t *sink = req->scene_sink;" in read
+    assert "fos_scene_pieces_read_to(res->content_length, max_body, &io, sink, req->scene_set)" in read
+    # Held (no sink) only when it has a length no more than what is held.
+    held = read[read.index("if (sink != NULL && !("):read.index("res->spooled")]
+    assert "req->scene_held_max == 0 || res->content_length > (int64_t)req->scene_held_max" in held
+    assert "sink = NULL;" in held
+    assert "res->spooled = sink != NULL;" in read
     # An answer the store refused is told by its ETag before its body is read.
     fetch_http = http["fos_http_fetch"]
     assert fetch_http.index("res->skipped = true;") < fetch_http.index("read_body(client, max_body, req, res);")
