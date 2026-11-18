@@ -518,6 +518,21 @@ proc jsCode(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} 
     answer = if host.isNil: "" else: host(storeAsker(e), toNimString(ctx, op), toNimString(ctx, arg))
   nimStringToJS(ctx, answer)
 
+proc jsMeasureText(ctx: ptr JSContext, texts: JSValue, options: JSValue): JSValue {.nimcall.} =
+  ## `frameos.measureText(texts, {className, width})` (docs/jsx-ui.md): each
+  ## text's height as a field would set it, as JSON text.
+  var heights: seq[float32]
+  try:
+    let
+      list = parseJson(toNimString(ctx, texts))
+      o = parseJson(toNimString(ctx, options))
+    var all: seq[string]
+    for t in list: all.add t.getStr()
+    heights = measureText(all, o{"className"}.getStr(), o{"width"}.getFloat().float32)
+  except CatchableError:
+    discard
+  nimStringToJS(ctx, $(%heights))
+
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e != nil:
@@ -2833,6 +2848,7 @@ const appJsPrelude* = compactJs("""
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
+    measureText: (texts, options) => JSON.parse(jsMeasureText(JSON.stringify(texts), JSON.stringify(options || {}))),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
@@ -3142,6 +3158,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsStoreAction", jsStoreAction)
   runtime.js.registerFunction("jsFrame", jsFrame)
   runtime.js.registerFunction("jsCode", jsCode)
+  runtime.js.registerFunction("jsMeasureText", jsMeasureText)
   runtime.js.registerFunction("jsSetState", jsSetState)
   runtime.js.registerFunction("jsRemember", jsRemember)
   runtime.js.registerFunction("jsRecall", jsRecall)

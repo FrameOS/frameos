@@ -1362,6 +1362,10 @@ declare const frameos: {
   code(op: "save", args: { scene: Record<string, any>; show?: boolean }): boolean;
   /** Forgets the draft and the last error. */
   code(op: "clear"): boolean;
+  /** How tall each text is, in pixels, set in className's text classes (font-*, text-*, leading-*) into width, as a
+   * <textarea> sets its text: wrapped at spaces, spaces kept, an empty text one line. For a list whose rows are text
+   * that wraps (a code editor's lines), measured before they are laid out (FrameOS 2026.11.12+). */
+  measureText(texts: string[], options: { className?: string; width: number }): number[];
   fetchText(url: string): string;
   fetchJson(url: string): any;
   httpRequest(

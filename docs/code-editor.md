@@ -32,8 +32,9 @@ nothing of a plane: `previewOnly`).
   other windows (the frame's render scale makes it bigger on a big screen,
   never the app). The code is colored by kind (keywords, strings, numbers,
   calls, comments, JSON keys) in Cascadia Mono where the frame has it in its
-  fonts (a Pi's assets folder), else in the frame's own face; lines are not
-  wrapped, as in VS Code: a long one scrolls sideways. A screen under 600 px
+  fonts (a Pi's assets folder), else in the frame's own face. Long lines wrap
+  at spaces, each line's number beside its first row; **Wrap** in the status
+  bar turns it off (VS Code's Alt+Z), and a long line then scrolls sideways. A screen under 600 px
   wide drops the activity bar and the explorer for a select of the files;
   e-paper and a grey panel are black on white, uncolored. A refusal or a note
   is a notification over the bottom right corner; a tap puts it away.
@@ -84,6 +85,15 @@ JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
   the screen jumped clear of (e-paper, which scrolls once the finger lifts)
   is set anew. A field whose value changes at one end keeps its caret on its
   text, so the keyboard stays where it was typing while the window slides.
+- **Wrapped lines** take as many rows as the field sets them in. The rows of
+  the lines in the window are measured with `frameos.measureText` (the field's
+  own typesetting, its classes and width), so each number sits by its line's
+  first row; the lines never near the screen are guessed from their length.
+  Where a line starts is the rows above it, summed (`rowSums`). When guessed
+  lines above the screen are measured and turn out taller or shorter, the
+  box is scrolled by the difference (`scrollTop`), so what shows does not
+  move; a drag scrolls from where the box is, so it keeps that. A line typed
+  into is measured again.
 - **What was typed** is the file's lines in memory (`current`), folded back
   into the file's text when the window moves, the file changes, or the scene
   is saved or sent to the AI; until then it is remembered as the window's

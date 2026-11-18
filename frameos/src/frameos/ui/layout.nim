@@ -2156,6 +2156,24 @@ proc fieldIn(n: UiNode, key: int): UiNode =
     if not result.isNil:
       return
 
+proc measureText*(texts: openArray[string], classes: string, width: float32): seq[float32] =
+  ## `frameos.measureText`: how tall each text is, set in `classes` into
+  ## `width` as a field sets its text (its spaces kept, an empty one a line
+  ## tall): a code editor's lines, wrapped, before they are laid out.
+  let kept = memo
+  memo = nil # no layout's type cache: this is no layout
+  var
+    style = initText()
+    box = initBox()
+  box.applyClasses(style, classes, width, width)
+  for text in texts:
+    let n = newUiNode(ukText, style)
+    n.keep = true
+    n.runs.add SvgNode(tag: "&", text: if text.len == 0: " " else: text)
+    n.styles.add style
+    result.add n.arrange(width, style.align).layoutBounds().y
+  memo = kept
+
 proc fieldText*(memo: UiMemo, key: int): string =
   ## The text the last layout gave the field at `key` ("" for none).
   if not memo.isNil:

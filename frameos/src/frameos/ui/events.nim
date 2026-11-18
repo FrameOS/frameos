@@ -58,7 +58,7 @@ type
     # began and how far the box was scrolled then; `dragging` once it moved
     # far enough to be a scroll rather than a tap.
     dragPointer, dragKey: int
-    dragX, dragY, dragSX, dragSY: float32
+    dragX, dragY: float32
     dragging, dragged: bool
     holdPointer: int            ## the pointer whose hold opened a key's accents, -1 for none
     # A key held that types again (backspace): its pointer (-1 for none), the
@@ -1253,17 +1253,22 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             if (if abs(dy) > abs(dx): o.scrollY > 0 else: o.scrollX > 0) and o.inside(downX, downY):
               box = o
               target.dragKey = o.key
-              (target.dragSX, target.dragSY) = target.input.scrolled(o.key)
               break
         if not target.dragging and (box.scrollX > 0 and abs(dx) > GestureTapSlopPx or
             box.scrollY > 0 and abs(dy) > GestureTapSlopPx):
           target.dragging = true
           target.input.pressed.setLen(0)
         if target.dragging:
+          # From where the box is now, by how far the finger moved since the
+          # last move: an app that moved it meanwhile (scrollTop, a code
+          # editor's lines measured above the screen) keeps what it did.
+          let (sx, sy) = target.input.scrolled(box.key)
           target.input.scrollTo(box.key,
             # The finger moved in the canvas's pixels; the box scrolls in the UI's.
-            if box.scrollX > 0: clamp(target.dragSX - dx / scale, 0, box.scrollX) else: target.dragSX,
-            if box.scrollY > 0: clamp(target.dragSY - dy / scale, 0, box.scrollY) else: target.dragSY)
+            if box.scrollX > 0: clamp(sx - dx / scale, 0, box.scrollX) else: sx,
+            if box.scrollY > 0: clamp(sy - dy / scale, 0, box.scrollY) else: sy)
+          target.dragX = x
+          target.dragY = y
           target.inputOnly = true
           # A slow panel shows where it got to when the finger lifts.
           if not target.input.slow:
@@ -1455,7 +1460,6 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.captures.add((pointer, target.regions[takes].key))
         elif box >= 0:
           let r = target.regions[box]
-          (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
           target.dragKey = r.key
           target.dragPointer = pointer
           target.dragX = x

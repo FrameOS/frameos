@@ -354,7 +354,9 @@
   A file is a virtualized list built from the JSX layer alone (doc section
   "The file open"): a box that scrolls, as tall as the file, holding only the
   lines around `scrollTop` as one `<textarea>` colored by its `<span>`s,
-  slid by `onScroll` one end at a time so the field keeps its caret. A
+  slid by `onScroll` one end at a time so the field keeps its caret, its
+  wrapped rows measured by `frameos.measureText` (the field's own
+  typesetting) so the line numbers and spacers are exact. A
   feature it needs from the runtime is a JSX feature for every app
   (`docs/jsx-ui.md`), never an editor native.
 - The plane's half is `POST …/panel/code` (backend `panel_code.py`, cloud

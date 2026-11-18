@@ -750,6 +750,13 @@ export function get(app) {
 - **`whitespace-nowrap` on a `<textarea>`**: its lines are not wrapped, and
   with `overflow-x-auto` a long one scrolls it sideways under a finger or the
   wheel, as the caret does.
+- **`frameos.measureText(texts, {className, width})`**: how tall each text is,
+  in pixels, set in those classes' font, size and `leading-*` into `width`
+  exactly as a `<textarea>` of that width sets it (the same typesetting:
+  wrapped at spaces, spaces kept, an empty text one line). An app that lays
+  out wrapped rows itself measures them before they are drawn: the Code
+  editor's line numbers beside each line's first row, and the height of the
+  lines out of sight in a virtualized list (`layout.nim` `measureText`).
 
 How: the field is a region of the UI's layout (`UiRegion.field`), its
 text and caret are kept with the UI's input state (`UiInput`: `focus`,
@@ -956,7 +963,8 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 
 - **A finger drags it**: once a press on it moves past the tap's slop
   along the way it scrolls, the content follows the finger and nothing is
-  pressed; the swipe that ends the drag is the box's, not a handler's. A
+  pressed (from where the box is at each move, so a `scrollTop` the app set
+  during a drag holds); the swipe that ends the drag is the box's, not a handler's. A
   press on an element that takes it (`onPointerDown`, `onPointerMove`: a
   slider) stays that element's, unless the box that scrolls is that element
   or drawn over it (inside it, or over it): a menu that takes its presses, so the
