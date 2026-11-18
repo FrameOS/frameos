@@ -14,8 +14,8 @@
  * fos_events_dispatch from the render task, so a frame rendered on its plane
  * relays it like a touch.
  *
- * Off unless `set bluetooth 1`: off, the controller's static RAM is given
- * back at boot. */
+ * Off unless `set bluetooth 1` or the frame page's switch, which start and
+ * stop it while the frame runs. */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,6 +28,11 @@
 
 /* At boot, after the config: starts the stack when `bluetooth` is on. */
 esp_err_t fos_bt_start(void);
+/* Bluetooth on or off while running, no restart (the frame page's switch,
+ * `set bluetooth`): on starts the stack (ESP_ERR_NO_MEM and the like when it
+ * cannot now), off stops it and gives its heap back; the bonds stay. Not
+ * from the Bluetooth host's own task. */
+esp_err_t fos_bt_set_enabled(bool on);
 /* Input queued for the render task. */
 bool fos_bt_pending(void);
 /* The render task: what the keyboards and mice did since, to the dispatcher.

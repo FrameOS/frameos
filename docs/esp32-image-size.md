@@ -1147,8 +1147,13 @@ limit while the old layout gets the same image.
   line by `keyboard_tables.nim`, and the firmware ships `us` alone; a frame's
   own layout is a `keyboard.json` in its storage. Linux and the preview keep
   all nine.
-- Static internal RAM: +19 KB, mostly the controller's, given back at boot
-  while Bluetooth is off (`esp_bt_controller_mem_release`).
+- Static internal RAM: +19 KB, almost all of it controller code that runs
+  from IRAM and is there whether Bluetooth is on or not. The controller's own
+  `.data` / `.bss` is 1.1 KB (`_bt_*` / `_bt_controller_*` symbols), all that
+  `esp_bt_controller_mem_release` would give back, and releasing it would
+  make turning Bluetooth on a restart: it stays reserved, and the switch
+  works live. What the stack takes while on is heap, given back when it is
+  turned off.
 
 ## Counted, not built
 

@@ -1129,7 +1129,9 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
     else if (strcmp(key, "bluetooth") == 0) {
         config->bluetooth = atoi(value) != 0;
-        printf("bluetooth saved; takes effect at the next boot\n");
+        esp_err_t bt_err = fos_bt_set_enabled(config->bluetooth);
+        if (bt_err != ESP_OK) printf("bluetooth saved; could not start now (%s): it starts at the next boot\n",
+                                     esp_err_to_name(bt_err));
     }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {

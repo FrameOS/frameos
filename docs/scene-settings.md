@@ -146,9 +146,10 @@ What the page holds, top to bottom:
   where it has one. A frame that reaches the internet goes back to network time
   at its next sync, which the page says. One field and no `strftime`, which
   alone brings 12 KB of libc into the image.
-- **Bluetooth keyboards and mice** (an ESP32 S3, `main/fos_bt.c`): a switch,
-  with "Saving a change restarts the frame" under it (the stack starts at
-  boot, and its RAM is given back there when it is off). While it is on, a
+- **Bluetooth keyboards and mice** (an ESP32 S3, `main/fos_bt.c`): a switch
+  that takes effect on Save, no restart (`fos_bt_set_enabled`: the stack is
+  started, or stopped and its heap given back; when memory is too short to
+  start it now, the note says it starts at the next restart). While it is on, a
   **Bluetooth** card lists every bonded device by the name it serves (GAP
   Device Name, kept in NVS beside the bond; a bond without one by its
   address), what it is, connected or not, each with **Forget** (a second

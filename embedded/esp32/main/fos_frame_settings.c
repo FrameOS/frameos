@@ -281,14 +281,17 @@ void fos_frame_settings_apply(const char *json)
             clock_changed = true;
         }
     }
-    /* Bluetooth on or off: the stack starts at boot (or its RAM is given
-     * back there), so the frame restarts, as for a rotation. */
+    /* Bluetooth on or off, at once (fos_bt_set_enabled). Kept on when the
+     * stack cannot start now: it starts at the next boot, and the page says so. */
     const cJSON *bluetooth = cJSON_GetObjectItem(root, "bluetooth");
     bool bluetooth_changed = false;
     if (cJSON_IsBool(bluetooth) && cJSON_IsTrue(bluetooth) != config->bluetooth) {
         config->bluetooth = cJSON_IsTrue(bluetooth);
         bluetooth_changed = true;
-        restart = true;
+        if (fos_bt_set_enabled(config->bluetooth) != ESP_OK) {
+            strlcpy(s_refused, "Not enough memory for Bluetooth now: it starts at the next restart",
+                    sizeof(s_refused));
+        }
     }
     cJSON_Delete(root);
 
@@ -317,7 +320,7 @@ void fos_frame_settings_apply(const char *json)
     if (scale) {
         fos_cloud_request_state();
         fos_client_render_now();
-    } else if (clock_changed) {
+    } else if (clock_changed || bluetooth_changed) {
         fos_client_render_now();
     }
     if (wifi) {

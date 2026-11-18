@@ -1293,8 +1293,12 @@ quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 
 An S3 frame takes Bluetooth LE keyboards and mice (HID over GATT;
 `fos_bt.c`, NimBLE as a central only). Off by default: `set bluetooth 1`
-and a restart start it (off, the controller's static RAM is released at
-boot). `bt pair [seconds]` opens a pairing window (60 s by default; `bt stop`
+(or the frame page's switch) starts it at once and `set bluetooth 0` stops
+it, giving its heap back; no restart either way. The controller's static RAM
+is 1.1 KB on the S3 and stays reserved, which is what makes that possible
+(`esp_bt_controller_mem_release` would make the next start a restart). If
+the stack cannot start for want of memory, the setting is kept and it
+starts at the next boot. `bt pair [seconds]` opens a pairing window (60 s by default; `bt stop`
 closes it): the frame connects to the first device advertising the HID
 service and pairs "Just Works", and the bond stays in NVS, so the device
 reconnects by itself when it wakes. `bt` lists every bond with its name

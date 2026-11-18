@@ -881,7 +881,6 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let note =
       if name == "rotate" and not look.paper: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
       elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
-      elif name == "bluetooth": "Saving a change restarts the frame."
       else: ""
     if note.len > 0:
       var c = look.grey

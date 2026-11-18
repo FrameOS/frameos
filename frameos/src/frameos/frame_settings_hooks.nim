@@ -26,7 +26,7 @@ type
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
     ## for the same network, none for another), rotate, renderScale,
-    ## bluetooth (a restart, as rotate).
+    ## bluetooth (on or off at once).
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
     ## "open" when the page comes up, "close" when it goes, "scan" for the
     ## networks in range; "btPair" / "btStop" open and close a minute of

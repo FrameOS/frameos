@@ -947,16 +947,17 @@ static void pair_ended(void *arg)
     changed();
 }
 
-esp_err_t fos_bt_start(void)
+/* The stack up: the controller, the host and its task. What it takes is
+ * heap, given back by bt_down; the controller's static RAM is 1.1 KB on the
+ * S3 and stays reserved (esp_bt_controller_mem_release would make the next
+ * start a restart), so Bluetooth goes on and off without one. */
+static esp_err_t bt_up(void)
 {
-    if (!fos_config()->bluetooth) {
-        /* Never on this boot: the controller's static RAM goes back to the
-         * heap (irreversible until a restart, which `set bluetooth 1` asks for). */
-        esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
-        return ESP_OK;
+    if (s_started) return ESP_OK;
+    if (!s_repeat_timer) {
+        const esp_timer_create_args_t repeat = {.callback = repeat_fire, .name = "fos_bt_repeat"};
+        if (esp_timer_create(&repeat, &s_repeat_timer) != ESP_OK) s_repeat_timer = NULL;
     }
-    const esp_timer_create_args_t repeat = {.callback = repeat_fire, .name = "fos_bt_repeat"};
-    if (esp_timer_create(&repeat, &s_repeat_timer) != ESP_OK) s_repeat_timer = NULL;
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
         char line[96];
@@ -977,18 +978,57 @@ esp_err_t fos_bt_start(void)
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_store_config_init();
     known_load();
-    const esp_timer_create_args_t pair_end = {.callback = pair_ended, .name = "fos_bt_pair"};
-    if (esp_timer_create(&pair_end, &s_pair_timer) != ESP_OK) s_pair_timer = NULL;
+    if (!s_pair_timer) {
+        const esp_timer_create_args_t pair_end = {.callback = pair_ended, .name = "fos_bt_pair"};
+        if (esp_timer_create(&pair_end, &s_pair_timer) != ESP_OK) s_pair_timer = NULL;
+    }
     nimble_port_freertos_init(host_task);
     s_started = true;
     s_layout_due = true;
+    fos_client_wake_for_events();
+    changed();
     return ESP_OK;
+}
+
+/* The stack down: every link goes (a key held goes up, a mouse's press is
+ * cancelled), the host task ends and the controller and host give their heap
+ * back. The bonds stay in NVS. Not from the host's own task. */
+static void bt_down(void)
+{
+    if (!s_started) return;
+    s_pair_until_us = 0;
+    if (s_pair_timer) esp_timer_stop(s_pair_timer);
+    s_repeat_usage = 0;
+    if (s_repeat_timer) esp_timer_stop(s_repeat_timer);
+    s_synced = false;
+    if (nimble_port_stop() == 0) nimble_port_deinit();
+    for (int i = 0; i < BT_DEVICES_MAX; i++) {
+        if (s_devs[i].used) drop_dev(&s_devs[i]);
+    }
+    s_connecting = -1;
+    s_started = false;
+    log_line("{\"event\":\"bt:off\",\"source\":\"esp32\"}");
+    changed();
+}
+
+esp_err_t fos_bt_start(void)
+{
+    return fos_config()->bluetooth ? bt_up() : ESP_OK;
+}
+
+esp_err_t fos_bt_set_enabled(bool on)
+{
+    if (!on) {
+        bt_down();
+        return ESP_OK;
+    }
+    return bt_up();
 }
 
 void fos_bt_pair(uint32_t seconds)
 {
     if (!s_started) {
-        printf("bluetooth is off: set bluetooth 1, then restart\n");
+        printf("bluetooth is off: set bluetooth 1\n");
         return;
     }
     s_pair_until_us = seconds ? esp_timer_get_time() + (int64_t)seconds * 1000000 : 0;
@@ -1143,7 +1183,7 @@ bool fos_bt_mouse_connected(void)
 void fos_bt_print_status(void)
 {
     if (!s_started) {
-        printf("bluetooth:   off (set bluetooth 1, restart)\n");
+        printf("bluetooth:   off (set bluetooth 1)\n");
         return;
     }
     ble_addr_t bonds[CONFIG_BT_NIMBLE_MAX_BONDS];
@@ -1184,6 +1224,7 @@ size_t fos_bt_facts_json(char *buf, size_t cap)
 }
 
 esp_err_t fos_bt_start(void) { return ESP_OK; }
+esp_err_t fos_bt_set_enabled(bool on) { return on ? ESP_ERR_NOT_SUPPORTED : ESP_OK; }
 void fos_bt_pair(uint32_t seconds) { (void)seconds; printf("no Bluetooth in this firmware\n"); }
 void fos_bt_forget(void) {}
 bool fos_bt_mouse_connected(void) { return false; }
