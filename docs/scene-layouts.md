@@ -543,7 +543,9 @@ while that is collapsed. The same choice is the one Layout select in the frame's
 Settings; each scene's own select is under Advanced. A starter added to a frame
 wearing none goes on every scene, one added next to a layout in use waits for its
 own Activate, and a scene that joins a frame with an active layout wears it
-(`withActiveLayoutOnNewScenes`; on the cloud the assignment row says so too).
+(`withActiveLayoutOnNewScenes`; on the cloud the assignment row says so too),
+as do the first scenes of a frame that holds one layout and nothing else
+(`layoutForNewScenes`).
 "Layout settings" in the scene's menu edits `layout.state`, and so does the gear
 beside each select in those Settings; the one beside the Layout select writes it
 to every scene wearing that layout.
@@ -552,3 +554,28 @@ to every scene wearing that layout.
 where a render is free, a worn layout renders when its chrome or its scene is
 due; on e-paper or a deep-sleeping frame the scene's own interval stays the
 fastest it renders, whatever the chrome's clock says.
+
+### Chosen at the flash
+
+Every place a frame's card or board is flashed has a Layout select beside it
+(`FlashLayoutPicker`, `flashLayoutLogic`): "No layout", the frame's own
+layouts when it exists, and the starters (`LAYOUT_STARTERS`, the repository's
+layout samples), with a gear for the chosen layout's public fields (the same
+`StateFieldEdit` form as "Layout settings"). Left alone it changes nothing.
+The choice becomes what the frame's own Layout select would have saved
+(`utils/flashLayout.ts` `scenesWithFlashLayout`): a starter installed as a copy
+with an id of its own (one of that name already on the frame is worn instead),
+every scene wearing it with the gear's values as `layout.state`, and those
+values also the copy's field defaults, so a frame flashed before it has a
+scene keeps them for the scenes that join it (`layoutForNewScenes`).
+
+| Flow | How it reaches the device |
+|---|---|
+| Backend: SD card (deploy drawer) | the download's frame save carries `scenes` with the layout; the card's setup file carries `frame.scenes` |
+| Backend: ESP32 flash (deploy drawer, "Erase & flash FrameOS again") | `POST /api/frames/{id}` with the scenes before the board is written; the upload over USB after the flash carries them |
+| Backend: Pico (.uf2 download) | saved on the frame with the download; the backend renders a thin client's scenes |
+| Cloud: "Add frame" SD image and ESP32 | the starter is saved as one of the account's scenes and the claim code carries it (`layout`), installed when the frame turns active (docs/cloud-frames.md "A3") |
+| Cloud: "Write another SD card", "Redeploy to this board" | the frame exists: the layout goes into its form and the form is saved, as Settings does, before the code is minted |
+
+The install script, the SSH install and linking a running frame flash
+nothing and have no select; their frame's Settings has the same one.

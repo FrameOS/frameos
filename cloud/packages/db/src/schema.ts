@@ -1070,6 +1070,12 @@ export const frames = pgTable(
       (): AnyPgColumn => frames.id,
       { onDelete: "set null" },
     ),
+    // Provisioning intent the same way: the layout chosen where the card or
+    // board was flashed (docs/scene-layouts.md "Chosen at the flash"),
+    // `{storeSceneId, layout: {sceneId, state?}}`, installed and worn by every
+    // scene when the frame turns active (frame-provisioning.ts). Cleared once
+    // applied.
+    provisioningLayout: jsonb("provisioning_layout"),
     ...timestamps,
   },
   (table) => ({
@@ -1128,6 +1134,9 @@ export const frameEnrollmentTokens = pgTable(
       () => frames.id,
       { onDelete: "set null" },
     ),
+    // The layout every frame this token enrolls starts with, chosen beside
+    // the flash: copied onto each enrolled frame like the scene source.
+    provisioningLayout: jsonb("provisioning_layout"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

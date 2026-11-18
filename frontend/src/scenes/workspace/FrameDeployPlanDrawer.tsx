@@ -128,6 +128,8 @@ import { timezoneOptions } from '../../decorators/timezones'
 import { downloadJson } from '../../utils/objectUrl'
 import { sceneUpdatesLogic, type PendingSceneUpdate } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { SceneUpdatesSection } from './SceneUpdatesSection'
+import { FlashLayoutPicker } from './FlashLayoutPicker'
+import { backendFlashLayoutScenes } from './flashLayoutApply'
 
 interface DeployPlanProgressStep {
   label: string
@@ -1728,6 +1730,12 @@ function BuildrootSdCardSection({
               ))}
             </select>
           </label>
+          <FlashLayoutPicker
+            pickerKey={`${frame.id}-sd-card`}
+            frameScenes={frame.scenes}
+            labelClassName="frame-tool-muted text-xs font-semibold uppercase tracking-wide"
+            hint="Installed with the card and drawn around every scene, and around the scenes you install later."
+          />
           <AdvancedSection label="advanced: installation mode" open={compilationMode === 'static'}>
             <label className="block space-y-1">
               <span className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Installation mode</span>
@@ -4004,6 +4012,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const canIgnoreFrameSyncChanges = hasFrameSyncChanges && !frameSyncStatusLoading
 
   const saveSdCardSettingsAndDownload = async (): Promise<void> => {
+    const sdCardScenes = backendFlashLayoutScenes(`${frame.id}-sd-card`, frame)
     const response = await apiFetch(`/api/frames/${frame.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4026,6 +4035,9 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
           ...(frame.buildroot ?? {}),
           ...(frameForm.buildroot ?? {}),
         },
+        // The layout picked beside the card goes on the frame's scenes, which
+        // the card's setup file carries.
+        ...(sdCardScenes ? { scenes: sdCardScenes } : {}),
       }),
     })
     if (!response.ok) {

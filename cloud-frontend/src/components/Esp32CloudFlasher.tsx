@@ -644,6 +644,7 @@ export function Esp32CloudFlasher({
   cloudOrigin,
   reenrollFrame,
   sceneSourceFrameId,
+  claimFields,
   portHandoff,
 }: {
   // Provisioned into the board's NVS as cloud_url, so it must be the
@@ -659,6 +660,11 @@ export function Esp32CloudFlasher({
   // Rides on the claim code and is applied when the owner confirms the new
   // frame; ignored in re-enrollment mode, where the frame keeps its own.
   sceneSourceFrameId?: string | undefined
+  // The layout chosen beside the flash (flashLayoutLogic), applied once the
+  // firmware is written and before the code is minted: what it returns joins
+  // a new frame's claim code; in re-enrollment it saves the layout on the
+  // frame itself and the code carries only the frame id.
+  claimFields?: (() => Promise<Record<string, unknown>>) | undefined
   // Web Serial grants a port exclusively. On a frame's "Over USB" view the
   // connect card's log stream usually holds the board already, and a second
   // open() fails with "The port is already open" (2026-10-10). The handoff
@@ -763,6 +769,7 @@ export function Esp32CloudFlasher({
   // cloud echoes that id back — assert it, because provisioning a board with
   // a code for the wrong frame is exactly the duplicate this mode prevents.
   async function mintEnrollmentCode(): Promise<string> {
+    const extraClaimFields = claimFields ? await claimFields() : {}
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify(
         reenrollFrame
@@ -770,6 +777,7 @@ export function Esp32CloudFlasher({
           : {
               name: frameName.trim(),
               ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+              ...extraClaimFields,
               // Enrollment seeds the frame's time zone from this.
               ...claimTokenTimeZoneFields(),
             }

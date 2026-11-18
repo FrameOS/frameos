@@ -233,6 +233,23 @@ intent is then cleared — it fires once and never fights the owner's own later
 edits. A source frame deleted in the meantime simply means there is nothing
 left to copy.
 
+The layout the frame starts with travels the same way
+(docs/scene-layouts.md "Chosen at the flash"): the SD image builder and the
+ESP32 flasher save the chosen starter as one of the account's own scenes and
+mint the code with
+
+```http
+POST {provider}/api/frames/claim-tokens
+{"layout": {"scene_id": "…that store scene…", "layout_scene_id": "…its runtime id…", "state": {"look": "contrast"}}}
+```
+
+checked at mint time (the account's own scene or a public one, else `404
+invalid_layout`; malformed, or beside a `frame_id`, `400 invalid_layout`),
+kept in `provisioning_layout` on the token and then the frame (migration
+0085), and applied by the same activation step: the layout is assigned after
+the copied scenes, each of which wears it (`layouts` on its row), and the
+column is cleared (`src/lib/provisioning-layout.ts`).
+
 ### B. Link code on the device (RFC 8628)
 
 The device-authorization flow from `docs/cloud-link.md`, initiated from the
@@ -1437,7 +1454,7 @@ These are the endpoints the management UI uses; they are provider-internal
 but documented so the shared frontend's cloud adapter is reimplementable:
 
 ```http
-POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes; {"timezone": "Europe/Brussels"} seeds the enrolled frame's time zone (and queues the set_settings push)
+POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes; {"layout": {"scene_id", "layout_scene_id", "state"}} starts it with that layout on every scene; {"timezone": "Europe/Brussels"} seeds the enrolled frame's time zone (and queues the set_settings push)
 GET  {provider}/api/frames                     # list the account's frames
 GET  {provider}/api/frames/{id}                # one frame, state + sync status
 GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)

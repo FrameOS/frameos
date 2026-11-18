@@ -55,6 +55,11 @@
     // the legacy workspace components through framesModel.
     // Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/embedded-release-flasher.test.tsx",
+    // Same story: the add-frame panel's Layout select opens the chosen
+    // layout's settings in StateFieldEdit, whose field inputs (ColorInput,
+    // FontSelect, PathInput) reach the legacy workspace models. Vitest still
+    // runs it; only tsc leaves it out.
+    "src/test/shared-spa/cloud-add-frame-panel.test.tsx",
     // Same story: the USB board classifier type-imports embeddedUsbLogsModel
     // (noUncheckedIndexedAccess trips on its `connected[0]`), and the
     // scene-execution corpus runner imports frameDeployUtils, whose graph

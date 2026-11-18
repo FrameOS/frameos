@@ -406,6 +406,7 @@ describe("browser event shaping", () => {
       settings: { interval: 300, rotate: 90 },
       // Provisioning intent, cleared once applied — it never reaches the wire.
       sceneSourceFrameId: null,
+      provisioningLayout: null,
       status: "active",
       updatedAt: now,
     } satisfies FrameRow;
@@ -477,6 +478,7 @@ describe("browser event shaping", () => {
       voicePermissions: null,
       settings: null,
       sceneSourceFrameId: null,
+      provisioningLayout: null,
       status: "active",
       updatedAt: now,
     } satisfies FrameRow;

@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -2441,6 +2441,145 @@ describe("frame management API", () => {
     expect(copied.map((row) => row.sceneId)).toEqual([scene.id]);
     // Consumed exactly once.
     expect((await frameRow(newFrameId)).sceneSourceFrameId).toBeNull();
+  });
+
+  it("installs the layout chosen beside the flash, worn by every copied scene", async () => {
+    // docs/scene-layouts.md "Chosen at the flash": the SPA saves the chosen
+    // starter as the account's own scene, and the claim code carries it to
+    // the frame, which installs it after its other scenes and dresses each of
+    // them in it, as the frame's own Layout select would.
+    const source = await enrolledFrame();
+    const scene = await createStoreScene(source.accountId, { name: "Porch clock" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${source.frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(source.frame_id),
+    );
+    expect(assigned.status).toBe(200);
+    const layoutScene = await createStoreScene(source.accountId, { name: "Windows 98 desktop" });
+
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        {
+          scene_source_frame_id: source.frame_id,
+          layout: { scene_id: layoutScene.id, layout_scene_id: layoutScene.id, state: { look: "contrast" } },
+        },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(enrolled.status).toBe(200);
+    const { frame_id: newFrameId, status } = (await enrolled.json()) as {
+      frame_id: string;
+      status: string;
+    };
+    expect(status).toBe("active");
+    const rows = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId))
+      .orderBy(asc(frameSceneAssignments.position));
+    // The frame's own scene first, the layout after it.
+    expect(rows.map((row) => row.sceneId)).toEqual([scene.id, layoutScene.id]);
+    expect(rows[0]?.layouts).toEqual({
+      [scene.id]: { sceneId: layoutScene.id, state: { look: "contrast" } },
+    });
+    expect(rows[1]?.layouts).toBeNull();
+    // The push carries it on the scene, the shape the device reads.
+    const [queued] = await db
+      .select()
+      .from(frameCommands)
+      .where(and(eq(frameCommands.frameId, newFrameId), eq(frameCommands.type, "set_scenes")));
+    const pushed = (queued?.payload as { scenes?: { id: string; layout?: unknown }[] }).scenes ?? [];
+    expect(pushed.find((entry) => entry.id === scene.id)?.layout).toEqual({
+      sceneId: layoutScene.id,
+      state: { look: "contrast" },
+    });
+    // Consumed exactly once.
+    expect((await frameRow(newFrameId)).provisioningLayout).toBeNull();
+  });
+
+  it("installs a chosen layout on a frame that starts with no scenes, at the owner's confirmation", async () => {
+    const accountId = await signIn();
+    const layoutScene = await createStoreScene(accountId, { name: "Tiling desktop" });
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { multi_use: true, layout: { scene_id: layoutScene.id, layout_scene_id: "tiling" } },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    const { frame_id: newFrameId } = (await enrolled.json()) as { frame_id: string };
+    // Pending: nothing is sent before the owner confirms.
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, newFrameId)),
+    ).toHaveLength(0);
+    expect((await frameRow(newFrameId)).provisioningLayout).toEqual({
+      layout: { sceneId: "tiling" },
+      storeSceneId: layoutScene.id,
+    });
+
+    await confirmFrame(
+      postJson(`/api/frames/${newFrameId}/confirm`, {}, { origin: baseUrl }),
+      routeParams(newFrameId),
+    );
+    const rows = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId));
+    expect(rows.map((row) => row.sceneId)).toEqual([layoutScene.id]);
+    expect((await frameRow(newFrameId)).provisioningLayout).toBeNull();
+  });
+
+  it("refuses a layout the caller may not install, and one on a re-enrollment", async () => {
+    const strangerAccount = await signIn();
+    const strangers = await createStoreScene(strangerAccount, { name: "Someone else's desktop" });
+    const owner = await enrolledFrame();
+    const refused = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { layout: { scene_id: strangers.id, layout_scene_id: "desktop" } },
+        { origin: baseUrl },
+      ),
+    );
+    expect(refused.status).toBe(404);
+    expect(((await refused.json()) as { error: string }).error).toBe("invalid_layout");
+
+    const own = await createStoreScene(owner.accountId, { name: "My desktop" });
+    const malformed = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { layout: { scene_id: own.id } },
+        { origin: baseUrl },
+      ),
+    );
+    expect(malformed.status).toBe(400);
+    const rebind = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { frame_id: owner.frame_id, layout: { scene_id: own.id, layout_scene_id: "desktop" } },
+        { origin: baseUrl },
+      ),
+    );
+    expect(rebind.status).toBe(400);
+    expect(((await rebind.json()) as { error: string }).error).toBe("invalid_layout");
   });
 
   it("refuses a scene source that is not the caller's frame", async () => {
