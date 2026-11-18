@@ -11,6 +11,7 @@ import frameos/values
 import frameos/utils/http_client
 import frameos/utils/line_reader
 import frameos/utils/zip_entry
+import frameos/utils/base64_field
 import frameos/spool
 import lib/tz
 from chrono import findTimeZone, findDstChanges, valid
@@ -689,6 +690,10 @@ proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): Js
 
 const JsHttpMaxTimeoutMs = 600_000
 
+proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false, storage = ""): string
+proc assetWriteTarget(e: JsAppEvalEnv, opName: string, pathStr: string, bytes: int): string
+proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int
+
 when defined(testing):
   ## Test seam for `frameos.httpRequest`: when set, every request a JS app
   ## makes is answered here instead of on the network, so an app whose API
@@ -776,6 +781,17 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     var body = options{"body"}.getStr("")
     if options{"bodyBase64"}.getStr("").len > 0:
       body = decode(options["bodyBase64"].getStr())
+    let bodyAsset = options{"bodyAsset"}
+    if not bodyAsset.isNil and bodyAsset.kind == JObject:
+      # An asset's bytes, base64, where the marker is: a picture uploaded
+      # without ever being a JS string.
+      let marker = bodyAsset{"marker"}.getStr()
+      let at = if marker.len > 0: body.find(marker) else: -1
+      let full = if e != nil: resolveAssetPath(e, bodyAsset{"path"}.getStr()) else: ""
+      if at < 0 or full.len == 0 or not fileExists(full) or getFileSize(full) > jsAssetReadMaxBytes(e):
+        raise newException(ValueError, "bodyAsset: no such asset, or no marker in the body")
+      body.delete(at ..< at + marker.len)
+      body.insert(encode(readFile(full)), at)
     var headers: seq[SimpleHttpHeader] = @[]
     let headersNode = options{"headers"}
     if not headersNode.isNil and headersNode.kind == JObject:
@@ -807,6 +823,19 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
       code = res.code
       resBody = res.body
     response["status"] = %*code
+    let saveField = options{"saveBase64Field"}
+    if code >= 200 and code < 300 and not saveField.isNil and saveField.kind == JObject and e != nil:
+      # The base64 text of one JSON string field, decoded into an asset, and
+      # that field left empty in the body the app gets.
+      let span = jsonStringFieldSpan(resBody, saveField{"field"}.getStr())
+      let path = saveField{"path"}.getStr()
+      let full = if span.start >= 0: assetWriteTarget(e, "httpRequest", path, (span.stop - span.start) * 3 div 4) else: ""
+      let written = if full.len > 0: writeBase64Span(resBody, span.start, span.stop, full) else: -1
+      if written > 0:
+        resBody.delete(span.start ..< span.stop)
+        response["saved"] = %*{"path": path, "bytes": written}
+      else:
+        response["saveError"] = %*(if span.start < 0: "no such field in the reply" else: "could not write the asset")
     let find = options{"find"}.getStr("")
     if find.len > 0:
       let length = clamp(options{"findLength"}.getInt(JsHttpFindDefaultLength), 1, JsHttpFindMaxLength)
@@ -1246,16 +1275,47 @@ proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
   else:
     jsFetchMaxBytes(e)
 
-proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
-    contents: string, append: bool): bool =
+proc assetsMount(e: JsAppEvalEnv): string =
+  ## The frame's assets folder itself, whatever sandbox the app has in it.
+  let frameConfig = e.owner.frameConfig
+  if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets" else: frameConfig.assetsPath
+
+proc makeAssetDirs(dir, mount: string) =
+  ## The folders from the assets folder down to `dir`, one at a time.
+  ## createDir makes every prefix from "/", and on an ESP32 "/srv" above
+  ## the assets mount is no folder: a write into a new folder failed there
+  ## ("No such file or directory: /srv/"), every time.
+  if dirExists(dir):
+    return
+  if dir.len <= mount.len:
+    when not defined(frameosEmbedded):
+      createDir(dir) # a Pi's assets folder before anything was put in it
+    return
+  makeAssetDirs(dir.parentDir(), mount)
+  discard existsOrCreateDir(dir)
+
+proc assetWriteTarget(e: JsAppEvalEnv, opName: string, pathStr: string, bytes: int): string =
+  ## The absolute path a write of `bytes` to `pathStr` goes to, its folder
+  ## made, or "" (logged) when the app may not write there or the disk is
+  ## nearly full: under 100 MB left on a Pi's card, too little for the write
+  ## on an ESP32, whose flash storage is 1 or 24 MB all told and whose card
+  ## is the assets folder itself.
   let full = resolveAssetPath(e, pathStr, write = true)
   if full.len == 0:
     frameos_apps.logError(e.owner, "JS app " & opName & AssetPathRefused & pathStr)
-    return false
-  createDir(full.parentDir())
+    return ""
+  makeAssetDirs(full.parentDir(), assetsMount(e))
   let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
-  if freeDiskSpace != -1 and freeDiskSpace < 100 * 1024 * 1024:
+  let floor = when defined(frameosEmbedded): bytes.int64 + 64 * 1024 else: 100'i64 * 1024 * 1024
+  if freeDiskSpace != -1 and freeDiskSpace < floor:
     frameos_apps.logError(e.owner, "JS app " & opName & ": low disk space, asset not saved: " & pathStr)
+    return ""
+  full
+
+proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
+    contents: string, append: bool): bool =
+  let full = assetWriteTarget(e, opName, pathStr, contents.len)
+  if full.len == 0:
     return false
   if append:
     var file: File
@@ -1423,15 +1483,33 @@ proc assetFileImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image
       return nil
     if not readImageIntoTarget(full, result, fit):
       scaleAndDrawImage(result, readImageWithDisplayBounds(full), fit)
-  else:
-    result = readImageWithDisplayBounds(full)
-  if result.isNil:
-    return nil
   # The photo's own colour profile, if the Assets panel wrote one
   # (utils/asset_colors) — the same treatment data/localImage gives it.
   # A kept picture shares its render with others (a grid of them), so it
   # never sets the frame's dither palette.
   let colorProfile = loadAssetColorProfile(full)
+  if result.isNil and not options.keep:
+    # The picture the app returns, as data/localImage and fetchImage give
+    # it: decoded straight into the consumer's target where the interpreter
+    # offers one (on an ESP32 the canvas itself), else at the consumer's
+    # bounds. A second picture of a 13.3" panel's size is 3.8 MB that an
+    # 8 MB board beside its canvas does not have. A profile that adjusts
+    # colors goes into the canvas only under a fit that covers it all.
+    let context = e.context
+    let (target, mode) =
+      if context.isNil: (Image(nil), "") else: e.owner.takeDecodeTarget(context)
+    let adjusts = colorProfile.isSome and colorProfile.get().hasAdjustments()
+    if not target.isNil and not (adjusts and mode notin ["cover", "stretch"]) and
+        readImageIntoTarget(full, target, mode):
+      result = target
+    else:
+      let (boundWidth, boundHeight) =
+        if target.isNil and not context.isNil: e.owner.takeDecodeBounds(context) else: (0, 0)
+      result = readImageWithDisplayBounds(full, boundWidth = boundWidth, boundHeight = boundHeight)
+  elif result.isNil:
+    result = readImageWithDisplayBounds(full)
+  if result.isNil:
+    return nil
   if colorProfile.isSome:
     if not options.keep:
       if colorProfile.get().hasPaletteOverride():
