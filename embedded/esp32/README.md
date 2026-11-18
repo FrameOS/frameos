@@ -1618,8 +1618,9 @@ writing. `scenes:toStore` logs the scenes, the bytes and how long it took
 (`detail`).
 
 What the store cannot take is said once: `payload-too-large` (more than
-`/state` has room for, nothing of it read), `no-room`, `too-many-scenes`,
-`invalid`. That answer is not read again until its ETag changes, the frame
+`/state` has room for, nothing of it read), or the store's own words for it
+(`no room on /state`, `no free scene slot`, `not one scene object with an
+id`). That answer is not read again until its ETag changes, the frame
 restarts or, where room was what it wanted, `/state` has that much: a
 backend asks for a sync with every commands answer while the frame is
 behind. On a small partition a set that replaces most of the one before has
