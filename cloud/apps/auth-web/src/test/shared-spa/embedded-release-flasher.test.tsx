@@ -77,10 +77,10 @@ vi.mock("../../../../../../frontend/src/models/embeddedUsbLogsModel", async (imp
   return { ...actual, usbSet: usbSetMock };
 });
 
-const apiFetchMock = vi.hoisted(() => vi.fn<(input: string) => Promise<Response>>());
+const apiFetchMock = vi.hoisted(() => vi.fn<(input: string, init?: RequestInit) => Promise<Response>>());
 vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, apiFetch: (input: string) => apiFetchMock(input) };
+  return { ...actual, apiFetch: (input: string, init?: RequestInit) => apiFetchMock(input, init) };
 });
 
 const releaseImage = mergedImage();
@@ -143,6 +143,9 @@ function mockBackendApi(provisioning: EmbeddedProvisioningPlan) {
     if (url.startsWith("/api/frames/firmware?platform=")) {
       return Promise.resolve(new Response(releaseImage.slice()));
     }
+    if (url === "/api/frames/1") {
+      return Promise.resolve(Response.json({ frame: {} }));
+    }
     return Promise.resolve(new Response("null", { status: 404 }));
   });
 }
@@ -204,6 +207,32 @@ describe("EmbeddedReleaseFlasher", () => {
     expect(options.fileArray.length).toBe(1);
     expect(options.fileArray[0].address).toBe(0);
     expect(options.fileArray[0].data.byteLength).toBe(releaseImage.byteLength);
+  });
+
+  // docs/scene-layouts.md "Chosen at the flash": the layout picked beside the
+  // button goes on the frame's scenes before anything is written, so the
+  // upload after the flash carries it.
+  it("saves the chosen layout on the frame's scenes before it writes the board", async () => {
+    mockBackendApi(plan());
+    const frame = { ...embeddedC3Frame(), scenes: [{ id: "clock", name: "Clock", nodes: [], edges: [] }] } as FrameType;
+    render(<EmbeddedReleaseFlasher frame={frame} />);
+    await screen.findByText(/esp32-c3-generic image/i);
+    // Left alone, the flash saves nothing.
+    fireEvent.click(screen.getByRole("button", { name: /flash latest release/i }));
+    await waitFor(() => expect(esptool.state.writeFlashCalls.length).toBe(1), { timeout: 5000 });
+    expect(apiFetchMock.mock.calls.some(([input]) => input === "/api/frames/1")).toBe(false);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Layout" }), { target: { value: "starter:Windows 98" } });
+    fireEvent.click(screen.getByRole("button", { name: /flash latest release/i }));
+    await waitFor(() => expect(esptool.state.writeFlashCalls.length).toBe(2), { timeout: 5000 });
+    const save = apiFetchMock.mock.calls.find(([input]) => input === "/api/frames/1");
+    expect(save?.[1]?.method).toBe("POST");
+    const { scenes } = JSON.parse(String(save?.[1]?.body)) as {
+      scenes: { id: string; name: string; layout?: { sceneId: string }; settings?: { isLayout?: boolean } }[];
+    };
+    const layout = scenes.find((scene) => scene.settings?.isLayout);
+    expect(layout?.name).toBe("Windows 98");
+    expect(scenes.find((scene) => scene.id === "clock")?.layout).toEqual({ sceneId: layout?.id });
   });
 
   it("shows what the published image cannot carry, before anyone chooses it", async () => {

@@ -358,6 +358,8 @@ async function enrollWithClaimToken(
           // card enrolls many frames, and the token's own frame_id records
           // only the last one, so the intent has to ride the frame row.
           sceneSourceFrameId: token.sceneSourceFrameId,
+          // And the layout chosen beside the flash, the same way.
+          provisioningLayout: token.provisioningLayout,
           // Only a SINGLE-USE token's enrollment is born active: minting it
           // was the owner's deliberate act for one device. A multi-use token
           // is baked into an SD image that may be copied or leaked, and its

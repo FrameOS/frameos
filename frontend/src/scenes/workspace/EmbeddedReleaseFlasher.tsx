@@ -46,6 +46,8 @@ import {
   type FlashTraceRecorder,
 } from './embeddedFlashShared'
 import { workspaceLogic } from './workspaceLogic'
+import { FlashLayoutPicker } from './FlashLayoutPicker'
+import { saveBackendFlashLayout } from './flashLayoutApply'
 
 // Flash a BLANK board from the published release and provision it over the
 // same cable.
@@ -239,6 +241,7 @@ export function EmbeddedReleaseFlasher({
   const { openFrameToolBehindDrawer } = useActions(workspaceLogic)
 
   const webSerialSupported = isWebSerialSupported()
+  const flashLayoutPickerKey = `${frame.id}-esp32`
   const busy = phase === 'connecting' || phase === 'preparing' || phase === 'flashing'
 
   useEffect(() => {
@@ -287,6 +290,7 @@ export function EmbeddedReleaseFlasher({
     let detectedFlashSize: string | null = null
     let firstBootWaitMs: number | undefined
     let flashSizeDiffersFromFrame = false
+    let flashedFrame: FrameType = frame
     const setFlashMessage = (nextMessage: string | null): void => {
       setMessage(nextMessage)
       if (nextMessage) {
@@ -319,6 +323,10 @@ export function EmbeddedReleaseFlasher({
       openFrameToolBehindDrawer(frame.id, 'logs')
 
       setPhase('preparing')
+      // The layout picked above goes on the frame's scenes before anything is
+      // written: the upload after the flash carries them, and a save that
+      // fails leaves the board as it was.
+      flashedFrame = await saveBackendFlashLayout(flashLayoutPickerKey, frame)
       const listing = await fetchReleaseFirmwareListing()
 
       // Loaded on demand: esptool-js adds ~380KB we only need when flashing.
@@ -448,7 +456,7 @@ export function EmbeddedReleaseFlasher({
           // Scenes before the Wi-Fi reboot: the board is up and answering, and
           // pushing them now saves a second boot wait. A frame with none gets
           // them from the backend once it connects.
-          if (await uploadScenesOverUsbAfterFlash(frame, port, setFlashMessage)) {
+          if (await uploadScenesOverUsbAfterFlash(flashedFrame, port, setFlashMessage)) {
             const completeResponse = await apiFetch(`/api/frames/${frame.id}/embedded/usb_deploy_complete`, {
               method: 'POST',
             })
@@ -507,6 +515,14 @@ export function EmbeddedReleaseFlasher({
 
   return (
     <div className="space-y-2">
+      {plan?.supported ? (
+        <FlashLayoutPicker
+          pickerKey={flashLayoutPickerKey}
+          frameScenes={frame.scenes}
+          labelClassName="frame-tool-muted text-xs font-semibold uppercase tracking-wide"
+          hint="Pushed to the board with its scenes and drawn around every scene, and around the scenes you install later."
+        />
+      ) : null}
       <button
         type="button"
         onClick={flash}

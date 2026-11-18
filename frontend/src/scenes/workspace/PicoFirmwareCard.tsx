@@ -4,6 +4,8 @@ import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '../../components/Spinner'
 import type { FrameType } from '../../types'
 import { embeddedUsbConnectLogic } from './embeddedUsbConnectLogic'
+import { FlashLayoutPicker } from './FlashLayoutPicker'
+import { saveBackendFlashLayoutInBackground } from './flashLayoutApply'
 import { firmwareSizeLabel, picoBoardLabel } from './picoFirmware'
 
 // Step 1 of installing FrameOS on a Pico W / Pico 2 W (Pimoroni Inky Frame):
@@ -47,6 +49,7 @@ export function PicoFirmwareCard({ frame }: { frame: FrameType }): JSX.Element {
   } = useValues(logic)
   const { downloadFirmware } = useActions(logic)
   const expectedFileName = `frameos-<version>-${uf2Platform}.uf2`
+  const flashLayoutPickerKey = `${frame.id}-pico`
 
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
@@ -58,9 +61,23 @@ export function PicoFirmwareCard({ frame }: { frame: FrameType }): JSX.Element {
         </div>
       </div>
 
+      <FlashLayoutPicker
+        pickerKey={flashLayoutPickerKey}
+        frameScenes={frame.scenes}
+        labelClassName="frame-tool-muted text-xs font-semibold uppercase tracking-wide"
+        hint="Saved on the frame with the firmware download and drawn around every scene, and around the scenes you install later."
+      />
       {uf2Asset ? (
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={downloadFirmware} disabled={downloadBusy} className={primaryButtonClass}>
+          <button
+            type="button"
+            onClick={() => {
+              downloadFirmware()
+              saveBackendFlashLayoutInBackground(flashLayoutPickerKey, frame)
+            }}
+            disabled={downloadBusy}
+            className={primaryButtonClass}
+          >
             {downloadBusy ? <Spinner color="white" /> : <ArrowDownTrayIcon className="h-4 w-4" />}
             {downloadBusy ? 'Downloading' : 'Download firmware (.uf2)'}
           </button>

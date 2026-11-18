@@ -13,6 +13,11 @@ import { claimTokenTimeZoneFields } from '../lib/browser-time-zone'
 import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
+import { FlashLayoutPicker } from '../../../frontend/src/scenes/workspace/FlashLayoutPicker'
+import {
+  cloudFlashLayoutClaimFields,
+  flashLayoutSignature,
+} from '../../../frontend/src/scenes/workspace/flashLayoutLogic'
 import { Esp32CloudFlasher } from './Esp32CloudFlasher'
 import { LinkRunningFrameForm, takeStashedLinkCode } from './LinkRunningFrameForm'
 import { SdImageBuilder } from './SdImageBuilder'
@@ -66,6 +71,11 @@ export interface AddFramePanelProps {
 }
 
 type AddFramePath = 'script' | 'sd' | 'link' | 'esp32' | 'virtual'
+
+// The flashing paths offer the layout the new frame starts with
+// (docs/scene-layouts.md "Chosen at the flash"); its claim code carries it.
+const flashPaths: AddFramePath[] = ['sd', 'esp32']
+const layoutPickerKey = 'cloud-add-frame'
 
 // Stage one: one button per enrollment path, each with a single line saying
 // what it is for. The chosen path's full form is stage two.
@@ -143,6 +153,8 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // the install command's and the SD image's are minted at different times.
   const [installSceneSource, setInstallSceneSource] = useState('')
   const [multiUseSceneSource, setMultiUseSceneSource] = useState('')
+  // And the layout the cached SD code was minted with, for the same reason.
+  const [multiUseLayout, setMultiUseLayout] = useState('')
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
   // One mint per opening, whatever React does with renders. A ref, not state:
@@ -320,10 +332,20 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     multiUse: boolean
     ttlDays?: number | 'forever'
   }): Promise<string> {
-    if (multiUse && multiUseToken && ttlDays === multiUseTtlDays && multiUseSceneSource === sceneSourceFrameId) {
+    const layoutSignature = flashLayoutSignature(layoutPickerKey)
+    if (
+      multiUse &&
+      multiUseToken &&
+      ttlDays === multiUseTtlDays &&
+      multiUseSceneSource === sceneSourceFrameId &&
+      multiUseLayout === layoutSignature
+    ) {
       return multiUseToken
     }
-    const sceneSource = sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}
+    const sceneSource = {
+      ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
+      ...(await cloudFlashLayoutClaimFields(layoutPickerKey)),
+    }
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify(
         multiUse
@@ -346,6 +368,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
       setMultiUseExpiresAt(data.expires_at)
       setMultiUseTtlDays(ttlDays)
       setMultiUseSceneSource(sceneSourceFrameId)
+      setMultiUseLayout(layoutSignature)
     }
     return data.claim_token
   }
@@ -435,6 +458,14 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
           </p>
         ) : null}
 
+        {path !== undefined && flashPaths.includes(path) ? (
+          <FlashLayoutPicker
+            pickerKey={layoutPickerKey}
+            labelClassName="frameos-muted text-xs"
+            hint="Installed when the frame joins and drawn around every scene, and around the scenes you install on it later."
+          />
+        ) : null}
+
         {path === 'script' ? (
           <section className="frameos-card rounded-2xl border border-white/90 p-4 shadow-sm">
             <h3 className="frameos-strong mb-1 flex items-center gap-2 text-sm font-semibold">
@@ -501,7 +532,11 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               <CpuChipIcon aria-hidden className="h-5 w-5" />
               Flash an ESP32 from this browser
             </h3>
-            <Esp32CloudFlasher cloudOrigin={cloudOrigin} sceneSourceFrameId={sceneSourceFrameId || undefined} />
+            <Esp32CloudFlasher
+              cloudOrigin={cloudOrigin}
+              sceneSourceFrameId={sceneSourceFrameId || undefined}
+              claimFields={() => cloudFlashLayoutClaimFields(layoutPickerKey)}
+            />
           </section>
         ) : null}
 

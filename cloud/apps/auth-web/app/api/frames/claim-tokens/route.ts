@@ -1,4 +1,5 @@
-import { frameEnrollmentTokens } from "@frameos-cloud/db";
+import { frameEnrollmentTokens, storeScenes } from "@frameos-cloud/db";
+import { and, eq, or } from "drizzle-orm";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -24,6 +25,10 @@ import { accountLimits } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
+import {
+  provisioningLayoutColumn,
+  readProvisioningLayoutBody,
+} from "../../../../src/lib/provisioning-layout";
 
 export const runtime = "nodejs";
 
@@ -122,6 +127,36 @@ export async function POST(request: NextRequest) {
     );
     if (!sceneSourceFrame) {
       return jsonError("invalid_scene_source_frame", 404);
+    }
+  }
+
+  // The layout the frames this token enrolls start with, chosen beside the
+  // flash (provisioning-layout.ts): a scene the account already holds (the
+  // SPA saved the chosen starter there first) or a public one, checked here
+  // at mint time like the scene source, and installed at activation. A
+  // re-enrollment keeps its frame's own scenes and layouts: the SPA saves a
+  // layout chosen there on the frame itself.
+  const provisioningLayout = readProvisioningLayoutBody(body.layout);
+  if (provisioningLayout === false || (provisioningLayout && boundFrame)) {
+    return jsonError("invalid_layout", 400);
+  }
+  if (provisioningLayout) {
+    const [layoutScene] = await db
+      .select({ id: storeScenes.id })
+      .from(storeScenes)
+      .where(
+        and(
+          eq(storeScenes.id, provisioningLayout.storeSceneId),
+          eq(storeScenes.status, "active"),
+          or(
+            eq(storeScenes.accountId, session.accountId),
+            eq(storeScenes.visibility, "public"),
+          ),
+        ),
+      )
+      .limit(1);
+    if (!layoutScene) {
+      return jsonError("invalid_layout", 404);
     }
   }
 
@@ -230,6 +265,9 @@ export async function POST(request: NextRequest) {
       maxUses,
       name: name ?? null,
       sceneSourceFrameId: sceneSourceFrame?.id ?? null,
+      provisioningLayout: provisioningLayout
+        ? provisioningLayoutColumn(provisioningLayout)
+        : null,
       timezone,
       tokenHash: hashSecret(token),
     })

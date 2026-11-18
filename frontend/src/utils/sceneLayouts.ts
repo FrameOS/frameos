@@ -179,12 +179,33 @@ export function layoutsWornBy(
   return layouts
 }
 
-/** Scenes joining a frame that has an active layout wear it too. A layout, or a scene with its own, is left alone. */
+/**
+ * The layout a scene joining this frame wears: the active one, or, on a frame
+ * with no scene of its own yet and exactly one layout, that layout (a card or
+ * board flashed with a layout, docs/scene-layouts.md "Chosen at the flash":
+ * its copy holds the chosen settings as its defaults). Null for none.
+ */
+export function layoutForNewScenes(
+  existing: readonly Pick<FrameScene, 'id' | 'layout' | 'settings'>[] | null | undefined
+): SceneLayoutRef | null {
+  const active = activeFrameLayout(existing)
+  if (active) {
+    return active
+  }
+  const [only, ...others] = layoutScenes(existing)
+  return only && others.length === 0 && scenesWithoutLayouts(existing).length === 0 ? { sceneId: only.id } : null
+}
+
+/**
+ * Scenes joining a frame that has an active layout wear it too, and so do
+ * the first scenes of a frame that holds one layout alone. A layout, or a
+ * scene with its own, is left alone.
+ */
 export function withActiveLayoutOnNewScenes<T extends Partial<FrameScene>>(
   existing: readonly Pick<FrameScene, 'id' | 'layout' | 'settings'>[] | null | undefined,
   added: readonly T[]
 ): T[] {
-  const active = activeFrameLayout(existing)
+  const active = layoutForNewScenes(existing)
   if (!active) {
     return [...added]
   }
