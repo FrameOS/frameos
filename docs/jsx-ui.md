@@ -983,8 +983,9 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   So does the wheel.
 - **`onScroll`** hears every scroll a finger or the wheel makes (on a slow
   panel, once the finger lifts): `e.scrollTop` and `e.scrollLeft` (also on
-  `e.target`, as React's), in the UI's pixels. A scroll the runtime makes
-  itself (a field brought into sight) is not heard.
+  `e.target`, as React's), in the UI's pixels. A scroll the layout makes
+  itself (a caret brought into sight) is heard with the next event (a key,
+  a tap): the layout runs inside a render, where no handler can.
 - **`scrollTop={y}`** scrolls the box to `y` when the app changes it (a file
   opened at the top, or where it was left), kept in range; the same value
   render after render leaves the box where a finger took it, as a browser
