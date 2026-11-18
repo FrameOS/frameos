@@ -25,7 +25,42 @@ void fos_charger_decode(uint8_t reg08, uint8_t reg0a, fos_charger_status_t *out)
 
 #ifdef ESP_PLATFORM
 
+#include "driver/gpio.h"
+
+#include "fos_board.h"
 #include "fos_i2c.h"
+
+static int s_enable_pin = -1;
+
+void fos_charger_enable(const char *hardware_preset)
+{
+    int pin = fos_board_charge_enable_pin(hardware_preset);
+    if (pin < 0) return;
+    /* Low before it is an output: the pin reads high until it is driven, and
+     * a moment of driven high is the same "do not charge" it has had since.
+     * Held, so the level outlives a deep sleep (a pad of the core's power
+     * domain otherwise goes back to its reset state, pull-up included). */
+    gpio_hold_dis((gpio_num_t)pin);
+    gpio_set_level((gpio_num_t)pin, 0);
+    const gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << pin,
+        .mode = GPIO_MODE_INPUT_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&cfg) != ESP_OK) return;
+    gpio_set_level((gpio_num_t)pin, 0);
+    gpio_hold_en((gpio_num_t)pin);
+    gpio_deep_sleep_hold_en();
+    s_enable_pin = pin;
+}
+
+int fos_charger_enable_pin(int *level)
+{
+    if (level) *level = s_enable_pin >= 0 ? gpio_get_level((gpio_num_t)s_enable_pin) : -1;
+    return s_enable_pin;
+}
 
 bool fos_charger_present(void)
 {

@@ -2085,11 +2085,28 @@ static int cmd_i2c(int argc, char **argv)
                (int)charger.usb_power, (int)charger.charging, (int)charger.charge_done,
                (unsigned)charger.vbus_stat, (unsigned)charger.chrg_stat);
     }
+    int charge_level = -1;
+    int charge_pin = fos_charger_enable_pin(&charge_level);
+    if (charge_pin >= 0) {
+        printf("charger: enable on GPIO %d reads %d (%s)\n", charge_pin, charge_level,
+               charge_level == 0 ? "charging allowed" : "charging off");
+    }
     fos_gauge_status_t gauge;
     if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK) {
         printf("gauge: %s %d mV soc=%d%% current=%d mA present=%d discharging=%d charging=%d full=%d\n",
                fos_gauge_chip_name(), gauge.mv, gauge.pct, gauge.current_ma, (int)gauge.present,
                (int)gauge.discharging, (int)gauge.charging, (int)gauge.full);
+    }
+    uint16_t bq[FOS_GAUGE_RAW_WORDS];
+    if (fos_gauge_bq27220_raw(bq) == ESP_OK) {
+        int deci_c = (int)bq[0] - 2731;
+        printf("bq27220: temp=%d.%dC voltage=%umV status=0x%04x current=%dmA remaining=%umAh full=%umAh "
+               "avg_current=%dmA standby=%dmA cycles=%u soc=%u%% soh=%u%% charge_voltage=%umV "
+               "charge_current=%umA op_status=0x%04x design=%umAh\n",
+               deci_c / 10, deci_c < 0 ? -deci_c % 10 : deci_c % 10, (unsigned)bq[1], (unsigned)bq[2],
+               (int)(int16_t)bq[3], (unsigned)bq[4], (unsigned)bq[5], (int)(int16_t)bq[6], (int)(int16_t)bq[7],
+               (unsigned)bq[8], (unsigned)bq[9], (unsigned)bq[10], (unsigned)bq[11], (unsigned)bq[12],
+               (unsigned)bq[13], (unsigned)bq[14]);
     }
     uint8_t axp[8];
     if (fos_gauge_axp2101_raw(axp) == ESP_OK) {

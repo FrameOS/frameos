@@ -144,6 +144,25 @@ static esp_err_t read_word(uint8_t command, uint16_t *out)
     return ESP_OK;
 }
 
+/* Temperature, Voltage, BatteryStatus, Current, RemainingCapacity,
+ * FullChargeCapacity, AverageCurrent, StandbyCurrent, CycleCount,
+ * StateOfCharge, StateOfHealth, ChargingVoltage, ChargingCurrent,
+ * OperationStatus, DesignCapacity (the technical reference's "Standard Data
+ * Commands"). */
+const uint8_t FOS_GAUGE_RAW_COMMANDS[FOS_GAUGE_RAW_WORDS] = {
+    0x06, 0x08, 0x0A, 0x0C, 0x10, 0x12, 0x14, 0x1A, 0x2A, 0x2C, 0x2E, 0x30, 0x32, 0x3A, 0x3C,
+};
+
+esp_err_t fos_gauge_bq27220_raw(uint16_t out[FOS_GAUGE_RAW_WORDS])
+{
+    if (!fos_i2c_present(FOS_I2C_BQ27220)) return ESP_ERR_NOT_FOUND;
+    for (int i = 0; i < FOS_GAUGE_RAW_WORDS; i++) {
+        esp_err_t err = read_word(FOS_GAUGE_RAW_COMMANDS[i], &out[i]);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
+}
+
 esp_err_t fos_gauge_read(fos_gauge_status_t *out)
 {
     if (!out) return ESP_ERR_INVALID_ARG;

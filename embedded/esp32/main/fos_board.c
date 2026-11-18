@@ -206,6 +206,32 @@ static const struct {
     {"seeed_reterminal_e1003", 42, 41, 38},
 };
 
+/* Chargers with no bus, strapped by resistors, whose charge-enable input
+ * goes to a GPIO. The reTerminal Sticky's BQ25616 charges while its /CE is
+ * low: EN_BAT_CHGn, GPIO39, with 100 kOhm to ground (Seeed's schematic of
+ * 2026-06-09, the Power sheet; STAT is the red LED and CHARGE_STATE on
+ * GPIO40). Left alone the pin read high on the bench and the cell never
+ * charged (2026-11-18: 3397 mV and 0 mA for two days on USB); driven low,
+ * STAT went low at once. GPIO39 is the S3's MTCK, for which the datasheet
+ * has a pull-up out of reset (EFUSE_DIS_PAD_JTAG unburnt), about 45 kOhm
+ * against the board's 100; the IO mux showed none, so why it reads high is
+ * not settled, only that it does. */
+static const struct {
+    const char *preset;
+    int enable_low;
+} k_charge_enable[] = {
+    {"seeed_reterminal_sticky", 39},
+};
+
+int fos_board_charge_enable_pin(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return -1;
+    for (size_t i = 0; i < sizeof(k_charge_enable) / sizeof(k_charge_enable[0]); i++) {
+        if (strcmp(hardware_preset, k_charge_enable[i].preset) == 0) return k_charge_enable[i].enable_low;
+    }
+    return -1;
+}
+
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr)
 {
     if (clk) *clk = -1;
