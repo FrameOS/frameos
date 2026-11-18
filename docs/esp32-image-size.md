@@ -1141,6 +1141,76 @@ limit while the old layout gets the same image.
   formatting, where QuickJS's `dtoa.c` already prints doubles; `strtod` is
   5.6 KB beside `js_atod`; `strerror`'s table 3.1 KB.
 
+## A scene set as big as `/state`: +6,672, and what came back
+
+A set bounded by the partition, not by a 512 KB constant (#891: scenes
+written to slot files as they arrive and the index switched once, 128
+scenes in 256 slots, one listing of the directory for a lookup a slot, a
+collector that walks the partition once) took the 8 MB S3 image from
+3,163,408 to 3,170,080. By object, before the linker:
+
+| object | bytes | what |
+|---|---:|---|
+| `fos_scene_store.c` | +3,631 | the staging (`stage_begin` / `_write` / `_end` / `_open` / `_drop`, 1.9 KB), `make_entry` and `pick_slot` out of line now that two callers have them, the listing, a set written at once |
+| `fos_scenes.c` | +3,444 | the fetch's three ways to read an answer and their retry (1.6 KB), the sink (0.6 KB), the commit in the take |
+| `fos_scene_meta.c` | +1,029 | new: the index's fields read off a scene's bytes |
+| `fos_spiffs_gc.c` | +252 | the one-walk eraser |
+| `fos_scene_pieces.c`, `fos_backend_http.c` | +309 | scenes to a sink, an answer skipped by its ETag |
+
+What came back without taking any of it away, a commit each:
+
+| cut | image |
+|---|---:|
+| `scenes:toStore` is a `log_scene_event` line; no timer around every open, write and close of the sink | −576 |
+| the commit of a staged set shares the patch's tail in the take; the staging's counters are the host test's | −176 |
+| the fetch names a refusal in the store's words (`fos_scene_store_err_str`), no `ESP_LOGE` beside the event line, `/state` asked once | −256 |
+| the store's three slot bitmaps set by one `slot_is(slot, what)` | −128 |
+| one `big_alloc`, one staging check, "stored already" by the hash alone | −96 |
+| one hand-off to the store task for a split and a sweep, one block for a set's scene starts | −84 of its own code |
+| the scene reader tells `"settings"` and its commas off the text it kept | −80 |
+| one call into the pieces reader from the HTTP body | −48 |
+
+Together 3,170,080 → 3,168,784 (−1,296). Then the link order, written
+again from that build (`link_order.py optimize`: the new object had no line,
+and the file was 485 long calls staler than when it was written, 7,760 of
+77,620 against 7,275): 7,394 left long and 3,168,784 → 3,167,232 (−1,552).
+The change stands at +3,824 over main, and main gets the order's part of
+that for nothing the next time the file is written from its own build.
+
+The tool wants numpy, and `uv run --with numpy` picks an interpreter whose
+numpy cannot load `libstdc++` on the dev box (the tool says so and runs a
+quarter of an hour in plain Python): `uv run --python /usr/bin/python3
+--with numpy python3 embedded/esp32/tools/link_order.py optimize ...` is
+half a minute.
+
+- **A cut's image number is its own bytes give or take 150.** The hand-off
+  helper took 84 bytes out of `fos_scenes.c` in the linked image
+  (`firmware-size.json`'s `files`) and the image grew 64: the functions
+  behind it moved, and calls to them from other objects went long. Read a
+  small cut off the object (`readelf -S`, a section a function) or the
+  per-file number, and the image at the end.
+- **A diagnostic line with its own format is 400 bytes.** A JSON line of
+  nine fields, its `snprintf`, and a pair of `esp_timer_get_time()` calls
+  around three call sites. Through the helper every scene line uses it is 100.
+- Not done: the store's "a kept scene must still be that scene" check at
+  commit (the hash of each scene found stored, kept until the index
+  switches). Ending the staging on any other change would do without it,
+  about 150 bytes, and changes what a tested guard does.
+- Not done: the put path through the staging (one way to write a scene to
+  a new slot). A put is parsed whole before it is stored; a staged scene is
+  read for its index fields only.
+- Not done: the tables in PSRAM as statics (`EXT_RAM_BSS_ATTR`) for the
+  `fos_big_malloc`-else-`malloc` blocks: `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`
+  is off, and a board without PSRAM would hold 17 KB of slot rows in DRAM.
+- Counted, not built: the combined scenes file. A producer's whole payload
+  (the cloud, HTTP, USB) is still written as one file and split by the
+  store task, beside a per-scene store that takes a set as changes or as it
+  arrives: `split_puts_locked`, `ensure_split_locked`, `store_split_stored`,
+  the split's no-room record and `fos_scene_store_write_set` are 1.3 KB by
+  name, with more inside `fos_scenes_set_json_from`, `store_backend_payload`
+  and the apply's whole-file load. A frame in the field may hold a combined
+  file, so the reader stays whatever the writers do.
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim
