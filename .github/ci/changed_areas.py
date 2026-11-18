@@ -34,6 +34,9 @@ COMMON_IRRELEVANT = [
     "*.md",
     "docs/**/*.md",
     "tools/gha-runners/**",
+    # The Nimony probe (docs/nimony.md) reads the tree and builds nothing of it.
+    "tools/nimony/**",
+    ".github/workflows/nimony-probe.yml",
     "mprocs.yaml",
     ".github/workflows/ios.yml",
     ".github/workflows/cloud-ci.yml",

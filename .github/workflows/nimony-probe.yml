@@ -1,0 +1,59 @@
+name: Nimony probe
+
+# How far FrameOS is from compiling with Nimony (Nim 3): docs/nimony.md.
+# A report, never a gate: it runs when the probe itself changes and by hand,
+# on a GitHub-hosted runner (the pool's warm image has no Nimony), and the
+# report is the job summary.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - tools/nimony/**
+      - .github/workflows/nimony-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Nimony probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: FrameOS nimble packages
+        run: |
+          cd frameos
+          nimble install -d
+          nimble setup
+
+      - name: Pinned Nimony commit
+        id: nimony
+        run: echo "commit=$(sed -n 's/^NIMONY_COMMIT="${NIMONY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' tools/nimony/probe.sh)" >> "$GITHUB_OUTPUT"
+
+      # Building Nimony is most of the job (about eight minutes on a laptop).
+      - name: Cache Nimony
+        uses: actions/cache@v4
+        with:
+          path: frameos/build/nimony
+          key: ${{ runner.os }}-nimony-${{ steps.nimony.outputs.commit }}
+
+      - name: Probe
+        run: tools/nimony/probe.sh
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nimony-probe
+          path: |
+            frameos/build/nimony-probe/report.md
+            frameos/build/nimony-probe/logs/
