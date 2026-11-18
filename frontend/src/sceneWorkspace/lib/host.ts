@@ -21,6 +21,9 @@ export interface SceneWorkspaceHost {
   previewProxyUrl: string | null
   /** What else every AI turn sends (a backend's frame scene: its frameId). */
   aiChatContext: () => Record<string, unknown>
+  /** Where the owner chooses how often the preview asks before it reads the
+   * saved keys (the cloud's Security page); null where it never asks. */
+  savedKeysSettingsUrl: string | null
   /** Product analytics; a no-op where there are none. */
   track: (event: string, properties?: Record<string, unknown>) => void
 }
@@ -33,6 +36,7 @@ const cloudHost: SceneWorkspaceHost = {
   settingsUrl: '/api/settings',
   previewProxyUrl: '/api/store/preview-proxy',
   aiChatContext: () => ({}),
+  savedKeysSettingsUrl: '/account/security#saved-keys',
   track: () => {},
 }
 

@@ -16,6 +16,7 @@ import {
   forecastCycleOptions,
   formatCycle,
   formatRemaining,
+  frameWakeSettings,
   nearestCycleOption,
   SERVER_RENDER_MIN_GAIN,
   serverRenderForecast,
@@ -243,7 +244,7 @@ function BatteryPanel({
         </div>
       </div>
 
-      <BatteryFacts analysis={analysis} loading={loading} />
+      <BatteryFacts frame={frame} analysis={analysis} loading={loading} />
 
       <BatteryChart
         analysis={analysis}
@@ -332,8 +333,20 @@ function Fact({ label, value, title }: { label: string; value: ReactNode; title?
   )
 }
 
-function BatteryFacts({ analysis, loading }: { analysis: BatteryAnalysis; loading: boolean }): JSX.Element {
+function BatteryFacts({
+  frame,
+  analysis,
+  loading,
+}: {
+  frame: FrameType
+  analysis: BatteryAnalysis
+  loading: boolean
+}): JSX.Element {
   const { cadence, segment, drainPerDay, samples, misreadCount, latest } = analysis
+  // What the owner set, next to what was measured: the check-ins only
+  // happen while the frame sleeps between renders.
+  const { checkInSeconds, renderSeconds } = frameWakeSettings(frame)
+  const shownCheckIn = analysis.deepSleep ? checkInSeconds : null
   const placeholder = loading ? '…' : '—'
   const wakeCause = latest?.wakeCause ? ` · woke by ${latest.wakeCause}` : ''
   return (
@@ -351,6 +364,20 @@ function BatteryFacts({ analysis, loading }: { analysis: BatteryAnalysis; loadin
         value={cadence.awakeSeconds !== null ? `${Math.round(cadence.awakeSeconds)} s${wakeCause}` : placeholder}
         title="How long the frame stays on each time it wakes: boot, Wi-Fi, render, refresh."
       />
+      {renderSeconds !== null ? (
+        <Fact
+          label="Re-renders"
+          value={`every ${formatCycle(renderSeconds)}`}
+          title="The refresh interval of the scene showing."
+        />
+      ) : null}
+      {shownCheckIn !== null ? (
+        <Fact
+          label="Checks in"
+          value={`every ${formatCycle(shownCheckIn)}`}
+          title="Extra wakes between renders that fetch queued commands and go back to sleep (Power settings)."
+        />
+      ) : null}
       <Fact
         label="Drain"
         value={drainPerDay !== null ? formatDrain(drainPerDay) : placeholder}

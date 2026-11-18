@@ -111,7 +111,3 @@ export function buildSceneDependencyEntries({
   visibleRootScenes.forEach((scene) => appendScene(scene, false, scene.id, new Set<string>()))
   return entries
 }
-
-export function flatSceneDependencyEntries(scenes: FrameScene[]): SceneDependencyEntry[] {
-  return scenes.map((scene) => ({ scene, key: scene.id, nested: false }))
-}

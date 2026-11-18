@@ -4,7 +4,7 @@ import { loaders } from 'kea-loaders'
 
 import { apiFetch } from '../../../utils/apiFetch'
 import { apiCall, describeHttpError, readJsonPayload } from './api'
-import { redirectToReauthIfRequired, takePendingReauthAction } from './reauth'
+import { reauthRequiredError, redirectToReauthIfRequired, takePendingReauthActionWhere } from './reauth'
 
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
@@ -19,6 +19,9 @@ export interface AccountSecurity {
   has_password: boolean
   is_superadmin: boolean
   name: string | null
+  /** How long a sign-in lets the preview read the saved service keys; 0 = only at sign-in. */
+  saved_keys_reauth_seconds?: number
+  saved_keys_reauth_choices?: number[]
 }
 
 export interface ChangePasswordForm {
@@ -32,6 +35,29 @@ export interface DeleteAccountForm {
 }
 
 const signOutResumeAction = 'sessions:revoke-all'
+const savedKeysResumePrefix = 'saved-keys-reauth:'
+
+function isReauthRequiredPayload(payload: { error?: unknown } | undefined | null): boolean {
+  return payload?.error === reauthRequiredError
+}
+
+/** "Every 2 hours", "Once a day", …: the Security page's words for a saved-keys window. */
+export function savedKeysReauthLabel(seconds: number): string {
+  if (seconds === 0) {
+    return 'Only when I sign in'
+  }
+  if (seconds === 7200) {
+    return 'After 2 hours (default)'
+  }
+  if (seconds === 86400) {
+    return 'After a day'
+  }
+  if (seconds === 604800) {
+    return 'After a week'
+  }
+  const hours = Math.round(seconds / 3600)
+  return `After ${hours} hour${hours === 1 ? '' : 's'}`
+}
 
 export type SignOutState = 'idle' | 'submitting' | 'done'
 
@@ -63,6 +89,8 @@ export interface securityLogicValues {
   passwordTouched: boolean
   passwordTouches: Record<string, boolean>
   passwordValidationErrors: DeepPartialMap<ChangePasswordForm, ValidationErrorType>
+  savedKeysReauthError: string | null
+  savedKeysReauthSaving: boolean
   security: AccountSecurity | null
   securityLoading: boolean
   showDeleteAccountErrors: boolean
@@ -133,6 +161,58 @@ export interface securityLogicActions {
   setPasswordValues: (values: DeepPartial<ChangePasswordForm>) => {
     values: DeepPartial<ChangePasswordForm>
   }
+  setSavedKeysReauth: (
+    seconds: number,
+    options?: {
+      resumed?: boolean
+    }
+  ) => {
+    options: {
+      resumed?: boolean | undefined
+    }
+    seconds: number
+  }
+  setSavedKeysReauthError: (error: string | null) => {
+    error: string | null
+  }
+  setSavedKeysReauthSaving: (saving: boolean) => {
+    saving: boolean
+  }
+  setSavedKeysReauthStored: ({ seconds }: { seconds: number }) => {
+    seconds: number
+  }
+  setSavedKeysReauthStoredFailure: (
+    error: string,
+    errorObject?: any
+  ) => {
+    error: string
+    errorObject?: any
+  }
+  setSavedKeysReauthStoredSuccess: (
+    security: {
+      email: string | null
+      has_password: boolean
+      is_superadmin: boolean
+      name: string | null
+      saved_keys_reauth_choices?: number[] | undefined
+      saved_keys_reauth_seconds: number
+    } | null,
+    payload?: {
+      seconds: number
+    }
+  ) => {
+    security: {
+      email: string | null
+      has_password: boolean
+      is_superadmin: boolean
+      name: string | null
+      saved_keys_reauth_choices?: number[] | undefined
+      saved_keys_reauth_seconds: number
+    } | null
+    payload?: {
+      seconds: number
+    }
+  }
   setSignOutError: (error: string | null) => {
     error: string | null
   }
@@ -200,8 +280,11 @@ export const securityLogic = kea<securityLogicType>([
     setSignOutError: (error: string | null) => ({ error }),
     setDeleteOpen: (open: boolean) => ({ open }),
     setDeleteError: (error: string | null) => ({ error }),
+    setSavedKeysReauth: (seconds: number, options: { resumed?: boolean } = {}) => ({ seconds, options }),
+    setSavedKeysReauthSaving: (saving: boolean) => ({ saving }),
+    setSavedKeysReauthError: (error: string | null) => ({ error }),
   }),
-  loaders(() => ({
+  loaders(({ values }) => ({
     security: [
       null as AccountSecurity | null,
       {
@@ -211,6 +294,10 @@ export const securityLogic = kea<securityLogicType>([
             throw new Error('Failed to load the account')
           }
           return (await response.json()) as AccountSecurity
+        },
+        // What PUT /api/account/security answered, kept without a reload.
+        setSavedKeysReauthStored: ({ seconds }: { seconds: number }) => {
+          return values.security ? { ...values.security, saved_keys_reauth_seconds: seconds } : null
         },
       },
     ],
@@ -253,6 +340,19 @@ export const securityLogic = kea<securityLogicType>([
       false,
       {
         setDeleteOpen: (_, { open }) => open,
+      },
+    ],
+    savedKeysReauthSaving: [
+      false,
+      {
+        setSavedKeysReauthSaving: (_, { saving }) => saving,
+      },
+    ],
+    savedKeysReauthError: [
+      null as string | null,
+      {
+        setSavedKeysReauthError: (_, { error }) => error,
+        setSavedKeysReauth: () => null,
       },
     ],
     deleteError: [
@@ -357,6 +457,32 @@ export const securityLogic = kea<securityLogicType>([
       }
       actions.setSignOutState('idle')
     },
+    // How long a sign-in lets the preview read the saved service keys. Asking
+    // less often is itself a sudo-mode action (the route answers
+    // reauth_required), so a stale session goes through /login/reauth and the
+    // choice is replayed on return.
+    setSavedKeysReauth: async ({ seconds, options }) => {
+      actions.setSavedKeysReauthSaving(true)
+      try {
+        const response = await apiCall('/api/account/security', 'PUT', { saved_keys_reauth_seconds: seconds })
+        const payload = await readJsonPayload(response)
+        if (response.ok) {
+          actions.setSavedKeysReauthStored({ seconds })
+        } else if (
+          options.resumed ||
+          !redirectToReauthIfRequired(response, payload, `${savedKeysResumePrefix}${seconds}`)
+        ) {
+          actions.setSavedKeysReauthError(
+            isReauthRequiredPayload(payload)
+              ? 'Confirm it is you to ask less often.'
+              : describeHttpError(response.status)
+          )
+        }
+      } catch {
+        actions.setSavedKeysReauthError('Could not save that. Try again in a moment.')
+      }
+      actions.setSavedKeysReauthSaving(false)
+    },
     setDeleteOpen: ({ open }) => {
       if (!open) {
         actions.resetDeleteAccount()
@@ -367,8 +493,17 @@ export const securityLogic = kea<securityLogicType>([
     actions.loadSecurity()
     // Back from /login/reauth: the user already pressed the button before
     // the detour, so finish it without asking again.
-    if (takePendingReauthAction(signOutResumeAction)) {
+    // One stash for the page: either the sign-out or a saved-keys choice.
+    const resumed = takePendingReauthActionWhere(
+      (action) => action === signOutResumeAction || action.startsWith(savedKeysResumePrefix)
+    )
+    if (resumed === signOutResumeAction) {
       actions.signOutEverywhere({ resumed: true })
+    } else if (resumed) {
+      const seconds = Number(resumed.slice(savedKeysResumePrefix.length))
+      if (Number.isFinite(seconds)) {
+        actions.setSavedKeysReauth(seconds, { resumed: true })
+      }
     }
   }),
 ])

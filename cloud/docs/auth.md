@@ -299,7 +299,15 @@ standard sign-in holds the account to: sudo mode is "prove it again", not
   all through an editing session (fifteen minutes would mean re-proving
   while building a scene). The masked `GET /api/settings` is not gated; the
   preview surfaces degrade to "no saved keys" with a link to `/login/reauth`
-  rather than failing.
+  rather than failing, and a second link to the Security page's "Saved keys
+  in the scene preview" (`/account/security#saved-keys`), where the owner
+  picks the reveal's window: two hours (the default), a day, a week, or only
+  at sign-in (`accounts.saved_keys_reauth_seconds`, migration 0084, 0 = no
+  window; `savedKeysRevealMaxAge` in `recent-auth.ts`). `PUT
+  /api/account/security` sets it, from a browser session only; asking more
+  often is free, asking less often is itself on the 15-minute window, or a
+  lifted cookie could turn the gate off and then read the keys. Audited as
+  `account.saved_keys_reauth_changed`.
 
 Routes call `requireRecentAuth(db, accountId)` right after `readSession()`;
 pages call `hasRecentAuth(db)`. The client components behind those buttons

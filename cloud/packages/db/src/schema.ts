@@ -75,6 +75,10 @@ export const accounts = pgTable("accounts", {
   // subject (see account_identities). Never use this column for account lookup
   // or recovery decisions; it is a display/contact snapshot only.
   primaryEmail: text("primary_email"),
+  // How long a sign-in lets the preview read the saved service keys before it
+  // asks again (migration 0084, recent-auth.ts savedKeysRevealMaxAge). Null =
+  // the default two hours; 0 = as long as the session lasts.
+  savedKeysReauthSeconds: integer("saved_keys_reauth_seconds"),
   // Verified publisher: superadmin-granted trust mark. Today its only consumer
   // is the AI chat's store-catalog tool, which recommends public scenes from
   // verified publishers only. Null = not verified.

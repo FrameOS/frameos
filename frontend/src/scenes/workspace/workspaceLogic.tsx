@@ -109,24 +109,6 @@ export function sceneChildExpansionPath(sceneId: string): string {
   return `scene-children:${sceneId}`
 }
 
-export type SceneDependencyGroupingSurface = 'overview' | 'split' | 'schedule'
-
-export function sceneDependencyGroupingDisabledPath(surface: SceneDependencyGroupingSurface): string {
-  return `scene-dependency-grouping-disabled:${surface}`
-}
-
-export function sceneDependencyGroupingDisabledKey(frameId: FrameId, surface: SceneDependencyGroupingSurface): string {
-  return frameAssetFolderExpansionKey(frameId, sceneDependencyGroupingDisabledPath(surface))
-}
-
-export function sceneDependencyGroupingIsEnabled(
-  expansion: Record<string, boolean>,
-  frameId: FrameId,
-  surface: SceneDependencyGroupingSurface
-): boolean {
-  return !expansion[sceneDependencyGroupingDisabledKey(frameId, surface)]
-}
-
 // NEVER a number parse: frame ids are opaque (the backend numbers frames, the
 // cloud keys them by uuid). Number()-ing the `?frameId=` of a cloud drawer URL
 // gave null, so applyDrawerFromSearch closed every drawer the moment its own

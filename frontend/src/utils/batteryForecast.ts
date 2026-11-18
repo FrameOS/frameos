@@ -1,5 +1,8 @@
 import type { FrameType, MetricsType } from '../types'
 import { withoutBatteryMisreads } from './batteryMisreads'
+import { presetWakeCheckSeconds } from './presetSleep'
+import { sceneRefreshSeconds } from './refreshInterval'
+import { sceneIdsRefer } from './systemScenes'
 
 /**
  * What a frame's battery has been doing and how long it will last.
@@ -652,4 +655,39 @@ export function formatRemaining(hours: number): string {
   }
   const months = Math.round(days / 30)
   return `about ${months} month${months === 1 ? '' : 's'}`
+}
+
+export interface FrameWakeSettings {
+  /** Seconds between the wakes that only fetch commands ("Check for commands while sleeping"); null when off. */
+  checkInSeconds: number | null
+  /** The scene showing's seconds between renders; null when the scene is not known. */
+  renderSeconds: number | null
+}
+
+function deviceConfigNumber(frame: FrameType, camel: string, snake: string): number | undefined {
+  const config = (frame.device_config ?? {}) as Record<string, unknown>
+  const value = Number(config[camel] ?? config[snake])
+  return Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * What the owner set, beside what the battery popup measured: how often a
+ * sleeping frame checks in for commands (the cloud's `wake_check_seconds`,
+ * else the board's preset; a backend's `device_config`) and how often the
+ * scene showing re-renders (its refresh interval, as installed).
+ */
+export function frameWakeSettings(frame: FrameType): FrameWakeSettings {
+  const checkIn =
+    frame.wake_check_seconds ??
+    deviceConfigNumber(frame, 'wakeCheckSeconds', 'wake_check_seconds') ??
+    presetWakeCheckSeconds(frame.hardware?.hardwarePreset)
+  const activeSceneId = frame.active_scene_id
+  const scene = activeSceneId
+    ? frame.scenes?.find((candidate) => sceneIdsRefer(candidate.id, activeSceneId))
+    : undefined
+  const render = scene ? sceneRefreshSeconds(scene) : 0
+  return {
+    checkInSeconds: checkIn && checkIn > 0 ? checkIn : null,
+    renderSeconds: render > 0 ? render : null,
+  }
 }

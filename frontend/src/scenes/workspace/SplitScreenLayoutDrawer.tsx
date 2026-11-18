@@ -51,20 +51,13 @@ import {
   setFrameosSplitLeafDragData,
 } from './sceneDrag'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
-import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
   buildSceneDependencyEntries,
   buildSceneDependencyGraph,
-  flatSceneDependencyEntries,
   sortScenesAlphabetically,
 } from './sceneDependencyGrouping'
 import { splitScreenLayoutLogic } from './splitScreenLayoutLogic'
-import {
-  sceneChildExpansionKey,
-  sceneChildExpansionPath,
-  sceneDependencyGroupingIsEnabled,
-  workspaceLogic,
-} from './workspaceLogic'
+import { sceneChildExpansionKey, sceneChildExpansionPath, workspaceLogic } from './workspaceLogic'
 import { DEFAULT_REFRESH_INTERVAL_SECONDS, sceneRefreshSeconds, sceneStateFields } from '../../utils/refreshInterval'
 
 const DEFAULT_SPLIT_SCENE_NAME = 'Split screen'
@@ -200,17 +193,14 @@ function SceneSourceStrip({
     ? scenes.filter((scene) => `${scene.name || ''} ${scene.id}`.toLowerCase().includes(searchTerm))
     : scenes
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(scenes)
-  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'split')
-  const sceneEntries = groupingEnabled
-    ? buildSceneDependencyEntries({
-        childrenBySceneId,
-        frameId: frame.id,
-        matchingSceneIds: searchTerm ? new Set(filteredScenes.map((scene) => scene.id)) : null,
-        sceneById,
-        sceneChildExpansion: frameAssetFolderExpansion,
-        scenes,
-      })
-    : flatSceneDependencyEntries(filteredScenes)
+  const sceneEntries = buildSceneDependencyEntries({
+    childrenBySceneId,
+    frameId: frame.id,
+    matchingSceneIds: searchTerm ? new Set(filteredScenes.map((scene) => scene.id)) : null,
+    sceneById,
+    sceneChildExpansion: frameAssetFolderExpansion,
+    scenes,
+  })
 
   return (
     <div className="min-w-0">
@@ -223,7 +213,6 @@ function SceneSourceStrip({
           placeholder="Search"
           className="frameos-form-control h-7 min-w-0 flex-1 rounded-md border px-2 text-xs font-medium outline-none transition focus:ring-1 focus:ring-blue-400 sm:max-w-44"
         />
-        <SceneDependencyFormatMenu frameId={frame.id} surface="split" className="!h-7 !w-7" />
       </div>
       {scenes.length === 0 ? (
         <div className="frameos-muted frameos-inset rounded-lg border px-3 py-3 text-center text-xs font-semibold">
@@ -236,7 +225,7 @@ function SceneSourceStrip({
       ) : (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {sceneEntries.map(({ scene, key, nested }) => {
-            const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+            const childSceneCount = childrenBySceneId.get(scene.id)?.length ?? 0
             const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
             return (
               <div key={key} className="relative w-36 shrink-0 sm:w-32">

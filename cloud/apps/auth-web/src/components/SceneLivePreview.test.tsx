@@ -170,6 +170,33 @@ describe("SceneLivePreviewPanel embedded", () => {
   });
 });
 
+describe("SceneLivePreviewPanel worker", () => {
+  // A backend behind Home Assistant ingress serves the SPA, and the runtime
+  // with it, under /api/hassio_ingress/<token>/: a bare /frameos-wasm/ asked
+  // Home Assistant for the worker ("FrameOS preview worker failed to load").
+  it("is loaded from under the page's ingress path", async () => {
+    const appWindow = window as Window & { FRAMEOS_APP_CONFIG?: { ingress_path: string } };
+    appWindow.FRAMEOS_APP_CONFIG = { ingress_path: "/api/hassio_ingress/tok/" };
+    try {
+      render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+      await waitFor(() => expect(previews).toHaveLength(1));
+      expect((previews[0]!.options as unknown as { workerUrl: string }).workerUrl).toBe(
+        "/api/hassio_ingress/tok/frameos-wasm/preview-worker.js",
+      );
+    } finally {
+      delete appWindow.FRAMEOS_APP_CONFIG;
+    }
+  });
+
+  it("is root-absolute on the store's own pages", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    expect((previews[0]!.options as unknown as { workerUrl: string }).workerUrl).toBe(
+      "/frameos-wasm/preview-worker.js",
+    );
+  });
+});
+
 describe("SceneLivePreviewPanel memory limit", () => {
   it("is off by default, and the device picker waits behind its checkbox", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);

@@ -31,18 +31,8 @@ import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from '../../../workspace/sceneDrag'
 import { SceneDependencyConnector } from '../../../workspace/SceneDependencyConnector'
-import { SceneDependencyFormatMenu } from '../../../workspace/SceneDependencyFormatMenu'
-import {
-  buildSceneDependencyEntries,
-  buildSceneDependencyGraph,
-  flatSceneDependencyEntries,
-} from '../../../workspace/sceneDependencyGrouping'
-import {
-  sceneChildExpansionKey,
-  sceneChildExpansionPath,
-  sceneDependencyGroupingIsEnabled,
-  workspaceLogic,
-} from '../../../workspace/workspaceLogic'
+import { buildSceneDependencyEntries, buildSceneDependencyGraph } from '../../../workspace/sceneDependencyGrouping'
+import { sceneChildExpansionKey, sceneChildExpansionPath, workspaceLogic } from '../../../workspace/workspaceLogic'
 
 const weekDayOptions = [
   { value: 0, label: 'Every day' },
@@ -598,17 +588,14 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   const scenesById = Object.fromEntries(sortedScenes.map((scene) => [scene.id, scene]))
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(sortedScenes)
-  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frameId, 'schedule')
-  const scenePickerEntries = groupingEnabled
-    ? buildSceneDependencyEntries({
-        childrenBySceneId,
-        frameId,
-        matchingSceneIds: sceneSearch.trim() ? new Set(filteredScenes.map((scene) => scene.id)) : null,
-        sceneById,
-        sceneChildExpansion: frameAssetFolderExpansion,
-        scenes: sortedScenes,
-      })
-    : flatSceneDependencyEntries(filteredScenes)
+  const scenePickerEntries = buildSceneDependencyEntries({
+    childrenBySceneId,
+    frameId,
+    matchingSceneIds: sceneSearch.trim() ? new Set(filteredScenes.map((scene) => scene.id)) : null,
+    sceneById,
+    sceneChildExpansion: frameAssetFolderExpansion,
+    scenes: sortedScenes,
+  })
 
   const dragIsInsidePanel = (event: DragEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -670,7 +657,6 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
             <div className="frame-tool-muted text-xs">
               {filteredScenes.length}/{sortedScenes.length}
             </div>
-            <SceneDependencyFormatMenu frameId={frameId} surface="schedule" />
           </div>
         </div>
         {scenePickerEntries.length ? (
@@ -682,7 +668,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
             )}
           >
             {scenePickerEntries.map(({ scene, key, nested }) => {
-              const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+              const childSceneCount = childrenBySceneId.get(scene.id)?.length ?? 0
               const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frameId, scene.id)]
               return (
                 <SceneScheduleCard
