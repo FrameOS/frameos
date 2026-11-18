@@ -1,0 +1,227 @@
+[
+  {
+    "id": "download-to-assets",
+    "name": "Download to assets",
+    "settings": {
+      "category": "Tools & utilities",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#eef1f4",
+      "windowSize": "800x480",
+      "icon": "M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"
+    },
+    "fields": [
+      {
+        "name": "urls",
+        "label": "Addresses",
+        "type": "text",
+        "rows": 6,
+        "value": "https://raw.githubusercontent.com/FrameOS/frameos/main/README.md -> FrameOS readme.md",
+        "placeholder": "https://example.com/photo.jpg",
+        "hint": "One web address a line. Add -> and a name to save it under that name: https://example.com/a.jpg -> Garden.jpg. Lines starting with # are left out.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "folder",
+        "label": "Folder in the assets",
+        "type": "string",
+        "value": "Downloads",
+        "hint": "Made when the first file comes in. Empty for the assets folder itself.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "existing",
+        "label": "A file that is already there",
+        "type": "select",
+        "value": "skip",
+        "options": [
+          {
+            "value": "skip",
+            "label": "Skip it"
+          },
+          {
+            "value": "overwrite",
+            "label": "Replace it"
+          },
+          {
+            "value": "rename",
+            "label": "Keep both: number the new one"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "chunkKb",
+        "label": "Chunk size",
+        "type": "select",
+        "value": "64",
+        "options": [
+          {
+            "value": "16",
+            "label": "16 KB"
+          },
+          {
+            "value": "64",
+            "label": "64 KB (safe on an ESP32)"
+          },
+          {
+            "value": "256",
+            "label": "256 KB"
+          },
+          {
+            "value": "1024",
+            "label": "1 MB (a Raspberry Pi)"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "maxMb",
+        "label": "Largest file",
+        "type": "select",
+        "value": "100",
+        "options": [
+          {
+            "value": "10",
+            "label": "10 MB"
+          },
+          {
+            "value": "100",
+            "label": "100 MB"
+          },
+          {
+            "value": "1000",
+            "label": "1 GB"
+          },
+          {
+            "value": "0",
+            "label": "No limit"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "autoDownload",
+        "label": "Download new addresses by themselves",
+        "type": "boolean",
+        "value": "false",
+        "hint": "Each address in the list is downloaded once, when the scene next renders. Change a line to download it again.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "downloads",
+        "label": "Downloads",
+        "type": "json",
+        "value": "",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "downloadToAssets": {
+        "name": "Download to assets",
+        "category": "data",
+        "description": "Downloads files from the web into the frame's assets folder a chunk at a time, and lists the folder's files to delete.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Download to assets\",\n  \"category\": \"data\",\n  \"description\": \"Downloads files from the web into the frame's assets folder a chunk at a time, and lists the folder's files to delete.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n",
+          "app.tsx": "// @name Download to assets\n// @background #eef1f4\n// @refresh 3600\n// Downloads files from the web into the frame's assets folder, where other\n// scenes (a gallery, the Files scene, a font) find them. The addresses are the\n// public `urls` field, one a line (`https://… -> name.ext` to pick the name),\n// and can be typed on the frame too. A download goes a chunk at a time, so a\n// big file works on an ESP32: a few chunks a render, and renders follow each\n// other until it is done. The folder's files are listed beside the queue, to\n// delete with a confirm.\nimport { parseLine, cleanFolder, joinPath, freeName, sizeText, ofText, timeLeft, step } from './download'\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: 'bg-[#eef1f4] text-[#1c2533]',\n    muted: 'text-[#5d6b7e]',\n    card: 'bg-white',\n    field: 'bg-white focus:bg-[#f0f7ff] placeholder:text-[#8a96a8]',\n    button: 'bg-[#dfe5ec] text-[#1c2533] active:bg-[#cdd6e0]',\n    primary: 'bg-[#1d5c96] text-white active:bg-[#174a79]',\n    remove: 'bg-[#b42318] text-white active:bg-[#912018]',\n    error: 'text-[#b42318]',\n    ok: 'text-[#17714a]',\n    track: 'bg-[#dfe5ec]',\n    fill: 'bg-[#1d5c96]',\n    heading: 'text-[#5d6b7e]',\n    icon: 'text-[#1d5c96]',\n  },\n  high: {\n    page: 'bg-white text-black',\n    muted: 'text-black',\n    card: 'bg-white border-2 border-black',\n    field: 'bg-white border-2 border-black',\n    button: 'bg-white text-black border-2 border-black',\n    primary: 'bg-black text-white',\n    remove: 'bg-black text-white',\n    error: 'text-black font-bold',\n    ok: 'text-black',\n    track: 'bg-white border-2 border-black',\n    fill: 'bg-black',\n    heading: 'text-black',\n    icon: 'text-black',\n  },\n}\n\nconst CHUNK_SIZES = [16, 64, 256, 1024]\nconst baseName = (path) => String(path || '').split('/').pop()\n\nfunction readDownloads(app) {\n  let value = app.state.downloads\n  if (typeof value === 'string') {\n    try {\n      value = JSON.parse(value)\n    } catch (e) {\n      value = null\n    }\n  }\n  if (!value || typeof value !== 'object') value = {}\n  return {\n    queue: Array.isArray(value.queue) ? value.queue.filter((q) => typeof q === 'string') : [],\n    force: Array.isArray(value.force) ? value.force.filter((q) => typeof q === 'string') : [],\n    active: value.active && typeof value.active === 'object' && value.active.line ? value.active : null,\n    results: value.results && typeof value.results === 'object' ? value.results : {},\n  }\n}\n\nconst flag = (value, fallback) => (value === undefined || value === null || value === '' ? fallback : value === true || value === 'true')\n\nfunction settingsOf(app) {\n  const chunkKb = Number(app.state.chunkKb)\n  const maxMb = Number(app.state.maxMb)\n  return {\n    folder: cleanFolder(app.state.folder ?? 'Downloads'),\n    existing: ['skip', 'overwrite', 'rename'].includes(app.state.existing) ? app.state.existing : 'skip',\n    chunk: (CHUNK_SIZES.includes(chunkKb) ? chunkKb : 64) * 1024,\n    maxBytes: maxMb > 0 ? maxMb * 1048576 : Number.MAX_SAFE_INTEGER,\n    auto: flag(app.state.autoDownload, false),\n  }\n}\n\n// The URLs field as lines, blank ones and #comments left out.\nconst linesOf = (text) =>\n  String(text || '')\n    .split('\\n')\n    .map((l) => l.trim())\n    .filter((l) => l && !l.startsWith('#'))\n\n// The next line of the queue made into a job, or a result when there is\n// nothing to download (a line that is not a URL, a file that is there).\n// A line asked for again (`force`) replaces its file when skipping is the rule.\nfunction startJob(line, settings, force) {\n  const parsed = parseLine(line)\n  if (parsed.error) return { job: null, result: { s: 'failed', error: parsed.error, at: Date.now() } }\n  let name = parsed.name\n  const there = frameos.assetExists(joinPath(settings.folder, name))\n  if (there && settings.existing === 'skip' && !force) return { job: null, result: { s: 'skipped', path: joinPath(settings.folder, name), at: Date.now() } }\n  if (there && settings.existing === 'rename') name = freeName(settings.folder, name)\n  const path = joinPath(settings.folder, name)\n  return { job: { line, url: parsed.url, path, offset: 0, retries: 0, chunks: 0, startedAt: Date.now() }, result: null }\n}\n\n// Downloads for a while: about a second on a fast screen, so its progress\n// shows as it goes, and half a minute on e-paper, where each picture is a\n// refresh. Returns the downloads as they are now.\nfunction work(downloads, settings, embedded, budgetMs) {\n  let { queue, force, active, results } = downloads\n  queue = queue.slice()\n  results = { ...results }\n  const began = Date.now()\n  const limits = { chunk: settings.chunk, maxBytes: settings.maxBytes, embedded }\n  // A download a restart cut short goes on from what is on the disk.\n  if (active && active.offset > 0) {\n    const size = frameos.assetSize(active.path)\n    if (size !== active.offset) active = { ...active, offset: size > 0 ? size : 0 }\n  }\n  while ((active || queue.length) && Date.now() - began < budgetMs) {\n    if (!active) {\n      const line = queue.shift()\n      const started = startJob(line, settings, force.includes(line))\n      force = force.filter((l) => l !== line)\n      if (started.result) results[line] = started.result\n      active = started.job\n      continue\n    }\n    const next = step(active, limits)\n    if (next.result) results[active.line] = { ...next.result, ms: Date.now() - active.startedAt }\n    active = next.job\n    // A failed chunk is tried again on the next render, not at once.\n    if (active && active.retries) break\n  }\n  return { queue, force, active, results }\n}\n\nconst Icon = ({ d, size, className }) => (\n  <svg className={`w-[${size}px] h-[${size}px] ${className || ''}`} viewBox=\"0 0 24 24\">\n    <path d={d} fill=\"currentColor\" />\n  </svg>\n)\nconst DOWNLOAD = 'M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z'\nconst FILE = 'M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z'\nconst BIN = 'M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z'\nconst CLOSE = 'M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z'\n\n// The folder's own files, by name, with their sizes. A runtime before\n// 2026.11.8 lists every file below: those in subfolders are left out.\nfunction filesIn(folder) {\n  const prefix = folder ? folder + '/' : ''\n  const list = frameos.listAssets(folder, { shallow: true }) || []\n  const files = []\n  for (const path of list) {\n    if (!path.startsWith(prefix) || path.endsWith('/')) continue\n    if (path.slice(prefix.length).includes('/')) continue\n    files.push({ path, name: path.slice(prefix.length), size: frameos.assetSize(path) })\n  }\n  files.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))\n  return files\n}\n\nexport function get(app, context) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  // Sizes are made for 800x480 (and 480x800) and grow or shrink with the canvas.\n  const z = Math.max(0.85, Math.min(2.5, Math.min(W, H) / 480, Math.max(W, H) / 800))\n  const px = (n) => Math.round(n * z)\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  const fast = app.frame.fast ?? !app.frame.paper\n  const embedded = app.frame.embedded === true\n  const settings = settingsOf(app)\n  const lines = linesOf(app.state.urls)\n\n  let downloads = readDownloads(app)\n  // Download new lines by themselves, when the settings say so.\n  if (settings.auto) {\n    const waiting = lines.filter((l) => !downloads.results[l] && !downloads.queue.includes(l) && !(downloads.active && downloads.active.line === l))\n    if (waiting.length) downloads = { ...downloads, queue: downloads.queue.concat(waiting) }\n  }\n  if (downloads.active || downloads.queue.length) {\n    downloads = work(downloads, settings, embedded, fast ? 1200 : 30000)\n    // Results for lines no longer in the field go.\n    const results = {}\n    for (const line of lines) if (downloads.results[line]) results[line] = downloads.results[line]\n    downloads = { ...downloads, results }\n    frameos.setState('downloads', downloads)\n    // Not done: draw again soon and go on.\n    if (downloads.active || downloads.queue.length) frameos.setNextSleep(fast ? 0.05 : 0.5)\n  }\n  const busy = !!(downloads.active || downloads.queue.length)\n\n  const draft = frameos.recall('draft') || ''\n  const asking = frameos.recall('asking') || ''\n  const save = (next) => frameos.setState('downloads', next)\n  const queueLines = (more, again) => {\n    const current = readDownloads(app)\n    const queue = current.queue.concat(more.filter((l) => !current.queue.includes(l) && !(current.active && current.active.line === l)))\n    const force = again ? current.force.concat(more.filter((l) => !current.force.includes(l))) : current.force\n    const results = { ...current.results }\n    for (const line of more) delete results[line]\n    save({ ...current, queue, force, results })\n  }\n  const addTyped = () => {\n    const line = (frameos.recall('draft') || '').trim()\n    if (!line) return\n    if (!lines.includes(line)) frameos.setState('urls', [...String(app.state.urls || '').split('\\n').filter((l) => l.trim()), line].join('\\n'))\n    frameos.remember('draft', '')\n    queueLines([line])\n  }\n  const stop = () => {\n    const current = readDownloads(app)\n    if (!current.active) return\n    if (current.active.offset > 0) frameos.deleteAsset(current.active.path)\n    save({\n      ...current,\n      active: null,\n      results: { ...current.results, [current.active.line]: { s: 'stopped', path: current.active.path, at: Date.now() } },\n    })\n  }\n  const removeLine = (line) => {\n    const current = readDownloads(app)\n    const queue = current.queue.filter((l) => l !== line)\n    const force = current.force.filter((l) => l !== line)\n    const results = { ...current.results }\n    delete results[line]\n    save({ ...current, queue, force, results })\n    frameos.setState('urls', String(app.state.urls || '').split('\\n').filter((l) => l.trim() !== line).join('\\n'))\n  }\n\n  const pending = lines.filter((l) => !downloads.results[l] && !downloads.queue.includes(l) && !(downloads.active && downloads.active.line === l))\n  const files = filesIn(settings.folder)\n  const portrait = H > W * 1.1\n  const wide = !portrait && W >= 700 * z\n\n  const Button = ({ label, onClick, kind, icon }) => (\n    <div\n      className={`shrink-0 h-[${px(46)}px] px-[${px(16)}px] rounded-[${px(12)}px] flex items-center justify-center gap-[${px(6)}px] text-[${px(17)}px] font-bold ${kind === 'primary' ? t.primary : kind === 'remove' ? t.remove : t.button}`}\n      onClick={onClick}\n    >\n      {icon ? <Icon d={icon} size={px(20)} /> : null}\n      {label}\n    </div>\n  )\n\n  // What a line of the queue shows under its name.\n  const statusOf = (line, host) => {\n    if (downloads.active && downloads.active.line === line) {\n      const a = downloads.active\n      const seconds = Math.max(1, (Date.now() - a.startedAt) / 1000)\n      const perSecond = a.offset / seconds\n      const again = a.lastError ? `. Trying again: ${a.lastError}` : ''\n      // With the size known (FrameOS 2026.11.12+ hands over the headers): how\n      // far along, and roughly how long is left at the speed so far.\n      if (typeof a.total === 'number' && a.total > 0) {\n        const share = Math.min(1, a.offset / a.total)\n        const left = a.offset > 0 ? timeLeft((a.total - a.offset) / perSecond) : ''\n        return {\n          text: `${ofText(a.offset, a.total)}, ${Math.floor(share * 100)}%${left ? `, ${left}` : ''}${again}`,\n          tone: a.lastError ? t.error : t.muted,\n          active: true,\n          share,\n        }\n      }\n      const rate = a.offset > 0 ? `, ${sizeText(Math.round(perSecond))}/s` : ''\n      return { text: `${sizeText(a.offset)} so far${rate}${again}`, tone: a.lastError ? t.error : t.muted, active: true, share: null }\n    }\n    if (downloads.queue.includes(line)) return { text: `Waiting, from ${host}`, tone: t.muted }\n    const r = downloads.results[line]\n    if (!r) return { text: `From ${host}`, tone: t.muted }\n    if (r.s === 'done') return { text: `Saved as ${baseName(r.path)}, ${sizeText(r.bytes || 0)}${r.whole ? ', sent whole' : ''}`, tone: t.ok }\n    if (r.s === 'skipped') return { text: `Skipped: ${baseName(r.path)} is there already`, tone: t.muted }\n    if (r.s === 'stopped') return { text: 'Stopped', tone: t.muted }\n    return { text: `Failed: ${r.error}`, tone: t.error }\n  }\n\n  const QueueRow = ({ line }) => {\n    const parsed = parseLine(line)\n    const host = parsed.url.replace(/^[a-z]+:\\/\\//i, '').split(/[/?#]/)[0] || parsed.url\n    const status = statusOf(line, host)\n    const r = downloads.results[line]\n    return (\n      <div className={`flex items-center gap-[${px(10)}px] rounded-[${px(14)}px] pl-[${px(14)}px] pr-[${px(8)}px] py-[${px(8)}px] ${t.card}`}>\n        <div className=\"flex-1 min-w-0 flex flex-col gap-[2px]\">\n          <span className={`truncate text-[${px(18)}px] font-semibold`}>{parsed.name || line}</span>\n          {status.active && status.share !== null ? (\n            <div className={`h-[${px(8)}px] my-[${px(3)}px] rounded-full ${t.track}`}>\n              <div className={`h-full rounded-full ${t.fill} w-[${Math.max(2, Math.round(status.share * 1000) / 10)}%]`} />\n            </div>\n          ) : status.active ? (\n            <div className={`flex gap-[${px(3)}px] h-[${px(8)}px] my-[${px(3)}px]`}>\n              {/* The size is not known until the end: the lit blocks move on with each chunk. */}\n              {Array.from({ length: 12 }, (_, i) => (\n                <div className={`flex-1 rounded-full ${i <= (downloads.active.chunks || 0) % 12 ? t.fill : t.track}`} />\n              ))}\n            </div>\n          ) : null}\n          <span className={`text-[${px(14)}px] ${status.tone === t.error ? 'line-clamp-3' : 'line-clamp-2'} ${status.tone}`}>{status.text}</span>\n        </div>\n        {status.active ? (\n          <Button label=\"Stop\" onClick={stop} />\n        ) : downloads.queue.includes(line) ? null : (\n          <Button\n            label={r && r.s !== 'done' && r.s !== 'skipped' ? 'Retry' : r ? 'Again' : 'Get'}\n            kind={r ? '' : 'primary'}\n            onClick={() => queueLines([line], !!r && (r.s === 'done' || r.s === 'skipped'))}\n          />\n        )}\n        {status.active ? null : (\n          <div className={`shrink-0 w-[${px(40)}px] h-[${px(46)}px] flex items-center justify-center ${t.muted}`} onClick={() => removeLine(line)}>\n            <Icon d={CLOSE} size={px(22)} />\n          </div>\n        )}\n      </div>\n    )\n  }\n\n  const FileRow = ({ file }) =>\n    asking === file.path ? (\n      <div className={`flex items-center gap-[${px(8)}px] rounded-[${px(14)}px] pl-[${px(14)}px] pr-[${px(6)}px] py-[${px(6)}px] ${t.card}`}>\n        <span className={`flex-1 min-w-0 truncate text-[${px(16)}px]`}>{`Delete ${file.name}?`}</span>\n        <Button label=\"Cancel\" onClick={() => frameos.remember('asking', '')} />\n        <Button\n          label=\"Delete\"\n          kind=\"remove\"\n          onClick={() => {\n            // A file still coming in is stopped first.\n            const current = readDownloads(app)\n            if (current.active && current.active.path === file.path) stop()\n            frameos.deleteAsset(file.path)\n            frameos.remember('asking', '')\n          }}\n        />\n      </div>\n    ) : (\n      <div className={`flex items-center gap-[${px(10)}px] h-[${px(58)}px] rounded-[${px(14)}px] pl-[${px(12)}px] pr-[${px(4)}px] ${t.card}`}>\n        <Icon d={FILE} size={px(24)} className={`shrink-0 ${t.icon}`} />\n        <span className={`flex-1 min-w-0 truncate text-[${px(17)}px]`}>{file.name}</span>\n        <span className={`shrink-0 text-[${px(14)}px] ${t.muted}`}>{file.size >= 0 ? sizeText(file.size) : ''}</span>\n        <div className={`shrink-0 w-[${px(46)}px] h-[${px(46)}px] flex items-center justify-center ${t.muted}`} onClick={() => frameos.remember('asking', file.path)}>\n          <Icon d={BIN} size={px(22)} />\n        </div>\n      </div>\n    )\n\n  const heading = (text, extra) => (\n    <div className={`flex items-center gap-[${px(8)}px] h-[${px(30)}px]`}>\n      <span className={`flex-1 min-w-0 truncate text-[${px(14)}px] font-bold uppercase ${t.heading}`}>{text}</span>\n      {extra}\n    </div>\n  )\n\n  const queueBox = (\n    <div className={`flex-1 min-h-0 min-w-0 flex flex-col gap-[${px(6)}px]`}>\n      {heading(\n        busy ? `Downloading, ${downloads.queue.length + (downloads.active ? 1 : 0)} to go` : `Addresses, ${lines.length}`,\n        pending.length > 1 && !busy ? (\n          <span className={`text-[${px(15)}px] font-bold underline`} onClick={() => queueLines(pending)}>\n            {`Get all ${pending.length}`}\n          </span>\n        ) : null,\n      )}\n      <div className=\"flex-1 min-h-0 overflow-y-auto\">\n        <div className={`flex flex-col gap-[${px(8)}px]`}>\n          {lines.length ? (\n            lines.map((line) => <QueueRow line={line} />)\n          ) : (\n            <span className={`text-[${px(16)}px] ${t.muted}`}>\n              {\"Type an address above, or list them in the scene's settings, one a line. Add -> name.ext after one to pick its name.\"}\n            </span>\n          )}\n        </div>\n      </div>\n    </div>\n  )\n\n  // Side by side, the two lists share the width; stacked, the files take what\n  // they need up to two fifths of the height, and the addresses the rest.\n  const filesH = Math.round(Math.min(H * 0.4, px(42) + Math.max(1, files.length) * px(66)))\n  const filesBox = (\n    <div className={`${wide ? 'flex-1' : `shrink-0 h-[${filesH}px]`} min-h-0 min-w-0 flex flex-col gap-[${px(6)}px]`}>\n      {heading(`In ${settings.folder || 'the assets folder'}, ${files.length} ${files.length === 1 ? 'file' : 'files'}`)}\n      <div className=\"flex-1 min-h-0 overflow-y-auto\">\n        <div className={`flex flex-col gap-[${px(8)}px]`}>\n          {files.length ? (\n            files.map((file) => <FileRow file={file} />)\n          ) : (\n            <span className={`text-[${px(16)}px] ${t.muted}`}>Nothing here yet.</span>\n          )}\n        </div>\n      </div>\n    </div>\n  )\n\n  return (\n    <div className={`flex flex-col w-full h-full gap-[${px(12)}px] p-[${px(18)}px] ${t.page}`}>\n      <div className={`flex items-center gap-[${px(10)}px]`}>\n        <Icon d={DOWNLOAD} size={px(34)} className={`shrink-0 ${t.icon}`} />\n        <div className=\"flex-1 min-w-0 flex flex-col\">\n          <span className={`text-[${px(26)}px] font-bold truncate`}>Download to assets</span>\n          <span className={`text-[${px(14)}px] ${t.muted} truncate`}>\n            {`Into ${settings.folder ? settings.folder + '/' : 'the assets folder'}, ${settings.chunk / 1024} KB at a time. ${\n              settings.existing === 'skip' ? 'Files already there are skipped.' : settings.existing === 'overwrite' ? 'Files already there are replaced.' : 'A file already there is kept, the new one numbered.'\n            }`}\n          </span>\n        </div>\n      </div>\n      <div className={`flex items-center gap-[${px(10)}px]`}>\n        <input\n          className={`flex-1 min-w-0 h-[${px(48)}px] px-[${px(14)}px] rounded-[${px(12)}px] text-[${px(17)}px] ${t.field}`}\n          value={draft}\n          placeholder=\"https://example.com/photo.jpg\"\n          onChange={(e) => frameos.remember('draft', e.target.value)}\n          onKeyDown={(e) => {\n            if (e.key === 'Enter') addTyped()\n          }}\n        />\n        <Button label=\"Download\" kind=\"primary\" icon={DOWNLOAD} onClick={addTyped} />\n      </div>\n      {wide ? (\n        <div className={`flex-1 min-h-0 flex gap-[${px(16)}px]`}>\n          {queueBox}\n          {filesBox}\n        </div>\n      ) : (\n        <div className={`flex-1 min-h-0 flex flex-col gap-[${px(12)}px]`}>\n          {queueBox}\n          {filesBox}\n        </div>\n      )}\n    </div>\n  )\n}\n",
+          "download.ts": "// Downloading a file into the assets folder a chunk at a time.\n//\n// A download asks for one range of bytes at a time (Range: bytes=a-b). Where\n// frameos.httpRequest hands over the headers (FrameOS 2026.11.12+), the first\n// answer's content-range says the file's size: the progress is a percentage\n// and the download stops exactly there. Before that it has the status and the\n// body alone, and knows it has the whole file when a range comes back shorter\n// than asked (206), or the server says the range starts past the end (416).\n// A server that ignores Range answers 200 with the whole file at once.\n//\n// The state of the downloads is one private json field (`downloads`):\n// {\n//   queue: [line, ...],                 lines waiting their turn\n//   force: [line, ...],                 of those, the ones asked for again: replaced if there\n//   active: { line, url, path, offset, total, retries, chunks, startedAt } | null,\n//   results: { [line]: { s: 'done' | 'skipped' | 'failed' | 'stopped', path, bytes, error, whole, at } },\n// }\n// A line is the text of a line of the URLs field: `https://… -> name.ext`.\n\n// A line's URL and the file name it asks for, or what is wrong with it.\nexport function parseLine(line) {\n  const text = String(line || '').trim()\n  const arrow = text.indexOf('->')\n  const url = (arrow >= 0 ? text.slice(0, arrow) : text).trim()\n  const asked = arrow >= 0 ? text.slice(arrow + 2).trim() : ''\n  if (!/^https?:\\/\\/[^\\s/]+/i.test(url)) return { url, name: '', error: 'Not a web address: it starts with http:// or https://' }\n  if (asked && /[\\/\\\\]/.test(asked)) return { url, name: '', error: 'The name after -> is a file name, not a folder' }\n  const name = cleanName(asked || nameFromUrl(url))\n  return { url, name, error: '' }\n}\n\n// The last part of the URL's path, decoded: what the file is called there.\nexport function nameFromUrl(url) {\n  const path = url.replace(/^[a-z]+:\\/\\/[^/]+/i, '').split(/[?#]/)[0]\n  const last = path.split('/').filter(Boolean).pop() || ''\n  try {\n    return decodeURIComponent(last)\n  } catch (e) {\n    return last\n  }\n}\n\n// A file name the assets folder takes: letters, digits and a few signs, no\n// folder in it, no dot at the start (a hidden file), at most 96 characters\n// with the extension kept.\nexport function cleanName(name) {\n  let clean = String(name || '')\n    .replace(/[\\/\\\\]/g, '_')\n    .replace(/[^A-Za-z0-9 ._()+,=@-]/g, '_')\n    .replace(/_+/g, '_')\n    .replace(/\\s+/g, ' ')\n    .replace(/^[\\s.]+/, '')\n    .trim()\n  if (!clean || clean === '_') clean = 'download'\n  if (clean.length > 96) {\n    const dot = clean.lastIndexOf('.')\n    const ext = dot > 0 && clean.length - dot <= 8 ? clean.slice(dot) : ''\n    clean = clean.slice(0, 96 - ext.length) + ext\n  }\n  return clean\n}\n\n// The folder setting as a path in the assets folder: no \"..\", no hidden\n// folders, no slashes at the ends. Empty is the assets folder itself.\nexport function cleanFolder(folder) {\n  return String(folder ?? '')\n    .split(/[\\/\\\\]/)\n    .map((part) => part.trim().replace(/^\\.+/, '').replace(/[^A-Za-z0-9 ._()+,=@-]/g, '_'))\n    .filter((part) => part && part !== '_')\n    .join('/')\n}\n\nexport const joinPath = (folder, name) => (folder ? `${folder}/${name}` : name)\n\n// \"report (2).pdf\" for the first name not taken.\nexport function freeName(folder, name) {\n  if (!frameos.assetExists(joinPath(folder, name))) return name\n  const dot = name.lastIndexOf('.')\n  const stem = dot > 0 ? name.slice(0, dot) : name\n  const ext = dot > 0 ? name.slice(dot) : ''\n  for (let n = 2; n < 1000; n++) {\n    const candidate = `${stem} (${n})${ext}`\n    if (!frameos.assetExists(joinPath(folder, candidate))) return candidate\n  }\n  return `${stem} (${Date.now()})${ext}`\n}\n\n// Bytes in a base64 string.\nexport function base64Bytes(b64) {\n  const s = String(b64 || '')\n  if (!s.length) return 0\n  const padding = s.endsWith('==') ? 2 : s.endsWith('=') ? 1 : 0\n  return Math.floor((s.length * 3) / 4) - padding\n}\n\nexport function sizeText(bytes) {\n  if (bytes < 1024) return `${bytes} B`\n  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`\n  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`\n  return `${(bytes / 1073741824).toFixed(1)} GB`\n}\n\n// \"2.4 of 8 MB\": both in the total's unit.\nexport function ofText(done, total) {\n  const units = [\n    [1073741824, 'GB'],\n    [1048576, 'MB'],\n    [1024, 'KB'],\n  ]\n  const [size, unit] = units.find(([u]) => total >= u) || [1, 'B']\n  const num = (n) => {\n    const v = n / size\n    return size === 1 ? String(Math.round(v)) : v < 10 ? String(Number(v.toFixed(1))) : String(Math.round(v))\n  }\n  return `${num(done)} of ${num(total)} ${unit}`\n}\n\n// \"about 2 min left\", from seconds.\nexport function timeLeft(seconds) {\n  if (!Number.isFinite(seconds) || seconds < 0) return ''\n  if (seconds < 5) return 'almost done'\n  if (seconds < 60) return `about ${Math.ceil(seconds / 5) * 5} s left`\n  if (seconds < 3600) return `about ${Math.round(seconds / 60)} min left`\n  const hours = Math.floor(seconds / 3600)\n  return `about ${hours} h ${Math.round((seconds - hours * 3600) / 60)} min left`\n}\n\nconst STATUS_WORDS = {\n  400: 'bad request',\n  401: 'a login is needed',\n  403: 'not allowed',\n  404: 'not found',\n  410: 'gone',\n  429: 'too many requests, try later',\n  500: 'server error',\n  502: 'bad gateway',\n  503: 'unavailable, try later',\n  504: 'gateway timeout',\n}\n\n// An error from the HTTP client, said plainly.\nfunction plainError(error) {\n  const text = String(error || 'no answer')\n  const exceeded = /exceeded (\\d+) bytes/.exec(text)\n  if (exceeded) return `The server sent the whole file at once, and it is bigger than the ${sizeText(Number(exceeded[1]))} this frame takes in one answer`\n  if (/Local network access is off/.test(text)) return text\n  if (/timed? ?out|timeout/i.test(text)) return 'The server took too long to answer'\n  return text.length > 160 ? text.slice(0, 157) + '...' : text\n}\n\n// The file's whole size as the answer says it, or null where it does not:\n// \"bytes 0-65535/8388608\" in content-range on a 206 (or \"bytes */8388608\" on\n// a 416), content-length on a 200. FrameOS 2026.11.12 hands httpRequest's\n// headers over (lower-case names); before that `headers` is undefined, and a\n// download finds its end by a chunk that comes back short.\nexport function totalOf(res) {\n  const headers = res && res.headers\n  if (!headers || typeof headers !== 'object') return null\n  if (res.status === 206 || res.status === 416) {\n    const m = /\\/\\s*(\\d+)\\s*$/.exec(String(headers['content-range'] || ''))\n    return m ? Number(m[1]) : null\n  }\n  if (res.status === 200 && headers['content-length'] !== undefined && !headers['content-encoding']) {\n    const n = Number(headers['content-length'])\n    return Number.isFinite(n) && n >= 0 ? n : null\n  }\n  return null\n}\n\n// The most a frame with little memory takes as one whole answer: its body\n// becomes a JS string (a third bigger in base64) beside the runtime's copy.\nconst WHOLE_ON_EMBEDDED = 1024 * 1024\n\n// Whether the server sends parts of a file, and how big it is, asked without\n// the body ever becoming a JS string: `find` keeps it in the runtime, and a\n// needle that is never there gives back only the status (and the headers). A\n// frame with little memory asks this before the first chunk, so a server that\n// ignores Range cannot hand it a file too big for its JavaScript.\nexport function probeRanges(url) {\n  const res = frameos.httpRequest(url, {\n    headers: { Range: 'bytes=0-0' },\n    find: '\\u0001frameos-range-probe\\u0002',\n    findLimit: 1,\n    findLength: 1,\n    timeoutMs: 30000,\n  })\n  return res\n}\n\n// One step of a download: a chunk fetched and written. Returns the job as it\n// is now, and when it is over, `result` (what the queue shows for the line).\n// `limits` = { chunk, maxBytes, embedded }. `job.total` is the file's size\n// once an answer said it (null until then, and always on older frames).\nexport function step(job, limits) {\n  const fail = (error, keepFile) => {\n    if (!keepFile && job.offset > 0) frameos.deleteAsset(job.path)\n    return { job: null, result: { s: 'failed', path: job.path, bytes: 0, error, at: Date.now() } }\n  }\n  const NOT_IN_PARTS =\n    'This server sends only whole files, and this frame downloads in parts to fit its memory. A Raspberry Pi frame can get it.'\n  const TOO_BIG = `Bigger than the ${sizeText(limits.maxBytes)} set as the largest file in the scene's settings`\n  const answered = (status) => `The server answered ${status}${STATUS_WORDS[status] ? ` (${STATUS_WORDS[status]})` : ''}`\n  const retry = (error) => {\n    // Too big for one answer is not worth asking again.\n    if (/exceeded \\d+ bytes/.test(String(error))) return fail(limits.embedded ? NOT_IN_PARTS : plainError(error), false)\n    const retries = (job.retries || 0) + 1\n    if (retries >= 3) return fail(plainError(error), false)\n    return { job: { ...job, retries, lastError: plainError(error) }, result: null }\n  }\n  const done = (bytes, whole) => ({ job: null, result: { s: 'done', path: job.path, bytes, whole: !!whole, at: Date.now() } })\n  const write = (b64) => (job.offset === 0 ? frameos.writeAsset(job.path, b64) : frameos.appendAsset(job.path, b64))\n  const CANNOT_WRITE = 'The frame could not write the file: it needs permission to write the assets folder, and room on its disk'\n\n  if (limits.embedded && !job.probed) {\n    const probe = probeRanges(job.url)\n    if (!probe || probe.error || !probe.status) return retry(probe && probe.error)\n    const total = totalOf(probe)\n    if (probe.status === 200) {\n      // The whole file at once: only when its size is known and small\n      // enough for this frame's memory.\n      if (total === null) return fail(NOT_IN_PARTS, true)\n      if (total > WHOLE_ON_EMBEDDED)\n        return fail(\n          `This server sends only whole files, and this one (${sizeText(total)}) is more than the ${WHOLE_ON_EMBEDDED / 1048576} MB this frame takes in one piece. A Raspberry Pi frame can get it.`,\n          true,\n        )\n      if (total > limits.maxBytes) return fail(TOO_BIG, true)\n      job = { ...job, probed: true, total }\n    } else if (probe.status === 206 || probe.status === 416) {\n      if (total !== null && total > limits.maxBytes) return fail(TOO_BIG, true)\n      job = { ...job, probed: true, total: total ?? job.total ?? null }\n    } else {\n      return fail(answered(probe.status), true)\n    }\n  }\n\n  // Nothing left to ask for: the size said so (an empty file, or a chunk\n  // that ended exactly at the end).\n  if (typeof job.total === 'number' && job.offset >= job.total) {\n    if (job.offset === 0) frameos.writeAsset(job.path, '')\n    return done(job.offset, false)\n  }\n\n  const last = typeof job.total === 'number' ? Math.min(job.offset + limits.chunk, job.total) - 1 : job.offset + limits.chunk - 1\n  const res = frameos.httpRequest(job.url, {\n    headers: { Range: `bytes=${job.offset}-${last}` },\n    base64: true,\n    timeoutMs: 30000,\n  })\n  if (!res || res.error || !res.status) return retry(res && res.error)\n\n  if (res.status === 206) {\n    const total = job.total ?? totalOf(res)\n    if (total !== null && total > limits.maxBytes) return fail(TOO_BIG, false)\n    const b64 = res.bodyBase64 || ''\n    const bytes = base64Bytes(b64)\n    if (job.offset + bytes > limits.maxBytes) return fail(TOO_BIG, false)\n    if (bytes > 0) {\n      if (!write(b64)) return fail(CANNOT_WRITE, false)\n    } else if (job.offset === 0) {\n      frameos.writeAsset(job.path, '')\n    }\n    const offset = job.offset + bytes\n    // The end: where the size says, else a chunk shorter than asked.\n    if (total !== null ? offset >= total || bytes === 0 : bytes < limits.chunk) return done(offset, false)\n    return { job: { ...job, offset, total, retries: 0, chunks: (job.chunks || 0) + 1, lastError: '' }, result: null }\n  }\n  if (res.status === 200) {\n    // The server ignored the range and sent the whole file.\n    const b64 = res.bodyBase64 || ''\n    const bytes = base64Bytes(b64)\n    if (bytes > limits.maxBytes) return fail(TOO_BIG, false)\n    if (!frameos.writeAsset(job.path, b64)) return fail(CANNOT_WRITE, false)\n    return done(bytes, true)\n  }\n  if (res.status === 416) {\n    // The range starts past the end: the last chunk was exactly a chunk long.\n    if (job.offset === 0) frameos.writeAsset(job.path, '')\n    return done(job.offset, false)\n  }\n  return fail(answered(res.status), false)\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -126
+        },
+        "data": {
+          "keyword": "downloadToAssets",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "customEvents": []
+  }
+]

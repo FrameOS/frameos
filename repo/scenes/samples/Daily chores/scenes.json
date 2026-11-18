@@ -1,0 +1,195 @@
+[
+  {
+    "id": "daily-chores",
+    "name": "Daily chores",
+    "settings": {
+      "category": "Tools & utilities",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#f4f1ea",
+      "windowSize": "800x480",
+      "icon": "M10,17L6,13L7.41,11.58L10,14.17L16.59,7.58L18,9M12,3A1,1 0 0,1 13,4A1,1 0 0,1 12,5A1,1 0 0,1 11,4A1,1 0 0,1 12,3M19,3H14.82C14.4,1.84 13.3,1 12,1C10.7,1 9.6,1.84 9.18,3H5A2,2 0 0,0 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3Z"
+    },
+    "fields": [
+      {
+        "name": "title",
+        "label": "Title",
+        "type": "string",
+        "value": "Chores",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "chores",
+        "label": "Chores",
+        "type": "text",
+        "rows": 10,
+        "value": "Make the beds\nEmpty the dishwasher #Sam\nFeed the cat #Mia\nWater the plants @mon,thu\nTake the bins out @tue\nHomework check @weekdays #Alex\nWipe the kitchen counters #Sam\nTidy the toys away #Mia\nVacuum the living room @sat",
+        "placeholder": "Water the plants @mon,thu",
+        "hint": "One chore a line. Add the days it is due with @: @mon,thu (or @mon @thu), @weekdays, @weekends; without one it is due every day. Add who does it with #: Dishes #Sam (#Mary_Ann for a name with a space).",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "resetHour",
+        "label": "New day starts at (hour, 0-23)",
+        "type": "integer",
+        "value": "4",
+        "hint": "The ticks start again at this hour: 4 is 04:00, so a chore ticked at midnight counts for the day before.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "groupByPerson",
+        "label": "Group by person",
+        "type": "boolean",
+        "value": "false",
+        "hint": "A list for each person named with #, then the chores for anyone.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showTomorrow",
+        "label": "Show tomorrow's chores when today's are done",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "history",
+        "label": "History",
+        "type": "select",
+        "value": "7",
+        "options": [
+          {
+            "value": "0",
+            "label": "Off"
+          },
+          {
+            "value": "7",
+            "label": "The last 7 days"
+          },
+          {
+            "value": "14",
+            "label": "The last 14 days"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "ticks",
+        "label": "Ticks",
+        "type": "json",
+        "value": "",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "dailyChores": {
+        "name": "Daily chores",
+        "category": "data",
+        "description": "A checklist of chores that starts again every day: tick them off, see who does what, and how the last days went.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "events": [
+          "back",
+          "forward"
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Daily chores\",\n  \"category\": \"data\",\n  \"description\": \"A checklist of chores that starts again every day: tick them off, see who does what, and how the last days went.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [],\n  \"events\": [\n    \"back\",\n    \"forward\"\n  ]\n}\n",
+          "app.tsx": "// @name Daily chores\n// @background #f4f1ea\n// @refresh 3600\n// A checklist of chores that starts again every day. The chores are the\n// scene's public `chores` field, one per line, so they can be changed in the\n// frame's settings, or here: tap Edit to change, add or delete them.\n//\n// A line can say more than the chore:\n//   Water the plants @mon,thu     only on Mondays and Thursdays\n//   Homework check @weekdays      Monday to Friday (@weekends, @daily too)\n//   Dishes #Sam                   Sam's chore: a small tag, or Sam's group\n//\n// What is ticked today is the private `ticks` field, kept on disk with the day\n// it belongs to. The day starts at the \"New day starts at\" hour (4 = 04:00),\n// and then the ticks go and that day's share goes into a short history.\nimport { parseChores, dueOn, dayKey, logicalDay, nextReset, DAY_NAMES, MONTH_NAMES, scheduleLabel } from './chores'\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: 'bg-[#f4f1ea] text-[#1f2a37]',\n    muted: 'text-[#6b7280]',\n    card: 'bg-white',\n    cardDone: 'bg-[#ebe7de]',\n    doneText: 'text-[#8a8f98] line-through',\n    track: 'bg-[#e2ddd2]',\n    fill: 'bg-[#0f766e]',\n    box: 'border-[3px] border-[#b9b2a3] bg-white',\n    boxOn: 'bg-[#0f766e]',\n    button: 'bg-white text-[#1f2a37] active:bg-[#e2ddd2]',\n    primary: 'bg-[#0f766e] text-white active:bg-[#115e59]',\n    remove: 'bg-[#b42318] text-white active:bg-[#912018]',\n    field: 'bg-white focus:bg-[#f0fdfa]',\n    hero: 'bg-[#0f766e] text-white',\n    heroMuted: 'text-[#ccfbf1]',\n    section: 'text-[#6b7280]',\n    // History bars: the day's share filled in the accent, today's darker.\n    bar: '#d9d3c6',\n    barFill: '#5eaaa3',\n    barToday: '#0f766e',\n    barText: '#6b7280',\n    outline: 'none',\n    // A person's tag, picked by their name.\n    tags: [\n      'bg-[#e0e7ff] text-[#3730a3]',\n      'bg-[#fde8d7] text-[#9a3412]',\n      'bg-[#dcfce7] text-[#166534]',\n      'bg-[#fae8ff] text-[#86198f]',\n      'bg-[#e0f2fe] text-[#075985]',\n      'bg-[#fef3c7] text-[#92400e]',\n    ],\n  },\n  high: {\n    page: 'bg-white text-black',\n    muted: 'text-black',\n    card: 'bg-white border-2 border-black',\n    cardDone: 'bg-white border-2 border-black',\n    doneText: 'text-black line-through',\n    track: 'bg-white border-2 border-black',\n    fill: 'bg-black',\n    box: 'border-4 border-black bg-white',\n    boxOn: 'bg-black',\n    button: 'bg-white text-black border-2 border-black',\n    primary: 'bg-black text-white',\n    remove: 'bg-black text-white',\n    field: 'bg-white border-2 border-black',\n    hero: 'bg-black text-white',\n    heroMuted: 'text-white',\n    section: 'text-black',\n    bar: '#ffffff',\n    barFill: '#000000',\n    barToday: '#000000',\n    barText: '#000000',\n    outline: '#000000',\n    tags: ['bg-white text-black border-2 border-black'],\n  },\n}\n\n// A field's value as the settings form or the scene's state holds it.\nconst flag = (value, fallback) => (value === undefined || value === null || value === '' ? fallback : value === true || value === 'true')\nconst numberOf = (value, fallback) => {\n  const n = Number(value)\n  return Number.isFinite(n) ? n : fallback\n}\n\n// The ticks: { day, done: [chore keys], history: [{ d: day, n: done, t: due }] }.\nfunction readTicks(app) {\n  let ticks = app.state.ticks\n  if (typeof ticks === 'string') {\n    try {\n      ticks = JSON.parse(ticks)\n    } catch (e) {\n      ticks = null\n    }\n  }\n  if (!ticks || typeof ticks !== 'object') ticks = {}\n  return {\n    day: typeof ticks.day === 'string' ? ticks.day : '',\n    done: Array.isArray(ticks.done) ? ticks.done : [],\n    history: Array.isArray(ticks.history) ? ticks.history : [],\n  }\n}\n\nconst HISTORY_KEPT = 14\n\n// A new day: what the last one got done goes into the history, and the\n// ticks start empty.\nfunction rollOver(ticks, today, chores) {\n  const history = ticks.history.filter((h) => h && h.d !== ticks.day && h.d < today)\n  if (ticks.day && ticks.day < today) {\n    const [y, m, d] = ticks.day.split('-').map(Number)\n    const due = dueOn(chores, new Date(y, m - 1, d, 12).getDay())\n    const n = due.filter((c) => ticks.done.includes(c.key)).length\n    history.push({ d: ticks.day, n, t: due.length })\n  }\n  history.sort((a, b) => (a.d < b.d ? -1 : 1))\n  return { day: today, done: [], history: history.slice(-HISTORY_KEPT) }\n}\n\n// The chores in groups: by person when asked (in the order they first come\n// up, then the chores for anyone), else one group.\nfunction groupsOf(list, byPerson) {\n  if (!byPerson) return [{ name: '', items: list }]\n  const names = []\n  for (const c of list) if (c.person && !names.some((n) => n.toLowerCase() === c.person.toLowerCase())) names.push(c.person)\n  const groups = names.map((name) => ({ name, items: list.filter((c) => c.person && c.person.toLowerCase() === name.toLowerCase()) }))\n  const anyone = list.filter((c) => !c.person)\n  if (anyone.length) groups.push({ name: 'Anyone', items: anyone })\n  return groups\n}\n\n// The chores in the order they are drawn.\nconst inOrder = (list, byPerson) => groupsOf(list, byPerson).flatMap((g) => g.items)\n\nconst Check = ({ size }) => (\n  <svg className={`w-[${size}px] h-[${size}px]`} viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={3} strokeLinecap=\"round\" strokeLinejoin=\"round\">\n    <path d=\"M5 12l5 5L20 7\" />\n  </svg>\n)\n\nconst Bin = ({ size }) => (\n  <svg className={`w-[${size}px] h-[${size}px]`} viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\" strokeLinejoin=\"round\">\n    <path d=\"M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3\" />\n  </svg>\n)\n\n// The last days as bars, today's last: how much of each day's chores got done.\nfunction History({ days, z, t }) {\n  const barW = Math.round(14 * z)\n  const gap = Math.round((days.length > 7 ? 7 : 12) * z)\n  const barH = Math.round(30 * z)\n  const textSize = Math.round(12 * z)\n  const width = days.length * barW + (days.length - 1) * gap\n  const height = barH + textSize + Math.round(6 * z)\n  const r = Math.round(4 * z)\n  return (\n    <svg className={`w-[${width}px] h-[${height}px]`} viewBox={`0 0 ${width} ${height}`}>\n      {days.map((day, i) => {\n        const x = i * (barW + gap)\n        const share = day.t > 0 ? Math.min(1, day.n / day.t) : day.known ? 1 : 0\n        const fillH = Math.round(barH * share)\n        // A day the scene did not see (the frame was off, or the scene is\n        // new) is a small dot; a day it saw is a bar filled as far as it got.\n        return (\n          <g>\n            {day.known ? (\n              <rect x={x + 1} y={1} width={barW - 2} height={barH - 2} rx={r} fill={t.bar} stroke={t.outline} strokeWidth={t.outline === 'none' ? 0 : 2} />\n            ) : (\n              <circle cx={x + barW / 2} cy={barH - barW / 2} r={barW / 4} fill={t.barText} />\n            )}\n            {fillH > 0 ? <rect x={x} y={barH - fillH} width={barW} height={fillH} rx={r} fill={day.today ? t.barToday : t.barFill} /> : null}\n            <text x={x + barW / 2} y={height - 1} fontSize={textSize} textAnchor=\"middle\" fill={t.barText} fontWeight={day.today ? 'bold' : 'normal'}>\n              {day.letter}\n            </text>\n          </g>\n        )\n      })}\n    </svg>\n  )\n}\n\nexport function get(app, context) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  // Sizes are made for 800x480 (and 480x800) and grow or shrink with the canvas.\n  const z = Math.max(0.85, Math.min(2.5, Math.min(W, H) / 480, Math.max(W, H) / 800))\n  const px = (n) => Math.round(n * z)\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  const fast = app.frame.fast ?? !app.frame.paper\n\n  const resetHour = Math.max(0, Math.min(23, Math.floor(numberOf(app.state.resetHour, 4))))\n  const groupByPerson = flag(app.state.groupByPerson, false)\n  const showTomorrow = flag(app.state.showTomorrow, true)\n  const historyDays = Math.max(0, Math.min(HISTORY_KEPT, Math.floor(numberOf(app.state.history, 7))))\n  const title = String(app.state.title ?? '').trim() || 'Chores'\n  const text = typeof app.state.chores === 'string' ? app.state.chores : ''\n  const chores = parseChores(text)\n\n  // Today, as the chores count it: before the reset hour it is still yesterday.\n  const now = Date.now()\n  const day = logicalDay(now, resetHour)\n  const today = dayKey(day)\n  let ticks = readTicks(app)\n  if (ticks.day !== today) {\n    ticks = rollOver(ticks, today, chores)\n    frameos.setState('ticks', ticks)\n  }\n\n  // Draw again when the day starts, if that comes before the next render.\n  const untilReset = Math.ceil((nextReset(now, resetHour) - now) / 1000) + 1\n  const interval = numberOf(app.state.refreshInterval, 3600)\n  if (untilReset < interval) frameos.setNextSleep(untilReset)\n\n  const due = dueOn(chores, day.getDay())\n  const done = due.filter((c) => ticks.done.includes(c.key))\n  const allDone = due.length > 0 && done.length === due.length\n  const otherDays = chores.length - due.length\n  const tomorrow = new Date(day.getTime() + 86400000)\n  const dueTomorrow = dueOn(chores, tomorrow.getDay())\n\n  const editing = frameos.recall('editing') === true\n  const asking = frameos.recall('asking') ?? -1\n  const draft = frameos.recall('draft') || ''\n  const peek = frameos.recall('peek') === true && allDone\n\n  const saveTicks = (doneKeys) => frameos.setState('ticks', { ...ticks, day: today, done: doneKeys })\n  const toggle = (key) =>\n    saveTicks(ticks.done.includes(key) ? ticks.done.filter((k) => k !== key) : [...ticks.done.filter((k) => due.some((c) => c.key === k)), key])\n  const lines = text.split('\\n')\n  const saveLines = (next) => frameos.setState('chores', next.join('\\n'))\n  const add = () => {\n    const line = (frameos.recall('draft') || '').trim()\n    if (!line) return\n    saveLines([...lines.filter((l) => l.trim() !== ''), line])\n    frameos.remember('draft', '')\n  }\n\n  const portrait = H > W * 1.1\n  const twoColumns = !portrait && W >= 640 * z\n  const rowH = px(54)\n  const textSize = px(20)\n  const smallSize = px(14)\n\n  // Who does what: a tag's color picked by the name, the same every day.\n  const tagClass = (person) => {\n    let h = 0\n    for (let i = 0; i < person.length; i++) h = (h * 31 + person.charCodeAt(i)) >>> 0\n    return t.tags[h % t.tags.length]\n  }\n  const Tag = ({ person }) => (\n    <span className={`shrink-0 rounded-full px-[${px(10)}px] py-[${px(2)}px] text-[${smallSize}px] font-semibold ${tagClass(person.toLowerCase())}`}>{person}</span>\n  )\n\n  const Row = ({ chore, readOnly }) => {\n    const on = !readOnly && ticks.done.includes(chore.key)\n    const when = scheduleLabel(chore.days)\n    // Tomorrow's chores are only to read: smaller, and nothing to tap.\n    return (\n      <div\n        className={`flex items-center gap-[${px(12)}px] h-[${readOnly ? px(40) : rowH}px] rounded-[${px(readOnly ? 10 : 14)}px] pl-[${px(readOnly ? 14 : 12)}px] pr-[${px(14)}px] ${on || readOnly ? t.cardDone : t.card}`}\n        onClick={readOnly ? undefined : () => toggle(chore.key)}\n      >\n        {readOnly ? null : (\n          <div className={`shrink-0 w-[${px(32)}px] h-[${px(32)}px] rounded-full flex items-center justify-center text-white ${on ? t.boxOn : t.box}`}>\n            {on ? <Check size={px(20)} /> : null}\n          </div>\n        )}\n        <span className={`flex-1 min-w-0 truncate text-[${readOnly ? px(17) : textSize}px] ${on ? t.doneText : ''}`}>{chore.name}</span>\n        {when ? <span className={`shrink-0 text-[${smallSize}px] ${t.muted}`}>{when}</span> : null}\n        {chore.person && !groupByPerson ? <Tag person={chore.person} /> : null}\n      </div>\n    )\n  }\n\n  const List = ({ list, readOnly }) => (\n    <div className={`flex flex-col gap-[${px(14)}px]`}>\n      {groupsOf(list, groupByPerson).map((group) => (\n        <div className={`flex flex-col gap-[${px(8)}px]`}>\n          {group.name ? (\n            <div className={`flex items-center gap-[${px(8)}px] text-[${px(15)}px] ${t.section}`}>\n              <span className=\"font-bold uppercase\">{group.name}</span>\n              {readOnly ? null : (\n                <span>{`${group.items.filter((c) => ticks.done.includes(c.key)).length} of ${group.items.length}`}</span>\n              )}\n            </div>\n          ) : null}\n          <div className={twoColumns ? `grid grid-cols-2 gap-[${px(8)}px]` : `flex flex-col gap-[${px(8)}px]`}>\n            {group.items.map((chore) => (\n              <Row chore={chore} readOnly={readOnly} />\n            ))}\n          </div>\n        </div>\n      ))}\n    </div>\n  )\n\n  const Button = ({ label, onClick, kind }) => (\n    <div\n      className={`shrink-0 h-[${px(46)}px] px-[${px(18)}px] rounded-[${px(12)}px] flex items-center justify-center text-[${px(18)}px] font-bold ${kind === 'primary' ? t.primary : kind === 'remove' ? t.remove : t.button}`}\n      onClick={onClick}\n    >\n      {label}\n    </div>\n  )\n\n  const dateLine = `${DAY_NAMES[day.getDay()]} ${day.getDate()} ${MONTH_NAMES[day.getMonth()]}`\n  const resetLabel = `${String(resetHour).padStart(2, '0')}:00`\n\n  // The history: the days before today, then today as it stands.\n  const historyBars = []\n  for (let back = historyDays - 1; back >= 0 && historyDays > 0; back--) {\n    const d = new Date(day.getTime() - back * 86400000)\n    const key = dayKey(d)\n    const letter = DAY_NAMES[d.getDay()].slice(0, back === 0 ? 3 : 1)\n    if (back === 0) historyBars.push({ letter, n: done.length, t: due.length, known: true, today: true })\n    else {\n      const h = ticks.history.find((x) => x.d === key)\n      historyBars.push({ letter, n: h ? h.n : 0, t: h ? h.t : 0, known: !!h, today: false })\n    }\n  }\n\n  const header = (\n    <div className={`flex items-center gap-[${px(14)}px]`}>\n      <div className=\"flex-1 min-w-0 flex flex-col\">\n        <span className={`text-[${px(34)}px] font-bold truncate`}>{title}</span>\n        <span className={`text-[${px(16)}px] ${t.muted} truncate`}>{dateLine}</span>\n      </div>\n      {editing ? null : (\n        <div className=\"shrink-0 flex flex-col items-end\">\n          <span className={`text-[${px(30)}px] font-bold`}>{due.length ? `${done.length}/${due.length}` : '0'}</span>\n          <span className={`text-[${px(14)}px] ${t.muted}`}>{due.length ? 'done today' : 'chores today'}</span>\n        </div>\n      )}\n      <Button\n        label={editing ? 'Done' : 'Edit'}\n        kind={editing ? 'primary' : ''}\n        onClick={() => {\n          frameos.remember('editing', !editing)\n          frameos.remember('asking', -1)\n        }}\n      />\n    </div>\n  )\n\n  if (editing) {\n    return (\n      <div className={`flex flex-col w-full h-full gap-[${px(12)}px] p-[${px(20)}px] ${t.page}`}>\n        {header}\n        <span className={`text-[${px(15)}px] ${t.muted}`}>\n          One chore a line. Add @mon,thu or @weekdays for the days it is due, and #Name for who does it.\n        </span>\n        <div className=\"flex-1 min-h-0 overflow-y-auto\">\n          <div className={`flex flex-col gap-[${px(8)}px]`}>\n            {lines.map((line, i) =>\n              line.trim() === '' ? null : asking === i ? (\n                <div className={`flex items-center gap-[${px(10)}px] rounded-[${px(14)}px] px-[${px(12)}px] py-[${px(6)}px] ${t.card}`}>\n                  <span className={`flex-1 min-w-0 truncate text-[${px(18)}px]`}>{`Delete \"${line.trim()}\"?`}</span>\n                  <Button label=\"Cancel\" onClick={() => frameos.remember('asking', -1)} />\n                  <Button\n                    label=\"Delete\"\n                    kind=\"remove\"\n                    onClick={() => {\n                      saveLines(lines.filter((_, j) => j !== i))\n                      frameos.remember('asking', -1)\n                    }}\n                  />\n                </div>\n              ) : (\n                <div className={`flex items-center gap-[${px(8)}px]`}>\n                  <input\n                    className={`flex-1 h-[${px(48)}px] px-[${px(14)}px] rounded-[${px(12)}px] text-[${px(18)}px] ${t.card} ${t.field}`}\n                    value={line}\n                    onChange={(e) => saveLines(lines.map((l, j) => (j === i ? e.target.value : l)))}\n                  />\n                  <div className={`shrink-0 w-[${px(46)}px] h-[${px(46)}px] flex items-center justify-center ${t.muted}`} onClick={() => frameos.remember('asking', i)}>\n                    <Bin size={px(24)} />\n                  </div>\n                </div>\n              ),\n            )}\n          </div>\n        </div>\n        <div className={`flex items-center gap-[${px(10)}px]`}>\n          <input\n            className={`flex-1 h-[${px(48)}px] px-[${px(14)}px] rounded-[${px(12)}px] text-[${px(18)}px] ${t.card} ${t.field}`}\n            value={draft}\n            placeholder=\"Add a chore, like Feed the cat #Mia\"\n            onChange={(e) => frameos.remember('draft', e.target.value)}\n            onKeyDown={(e) => {\n              if (e.key === 'Enter') add()\n            }}\n          />\n          <Button label=\"Add\" kind=\"primary\" onClick={add} />\n        </div>\n      </div>\n    )\n  }\n\n  const footer = (\n    <div className={`flex items-end gap-[${px(14)}px]`}>\n      {historyBars.length > 1 ? <History days={historyBars} z={z} t={t} /> : null}\n      <div className=\"flex-1 min-w-0 flex flex-col\">\n        {historyBars.length > 1 ? <span className={`text-[${px(13)}px] ${t.muted} truncate`}>{`Last ${historyBars.length} days`}</span> : null}\n        <span className={`text-[${px(13)}px] ${t.muted}`}>\n          {otherDays > 0 ? `${otherDays} more on other days. ` : ''}\n          {`A new day starts at ${resetLabel}.`}\n        </span>\n      </div>\n    </div>\n  )\n\n  let body\n  if (chores.length === 0) {\n    body = (\n      <div className={`flex-1 flex flex-col items-center justify-center gap-[${px(12)}px] text-center`}>\n        <span className={`text-[${px(24)}px] font-bold`}>No chores yet</span>\n        <span className={`text-[${px(16)}px] ${t.muted}`}>Tap Edit to add some, or set them in the scene's settings.</span>\n      </div>\n    )\n  } else if (due.length === 0) {\n    body = (\n      <div className={`flex-1 min-h-0 flex flex-col gap-[${px(12)}px]`}>\n        <div className={`rounded-[${px(18)}px] p-[${px(18)}px] ${t.card}`}>\n          <span className={`text-[${px(24)}px] font-bold`}>Nothing due today</span>\n        </div>\n        {showTomorrow && dueTomorrow.length ? (\n          <div className=\"flex-1 min-h-0 overflow-y-auto\">\n            <div className={`flex flex-col gap-[${px(8)}px]`}>\n              <span className={`text-[${px(15)}px] font-bold uppercase ${t.section}`}>{`Tomorrow, ${DAY_NAMES[tomorrow.getDay()]}`}</span>\n              <List list={dueTomorrow} readOnly />\n            </div>\n          </div>\n        ) : null}\n      </div>\n    )\n  } else if (allDone && !peek) {\n    body = (\n      <div className={`flex-1 min-h-0 flex flex-col gap-[${px(12)}px]`}>\n        <div className={`flex items-center gap-[${px(16)}px] rounded-[${px(18)}px] px-[${px(18)}px] py-[${px(14)}px] ${t.hero}`} onClick={() => frameos.remember('peek', true)}>\n          <div className={`shrink-0 w-[${px(56)}px] h-[${px(56)}px] rounded-full flex items-center justify-center border-[${px(3)}px] border-white`}>\n            <Check size={px(34)} />\n          </div>\n          <div className=\"flex-1 min-w-0 flex flex-col\">\n            <span className={`text-[${px(28)}px] font-bold`}>All done for today</span>\n            <span className={`text-[${px(15)}px] ${t.heroMuted}`}>{`${due.length} ${due.length === 1 ? 'chore' : 'chores'} ticked off. Tap to see them.`}</span>\n          </div>\n        </div>\n        {showTomorrow && dueTomorrow.length ? (\n          <div className=\"flex-1 min-h-0 overflow-y-auto\">\n            <div className={`flex flex-col gap-[${px(8)}px]`}>\n              <span className={`text-[${px(15)}px] font-bold uppercase ${t.section}`}>{`Tomorrow, ${DAY_NAMES[tomorrow.getDay()]}`}</span>\n              <List list={dueTomorrow} readOnly />\n            </div>\n          </div>\n        ) : null}\n      </div>\n    )\n  } else {\n    body = (\n      <div className=\"flex-1 min-h-0 overflow-y-auto\">\n        <List list={due} readOnly={false} />\n      </div>\n    )\n  }\n\n  return (\n    <div className={`flex flex-col w-full h-full gap-[${px(12)}px] p-[${px(20)}px] ${t.page}`}>\n      {header}\n      {due.length ? (\n        <div className={`h-[${px(10)}px] rounded-full ${t.track}`}>\n          <div className={`h-full rounded-full ${t.fill} w-[${Math.round((done.length * 100) / due.length)}%]`} />\n        </div>\n      ) : null}\n      {body}\n      {peek ? (\n        <div className=\"flex\">\n          <Button label=\"Back to all done\" onClick={() => frameos.remember('peek', false)} />\n        </div>\n      ) : null}\n      {footer}\n    </div>\n  )\n}\n\n// Frames with buttons and no touch: forward ticks the next chore off, back\n// takes the last tick back.\nexport function onEvent(app, context) {\n  if (context.event !== 'forward' && context.event !== 'back') return false\n  const resetHour = Math.max(0, Math.min(23, Math.floor(numberOf(app.state.resetHour, 4))))\n  const chores = parseChores(typeof app.state.chores === 'string' ? app.state.chores : '')\n  const day = logicalDay(Date.now(), resetHour)\n  const today = dayKey(day)\n  let ticks = readTicks(app)\n  if (ticks.day !== today) ticks = rollOver(ticks, today, chores)\n  const due = inOrder(dueOn(chores, day.getDay()), flag(app.state.groupByPerson, false))\n  let doneKeys = ticks.done.filter((k) => due.some((c) => c.key === k))\n  if (context.event === 'forward') {\n    const next = due.find((c) => !doneKeys.includes(c.key))\n    if (!next) return false\n    doneKeys = [...doneKeys, next.key]\n  } else {\n    if (!doneKeys.length) return false\n    doneKeys = doneKeys.slice(0, -1)\n  }\n  frameos.setState('ticks', { ...ticks, done: doneKeys })\n  return true\n}\n",
+          "chores.ts": "// Reading the chores field and working out days.\n\nexport const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n\n// A day by its first two letters, Sunday first as Date.getDay() counts.\nconst DAY_PREFIXES = ['su', 'mo', 'tu', 'we', 'th', 'fr', 'sa']\nconst WEEKDAYS = [1, 2, 3, 4, 5]\nconst WEEKENDS = [0, 6]\nconst EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]\n\n// \"@mon,thu\", \"@weekdays\", \"@weekends\", \"@daily\": the days it names, or null\n// when it names none.\nfunction daysOf(word) {\n  const lower = word.toLowerCase()\n  if (lower === 'weekdays' || lower === 'weekday' || lower === 'workdays') return WEEKDAYS\n  if (lower === 'weekends' || lower === 'weekend') return WEEKENDS\n  if (lower === 'daily' || lower === 'everyday' || lower === 'always') return EVERY_DAY\n  const days = []\n  for (const part of lower.split(/[,/+]/)) {\n    const day = DAY_PREFIXES.indexOf(part.trim().slice(0, 2))\n    if (day < 0) return null\n    if (!days.includes(day)) days.push(day)\n  }\n  return days.length ? days : null\n}\n\n// One chore a line: { key, name, person, days }. `days` is null for every\n// day. The key is what a tick is kept under: the name and the person, so the\n// same chore keeps its tick when its days change.\nexport function parseChores(text) {\n  const chores = []\n  const seen = {}\n  for (const raw of String(text || '').split('\\n')) {\n    let days = null\n    let person = ''\n    const words = []\n    for (const word of raw.trim().split(/\\s+/)) {\n      if (!word) continue\n      if (word.length > 1 && word[0] === '@') {\n        const named = daysOf(word.slice(1))\n        if (named) {\n          days = (days || []).concat(named.filter((d) => !(days || []).includes(d)))\n          continue\n        }\n      }\n      if (word.length > 1 && word[0] === '#' && !person) {\n        person = word.slice(1).replace(/_/g, ' ')\n        continue\n      }\n      words.push(word)\n    }\n    const name = words.join(' ')\n    if (!name) continue\n    let key = `${name.toLowerCase()}#${person.toLowerCase()}`\n    seen[key] = (seen[key] || 0) + 1\n    if (seen[key] > 1) key += `~${seen[key]}`\n    chores.push({ key, name, person, days: days && days.length < 7 ? days.sort() : null })\n  }\n  return chores\n}\n\nexport const dueOn = (chores, weekday) => chores.filter((c) => !c.days || c.days.includes(weekday))\n\n// \"Mon, Thu\" for a chore that is not every day; \"\" when it is.\nexport function scheduleLabel(days) {\n  if (!days) return ''\n  if (days.length === 5 && WEEKDAYS.every((d) => days.includes(d))) return 'Weekdays'\n  if (days.length === 2 && WEEKENDS.every((d) => days.includes(d))) return 'Weekends'\n  // Monday first, as a week reads.\n  return [1, 2, 3, 4, 5, 6, 0].filter((d) => days.includes(d)).map((d) => DAY_NAMES[d].slice(0, 3)).join(', ')\n}\n\n// The day the chores belong to: before the reset hour it is still the day\n// before. A Date at noon of that day, in the frame's time zone.\nexport function logicalDay(nowMs, resetHour) {\n  const shifted = new Date(nowMs - resetHour * 3600000)\n  return new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate(), 12)\n}\n\nexport const dayKey = (date) =>\n  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`\n\n// When the next day starts, in ms since the epoch.\nexport function nextReset(nowMs, resetHour) {\n  const now = new Date(nowMs)\n  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0, 0)\n  if (next.getTime() <= nowMs) next.setDate(next.getDate() + 1)\n  return next.getTime()\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -126
+        },
+        "data": {
+          "keyword": "dailyChores",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "customEvents": []
+  }
+]
