@@ -189,6 +189,42 @@ proc availableRenderBytes*(): int =
     # Development hosts: plenty of memory, keep decodes bounded anyway.
     1024 * 1024 * 1024
 
+when defined(frameosEmbedded):
+  proc fos_nim_emergency_reserve_bytes(): csize_t {.importc, cdecl.}
+
+const BlockSlackBytes = 4096
+  ## What a block of a download's size is asked to leave: the heap's own
+  ## bookkeeping, and the small allocations made beside it.
+
+proc blockFits*(bytes, largestBlock, reserveBytes: int): bool =
+  ## `roomForBlock`'s rule: the largest free block holds it, or the reserve a
+  ## failed allocation is handed (frameos_nim_glue.c, one megabyte in one
+  ## block) would.
+  let need = bytes + BlockSlackBytes
+  need <= reserveBytes or need <= largestBlock
+
+proc roomForBlock*(bytes: int): bool =
+  ## Whether one block of `bytes` can be had now. Asked before an allocation
+  ## the size of a download, which Nim's allocator cannot refuse: on an ESP32
+  ## a failed one ends the whole render (embedded/patched_malloc.nim: a
+  ## longjmp, and what the render held is leaked, a scene's JS interpreters
+  ## included). A 341 KB map that came into a heap with 1.7 MB free in blocks
+  ## of 278 KB aborted three renders of a reTerminal E1004 that way, about
+  ## 300 KB lost at each, and the frame restarted (the hardware bench,
+  ## 2026-11-18). The caller raises an error its node can show instead.
+  when defined(testing):
+    if contiguousBudgetOverride != 0:
+      return blockFits(bytes, contiguousBudgetOverride, 0)
+  when defined(frameosEmbedded):
+    if fos_psram_total_bytes() == 0:
+      return true # no PSRAM: the internal heap's call, as it always was
+    let reserve = fos_nim_emergency_reserve_bytes().int
+    # The reserve first: it answers without walking the heap for its largest
+    # block (half a millisecond and more on a fragmented one).
+    blockFits(bytes, 0, reserve) or blockFits(bytes, fos_psram_largest_free_block().int, reserve)
+  else:
+    true
+
 proc availableRenderHeadroomBytes*(): int =
   ## Total free render memory minus the reserve, ignoring fragmentation —
   ## the answer to "can these allocations coexist", where the pieces need
@@ -268,6 +304,11 @@ proc releaseRenderMemory*(): bool =
   ## decode was just refused. Whether anything went (then try it again).
   clearCoverageCache()
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
+
+proc makeRoomForBlock*(bytes: int): bool =
+  ## `roomForBlock`, after letting go of what a render can rebuild when there
+  ## is none: a download is not refused for an idle interpreter's sake.
+  roomForBlock(bytes) or (releaseRenderMemory() and roomForBlock(bytes))
 
 proc keepIdleInterpreters*(holdingPictures = false, answeringPointer = false): bool =
   ## Whether the idle JS interpreters may stay for the next render: while the

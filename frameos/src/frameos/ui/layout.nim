@@ -731,6 +731,13 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
               before = c
               break
       let built = child.build(result.text, rootW, rootH, depth + 1, childKey, input, childGroup, before)
+      if not before.isNil and built == before and built.src != child and not built.src.isNil:
+        # Taken back from the last layout: the element it was built from
+        # takes this one's place in the tree too (they say the same,
+        # sameTree), or the app's tree keeps a second copy of what the
+        # layout keeps: a map's `<svg>` was a third of a megabyte twice over
+        # from its second render on.
+        n.children[i] = built.src
       if built.pointer:
         result.pointer = true
       result.holds = result.holds or built.holds
@@ -2571,6 +2578,12 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     memo.rootH = h
     memo = nil
   ui = nil
+
+proc source*(memo: UiMemo): SvgNode =
+  ## The tree the last layout was built from: the one handed in, or, when
+  ## nothing in it had changed, the one the layout before had kept. A caller
+  ## that keeps the tree keeps this one, not an equal second.
+  if memo.isNil or memo.root.isNil: nil else: memo.root.src
 
 proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
   var

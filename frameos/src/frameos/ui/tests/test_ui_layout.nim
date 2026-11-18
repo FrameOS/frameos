@@ -431,6 +431,40 @@ suite "ui layout":
     let moved = layoutUi(panel([true, true, false], extra = true), 200, 200, UiInput(), regions, memo)
     check samePicture(moved, layoutUi(panel([true, true, false], extra = true), 200, 200))
 
+  test "an unchanged tree is kept once, not once by the layout and once by the app":
+    # A map's `<svg>` is a third of a megabyte of path data. The layout keeps
+    # the element it was built from when the next render's says the same, so
+    # the next render's copy has to go, from the tree the app keeps for the
+    # pointer's render too: both stood on a reTerminal E1004 from the second
+    # render on (the hardware bench, 2026-11-18).
+    proc map(label: string): SvgNode =
+      let drawing = SvgNode(tag: "svg", attrs: @[("width", "200"), ("height", "100"), ("viewBox", "0 0 200 100")])
+      drawing.children.add SvgNode(tag: "path", attrs: @[("d", "M10 10h180v80h-180z"), ("fill", "#a7d3f5")])
+      el("div", "flex flex-col", el("div", "text-sm", txt(label)), drawing)
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    let first = map("London")
+    discard layoutUi(first, 200, 120, UiInput(), regions, memo)
+    check memo.source == first
+    # The same again: the first tree is the one laid out, whole.
+    let second = map("London")
+    discard layoutUi(second, 200, 120, UiInput(), regions, memo)
+    check memo.source == first
+    # A new label over the same drawing: a new tree, holding the first's
+    # drawing in place of its own equal one.
+    let third = map("Paris")
+    let drawn = layoutUi(third, 200, 120, UiInput(), regions, memo)
+    check memo.source == third
+    check third.children[1] == first.children[1]
+    check third.children[0] != first.children[0]
+    proc picture(svg: SvgNode): Image = newImage(parseSvg(svg, 200, 120))
+    let (a, b) = (picture(drawn), picture(layoutUi(map("Paris"), 200, 120)))
+    var same = true
+    for y in 0 ..< 120:
+      for x in 0 ..< 200:
+        if a[x, y] != b[x, y]: same = false
+    check same
+
   test "the pointer rebuilds only what it changes":
     proc keys(memo: UiMemo, pressed: seq[int]): (SvgNode, seq[UiRegion]) =
       var regions: seq[UiRegion]

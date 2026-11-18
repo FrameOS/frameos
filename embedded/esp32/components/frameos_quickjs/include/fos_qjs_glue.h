@@ -31,6 +31,15 @@ typedef struct fos_js_runtime_account {
     size_t bytes;
 } fos_js_runtime_account_t;
 
+/* What refused the last allocation a runtime asked for, and its size; the
+ * record is taken (the next call answers NONE). BY_LIMIT is the scene's own
+ * ceilings (the runtime's memory limit, the shared budget), BY_HEAP a heap
+ * with no free block that size. */
+#define FOS_JS_REFUSED_NONE 0
+#define FOS_JS_REFUSED_BY_LIMIT 1
+#define FOS_JS_REFUSED_BY_HEAP 2
+int fos_js_take_refusal(size_t *bytes);
+
 /* fos_js_new_runtime, with that account (NULL for none). */
 struct JSRuntime *fos_js_new_runtime_accounted(fos_js_runtime_account_t *account);
 

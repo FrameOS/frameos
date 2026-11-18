@@ -80,4 +80,25 @@ block:
   doAssert refused and released == 5
   doAssert releaseRenderMemory() and released == 6
 
+block:
+  # A block of a download's size (roomForBlock): held by the largest free
+  # block, or by the reserve a failed allocation is handed, with a little
+  # left beside it. A body with no block to go in is an error for its node,
+  # where the allocation itself would have ended the render.
+  doAssert blockFits(341_371, 1024 * 1024, 0)
+  doAssert not blockFits(341_371, 278_528, 0)      # 1.7 MB free in 278 KB blocks
+  doAssert blockFits(341_371, 278_528, 1024 * 1024) # the reserve holds it
+  doAssert not blockFits(1024 * 1024, 278_528, 1024 * 1024)
+  doAssert not blockFits(64 * 1024, 64 * 1024, 0)   # nothing left beside it
+  contiguousBudgetOverride = 300 * 1024
+  doAssert roomForBlock(200 * 1024)
+  doAssert not roomForBlock(341_371)
+  # Short of one, what a render can rebuild goes first, and it is asked again.
+  let before = released
+  doAssert not makeRoomForBlock(341_371)
+  doAssert released == before + 1
+  doAssert makeRoomForBlock(200 * 1024) and released == before + 1
+  contiguousBudgetOverride = 0
+  doAssert roomForBlock(64 * 1024 * 1024)           # a host has no such limit
+
 echo "render memory ok"

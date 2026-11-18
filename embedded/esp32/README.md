@@ -1115,7 +1115,16 @@ deploy started since.
 - **The emergency-reserve line names the request**: `a N-byte request with
   F bytes free, largest block L` — a shortage and a fragmentation dip look
   the same without it. The 1200×1600 Weather render dips every pass with
-  2.3 MB free before it; the size is what identifies the allocation.
+  2.3 MB free before it; the size is what identifies the allocation. A
+  reserve that could not be armed again (`could not arm`, logged once) is
+  tried after every pass until it is (`emergency heap reserve armed again`):
+  left at the one try, the next failed allocation had nothing to release
+  and aborted its render.
+- **A script's "out of memory" says whose memory**: QuickJS has one message
+  for a scene past its heap ceilings and for a heap with no free block of
+  the size asked. The second now reads `out of memory (the frame's memory is
+  short: no free block of N bytes, F free)`; the first keeps `(the scene's
+  JS heap budget ...)` (`fos_js_take_refusal`, `describeJsError`).
 
 `battery_pin` enables battery sensing on an **ADC1** GPIO (ADC2 conflicts with
 Wi-Fi). The reading is divider-corrected (`battery_divider`, default 2.0 for a

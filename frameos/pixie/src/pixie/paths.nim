@@ -1101,6 +1101,14 @@ proc shapesToSegments(
   template quantizeY(v: Vec2): Vec2 =
     vec2(v.x, v.y.quantize(1 / 256))
 
+  # Room for every edge at once: grown as it filled, a coastline's 13,000
+  # edges held the block before beside each new one (163 KB, then 327 KB of
+  # an ESP32's memory) and kept what the last growth overshot.
+  var edges = 0
+  for poly in shapes:
+    edges += poly.len
+  result = newSeqOfCap[(Segment, int16)](edges)
+
   for poly in shapes:
     var
       vec1 = poly[^1].quantizeY()
@@ -1236,12 +1244,10 @@ proc partitionSegments(
   # height - (height div numPartitions) * numPartitions
   result[^1].bottom = top + height
 
-  var entries = newSeq[PartitionEntry](segments.len)
-  for i, (segment, winding) in segments:
-    entries[i] = initPartitionEntry(segment, winding)
-
   if numPartitions == 1:
-    result[0].entries = move entries
+    result[0].entries = newSeq[PartitionEntry](segments.len)
+    for i, (segment, winding) in segments:
+      result[0].entries[i] = initPartitionEntry(segment, winding)
   else:
     iterator partitionRange(
       segment: Segment,
@@ -1267,12 +1273,16 @@ proc partitionSegments(
     for partitionIndex, entryCounts in entryCounts:
       result[partitionIndex].entries.setLen(entryCounts)
 
+    # Each edge's entry made as it is handed out, not all of them in a seq
+    # first: that seq was a third of what a large fill held at its peak (28
+    # bytes an edge, beside the edges and the partitions' own copies).
     var indexes = newSeq[int](numPartitions)
-    for i, (segment, winding) in segments:
+    for (segment, winding) in segments:
+      let entry = initPartitionEntry(segment, winding)
       for partitionIndex in segment.partitionRange(
         numPartitions, startY, partitionHeight
       ):
-        result[partitionIndex].entries[indexes[partitionIndex]] = entries[i]
+        result[partitionIndex].entries[indexes[partitionIndex]] = entry
         inc indexes[partitionIndex]
 
   for partition in result.mitems:

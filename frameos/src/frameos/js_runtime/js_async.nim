@@ -187,6 +187,14 @@ when jsAsyncOn:
   proc fetchAnswer(answer: var JsIoResult): string =
     ## What `fetch`'s promise settles with: {status, body, headers}, or
     ## {status: 0, error}, which the prelude rejects with a TypeError.
+    var body = ""
+    if answer.error.len == 0:
+      try:
+        body = jsIoText(answer)
+      except IOError as err:
+        # A body with no block to hold it whole (http_client.requireRoomForBody).
+        releaseJsIoResult(answer)
+        answer.error = err.msg
     if answer.error.len > 0:
       result = """{"status":0,"error":"""
       escapeJson(redactedUrlsIn(answer.error), result)
@@ -199,7 +207,7 @@ when jsAsyncOn:
       result.add ':'
       escapeJson(value, result)
     result.add """},"body":"""
-    escapeJson(jsIoText(answer), result)
+    escapeJson(body, result)
     result.add '}'
 
   proc decodeAnswer(wait: AsyncWait, answer: var JsIoResult): UrlImage =
