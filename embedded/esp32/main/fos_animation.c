@@ -17,9 +17,9 @@ double fos_scene_interval_snap(double seconds)
     return whole >= 1.0 && off < 0.01 ? whole : seconds;
 }
 
-uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_interval_s)
+uint32_t fos_pass_interval_seconds(double scene_interval_s)
 {
-    if (!(scene_interval_s > 0.0)) return frame_interval_s ? frame_interval_s : 300;
+    if (!(scene_interval_s > 0.0)) return FOS_PASS_DEFAULT_SECONDS;
     if (scene_interval_s < 1.0) return 1;
     if (scene_interval_s > 7 * 86400.0) return 7 * 86400;
     return (uint32_t)scene_interval_s;

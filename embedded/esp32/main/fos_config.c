@@ -46,7 +46,6 @@ static void load_defaults(void)
     s_config.palette[0] = '\0';
     s_config.event_map[0] = '\0';
     strlcpy(s_config.time_zone, FRAMEOS_DEFAULT_TIME_ZONE, sizeof(s_config.time_zone));
-    s_config.interval_sec = FRAMEOS_DEFAULT_INTERVAL_SEC;
     s_config.max_http_response_bytes = FRAMEOS_DEFAULT_MAX_HTTP_RESPONSE_BYTES;
     s_config.server_send_logs = FRAMEOS_DEFAULT_SERVER_SEND_LOGS;
     /* Fusion is the normal path; the flag exists so a render can be repeated
@@ -182,7 +181,6 @@ esp_err_t fos_config_init(void)
     }
     uint32_t u32;
     if (nvs_get_u32(nvs, "frame_id", &u32) == ESP_OK) s_config.frame_id = u32;
-    if (nvs_get_u32(nvs, "interval", &u32) == ESP_OK) s_config.interval_sec = u32;
     if (nvs_get_u32(nvs, "spill_force", &u32) == ESP_OK) s_config.http_spill_force_bytes = u32;
     uint16_t rotate_u16 = 0;
     if (nvs_get_u16(nvs, "rotate", &rotate_u16) == ESP_OK &&
@@ -341,10 +339,10 @@ esp_err_t fos_config_init(void)
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s interval=%lus logs=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
+    ESP_LOGI(TAG, "config loaded: frame_id=%lu hostname=%s panel=%s mode=%s logs=%s tls=%s:%u admin=%s assets_sd=%s buttons=%u wifi=%s backend=%s",
              (unsigned long)s_config.frame_id, s_config.hostname[0] ? s_config.hostname : "(unset)", s_config.panel,
              s_config.render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
-             (unsigned long)s_config.interval_sec, s_config.server_send_logs ? "on" : "off",
+             s_config.server_send_logs ? "on" : "off",
              s_config.tls_enable ? "on" : "off", (unsigned)s_config.tls_port,
              (s_config.admin_auth_enabled && s_config.admin_user[0] && s_config.admin_pass[0]) ? "on" : "off",
              s_config.assets_sd.enabled ? "on" : "off",
@@ -403,7 +401,6 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_str(nvs, "admin_pass", s_config.admin_pass), "admin_pass");
     FOS_NVS_SET(nvs_set_str(nvs, "ap_psk", s_config.ap_psk), "ap_psk");
     FOS_NVS_SET(nvs_set_u32(nvs, "frame_id", s_config.frame_id), "frame_id");
-    FOS_NVS_SET(nvs_set_u32(nvs, "interval", s_config.interval_sec), "interval");
     FOS_NVS_SET(nvs_set_u16(nvs, "rotate", s_config.rotate), "rotate");
     FOS_NVS_SET(nvs_set_str(nvs, "scaling", s_config.scaling_mode), "scaling");
     FOS_NVS_SET(nvs_set_u16(nvs, "render_scale_m", s_config.render_scale_milli), "render_scale_m");

@@ -336,7 +336,6 @@ const frameApiKeyMap* = [
   ("mountpoints", "mountpoints"),
   ("palette", "palette"),
   ("colors", "colors"),
-  ("interval", "interval"),
   ("color", "color"),
   ("reboot", "reboot"),
   ("buildroot", "buildroot"),
@@ -1034,7 +1033,6 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
       result[apiKey] = live[configKey]
     else:
       result[apiKey] = storedApiOrConfigValue(configJson, storedFrameApi, apiKey, configKey, newJNull())
-  result["interval"] = storedConfigValue(configJson, "interval", %300)
   result["upload_fonts"] = storedApiOrConfigValue(configJson, storedFrameApi, "upload_fonts", "uploadFonts", %"")
   result["https_proxy"] = apiHttpsProxy(live{"httpsProxy"}, exposeSecrets)
   result["error_behavior"] = apiErrorBehavior(live{"errorBehavior"})

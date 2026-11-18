@@ -609,7 +609,6 @@ async def test_api_frame_logs_full_download_includes_all_persisted_logs(async_cl
         server_api_key="server-key",
         server_send_logs=True,
         status="uninitialized",
-        interval=300,
         metrics_interval=60,
         scenes=[],
         apps=[],
@@ -2334,7 +2333,7 @@ async def test_api_frame_sync_apply_imports_frame_copy_and_marks_baseline(async_
 async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_scene_versions(async_client, db, redis):
     frame = await new_frame(db, redis, 'Backend Name', 'localhost', 'localhost')
     frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
-    frame.interval = 300
+    frame.rotate = 0
     frame.scenes = [
         {
             'id': 'scene-1',
@@ -2352,7 +2351,7 @@ async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_sce
         **frame.to_dict(),
         'id': 1,
         'name': 'Frame Name',
-        'interval': 600,
+        'rotate': 90,
         'scenes': [
             {
                 'id': 'scene-1',
@@ -2386,7 +2385,7 @@ async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_sce
         response = await async_client.post(
             f'/api/frames/{frame.id}/sync',
             json={
-                'frame_json_choices': {'name': 'frame', 'interval': 'backend'},
+                'frame_json_choices': {'name': 'frame', 'rotate': 'backend'},
                 'scenes_json_choices': {'scene-1': 'both'},
             },
         )
@@ -2395,7 +2394,7 @@ async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_sce
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.name == 'Frame Name'
-    assert updated_frame.interval == 300
+    assert updated_frame.rotate == 0
     assert len(updated_frame.scenes) == 2
     assert updated_frame.scenes[0]['id'] == 'scene-1'
     assert updated_frame.scenes[0]['name'] == 'Backend scene'
@@ -2403,10 +2402,10 @@ async def test_api_frame_sync_apply_resolves_individual_items_and_keeps_both_sce
     assert updated_frame.scenes[1]['name'] == 'Frame scene (frame copy)'
 
     sync_write = next(payload for payload in posted_payloads if 'scenes' in payload)
-    assert sync_write['interval'] == 300
+    assert sync_write['rotate'] == 0
     assert sync_write['scenes'] == updated_frame.scenes
     assert remote_frame['name'] == 'Frame Name'
-    assert remote_frame['interval'] == 300
+    assert remote_frame['rotate'] == 0
     assert remote_frame['scenes'] == updated_frame.scenes
     assert response.json()['sync']['has_changes'] is False
     assert updated_frame.last_successful_deploy_at is not None
@@ -3677,7 +3676,8 @@ async def test_api_frame_adopt_imports_config_scenes_and_writes_back_credentials
     assert frame.device == 'pimoroni.inky_impression_13'
     assert frame.width == 800 and frame.height == 480
     assert frame.rotate == 90
-    assert frame.interval == 300.0
+    # The device's frame.json still says `interval` (from before): not taken.
+    assert not hasattr(frame, 'interval')
     # Imported scenes are stamped with an execution mode on the way in.
     assert frame.scenes == _stamped(_standalone_device_payload()['scenes'])
     # The device's web access key is taken over, so existing ?k= links keep working.
@@ -4397,7 +4397,6 @@ async def test_api_frame_logs_full_download_is_capped_to_the_retained_window_and
         server_host="localhost",
         server_port=8989,
         status="uninitialized",
-        interval=300,
         metrics_interval=60,
         scenes=[],
         apps=[],

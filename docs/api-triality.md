@@ -183,7 +183,6 @@ Frame save:
 ```json
 {
   "name": "Kitchen",
-  "interval": 300,
   "frame_admin_auth": { "enabled": true, "user": "admin", "pass": "secret" },
   "https_proxy": { "enable": false },
   "error_behavior": { "mode": "show_error_retry", "retry_seconds": 300 },

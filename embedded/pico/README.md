@@ -29,7 +29,7 @@ Everything *else* an ESP32 frame does, this firmware does too:
 | --- | --- |
 | Provisioning from the browser | The frame's deploy panel downloads the UF2, then "Connect over USB" speaks the same `usb_api` protocol as the ESP32 and applies the frame's settings + Wi-Fi |
 | Setup without a computer | No network to join → WPA2 hotspot `FrameOS-XXXX` with a captive-portal setup page; SSID, password and address are drawn on the panel |
-| Settings that follow the frame | Pulls `/embedded/settings` (ETag'd) each pass: name, deep sleep, device login (and the stored interval, the fallback below) |
+| Settings that follow the frame | Pulls `/embedded/settings` (ETag'd) each pass: name, deep sleep, device login |
 | Device HTTP API | `/status`, `/logs`, `/image`, `/ping`, `/event/*`, `/api/action/*` — what the backend calls on an embedded frame — and `<hostname>.local` over mDNS |
 | Logs | A log ring on the device, `usb_api logs`, `GET /logs`, and batched upload to the backend's log view (`bootup`, `render:*`, `metrics`, `wake`, `sleep`), and what the scene heard of a button press |
 | No wasted refreshes | The payload is hashed; an unchanged frame skips the 25-second refresh. The hash lives in a wear-levelled flash log, so it survives the power cut |
@@ -151,13 +151,14 @@ powers the board off completely after each pass via the Inky Frame's
 PCF85063A RTC + HOLD_VSYS latch (~20 µA), cold-booting when the scene wants its
 next picture or on any front button. The backend's render answer says when
 (`X-FrameOS-Next-Render`, the scene's refresh interval or this render's
-`nextSleep`; `docs/server-rendering.md` "When the next picture is due"); the
-frame's stored `interval` (300 s) applies only before an answer said. On USB power the latch cannot cut VSYS, so the firmware
+`nextSleep`; `docs/server-rendering.md` "When the next picture is due"), and
+300 s before an answer said. A frame has no interval of its own: the stored
+config keeps the old slot unused, and `set interval` is taken and ignored. On USB power the latch cannot cut VSYS, so the firmware
 waits in place instead — and anything a person does (a console line, a button,
 a render request over HTTP) ends the wait. The RTC timer is 8 bits: whole seconds up to
 255, then whole minutes up to 4 h 15 min; a longer interval wakes early, finds
 the frame unchanged, skips the refresh and sleeps again. A provisioned frame on
-battery that cannot find its Wi-Fi sleeps the interval out rather than opening
+battery that cannot find its Wi-Fi sleeps 300 s out rather than opening
 a hotspot.
 
 On battery **every reset is a power cut**: a watchdog or software reset floats

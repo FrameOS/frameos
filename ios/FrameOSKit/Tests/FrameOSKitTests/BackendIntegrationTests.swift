@@ -89,9 +89,9 @@ struct BackendIntegrationTests {
         frame = try await service.frame(frameId)
 
         // Settings, schedule, button actions and voice switches save on the backend.
-        _ = try await service.saveSettings(frame, ["interval": 600, "rotate": 90])
+        _ = try await service.saveSettings(frame, ["metrics_interval": 600, "rotate": 90])
         frame = try await service.frame(frameId)
-        #expect(frame.interval == 600 && frame.rotate == 90)
+        #expect(frame["metrics_interval"]?.doubleValue == 600 && frame.rotate == 90)
         let sceneId = try #require(installed.first?.id)
         _ = try await service.saveSchedule(frame, events: [ScheduleEvent.new(sceneId: sceneId, hour: 8, minute: 30, weekday: 8)], disabled: false)
         let binding = ButtonBinding(gesture: .button(label: "LEFT", action: "longPress"), kind: "prevScene")

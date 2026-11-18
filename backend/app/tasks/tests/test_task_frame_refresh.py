@@ -26,7 +26,6 @@ def _frame(db, **overrides) -> Frame:
         "server_api_key": "server-key",
         "server_send_logs": True,
         "status": "uninitialized",
-        "interval": 300,
         "metrics_interval": 60,
         "scenes": [],
         "apps": [],

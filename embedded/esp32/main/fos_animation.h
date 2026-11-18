@@ -92,12 +92,17 @@ bool fos_animation_wanted(double scene_interval_s, bool lcd, bool deep_sleep);
  * no opinion (0). */
 double fos_scene_interval_snap(double seconds);
 
-/* The pass loop's interval in whole seconds: the scene's, else the frame's
- * (`frame_interval_s`, 300 s when 0). Under a second is one second: the
- * scene's still, never the frame's. A 1 s clock in a layout whose wait came
- * out 0.9999 s stood still for five minutes now and then on a reTerminal
- * Sticky (2026-11-10). At most a week. */
-uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_interval_s);
+/* What a pass waits when the scene has no opinion (no scene, no interval,
+ * a server-rendered pull that did not say). A frame has no interval of its
+ * own: its scenes do. */
+#define FOS_PASS_DEFAULT_SECONDS 300
+
+/* The pass loop's interval in whole seconds: the scene's, else
+ * FOS_PASS_DEFAULT_SECONDS. Under a second is one second: the scene's
+ * still, never the default. A 1 s clock in a layout whose wait came out
+ * 0.9999 s stood still for five minutes now and then on a reTerminal Sticky
+ * (2026-11-10). At most a week. */
+uint32_t fos_pass_interval_seconds(double scene_interval_s);
 
 /* Once per pass, before the render: start, retime or stop. True when the
  * mode changed (the caller logs the start or the stop). Stopping leaves the

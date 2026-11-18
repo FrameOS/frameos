@@ -129,11 +129,8 @@ async def test_virtual_image_bw_color_mode(async_client, no_auth_client, db):
 @pytest.mark.asyncio
 async def test_virtual_page_embeds_image_and_paces_by_the_scene(async_client, no_auth_client, db):
     frame = await create_virtual_frame(async_client, db)
-    # The frame's own interval is no part of it: the page asks again when the
-    # picture says the scene wants its next one, else after a minute.
-    frame.interval = 7
-    db.add(frame)
-    db.commit()
+    # The page asks again when the picture says the scene wants its next one,
+    # else after a minute.
 
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/virtual/page?k={frame.device_config["viewToken"]}')
@@ -142,7 +139,6 @@ async def test_virtual_page_embeds_image_and_paces_by_the_scene(async_client, no
     assert f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}' in body
     assert 'X-FrameOS-Next-Render' in body
     assert 'let next = 60;' in body
-    assert '7000' not in body
 
 
 @pytest.mark.asyncio

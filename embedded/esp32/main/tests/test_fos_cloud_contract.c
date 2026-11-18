@@ -97,7 +97,7 @@ int main(int argc, char **argv)
         }
     }
     checks++;
-    if (!fos_cloud_contract_setting_restarts("rotate") || fos_cloud_contract_setting_restarts("interval") ||
+    if (!fos_cloud_contract_setting_restarts("rotate") || fos_cloud_contract_setting_restarts("name") ||
         fos_cloud_contract_setting_allowed("flip")) {
         failures++;
         printf("FAIL restart/allowed flags\n");

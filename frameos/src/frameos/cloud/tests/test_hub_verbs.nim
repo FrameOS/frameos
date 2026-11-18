@@ -177,7 +177,7 @@ suite "cloud hub verb dispatcher":
     let recorded = Recorded()
     let reply = handleCloudVerb(makeContext(recorded), %*{
       "id": "3", "type": "set_settings",
-      "settings": {"name": "Kitchen", "rotate": 90, "interval": 300,
+      "settings": {"name": "Kitchen", "rotate": 90,
                    "scaling_mode": "cover", "timezone": "Europe/Brussels",
                    "debug": false},
     })
@@ -350,7 +350,6 @@ suite "cloud hub verb dispatcher":
       %*{"timezone_updater": {"hour": 24}},
       %*{"timezone_updater": {"enabled": true, "url": "https://evil.example/tz.json.gz"}},
       %*{"rotate": 45},
-      %*{"interval": 0},
       %*{"name": ""},
       %*{"debug": "true"},
     ]
@@ -371,7 +370,7 @@ suite "cloud hub verb dispatcher":
     # refuses every value — which would make the key unsettable while still
     # advertised. Pin one accepted value per key.
     let samples = %*{
-      "name": "Kitchen", "rotate": 180, "interval": 300, "scaling_mode": "contain",
+      "name": "Kitchen", "rotate": 180, "scaling_mode": "contain",
       "render_scale": 1.5, "frame_settings_on_screen": false, "timezone": "Europe/Tallinn", "debug": true,
       "flip": "",
       "error_behavior": {"mode": "show_error_retry", "show_error_retry_seconds": 60},

@@ -243,6 +243,7 @@ suite "frame api route behavior":
 
       let updatePayload = %*{
         "name": "Standalone editor",
+        # From a control plane before frames lost their interval: ignored.
         "interval": 42,
         "frame_admin_auth": {
           "enabled": true,
@@ -286,7 +287,7 @@ suite "frame api route behavior":
 
       let savedConfig = parseFile(configPath)
       check savedConfig["name"].getStr() == "Standalone editor"
-      check savedConfig["interval"].getInt() == 42
+      check not savedConfig.hasKey("interval")
       check savedConfig["frameAdminAuth"]["pass"].getStr() == "new-secret"
       check savedConfig["httpsProxy"]["port"].getInt() == 9443
       check savedConfig["httpsProxy"]["serverCert"].getStr() == "cert"

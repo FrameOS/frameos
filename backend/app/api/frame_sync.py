@@ -1810,7 +1810,6 @@ async def adopt_standalone_frame(
         host,
         server_host,
         device=remote_frame.get("device"),
-        interval=remote_frame.get("interval"),
         project_id=project_id,
         server_port=server_port,
         server_scheme=server_scheme,

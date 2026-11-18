@@ -1410,7 +1410,6 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
         server_host="10.0.0.5",
         server_port=8989,
         server_api_key="key-9",
-        interval=600,
         rotate=90,
         scaling_mode="contain",
     )
@@ -1433,7 +1432,6 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
         "frame_id",
         "hostname",
         "render_mode",
-        "interval",
         "rotate",
         "scaling_mode",
         "server_send_logs",
@@ -1458,7 +1456,6 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
     assert settings["hostname"] == "frame9"
     # No PSRAM on the C3, so it can only ever be a thin client.
     assert settings["render_mode"] == "remote"
-    assert settings["interval"] == "600"
     assert settings["rotate"] == "90"
     assert settings["scaling_mode"] == "contain"
     assert settings["server_send_logs"] == "1"

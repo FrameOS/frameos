@@ -1325,7 +1325,6 @@ export type EmbeddedUsbConfigKey =
   | 'frame_settings_on_screen'
   | 'settings_unlock'
   | 'time_zone'
-  | 'interval'
   | 'max_http_response_bytes'
   | 'server_send_logs'
   | 'admin_user'

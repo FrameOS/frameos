@@ -69,9 +69,7 @@ struct CloudIntegrationTests {
 
                 // Settings, schedule and button actions, as the frame's profile allows.
                 let editable = service.editableSettings(frame)
-                if editable.contains("interval") {
-                    _ = try await service.saveSettings(frame, ["interval": 900])
-                }
+                #expect(!editable.contains("interval"))
                 _ = try await service.saveSchedule(frame, events: [ScheduleEvent.new(sceneId: installed.id, hour: 7, minute: 15, weekday: 8)], disabled: false)
                 frame = try await service.frame(frame.id)
                 #expect(service.schedule(frame).events.first?.hour == 7)

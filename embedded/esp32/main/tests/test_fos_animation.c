@@ -346,7 +346,7 @@ static void test_a_layouts_second_is_a_second(void)
     CHECK(fos_scene_interval_snap(0.99996) == 1.0, "0.99996 s is a second");
     CHECK(fos_scene_interval_snap(1.00004) == 1.0, "and so is 1.00004 s");
     CHECK(fos_scene_interval_snap(59.995) == 60.0, "a minute's clock too");
-    CHECK(fos_pass_interval_seconds(fos_scene_interval_snap(0.99996), 300) == 1,
+    CHECK(fos_pass_interval_seconds(fos_scene_interval_snap(0.99996)) == 1,
           "the scene's second, never the frame's 300 s");
     /* An animation on an LCD stays one (below a second, not near it), and a
      * second's clock does not start one now and then. */
@@ -361,14 +361,13 @@ static void test_a_layouts_second_is_a_second(void)
     CHECK(fos_scene_interval_snap(0.0) == 0.0, "zero: none");
     CHECK(fos_scene_interval_snap(-3.0) == 0.0, "negative: none");
     CHECK(fos_scene_interval_snap(0.0 / 0.0) == 0.0, "NaN: none");
-    CHECK(fos_pass_interval_seconds(0.0, 300) == 300, "no opinion: the frame's");
-    CHECK(fos_pass_interval_seconds(0.0, 0) == 300, "and 300 s without one");
-    CHECK(fos_pass_interval_seconds(0.0, 60) == 60, "the frame's own");
+    CHECK(fos_pass_interval_seconds(0.0) == FOS_PASS_DEFAULT_SECONDS, "no opinion: 300 s");
+    CHECK(fos_pass_interval_seconds(-1.0) == 300, "a negative is no opinion either");
     /* Under a second on e-paper: the loop's shortest, a second, not 300 s. */
-    CHECK(fos_pass_interval_seconds(0.25, 300) == 1, "a quarter second: one second");
-    CHECK(fos_pass_interval_seconds(5.0, 300) == 5, "five seconds");
-    CHECK(fos_pass_interval_seconds(1.9, 300) == 1, "whole seconds, rounded down as before");
-    CHECK(fos_pass_interval_seconds(30.0 * 86400.0, 300) == 7 * 86400, "a month: a week");
+    CHECK(fos_pass_interval_seconds(0.25) == 1, "a quarter second: one second");
+    CHECK(fos_pass_interval_seconds(5.0) == 5, "five seconds");
+    CHECK(fos_pass_interval_seconds(1.9) == 1, "whole seconds, rounded down as before");
+    CHECK(fos_pass_interval_seconds(30.0 * 86400.0) == 7 * 86400, "a month: a week");
 }
 
 static void test_an_animation_is_pictured_once(void)

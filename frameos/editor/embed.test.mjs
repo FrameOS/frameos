@@ -50,7 +50,6 @@ test('setScenes keeps its selected scene until the iframe is ready', () => {
     mode: 'rpios',
     width: 800,
     height: 480,
-    interval: 300,
     theme: undefined,
     previewProxyUrl: undefined,
     description: undefined,

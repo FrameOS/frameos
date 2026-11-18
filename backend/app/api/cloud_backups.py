@@ -74,7 +74,6 @@ FRAME_RESTORE_FIELDS = (
     "color",
     "timezone",
     "timezone_updater",
-    "interval",
     "metrics_interval",
     "max_http_response_bytes",
     "scaling_mode",

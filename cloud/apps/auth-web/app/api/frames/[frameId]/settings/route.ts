@@ -15,11 +15,11 @@ import {
   mergeFrameSettings,
   redeployAssignedScenesToFrame,
   validateFrameSettings,
+  withoutRetiredFrameSettings,
 } from '../../../../../src/lib/frames'
 import { rateLimitResponse } from '../../../../../src/lib/rate-limit'
 import {
   accountLimits,
-  cloudRenderedMinIntervalSeconds,
   countCloudRenderedFramesForAccount,
   frameIsCloudRendered,
 } from '../../../../../src/lib/usage'
@@ -66,7 +66,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const body = await readJsonObject(request)
-  const validated = validateFrameSettings(body.settings)
+  const pushed = withoutRetiredFrameSettings(body.settings)
+  if (
+    pushed && typeof pushed === 'object' && Object.keys(pushed).length === 0 &&
+    body.settings && typeof body.settings === 'object' && Object.keys(body.settings).length > 0
+  ) {
+    // Only retired keys (an `interval` from an older app): nothing to change.
+    return NextResponse.json({ command_id: null, status: 'applied' })
+  }
+  const validated = validateFrameSettings(pushed)
   if (validated.error || !validated.settings) {
     return jsonError(validated.error ?? 'invalid_settings', 400)
   }
@@ -98,20 +106,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // cost. The plan sells "N frames"; this is where the other half bites.
   // A board with its own runtime set to render on the server
   // (`render_mode: "remote"`, docs/server-rendering.md) becomes one of these
-  // frames with this push: it takes one of the plan's cloud-rendered frames,
-  // and an interval pushed to it may not be under the floor. What the cloud
-  // draws is paced by the scene's interval, held to the floor where it is
-  // drawn (the render route's X-FrameOS-Next-Render); the frame's own
-  // interval is only an older firmware's fallback, so one stored from before
-  // never stands in the way of turning this on.
+  // frames with this push: it takes one of the plan's cloud-rendered frames.
+  // The refresh floor is applied where its pictures are drawn: the scene
+  // paces them, held to the floor in the render route's
+  // X-FrameOS-Next-Render (a frame has no interval of its own).
   const mergedSettings = mergeFrameSettings(frame.settings, settings)
   const renderedBefore = frameIsCloudRendered(frame)
   const renderedAfter = frameIsCloudRendered({ hardware: frame.hardware, settings: mergedSettings ?? frame.settings })
   const turningOn = renderedAfter && !renderedBefore
-  const interval = typeof settings.interval === 'number' ? settings.interval : undefined
-  if (renderedAfter && interval !== undefined && interval < cloudRenderedMinIntervalSeconds) {
-    return jsonError('interval_below_plan_floor', 400, { min_interval: cloudRenderedMinIntervalSeconds })
-  }
 
   const writeSettings = async (tx: Pick<typeof db, 'update'>) => {
     if (typeof settings.name === 'string' || mergedSettings) {

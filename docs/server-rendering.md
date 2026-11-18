@@ -50,9 +50,8 @@ a runtime (`localRenderSupported: false`) is remote whatever the setting says.
 On the cloud, a frame set to remote counts against `cloud_rendered_frames`
 (`frameIsCloudRendered` in `cloud-rendered.ts`; the count's SQL reads the same
 setting). Turning it on past the plan's number is refused with
-`cloud_rendered_frame_quota_exceeded`, and an `interval` pushed under the
-floor is refused (`interval_below_plan_floor`); the pictures are paced by the
-scene, held to the floor in `X-FrameOS-Next-Render`. A device that is remote by its
+`cloud_rendered_frame_quota_exceeded`; the pictures are paced by the scene,
+held to the plan's floor in `X-FrameOS-Next-Render`. A device that is remote by its
 own console but not on the plane is refused at the pull
 (`not_server_rendered`) and, having a runtime, renders that pass itself.
 
@@ -461,9 +460,12 @@ A scene decides when it renders next, on the board as on a Pi: its
 `refreshInterval` (the scene's setting, a state field with the role
 `refreshInterval`, a layout's, a built-in scene's idle time) and, for one
 render, `nextSleep` (`logic/nextSleepDuration`), which beats the interval.
-A frame has no interval of its own to set: the firmware's stored one (300 s
-unless an older plane changed it) is only the fallback for a scene with no
-opinion and a pass the plane did not answer.
+A frame has no interval of its own: a scene with no opinion, or a pass the
+plane did not answer, waits 300 s (`FOS_PASS_DEFAULT_SECONDS`,
+`PK_INTERVAL_DEFAULT_SECONDS`). An `interval` a device still holds from
+before (ESP32 NVS, a Pico's stored config, a Pi's frame.json) is ignored, and
+`set interval` on either console is taken and dropped, so an older plane's
+provisioning still goes through.
 On a frame rendered on the server the scene runs on the plane, so the plane
 tells the board:
 
@@ -495,10 +497,10 @@ tells the board:
   (`fos_pass_interval_seconds` in `fos_client.c`): its next pass, its deep
   sleep and the `nextRenderAt` it tells the plane, so the picture drawn
   before the wake is drawn for the time the scene asked. A pull with no
-  answer (no network, an error) leaves the frame's interval. A Pico thin
-  client does the same (`main.c`): it waits, or sleeps on its RTC, for the
-  header's seconds (at least 15), keeps the last one through a failed pass,
-  and uses its stored interval only before any answer said.
+  answer (no network, an error) waits 300 s. A Pico thin client does the
+  same (`main.c`): it waits, or sleeps on its RTC, for the header's seconds
+  (at least 15), keeps the last one through a failed pass, and waits 300 s
+  only before any answer said.
 
 ## Deep sleep: the picture is drawn before the wake
 

@@ -457,17 +457,6 @@ static bool apply_frame_settings(const cJSON *frame)
     fos_config_t *config = fos_config();
     bool changed = false;
 
-    const cJSON *interval = cJSON_GetObjectItem(frame, "interval");
-    if (cJSON_IsNumber(interval) && interval->valuedouble >= 1 &&
-        interval->valuedouble <= 7 * 86400) {
-        uint32_t seconds = (uint32_t)interval->valuedouble;
-        if (seconds < 5) seconds = 5; /* same floor as the local admin API */
-        if (config->interval_sec != seconds) {
-            config->interval_sec = seconds;
-            changed = true;
-        }
-    }
-
     const cJSON *name = cJSON_GetObjectItem(frame, "name");
     if (cJSON_IsString(name) && name->valuestring[0] &&
         strcmp(config->hostname, name->valuestring) != 0 &&
@@ -922,9 +911,6 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     if (!out || out_len == 0) return;
     out[0] = '\0';
     if (!before || !after) return;
-    if (before->interval_sec != after->interval_sec) {
-        change_append_int(out, out_len, "interval", (long)after->interval_sec);
-    }
     if (strcmp(before->hostname, after->hostname) != 0) {
         change_append(out, out_len, "name", after->hostname);
     }
@@ -1302,9 +1288,9 @@ esp_err_t fos_settings_apply(fos_settings_fetched_t *fetched)
         char changes[320] = "";
         fos_settings_describe_changes(before, config, changes, sizeof(changes));
         log_settings_applied(s_restart_after_apply ? "restarting" : "", changes);
-        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s "
+        ESP_LOGI(TAG, "settings applied from backend (render_mode=%d rotate=%u scaling=%s "
                       "render_scale=%g)",
-                 (unsigned long)config->interval_sec, (int)config->render_mode,
+                 (int)config->render_mode,
                  (unsigned)config->rotate, config->scaling_mode, config->render_scale_milli / 1000.0);
     }
     free(before);

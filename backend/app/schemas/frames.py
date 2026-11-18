@@ -110,7 +110,6 @@ class FrameBase(BaseModel):
     color: Optional[str]
     timezone: Optional[str] = None
     timezone_updater: Optional[FrameTimezoneUpdater] = None
-    interval: float
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
@@ -197,7 +196,6 @@ class FrameCreateRequest(BaseModel):
     server_host: str
     server_port: Optional[int] = None
     server_scheme: Optional[Literal["http", "https"]] = None
-    interval: Optional[float] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     ssh_pass: Optional[str] = None
@@ -243,7 +241,6 @@ class FrameUpdateRequest(BaseModel):
     color: Optional[str] = None
     timezone: Optional[str] = None
     timezone_updater: Optional[FrameTimezoneUpdater] = None
-    interval: Optional[float] = None
     metrics_interval: Optional[float] = None
     max_http_response_bytes: Optional[int] = None
     log_to_file: Optional[str] = None

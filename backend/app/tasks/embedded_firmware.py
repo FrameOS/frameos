@@ -1978,7 +1978,6 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
         "render_mode",
         "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
     ))
-    settings.append(_provisioning_setting("interval", max(5, int(frame.interval or 300))))
     settings.append(_provisioning_setting("rotate", int(frame.rotate or 0) % 360))
     settings.append(_provisioning_setting("scaling_mode", embedded_scaling_mode_for_frame(frame)))
     # Only a scale the owner chose: automatic is the firmware's default, and

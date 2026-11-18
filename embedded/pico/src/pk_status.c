@@ -67,7 +67,7 @@ size_t pk_status_json(char *dst, size_t cap)
         "\"cloud\":{\"state\":\"unsupported\",\"url\":\"\",\"frameId\":\"\",\"wsConnected\":false,"
         "\"error\":\"\"},"
         "\"config\":{\"frameId\":%lu,\"name\":\"%s\",\"panel\":\"%s\",\"hardwarePreset\":\"%s\","
-        "\"renderMode\":\"remote\",\"intervalSec\":%lu,\"serverSendLogs\":%s,"
+        "\"renderMode\":\"remote\",\"serverSendLogs\":%s,"
         "\"deepSleep\":%s,\"deepSleepOnBattery\":%s,\"adminAuth\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
         FRAMEOS_VERSION, (unsigned long)pk_uptime_seconds(), pk_platform_name(),
@@ -79,7 +79,7 @@ size_t pk_status_json(char *dst, size_t cap)
         render->last_refresh_skipped ? "true" : "false", render->busy ? "true" : "false",
         preview_ready() ? "true" : "false", error,
         (unsigned long)config->frame_id, name, panel_key, preset,
-        (unsigned long)config->interval_seconds, config->send_logs ? "true" : "false",
+        config->send_logs ? "true" : "false",
         config->deep_sleep ? "true" : "false", config->deep_sleep_on_battery ? "true" : "false",
         config->admin_auth ? "true" : "false", pins_json, backend, ssid);
     if (written < 0 || (size_t)written >= cap) {

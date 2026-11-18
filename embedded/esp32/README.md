@@ -780,7 +780,7 @@ bytes with the device key. Implemented verbs: `get_state`, `render`,
 `reboot`, `restart_runtime` (same as reboot on ESP32), `set_current_scene`,
 `set_scenes` (stored through the same interpreted-scene path as
 `usb_api upload-scenes`; `scene_ack` is sent only after the render task has
-actually hot-loaded the payload), `set_settings` (the `interval`/`name`
+actually hot-loaded the payload), `set_settings` (the `name`
 subset), `image_get` (the packed framebuffer as BMP, built a row at a time
 straight off the boot-time framebuffer reservation — since 2026.8.43 the
 preview snapshot borrows that buffer instead of copying it, and the stream
@@ -1430,7 +1430,8 @@ on the 200 and the 304 (its `nextSleep`, else its `refreshInterval`; at least
 `fos_render_pull_next_render_seconds`). The board takes it where its own
 runtime's interval would go, so its next pass, its deep sleep and the
 `nextRenderAt` it reports follow the scene; with no header (a scene with no
-opinion, a pull nobody answered) the frame's interval. The idle runtime's
+opinion, a pull nobody answered) 300 s (`FOS_PASS_DEFAULT_SECONDS`: a frame has
+no interval of its own; an NVS `interval` from before is ignored). The idle runtime's
 own interval and `nextSleep` are never read in remote mode: they belong to a
 scene left from before.
 

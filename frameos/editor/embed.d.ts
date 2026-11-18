@@ -11,6 +11,7 @@ export interface FrameOSEditorOptions {
   mode?: string
   width?: number
   height?: number
+  /** @deprecated Ignored: a frame has no refresh interval, its scenes do (300 s for a new one). */
   interval?: number
   /** Editor color theme; defaults to the browser's preferred color scheme. */
   theme?: 'light' | 'dark'

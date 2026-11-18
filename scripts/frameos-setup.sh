@@ -920,7 +920,6 @@ data.update({
     "height": env_int("FRAMEOS_HEIGHT", 480),
     "device": env("FRAMEOS_DEVICE"),
     "deviceConfig": device_config,
-    "interval": env_float("FRAMEOS_INTERVAL", 300),
     "metricsInterval": env_float("FRAMEOS_METRICS_INTERVAL", 60),
     "maxHttpResponseBytes": env_int("FRAMEOS_MAX_HTTP_RESPONSE_BYTES", 67108864),
     "debug": env_bool("FRAMEOS_DEBUG"),
@@ -1037,7 +1036,6 @@ default_device="$(json_get "$existing_config" device "web_only")"
 default_width="$(json_get "$existing_config" width "800")"
 default_height="$(json_get "$existing_config" height "480")"
 default_frame_port="$(json_get "$existing_config" framePort "8787")"
-default_interval="$(json_get "$existing_config" interval "300")"
 default_metrics_interval="$(json_get "$existing_config" metricsInterval "60")"
 default_rotate="$(json_get "$existing_config" rotate "0")"
 default_timezone="$(json_get "$existing_config" timeZone "$(detect_timezone)")"
@@ -1098,7 +1096,6 @@ case "$FRAMEOS_ROTATE" in
 esac
 FRAMEOS_FRAME_PORT="${FRAMEOS_FRAME_PORT:-$(ask_int "Local admin panel port" "$default_frame_port")}"
 FRAMEOS_TIME_ZONE="${FRAMEOS_TIME_ZONE:-$(ask "Timezone" "$default_timezone")}"
-FRAMEOS_INTERVAL="${FRAMEOS_INTERVAL:-$default_interval}"
 FRAMEOS_METRICS_INTERVAL="${FRAMEOS_METRICS_INTERVAL:-$default_metrics_interval}"
 FRAMEOS_ADMIN_AUTH_ENABLED="${FRAMEOS_ADMIN_AUTH_ENABLED:-$(ask_yes_no "Require admin login for the local panel" "$default_admin_enabled")}"
 FRAMEOS_ADMIN_USER="${FRAMEOS_ADMIN_USER:-$(ask_required "Admin username" "$default_admin_user")}"
@@ -1251,7 +1248,7 @@ export FRAMEOS_NETWORK_CHECK FRAMEOS_NETWORK_CHECK_TIMEOUT_SECONDS FRAMEOS_NETWO
 export FRAMEOS_WIFI_HOTSPOT FRAMEOS_WIFI_HOTSPOT_SSID FRAMEOS_WIFI_HOTSPOT_PASSWORD FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS
 export FRAMEOS_LOG_TO_FILE FRAMEOS_ASSETS_PATH FRAMEOS_SAVE_ASSETS
 export FRAMEOS_MAX_HTTP_RESPONSE_BYTES FRAMEOS_DEBUG FRAMEOS_SCALING_MODE FRAMEOS_FLIP
-export FRAMEOS_INTERVAL FRAMEOS_METRICS_INTERVAL FRAMEOS_TIME_ZONE
+export FRAMEOS_METRICS_INTERVAL FRAMEOS_TIME_ZONE
 
 say ""
 say "Installing FrameOS..."

@@ -13,11 +13,6 @@ const CloudContractSettings* = @[
   profiles: @[
     ProfileSpec(profile: "linux"),
     ProfileSpec(profile: "esp32", restart: true)]),
-  SettingSpec(key: "interval", rule:
-    Rule(kind: rkNumber, hasMin: true, min: 1.0, hasMax: true, max: 86400.0),
-  profiles: @[
-    ProfileSpec(profile: "linux"),
-    ProfileSpec(profile: "esp32")]),
   SettingSpec(key: "scaling_mode", rule:
     Rule(kind: rkString, strEnum: @["contain", "cover", "stretch", "center"]),
   profiles: @[

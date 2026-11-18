@@ -278,7 +278,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         name="frames_list",
         description=(
             "List the project's frames: id, name, mode (rpios/buildroot/embedded), platform, device, size, "
-            "status, host, FrameOS version, interval, scene count, the scene currently showing and when "
+            "status, host, FrameOS version, scene count, the scene currently showing and when "
             "the frame last logged. Archived frames are left out unless include_archived."
         ),
         properties={"include_archived": {"type": "boolean"}},
@@ -297,7 +297,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         name="frame_get",
         description=(
             "Everything the backend records about one frame: connection (host, ports, mode), display "
-            "(device, size, rotate, color palette, colors), timing (interval, timezone, schedule, reboot), "
+            "(device, size, rotate, color palette, colors), timing (timezone, schedule, reboot), "
             "scene summaries, error behavior, GPIO buttons, build/deploy state. Credentials are redacted."
         ),
         properties={"frame_id": FRAME_ID},

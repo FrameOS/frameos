@@ -9,7 +9,7 @@ import Testing
         #expect(contract.profiles["linux"] != nil && contract.profiles["esp32"] != nil)
 
         let oldLinux = contract.keys(profile: "linux", frameosVersion: "2026.8.1")
-        #expect(oldLinux.contains("rotate") && oldLinux.contains("interval"))
+        #expect(oldLinux.contains("rotate") && !oldLinux.contains("interval"))
         #expect(!oldLinux.contains("render_scale"))
 
         let newLinux = contract.keys(profile: "linux", frameosVersion: "2026.11.6")

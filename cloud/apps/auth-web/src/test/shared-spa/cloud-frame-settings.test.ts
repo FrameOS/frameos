@@ -557,8 +557,8 @@ describe("cloud settings push", () => {
     expect(cloudFrameSettingKeysForVersion("2026.9.22")).toContain("device");
     // A form that never touched the driver sends none: the key is only in
     // the payload once the owner picked one (or the cloud stored a pick).
-    expect(cloudFrameSettingsPayload({ interval: 60 }, cloudFrameSettingKeysForVersion("2026.9.22"))).toEqual({
-      interval: 60,
+    expect(cloudFrameSettingsPayload({ rotate: 90 }, cloudFrameSettingKeysForVersion("2026.9.22"))).toEqual({
+      rotate: 90,
     });
     expect(
       cloudFrameSettingsPayload(
@@ -873,8 +873,8 @@ describe("cloud settings push", () => {
   });
 
   it("keeps the extended keys out of the base payload", () => {
-    const payload = cloudFrameSettingsPayload({ flip: "horizontal", interval: 300 } as never);
-    expect(Object.keys(payload)).toEqual(["interval"]);
+    const payload = cloudFrameSettingsPayload({ flip: "horizontal", rotate: 90 } as never);
+    expect(Object.keys(payload)).toEqual(["rotate"]);
   });
 
   it("keeps the power keys out of the base (Pi) payload", () => {
@@ -885,15 +885,16 @@ describe("cloud settings push", () => {
     }
     const payload = cloudFrameSettingsPayload({
       deep_sleep: true,
-      interval: 300,
+      rotate: 90,
     } as never);
-    expect(Object.keys(payload)).toEqual(["interval"]);
+    expect(Object.keys(payload)).toEqual(["rotate"]);
   });
 
   it("drops everything else from a full frame form", () => {
     const payload = cloudFrameSettingsPayload({
       debug: true,
       frame_host: "192.168.1.10",
+      // A row from before frames lost their interval still holds one.
       interval: 300,
       name: "Kitchen",
       rotate: 90,
@@ -903,7 +904,6 @@ describe("cloud settings push", () => {
     } as never);
     expect(Object.keys(payload).sort()).toEqual([
       "debug",
-      "interval",
       "name",
       "rotate",
       "scaling_mode",
@@ -925,11 +925,11 @@ describe("cloud settings push", () => {
 
   it("coerces the numeric fields the form keeps as strings", () => {
     const payload = cloudFrameSettingsPayload({
-      interval: "300",
       rotate: "90",
+      wake_check_seconds: "900",
     } as never);
-    expect(payload).toEqual({ interval: 300, rotate: 90 });
-    expect(allowedFrameSettings.get("interval")?.(payload.interval)).toBe(true);
+    expect(payload).toEqual({ rotate: 90 });
+    expect(allowedFrameSettings.get("interval")).toBeUndefined();
     expect(allowedFrameSettings.get("rotate")?.(payload.rotate)).toBe(true);
   });
 });

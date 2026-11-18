@@ -109,7 +109,6 @@ public struct APIError: Error, LocalizedError, Sendable, Equatable {
         case "invalid_frame": return "That frame is not on this account."
         case "invalid_password": return "That password is not right."
         case "second_factor_required": return "Type the code from your authenticator instead of the password."
-        case "interval_below_plan_floor": return "Your plan does not render this often. Choose a longer interval."
         case "settings_not_supported_by_device": return "This frame does not take these settings."
         case "invalid_settings": return "The frame did not take these values. Check them and try again."
         case "scene_name_taken": return "You already have a scene with that name."

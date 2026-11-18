@@ -437,7 +437,6 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'device_config',
   'timezone',
   'timezone_updater',
-  'interval',
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',
@@ -504,7 +503,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
 // These fields are edited through text inputs, so frameForm may hold strings like
 // "1080" while the backend returns numbers. Normalize before comparing or submitting,
 // otherwise a saved frame still counts as having unsaved changes.
-// The cloud settings half (interval, rotate, the ESP32 power numbers, …) is
+// The cloud settings half (rotate, the ESP32 power numbers, …) is
 // the same list the cloud payload builder coerces, so the two cannot drift.
 const NUMERIC_FRAME_KEYS = new Set<keyof FrameType>([
   ...numericCloudFrameSettingKeys,
@@ -569,7 +568,6 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   device_config: 'Device config',
   timezone: 'Timezone',
   timezone_updater: 'Timezone data updates',
-  interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
   scaling_mode: 'Scaling mode',
@@ -643,7 +641,6 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'device_config',
   'timezone',
   'timezone_updater',
-  'interval',
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',

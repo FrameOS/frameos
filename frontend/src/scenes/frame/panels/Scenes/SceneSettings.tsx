@@ -127,7 +127,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                   <RefreshIntervalInput
                     value={value}
                     onChange={(seconds) => onChange(seconds === undefined ? '' : String(seconds))}
-                    placeholder={String(scene.settings?.refreshInterval || frameForm.interval || 300)}
+                    placeholder={String(scene.settings?.refreshInterval || DEFAULT_REFRESH_INTERVAL_SECONDS)}
                     className="h-10 @md:max-w-[9rem]"
                   />
                 )}

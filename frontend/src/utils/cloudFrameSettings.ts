@@ -536,7 +536,6 @@ function compareVersions(a: string, b: string): number {
 }
 
 export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
-  'interval',
   'rotate',
   'wake_check_seconds',
   'awake_after_input_seconds',

@@ -96,7 +96,7 @@
       }
     },
     {
-      "name": "cloud frame asleep, wake estimated from its power settings",
+      "name": "cloud frame asleep, wake estimated from its power settings (300 s: a frame's old interval is no part of it)",
       "plane": "cloud",
       "frame": {
         "id": "c6",
@@ -111,7 +111,7 @@
       },
       "expect": {
         "label": "offline",
-        "activity": "asleep · wakes in ~7 min",
+        "activity": "asleep · wakes in ~2 min",
         "deploy": null,
         "firmware": null,
         "active": true
@@ -136,7 +136,7 @@
       },
       "expect": {
         "label": "offline",
-        "activity": "asleep · wakes in ~7 min",
+        "activity": "asleep · wakes in ~2 min",
         "deploy": null,
         "firmware": null,
         "active": true

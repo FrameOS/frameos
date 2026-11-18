@@ -36,6 +36,9 @@ static const char *const s_ignored_keys[] = {
     "assets_path", "wake_schedule", "wake_check", "battery_pin", "battery_divider",
     "battery_enable_pin", "time_zone", "fusion", "allow_lan", "spill_force",
     "tls_enable", "tls_port", "frame_settings_on_screen", "settings_unlock",
+    // A frame has no refresh interval any more (its scenes do), but a control
+    // plane from before still provisions `set interval N`.
+    "interval",
 };
 
 const pk_preset_t *pk_config_presets(size_t *count)
@@ -64,7 +67,6 @@ bool pk_config_panel_upside_down(const pk_config_t *config)
 void pk_config_defaults(pk_config_t *config)
 {
     memset(config, 0, sizeof(*config));
-    config->interval_seconds = PK_INTERVAL_DEFAULT_SECONDS;
     config->send_logs = 1;
     pk_pins_t unset = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
     config->pins = unset;
@@ -217,13 +219,6 @@ pk_set_result_t pk_config_set(pk_config_t *config, const char *key, const char *
             return reply(PK_SET_INVALID, message, message_cap, "frame_id must be a number");
         }
         config->frame_id = (uint32_t)id;
-    } else if (strcmp(key, "interval") == 0) {
-        unsigned long seconds = 0;
-        if (!parse_unsigned(value, &seconds)) {
-            return reply(PK_SET_INVALID, message, message_cap, "interval must be seconds");
-        }
-        config->interval_seconds =
-            seconds < PK_INTERVAL_MIN_SECONDS ? PK_INTERVAL_MIN_SECONDS : (uint32_t)seconds;
     } else if (strcmp(key, "deep_sleep") == 0) {
         if (!parse_flag(value, &config->deep_sleep)) {
             return reply(PK_SET_INVALID, message, message_cap, "want 0 or 1");
