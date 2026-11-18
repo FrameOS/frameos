@@ -260,6 +260,15 @@ link started from the admin page completes even after the browser tab
 closes, and the code comes down the moment the flow resolves or its window
 lapses.
 
+**From the frame's own screen.** The settings panel's frame page offers
+**Link to FrameOS Cloud** on a frame no control plane holds
+(`docs/scene-settings.md` "Linking the frame"): a Pi queues the same panel link
+code as the portal below, and an ESP32 runs the flow on its cloud task
+(`fos_cloud.c`, scopes `frame:link` + `frame:managed`, then
+`/api/frames/enroll` with the flow's Bearer token; nothing survives a reboot,
+and an unclaimed window just ends). The page shows the code and the page to
+enter it in.
+
 **Starting one without a browser.** The setup portal's cloud option no
 longer requires a claim code: saved without one, it queues
 `state/cloud_link_code_pending.json`, and once the frame is online the hub

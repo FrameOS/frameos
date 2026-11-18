@@ -9,6 +9,11 @@
  * the token is dead after one use, success or failure — and the state is
  * surfaced as "error" until a fresh token is provisioned.
  *
+ * Flow B: the frame page's link code (fos_cloud_link_start below). The
+ * owner's approval of the device flow gives a Bearer token, the frame
+ * enrolls with it in place of a claim token, and that token is the access
+ * token from then on.
+ *
  * NVS keys (namespace "frameos", all managed here, never printed):
  *   cloud_sk    32-byte Ed25519 seed (blob)
  *   cloud_token opaque bearer access token
@@ -35,6 +40,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 typedef enum {
@@ -154,6 +160,24 @@ void fos_cloud_add_device_report(cJSON *msg);
  * task's frame page included (it runs under the runtime lock, and a state
  * takes a runtime snapshot, so the cloud task sends it). */
 void fos_cloud_request_state(void);
+
+/* The link code (flow B, docs/cloud-frames.md "B. Link code on the device"),
+ * asked for by the frame page's "Link to FrameOS Cloud": the cloud task
+ * starts the device flow against cloud_url (else https://cloud.frameos.net),
+ * polls it and enrolls with its Bearer token once the owner approves; a
+ * window that lapses unclaimed just ends. Start and cancel from any task
+ * (cancel never touches an enrolled link). */
+void fos_cloud_link_start(void);
+void fos_cloud_link_cancel(void);
+/* True while a link is pending, from the start until it ends; `code` and
+ * `uri` get the code to enter and where (verification_uri, else
+ * verification_uri_complete), "" while the provider has not answered yet
+ * and after the approval. */
+bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len);
+/* How long a pending link holds the frame awake, 0 when none. */
+uint32_t fos_cloud_link_seconds_left(void);
+/* "esp32-s3" | "esp32-c3" | "esp32": the platform a frame reports. */
+const char *fos_platform_name(void);
 
 /* A scene changed here (USB, HTTP): the checksum the cloud knows no longer
  * says what this frame holds, so the next hello must not report it. */

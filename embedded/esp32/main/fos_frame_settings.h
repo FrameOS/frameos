@@ -17,5 +17,8 @@ char *fos_frame_settings_json(void);
  * `renderScale`. Wi-Fi is joined in the background, the scale is live, a
  * rotation restarts. */
 void fos_frame_settings_apply(const char *json);
-/* "scan", or "open" when the page comes up (a scan when off Wi-Fi). */
+/* "scan", or "open" when the page comes up (a scan when off Wi-Fi);
+ * "checkUpdate", "installUpdate"; "linkCloud" (a FrameOS Cloud link code,
+ * fos_cloud.c), "adopt" (an adoption code over the panel, for a backend's
+ * POST /api/adopt, fos_http.c), "cancelLink" (either, while pending). */
 void fos_frame_settings_action(const char *action);

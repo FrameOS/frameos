@@ -48,9 +48,11 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_framebuffer.h"
+#include "fos_lan_access.h"
 #include "fos_mem.h"
 #include "fos_scenes.h"
 #include "fos_settings.h"
+#include "fos_url_guard.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -2058,6 +2060,134 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
     return err;
 }
 
+/* --------------------------------------------------------------- adoption */
+
+/* GET and POST /api/adopt (docs/scene-settings.md "Linking the frame"): a
+ * backend adopts a frame no plane holds with the code the frame page drew
+ * over the panel (fos_frame_settings.c, scope `adopt`). No login: the code
+ * is the credential, single use, five tries, under the wrong-code budget it
+ * shares with the local network access code (fos_lan_access.c). GET says
+ * whether a code is showing and, only then, what the backend needs for the
+ * frame's row; POST {code, backend, apiKey, frameId} gives the frame its
+ * backend and restarts it, after which it talks to the backend like a frame
+ * provisioned over USB. */
+static esp_err_t adopt_answer(httpd_req_t *req, const char *status, const char *error, const char *detail)
+{
+    char body[192];
+    snprintf(body, sizeof(body), "{\"error\":\"%s\",\"detail\":\"%s\"}", error, detail);
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t adopt_get(httpd_req_t *req)
+{
+    fos_config_t *config = fos_config();
+    httpd_resp_set_type(req, "application/json");
+    if (fos_lan_access_scope(fos_lan_access_now()) != FOS_LAN_ACCESS_SCOPE_ADOPT) {
+        return httpd_resp_send(req, "{\"adopting\":false}", HTTPD_RESP_USE_STRLEN);
+    }
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return httpd_resp_send_500(req);
+    cJSON_AddBoolToObject(root, "adopting", true);
+    cJSON_AddStringToObject(root, "kind", "embedded");
+    cJSON_AddStringToObject(root, "platform", fos_platform_name());
+    cJSON_AddStringToObject(root, "name", config->hostname);
+    cJSON_AddStringToObject(root, "version", esp_app_get_description()->version);
+    cJSON_AddStringToObject(root, "panel", config->panel);
+    cJSON_AddStringToObject(root, "hardwarePreset", config->hardware_preset);
+    cJSON_AddNumberToObject(root, "width", fos_display_width());
+    cJSON_AddNumberToObject(root, "height", fos_display_height());
+    cJSON_AddNumberToObject(root, "rotate", config->rotate);
+    esp_err_t err = send_cjson_response(req, root);
+    cJSON_Delete(root);
+    return err;
+}
+
+static esp_err_t adopt_post(httpd_req_t *req)
+{
+    fos_config_t *config = fos_config();
+    char *body = NULL;
+    cJSON *root = NULL;
+    if (read_request_body(req, 1024, false, &body) == ESP_OK) root = cJSON_Parse(body);
+    free(body);
+    const cJSON *code = cJSON_GetObjectItem(root, "code");
+    const cJSON *backend = cJSON_GetObjectItem(root, "backend");
+    const cJSON *api_key = cJSON_GetObjectItem(root, "apiKey");
+    const cJSON *frame_id = cJSON_GetObjectItem(root, "frameId");
+    char origin[FOS_URL_LEN];
+    const char *status = "400 Bad Request";
+    const char *error = NULL;
+    const char *detail = "Send code, backend (an http(s) origin), apiKey and frameId";
+    /* The body first: a malformed one costs no attempt. */
+    if (!cJSON_IsObject(root)) {
+        error = "invalid_request";
+    } else if (!cJSON_IsString(code) || !code->valuestring[0]) {
+        error = "code_required";
+        detail = "Enter the code shown on the frame";
+    } else if (!cJSON_IsString(backend) || strncasecmp(backend->valuestring, "http", 4) != 0 ||
+               !fos_url_origin(backend->valuestring, origin, sizeof(origin)) ||
+               origin[strcspn(origin, " \"\\")] != '\0' || !cJSON_IsString(api_key) ||
+               !api_key->valuestring[0] || strlen(api_key->valuestring) >= sizeof(config->api_key) ||
+               !cJSON_IsNumber(frame_id) || frame_id->valuedouble < 1 || frame_id->valuedouble > 4294967295.0) {
+        error = "invalid_request";
+    } else if (config->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+        status = "409 Conflict";
+        error = "managed";
+        detail = "This frame already has a control plane";
+    } else {
+        fos_lan_access_result_t result =
+            fos_lan_access_consume(code->valuestring, fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT);
+        if (result != FOS_LAN_ACCESS_OK) {
+            /* In fos_lan_access_result_t order, from CODE_EXPIRED on. */
+            static const char *const statuses[] = {"410 Gone", "403 Forbidden", "403 Forbidden",
+                                                   "429 Too Many Requests"};
+            static const char *const details[] = {
+                "No adoption code is showing on the frame; ask for a new one",
+                "That code does not match the one on the frame",
+                "Too many wrong codes; ask for a new one",
+                "Too many wrong codes; try again in an hour",
+            };
+            const unsigned i = (unsigned)result - FOS_LAN_ACCESS_CODE_EXPIRED;
+            error = fos_lan_access_result_token(result);
+            status = i < 4 ? statuses[i] : status;
+            detail = i < 4 ? details[i] : detail;
+        }
+    }
+    if (error) {
+        cJSON_Delete(root);
+        return adopt_answer(req, status, error, detail);
+    }
+    char old_key[sizeof(config->api_key)];
+    strlcpy(old_key, config->api_key, sizeof(old_key));
+    strlcpy(config->backend_url, origin, sizeof(config->backend_url));
+    strlcpy(config->api_key, api_key->valuestring, sizeof(config->api_key));
+    config->frame_id = (uint32_t)frame_id->valuedouble;
+    cJSON_Delete(root);
+    if (fos_config_save() != ESP_OK) {
+        config->backend_url[0] = '\0';
+        strlcpy(config->api_key, old_key, sizeof(config->api_key));
+        config->frame_id = 0;
+        return adopt_answer(req, "500 Internal Server Error", "persist_failed", "The frame could not save its backend");
+    }
+    frameos_nim_log_hook("{\"event\":\"settings:adopted\",\"source\":\"esp32\"}");
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t err = httpd_resp_send(req, "{\"ok\":true}", HTTPD_RESP_USE_STRLEN);
+    /* Restarted to come up as a backend's frame (the commands pull, the
+     * scenes sync), once the answer is out. */
+    if (xTaskCreate(restart_task, "fos_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
+        esp_restart();
+    }
+    return err;
+}
+
+static esp_err_t adopt_handler(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET) return adopt_get(req);
+    if (req->method == HTTP_POST) return adopt_post(req);
+    return httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "GET or POST");
+}
+
 /* ---------------------------------------------------------- asset routes */
 
 /* Query strings on asset routes carry the (url-encoded) path plus, for
@@ -2854,10 +2984,10 @@ typedef struct {
     char uri[32];
 } logged_route_t;
 
-/* 27 routes per server (13 GET + 14 POST), x2 servers (http + https), or
- * 27 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
-#define FOS_HTTP_MAX_LOGGED_ROUTES 64
-/* 2.8 KB, read once a request: in PSRAM where the board has some, allocated
+/* 32 routes per server, x2 servers (http + https), or 32 + 7 captive-portal
+ * probes in portal mode. 72 leaves headroom for the next route. */
+#define FOS_HTTP_MAX_LOGGED_ROUTES 72
+/* 3.2 KB, read once a request: in PSRAM where the board has some, allocated
  * at the first route, so internal RAM keeps it for DMA, stacks and Wi-Fi. */
 static logged_route_t *s_logged_routes = NULL;
 static size_t s_logged_route_count = 0;
@@ -3089,6 +3219,9 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
     REGISTER_ROUTE(event);
     REGISTER_ROUTE(frame_api_get);
     REGISTER_ROUTE(frame_api_post);
+    /* Both methods in one slot: the TLS server registers every route again. */
+    httpd_uri_t adopt = {.uri = "/api/adopt", .method = HTTP_ANY, .handler = adopt_handler};
+    REGISTER_ROUTE(adopt);
 
     if (portal_mode) {
         static const char *probes[] = {
@@ -3109,7 +3242,7 @@ static esp_err_t register_routes(httpd_handle_t server, bool portal_mode)
 
 static void configure_httpd_defaults(httpd_config_t *config)
 {
-    /* 30 fixed routes + 7 captive-portal probes = 37 in portal mode, and a
+    /* 32 fixed routes + 7 captive-portal probes = 39 in portal mode, and a
      * registration past the cap fails the boot rather than dropping quietly.
      * Each slot is a small struct, so keep real headroom for the next route. */
     config->max_uri_handlers = 48;

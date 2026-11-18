@@ -27,6 +27,10 @@ import frameos/events_gen
 import frameos/portal as netportal
 import frameos/frame_settings_lock
 import frameos/cloud/link_state
+import frameos/local_access
+from frameos/cloud/device_flow import activeLinkCode, writePendingLinkCode, pendingLinkCodeQueued,
+  clearPendingLinkCode
+from frameos/cloud/enrollment import otherControlPlaneActive, loadPendingEnrollment
 import frameos/server/api
 from frameos/upgrade import installedFrameOSVersion
 import system/sceneSettings/scene as sceneSettings
@@ -208,6 +212,51 @@ proc managedBy(config: FrameConfig): string =
   if config != nil and config.serverHost.len > 0 and config.serverApiKey.len > 0:
     return "FrameOS backend"
 
+proc cloudLinkFacts(): tuple[managed, connecting, connected: bool, providerUrl: string] =
+  ## The cloud link as the page needs it: enrolled, a device flow under way,
+  ## linked at all (a direct link that manages nothing still holds the
+  ## frame's one link), and the provider a new link goes to.
+  try:
+    withLock cloudLinkLock:
+      let state = loadCloudLinkState()
+      result.managed = isManagedLink(state)
+      result.connecting = state{"status"}.getStr() == "connecting"
+      result.connected = state{"status"}.getStr() == "connected"
+      result.providerUrl = providerUrlFromState(state)
+  except CatchableError:
+    result.providerUrl = DEFAULT_CLOUD_PROVIDER_URL
+
+proc linkFacts(config: FrameConfig, f: WifiFacts, result: JsonNode) =
+  ## The frame page's "Link to FrameOS Cloud" and "Adopt by a backend"
+  ## (docs/scene-settings.md "Linking the frame"): offered to a frame no
+  ## control plane holds, and what to do while one is being linked. The
+  ## adoption code itself is never a fact: the runner draws it over the
+  ## panel after the image is stored (local_access.nim), like the local
+  ## network access code.
+  let
+    cloud = cloudLinkFacts()
+    code = activeLinkCode()
+    adopting = pendingLocalAccessScope() == LocalAccessScopeAdopt
+    linking = code.active or cloud.connecting or pendingLinkCodeQueued()
+  if linking:
+    result["cloudLink"] = %*{"code": code.userCode,
+      "uri": if code.verificationUri.len > 0: code.verificationUri else: code.verificationUriComplete}
+  if adopting:
+    let host = if f.connected and f.ip.len > 0: f.ip else: config.frameHost
+    let port = if config.framePort > 0: config.framePort else: 8787
+    result["adopt"] = %*{"address": host & ":" & $port,
+      "seconds": int(localAccessChallengeSecondsLeft())}
+  if linking or adopting or cloud.managed or cloud.connected or f.hotspot or managedBy(config).len > 0 or
+      loadPendingEnrollment() != nil:
+    return
+  # A serverHost alone is a frame waiting to be adopted (the setup portal's
+  # "backend" mode), which only the backend's adoption finishes; the cloud
+  # refuses to enroll it (enrollment.nim otherControlPlaneActive).
+  if not otherControlPlaneActive(config):
+    result["actions"].add %"linkCloud"
+  if localAccessPanelDevice(config.device):
+    result["actions"].add %"adopt"
+
 proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
     try:
@@ -240,6 +289,7 @@ proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
         if f.connected and f.ip.len > 0:
           wifi["ip"] = %f.ip
         result["wifi"] = wifi
+      linkFacts(config, f, result)
     except Exception:
       result = nil
 
@@ -262,6 +312,33 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
       of "close":
         withLock factsLock:
           pageOpen = false
+      of "linkCloud":
+        # The hub thread starts the device flow on its next pass and polls it
+        # (device_flow.nim deviceFlowTick): no network on the runner. The
+        # runner draws the code over the panel, and this page shows it too.
+        let config = runnerConfig()
+        let cloud = cloudLinkFacts()
+        if not cloud.managed and not otherControlPlaneActive(config) and
+            writePendingLinkCode(cloud.providerUrl):
+          log(%*{"event": "settings:frame:linkCloud", "origin": "panel"})
+          sendEvent(evRender, newJObject(), eoSystem)
+      of "adopt":
+        let config = runnerConfig()
+        if config != nil and localAccessPanelDevice(config.device) and not cloudLinkFacts().managed:
+          discard startLocalAccessChallenge(LocalAccessScopeAdopt)
+          log(%*{"event": "settings:frame:adopt", "origin": "panel"})
+          sendEvent(evRender, newJObject(), eoSystem)
+      of "cancelLink":
+        # A link under way, never one made: a device flow still waiting for
+        # its code to be approved, and the adoption code.
+        clearPendingLinkCode()
+        withLock cloudLinkLock:
+          let state = loadCloudLinkState()
+          if state{"status"}.getStr() == "connecting" and not isManagedLink(state):
+            resetLinkState(state)
+            saveCloudLinkState(state)
+        clearLocalAccessChallenge(LocalAccessScopeAdopt)
+        sendEvent(evRender, newJObject(), eoSystem)
       else:
         discard
     except Exception:

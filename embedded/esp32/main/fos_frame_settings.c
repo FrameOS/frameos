@@ -25,17 +25,20 @@
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_system.h"
 
 #include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_lan_access.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_rtc.h"
 #include "fos_scenes.h"
 #include "fos_wifi.h"
+#include "frameos_display.h"
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_frame_settings";
@@ -64,8 +67,8 @@ static const char *manager(void)
 /* The page's facts as JSON, written as text: the keys are literals, and what
  * the frame says (a network's name) is escaped on its way in. A buffer of
  * JSON_CAP holds the worst case: every name in range and the saved one, 32
- * bytes each, every byte escaped to \u00XX. */
-#define JSON_CAP (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+ * bytes each, every byte escaped to \u00XX, and a link code with where to enter it. */
+#define JSON_CAP (1088 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
 
 typedef struct {
     char *buf;
@@ -189,8 +192,36 @@ char *fos_frame_settings_json(void)
         if (version[0]) put_pair(&out, "updateVersion", version);
     }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
-    /* Restart is a reboot here: the page shows Reboot alone. */
-    put(&out, ",\"actions\":[]}");
+    /* A control plane being linked (docs/scene-settings.md "Linking the
+     * frame"): the cloud's code is the page's to show; an adoption's never
+     * is, it is drawn over the panel alone (fos_client.c), so the page says
+     * where the backend finds the frame (port 80: the address alone). */
+    char code[16], uri[192];
+    const int64_t now_s = fos_lan_access_now();
+    const bool linking = fos_cloud_link_code(code, sizeof(code), uri, sizeof(uri));
+    const fos_lan_access_scope_t scope = fos_lan_access_scope(now_s);
+    if (linking) {
+        put(&out, ",\"cloudLink\":{\"code\":");
+        put_string(&out, code);
+        put_pair(&out, "uri", uri);
+        put(&out, "}");
+    }
+    if (scope == FOS_LAN_ACCESS_SCOPE_ADOPT) {
+        put(&out, ",\"adopt\":{\"address\":");
+        put_string(&out, fos_wifi_ip());
+        snprintf(line, sizeof(line), ",\"seconds\":%u}", (unsigned)fos_lan_access_seconds_left(now_s));
+        put(&out, line);
+    }
+    /* Restart is a reboot here: the page shows Reboot alone. Linking is
+     * offered to a frame no plane holds, online, with nothing pending; an
+     * adoption needs a panel to show its code on. */
+    put(&out, ",\"actions\":[");
+    if (!linking && scope == FOS_LAN_ACCESS_SCOPE_NONE && !config->backend_url[0] &&
+        fos_cloud_state() != FOS_CLOUD_ENROLLED && fos_cloud_state() != FOS_CLOUD_PENDING &&
+        state == FOS_WIFI_CONNECTED) {
+        put(&out, fos_display_present() ? "\"linkCloud\",\"adopt\"" : "\"linkCloud\"");
+    }
+    put(&out, "]}");
     return out.buf;
 }
 
@@ -396,6 +427,22 @@ void fos_frame_settings_action(const char *action)
         fos_ota_check_start(0);
     } else if (strcmp(action, "installUpdate") == 0) {
         if (fos_ota_install_checked() != ESP_OK) ESP_LOGW(TAG, "update refused: nothing to install");
+    } else if (strcmp(action, "linkCloud") == 0) {
+        fos_cloud_link_start();
+        fos_client_render_now(); /* Cancel in place of the offer, at once */
+    } else if (strcmp(action, "adopt") == 0) {
+        /* The same checks as the facts, again: the page may be a moment old. */
+        if (!fos_display_present() || fos_config()->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+            return;
+        }
+        if (fos_lan_access_start(fos_lan_access_now(), esp_random, FOS_LAN_ACCESS_SCOPE_ADOPT) == 0) {
+            strlcpy(s_refused, "Too many wrong codes. Try again in an hour", sizeof(s_refused));
+        }
+        fos_client_render_now(); /* the code over the panel, the page's line */
+    } else if (strcmp(action, "cancelLink") == 0) {
+        fos_cloud_link_cancel();
+        if (fos_lan_access_scope(fos_lan_access_now()) == FOS_LAN_ACCESS_SCOPE_ADOPT) fos_lan_access_clear();
+        fos_client_render_now();
     } else if (strcmp(action, "open") == 0) {
         int64_t age = fos_wifi_scan_age_us();
         if (fos_wifi_state() != FOS_WIFI_CONNECTED && !fos_wifi_scanning() && (age < 0 || age > SCAN_FRESH_US)) {

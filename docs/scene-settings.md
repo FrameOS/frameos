@@ -118,9 +118,9 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (what the page may offer besides Render again and Reboot: `restart` on a Pi; `linkCloud` and `adopt`, below), `cloudLink` (`code`, `uri`) and `adopt` (`address`, `seconds`) while a link is under way, `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
 | `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
-| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `linkCloud`, `adopt`, `cancelLink` |
 
 The page is for somebody at the frame. A key or a tap that came in over the
 frame's HTTP API with the frame access key (origin `http:write`,
@@ -141,7 +141,19 @@ What the page holds, top to bottom:
 - **A card**: Wi-Fi (connected to what, can't find it, wrong password?,
   connecting, the setup hotspot), signal, address, the battery on a frame
   that has one, what the last Save could not do, who manages the frame, the
-  version.
+  version, and while a link is under way the cloud's code or the address to
+  adopt the frame at.
+- **The buttons**, right under the card, above the fields (which can run
+  longer than the panel): **Render again**, **Check for updates** / **Install
+  update** (below), **Update scenes** (below), **Restart FrameOS** (where the
+  host lists it) and **Reboot**. Restart, Reboot, Install and Update scenes
+  ask for a second tap ("Tap again", red); anything else in between asks
+  again. Render, Restart and Reboot send
+  the contract's device commands from the origin `panel`
+  (`docs/events-contract.json`), so every host runs the restart and reboot it
+  runs for a schedule. Then **Link to FrameOS Cloud** and **Adopt by a
+  backend** on a frame no control plane holds, and **Cancel link** while
+  either is under way (below, "Linking the frame").
 - **Wi-Fi network**: a select box of the networks in range, the saved one first
   when it is not among them, and "Other network…" for a hidden one (an input
   to type its name). "Scan for networks" sits right under it; a scan runs when
@@ -200,12 +212,6 @@ What the page holds, top to bottom:
   and the words stay on the page. It asks for a second tap, as Install update
   does. One only the owner may take is counted and left to the owner. A
   frame with no plane, or whose plane does not list updates, shows neither.
-- **Render again**, **Restart FrameOS** (where the host lists it) and
-  **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
-  anything else in between asks again. They send the
-  contract's device commands from the origin `panel`
-  (`docs/events-contract.json`), so every host runs the restart and reboot it
-  runs for a schedule.
 
 Save is lit only while there is something to save, on either page, and goes
 quiet once it is pressed: that is how the page says it took it. On the frame
@@ -239,6 +245,51 @@ was off can still be fixed at the frame, the device has the last word:
   `/boot/firmware`), while it is there (`frame_settings_lock.nim`);
 - an ESP32: `set settings_unlock 1` on the USB console, until `set
   settings_unlock 0`.
+
+### Linking the frame
+
+A frame that no control plane holds (no cloud link of any kind, no backend
+with its key, no claim token queued) is offered both, and the person at the
+frame picks. The host decides what is offered (`actions`); the words are the
+page's.
+
+- **Link to FrameOS Cloud** (`linkCloud`; not offered to a Pi whose
+  frame.json names a backend, which the cloud refuses to enroll): the device
+  flow of `docs/cloud-frames.md` "B. Link code on the device", started off the
+  render task (a Pi queues `state/cloud_link_code_pending.json` for the hub
+  thread, `device_flow.nim`; an ESP32's cloud task, `fos_cloud.c`). The code
+  and the page to type it in (`verification_uri`, shown without its scheme)
+  are on the card and in a line under the buttons; a Pi also draws its code
+  and a QR over every scene. Approved, the frame enrolls with the flow's token
+  and is cloud-managed. The code may be in an image: it links the frame to the
+  account of whoever types it, which is what the page asks for.
+- **Adopt by a backend** (`adopt`; only with a panel to show the code on):
+  six digits on the panel, the local network access ceremony with the scope
+  `adopt` (`local_access.nim`, `fos_lan_access.c`: five tries, five minutes,
+  the same wrong-code budget, drawn after the image is stored and so in no
+  image the frame serves, `docs/lan-access.md`). The card shows the address
+  to type (`ip:8787` on a Pi, the IP on an ESP32). In the backend's **Adopt
+  frame** form the code stands in for the admin login: the backend reads
+  `GET /api/adopt` on the frame (8787, then 80) and sends the code to
+  `POST /api/adopt`:
+  - a Pi answers with its admin login (minting one, `admin` and a random
+    password saved to frame.json, when it has none), and the backend goes on
+    as an adoption by password does: reads `GET /api/frames/1`, imports the
+    scenes and writes its address and key back (`adopt_standalone_frame`,
+    `backend/app/api/frame_sync.py`);
+  - an ESP32 is sent `{code, backend, apiKey, frameId}` for a row the backend
+    made from what `GET /api/adopt` said (platform, panel, preset, size),
+    writes them to NVS and restarts, and from then on is a backend frame like
+    a USB-provisioned one. It keeps its board settings; its scenes are the
+    backend's from the first pull, so scenes it held on its own are replaced.
+
+  `GET /api/adopt` says nothing but `{"adopting": false}` while no code shows;
+  `POST /api/adopt` answers the ceremony's tokens (`code_required` 400,
+  `invalid_code` / `too_many_attempts` 403, `code_expired` 410, `rate_limited`
+  429) and `managed` 409 on a cloud-managed frame. FrameOS Cloud adopts
+  nothing: the cloud's half is the link code.
+- **Cancel link** (`cancelLink`) drops a flow still waiting for its code and
+  the adoption code, never a link made, and never a local network access code.
 
 ### What a control plane learns
 

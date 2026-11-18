@@ -931,8 +931,11 @@ static uint32_t keep_awake_remaining_seconds(void)
     /* A local network access code on the panel holds the deep sleep until it is
      * answered or expires: the person walking to the frame to read it must
      * find the code there, and its end must repaint the panel. Not a
-     * keep_awake_ms() window, which an answered code could not shorten. */
+     * keep_awake_ms() window, which an answered code could not shorten.
+     * So does a link code (fos_cloud.c): the cloud task polls for it. */
     uint32_t lan_s = fos_lan_access_seconds_left(fos_lan_access_now());
+    uint32_t link_s = fos_cloud_link_seconds_left();
+    if (link_s > lan_s) lan_s = link_s;
     uint32_t hold_s = 0;
     if (until_us > now_us) hold_s = (uint32_t)((until_us - now_us + 999999) / 1000000);
     return lan_s > hold_s ? lan_s : hold_s;
@@ -2618,6 +2621,11 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
                               fos_pixel_format_t format)
 {
     memset(ov, 0, sizeof(*ov));
+    /* Read apart from the code: a challenge replaced in between has a new
+     * generation, so the next pass draws it again with its own label. */
+    const char *label = fos_lan_access_scope(fos_lan_access_now()) == FOS_LAN_ACCESS_SCOPE_ADOPT
+                            ? "Adoption code"
+                            : "Local network access code";
     if (s_last_frame == buf) {
         /* The lend hook could not drop the preview snapshot (a stream stalled
          * past 30 s) so this buffer is still served as the frame's image. */
@@ -2627,12 +2635,11 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
             .buf = buf, .width = width, .height = height, .format = format,
             .rotate = fos_config()->rotate,
         };
-        if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
-                               &ov->box)) {
+        if (fos_panel_code_box(&ov->surface, label, FOS_LAN_ACCESS_CODE_LEN, &ov->box)) {
             size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
             ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
             if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
-            fos_panel_draw_code(&ov->surface, &ov->box, "Local network access code", code);
+            fos_panel_draw_code(&ov->surface, &ov->box, label, code);
             ov->drawn = true;
             frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
         }

@@ -11,6 +11,11 @@
  * fos_lan_access_panel_code(), whose one caller draws it: it is not in an
  * ack, a log line or an image the frame serves.
  *
+ * The same ceremony adopts the frame by a backend (docs/scene-settings.md
+ * "Linking the frame"): a code minted for the `adopt` scope is drawn as the
+ * "Adoption code" and only POST /api/adopt (fos_http.c) takes it. A code is
+ * good for the scope it was shown for alone, and the budget is shared.
+ *
  * Plain C with no IDF beyond a spinlock, so main/tests/test_fos_lan_access.c
  * runs the whole state machine on a laptop: the clock and the RNG are the
  * caller's (esp_timer seconds and esp_random() on the device).
@@ -82,16 +87,30 @@ typedef enum {
     FOS_LAN_ACCESS_RATE_LIMITED      /* the wrong-code budget is spent: nothing touched */
 } fos_lan_access_result_t;
 
-/* Start a challenge at `now_s` (fos_lan_access_now()), replacing any pending
- * one. Returns its generation, never 0 — or 0 when the wrong-code budget is
- * spent (`rate_limited`), leaving any pending challenge as it was. */
-uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng);
+/* What a code unlocks: the local network access switch (the cloud's
+ * `lan_access_set`), or adoption by a backend (POST /api/adopt). */
+typedef enum {
+    FOS_LAN_ACCESS_SCOPE_LAN = 0,
+    FOS_LAN_ACCESS_SCOPE_ADOPT,
+    FOS_LAN_ACCESS_SCOPE_NONE /* fos_lan_access_scope(): nothing pending */
+} fos_lan_access_scope_t;
 
-/* Check `code` (NULL or "" = none given, `code_required`). With the budget
- * spent, `rate_limited` before anything else is looked at. OK clears the
- * challenge, so does the wrong code that spends the last attempt; every
- * wrong code counts against the budget. */
-fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s);
+/* Start a challenge for `scope` at `now_s` (fos_lan_access_now()), replacing
+ * any pending one. Returns its generation, never 0 — or 0 when the wrong-code
+ * budget is spent (`rate_limited`), leaving any pending challenge as it was. */
+uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng, fos_lan_access_scope_t scope);
+
+/* Check `code` (NULL or "" = none given, `code_required`) for `scope`. With
+ * the budget spent, `rate_limited` before anything else is looked at. A code
+ * pending for another scope is `code_expired` and costs no attempt: there is
+ * no code for this scope to guess (the Pi's consumeLocalAccessCode). OK
+ * clears the challenge, so does the wrong code that spends the last attempt;
+ * every wrong code counts against the budget. */
+fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s, fos_lan_access_scope_t scope);
+
+/* The scope of the challenge pending at `now_s`, FOS_LAN_ACCESS_SCOPE_NONE
+ * when there is none. */
+fos_lan_access_scope_t fos_lan_access_scope(int64_t now_s);
 
 /* Drop any pending challenge (local network access turned off: the code has nothing
  * left to do). The panel repaints because fos_lan_access_panel_code() now

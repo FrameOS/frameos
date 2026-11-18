@@ -52,6 +52,11 @@ const
   ## chromiumScreenshot run Chromium unsandboxed where FrameOS runs as root.
   LocalAccessScopeLocalNetwork* = "localNetwork"
   LocalAccessScopeShellApps* = "shellApps"
+  ## Not a fact but a handover: the frame page's "Adopt by a backend" shows a
+  ## code, and `POST /api/adopt` takes it (server/routes/adopt_routes.nim,
+  ## docs/scene-settings.md "Linking the frame"). Only the frame page starts
+  ## one, never a control plane's challenge: `isLocalAccessScope` leaves it out.
+  LocalAccessScopeAdopt* = "adopt"
 
   LocalAccessStatePath* = "./state/local_access.json"
     ## Deliberately NOT frame.json. A backend deploy uploads a freshly
@@ -364,6 +369,19 @@ proc clearLocalAccessChallenge*() =
   withLock localAccessLock:
     localAccessChallenge = LocalAccessChallenge()
 
+proc clearLocalAccessChallenge*(scope: string) =
+  ## Drops the pending challenge only when it was shown for `scope`: the
+  ## frame page's Cancel ends an adoption code, never a local network one.
+  withLock localAccessLock:
+    if localAccessChallenge.scope == scope:
+      localAccessChallenge = LocalAccessChallenge()
+
+proc pendingLocalAccessScope*(): string =
+  ## The scope of the code on the panel right now, or "" for none.
+  withLock localAccessLock:
+    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
+      result = localAccessChallenge.scope
+
 proc activeLocalAccessCode*(): string =
   ## The code that should be on the panel right now, or "" for nothing.
   withLock localAccessLock:
@@ -382,6 +400,7 @@ proc localAccessPanelText*(): string =
     if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
       let label =
         if localAccessChallenge.scope == LocalAccessScopeShellApps: "Shell apps code"
+        elif localAccessChallenge.scope == LocalAccessScopeAdopt: "Adoption code"
         else: "Local network access code"
       result = label & "\n" & localAccessChallenge.code
     else:
