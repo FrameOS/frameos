@@ -2786,11 +2786,11 @@ static esp_err_t render_once(bool quiet)
                 }
             }
             char showing_id[sizeof(s_refresh_scene_id)];
-            char showing_name[8];
             /* A new scene gets a full refresh, not a partial one: the scene the
-             * plane drew when it drew it, the idle runtime's is never new. */
+             * plane drew when it drew it, the idle runtime's is never new. The
+             * id alone: this runs for every frame of an animation. */
             if (local_render) {
-                current_scene_details(showing_id, sizeof(showing_id), showing_name, sizeof(showing_name));
+                frameos_nim_current_scene_id(showing_id, sizeof(showing_id));
             } else {
                 strlcpy(showing_id, s_remote_scene, sizeof(showing_id));
             }

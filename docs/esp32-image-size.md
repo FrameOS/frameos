@@ -579,6 +579,10 @@ on the SenseCAP ran ~5 ms a frame slower without them, and these loops are
 every frame of an animation and most of a render. Find the bytes elsewhere
 before taking a module off the list.
 
+`pixie/paints` joined the list on 2026-11-18 with the gradient rows it holds
+(`docs/perf-todo.md` "The hardware bench's slow renders"): the change as a
+whole, its row job, tables and probe lines included, was about 10 KB of flash (3,140,048 to 3,149,808 B on the generic image).
+
 ## The cuts
 
 Per-cut numbers are from the linker map of builds that also carried the

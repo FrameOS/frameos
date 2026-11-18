@@ -100,5 +100,13 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
 - An e-paper render line carries the probe split only on firmware that has
   it on that path; compare phases (`get`, `walk`, `parse`, `raster`) between
   runs, not absolute numbers between boards.
+- A slow animation's issue says where a quiet frame went (`a quiet frame:
+  scene 33.2, app 26.6, ...`): the average of the frames between two logged
+  ones, from the logged frame's line (`passive.quiet` in `run.json`). The
+  logged frame's own split is a third slower and not what the frame rate is
+  made of.
+- `paint NxMS` on a render line is the gradients and images filled through a
+  shape: three page-sized ones were most of a 10 s render on the E1003
+  (2026-11-18).
 - After a firmware change, run with `--baseline` against the last good run on
   the same frames.

@@ -51,6 +51,7 @@ if(NIM_GENERATED_SRCS)
         "@spixie@sinternal.nim.c"  "@fcvkvr@fvagreany.nim.c"  # pixie/internal
         "@spixie@srgb565.nim.c"    "@fcvkvr@feto565.nim.c"    # pixie/rgb565
         "@spixie@scommon.nim.c"    "@fcvkvr@fpbzzba.nim.c"    # pixie/common
+        "@spixie@spaints.nim.c"    "@fcvkvr@fcnvagf.nim.c"    # pixie/paints: a gradient's rows
         "@sframeos@sutils@sresample.nim.c" "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c" # frameos/utils/resample: zoomPan's frame
         "@sframeos@sjs_runtime@spixel_ops.nim.c" "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c" # frameos/js_runtime/pixel_ops: frameos.pixels
         "@sframeos@sjs_runtime@styped_ops.nim.c" "@fsenzrbf@fwf_ehagvzr@fglcrq_bcf.nim.c") # frameos/js_runtime/typed_ops: frameos.ops

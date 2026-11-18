@@ -1088,6 +1088,13 @@ reTerminal Sticky (Touch test in the Windows 98 layout, 2026-11-09): about
 
 ## Measuring
 
+- The render line's bracket with `set debug 1` (`frameos/render_probe.nim`):
+  the phases of that render, pixie's fills by kind (`fill`, `fillMask`,
+  `stroke`, `strokeMask`, and `paint` for a gradient or an image through a
+  shape), and, on the frame an animation logs in full, the average of the
+  quiet frames since the last one: `| quiet 234: scene 33.2 native 2.1 ...`
+  in ms a frame. Read that one for an animation: the logged frame builds its
+  log lines and is a third slower than the frames between.
 - `set debug 1` on the console logs a profile line per node per render (not
   for an animation's quiet frames: the logger is off for those, and building
   the lines for nobody was most of the scene program's own cost per frame on

@@ -65,6 +65,7 @@ extern int fos_nim_repack_alloc_impl(uint8_t **buf, size_t *len, int pixel_forma
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
+extern void fos_nim_current_scene_id_impl(char *out, size_t len);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern bool fos_nim_scene_running_impl(const char *scene_id);
@@ -948,6 +949,16 @@ const char *frameos_nim_scene_info_json_wait(int timeout_ms)
     const char *json = fos_nim_scene_info_json_impl();
     nim_lock_give();
     return json;
+}
+
+void frameos_nim_current_scene_id(char *out, size_t len)
+{
+    if (!out || len == 0) return;
+    out[0] = '\0';
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_current_scene_id_impl(out, len);
+    nim_lock_give();
 }
 
 const char *frameos_nim_scene_info_json(void)

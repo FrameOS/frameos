@@ -14,6 +14,28 @@ template breathe*() =
     if not hook.isNil:
       hook()
 
+type RowsProc* = proc(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].}
+  ## Rows [first, last) of a job, on worker 0 (the caller) or 1.
+
+var
+  rowsRunner*: proc(fn: RowsProc, ctx: pointer, rows, blockRows: int32) {.cdecl, gcsafe, raises: [].}
+    ## A host with a second core for pixel rows sets this once at start
+    ## (FrameOS on an ESP32: fos_rows.c, which hands a job's rows out in
+    ## blocks to the caller and to a task on the other core). nil: every row
+    ## on the caller. A job runs on a task the Nim runtime knows nothing
+    ## about: plain values and pointers, no allocation, nothing that raises.
+  rowsWorkers*: int32 = 1 ## how many workers a job gets, for its per-worker scratch
+
+proc runRows*(fn: RowsProc, ctx: pointer, rows, blockRows: int, shared: bool) {.raises: [].} =
+  ## `fn` over rows [0, rows): shared between the workers when the host has
+  ## them and the job says its rows may run anywhere, else on the caller.
+  {.cast(gcsafe).}:
+    let runner = rowsRunner
+    if shared and not runner.isNil and rowsWorkers > 1:
+      runner(fn, ctx, rows.int32, blockRows.int32)
+    else:
+      fn(ctx, 0, 0, rows.int32)
+
 # Small per-pixel helpers: inlined where a loop calls them even when the
 # caller is compiled for size (the ESP32 firmware is -Os, where gcc called
 # these: a dozen calls a pixel in a gradient filled into a 4-bit grey
