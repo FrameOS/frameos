@@ -154,6 +154,10 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
  * RTC domain keeps both this variable and the system clock through deep
  * sleep. 0 = unknown, render on the next pass. */
 RTC_DATA_ATTR static time_t s_next_render_due;
+/* The frame's own interval when that render was scheduled: a check-in pass
+ * moves the render only when this was changed since
+ * (fos_checkin_sleep_seconds). */
+RTC_DATA_ATTR static uint32_t s_due_frame_interval;
 /* The pass-start power decision's memory (fos_power.h): the last believed
  * cell reading and the confirmation streaks that keep one bad ADC burst
  * from switching deep sleep off or parking the frame for six hours. */
@@ -3886,10 +3890,14 @@ static void client_task(void *arg)
         }
         if (checkin_pass) {
             /* This pass skipped the render, so sleep until the scheduled one,
-             * not a fresh interval from now. */
-            int64_t until_due = (int64_t)(s_next_render_due - time(NULL));
-            if (until_due < 1) until_due = 1;
-            if ((uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;
+             * not an interval from now: this pass's interval is the scene's
+             * declared one (nothing built it), not the one the render was
+             * scheduled by, and taken when shorter it redrew a one-day photo
+             * scene after every check-in. The frame's own interval counts
+             * when a setting changed it, on a scene that has none. */
+            bool frame_interval_changed = !(scene_interval > 0.0) && config->interval_sec != s_due_frame_interval;
+            sleep_s = fos_checkin_sleep_seconds((int64_t)(s_next_render_due - time(NULL)), sleep_s,
+                                                frame_interval_changed, battery_critical);
         }
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
@@ -3898,6 +3906,7 @@ static void client_task(void *arg)
          * by a keep-awake, whose follow-up pass must then check in, not
          * render again. */
         s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
+        s_due_frame_interval = config->interval_sec;
         /* A key still down, or a tap inside its double-press window: the
          * dispatcher has a `longPress`, `press` or `doublePress` still to
          * deliver, and only a tick delivers it. A battery frame that slept

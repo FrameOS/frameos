@@ -53,6 +53,27 @@ def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
     assert "scene_interval >= 1.0" not in client
 
 
+def test_a_checkin_pass_sleeps_until_the_render_that_was_scheduled():
+    """A deep-sleeping frame that wakes for commands (wake_check_seconds, 900 s
+    on the reTerminal presets) skips its render and went back to sleep for
+    the shorter of "until the scheduled render" and "this pass's interval".
+    The pass's interval is the scene's declared one (no scene is built on a
+    pass that renders nothing), not the saved "Refresh interval" the render
+    was scheduled by: a photo scene set to one day redrew minutes after every
+    check-in, around the clock, on a reTerminal E1004 (a user's report,
+    2026-11-18). The rule is fos_checkin_sleep_seconds, host-tested."""
+    client = (MAIN_DIR / "fos_client.c").read_text()
+    checkin = client[client.index("        if (checkin_pass) {\n            /* This pass skipped the render"):]
+    checkin = checkin[: checkin.index("s_next_render_due = clock_ok")]
+    assert "fos_checkin_sleep_seconds((int64_t)(s_next_render_due - time(NULL)), sleep_s," in checkin
+    assert "if ((uint64_t)until_due < sleep_s)" not in client, "the shorter of the two moved the render up"
+    # The frame's own interval counts only when it changed, on a scene with none.
+    assert "!(scene_interval > 0.0) && config->interval_sec != s_due_frame_interval" in checkin
+    assert "RTC_DATA_ATTR static uint32_t s_due_frame_interval;" in client
+    after = client[client.index("s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;"):]
+    assert after.index("s_due_frame_interval = config->interval_sec;") < 200
+
+
 def test_an_animation_goes_to_the_backend_once():
     """Both places a frame's picture is handed to the backend ask
     fos_animation_push_wanted first, and a push that reached the backend

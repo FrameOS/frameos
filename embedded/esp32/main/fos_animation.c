@@ -25,6 +25,17 @@ uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_inter
     return (uint32_t)scene_interval_s;
 }
 
+uint32_t fos_checkin_sleep_seconds(int64_t until_due_s, uint32_t interval_s, bool frame_interval_changed,
+                                   bool battery_critical)
+{
+    if (until_due_s < 1) until_due_s = 1;
+    if (until_due_s > 7 * 86400) until_due_s = 7 * 86400;
+    if ((frame_interval_changed || battery_critical) && interval_s >= 1 && interval_s < (uint64_t)until_due_s) {
+        return interval_s;
+    }
+    return (uint32_t)until_due_s;
+}
+
 static int64_t period_for(double scene_interval_s)
 {
     int64_t period = (int64_t)(scene_interval_s * 1000000.0 + 0.5);
