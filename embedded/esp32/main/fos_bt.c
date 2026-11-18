@@ -10,6 +10,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <sys/stat.h>
+
+#include "fos_assets.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -105,15 +108,60 @@ static bool dequeue(bt_event_t *out)
     return true;
 }
 
+/* The frame's own keyboard layout: `keyboard.json` at the top of its
+ * storage (put there like any asset, from either plane), in the contract's
+ * layout shape (frameos/keyboard_tables.nim). Read on the render task when
+ * the stack starts and when a keyboard connects (a stat on a 24 MB SPIFFS is
+ * half a second: never per key), again only when its size or time moved. */
+#define BT_LAYOUT_FILE "keyboard.json"
+#define BT_LAYOUT_MAX 4096
+static volatile bool s_layout_due = false;
+
+static void check_layout(void)
+{
+    static off_t s_size = -1;
+    static time_t s_mtime = 0;
+    struct stat st;
+    bool present = fos_assets_available() && fos_assets_stat(BT_LAYOUT_FILE, &st) == ESP_OK;
+    off_t size = present ? st.st_size : -1;
+    time_t mtime = present ? st.st_mtime : 0;
+    if (size == s_size && mtime == s_mtime) return;
+    s_size = size;
+    s_mtime = mtime;
+    if (!present) {
+        frameos_nim_set_keyboard_layout_json("");
+        return;
+    }
+    if (size <= 0 || size > BT_LAYOUT_MAX) {
+        frameos_nim_log_hook("{\"event\":\"bt:layout\",\"source\":\"esp32\",\"error\":\"keyboard.json: 1 to 4096 bytes\"}");
+        return;
+    }
+    char path[160];
+    fos_assets_full_path(path, sizeof(path), BT_LAYOUT_FILE);
+    FILE *f = fopen(path, "rb");
+    char *text = f ? malloc((size_t)size + 1) : NULL;
+    size_t got = text ? fread(text, 1, (size_t)size, f) : 0;
+    if (f) fclose(f);
+    if (text) {
+        text[got] = '\0';
+        frameos_nim_set_keyboard_layout_json(text);
+        free(text);
+    }
+}
+
 bool fos_bt_pending(void)
 {
-    return s_count > 0;
+    return s_count > 0 || s_layout_due;
 }
 
 bool fos_bt_process_events(void)
 {
     bt_event_t e;
     bool any = false;
+    if (s_layout_due) {
+        s_layout_due = false;
+        check_layout();
+    }
     /* What is queued now and no more (fos_touch_process_events's rule). */
     uint8_t budget = s_count;
     while (budget-- > 0 && dequeue(&e)) {
@@ -609,6 +657,10 @@ static void finish(bt_dev_t *d)
         strlcpy(k->name, d->name, sizeof(k->name));
         known_save();
     }
+    if (keyboard) {
+        s_layout_due = true; /* a keyboard.json put there since */
+        fos_client_wake_for_events();
+    }
     changed();
     start_scan(); /* for the other slot */
 }
@@ -929,6 +981,7 @@ esp_err_t fos_bt_start(void)
     if (esp_timer_create(&pair_end, &s_pair_timer) != ESP_OK) s_pair_timer = NULL;
     nimble_port_freertos_init(host_task);
     s_started = true;
+    s_layout_due = true;
     return ESP_OK;
 }
 

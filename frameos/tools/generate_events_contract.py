@@ -5,7 +5,7 @@ Source of truth: docs/events-contract.json (prose: docs/events.md, conformance
 corpus: docs/event-fixtures.json). Outputs (all committed):
 
   frameos/src/frameos/events_gen.nim                    every Nim host (Linux, ESP32, wasm)
-  frameos/src/frameos/keyboard_gen.nim                  the keyboard tables (Linux and wasm: the hosts with a keyboard)
+  frameos/src/frameos/keyboard_gen.nim                  the keyboard tables, packed (frameos/keyboard_tables.nim reads them)
   embedded/esp32/main/fos_events_gen.h                  the ESP32's C paths
   frontend/src/utils/eventsContract.gen.ts              the shared SPA (editor, Monaco typings)
   frontend/schema/events.json                           the editor catalog (also read by the legacy
@@ -549,53 +549,78 @@ def resolved_layout(keyboard, layout_id):
     return table
 
 
+def nim_packed(text):
+    """A Nim string literal of `text`, every byte that is not plain ASCII
+    escaped, so the table stays one line."""
+    out = []
+    for byte in text.encode("utf-8"):
+        ch = chr(byte)
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\t":
+            out.append("\\t")
+        elif 0x20 <= byte < 0x7F:
+            out.append(ch)
+        else:
+            out.append(f"\\x{byte:02x}")
+    return '"' + "".join(out) + '"'
+
+
+def packed_layout_keys(layout):
+    """A layout's own keys (not what it inherits), one line each:
+    `code<TAB>unshifted<TAB>shifted<TAB>altGr`, the letters left out where
+    they are their own letter (lowercase, uppercase, no altGr)."""
+    lines = []
+    for code, values in layout["keys"].items():
+        values = list(values) + [""] * (3 - len(values))
+        if any(ch in v for v in values for ch in "\t\n"):
+            fail(f"keyboard.layouts: {code} has a tab or a newline")
+        lines.append("\t".join([code] + values))
+    return "\n".join(lines)
+
+
 def gen_nim_keyboard(doc):
     keyboard = doc["keyboard"]
     layouts = list(keyboard["layouts"])
     out = [f"# {BANNER}", "#",
-           "# The keyboard tables: a Linux key number to its W3C `code`, a code to the `key`",
-           "# it means when it is not printable, and per layout what a printable code",
-           "# means as (unshifted, shifted, altGr). Only the hosts with a keyboard compile",
-           "# this (frameos/input_state.nim): the ESP32 too, for its Bluetooth keyboard.", ""]
+           "# The keyboard tables, packed as text and read by frameos/keyboard_tables.nim:",
+           "# a Linux key number to its W3C `code` (line n is KEY n), a code to the `key`",
+           "# it means when it is not printable, and per layout what its printable codes",
+           "# mean as (unshifted, shifted, altGr) over the layout it inherits. A letter",
+           "# no layout lists is its own letter. The ESP32 ships the default layout",
+           "# alone (docs/esp32-image-size.md); a frame's own goes in keyboard.json.", ""]
+    codes = {int(linux): code for linux, code in keyboard["codes"].items()}
+    lines = [codes.get(n, "") for n in range(max(codes) + 1)]
+    named = [code if key == code else f"{code}={key}" for code, key in keyboard["named"].items()]
     out.append("const")
     out.append(f"  DefaultKeyboardLayout* = \"us\"")
-    out.append(f"  KeyboardLayoutIds*: array[{len(layouts)}, string] = [{', '.join(nim_str(l) for l in layouts)}]")
+    out.append(f"  LinuxKeyCodes* = {nim_packed(chr(10).join(lines))}")
+    out.append(f"  NamedKeys* = {nim_packed(chr(10).join(named))}")
     out.append("")
-    out.append("proc linuxKeyCode*(linuxCode: int): string =")
-    out.append("  ## The W3C KeyboardEvent.code of a Linux KEY_* number; empty when unknown.")
-    out.append("  case linuxCode")
-    for linux, code in keyboard["codes"].items():
-        out.append(f"  of {int(linux)}: {nim_str(code)}")
-    out.append('  else: ""')
-    out.append("")
-    out.append("proc keyNamedValue*(code: string): string =")
-    out.append("  ## The `key` of a code that is not printable (\"Enter\", \"ArrowLeft\"); empty for")
-    out.append("  ## a printable one, whose key is the layout's.")
-    out.append("  case code")
-    for code, key in keyboard["named"].items():
-        out.append(f"  of {nim_str(code)}: {nim_str(key)}")
-    out.append('  else: ""')
-    out.append("")
-    out.append("proc isKeyboardLayout*(layout: string): bool =")
-    out.append("  layout in KeyboardLayoutIds")
-    out.append("")
-    for layout_id in layouts:
-        out.append(f"proc layoutKey{camel(layout_id)}(code: string): (string, string, string) =")
-        out.append("  case code")
-        for code, values in sorted(resolved_layout(keyboard, layout_id).items()):
-            out.append(f"  of {nim_str(code)}: ({nim_str(values[0])}, {nim_str(values[1])}, {nim_str(values[2])})")
-        out.append('  else: ("", "", "")')
-        out.append("")
-    out.append("proc keyboardLayoutKey*(layout, code: string): (string, string, string) =")
-    out.append("  ## What a printable `code` means under `layout`: (unshifted, shifted, altGr);")
-    out.append("  ## empty strings for a code the layout has no character for. An unknown")
-    out.append("  ## layout is the default.")
-    out.append("  case layout")
-    for layout_id in layouts:
-        if layout_id == "us":
-            continue
-        out.append(f"  of {nim_str(layout_id)}: layoutKey{camel(layout_id)}(code)")
-    out.append("  else: layoutKeyUs(code)")
+
+    def tables(ids):
+        index = {layout_id: i for i, layout_id in enumerate(ids)}
+        parents = [index.get(keyboard["layouts"][i].get("inherits", ""), -1) for i in ids]
+        body = [
+            f"  KeyboardLayoutIds*: array[{len(ids)}, string] = [{', '.join(nim_str(l) for l in ids)}]",
+            f"  KeyboardLayoutParents*: array[{len(ids)}, int] = [{', '.join(str(p) for p in parents)}]",
+            f"  KeyboardLayoutKeys*: array[{len(ids)}, string] = [",
+        ]
+        for layout_id in ids:
+            body.append(f"    {nim_packed(packed_layout_keys(keyboard['layouts'][layout_id]))},")
+        body.append("  ]")
+        return body
+
+    out.append("when defined(frameosEmbedded):")
+    out.append("  const")
+    out.extend("  " + line for line in tables(["us"]))
+    out.append("else:")
+    out.append("  const")
+    out.extend("  " + line for line in tables(layouts))
     return "\n".join(out) + "\n"
 
 

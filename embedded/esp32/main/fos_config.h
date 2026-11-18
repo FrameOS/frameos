@@ -285,8 +285,6 @@ typedef struct {
                                     * Default on. */
     bool bluetooth;                /* Bluetooth LE keyboards and mice
                                     * (fos_bt.c), read at boot. Default off. */
-    char keyboard_layout[8];       /* the contract's keyboard.layouts id a
-                                    * keyboard's keys are read under; "" = us */
     uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];

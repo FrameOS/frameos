@@ -877,9 +877,9 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `render` | yes | yes |  | all | Render the scene. |
 | `open` | yes |  | `sceneId` scene | all | Every time the scene becomes the frame's current scene: at boot, and whenever the frame switches to it, including switching back. |
 | `close` | yes |  |  | all | When the frame switches away from the scene to another one. |
-| `keyDown` | yes |  | `code` string, `key` string, `repeat` boolean, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is pressed on a keyboard (or held: `repeat`). |
-| `keyUp` | yes |  | `code` string, `key` string, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is released on a keyboard |
-| `textInput` | yes |  | `text` string | Pi, preview | Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). |
+| `keyDown` | yes |  | `code` string, `key` string, `repeat` boolean, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | all | When a key is pressed on a keyboard (or held: `repeat`). |
+| `keyUp` | yes |  | `code` string, `key` string, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | all | When a key is released on a keyboard |
+| `textInput` | yes |  | `text` string | all | Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). |
 | `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer | all | When a pointer (a finger, a mouse, a pen) moves |
 | `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string, `shift`? boolean, `ctrl`? boolean, `alt`? boolean, `meta`? boolean | all | When a pointer button is pressed or a finger touches the panel. |
 | `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is released or a finger lifts |
@@ -893,7 +893,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
 | `pinch` | yes |  | `scale` float, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | Two fingers (or pens) down together that moved, when the first of them lifts: `scale` is how far apart they are then over how far apart they were when the second went down (above 1 spread out, below 1 drawn together), `startX` / `startY` the point between them then and `x` / `y` the point between them now. |
 | `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
-| `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
+| `wheel` | yes |  | `deltaX` float, `deltaY` float, `x` integer, `y` integer | all | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |

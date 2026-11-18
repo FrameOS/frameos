@@ -545,7 +545,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|bluetooth|keyboard_layout|mic_pins|voice_chat|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|bluetooth|mic_pins|voice_chat|"
                "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
@@ -1130,14 +1130,6 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "bluetooth") == 0) {
         config->bluetooth = atoi(value) != 0;
         printf("bluetooth saved; takes effect at the next boot\n");
-    }
-    else if (strcmp(key, "keyboard_layout") == 0) {
-        if (strlen(value) >= sizeof(config->keyboard_layout)) {
-            printf("a layout id: us, gb, de, fr, es, it, sv, da, nb\n");
-            return 1;
-        }
-        strlcpy(config->keyboard_layout, value, sizeof(config->keyboard_layout));
-        frameos_nim_set_keyboard_layout(config->keyboard_layout);
     }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {

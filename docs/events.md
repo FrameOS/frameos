@@ -575,7 +575,8 @@ HID over GATT, "Just Works" pairing with `bt pair`, bonds in NVS). It compiles
 the whole input state but the Linux driver struct and round panels: a key
 arrives as `keyDown` / `keyUp` with its Linux number (`linuxCode`, from the
 HID usage) and the dispatcher's keyboard tables name it under the frame's
-layout (`set keyboard_layout`) and make its `textInput`; the mouse is
+layout (the firmware ships `us` alone; a frame's own is its `keyboard.json`,
+`frameos/keyboard_tables.nim`) and make its `textInput`; the mouse is
 pointer 0, its motion `movementX` / `movementY` on a `pointerMove`, its
 wheels `wheel`. The contract's generated lookups are
 procs, never inline iterators (an iterator's loop body is copied per `yield`;

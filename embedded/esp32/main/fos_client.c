@@ -3558,7 +3558,6 @@ static void client_task(void *arg)
             /* The frame's button bindings (docs/events.md "Event map"), the same
              * way: the dispatcher reads them off its config on the next press. */
             frameos_nim_set_event_map(config->event_map);
-            frameos_nim_set_keyboard_layout(config->keyboard_layout);
             /* Same contract for the zone name: live, one string per pass. */
             frameos_nim_set_time_zone(config->time_zone);
 

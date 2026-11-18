@@ -39,7 +39,7 @@ from frameos/utils/image import pointerToScenePoint
 # the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
 import frameos/loading_mark
 import frameos/cursor_sprite
-from frameos/input_state import setKeyboardLayout, takeCursorDirty, cursorVisible, cursorSpace
+from frameos/input_state import setCustomKeyboardLayout, takeCursorDirty, cursorVisible, cursorSpace
 
 # ------------------------------------------------------------------ C hooks
 
@@ -455,13 +455,20 @@ proc fos_nim_set_event_map_impl(json: cstring) {.exportc, cdecl.} =
   except CatchableError as e:
     log("eventMap: ignored, does not parse: " & e.msg)
 
-proc fos_nim_set_keyboard_layout_impl(layout: cstring) {.exportc, cdecl.} =
-  ## The layout a Bluetooth keyboard's keys are read under (the contract's
-  ## `keyboard.layouts`; NVS `kbd_layout`), pushed every pass like the zone.
-  if layout == nil or host.events.isNil:
-    return
-  let text = $layout
-  host.events.inputState.setKeyboardLayout(if text.len == 0: "us" else: text)
+proc fos_nim_set_keyboard_layout_json_impl(json: cstring): bool {.exportc, cdecl.} =
+  ## The frame's own keyboard layout (`keyboard.json` in its storage, read by
+  ## main/fos_bt.c; frameos/keyboard_tables.nim has the shape), "" for none:
+  ## the firmware knows `us` alone. A layout that does not read keeps the one
+  ## before, and says why in the log.
+  if json == nil or host.events.isNil:
+    return false
+  try:
+    host.events.inputState.setCustomKeyboardLayout($json)
+    log(if ($json).len == 0: "keyboard: us" else: "keyboard: keyboard.json")
+    true
+  except CatchableError as e:
+    log("keyboard: keyboard.json ignored: " & e.msg)
+    false
 
 var lastPaletteJson: string
 

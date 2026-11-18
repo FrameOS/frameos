@@ -32,7 +32,7 @@ when not defined(frameosEmbedded):
   import ./panel_shape
 import ./utils/image
 import std/unicode
-import ./keyboard_gen
+import ./keyboard_tables
 
 const
   ## A relative pointer's cursor is drawn (by the Linux runner) for this long
@@ -118,11 +118,13 @@ type
     cursorShown: bool
     cursorDirty*: bool             ## the host should draw (or clear) the cursor
     keyboardLayout: string
+    customLayout: CustomKeyboardLayout ## a frame's own (keyboard_tables.nim); none by default
     shift, ctrl, altLeft, altRight, meta, capsLock: bool
 
 proc initInputState*(config: FrameConfig): InputState =
   result = InputState(buttonRoles: @[], buttons: @[])
   result.keyboardLayout = "us"
+  result.customLayout.parent = -1
   if config.isNil:
     return
   for button in config.gpioButtons:
@@ -686,11 +688,11 @@ proc wheel(state: var InputState, deltaX, deltaY: float, origin: EventOrigin, ou
   output.add(InputDelivery(name: evWheel, origin: origin,
     payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
 
-proc setKeyboardLayout*(state: var InputState, layout: string) =
-  ## The layout a key's `key` is read under (the contract's `keyboard.layouts`):
-  ## for a host whose config is not a FrameConfig (the ESP32's NVS key).
-  if isKeyboardLayout(layout):
-    state.keyboardLayout = layout
+proc setCustomKeyboardLayout*(state: var InputState, json: string) =
+  ## A frame's own layout as JSON (keyboard_tables.nim), read before the
+  ## layout's own keys; "" for none. Raises a ValueError naming what is
+  ## wrong, and keeps the one it had then.
+  state.customLayout = customKeyboardLayout(json)
 
 # ------------------------------------------------------------------ keyboard
 
@@ -704,7 +706,7 @@ proc keyValue(state: InputState, code: string, shift, altGr: bool): string =
   let named = keyNamedValue(code)
   if named.len > 0:
     return named
-  let (base, shifted, third) = keyboardLayoutKey(state.keyboardLayout, code)
+  let (base, shifted, third) = keyboardLayoutKey(state.keyboardLayout, code, state.customLayout)
   if altGr and third.len > 0:
     return third
   let upper = if isLetterKey(code): shift != state.capsLock else: shift

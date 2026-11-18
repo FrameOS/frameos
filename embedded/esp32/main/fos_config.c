@@ -304,10 +304,6 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
     if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) s_config.touch_beep = u8 != 0;
     if (nvs_get_u8(nvs, "bt", &u8) == ESP_OK) s_config.bluetooth = u8 != 0;
-    size_t layout_len = sizeof(s_config.keyboard_layout);
-    if (nvs_get_str(nvs, "kbd_layout", s_config.keyboard_layout, &layout_len) != ESP_OK) {
-        s_config.keyboard_layout[0] = '\0';
-    }
     if (nvs_get_u8(nvs, "cpu_mode", &u8) == ESP_OK && u8 <= FOS_CPU_PERFORMANCE) s_config.cpu_mode = u8;
     /* The touch panel and the audio codec the same way: stored, else the
      * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
@@ -455,7 +451,6 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
     FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", s_config.touch_beep ? 1 : 0), "touch_beep");
     FOS_NVS_SET(nvs_set_u8(nvs, "bt", s_config.bluetooth ? 1 : 0), "bt");
-    FOS_NVS_SET(nvs_set_str(nvs, "kbd_layout", s_config.keyboard_layout), "kbd_layout");
     FOS_NVS_SET(nvs_set_u8(nvs, "cpu_mode", s_config.cpu_mode), "cpu_mode");
     char touch_pins[FOS_STR_LEN];
     fos_config_format_touch_pins(&s_config.touch_pins, touch_pins, sizeof(touch_pins));

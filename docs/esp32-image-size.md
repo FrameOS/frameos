@@ -1118,6 +1118,38 @@ to, and no way to move the frames already in the field (a partition table is
 not changed over the air). A layout for new boards only does not lift the
 limit while the old layout gets the same image.
 
+## Bluetooth keyboards and mice: +191,648 (2026-11-18)
+
+`main/fos_bt.c` and what came with it, S3 8 MB image, local builds against
+1f37c5d6d (3,163,408 B): 3,355,056 B, 93.1% of the slot.
+
+| What | Flash |
+|---|---|
+| The controller (`libbtdm_app`, `libbtbb`) | 71.4 KB |
+| NimBLE (`libbt`) | 65.6 KB |
+| Its strings (the pool, attributed to efuse) | 8.0 KB |
+| Wi-Fi and Bluetooth coexistence | 5.9 KB |
+| `fos_bt.c`, `fos_hid_report.c`, the glue | ~10 KB |
+| The input state's keyboard half, the relative mouse, the JSX UI's keys, wheel and `cursor-*` | ~13 KB |
+| The cursor sprite (`cursor_sprite.nim`) and the LCD overlay | 5.1 KB |
+| The frame page's Bluetooth card | 6.3 KB |
+| The keyboard tables (`keyboard_tables.nim`, `us` alone) | 5.2 KB |
+
+- **The stack is trimmed already**: a central and an observer, no peripheral
+  role, no GATT server, no BLE 5, errors-only logging, and a HID client of
+  our own instead of IDF's `esp_hid` (which needs the HID *service*, and
+  with it the peripheral role and the GATT server: 181.8 KB measured).
+  Bluedroid was 314 KB.
+- **The keyboard tables: −29,360.** The generator wrote one `case` branch per
+  key per layout, nine layouts: `keyboard_gen.nim` was 34.3 KB of code. It
+  writes packed text now (a line a key, a layout only its own keys over the
+  one it inherits, a letter that is its own letter not at all), read line by
+  line by `keyboard_tables.nim`, and the firmware ships `us` alone; a frame's
+  own layout is a `keyboard.json` in its storage. Linux and the preview keep
+  all nine.
+- Static internal RAM: +19 KB, mostly the controller's, given back at boot
+  while Bluetooth is off (`esp_bt_controller_mem_release`).
+
 ## Counted, not built
 
 - **Identical code.** `ld.bfd` folds none. Hashing every function that

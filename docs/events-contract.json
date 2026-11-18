@@ -226,9 +226,7 @@
         {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
-        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
-        {"name": "movementX", "label": "Movement X", "type": "integer", "required": false, "unit": "scene-px", "catalog": false},
-        {"name": "movementY", "label": "Movement Y", "type": "integer", "required": false, "unit": "scene-px", "catalog": false}
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",

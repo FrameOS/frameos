@@ -4,6 +4,7 @@
 
 import std/[json, monotimes, os, sequtils, strutils, times]
 import ../input_state
+import ../keyboard_tables
 import ../driver_abi
 import ../events
 import ../types
@@ -312,6 +313,44 @@ block test_the_old_names_arrive_and_are_the_new_events:
   doAssert output[1].payload["x"].getInt() == 799 and output[1].payload["y"].getInt() == 0
   doAssert output[1].payload["pointerType"].getStr() == "mouse" and output[1].payload["pointerId"].getInt() == 0
   doAssert not state.applyNamedInput("nextPage", %*{}, eoScene, at(0), output)
+
+block test_the_packed_tables_and_a_frames_own_layout:
+  # keyboard_tables.nim over the generated text: every layout's keys, its
+  # parent's, the letters by themselves, and a frame's own over its parent.
+  doAssert linuxKeyCode(1) == "Escape" and linuxKeyCode(30) == "KeyA" and linuxKeyCode(28) == "Enter"
+  doAssert linuxKeyCode(0) == "" and linuxKeyCode(100000) == ""
+  doAssert keyNamedValue("Enter") == "Enter" and keyNamedValue("NumpadEnter") == "Enter"
+  doAssert keyNamedValue("AltRight") == "AltGraph" and keyNamedValue("KeyA") == ""
+  doAssert keyboardLayoutKey("us", "KeyA") == ("a", "A", "")
+  doAssert keyboardLayoutKey("us", "Digit2") == ("2", "@", "")
+  doAssert keyboardLayoutKey("de", "KeyY") == ("z", "Z", "")
+  doAssert keyboardLayoutKey("de", "Digit1") == ("1", "!", ""), "inherited from us"
+  doAssert keyboardLayoutKey("de", "KeyQ") == ("q", "Q", "@")
+  doAssert keyboardLayoutKey("nope", "Digit2") == ("2", "@", ""), "an unknown layout is us"
+  doAssert keyboardLayoutKey("us", "Enter") == ("", "", "")
+  let own = customKeyboardLayout("""{"label": "Mine", "inherits": "us", "keys": {"KeyY": ["z", "Z"], "Digit2": ["2", "\"", "²"]}}""")
+  doAssert keyboardLayoutKey("us", "KeyY", own) == ("z", "Z", "")
+  doAssert keyboardLayoutKey("us", "Digit2", own) == ("2", "\"", "\xc2\xb2")
+  doAssert keyboardLayoutKey("us", "Digit3", own) == ("3", "#", ""), "the rest is its parent's"
+  doAssert keyboardLayoutKey("us", "KeyQ", own) == ("q", "Q", "")
+  var state = initInputState(config(800, 480))
+  state.setCustomKeyboardLayout("""{"KeyY": ["z", "Z"]}""")
+  var output: seq[InputDelivery]
+  doAssert state.applyNamedInput(evKeyDown, %*{"linuxCode": 21}, eoDriver, at(0), output)
+  doAssert output[0].payload["key"].getStr() == "z" and output[1].payload["text"].getStr() == "z", $output.names
+  var refused = false
+  try:
+    state.setCustomKeyboardLayout("""{"KeyY": "z"}""")
+  except ValueError:
+    refused = true
+  doAssert refused, "a layout that does not read is refused"
+  output.setLen(0)
+  doAssert state.applyNamedInput(evKeyDown, %*{"linuxCode": 21}, eoDriver, at(10), output)
+  doAssert output[0].payload["key"].getStr() == "z", "and the one before stays"
+  state.setCustomKeyboardLayout("")
+  output.setLen(0)
+  doAssert state.applyNamedInput(evKeyDown, %*{"linuxCode": 21}, eoDriver, at(20), output)
+  doAssert output[0].payload["key"].getStr() == "y"
 
 block test_a_key_from_the_driver_is_mapped_through_the_layout:
   var state = initInputState(config(800, 480, layout = "de"))

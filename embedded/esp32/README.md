@@ -1305,7 +1305,15 @@ with Forget, and Pair (docs/scene-settings.md). Two at once (a keyboard and a mo
 `fos_hid_report.c` (pure, host-tested in `main/tests/test_fos_hid_report.c`),
 with the boot protocol as the fallback. Keys reach the dispatcher as
 `keyDown` / `keyUp` with their Linux number, repeated while held (500 ms, then
-every 40 ms), read under `set keyboard_layout <us|gb|de|fr|es|it|sv|da|nb>`;
+every 40 ms), read under the US layout: the firmware ships no other
+(the tables are `frameos/keyboard_tables.nim`). A frame's own layout is a
+`keyboard.json` at the top of its storage, put there like any asset, in the
+contract's layout shape: `{"inherits": "us", "keys": {"KeyY": ["z", "Z"],
+"Digit2": ["2", "\"", "²"]}}`, each key `[unshifted, shifted, altGr?]` and
+what it does not list as on a US keyboard; any of
+`docs/events-contract.json`'s `keyboard.layouts` copied as it is will do. It
+is read when Bluetooth starts and when a keyboard connects, and stored
+nowhere else;
 the mouse is pointer 0 (`movementX` / `movementY`, buttons, wheel), and its
 cursor is drawn on the RGB LCD (docs/events.md "The cursor"). No C3: its
 overlay leaves `CONFIG_BT_ENABLED` off.
