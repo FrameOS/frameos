@@ -53,7 +53,6 @@ const frameFixture = {
   width: 800,
   height: 480,
   device: 'web_only',
-  interval: 60,
   metrics_interval: 60,
   scaling_mode: 'contain',
   rotate: 0,

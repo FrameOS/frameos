@@ -116,7 +116,6 @@ def base_frame_kwargs() -> dict[str, Any]:
         "device": "web_only",
         "device_config": {},
         "color": "full",
-        "interval": 300,
         "metrics_interval": 60,
         "scaling_mode": "contain",
         "rotate": 0,

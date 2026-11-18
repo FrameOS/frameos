@@ -49,7 +49,6 @@ def _frame(db) -> Frame:
         width=800,
         height=480,
         device="web_only",
-        interval=300,
         metrics_interval=60,
         scenes=[
             {
