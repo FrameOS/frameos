@@ -1,0 +1,10 @@
+{
+  "name": "Star shooter",
+  "description": "A vertical shoot-em-up for a fast screen (LCD or HDMI). Fly the Kestrel through waves of moths, darts, pods and shielded shellbacks, catch power-ups (S spread shot, R rapid fire, O shield, B bomb) and take on the Gloom barge every fifth wave. Touch: the D-pad and A / B buttons beside the field, or drag anywhere on the field to fly; auto-fire is on unless you play with a keyboard. Keyboard: arrows or WASD to fly, Space or Z to fire, X to bomb, Enter or P to pause. GPIO buttons follow the Buttons setting (a key the frame's own Button actions bind to a long press still does that when held, so tap it). Settings: difficulty, ships, auto-fire, flying up and down (on by default on a tall screen), on-screen controls, pixel size and a High contrast mode in black and white. Keeps the top five scores. On e-paper it shows its title card and sleeps.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
