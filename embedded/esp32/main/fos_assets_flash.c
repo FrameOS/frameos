@@ -250,11 +250,23 @@ static int fv_rmdir(const char *path)
         errno = EBUSY;
         return -1;
     }
-    if (marker_path(norm, marker, sizeof(marker)) == 0) unlink(marker);
-    if (dir_exists(norm)) {
-        errno = ENOTEMPTY;
-        return -1;
+    /* Anything besides its own marker keeps the folder, asked before the
+     * marker goes: a refused rmdir (a JS app's deleteAsset of a folder) must
+     * not leave the folder unmarked, gone once it is emptied. */
+    if (map_path(norm, marker, sizeof(marker)) == 0) {
+        DIR *dir = opendir(marker);
+        bool other = false;
+        struct dirent *entry;
+        while (dir && !other && (entry = readdir(dir)) != NULL) {
+            other = strcmp(entry->d_name, FLASH_DIR_MARKER) != 0;
+        }
+        if (dir) closedir(dir);
+        if (other) {
+            errno = ENOTEMPTY;
+            return -1;
+        }
     }
+    if (marker_path(norm, marker, sizeof(marker)) == 0) unlink(marker);
     return 0;
 }
 

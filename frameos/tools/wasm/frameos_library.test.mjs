@@ -116,7 +116,7 @@ test('malformed IPv6 fails closed', () => {
 
 // Runs the request hook as the preview worker would, returning which URLs
 // were opened directly and whether the proxy was used.
-function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = null } = {}) {
+function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = null, responseHeaders = '', headersPtr = 0 } = {}) {
   const library = loadLibrary()
   const opened = []
   const logs = []
@@ -131,8 +131,11 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
       this.status = 200
       this.response = new TextEncoder().encode('ok').buffer
     }
+    getAllResponseHeaders() {
+      return responseHeaders
+    }
   }
-  const heap = new Uint8Array(1024)
+  const heap = new Uint8Array(8192)
   const strings = new Map([
     [1, 'GET'],
     [2, url],
@@ -161,9 +164,22 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
   // The hook's `{{{ makeSetValue(...) }}}` lines are Emscripten macros; as
   // plain JS they are nested blocks calling the stub above.
   const hook = vm.runInNewContext(`(${library.fos_nim_http_request.toString()})`, context)
-  hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0)
-  return { opened, logs, direct: opened.filter((u) => u !== proxyUrl), viaProxy: opened.includes(proxyUrl) }
+  hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0, headersPtr)
+  const end = headersPtr ? heap.indexOf(0, headersPtr) : 0
+  const headers = new TextDecoder().decode(heap.subarray(headersPtr, end))
+  return { opened, logs, headers, direct: opened.filter((u) => u !== proxyUrl), viaProxy: opened.includes(proxyUrl) }
 }
+
+test("the response's headers go into the caller's block as whole lines, 2047 bytes at most", () => {
+  const lines = 'content-range: bytes 0-65535/8388608\r\netag: "abc"\r\n'
+  assert.equal(request('https://files.example/big.bin', { responseHeaders: lines, headersPtr: 4096 }).headers, lines)
+  const long = Array.from({ length: 100 }, (_, i) => `x-header-${i}: ${'v'.repeat(20)}\r\n`).join('')
+  const kept = request('https://files.example/', { responseHeaders: long, headersPtr: 4096 }).headers
+  assert.ok(kept.length <= 2047 && kept.length > 1900, String(kept.length))
+  assert.ok(long.startsWith(kept) && kept.endsWith('\n'))
+  // No block asked for: nothing written.
+  assert.equal(request('https://files.example/', { responseHeaders: lines }).headers, '')
+})
 
 test('a public page never requests a private host directly; the proxy decides', () => {
   for (const url of ['http://192.168.1.1/admin', 'http://localhost:8123/api/states', 'http://homeassistant.local/', 'http://[fd00::1]/', 'http://nas/']) {

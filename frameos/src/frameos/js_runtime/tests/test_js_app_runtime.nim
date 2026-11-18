@@ -81,7 +81,8 @@ proc echoServerLoop() {.thread.} =
       var payload = newString(256)
       for i in 0 ..< 256:
         payload[i] = chr(i)
-      client.send("HTTP/1.1 200 OK\r\nContent-Length: 256\r\n\r\n" & payload)
+      client.send("HTTP/1.1 206 Partial Content\r\nContent-Length: 256\r\n" &
+        "Content-Range: bytes 0-255/8388608\r\nX-Tag: a\r\nx-tag: b\r\n\r\n" & payload)
       client.close()
     of "/photo.png":
       # An Immich-shaped endpoint: the image is only served to the API key.
@@ -807,6 +808,148 @@ suite "js app runtime":
     check fileExists(assetsDir / "writer.txt")
     check not fileExists(assetsDir / "shared.txt")
 
+  test "deleteAsset removes an empty folder, never one with anything in it or the root":
+    let assetsDir = getTempDir() / "frameos-js-asset-rmdir-test"
+    removeDir(assetsDir)
+    createDir(assetsDir / "empty")
+    createDir(assetsDir / "full" / "inner")
+    writeFile(assetsDir / "full" / "keep.txt", "x")
+    createDir(assetsDir / "nested" / "leaf")
+    defer: removeDir(assetsDir)
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/rmdir".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 29.NodeId, nodeName: "jsRmdir", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(permissions: JsonNode): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = """export function get(app, context) {
+            return {
+              empty: frameos.deleteAsset("empty"),
+              emptyAgain: frameos.deleteAsset("empty"),
+              full: frameos.deleteAsset("full"),
+              withFolder: frameos.deleteAsset("nested"),
+              leafSlash: frameos.deleteAsset("nested/leaf/"),
+              root: frameos.deleteAsset("."),
+              rootSlash: frameos.deleteAsset("./"),
+              climbs: frameos.deleteAsset("full/../.."),
+              absolute: frameos.deleteAsset("/tmp"),
+              otherStorage: frameos.deleteAsset("full/inner", { storage: "internal" }),
+            }
+          }""",
+        assetGrant = assetGrantFromConfig(%*{"permissions": permissions})
+      )
+      runtime.get(owner, %*{}, context).asJson()
+
+    # Reading the folder is not changing it.
+    let reader = run(%*["assets"])
+    check not reader["empty"].getBool()
+    check dirExists(assetsDir / "empty")
+
+    let writer = run(%*["assets", "assets-write"])
+    check writer["empty"].getBool()
+    check not dirExists(assetsDir / "empty")
+    check not writer["emptyAgain"].getBool()
+    check not writer["full"].getBool()
+    check fileExists(assetsDir / "full" / "keep.txt") and dirExists(assetsDir / "full" / "inner")
+    check not writer["withFolder"].getBool() # a folder in it is something in it
+    check writer["leafSlash"].getBool()
+    check not dirExists(assetsDir / "nested" / "leaf") and dirExists(assetsDir / "nested")
+    for refused in ["root", "rootSlash", "climbs", "absolute", "otherStorage"]:
+      checkpoint refused
+      check not writer[refused].getBool()
+    check dirExists(assetsDir)
+    check dirExists(assetsDir / "full" / "inner")
+
+  test "btoa, atob, TextEncoder, TextDecoder and text writes":
+    let assetsDir = getTempDir() / "frameos-js-text-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/text".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 30.NodeId, nodeName: "jsText", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const throws = (f) => { try { f(); return null } catch (e) { return e.name } }
+          const text = "Grüße, 日本 🐦\u0000end"
+          const bytes = new TextEncoder().encode(text)
+          let binary = ""
+          for (let i = 0; i < 256; i++) binary += String.fromCharCode(i)
+          return {
+            btoa: btoa("Hello, World!"),
+            btoaLatin1: btoa("\u00e9\u00ff\u0000"),
+            btoaWide: throws(() => btoa("日")),
+            binaryRoundTrip: atob(btoa(binary)) === binary,
+            binaryBase64: btoa(binary),
+            atob: atob(" SGVs\nbG8 "),
+            atobNoPad: atob("SGVsbG8"),
+            atobBad: [throws(() => atob("SGV$")), throws(() => atob("A")), throws(() => atob("SG=V")), throws(() => atob("A===")),
+              throws(() => atob("AB=")), throws(() => atob("ABCD=")), throws(() => atob("QUJD==="))],
+            atobPadded: [atob("QQ= ="), atob("QUI="), atob("QUJD"), atob("")],
+            encoding: [new TextEncoder().encoding, new TextDecoder().encoding],
+            bytes: Array.from(bytes),
+            isUint8: bytes instanceof Uint8Array,
+            empty: new TextEncoder().encode().length,
+            lone: Array.from(new TextEncoder().encode("a\ud800b")),
+            roundTrip: new TextDecoder().decode(bytes) === text,
+            fromBuffer: new TextDecoder("UTF-8").decode(bytes.buffer) === text,
+            fromView: new TextDecoder().decode(new DataView(bytes.buffer, 1, 5)),
+            fromSubarray: new TextDecoder().decode(bytes.subarray(0, 3)),
+            invalid: new TextDecoder().decode(new Uint8Array([0x61, 0xff, 0x62])),
+            bom: new TextDecoder().decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x68, 0x69])),
+            otherLabel: throws(() => new TextDecoder("latin1")),
+            wrote: frameos.writeAsset("notes/a.txt", text, { text: true }),
+            appended: frameos.appendAsset("notes/a.txt", "\n¡más!", { text: true }),
+            readBack: frameos.readAsset("notes/a.txt", { text: true }),
+            base64Still: frameos.writeAsset("notes/b.txt", btoa("plain")),
+          }
+        }""",
+      assetGrant = assetGrantFromConfig(%*{"permissions": ["assets", "assets-write"]})
+    )
+    let r = runtime.get(owner, %*{}, context).asJson()
+    let text = "Grüße, 日本 🐦\0end"
+    var binary = newString(256)
+    for i in 0 ..< 256:
+      binary[i] = chr(i)
+    check r["btoa"].getStr() == "SGVsbG8sIFdvcmxkIQ=="
+    check r["btoaLatin1"].getStr() == encode("\xE9\xFF\0")
+    check r["btoaWide"].getStr() == "TypeError"
+    check r["binaryRoundTrip"].getBool()
+    check r["binaryBase64"].getStr() == encode(binary)
+    check r["atob"].getStr() == "Hello"
+    check r["atobNoPad"].getStr() == "Hello"
+    check r["atobBad"] == %*["TypeError", "TypeError", "TypeError", "TypeError", "TypeError", "TypeError", "TypeError"]
+    check r["atobPadded"] == %*["A", "AB", "ABC", ""]
+    check r["encoding"] == %*["utf-8", "utf-8"]
+    check r["bytes"].mapIt(it.getInt()) == text.mapIt(it.ord)
+    check r["isUint8"].getBool()
+    check r["empty"].getInt() == 0
+    check r["lone"].mapIt(it.getInt()) == @[0x61, 0xEF, 0xBF, 0xBD, 0x62]
+    check r["roundTrip"].getBool() and r["fromBuffer"].getBool()
+    check r["fromView"].getStr() == "rüß"
+    check r["fromSubarray"].getStr() == "Gr\uFFFD"
+    check r["invalid"].getStr() == "a\uFFFDb"
+    check r["bom"].getStr() == "hi"
+    check r["otherLabel"].getStr() == "RangeError"
+    check r["wrote"].getBool() and r["appended"].getBool()
+    check readFile(assetsDir / "notes" / "a.txt") == text & "\n¡más!"
+    check r["readBack"].getStr() == text & "\n¡más!"
+    check r["base64Still"].getBool()
+    check readFile(assetsDir / "notes" / "b.txt") == "plain"
+
   test "makeAssetFolder makes one folder the listing shows, and only with assets-write":
     let assetsDir = getTempDir() / "frameos-js-asset-mkdir-test"
     removeDir(assetsDir)
@@ -1404,7 +1547,14 @@ suite "js app runtime":
     check echoed["method"].getStr() == "POST"
     check echoed["auth"].getStr() == "Bearer sk-test"
     check parseJson(echoed["body"].getStr())["hello"].getStr() == "world"
-    check payload["binary"]["status"].getInt() == 200
+    check payload["binary"]["status"].getInt() == 206
+    # The response's headers: lower-case names, a repeated one joined.
+    let binaryHeaders = payload["binary"]["headers"]
+    check binaryHeaders["content-range"].getStr() == "bytes 0-255/8388608"
+    check binaryHeaders["content-length"].getStr() == "256"
+    check binaryHeaders["x-tag"].getStr() == "a, b"
+    check payload["post"]["headers"].kind == JObject
+    check not payload["failed"].hasKey("headers")
     var expected = newString(256)
     for i in 0 ..< 256:
       expected[i] = chr(i)
@@ -1581,6 +1731,34 @@ suite "js app runtime":
     let own = runtime.get(owner, %*{}, plain).asImage()
     check own != canvas
     check own.width == 480 and own.height == 720
+
+  test "httpRequest hands back headers in the lines the ESP32 glue and the wasm library write":
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      (206, "partial")
+    jsHttpHookHeaders = "Content-Range: bytes 0-65535/8388608\r\nETag: \"abc\"\nSet-Cookie: a=1\nset-cookie: b=2\nbroken line\n: no name\n"
+    defer:
+      jsHttpRequestHook = nil
+      jsHttpHookHeaders = ""
+
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-http-headers".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsHttpHeaders", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app) {
+          const r = frameos.httpRequest('https://files.example/big.bin', { headers: { Range: 'bytes=0-65535' } })
+          return { r, total: Number(r.headers['content-range'].split('/')[1]) }
+        }"""
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["r"]["status"].getInt() == 206
+    check payload["total"].getInt() == 8388608
+    check payload["r"]["headers"] == %*{"content-range": "bytes 0-65535/8388608", "etag": "\"abc\"",
+      "set-cookie": "a=1, b=2"}
 
   test "getSetting honors declared settings namespaces":
     let config = testConfig()

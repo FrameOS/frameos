@@ -217,6 +217,18 @@ function requestOnce(url, method, headers, body, lookup, signal) {
   });
 }
 
+// frameos.httpRequest's headers, as "name: value" lines; a body that
+// arrives decoded loses the length and encoding of the one that was sent.
+function headerLines(response) {
+  const decoded = /^(x-)?gzip$|^deflate$|^br$/.test(String(response.headers['content-encoding'] || '').trim().toLowerCase());
+  let lines = '';
+  for (let i = 0; i + 1 < response.rawHeaders.length; i += 2) {
+    if (decoded && /^content-(encoding|length)$/i.test(response.rawHeaders[i])) continue;
+    lines += response.rawHeaders[i] + ': ' + response.rawHeaders[i + 1] + '\\n';
+  }
+  return lines;
+}
+
 // What fetch did on its own: an encoded body arrives decoded.
 function decodedBody(response) {
   const encoding = String(response.headers['content-encoding'] || '').trim().toLowerCase();
@@ -261,7 +273,8 @@ process.stdin.on('end', async () => {
     const parts = [];
     for await (const chunk of decodedBody(response)) parts.push(chunk);
     const bytes = Buffer.concat(parts);
-    process.stdout.write(JSON.stringify({ status: response.statusCode, bodyBase64: bytes.toString('base64') }));
+    process.stdout.write(JSON.stringify({ status: response.statusCode, bodyBase64: bytes.toString('base64'),
+      headers: headerLines(response) }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ status: 0, error: String(error) }));
   } finally {
@@ -285,6 +298,9 @@ class SyncXMLHttpRequest {
   }
   setRequestHeader(name, value) {
     this._headers[name] = value
+  }
+  getAllResponseHeaders() {
+    return this._responseHeaders || ''
   }
   send(body) {
     if (/^https?:\/\/(\[?fd00:ec2::254\]?|169\.254\.169\.254)([:/]|$)/i.test(this._url)) {
@@ -311,6 +327,7 @@ class SyncXMLHttpRequest {
       throw new Error(result.error || 'request failed')
     }
     this.status = result.status
+    this._responseHeaders = result.headers || ''
     const bytes = Buffer.from(result.bodyBase64 || '', 'base64')
     if (this.responseType === 'arraybuffer') {
       this.response = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)

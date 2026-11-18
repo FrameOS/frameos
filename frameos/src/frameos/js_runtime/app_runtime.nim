@@ -31,6 +31,8 @@ import frameos/js_runtime/jsx_native
 import frameos/render_probe
 when not defined(frameosEmbedded):
   from frameos/utils/frame_time import frameEpochPinned
+when not defined(frameosEmbedded) and not defined(frameosWasm):
+  from std/httpcore import pairs # a Pi's response headers
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import std/hashes
@@ -714,6 +716,9 @@ when defined(testing):
   type JsHttpRequestHook* = proc(url, httpMethod, body: string,
     headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
   var jsHttpRequestHook*: JsHttpRequestHook = nil
+  var jsHttpHookHeaders*: string
+    ## The response headers the hook's answers carry, as the ESP32 glue and
+    ## the wasm library hand them over: "Name: value\n" lines.
 
 const
   JsHttpFindDefaultLength = 512
@@ -773,12 +778,80 @@ proc optionsArg(ctx: ptr JSContext, optionsJson: JSValue): JsonNode =
   if result.isNil or result.kind != JObject:
     result = newJObject()
 
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+proc jsText(ctx: ptr JSContext, op: JSValue, value: JSValue): JSValue {.nimcall.} =
+  ## The prelude's btoa (0), atob (1), TextEncoder.encode (2) and
+  ## TextDecoder.decode (3). A JS string reaches Nim as UTF-8, so a binary
+  ## string's chars 0x80-0xFF are two bytes each, both ways. A ValueError is
+  ## the TypeError the call throws.
+  var kind: int32
+  discard JS_ToInt32(ctx, addr kind, op)
+  if kind == 3:
+    # QuickJS decodes UTF-8, an invalid sequence as U+FFFD; a BOM is dropped.
+    var (data, len) = jsBytes(ctx, value)
+    if len >= 3 and data[0] == 0xEF and data[1] == 0xBB and data[2] == 0xBF:
+      data = cast[ptr UncheckedArray[uint8]](addr data[3])
+      len -= 3
+    return JS_NewStringLen(ctx, if len > 0: cast[cstring](data) else: "", len.csize_t)
+  var s = toNimStringLen(ctx, value)
+  var bytes = newStringOfCap(s.len)
+  var i = 0
+  case kind
+  of 0:
+    while i < s.len:
+      let c = s[i].uint8
+      if c < 0x80:
+        bytes.add s[i]
+      elif (c == 0xC2 or c == 0xC3) and i + 1 < s.len:
+        inc i
+        bytes.add char(((c and 0x1F) shl 6) or (s[i].uint8 and 0x3F))
+      else:
+        raise newException(ValueError, "btoa: a char above 255")
+      inc i
+    return nimStringToJS(ctx, encode(bytes))
+  of 1:
+    # The web's forgiving base64: ASCII whitespace dropped, the padding
+    # optional, anything else outside the alphabet refused.
+    var pad = 0
+    var bad = false
+    for ch in s:
+      case ch
+      of 'A'..'Z', 'a'..'z', '0'..'9', '+', '/':
+        bad = bad or pad > 0
+        bytes.add ch
+      of '=': inc pad
+      of '\t', '\n', '\f', '\r', ' ': discard
+      else: bad = true
+    if bad or pad > 2 or bytes.len mod 4 == 1 or (pad > 0 and (bytes.len + pad) mod 4 != 0):
+      raise newException(ValueError, "atob: not base64")
+    s.setLen(0)
+    for ch in decode(bytes):
+      if ch.uint8 < 0x80:
+        s.add ch
+      else:
+        s.add char(0xC0 or (ch.uint8 shr 6))
+        s.add char(0x80 or (ch.uint8 and 0x3F))
+    return nimStringToJS(ctx, s)
+  else:
+    # A lone surrogate comes out of QuickJS as its own 3 bytes (ED A0-BF ..);
+    # the web encodes it as U+FFFD.
+    while i + 2 < s.len:
+      if s[i] == '\xED' and s[i + 1].uint8 >= 0xA0:
+        s[i] = '\xEF'
+        s[i + 1] = '\xBF'
+        s[i + 2] = '\xBD'
+      inc i
+    return JS_NewArrayBufferCopy(ctx, s.cstring, s.len.csize_t)
+{.pop.}
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
   ## base64-encoded, required for binary responses), timeoutMs, find,
   ## findLength, findLimit}.
-  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}. With
+  ## Returns JSON: {status, headers, body | bodyBase64} or {status: 0,
+  ## error}; headers as "name: value" lines, which the prelude turns into
+  ## an object (__frameosHeaders). With
   ## `find` the body stays native: the response carries `found` (the text
   ## at each occurrence, findLimit of them, findLength bytes each) and, for a
   ## non-2xx status, the first KB of the body so the error stays readable.
@@ -817,9 +890,11 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     var code = 0
     var resBody = ""
     var answered = false
+    var resHeaders = ""
     when defined(testing):
       if jsHttpRequestHook != nil:
         (code, resBody) = jsHttpRequestHook(urlStr, httpMethod, body, headers)
+        resHeaders = jsHttpHookHeaders
         answered = true
     if not answered:
       let res = boundedRequestWithHeaders(
@@ -829,11 +904,19 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
         headers = headers,
         timeoutMs = timeoutMs,
         maxBytes = jsFetchMaxBytes(e),
-        maxSeconds = maxSeconds
+        maxSeconds = maxSeconds,
+        wantHeaders = true
       )
       code = res.code
       resBody = res.body
+      when defined(frameosEmbedded) or defined(frameosWasm):
+        resHeaders = res.headers
+      else:
+        if not res.headers.isNil:
+          for name, value in res.headers.pairs:
+            resHeaders.add(name & ": " & value & "\n")
     response["status"] = %*code
+    response["headers"] = %resHeaders
     let saveField = options{"saveBase64Field"}
     if code >= 200 and code < 300 and not saveField.isNil and saveField.kind == JObject and e != nil:
       # The base64 text of one JSON string field, decoded into an asset, and
@@ -1286,6 +1369,8 @@ proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
   else:
     jsFetchMaxBytes(e)
 
+proc c_rmdir(path: cstring): cint {.importc: "rmdir", header: "<unistd.h>".}
+
 proc assetsMount(e: JsAppEvalEnv): string =
   ## The frame's assets folder itself, whatever sandbox the app has in it.
   let frameConfig = e.owner.frameConfig
@@ -1576,15 +1661,26 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       return nimFloatToJS(ctx, getFileSize(full).float)
     of "read":
       return assetsRead(ctx, e, pathStr, data)
-    of "write", "append":
-      let contents = decode(toNimString(ctx, data))
-      return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
+    of "write", "append", "writeText", "appendText":
+      # writeText / appendText: the string itself as UTF-8 ({text: true}),
+      # else the bytes the base64 says.
+      let raw = toNimStringLen(ctx, data)
+      let append = opStr[0] == 'a'
+      return nimBoolToJS(ctx, writeAssetFile(e, (if append: "appendAsset" else: "writeAsset"), pathStr,
+        (if opStr.endsWith("Text"): raw else: decode(raw)), append))
     of "delete":
-      let full = resolveAssetPath(e, pathStr, write = true, storage = assetStorage(ctx, data))
-      if full.len == 0 or not fileExists(full):
+      let storage = assetStorage(ctx, data)
+      let full = resolveAssetPath(e, pathStr, write = true, storage = storage)
+      if full.len == 0:
         return nimBoolToJS(ctx, false)
-      removeFile(full)
-      return nimBoolToJS(ctx, true)
+      if fileExists(full):
+        removeFile(full)
+        return nimBoolToJS(ctx, true)
+      # A folder, when it is empty: rmdir refuses one with anything in it
+      # (an ESP32's flash storage, whose folders are name prefixes, too:
+      # fos_assets_flash.c fv_rmdir). Never the root, never recursive.
+      return nimBoolToJS(ctx, dirExists(full) and full != assetsRoot(e, storage) and
+        c_rmdir(full.cstring) == 0)
     of "mkdir":
       # One folder in a folder that is there: an ESP32's mkdir of a parent
       # above its assets mount fails, so there is no `-p`. A name the listing
@@ -1602,9 +1698,9 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       return jsUndefSentinel(ctx)
   except CatchableError as err:
     frameos_apps.logError(e.owner, "JS app assets " & opStr & " failed: " & err.msg)
-    if opStr in ["write", "append", "delete", "exists", "mkdir"]:
-      return nimBoolToJS(ctx, false)
-    return jsNull(ctx)
+    if opStr in ["list", "size", "read", "image"]:
+      return jsNull(ctx)
+    return nimBoolToJS(ctx, false)
 
 ## Streams let apps pass around and process data bigger than memory allows in
 ## one piece: a data app can return a streamRef (it travels between nodes as
@@ -3012,6 +3108,18 @@ const appJsPrelude* = compactJs("""
   const __frameosAppState = __frameosProxy("state", jsGetAppState);
   const __frameosAppFrame = __frameosProxy("frame", jsGetAppFrame);
   globalThis.__frameosContext = __frameosProxy("context", jsGetAppContext);
+  // httpRequest's answer, its "name: value" header lines as an object: names
+  // in lower case, a repeated one joined with ", " as the web's Headers does.
+  const __frameosAnswer = (text) => {
+    const a = JSON.parse(text || "{}"), h = {};
+    if (typeof a.headers !== "string") return a;
+    for (const line of a.headers.split("\n")) {
+      const i = line.indexOf(":"), k = line.slice(0, i).trim().toLowerCase(), v = line.slice(i + 1).trim();
+      if (i > 0) h[k] = k in h ? h[k] + ", " + v : v;
+    }
+    a.headers = h;
+    return a;
+  };
   // What every asset and stream call below shares.
   const __frameosAsset = (op, path, data = "") => __frameosUnwrap(jsAssets(op, String(path || ""), data));
   const __frameosStream = (op, options) => __frameosUnwrap(jsStreams(op, JSON.stringify(options)));
@@ -3042,8 +3150,8 @@ const appJsPrelude* = compactJs("""
       : [],
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
-    httpRequest: (url, options) => JSON.parse(
-      jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __appReplacer)) || "{}"
+    httpRequest: (url, options) => __frameosAnswer(
+      jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __appReplacer))
     ),
     fetchImage: (url, options) => JSON.parse(
       jsFetchImage(String(url || ""), JSON.stringify(options || {}, __appReplacer)) || '{"image":null}'
@@ -3066,8 +3174,8 @@ const appJsPrelude* = compactJs("""
     assetExists: (path, options) => __frameosAsset("exists", path, options ? JSON.stringify(options) : "") === true,
     assetSize: (path, options) => __frameosAsset("size", path, options ? JSON.stringify(options) : "") ?? -1,
     readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,
-    writeAsset: (path, base64) => __frameosAsset("write", path, String(base64 || "")) === true,
-    appendAsset: (path, base64) => __frameosAsset("append", path, String(base64 || "")) === true,
+    writeAsset: (path, data, o) => __frameosAsset(o && o.text ? "writeText" : "write", path, String(data ?? "")) === true,
+    appendAsset: (path, data, o) => __frameosAsset(o && o.text ? "appendText" : "append", path, String(data ?? "")) === true,
     deleteAsset: (path, options) => __frameosAsset("delete", path, options ? JSON.stringify(options) : "") === true,
     makeAssetFolder: (path, options) =>
       __frameosAsset("mkdir", String(path || ""), options ? JSON.stringify(options) : "") === true,
@@ -3109,6 +3217,16 @@ const appJsPrelude* = compactJs("""
     log: frameos.log, info: frameos.log, debug: frameos.log, error: frameos.error,
     warn: (...args) => jsAppLog("warn", JSON.stringify(args, __appReplacer)),
   };
+  // btoa / atob and UTF-8's TextEncoder / TextDecoder, as the web has them (jsText).
+  globalThis.btoa = (s) => jsText(0, String(s));
+  globalThis.atob = (s) => jsText(1, String(s));
+  // Functions, not classes: a third less bytecode in the firmware.
+  globalThis.TextEncoder = function () { this.encoding = "utf-8"; this.encode = (s = "") => new Uint8Array(jsText(2, String(s))); };
+  globalThis.TextDecoder = function (l = "utf-8") {
+    if (String(l).toLowerCase().replace("-", "") !== "utf8") throw new RangeError("TextDecoder: utf-8 only");
+    this.encoding = "utf-8";
+    this.decode = (b) => b == null ? "" : jsText(3, ArrayBuffer.isView(b) ? new Uint8Array(b.buffer, b.byteOffset, b.byteLength) : new Uint8Array(b));
+  };
   // Async (docs/async-js.md, js_async.nim): promises the host settles by id
   // between renders. Where nothing pumps them (jsAsyncMode() false: the
   // preview, a board that sleeps) fetch blocks and settles at once.
@@ -3141,7 +3259,7 @@ const appJsPrelude* = compactJs("""
     const url = String((input && input.url) || input || ""), o = __fetchInit(init), s = init.signal;
     return new Promise((ok, no) => {
       if (s && s.aborted) return no(s.reason);
-      if (!jsAsyncMode()) return ok(JSON.parse(jsHttpRequest(url, o) || "{}"));
+      if (!jsAsyncMode()) return ok(__frameosAnswer(jsHttpRequest(url, o)));
       const id = __wait("fetch", url, o, ok, no);
       // Aborted while in flight: rejected now, its answer dropped when it comes.
       if (s && id) s.addEventListener("abort", () => { if (__waits.delete(id)) { jsAsyncCancel(id); no(s.reason); } });
@@ -3333,7 +3451,8 @@ proc registerAppNatives(js: var QuickJS) =
       ("jsGetAppContext", jsGetAppContext), ("jsGetAppKeys", jsGetAppKeys), ("jsAsyncCancel", jsAsyncCancel)]
     natives2 = [("jsAppLog", NimFunction2(jsAppLog)), ("jsDispatch", jsDispatch),
       ("jsStoreAction", jsStoreAction), ("jsFrame", jsFrame), ("jsCode", jsCode), ("jsSetState", jsSetState),
-      ("jsRemember", jsRemember), ("jsHttpRequest", jsHttpRequest), ("jsFetchImage", jsFetchImage),
+      ("jsRemember", jsRemember), ("jsHttpRequest", jsHttpRequest), ("jsText", jsText),
+      ("jsFetchImage", jsFetchImage),
       ("jsCanvas", jsCanvas), ("jsCanvasDraw", jsCanvasDraw), ("jsCanvasClear", jsCanvasClear),
       ("jsStreams", jsStreams), ("jsOpenLines", jsOpenLines), ("jsNextBlock", jsNextBlock)]
   js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)

@@ -336,14 +336,20 @@ void fos_nim_http_free_chunks(fos_nim_http_chunk *chunks, size_t count);
  * chunk array holds a single empty chunk, *out_spill_path is a malloc'd
  * path (free with fos_nim_http_free; the caller also owns deleting the
  * file) and *out_spill_len is the body size. Passing NULL spill out-params
- * disables spilling for that request. */
+ * disables spilling for that request. A non-NULL out_headers is a
+ * zeroed buffer of FOS_NIM_HTTP_HEADERS_BYTES that gets the final response's
+ * headers as "name: value\n" lines (frameos.httpRequest's `headers`; lines
+ * past the buffer are dropped). The wasm runtime's fos_nim_http_request
+ * fills the same block (tools/wasm/frameos_library.js). */
+#define FOS_NIM_HTTP_HEADERS_BYTES 2048
 fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                               const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
                               int timeout_ms, size_t max_bytes,
                               int *out_status, size_t *out_chunk_count,
-                              char **out_spill_path, size_t *out_spill_len);
+                              char **out_spill_path, size_t *out_spill_len,
+                              char *out_headers);
 
 /* Registers where oversized HTTP bodies may spill (empty/NULL disables —
  * the boot default, keeping the feature off until the firmware wires it).

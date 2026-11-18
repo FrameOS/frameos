@@ -108,6 +108,11 @@ uses QuickJS only to execute the resulting JavaScript.
     `found`, the text at each occurrence (`findLength` bytes, default 512;
     `findLimit` of them, default 1000), plus the first KB of `body` on a
     non-2xx status: how an app scrapes a page bigger than an ESP32's JS heap.
+    Every answer carries `headers`: the native side hands over "name: value"
+    lines (the Pi's client, the ESP32 glue's `HTTP_EVENT_ON_HEADER` handler
+    into a 2 KB block, the wasm library's `getAllResponseHeaders()`, the
+    final response's only) and the prelude's `__frameosAnswer` makes them an
+    object, names in lower case and a repeated one joined with ", ".
   - `fetchImage(url, {headers, saveAsset: {name, extension, mode}, exif, colors})`:
     download and decode an image natively — the bytes never enter the JS
     heap — and return `{image: imageRef, width, height, savedAs?, exif?,
@@ -128,11 +133,15 @@ uses QuickJS only to execute the resulting JavaScript.
     not graded. `null` means no profile and clears an earlier palette
     override; without the key nothing about colors changes.
   - `listAssets(dir)`, `assetExists(path)`, `assetSize(path)`,
-    `readAsset(path, {offset, length}?)`, `writeAsset(path, base64)`,
-    `appendAsset(path, base64)`, `deleteAsset(path)`, `makeAssetFolder(path)`
+    `readAsset(path, {offset, length, text}?)`, `writeAsset(path, data, {text}?)`,
+    `appendAsset(path, data, {text}?)` (base64, or with `text` the string as
+    UTF-8), `deleteAsset(path)` (a file, or a folder once it is empty: rmdir,
+    never recursive, never the root), `makeAssetFolder(path)`
     (one folder, in a folder that is there; no hidden or junk names): asset
     management scoped to the frame's assets folder. Full-buffer reads are capped on embedded
     targets (2MB) — read bigger files in ranged chunks or via streams.
+  - Globals `btoa` / `atob` / `TextEncoder` / `TextDecoder` (UTF-8 only),
+    one native `jsText(op, value)` under the prelude's few lines.
   - `loadAssetImage(path)`: decode an asset image within display bounds
     (memory-aware, streams from disk) and return an image reference.
   - `openAssetStream(path, "r"|"w"|"a")`, `createStream(base64?)`,

@@ -100,7 +100,10 @@ not by call order, so it may sit in a condition or a loop.
   `headers`, `body` (a string, or an object sent as JSON), `signal`, plus
   `timeoutMs` (the request's own limit, 15 s by default).
   It resolves with a `Response`: `ok`, `status`, `url`, `headers.get(name)`
-  (a Pi's; an ESP32's glue keeps none), `text()`, `json()`. A 404 is an
+  (a Pi's, and from 2026.11.12 those of every runtime where `fetch` blocks:
+  the wasm runtime and a deep sleeper, through `httpRequest`; the I/O task of
+  an ESP32 that stays awake keeps none: an app that needs a header there
+  calls `frameos.httpRequest`), `text()`, `json()`. A 404 is an
   answer; a network error rejects with a `TypeError`. The scene's response
   ceiling applies; the render deadline does not (no render waits).
 - **`setTimeout`, `setInterval`, `clearTimeout`, `clearInterval`**: as on the

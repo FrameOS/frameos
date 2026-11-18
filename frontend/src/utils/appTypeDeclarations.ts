@@ -468,6 +468,9 @@ declare const frameos: {
     }
   ): {
     status: number;
+    /** The response's headers, names in lower case, a repeated one joined with ", " (headers["content-range"]:
+     * "bytes 0-65535/8388608"). As many as fit 2 KB on an ESP32 (FrameOS 2026.11.12+; undefined before). */
+    headers?: Record<string, string>;
     body?: string;
     bodyBase64?: string;
     found?: string[];
@@ -555,8 +558,13 @@ declare const frameos: {
     path: string,
     options?: { offset?: number; length?: number; text?: boolean; entry?: string; storage?: "assets" | "internal" }
   ): string | null;
-  writeAsset(path: string, base64: string): boolean;
-  appendAsset(path: string, base64: string): boolean;
+  /** Writes the file: data is base64, or with text the string itself, written as UTF-8 (text: FrameOS 2026.11.12+;
+   * before, the string is read as base64). */
+  writeAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  /** Adds to the end of the file, as writeAsset writes it. */
+  appendAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  /** Deletes a file, or a folder when it is empty: false for a folder with anything in it, and never the storage's
+   * own folder (folders: FrameOS 2026.11.12+; false before). */
   deleteAsset(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   /** One folder, inside a folder that is there: true when it was made, false when it was there already or refused
    * (a name starting with a dot, one the listing hides, an app without "assets-write") (FrameOS 2026.11.10+). */
@@ -620,6 +628,29 @@ declare const frameos: {
   remember(key: string, value: FrameOSJson): boolean;
   recall(key: string): FrameOSJson | undefined;
 };
+
+/** A binary string (each char a byte, 0-255) as base64; throws for a char above 255 (FrameOS 2026.11.12+). */
+declare function btoa(data: string): string;
+/** base64 as a binary string, whitespace ignored, the padding optional; throws for anything else (FrameOS 2026.11.12+). */
+declare function atob(data: string): string;
+/** A string's UTF-8 bytes: new TextEncoder().encode("ü") (FrameOS 2026.11.12+). */
+interface TextEncoder {
+  readonly encoding: string;
+  encode(input?: string): Uint8Array;
+}
+declare var TextEncoder: { prototype: TextEncoder; new (): TextEncoder };
+/** UTF-8 bytes as a string, U+FFFD for what is not UTF-8, a leading BOM dropped; UTF-8 only: another label
+ * ("latin1") throws a RangeError (FrameOS 2026.11.12+). */
+interface TextDecoder {
+  readonly encoding: string;
+  decode(input?: ArrayBuffer | ArrayBufferView | null): string;
+}
+/** Ignored: a frame's TextDecoder is never fatal and always drops a BOM. */
+interface TextDecoderOptions {
+  fatal?: boolean;
+  ignoreBOM?: boolean;
+}
+declare var TextDecoder: { prototype: TextDecoder; new (label?: string, options?: TextDecoderOptions): TextDecoder };
 
 /** console.log and friends log like frameos.log; warn says so; error goes to the error log (FrameOS 2026.10.16+). */
 declare const console: {
@@ -736,9 +767,9 @@ declare const mock: {
   frameos<K extends keyof typeof frameos>(name: K, impl?: (typeof frameos)[K]): FrameOSMockFn<(typeof frameos)[K]>;
   /** Back to the test defaults. */
   restore(): void;
-  /** A { status, body } reply for mock.httpRequest; an object body is sent as JSON. */
-  response(status: number, body?: string | Record<string, any> | any[], extra?: Record<string, any>): { status: number; body: string } & Record<string, any>;
-  json(body: any, status?: number): { status: number; body: string };
+  /** A { status, headers, body } reply for mock.httpRequest (headers {} unless extra has some); an object body is sent as JSON. */
+  response(status: number, body?: string | Record<string, any> | any[], extra?: Record<string, any>): { status: number; headers: Record<string, string>; body: string } & Record<string, any>;
+  json(body: any, status?: number): { status: number; headers: Record<string, string>; body: string };
   /** A frameos.fetchImage reply with an image reference the app can return. */
   image(spec?: { width?: number; height?: number; [key: string]: any }): { image: FrameOSImageRef; width: number; height: number; [key: string]: any };
   httpRequest(impl?: (typeof frameos)["httpRequest"]): FrameOSMockFn<(typeof frameos)["httpRequest"]>;

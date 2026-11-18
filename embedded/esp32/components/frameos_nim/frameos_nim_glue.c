@@ -1793,7 +1793,7 @@ static esp_http_client_handle_t http_open_request(
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
-    char *err_buf, size_t err_buf_len);
+    char *err_buf, size_t err_buf_len, char *out_headers);
 
 fos_nim_http_stream *fos_nim_http_stream_open(
     const char *url, const char *headers, size_t headers_len,
@@ -1805,7 +1805,7 @@ fos_nim_http_stream *fos_nim_http_stream_open(
     fos_netguard_url_origin(url, log_url, sizeof(log_url));
     esp_http_client_handle_t client = http_open_request(
         "GET", url, log_url, NULL, 0, headers, headers_len, timeout_ms,
-        out_status, &content_length, err_buf, err_buf_len);
+        out_status, &content_length, err_buf, err_buf_len, NULL);
     *out_content_length = content_length;
     if (client == NULL) return NULL;
     fos_nim_http_stream *stream = calloc(1, sizeof(*stream));
@@ -2202,12 +2202,28 @@ static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t bo
         return NULL; \
     } while (0)
 
+/* The response's headers as "name: value\n" lines into the caller's
+ * FOS_NIM_HTTP_HEADERS_BYTES buffer (user_data), for frameos.httpRequest:
+ * esp_http_client hands them over only here. A line that does not fit is
+ * dropped whole. */
+static esp_err_t http_header_event(esp_http_client_event_t *evt)
+{
+    char *out = evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_HEADER) {
+        size_t used = strlen(out);
+        int n = snprintf(out + used, FOS_NIM_HTTP_HEADERS_BYTES - used, "%s: %s\n",
+                         evt->header_key, evt->header_value);
+        if (n < 0 || used + (size_t)n >= FOS_NIM_HTTP_HEADERS_BYTES) out[used] = '\0';
+    }
+    return ESP_OK;
+}
+
 static esp_http_client_handle_t http_open_request(
     const char *method, const char *url, const char *log_url,
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
-    char *err_buf, size_t err_buf_len)
+    char *err_buf, size_t err_buf_len, char *out_headers)
 {
     *out_status = 0;
     *out_content_length = -1;
@@ -2258,6 +2274,8 @@ static esp_http_client_handle_t http_open_request(
         .buffer_size = 1024,
         .buffer_size_tx = 4096,
         .max_redirection_count = 5,
+        .event_handler = out_headers != NULL ? http_header_event : NULL,
+        .user_data = out_headers,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
@@ -2378,6 +2396,7 @@ static esp_http_client_handle_t http_open_request(
                 HTTP_OPEN_FAIL("request body write failed");
             }
         }
+        if (out_headers != NULL) out_headers[0] = '\0'; /* the final answer's alone */
         content_length = esp_http_client_fetch_headers(client);
         *out_status = esp_http_client_get_status_code(client);
         redirects++;
@@ -2406,7 +2425,8 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                               const char *headers, size_t headers_len,
                               int timeout_ms, size_t max_bytes,
                               int *out_status, size_t *out_count,
-                              char **out_spill_path, size_t *out_spill_len)
+                              char **out_spill_path, size_t *out_spill_len,
+                              char *out_headers)
 {
     *out_status = 0;
     *out_count = 0;
@@ -2427,7 +2447,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     int64_t content_length = -1;
     esp_http_client_handle_t client = http_open_request(
         method, url, log_url, body, body_len, headers, headers_len, timeout_ms,
-        out_status, &content_length, open_err, sizeof(open_err));
+        out_status, &content_length, open_err, sizeof(open_err), out_headers);
     if (client == NULL) {
         return chunked_error(out_status, out_count, "%s", open_err);
     }
@@ -2628,7 +2648,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked(
                                               headers, headers_len,
                                               timeout_ms, max_bytes,
                                               out_status, out_count,
-                                              NULL, NULL);
+                                              NULL, NULL, NULL);
 }
 
 uint8_t *fos_nim_http_request(const char *method, const char *url,

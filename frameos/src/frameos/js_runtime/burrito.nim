@@ -205,6 +205,7 @@ proc JS_ToInt32*(ctx: ptr JSContext, pres: ptr int32, val: JSValueConst): cint
 proc JS_ToFloat64*(ctx: ptr JSContext, pres: ptr float64, val: JSValueConst): cint
 proc JS_ToInt64Ext*(ctx: ptr JSContext, pres: ptr int64, val: JSValueConst): cint
 proc JS_ToCString*(ctx: ptr JSContext, val: JSValueConst): cstring
+proc JS_ToCStringLen2*(ctx: ptr JSContext, plen: ptr csize_t, val: JSValueConst, cesu8: cint): cstring
 proc JS_FreeCString*(ctx: ptr JSContext, str: cstring)
 proc JS_ToBool*(ctx: ptr JSContext, val: JSValueConst): cint
 
@@ -263,6 +264,7 @@ proc JS_IsArray*(ctx: ptr JSContext, val: JSValueConst): cint
 proc JS_GetClassID*(v: JSValueConst): uint32
 proc JS_NewTypedArray*(ctx: ptr JSContext, argc: cint, argv: ptr JSValueConst, arrayType: cint): JSValue
 proc JS_GetArrayBuffer*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst): ptr UncheckedArray[uint8]
+proc JS_NewArrayBufferCopy*(ctx: ptr JSContext, buf: cstring, len: csize_t): JSValue
 proc JS_GetTypedArrayBuffer*(ctx: ptr JSContext, obj: JSValueConst, pbyteOffset: ptr csize_t,
     pbyteLength: ptr csize_t, pbytesPerElement: ptr csize_t): JSValue
 proc JS_IsFunction*(ctx: ptr JSContext, val: JSValueConst): cint
@@ -831,6 +833,17 @@ proc toNimString*(ctx: ptr JSContext, val: JSValueConst): string =
     JS_FreeCString(ctx, cstr) # Important: free the C string
   else:
     result = ""
+
+proc toNimStringLen*(ctx: ptr JSContext, val: JSValueConst): string =
+  ## toNimString that keeps a NUL inside the string (binary strings, text
+  ## written to a file). Never for a path: a NUL would cut it in C.
+  var len: csize_t
+  let cstr = JS_ToCStringLen2(ctx, addr len, val, 0)
+  if cstr != nil:
+    result = newString(len.int)
+    if len > 0:
+      copyMem(addr result[0], cstr, len.int)
+    JS_FreeCString(ctx, cstr)
 
 proc toNimInt*(ctx: ptr JSContext, val: JSValueConst): int32 =
   var res: int32
