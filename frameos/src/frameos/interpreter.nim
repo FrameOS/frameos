@@ -1781,6 +1781,22 @@ proc setNodeFieldFromEdge*(scene: InterpretedFrameScene, edge: DiagramEdge) =
 # Scene lifecycle
 # -------------------------
 
+
+proc anInterval(scene: FrameScene, key: string, value: JsonNode): JsonNode {.noinline.} =
+  ## What goes into the scene's state under `key`. The refresh interval's field
+  ## holds a positive number of seconds; anything else said to it from outside
+  ## (a 0 typed into a schedule entry or a control form to "turn it off", an
+  ## emptied box, one a runtime before 2026.11.12 saved) is the scene's own
+  ## default. The interval read it so already, but the state kept the 0, and a
+  ## logic/nextSleepDuration fed from the same field (every photo sample)
+  ## slept the shortest there is: a frame drew again a second after it had
+  ## drawn. One proc for what a payload says and what a saved state holds: in
+  ## each of the two places it was 273 bytes of an ESP32's flash.
+  if key == scene.refreshIntervalKey and parseRefreshSeconds(value) <= 0:
+    %scene.refreshIntervalDefault
+  else:
+    value
+
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
   var exportedScene: ExportedInterpretedScene
@@ -1820,10 +1836,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     programData(scene, nodeId, context)
   if persistedState.kind == JObject:
     for key in persistedState.keys:
-      # A saved interval that is no interval (see applyPublicStateFromPayload).
-      if key == scene.refreshIntervalKey and parseRefreshSeconds(persistedState[key]) <= 0:
-        continue
-      scene.state[key] = persistedState[key]
+      scene.state[key] = scene.anInterval(key, persistedState[key])
 
   # stateFields carries every field (including private ones); older callers
   # that only set publicStateFields still get their state seeded.
@@ -1946,15 +1959,7 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
           value = parseJson(value.getStr())
         except CatchableError:
           discard
-      # The refresh interval is a positive number of seconds. Anything else
-      # said to it from outside (a 0 typed into a schedule entry or a control
-      # form to "turn it off", an emptied box) is the scene's own default.
-      # The interval already read it so, but the state kept the 0, and a
-      # logic/nextSleepDuration fed from the same field (every photo sample)
-      # slept the shortest there is: a frame drew again a second after it
-      # had drawn, around the clock.
-      if key == scene.refreshIntervalKey and parseRefreshSeconds(value) <= 0:
-        value = %scene.refreshIntervalDefault
+      value = scene.anInterval(key, value)
       if value != scene.state{key}:
         scene.state[key] = value
 
