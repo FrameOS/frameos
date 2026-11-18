@@ -1,0 +1,10 @@
+{
+  "name": "Block drop",
+  "description": "Block drop, a falling-block puzzle in chunky pixels: shapes of four cells fall into a well ten wide and twenty deep; slide and turn them to fill rows, and full rows flash and clear. Every ten rows the level goes up and the pieces fall faster. A ghost shows where the piece will land, the next pieces wait beside the well and a keep slot puts one aside for later (each can be turned off). On the screen: left, right, down and drop on the left, turn and keep on the right. Keys: arrows or WASD, Up or X turns, Z turns back, Space drops, C keeps, P pauses. On e-paper nothing falls by itself: every press moves or turns the piece and Down lowers it one row, a slow puzzle that plays well with the frame's buttons (by default LEFT and RIGHT move, the third button lowers, LEFT and RIGHT together turn, a double press drops; change it under Buttons). The best five scores are kept. High contrast (black on white) is automatic on black-and-white panels, or set it under Contrast. Holding a key the frame's Button actions bind still does that; a short press plays.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

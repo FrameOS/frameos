@@ -1,0 +1,10 @@
+{
+  "name": "Cave flyer",
+  "description": "A one-button game for a fast screen (LCD or HDMI): hold to rise and let go to fall, and thread the Lumen through an endless cave that gets narrower and faster the further you fly, past pillars, catching gems, a glowing trail behind you. The button is anything: a touch or a click anywhere, any key or any GPIO button, so it plays on a frame with a single key (a key the frame's own Button actions bind to a long press still does that when held long; most holds here are short). P, Escape or the button in the corner pauses. Settings: difficulty, three caves (amethyst, ember, frost), gems on or off, pixel size and a High contrast mode in black and white. Keeps the top five scores. On e-paper it shows its title card and sleeps.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
