@@ -167,12 +167,6 @@ export interface FrameType {
     /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
     cpuMode?: CpuMode | null
     cpuMhz?: number | null
-    /** ESP32 only: what it sleeps by (`deep_sleep`, `deep_sleep_on_battery`,
-     * `wake_check_seconds`), 2026.11.12+. A board preset sets these on the
-     * device itself, so the plane may never have been told. */
-    deepSleep?: boolean | null
-    deepSleepOnBattery?: boolean | null
-    wakeCheckSeconds?: number | null
     /** ESP32 only: where its scenes run now (`render_mode`, 2026.11.7+); a board
      * without a runtime of its own (`localRenderSupported: false`) is always remote. */
     renderMode?: RenderMode | null
