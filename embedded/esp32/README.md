@@ -1614,8 +1614,8 @@ Memory holds a read's worth of bytes throughout: the reTerminal E1004 had no
 block for one scene of a 465 KB set while its 13.3" render had its PSRAM cut
 up (`no-memory`), and that read is tried again this way. One staging at a
 time: an answer waits in its socket for a set the store task is still
-writing. `scenes:toStore` logs the scenes, the bytes and where the time went
-(opening the files, writing, closing).
+writing. `scenes:toStore` logs the scenes, the bytes and how long it took
+(`detail`).
 
 What the store cannot take is said once: `payload-too-large` (more than
 `/state` has room for, nothing of it read), `no-room`, `too-many-scenes`,

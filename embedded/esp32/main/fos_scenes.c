@@ -2268,11 +2268,7 @@ typedef struct {
     fos_scene_store_err_t err; /* why the store refused, when it did */
     bool busy;                 /* another payload is being stored or waits for its apply */
     bool updating;             /* "Updating" is on the glass */
-    /* Where the time went, for the `scenes:toStore` line: opening each
-     * scene's file, writing its bytes (the pace's waits included), closing
-     * it and reading what the index keeps. */
-    int scenes;
-    int64_t open_us, write_us, close_us;
+    int scenes;                /* written or found stored, for the `scenes:toStore` line */
 } spool_t;
 
 /* Under the store lock. */
@@ -2336,9 +2332,7 @@ static fos_http_body_err_t spool_begin(void *ctx)
         spool->updating = true;
         fos_display_updating_begin();
     }
-    int64_t started = esp_timer_get_time();
     if (err == FOS_SCENE_STORE_OK) err = fos_scene_store_stage_begin(spool->id);
-    spool->open_us += esp_timer_get_time() - started;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
@@ -2348,9 +2342,7 @@ static fos_http_body_err_t spool_bytes(void *ctx, const char *bytes, size_t len)
 {
     spool_t *spool = ctx;
     store_lock();
-    int64_t started = esp_timer_get_time();
     fos_scene_store_err_t err = fos_scene_store_stage_write(spool->id, bytes, len);
-    spool->write_us += esp_timer_get_time() - started;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
@@ -2360,27 +2352,24 @@ static fos_http_body_err_t spool_end(void *ctx)
 {
     spool_t *spool = ctx;
     store_lock();
-    int64_t started = esp_timer_get_time();
     fos_scene_store_err_t err = fos_scene_store_stage_end(spool->id, NULL);
-    spool->close_us += esp_timer_get_time() - started;
     if (err == FOS_SCENE_STORE_OK) spool->scenes++;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
 }
 
-/* One line for an answer read into the store: how much, how long, and where
- * the time went. */
+/* One line for an answer read into the store: how much and how long, in the
+ * words of every scene line (`detail` is the time). Where the time went
+ * (opening, writing and closing each file) was a line of its own with three
+ * timers behind it, 400 bytes of flash for a number read once: a slot file
+ * that does not exist yet is a second to make on a 24 MB /state, and the
+ * rest is the bytes. */
 static void log_spool(const spool_t *spool, size_t bytes, int64_t took_us, bool ok)
 {
-    char line[320];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"scenes:toStore\",\"source\":\"esp32\",\"status\":\"%s\",\"scenes\":%d,"
-             "\"bytes\":%u,\"ms\":%d,\"openMs\":%d,\"writeMs\":%d,\"closeMs\":%d,\"freePsram\":%u}",
-             ok ? "ok" : "error", spool->scenes, (unsigned)bytes, (int)(took_us / 1000), (int)(spool->open_us / 1000),
-             (int)(spool->write_us / 1000), (int)(spool->close_us / 1000),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    frameos_nim_log_hook(line);
+    char took[16];
+    snprintf(took, sizeof(took), "%d ms", (int)(took_us / 1000));
+    log_scene_event("scenes:toStore", ok ? "ok" : "error", "backend", "", took, bytes, spool->scenes, 200, ESP_OK);
 }
 
 /* What /state takes beside what it holds, less the index written twice and
