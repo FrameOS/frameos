@@ -1378,6 +1378,10 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
         if c.box.display != diNone:
           right = max(right, c.x + c.size.x)
           bottom = max(bottom, c.y + c.size.y)
+          if c.kind == ukText and c.text.nowrap and not c.arrangement.isNil:
+            # Lines that do not wrap reach past the box they were set in (a
+            # field's code): as wide as the longest.
+            right = max(right, c.x + c.box.padX + c.arrangement.layoutBounds().x)
       n.maxX = max(right + b.pad[1] + b.border[1] - result.x, 0)
       n.maxY = max(bottom + b.pad[2] + b.border[2] - result.y, 0)
   n.prevW = n.lastW

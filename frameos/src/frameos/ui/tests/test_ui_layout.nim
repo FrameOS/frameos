@@ -670,6 +670,13 @@ suite "fields, clipping and scrolling":
     # Spans that do not spell the value (an edit the app has not seen): its
     # text in the field's color.
     check inks(layoutUi(el("div", "bg-white", colored("let y = 1")), 240, 60)) == (false, false)
+    # Its lines unwrapped: a long one scrolls the field sideways.
+    var regions: seq[UiRegion]
+    let wide = input("textarea", "w-[100px] text-black whitespace-nowrap overflow-x-auto",
+      {"value": "a line far longer than the field is wide\nb"})
+    var state: UiInput
+    discard layout.layoutUi(el("div", "bg-white", wide), 240, 60, state, regions)
+    check regions.len == 1 and regions[0].scrollX > 100 and regions[0].scrollY == 0
 
   test "a value the app changed keeps the caret on its text, before or after":
     let area = proc(value: string): SvgNode =
