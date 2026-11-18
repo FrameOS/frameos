@@ -216,20 +216,10 @@ static const struct {
  * has a pull-up out of reset (EFUSE_DIS_PAD_JTAG unburnt), about 45 kOhm
  * against the board's 100; the IO mux showed none, so why it reads high is
  * not settled, only that it does. */
-static const struct {
-    const char *preset;
-    int enable_low;
-} k_charge_enable[] = {
-    {"seeed_reterminal_sticky", 39},
-};
-
 int fos_board_charge_enable_pin(const char *hardware_preset)
 {
-    if (!hardware_preset || !hardware_preset[0]) return -1;
-    for (size_t i = 0; i < sizeof(k_charge_enable) / sizeof(k_charge_enable[0]); i++) {
-        if (strcmp(hardware_preset, k_charge_enable[i].preset) == 0) return k_charge_enable[i].enable_low;
-    }
-    return -1;
+    /* One board so far: a compare, not a table with a loop. */
+    return hardware_preset && strcmp(hardware_preset, "seeed_reterminal_sticky") == 0 ? 39 : -1;
 }
 
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr)

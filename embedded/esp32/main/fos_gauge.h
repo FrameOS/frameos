@@ -89,11 +89,4 @@ const char *fos_gauge_chip_name(void);
 esp_err_t fos_gauge_axp2101_raw(uint8_t out[8]);
 /* Read and decode. ESP_ERR_NOT_FOUND without a gauge. */
 esp_err_t fos_gauge_read(fos_gauge_status_t *out);
-/* The BQ27220's words behind a reading, for the console: what the decode
- * leaves out says why a cell does not charge (the flags, the temperature,
- * the capacities the gauge was set up with). In the order of
- * FOS_GAUGE_RAW_COMMANDS. ESP_ERR_NOT_FOUND without that chip. */
-#define FOS_GAUGE_RAW_WORDS 15
-extern const uint8_t FOS_GAUGE_RAW_COMMANDS[FOS_GAUGE_RAW_WORDS];
-esp_err_t fos_gauge_bq27220_raw(uint16_t out[FOS_GAUGE_RAW_WORDS]);
 #endif

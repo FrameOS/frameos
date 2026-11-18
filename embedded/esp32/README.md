@@ -318,11 +318,10 @@ for the two Spectra boards most of the bench work runs on:
   low. Left alone the pin reads high (it is the S3's MTCK, with a pull-up out
   of reset per the datasheet, against the board's 100 kΩ to ground) and the
   cell is never charged: `fos_charger_enable` drives it low at boot and holds
-  it through a deep sleep (`fos_board_charge_enable_pin`). The console's
-  `i2c` says what the pin reads and prints the gauge's words raw
-  (`bq27220: temp=… status=…`); the red LED beside the port is the charger's
-  STAT (CHARGE_STATE, GPIO40, not read): lit while it charges, blinking when
-  it holds off (the cell too warm or cold, its safety timer). On the bench
+  it through a deep sleep (`fos_board_charge_enable_pin`). The red LED beside
+  the port is the charger's STAT (CHARGE_STATE, GPIO40, not read): lit while
+  it charges, blinking when it holds off (the cell too warm or cold, its
+  safety timer). On the bench
   (2026-11-18) the pin read 1 and the cell sat at 3397 mV and 0 mA for two
   days on USB; driven low, STAT went low at once and the cell rose to
   3768 mV and 32% in twenty minutes. Seeed set the gauge up in tenths (a

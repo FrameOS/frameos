@@ -30,8 +30,6 @@ void fos_charger_decode(uint8_t reg08, uint8_t reg0a, fos_charger_status_t *out)
 #include "fos_board.h"
 #include "fos_i2c.h"
 
-static int s_enable_pin = -1;
-
 void fos_charger_enable(const char *hardware_preset)
 {
     int pin = fos_board_charge_enable_pin(hardware_preset);
@@ -53,13 +51,6 @@ void fos_charger_enable(const char *hardware_preset)
     gpio_set_level((gpio_num_t)pin, 0);
     gpio_hold_en((gpio_num_t)pin);
     gpio_deep_sleep_hold_en();
-    s_enable_pin = pin;
-}
-
-int fos_charger_enable_pin(int *level)
-{
-    if (level) *level = s_enable_pin >= 0 ? gpio_get_level((gpio_num_t)s_enable_pin) : -1;
-    return s_enable_pin;
 }
 
 bool fos_charger_present(void)

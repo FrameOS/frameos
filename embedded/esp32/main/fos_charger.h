@@ -48,6 +48,4 @@ esp_err_t fos_charger_read(fos_charger_status_t *out);
  * cable plugged into a sleeping frame charges it. Once at boot; nothing to
  * do on any other board. */
 void fos_charger_enable(const char *hardware_preset);
-/* That pin, and what it reads (0: charging allowed); -1 without one. */
-int fos_charger_enable_pin(int *level);
 #endif
