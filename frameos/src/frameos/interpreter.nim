@@ -1820,6 +1820,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     programData(scene, nodeId, context)
   if persistedState.kind == JObject:
     for key in persistedState.keys:
+      # A saved interval that is no interval (see applyPublicStateFromPayload).
+      if key == scene.refreshIntervalKey and parseRefreshSeconds(persistedState[key]) <= 0:
+        continue
       scene.state[key] = persistedState[key]
 
   # stateFields carries every field (including private ones); older callers
@@ -1943,6 +1946,15 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
           value = parseJson(value.getStr())
         except CatchableError:
           discard
+      # The refresh interval is a positive number of seconds. Anything else
+      # said to it from outside (a 0 typed into a schedule entry or a control
+      # form to "turn it off", an emptied box) is the scene's own default.
+      # The interval already read it so, but the state kept the 0, and a
+      # logic/nextSleepDuration fed from the same field (every photo sample)
+      # slept the shortest there is: a frame drew again a second after it
+      # had drawn, around the clock.
+      if key == scene.refreshIntervalKey and parseRefreshSeconds(value) <= 0:
+        value = %scene.refreshIntervalDefault
       if value != scene.state{key}:
         scene.state[key] = value
 
