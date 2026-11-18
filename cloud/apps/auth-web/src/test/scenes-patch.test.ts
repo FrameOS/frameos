@@ -71,6 +71,34 @@ describe("scenes_patch", () => {
     });
   });
 
+  it("knows a scene by the digest its row kept, not by the order its keys come back in", () => {
+    // Queued as {name, id}; the queue's jsonb column gives back {id, name}.
+    const queued = [
+      { name: "A", id: "a" },
+      { name: "B", id: "b" },
+    ];
+    const kept = sceneHashes(queued) as Record<string, string>;
+    const read = [
+      { id: "a", name: "A" },
+      { id: "b", name: "B2" },
+    ];
+    const changed = { ...kept, b: (sceneHashes([{ name: "B2", id: "b" }]) as Record<string, string>).b };
+    const message = buildScenesPatchMessage(
+      { id: "cmd", payload: { checksum: "new", scene_hashes: changed, scenes: read } },
+      { checksum: "old", hashes: kept },
+    );
+    expect(message?.put).toEqual([{ id: "b", name: "B2" }]);
+    // Hashes that are not of exactly these scenes are not believed.
+    for (const scene_hashes of [{ a: kept.a }, { ...changed, c: "x" }, { a: kept.a, b: 1 }, "x"]) {
+      expect(
+        buildScenesPatchMessage(
+          { id: "cmd", payload: { checksum: "new", scene_hashes, scenes: read } },
+          { checksum: "old", hashes: sceneHashes([read[0], { id: "b", name: "B" }]) as Record<string, string> },
+        )?.put,
+      ).toEqual([{ id: "b", name: "B2" }]);
+    }
+  });
+
   it("carries the scene to show and its field values ('Push & activate'), even with nothing to put", () => {
     // The install already landed, then "Push & activate": the same set, a
     // scene to open and its values. The frame switches on it (fos_cloud.c).

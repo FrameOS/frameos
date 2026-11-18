@@ -818,6 +818,34 @@ describe("scenes_patch", () => {
     device.ws.close();
   });
 
+  it("knows a scene by the digest it was queued with, whatever order its keys come back in", async () => {
+    // The queue's jsonb column gives keys back by length, then bytes: a
+    // digest of the scene read from it made every scene whose keys were in
+    // another order look changed, and the push went out whole.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, esp32);
+    const one = { name: "One", id: "one", nodes: [], edges: [], settings: { refreshInterval: 60, backgroundColor: "#000" } };
+    const two = { name: "Two", id: "two", nodes: [], edges: [] };
+    const first = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scenes: [one, two] },
+      type: "set_scenes",
+    });
+    await device.next((msg) => msg.id === first?.id, "the first push, whole");
+    await settle(device, frame.id, first?.id, "set-1");
+
+    const second = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: [one, { ...two, name: "Two again" }] },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === second?.id, "the patch");
+    expect(patch.type).toBe("scenes_patch");
+    expect(patch.put).toEqual([{ ...two, name: "Two again" }]);
+    device.ws.close();
+  });
+
   it("sends the whole list when the frame refuses the patch", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);

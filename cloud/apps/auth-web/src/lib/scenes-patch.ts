@@ -92,6 +92,33 @@ export function sceneHashes(scenes: readonly unknown[]): Record<string, string> 
 }
 
 /**
+ * Each scene's digest by id for a set_scenes row about to go out: the ones
+ * the row has kept since it was queued (`scene_hashes`, enqueueFrameCommand),
+ * which are what the next push's base is read from. Worked out from the
+ * scenes only when the row has none for exactly these scenes: the queue's
+ * jsonb column gives an object's keys back in its own order (by length, then
+ * bytes), so the digest of a scene read from it is not the digest it was
+ * queued with, and every scene whose keys were in another order looked
+ * changed: such a push went out whole, never as a patch.
+ */
+function rowSceneHashes(payload: Record<string, unknown>, scenes: readonly unknown[]): Record<string, string> | null {
+  const kept = payload.scene_hashes;
+  if (kept && typeof kept === "object" && !Array.isArray(kept) && Object.keys(kept).length === scenes.length) {
+    const hashes = kept as Record<string, unknown>;
+    const ids = new Set(scenes.map((scene) => sceneId(scene)));
+    if (
+      ids.size === scenes.length &&
+      [...ids].every(
+        (id) => id !== null && Object.prototype.hasOwnProperty.call(hashes, id) && typeof hashes[id] === "string",
+      )
+    ) {
+      return hashes as Record<string, string>;
+    }
+  }
+  return sceneHashes(scenes);
+}
+
+/**
  * The verb to send in place of a set_scenes row, or null to send the whole list.
  * `base` is the set the frame holds: its checksum and each scene's digest, and
  * the slot files its store has (esp32SceneStoreSlotsFor its firmware; the
@@ -109,7 +136,7 @@ export function buildScenesPatchMessage(
   if (!Array.isArray(scenes) || scenes.length === 0 || typeof rest.checksum !== "string" || !rest.checksum) {
     return null;
   }
-  const hashes = sceneHashes(scenes);
+  const hashes = rowSceneHashes(payload as Record<string, unknown>, scenes);
   if (hashes === null) {
     return null;
   }
