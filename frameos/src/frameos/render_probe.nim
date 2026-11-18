@@ -104,6 +104,41 @@ proc probeLine*(cacheAtStart: (int, int)): string =
     if cacheSkips[reason] > 0:
       result.add " " & $reason & " " & $cacheSkips[reason]
 
+var
+  quietNs: array[RenderPhase, int64]
+  quietPathNs: array[PathProbeKind, int64]
+  quietFrames: int
+
+proc probeKeepQuiet*() =
+  ## A frame whose line nobody writes (an animation's quiet frames: nine
+  ## seconds in ten): its phases join the average the next written line
+  ## carries. The written frame builds its log lines, so its own split says
+  ## little about the frames between (the SenseCAP Indicator's DVD Logo
+  ## Bounce: 51 ms written, 39 quiet, 2026-11-18).
+  if not probeOn:
+    return
+  for phase in RenderPhase:
+    quietNs[phase] += accNs[phase]
+  for kind in PathProbeKind:
+    quietPathNs[kind] += pathProbeNs[kind]
+  inc quietFrames
+
+proc probeQuietLine*(): string =
+  ## " | quiet 290: scene 37.9 native 1.2 ..." in ms a frame, the average of
+  ## the quiet frames since the last line; "" when there were none.
+  if quietFrames == 0:
+    return
+  result = " | quiet " & $quietFrames & ":"
+  for phase in RenderPhase:
+    if quietNs[phase] > 0:
+      result.add " " & $phase & " " & ms1(quietNs[phase] div quietFrames)
+    quietNs[phase] = 0
+  for kind in PathProbeKind:
+    if quietPathNs[kind] > 0:
+      result.add " " & $kind & " " & ms1(quietPathNs[kind] div quietFrames)
+    quietPathNs[kind] = 0
+  quietFrames = 0
+
 proc probeNs*(phase: RenderPhase): int64 =
   ## What `phase` took this render, in nanoseconds (a host benchmark's unit).
   accNs[phase]

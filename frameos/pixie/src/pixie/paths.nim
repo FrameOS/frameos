@@ -2732,6 +2732,8 @@ type PathProbeKind* = enum
   ppFillMask = "fillMask"  ## a fill blended from a kept mask
   ppStroke = "stroke"      ## a stroke outlined and rasterized
   ppStrokeMask = "strokeMask"
+  ppPaint = "paint"        ## a gradient or an image painted through its shape (`paintThroughMask`),
+                           ## the shape's own fill into the mask included, which `fill` counts too
 
 type CacheSkip* = enum
   csOff = "off", csNotShared = "notShared", csTransform = "transform", csBlend = "blend",
@@ -3055,8 +3057,9 @@ proc fillPath*(
         image.fillShapes(shapes, color, windingRule, paint.blendMode)
     return
 
-  image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
-    mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
+  pathProbe(ppPaint):
+    image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
+      mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
 
 proc strokePath*(
   image: Image,
@@ -3130,17 +3133,18 @@ proc strokePath*(
   bounds.y -= reach
   bounds.w += reach * 2
   bounds.h += reach * 2
-  image.paintThroughMask(paint, transform, bounds):
-    mask.strokePath(
-      path,
-      color(1, 1, 1, 1),
-      stripTransform,
-      strokeWidth,
-      lineCap,
-      lineJoin,
-      miterLimit,
-      dashes
-    )
+  pathProbe(ppPaint):
+    image.paintThroughMask(paint, transform, bounds):
+      mask.strokePath(
+        path,
+        color(1, 1, 1, 1),
+        stripTransform,
+        strokeWidth,
+        lineCap,
+        lineJoin,
+        miterLimit,
+        dashes
+      )
 
 proc overlaps(
   shapes: seq[Polygon],

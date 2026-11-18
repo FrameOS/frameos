@@ -776,11 +776,13 @@ proc fos_nim_render_impl(
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
     if not quietRenders:
-      let phases = probeLine(cacheAtStart)
+      let phases = probeLine(cacheAtStart) & probeQuietLine()
       log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
           (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
            else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms") &
           (if phases.len > 0: " [" & phases & "]" else: ""))
+    else:
+      probeKeepQuiet()
     recoverEmergencyReserve("render")
     # Many interpreted scene graphs dispatch "render" while responding to the
     # render event itself. On embedded that should not immediately replay the
