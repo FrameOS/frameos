@@ -124,31 +124,31 @@ describe("a frame that announced its sleep", () => {
 });
 
 describe("estimating the wake from the power settings (older firmware)", () => {
-  it("uses the wake check period when it is shorter than the render interval", () => {
+  it("uses the wake check period when it is shorter than the firmware's 300 s", () => {
     const frame = cloudFrame({
       deep_sleep: true,
-      interval: 3600,
-      last_seen_at: at(-5 * 60),
-      wake_check_seconds: 900,
+      last_seen_at: at(-60),
+      wake_check_seconds: 240,
     });
     expect(frameCheckin(frame, now)).toMatchObject({
       announced: false,
       kind: "sleeping",
-      wakeAt: now + 10 * 60 * 1000,
+      wakeAt: now + 3 * 60 * 1000,
     });
-    expect(frameActivityDescription(frame)).toBe("asleep · wakes in ~10 min");
+    expect(frameActivityDescription(frame)).toBe("asleep · wakes in ~3 min");
   });
 
-  it("uses the render interval when the wake check is longer or off", () => {
+  it("uses 300 s when the wake check is longer or off", () => {
     expect(
-      frameCheckin(
-        cloudFrame({ deep_sleep: true, interval: 300, last_seen_at: at(-60), wake_check_seconds: 3600 }),
-        now,
-      )?.wakeAt,
+      frameCheckin(cloudFrame({ deep_sleep: true, last_seen_at: at(-60), wake_check_seconds: 3600 }), now)?.wakeAt,
     ).toBe(now + 4 * 60 * 1000);
     expect(
+      frameCheckin(cloudFrame({ deep_sleep: true, last_seen_at: at(-60), wake_check_seconds: 0 }), now)?.wakeAt,
+    ).toBe(now + 4 * 60 * 1000);
+    // An `interval` a frame row still holds from before is no part of it.
+    expect(
       frameCheckin(
-        cloudFrame({ deep_sleep: true, interval: 300, last_seen_at: at(-60), wake_check_seconds: 0 }),
+        cloudFrame({ deep_sleep: true, interval: 3600, last_seen_at: at(-60), wake_check_seconds: 0 } as never),
         now,
       )?.wakeAt,
     ).toBe(now + 4 * 60 * 1000);
@@ -157,7 +157,6 @@ describe("estimating the wake from the power settings (older firmware)", () => {
   it("only counts deep_sleep_on_battery when the device reports a cell", () => {
     const base = {
       deep_sleep_on_battery: true,
-      interval: 600,
       last_seen_at: at(-60),
     };
     expect(frameCheckin(cloudFrame(base), now)).toBeNull();
@@ -178,14 +177,14 @@ describe("estimating the wake from the power settings (older firmware)", () => {
   });
 
   it("gives an estimate half a cycle of slack before calling it overdue", () => {
-    const frame = cloudFrame({ deep_sleep: true, interval: 600, wake_check_seconds: 0 });
-    expect(frameCheckin({ ...frame, last_seen_at: at(-15 * 60) }, now)?.kind).toBe("sleeping");
-    expect(frameCheckin({ ...frame, last_seen_at: at(-20 * 60) }, now)).toMatchObject({
+    const frame = cloudFrame({ deep_sleep: true, wake_check_seconds: 0 });
+    expect(frameCheckin({ ...frame, last_seen_at: at(-9 * 60) }, now)?.kind).toBe("sleeping");
+    expect(frameCheckin({ ...frame, last_seen_at: at(-10 * 60) }, now)).toMatchObject({
       announced: false,
       kind: "overdue",
     });
-    expect(frameActivityDescription({ ...frame, last_seen_at: at(-20 * 60) })).toBe(
-      "overdue · expected ~10 minutes ago · last seen 20 minutes ago",
+    expect(frameActivityDescription({ ...frame, last_seen_at: at(-10 * 60) })).toBe(
+      "overdue · expected ~5 minutes ago · last seen 10 minutes ago",
     );
   });
 
@@ -203,7 +202,7 @@ describe("estimating the wake from the power settings (older firmware)", () => {
   });
 
   it("leaves frames that never sleep alone", () => {
-    expect(frameCheckin(cloudFrame({ last_seen_at: at(-60), interval: 60 }), now)).toBeNull();
+    expect(frameCheckin(cloudFrame({ last_seen_at: at(-60) }), now)).toBeNull();
     expect(
       frameCheckin(cloudFrame({ deep_sleep: false, deep_sleep_on_battery: false, last_seen_at: at(-60) }), now),
     ).toBeNull();

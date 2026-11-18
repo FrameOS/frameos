@@ -38,7 +38,9 @@ public enum FrameStatus {
         let sleeps = deepSleep == .bool(true) || (deepSleepOnBattery == .bool(true) && onBattery)
         if !sleeps { return nil }
         let wakeCheck = (frame["wake_check_seconds"].nonNull ?? frame.deviceConfigValue("wakeCheckSeconds", "wake_check_seconds").nonNull)?.doubleValue ?? 0
-        let interval = (frame.interval ?? 0) > 0 ? frame.interval! : 300
+        // The firmware's pass when the scene says nothing; a frame has no
+        // interval of its own (an `interval` a row still holds is ignored).
+        let interval: Double = 300
         let period = wakeCheck >= 60 && wakeCheck < interval ? wakeCheck : interval
         return min(max(period, 60), 7 * 86400)
     }

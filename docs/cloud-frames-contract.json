@@ -58,10 +58,6 @@
       "rule": {"type": "int", "enum": [0, 90, 180, 270]},
       "profiles": {"linux": {"since": null}, "esp32": {"since": null, "restart": true}}
     },
-    "interval": {
-      "rule": {"type": "number", "min": 1, "max": 86400},
-      "profiles": {"linux": {"since": null}, "esp32": {"since": null}}
-    },
     "scaling_mode": {
       "rule": {"type": "string", "enum": ["contain", "cover", "stretch", "center"]},
       "profiles": {"linux": {"since": null}, "esp32": {"since": null}}

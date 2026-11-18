@@ -44,21 +44,6 @@ export const cloudFramesContract = {
         }
       }
     },
-    "interval": {
-      "rule": {
-        "type": "number",
-        "min": 1,
-        "max": 86400
-      },
-      "profiles": {
-        "linux": {
-          "since": null
-        },
-        "esp32": {
-          "since": null
-        }
-      }
-    },
     "scaling_mode": {
       "rule": {
         "type": "string",

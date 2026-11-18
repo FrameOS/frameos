@@ -290,7 +290,7 @@ export function FrameImage({
   const showWasmFallback = Boolean(wasmFallbackSceneId && baseImageFailed && frame && !isFrameControlMode())
 
   // Determine if we should show the fade-in-out or loading cursor
-  const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready') && frame?.interval > 5
+  const visiblyLoading = !sceneId && (isLoading || frame?.status !== 'ready')
 
   const cancelQueuedFullSizeLoad = () => {
     if (typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {

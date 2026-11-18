@@ -57,7 +57,6 @@ function picoFrame(): FrameType {
     interval: 300,
     metrics_interval: 60,
     scaling_mode: "contain",
-    background_color: "#000000",
     scenes: [],
     device: "waveshare.EPD_7in3e",
     embedded: { platform: "pico-2w", hardwarePreset: "pimoroni_inky_frame_7_3_spectra" },

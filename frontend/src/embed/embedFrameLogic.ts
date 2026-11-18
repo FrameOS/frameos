@@ -3,6 +3,7 @@ import { forms } from 'kea-forms'
 import { FrameScene, FrameType, FrameId } from '../types'
 import { frameFormSceneErrors } from '../scenes/frame/frameFormSceneErrors'
 import { convertSceneWithFeedback, postSceneConversion, type SceneConversionResult } from '../utils/sceneConvert'
+import { DEFAULT_REFRESH_INTERVAL_SECONDS } from '../utils/refreshInterval'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
 // In-memory replacement for frameLogic's editor-facing slice, used by the
@@ -159,7 +160,7 @@ export interface embedFrameLogicMeta {
     mode: (frame: any, frameForm: any) => 'buildroot' | 'embedded' | 'rpios'
     width: (frameForm: any) => number | undefined
     height: (frameForm: any) => number | undefined
-    defaultInterval: (frameForm: any) => number
+    defaultInterval: () => number
     defaultScene: (scenes: any) => string
   }
 }
@@ -238,7 +239,7 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
       (frameForm: Partial<FrameType>) =>
         frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height,
     ],
-    defaultInterval: [(s: any) => [s.frameForm], (frameForm: Partial<FrameType>) => frameForm.interval ?? 300],
+    defaultInterval: [(s: any) => [s.frameForm], (): number => DEFAULT_REFRESH_INTERVAL_SECONDS],
     defaultScene: [
       (s: any) => [s.scenes],
       (scenes: FrameScene[]) =>

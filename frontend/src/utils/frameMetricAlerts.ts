@@ -10,7 +10,6 @@ const CPU_TEMPERATURE_ALERT_C = 70
 const OPEN_FILE_DESCRIPTORS_ALERT = 100
 const DEFAULT_CPU_COUNT = 1
 const DEFAULT_RUNTIME_CHECKPOINT_ALERT_MS = 10 * 60 * 1000
-const MAX_RENDER_INTERVAL_RUNTIME_CHECKPOINT_ALERT_MS = 30 * 60 * 1000
 
 function parseMetricTimestamp(timestamp: string): number {
   const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp)
@@ -128,12 +127,8 @@ function cpuCountFromMetric(metrics: Record<string, unknown>): number {
 function runtimeCheckpointAlertMs(frame: FrameType): number {
   const metricsIntervalMs =
     Number.isFinite(frame.metrics_interval) && frame.metrics_interval > 0 ? frame.metrics_interval * 5 * 1000 : 0
-  const renderIntervalMs =
-    Number.isFinite(frame.interval) && frame.interval > 0
-      ? Math.min(frame.interval * 2 * 1000, MAX_RENDER_INTERVAL_RUNTIME_CHECKPOINT_ALERT_MS)
-      : 0
 
-  return Math.max(DEFAULT_RUNTIME_CHECKPOINT_ALERT_MS, metricsIntervalMs, renderIntervalMs)
+  return Math.max(DEFAULT_RUNTIME_CHECKPOINT_ALERT_MS, metricsIntervalMs)
 }
 
 function formatDuration(ms: number): string {

@@ -49,7 +49,7 @@ DEPLOY = {
 # must not be able to reroute a frame's control connection.
 FRAME_SETTING_KEYS = (
     "name", "archived", "width", "height", "rotate", "flip", "color", "timezone", "timezone_updater",
-    "interval", "metrics_interval", "max_http_response_bytes", "log_to_file", "assets_path", "save_assets",
+    "metrics_interval", "max_http_response_bytes", "log_to_file", "assets_path", "save_assets",
     "upload_fonts", "scaling_mode", "render_scale", "frame_settings_on_screen", "device", "device_config", "debug",
     "reboot", "control_code", "schedule",
     "gpio_buttons", "event_map", "error_behavior", "input_settings", "palette", "colors", "service_setting_groups",
@@ -83,7 +83,6 @@ def compact_frame(frame: dict[str, Any]) -> dict[str, Any]:
         "archived": bool(frame.get("archived")),
         "frame_host": frame.get("frame_host"),
         "frameos_version": frame.get("version"),
-        "interval": frame.get("interval"),
         "timezone": frame.get("timezone"),
         "scene_count": len(scenes) if isinstance(scenes, list) else 0,
         "active_scene_id": frame.get("active_scene_id"),
@@ -279,7 +278,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         name="frames_list",
         description=(
             "List the project's frames: id, name, mode (rpios/buildroot/embedded), platform, device, size, "
-            "status, host, FrameOS version, interval, scene count, the scene currently showing and when "
+            "status, host, FrameOS version, scene count, the scene currently showing and when "
             "the frame last logged. Archived frames are left out unless include_archived."
         ),
         properties={"include_archived": {"type": "boolean"}},
@@ -298,7 +297,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         name="frame_get",
         description=(
             "Everything the backend records about one frame: connection (host, ports, mode), display "
-            "(device, size, rotate, color palette, colors), timing (interval, timezone, schedule, reboot), "
+            "(device, size, rotate, color palette, colors), timing (timezone, schedule, reboot), "
             "scene summaries, error behavior, GPIO buttons, build/deploy state. Credentials are redacted."
         ),
         properties={"frame_id": FRAME_ID},
@@ -352,7 +351,6 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
         mode: str | None = None,
         device: str | None = None,
         platform: str | None = None,
-        interval: float | None = None,
         timezone: str | None = None,
         project_id: int | None = None,
     ):
@@ -361,7 +359,7 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 key: value
                 for key, value in {
                     "name": name, "frame_host": frame_host, "server_host": server_host, "mode": mode,
-                    "device": device, "platform": platform, "interval": interval, "timezone": timezone,
+                    "device": device, "platform": platform, "timezone": timezone,
                 }.items()
                 if value is not None
             }
@@ -390,7 +388,6 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
             "mode": {"type": "string", "enum": ["rpios", "buildroot", "embedded"]},
             "device": {"type": "string"},
             "platform": {"type": "string", "description": "Board for buildroot/embedded modes (e.g. pi-zero-2w, esp32-s3-generic)."},
-            "interval": {"type": "number", "minimum": 1},
             "timezone": {"type": "string", "description": "IANA zone, e.g. Europe/Brussels."},
         },
         required=["name", "frame_host", "server_host"],

@@ -49,7 +49,7 @@ def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
         assert "fos_scene_interval_snap(frameos_nim_scene_interval())" in line, (
             "fos_client.c reads the scene interval raw: " + line.strip()
         )
-    assert "fos_pass_interval_seconds(scene_interval, config->interval_sec)" in client
+    assert "fos_pass_interval_seconds(scene_interval)" in client
     assert "scene_interval >= 1.0" not in client
 
 

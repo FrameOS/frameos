@@ -612,7 +612,7 @@ const virtualCloudFrameHiddenMenuActions: readonly FrameMenuAction[] = ['updateF
  * The settings a cloud virtual frame has headings for: its own section (size
  * and view link) and the log switch. The rest of the cloud's list is a
  * panel's or a board's (flip, palette, buttons, power, SSH keys, local
- * network access); the frame's name, interval and time zone are the block
+ * network access); the frame's name and time zone are the block
  * the panel opens on, which has no link.
  */
 const virtualCloudFrameSettingsSections: readonly string[] = [
@@ -942,7 +942,7 @@ export function frameSupportsUsbSerialConsole(
 
 /**
  * The esp32 cloud profile replaces the whole settings form with one compact
- * block (name/interval/rotate/scaling) plus the Power section — see
+ * block (name/rotate/scaling) plus the Power section — see
  * `esp32CloudProfile` in FrameSettings.tsx — so every other nav entry would
  * scroll to an anchor that is never rendered. The compact block itself keeps
  * no nav entry: an "Info" link pointing at the form the panel opens on was

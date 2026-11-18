@@ -53,7 +53,6 @@ code{background:#eee;padding:0 .3rem}</style></head><body>
 <option value='0'>On device (Nim runtime)</option><option value='1'>Thin client (backend renders)</option></select></div>
 <label for='server_send_logs'>Backend logs</label><select id='server_send_logs' name='server_send_logs'>
 <option value='1'>Send render/runtime logs</option><option value='0'>Serial only</option></select>
-<label for='interval'>Refresh interval (seconds)</label><input id='interval' name='interval' type='number' min='5'>
 <label for='pins'>Pins</label><input id='pins' name='pins' type='text' placeholder='rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1'>
 <label for='assets_path'>Assets path</label><input id='assets_path' name='assets_path' type='text' placeholder='/srv/assets'>
 <label for='assets_sd_enable'>SD card assets</label><select id='assets_sd_enable' name='assets_sd_enable'>
@@ -69,7 +68,7 @@ const $=id=>document.getElementById(id);
 async function loadSetup(){
 const c=await (await fetch('/api/setup')).json();
 for(const [id,v] of Object.entries({ssid:c.ssid,backend:c.backend,tls_port:c.tlsPort,admin_user:c.adminUser||'admin',
-frame_id:c.frameId,interval:c.interval,pins:c.pins,assets_path:c.assetsPath,assets_sd_pins:c.sdPins,assets_sd_freq:c.sdFreq}))$(id).value=v;
+frame_id:c.frameId,pins:c.pins,assets_path:c.assetsPath,assets_sd_pins:c.sdPins,assets_sd_freq:c.sdFreq}))$(id).value=v;
 for(const [id,on] of Object.entries({tls_enable:c.tlsEnable,admin_auth:c.adminAuth,server_send_logs:c.sendLogs,
 assets_sd_enable:c.sdEnable,assets_sd_autoformat:c.sdAutoformat,render_mode:c.renderMode}))$(id).value=on?'1':'0';
 /* "Leave blank to keep current" is only true when there is a current password:

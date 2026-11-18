@@ -413,6 +413,23 @@ export const allowedFrameCommandTypes = new Set([
   "set_schedule",
 ]);
 
+/**
+ * Settings a frame had once and has no more: `interval` (a frame renders on
+ * its scenes' refresh intervals). An app or a script from before still sends
+ * them; they are dropped, never refused, so its other keys still go.
+ */
+export const retiredFrameSettings: readonly string[] = ["interval"];
+
+/** `value` without the retired keys; `value` itself when it is no object. */
+export function withoutRetiredFrameSettings(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(([key]) => !retiredFrameSettings.includes(key)),
+  );
+}
+
 export function validateFrameSettings(
   value: unknown,
   profile?: ContractProfile,
@@ -610,7 +627,7 @@ function persistableSettings(
 }
 
 // Merge a validated push onto whatever was stored before, so a push carrying
-// only `interval` does not blank out a previously pushed `rotate`. Returns
+// only `rotate` does not blank out a previously pushed `scaling_mode`. Returns
 // undefined when the push has nothing to mirror (a name-only rename).
 export function mergeFrameSettings(
   stored: unknown,

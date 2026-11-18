@@ -1194,7 +1194,6 @@ async def test_render_answers_503_with_retry_after_when_the_queue_is_full(
 async def test_settings_includes_live_frame_settings(async_client, no_auth_client, db):
     frame = await device_frame(async_client, db)
     frame.name = 'Kitchen'
-    frame.interval = 61.5
     frame.scaling_mode = 'contain'
     frame.render_scale = 1.5
     frame.timezone = None  # deterministic utcOffsetMinutes
@@ -1230,7 +1229,6 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
     assert response.status_code == 200, response.text
     assert response.json()['frame'] == {
-        'interval': 61.5,
         'name': 'Kitchen',
         'renderMode': 'remote',  # thin client — string form fos_settings.c parses
         'deepSleep': True,
@@ -1269,7 +1267,6 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     response = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
     assert response.json()['frame'] == {
-        'interval': 61.5,
         'name': 'Kitchen',
         'renderMode': 'local',
         'deepSleep': False,
@@ -1525,7 +1522,7 @@ async def test_settings_etag_supports_cheap_polling(async_client, no_auth_client
     assert response.headers['etag'] == etag
 
     # A settings change → new ETag + fresh payload
-    frame.interval = 999
+    frame.name = 'Renamed'
     db.add(frame)
     db.commit()
     response = await no_auth_client.get(
@@ -1533,7 +1530,9 @@ async def test_settings_etag_supports_cheap_polling(async_client, no_auth_client
         headers={**auth(frame), 'If-None-Match': etag})
     assert response.status_code == 200
     assert response.headers['etag'] != etag
-    assert response.json()['frame']['interval'] == 999.0
+    assert response.json()['frame']['name'] == 'Renamed'
+    # A frame has no interval: a board renders when its scene says.
+    assert 'interval' not in response.json()['frame']
 
 
 @pytest.mark.asyncio

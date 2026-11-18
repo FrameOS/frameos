@@ -32,7 +32,7 @@ typedef struct {
     char panel[PK_STR_LEN];
     char hardware_preset[PK_STR_LEN];
     pk_pins_t pins;
-    uint32_t interval_seconds;
+    uint32_t unused_interval_seconds;
     uint8_t deep_sleep;
 } pk_config_v2_t;
 
@@ -101,9 +101,6 @@ static bool load_from(uint32_t offset)
         return false;
     }
     terminate_strings(&s_config);
-    if (s_config.interval_seconds < PK_INTERVAL_MIN_SECONDS) {
-        s_config.interval_seconds = PK_INTERVAL_MIN_SECONDS;
-    }
     return true;
 }
 

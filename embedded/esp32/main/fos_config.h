@@ -171,7 +171,6 @@ typedef struct {
     char panel[FOS_STR_LEN];       /* e.g. EPD_7in5_V2, or "none" */
     char time_zone[FOS_STR_LEN];   /* IANA name, e.g. Europe/Brussels; "" = UTC (fos_tz.h) */
     fos_render_mode_t render_mode;
-    uint32_t interval_sec;         /* refresh interval */
     uint16_t rotate;               /* 0/90/180/270 — scenes render rotated, packers map to panel */
     char scaling_mode[16];         /* contain/cover/stretch/center — the FALLBACK
                                     * fit for image consumers that do not place

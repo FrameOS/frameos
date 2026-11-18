@@ -190,7 +190,7 @@ Cloud-profile verb set (complete):
 - `set_scenes` — interpreted scene JSON, validated on device, hot-reloaded
   via the existing uploaded-scenes path.
 - `set_schedule`, `set_settings` — declarative allowlist only (rotation,
-  flip, interval, timezone, error handling, control code, metrics interval,
+  flip, timezone, error handling, control code, metrics interval,
   asset saving, tz-updater on/off, scene schedule; from 2026.8.31 the panel
   palette, the partial-refresh policy and the GPIO button map — all three
   driver-init settings that restart the runtime; from 2026.9.22 the display

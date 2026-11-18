@@ -491,9 +491,9 @@ const MAX_ALBUM_PATH_CHARS = 1024;
 export const ALBUM_ORDERS = ["random", "sequential", "newest", "oldest"] as const;
 export type AlbumOrder = (typeof ALBUM_ORDERS)[number];
 // The contract's rule for the one setting the voice turn may change
-// (docs/cloud-frames-contract.json `rotate`). The frame's render interval is
-// deliberately not a voice tool: a frame sets its own, scenes have theirs, and
-// a model given the key kept inventing `interval: 1` next to a rotation.
+// (docs/cloud-frames-contract.json `rotate`). A frame has no render
+// interval (its scenes have theirs); a model given that key once kept
+// inventing `interval: 1` next to a rotation.
 const VOICE_ROTATIONS = [0, 90, 180, 270];
 
 // ------------------------------------------------------------ image scene

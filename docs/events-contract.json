@@ -108,7 +108,7 @@
     {
       "name": "render",
       "class": "lifecycle",
-      "description": "Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested.",
+      "description": "Render the scene. Triggered according to the scene's refresh interval, or when explicitly requested.",
       "listen": true,
       "dispatch": true,
       "wildcard": false,

@@ -139,7 +139,6 @@ def _frame(db, *, server_port: int, frame_port: int) -> Frame:
         width=320,
         height=240,
         device="web_only",
-        interval=300,
         metrics_interval=60,
         scenes=[_render_scene()],
         apps=[],

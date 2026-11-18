@@ -402,6 +402,7 @@ describe("browser event shaping", () => {
       // frame's scenes want); no field or value ever does.
       serviceSettingGroups: ["unsplash"],
       voicePermissions: null,
+      // `interval` is a row's from before frames lost theirs: left out.
       settings: { interval: 300, rotate: 90 },
       // Provisioning intent, cleared once applied — it never reaches the wire.
       sceneSourceFrameId: null,
@@ -421,7 +422,6 @@ describe("browser event shaping", () => {
       id: "frame-uuid",
       // The last-pushed settings ride along as top-level fields, in the
       // device's spelling — that is what the SPA's frameForm hydrates from.
-      interval: 300,
       // The hardware report carries no lanAccess: firmware from before the
       // switch, which the cloud cannot manage it on.
       lan_access: null,

@@ -2444,8 +2444,7 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
 }
 
 /* set_settings: the declarative allowlist (docs/cloud-frames.md). The ESP32
- * profile persists the subset that maps onto fos_config: `interval`
- * (interval_sec, picked up by the render loop's next pass, no reboot),
+ * profile persists the subset that maps onto fos_config:
  * `name` (the DHCP hostname — the provider-side display name stays
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
@@ -2546,13 +2545,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     static fos_config_t *before = NULL;
     if (!before) before = fos_big_malloc(sizeof(*before));
     if (before) memcpy(before, config, sizeof(*before));
-    const cJSON *interval = cJSON_GetObjectItem(settings, "interval");
-    if (interval != NULL) {
-        uint32_t seconds = (uint32_t)interval->valuedouble;
-        /* Same floor the local admin API applies (fos_http.c). */
-        if (seconds < 5) seconds = 5;
-        config->interval_sec = seconds;
-    }
     const cJSON *name = cJSON_GetObjectItem(settings, "name");
     if (name != NULL) {
         if (strlen(name->valuestring) >= sizeof(config->hostname)) {

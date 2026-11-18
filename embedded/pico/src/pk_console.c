@@ -268,7 +268,7 @@ static void print_status(void)
     printf("panel:    %s\n", config->panel[0] ? config->panel : "(unset)");
     printf("hardware: %s\n", config->hardware_preset[0] ? config->hardware_preset : "custom");
     printf("pins:     %s\n", pins);
-    printf("interval: %lus, deep sleep: %s\n", (unsigned long)config->interval_seconds,
+    printf("sleep:    %s\n",
            config->deep_sleep ? "always" : config->deep_sleep_on_battery ? "on battery" : "off");
     printf("power:    %s\n", pk_usb_powered() ? "USB" : "battery");
     printf("login:    %s\n", config->admin_auth ? "enabled" : "off");

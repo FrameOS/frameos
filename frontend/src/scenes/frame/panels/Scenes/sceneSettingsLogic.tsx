@@ -13,6 +13,7 @@ import {
   sceneAccessFlagLabel,
 } from '../../../../utils/sceneAccess'
 import { framePacedByInterval, splitSceneRhythmHint } from '../../../../utils/sceneRhythm'
+import { DEFAULT_REFRESH_INTERVAL_SECONDS } from '../../../../utils/refreshInterval'
 import { renderScaleFieldIndex, sceneRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
 import { sceneWindowSizeOptions, type WindowSizeOption } from '../../../../utils/sceneWindowSize'
 import { sceneIconPath, sceneIconProblem } from '../../../../utils/sceneIcon'
@@ -170,7 +171,12 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
         scenes: sceneSettingsLogicValues['scenes'],
         frameForm: sceneSettingsLogicValues['frameForm']
       ): string | null =>
-        splitSceneRhythmHint(scene, scenes, frameForm.interval || 300, framePacedByInterval(frameForm as FrameType)),
+        splitSceneRhythmHint(
+          scene,
+          scenes,
+          DEFAULT_REFRESH_INTERVAL_SECONDS,
+          framePacedByInterval(frameForm as FrameType)
+        ),
     ],
     pacedByInterval: [
       (s) => [s.frameForm],

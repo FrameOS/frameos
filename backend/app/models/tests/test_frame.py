@@ -33,7 +33,6 @@ async def test_new_frame(mock_publish, db, redis):
         frame_host="pi@192.168.1.1:8787",
         server_host="server_host.com",
         device="testDevice",
-        interval=123,
     )
     assert frame.id is not None
     assert frame.name == "TestFrame"
@@ -41,7 +40,8 @@ async def test_new_frame(mock_publish, db, redis):
     assert frame.frame_port == 8787
     assert frame.ssh_user == "pi"
     assert frame.device == "testDevice"
-    assert frame.interval == 123
+    # A frame has no refresh interval of its own: its scenes do.
+    assert not hasattr(frame, "interval")
     assert frame.max_http_response_bytes == 64 * 1024 * 1024
     assert frame.reboot == {"enabled": "true", "crontab": "0 4 * * *"}
     assert frame.server_send_logs is True
@@ -166,10 +166,10 @@ async def test_delete_nonexistent_frame(mock_publish, db, redis):
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_frame_to_dict(mock_publish, db, redis):
-    frame = await new_frame(db, redis, "FrameDict", "host", "server_host.com", interval=55)
+    frame = await new_frame(db, redis, "FrameDict", "host", "server_host.com")
     data = frame.to_dict()
     assert data["frame_host"] == "host"
-    assert data["interval"] == 55
+    assert "interval" not in data
     assert data["max_http_response_bytes"] == 64 * 1024 * 1024
     assert data["server_send_logs"] is True
     assert data["reboot"]["crontab"] == "0 4 * * *"
@@ -442,13 +442,13 @@ async def test_get_frame_json_ships_store_scene_settings_only_when_granted(_mock
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
-async def test_get_frame_json_includes_interval(_mock_publish, db, redis):
+async def test_get_frame_json_has_no_interval(_mock_publish, db, redis):
+    # A frame renders on its scenes' refresh intervals: frame.json says none.
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
-    frame.interval = 3600
 
     data = get_frame_json(db, frame)
 
-    assert data["interval"] == 3600
+    assert "interval" not in data
 
 
 @pytest.mark.asyncio

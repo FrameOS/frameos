@@ -205,7 +205,6 @@ async function importFrame(page: Page, name: string): Promise<CreatedFrame> {
         frame_host: 'import-e2e.local',
         server_host: '127.0.0.1:8989',
         device: 'web_only',
-        interval: 300,
         mode: 'rpios',
         scenes: [e2eScene],
         agent: { agentEnabled: false, agentRunCommands: false, deployWithAgent: false },

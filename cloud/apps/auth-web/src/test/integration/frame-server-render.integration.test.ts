@@ -160,7 +160,7 @@ const scenes = [
 
 // An ESP32-S3 frame of the account, with an assigned store scene holding
 // `scenes`, and the device's bearer token.
-async function createFrame(accountId: string, settings: Record<string, unknown> = { interval: 900, render_mode: "remote" }) {
+async function createFrame(accountId: string, settings: Record<string, unknown> = { render_mode: "remote" }) {
   const token = `fc_link_${randomBytes(24).toString("base64url")}`;
   const { publicKey } = generateKeyPairSync("ed25519");
   const [linkedClient] = await db
@@ -763,22 +763,30 @@ describe("the switch", () => {
 
     expect((await pushSettings(frame.id, { render_mode: "remote" })).status).toBe(200);
     expect(await commands()).toEqual(["set_settings", "set_scenes"]);
-    expect((await pushSettings(frame.id, { interval: 1200 })).status).toBe(200);
+    expect((await pushSettings(frame.id, { rotate: 90 })).status).toBe(200);
     expect(await commands()).toEqual(["set_settings", "set_scenes", "set_settings"]);
     expect((await pushSettings(frame.id, { render_mode: "local" })).status).toBe(200);
     expect((await commands()).slice(-2)).toEqual(["set_settings", "set_scenes"]);
   });
 
-  it("holds the frame to the plan's refresh floor", async () => {
+  it("takes an interval from before and leaves it out", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 2);
+    // A frame with an interval stored from before turns remote: the scene
+    // paces what the cloud draws, held to the floor at the render route.
     const fast = await createFrame(accountId, { interval: 60 });
-    const tooFast = await pushSettings(fast.frame.id, { render_mode: "remote" });
-    expect(tooFast.status).toBe(400);
-    expect(await tooFast.json()).toMatchObject({ error: "interval_below_plan_floor", min_interval: 300 });
-    expect((await pushSettings(fast.frame.id, { interval: 600, render_mode: "remote" })).status).toBe(200);
-    const under = await pushSettings(fast.frame.id, { interval: 120 });
-    expect(under.status).toBe(400);
+    expect((await pushSettings(fast.frame.id, { render_mode: "remote" })).status).toBe(200);
+    // An app from before still sends one: dropped, never refused, and a push
+    // of it alone queues nothing.
+    const commandsBefore = (await db.select().from(frameCommands).where(eq(frameCommands.frameId, fast.frame.id))).length;
+    const only = await pushSettings(fast.frame.id, { interval: 120 });
+    expect(only.status).toBe(200);
+    expect(await only.json()).toMatchObject({ command_id: null, status: "applied" });
+    expect((await db.select().from(frameCommands).where(eq(frameCommands.frameId, fast.frame.id))).length).toBe(commandsBefore);
+    expect((await pushSettings(fast.frame.id, { interval: 600, rotate: 90 })).status).toBe(200);
+    const [row] = await db.select().from(frames).where(eq(frames.id, fast.frame.id));
+    expect(row!.settings).toMatchObject({ rotate: 90 });
+    expect(row!.settings).not.toHaveProperty("interval");
   });
 
   it("needs firmware that knows it", async () => {

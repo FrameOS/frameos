@@ -108,7 +108,7 @@ class FrameOSSetupScriptTest(unittest.TestCase):
         self.assertEqual(frame_json["width"], 800)
         self.assertEqual(frame_json["height"], 480)
         self.assertEqual(frame_json["rotate"], 90)
-        self.assertEqual(frame_json["interval"], 300.0)
+        self.assertNotIn("interval", frame_json)  # a frame renders on its scenes' intervals
         self.assertEqual(frame_json["metricsInterval"], 60.0)
         self.assertEqual(frame_json["timeZone"], "Europe/Brussels")
         self.assertEqual(frame_json["frameAdminAuth"], {

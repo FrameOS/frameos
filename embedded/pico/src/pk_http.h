@@ -40,6 +40,7 @@ typedef struct {
     bool complete;              // the whole response arrived
     bool sink_aborted;
     long retry_after;           // seconds from a Retry-After header, else -1
+    long next_render;           // seconds from X-FrameOS-Next-Render, else -1
     char etag[PK_HTTP_ETAG_MAX];
 } pk_http_result_t;
 

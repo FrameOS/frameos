@@ -1223,7 +1223,7 @@ interface FrameOSApp {
 interface FrameOSEventPayloads {
   /** Once per scene, when it is first loaded and its apps are ready — before its first open and render. */
   init: Record<string, any>;
-  /** Render the scene. Triggered according to the frame's refresh interval, or when explicitly requested. */
+  /** Render the scene. Triggered according to the scene's refresh interval, or when explicitly requested. */
   render: Record<string, any>;
   /** Every time the scene becomes the frame's current scene: at boot, and whenever the frame switches to it, including switching back. */
   open: { sceneId: string };

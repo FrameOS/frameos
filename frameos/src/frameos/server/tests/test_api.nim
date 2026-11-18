@@ -158,9 +158,10 @@ suite "Server API helpers":
     createDir(tempRoot)
     let configPath = tempRoot / "frame.json"
     globalFrameConfig = baseConfig(tempRoot)
+    # A frame.json from before frames lost their interval still holds one:
+    # read past, never reported.
     writeFrameJson(configPath, globalFrameConfig, %*{
       "interval": 42,
-      "backgroundColor": "#123456",
       "color": "#ffffff"
     })
     putEnv("FRAMEOS_CONFIG", configPath)
@@ -175,10 +176,9 @@ suite "Server API helpers":
       state.items.add(default(WebSocket))
 
     let payload = frameApiPayload(state)
-    check payload{"interval"}.getFloat() == 42
+    check not payload.hasKey("interval")
     # A hand-built config reads back with defaults applied, like a loaded one.
     check payload{"max_http_response_bytes"}.getInt() == DefaultMaxHttpResponseBytes
-    check payload{"background_color"}.getStr() == "#123456"
     check payload{"active_connections"}.getInt() == 2
     # The active scene rides the payload so the panel marks its tile on load.
     check payload{"active_scene_id"}.getStr("") == getLastPublicState()[0].string or
@@ -300,12 +300,12 @@ suite "no-op settings pushes are detectable":
     # fixture with the wrong casing makes the merge ADD a key, which reads
     # (correctly) as a change.
     writeFile(configPath, $(%*{
-      "name": "Kitchen", "rotate": 90, "interval": 300.0,
+      "name": "Kitchen", "rotate": 90,
       "scalingMode": "cover", "timeZone": "Europe/Brussels", "debug": false,
     }))
 
     check not frameApiUpdateChangesConfig(%*{
-      "name": "Kitchen", "rotate": 90, "interval": 300.0,
+      "name": "Kitchen", "rotate": 90,
       "scaling_mode": "cover", "timezone": "Europe/Brussels", "debug": false,
     })
     check frameApiUpdateChangesConfig(%*{"name": "Hallway"})

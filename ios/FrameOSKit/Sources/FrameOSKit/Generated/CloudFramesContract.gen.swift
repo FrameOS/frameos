@@ -116,9 +116,6 @@ enum CloudFramesContractSource {
         },
         "since": "2026.8.31"
       },
-      "interval": {
-        "since": null
-      },
       "led_pin": {
         "since": "2026.10.20"
       },
@@ -216,9 +213,6 @@ enum CloudFramesContractSource {
       "input_settings": {
         "restart": true,
         "since": "2026.9.23"
-      },
-      "interval": {
-        "since": null
       },
       "max_http_response_bytes": {
         "since": "2026.8.30"
@@ -661,11 +655,6 @@ enum CloudFramesContractSource {
       },
       "minKeys": 1,
       "type": "object"
-    },
-    "interval": {
-      "max": 86400,
-      "min": 1,
-      "type": "number"
     },
     "led_pin": {
       "max": 48,

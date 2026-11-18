@@ -19,7 +19,7 @@ static void test_backend_plan_applies(void)
 {
     pk_config_t config;
     pk_config_defaults(&config);
-    CHECK(config.interval_seconds == 300 && config.send_logs == 1 && config.pins.cs == -1);
+    CHECK(config.send_logs == 1 && config.pins.cs == -1);
     CHECK_STR(config.hostname, "frameos");
 
     // The plan for a pimoroni_inky_frame_7_3_spectra frame, in plan order.
@@ -38,7 +38,7 @@ static void test_backend_plan_applies(void)
         {"frame_id", "42", PK_SET_OK},
         {"hostname", "Frame42", PK_SET_OK},
         {"render_mode", "remote", PK_SET_IGNORED},
-        {"interval", "900", PK_SET_OK},
+        {"interval", "900", PK_SET_IGNORED}, // from a plane before frames lost their interval
         {"rotate", "90", PK_SET_IGNORED},
         {"scaling_mode", "cover", PK_SET_IGNORED},
         {"render_scale", "1.5", PK_SET_IGNORED},
@@ -66,7 +66,7 @@ static void test_backend_plan_applies(void)
     CHECK(config.pins.sr_clock == 8 && config.pins.sr_latch == 9 && config.pins.sr_data == 10 &&
           config.pins.busy_bit == 7 && config.pins.hold_vsys == 2);
     CHECK_STR(config.backend_url, "http://10.4.0.47:8989"); // trailing slash dropped
-    CHECK(config.frame_id == 42 && config.interval_seconds == 900);
+    CHECK(config.frame_id == 42 && config.unused_interval_seconds == 0);
     CHECK_STR(config.hostname, "frame42"); // DNS labels are lowercase
     CHECK(config.admin_auth == 1 && config.deep_sleep == 1 && config.deep_sleep_on_battery == 0);
 }
@@ -80,8 +80,8 @@ static void test_validation(void)
     CHECK(set(&config, "backend", "https://frames.example.com") == PK_SET_OK);
     CHECK(set(&config, "frame_id", "abc") == PK_SET_INVALID);
     CHECK(set(&config, "frame_id", "12x") == PK_SET_INVALID);
-    CHECK(set(&config, "interval", "5") == PK_SET_OK && config.interval_seconds == PK_INTERVAL_MIN_SECONDS);
-    CHECK(set(&config, "interval", "-5") == PK_SET_INVALID);
+    // A frame has no interval: whatever an older plane sends is taken and dropped.
+    CHECK(set(&config, "interval", "-5") == PK_SET_IGNORED && config.unused_interval_seconds == 0);
     CHECK(set(&config, "deep_sleep", "maybe") == PK_SET_INVALID);
     CHECK(set(&config, "deep_sleep", "true") == PK_SET_OK && config.deep_sleep == 1);
     CHECK(set(&config, "panel", "EPD_13in3e") == PK_SET_INVALID); // no driver in this image

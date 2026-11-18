@@ -14,9 +14,6 @@ export const cloudFramesContractSettings = {
     "rotate": {
       "since": null
     },
-    "interval": {
-      "since": null
-    },
     "scaling_mode": {
       "since": null
     },
@@ -87,9 +84,6 @@ export const cloudFramesContractSettings = {
     "rotate": {
       "since": null,
       "restart": true
-    },
-    "interval": {
-      "since": null
     },
     "scaling_mode": {
       "since": null

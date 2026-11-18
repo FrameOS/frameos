@@ -43,6 +43,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { withActiveLayoutOnNewScenes } from '../../utils/sceneLayouts'
 import { apiFetch } from '../../utils/apiFetch'
+import { DEFAULT_REFRESH_INTERVAL_SECONDS } from '../../utils/refreshInterval'
 import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import {
@@ -436,7 +437,6 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'device_config',
   'timezone',
   'timezone_updater',
-  'interval',
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',
@@ -444,7 +444,6 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'frame_settings_on_screen',
   'rotate',
   'flip',
-  'background_color',
   'scenes',
   'debug',
   'log_to_file',
@@ -504,7 +503,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
 // These fields are edited through text inputs, so frameForm may hold strings like
 // "1080" while the backend returns numbers. Normalize before comparing or submitting,
 // otherwise a saved frame still counts as having unsaved changes.
-// The cloud settings half (interval, rotate, the ESP32 power numbers, …) is
+// The cloud settings half (rotate, the ESP32 power numbers, …) is
 // the same list the cloud payload builder coerces, so the two cannot drift.
 const NUMERIC_FRAME_KEYS = new Set<keyof FrameType>([
   ...numericCloudFrameSettingKeys,
@@ -569,7 +568,6 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   device_config: 'Device config',
   timezone: 'Timezone',
   timezone_updater: 'Timezone data updates',
-  interval: 'Refresh interval',
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
   scaling_mode: 'Scaling mode',
@@ -577,7 +575,6 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   frame_settings_on_screen: 'Frame settings on the screen',
   rotate: 'Rotation',
   flip: 'Flip',
-  background_color: 'Background color',
   scenes: 'Scenes',
   debug: 'Debug mode',
   log_to_file: 'Log to file',
@@ -644,7 +641,6 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'device_config',
   'timezone',
   'timezone_updater',
-  'interval',
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',
@@ -652,7 +648,6 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'frame_settings_on_screen',
   'rotate',
   'flip',
-  'background_color',
   'debug',
   'log_to_file',
   'assets_path',
@@ -2210,7 +2205,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
       // Always materialized: templates, imports and chat scenes arrive
       // without it, and "absent" used to be read as compiled downstream.
       execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
-      refreshInterval: settings.refreshInterval || frame.interval || 300,
+      refreshInterval: settings.refreshInterval || DEFAULT_REFRESH_INTERVAL_SECONDS,
       backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },
   } satisfies FrameScene)
@@ -2611,7 +2606,7 @@ export interface frameLogicMeta {
     defaultScene: (frame: FrameType, frameForm: Partial<FrameType>) => string
     width: (frameForm: Partial<FrameType>) => number | undefined
     height: (frameForm: Partial<FrameType>) => number | undefined
-    defaultInterval: (frameForm: Partial<FrameType>) => number
+    defaultInterval: () => number
     deployWithAgent: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     deployTransportToggleVisible: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     frameSyncSectionsWithChanges: (frameSyncStatus: FrameSyncStatus | null) => FrameSyncSection[]
@@ -3496,7 +3491,9 @@ export const frameLogic = kea<frameLogicType>([
       (frameForm: frameLogicValues['frameForm']) =>
         frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height,
     ],
-    defaultInterval: [(s) => [s.frameForm], (frameForm: frameLogicValues['frameForm']) => frameForm.interval ?? 300],
+    // A new scene's refresh interval. The frame has none of its own to offer:
+    // every scene carries its own (utils/refreshInterval.ts).
+    defaultInterval: [(s) => [s.frameForm], (): number => DEFAULT_REFRESH_INTERVAL_SECONDS],
     deployWithAgent: [
       (s) => [s.frameForm, s.frame],
       (frameForm: frameLogicValues['frameForm'], frame: frameLogicValues['frame']) => {

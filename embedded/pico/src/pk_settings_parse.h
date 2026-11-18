@@ -14,7 +14,8 @@
 
 #include "pk_config.h"
 
-#define PK_SETTINGS_CHANGED_INTERVAL (1u << 0)
+// (1u << 0) was the frame's interval: a frame has none any more, and a
+// backend from before that still sends `frame.interval` is not listened to.
 #define PK_SETTINGS_CHANGED_NAME (1u << 1)
 #define PK_SETTINGS_CHANGED_DEEP_SLEEP (1u << 2)
 #define PK_SETTINGS_CHANGED_ADMIN_AUTH (1u << 3)
@@ -22,8 +23,8 @@
 #define PK_SETTINGS_INVALID (1u << 31)
 
 // Applies the document to `config` and returns what changed. `summary`
-// receives a one-line description of the changes for the log ("interval
-// 300→900, deepSleep on"), secrets never included; empty when nothing did.
+// receives a one-line description of the changes for the log ("deepSleep
+// on"), secrets never included; empty when nothing did.
 unsigned pk_settings_apply(const char *json, size_t len, pk_config_t *config,
                            char *summary, size_t summary_cap);
 

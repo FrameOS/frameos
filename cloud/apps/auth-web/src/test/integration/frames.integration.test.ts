@@ -2012,7 +2012,7 @@ describe("frame management API", () => {
     expect(refused.status).toBe(409);
   });
 
-  it("holds a cloud-rendered frame to the plan's refresh-interval floor", async () => {
+  it("takes no refresh interval for a cloud-rendered frame: an old app's is dropped", async () => {
     // Seeded straight into the table: enrollment refuses such a board on the
     // free plan, but a frame that exists (a paid plan that lapsed, an
     // operator override) still must not be pushed below the floor.
@@ -2039,20 +2039,14 @@ describe("frame management API", () => {
         status: "active",
       })
       .returning();
-    const tooFast = await pushFrameSettings(
+    // A frame has no interval to hold to a floor any more (the render route
+    // holds the scene's): one sent by an app from before changes nothing.
+    const fromBefore = await pushFrameSettings(
       postJson(`/api/frames/${thin!.id}/settings`, { settings: { interval: 60 } }, { origin: baseUrl }),
       routeParams(thin!.id),
     );
-    expect(tooFast.status).toBe(400);
-    const body = (await tooFast.json()) as { error: string; min_interval: number };
-    expect(body.error).toBe("interval_below_plan_floor");
-    expect(body.min_interval).toBe(300);
-
-    const atFloor = await pushFrameSettings(
-      postJson(`/api/frames/${thin!.id}/settings`, { settings: { interval: 300 } }, { origin: baseUrl }),
-      routeParams(thin!.id),
-    );
-    expect(atFloor.status).toBe(200);
+    expect(fromBefore.status).toBe(200);
+    expect(await fromBefore.json()).toMatchObject({ command_id: null, status: "applied" });
   });
 
   it("enforces the settings allowlist and command types", async () => {
@@ -2573,7 +2567,7 @@ describe("frame management API", () => {
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
     // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST in
-    // frameos/src/frameos/cloud/hub_client.nim (the base six plus the
+    // frameos/src/frameos/cloud/hub_client.nim (the base five plus the
     // 2026.8.30 Pi/Linux batch) plus the power keys only
     // ws_handle_set_settings in embedded/esp32/main/fos_cloud.c applies,
     // mirrored in docs/cloud-frames.md. The hub forwards keys verbatim and
@@ -2583,7 +2577,6 @@ describe("frame management API", () => {
     expect([...allowedFrameSettings.keys()].sort()).toEqual(
       [
         "debug",
-        "interval",
         "name",
         "rotate",
         "scaling_mode",
@@ -2627,7 +2620,6 @@ describe("frame management API", () => {
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
     expect([...esp32SettableKeys].sort()).toEqual(
       [
-        "interval",
         "name",
         "rotate",
         "scaling_mode",
@@ -2863,8 +2855,7 @@ describe("frame management API", () => {
   });
 
   it("queues set_settings toward an esp32 for its settable subset", async () => {
-    // The firmware's set_settings applies interval (render cadence), name
-    // (hostname), rotate (renderer canvas, deferred reboot) and scaling_mode
+    // The firmware's set_settings applies name (hostname), rotate (renderer canvas, deferred reboot) and scaling_mode
     // (per-decode fallback fit, applied live); the provider enqueues those
     // and refuses the rest.
     const keys = deviceKeypair();
@@ -2882,6 +2873,7 @@ describe("frame management API", () => {
     const response = await pushFrameSettings(
       postJson(
         `/api/frames/${frame_id}/settings`,
+        // `interval` from an app from before frames lost theirs: dropped.
         { settings: { interval: 600, name: "Desk, renamed", rotate: 90, scaling_mode: "contain" } },
         { origin: baseUrl },
       ),
@@ -2902,7 +2894,7 @@ describe("frame management API", () => {
     const settingsCommands = commands.filter((c) => c.type === "set_settings");
     expect(settingsCommands).toHaveLength(1);
     expect(settingsCommands[0]?.payload).toEqual({
-      settings: { interval: 600, name: "Desk, renamed", rotate: 90, scaling_mode: "contain" },
+      settings: { name: "Desk, renamed", rotate: 90, scaling_mode: "contain" },
     });
     // The rename also applied provider-side, and the device-side keys are
     // mirrored into frames.settings (never the name — frames.name owns it).
@@ -2911,11 +2903,11 @@ describe("frame management API", () => {
       .from(frames)
       .where(eq(frames.id, frame_id));
     expect(frame?.name).toBe("Desk, renamed");
-    expect(frame?.settings).toEqual({ interval: 600, rotate: 90, scaling_mode: "contain" });
+    expect(frame?.settings).toEqual({ rotate: 90, scaling_mode: "contain" });
 
     // …and GET /api/frames/{id} hands them back as top-level fields, which
-    // is what the Settings panel hydrates from. Without this the Interval
-    // and Rotation controls rendered blank after every reload.
+    // is what the Settings panel hydrates from. Without this the Rotation
+    // control rendered blank after every reload.
     const detail = await getFrameDetail(
       new NextRequest(`${baseUrl}/api/frames/${frame_id}`),
       routeParams(frame_id),
@@ -2924,7 +2916,7 @@ describe("frame management API", () => {
     const detailBody = (await detail.json()) as {
       frame: { interval?: number; name?: string; rotate?: number };
     };
-    expect(detailBody.frame.interval).toBe(600);
+    expect(detailBody.frame.interval).toBeUndefined();
     expect(detailBody.frame.rotate).toBe(90);
     expect(detailBody.frame.name).toBe("Desk, renamed");
 
@@ -2942,7 +2934,7 @@ describe("frame management API", () => {
       .select()
       .from(frames)
       .where(eq(frames.id, frame_id));
-    expect(merged?.settings).toEqual({ interval: 600, rotate: 270, scaling_mode: "contain" });
+    expect(merged?.settings).toEqual({ rotate: 270, scaling_mode: "contain" });
   });
 
   it("refuses the settings an esp32 has no consumer for", async () => {

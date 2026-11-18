@@ -21,16 +21,16 @@ int main(void)
     pk_config_defaults(&config);
 
     unsigned changed = pk_settings_apply(DOCUMENT, sizeof(DOCUMENT) - 1, &config, summary, sizeof(summary));
-    CHECK(changed == (PK_SETTINGS_CHANGED_INTERVAL | PK_SETTINGS_CHANGED_NAME |
-                      PK_SETTINGS_CHANGED_DEEP_SLEEP | PK_SETTINGS_CHANGED_ADMIN_AUTH));
-    CHECK(config.interval_seconds == 900);
+    // `frame.interval` from a backend before frames lost theirs: not heard.
+    CHECK(changed == (PK_SETTINGS_CHANGED_NAME | PK_SETTINGS_CHANGED_DEEP_SLEEP | PK_SETTINGS_CHANGED_ADMIN_AUTH));
+    CHECK(config.unused_interval_seconds == 0);
     CHECK_STR(config.name, "Hallway");
     CHECK(config.deep_sleep == 1 && config.deep_sleep_on_battery == 1);
     CHECK(config.admin_auth == 1);
     CHECK_STR(config.admin_user, "admin");
     CHECK_STR(config.admin_pass, "hunter2");
     // The log line names what changed and never carries the password.
-    CHECK(strstr(summary, "interval 300->900") != NULL);
+    CHECK(strstr(summary, "interval") == NULL);
     CHECK(strstr(summary, "deepSleep on") != NULL);
     CHECK(strstr(summary, "hunter2") == NULL);
 
@@ -53,10 +53,9 @@ int main(void)
     CHECK(changed == PK_SETTINGS_CHANGED_ADMIN_AUTH);
     CHECK(config.admin_auth == 0);
 
-    // A sub-minimum interval is clamped, not obeyed.
+    // An interval alone changes nothing.
     const char *fast = "{\"frame\":{\"interval\":1}}";
-    pk_settings_apply(fast, strlen(fast), &config, summary, sizeof(summary));
-    CHECK(config.interval_seconds == PK_INTERVAL_MIN_SECONDS);
+    CHECK(pk_settings_apply(fast, strlen(fast), &config, summary, sizeof(summary)) == 0);
 
     // Garbage leaves the config alone.
     pk_config_t before = config;

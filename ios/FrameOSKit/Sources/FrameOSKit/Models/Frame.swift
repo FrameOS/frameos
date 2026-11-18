@@ -49,7 +49,6 @@ public struct Frame: Identifiable, Hashable, Sendable, Decodable {
     public var width: Int? { raw["width"]?.intValue }
     public var height: Int? { raw["height"]?.intValue }
     public var rotate: Int? { raw["rotate"]?.intValue }
-    public var interval: Double? { raw["interval"]?.doubleValue }
     public var scenesChecksum: String? { raw["scenes_checksum"]?.stringValue }
     public var lastSuccessfulDeployAt: String? { raw["last_successful_deploy_at"]?.stringValue }
     public var pendingCommandTypes: [String] {

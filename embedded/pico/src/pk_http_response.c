@@ -11,6 +11,7 @@ void pk_http_response_init(pk_http_response_t *response, pk_http_sink_fn sink, v
     response->sink = sink;
     response->sink_arg = sink_arg;
     response->retry_after = -1;
+    response->next_render = -1;
 }
 
 static char lower(char c)
@@ -81,6 +82,12 @@ static bool parse_headers(pk_http_response_t *r)
     value = header_value(h, "retry-after", &len);
     if (value != NULL && len > 0 && len < 8 && value[0] >= '0' && value[0] <= '9') {
         r->retry_after = strtol(value, NULL, 10); // the delay form; a date is ignored
+    }
+    // When the scene the backend drew wants its next picture
+    // (docs/server-rendering.md "When the next picture is due").
+    value = header_value(h, "x-frameos-next-render", &len);
+    if (value != NULL && len > 0 && len < 10 && value[0] >= '0' && value[0] <= '9') {
+        r->next_render = strtol(value, NULL, 10);
     }
     return true;
 }

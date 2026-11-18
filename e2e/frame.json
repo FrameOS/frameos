@@ -15,7 +15,6 @@
   "color": null,
   "backgroundColor": "blue",
   "timeZone": "UTC",
-  "interval": 1.0,
   "metricsInterval": 60.0,
   "scalingMode": "cover",
   "frameAccess": "public",

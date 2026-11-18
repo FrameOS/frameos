@@ -110,7 +110,6 @@ const batteryFrame = {
   width: 1200,
   height: 1600,
   device: 'EPD_13in3e',
-  interval: CYCLE_SECONDS,
   deep_sleep: false,
   deep_sleep_on_battery: true,
   scenes: [],

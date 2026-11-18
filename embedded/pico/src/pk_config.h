@@ -46,9 +46,13 @@ typedef struct {
     char panel[PK_STR_LEN];       // FrameOS panel key, e.g. "EPD_5in65f"
     char hardware_preset[PK_STR_LEN];
     pk_pins_t pins;
-    uint32_t interval_seconds;    // render poll interval (min 15s)
+    // Was the frame's refresh interval. A frame has none any more (the scene
+    // says when it wants its next picture, X-FrameOS-Next-Render): the slot
+    // stays so a stored config keeps its layout (pk_config.c), and is unused.
+    uint32_t unused_interval_seconds;
     // Battery mode: after each render, power off via the RTC + HOLD_VSYS
-    // latch and cold-boot on the next interval (Inky Frame ~20uA).
+    // latch and cold-boot when the scene wants its next picture (Inky Frame
+    // ~20uA).
     uint8_t deep_sleep;
     // --- v3 ---
     // Same power-cut, but only while no USB power is present (VBUS sense).

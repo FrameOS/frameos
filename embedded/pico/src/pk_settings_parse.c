@@ -43,18 +43,6 @@ unsigned pk_settings_apply(const char *json, size_t len, pk_config_t *config,
     unsigned changed = 0;
     pk_json_slice_t value;
 
-    // Sent as a float ("300.0"); whole seconds are all the RTC can count.
-    long interval = 0;
-    if (pk_json_find(json, len, "frame.interval", &value) && pk_json_as_long(value, &interval)) {
-        if (interval < PK_INTERVAL_MIN_SECONDS) interval = PK_INTERVAL_MIN_SECONDS;
-        if ((uint32_t)interval != config->interval_seconds) {
-            note(summary, summary_cap, "interval %lu->%ld",
-                 (unsigned long)config->interval_seconds, interval);
-            config->interval_seconds = (uint32_t)interval;
-            changed |= PK_SETTINGS_CHANGED_INTERVAL;
-        }
-    }
-
     char name[PK_NAME_LEN];
     if (pk_json_find(json, len, "frame.name", &value) && pk_json_as_string(value, name, sizeof(name)) &&
         strcmp(name, config->name) != 0) {

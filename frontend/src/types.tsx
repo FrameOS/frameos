@@ -433,7 +433,6 @@ export interface FrameType {
     }
   }
   color?: string
-  interval: number
   metrics_interval: number
   max_http_response_bytes?: number
   scaling_mode: string
@@ -470,7 +469,6 @@ export interface FrameType {
   led_pin?: number
   led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
   flip?: 'horizontal' | 'vertical' | 'both' | ''
-  background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
   /** How many scenes are on the legacy compiled path (a source build on every deploy). */
   compiled_scene_count?: number

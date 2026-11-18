@@ -205,7 +205,7 @@ static bool past(absolute_time_t deadline)
 
 pk_http_result_t pk_http_request(const pk_http_request_t *request)
 {
-    pk_http_result_t result = {.status = -1, .retry_after = -1};
+    pk_http_result_t result = {.status = -1, .retry_after = -1, .next_render = -1};
     if (s_busy) {
         result.status = -2;
         return result;
@@ -304,6 +304,7 @@ pk_http_result_t pk_http_request(const pk_http_request_t *request)
     result.complete = state->complete && !state->failed;
     result.sink_aborted = response->progress == PK_HTTP_SINK_ABORTED;
     result.retry_after = response->retry_after;
+    result.next_render = response->next_render;
     snprintf(result.etag, sizeof(result.etag), "%s", response->etag);
     s_busy = false;
     return result;

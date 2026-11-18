@@ -139,8 +139,9 @@ function frameDeviceConfigValue(frame: FrameType, camel: string, snake: string):
 // decision (embedded/esp32/main/fos_client.c) from the settings the control
 // plane pushed: the frame sleeps when deep_sleep is on, or deep_sleep_on_battery
 // is on and a cell is present, and it comes back every wake_check_seconds
-// (when set and shorter) or every render interval. An estimate — the scene's
-// own refreshInterval can stretch the real cycle — hence the "~" in the copy.
+// (when set and shorter) or every 300 s, the firmware's pass when the scene
+// says nothing. An estimate — the scene's own refreshInterval sets the real
+// cycle — hence the "~" in the copy.
 function estimatedCheckinPeriodSeconds(frame: FrameType): number | null {
   const deepSleep = frame.deep_sleep ?? frameDeviceConfigValue(frame, 'deepSleep', 'deep_sleep')
   const deepSleepOnBattery =
@@ -158,7 +159,7 @@ function estimatedCheckinPeriodSeconds(frame: FrameType): number | null {
   const wakeCheck = Number(
     frame.wake_check_seconds ?? frameDeviceConfigValue(frame, 'wakeCheckSeconds', 'wake_check_seconds') ?? 0
   )
-  const interval = Number(frame.interval) > 0 ? Number(frame.interval) : 300
+  const interval = 300
   const period = wakeCheck >= 60 && wakeCheck < interval ? wakeCheck : interval
   return Math.min(Math.max(period, 60), 7 * 86400)
 }

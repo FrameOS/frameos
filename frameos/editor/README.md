@@ -54,7 +54,8 @@ when it points back at the editor's own origin.
 
 Parent → editor:
 
-- `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?, template?, templateFields?}` —
+- `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, theme?, previewProxyUrl?, description?, template?, templateFields?}` —
+  (an `interval` from before is ignored: a frame has no refresh interval, its scenes do);
   `theme` is `'light' | 'dark'`; `previewProxyUrl` is an optional same-origin endpoint the in-editor wasm live
   preview routes CORS-blocked HTTP requests through; `description` is the embedding page's description of the
   scene, shown in the Scene settings panel; `template` (`{name, description, category, tags, frameosVersion}`) makes

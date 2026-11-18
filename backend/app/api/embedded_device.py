@@ -1716,8 +1716,8 @@ def embedded_frame_settings(frame: Frame) -> dict:
     """Live frame settings the device polls once per render pass.
 
     Everything a frame is, minus what only the USB console provisions (Wi-Fi,
-    backend URL, API key, frame id, panel, pins, SD wiring): the interval,
-    name, render mode, the power-management flags from ``device_config``,
+    backend URL, API key, frame id, panel, pins, SD wiring): the name,
+    render mode, the power-management flags from ``device_config``,
     rotation, time zone, the HTTP response cap, the GPIO button map, the
     device's own admin login and its HTTPS material — so a settings change
     takes effect on the next poll, and a board flashed with the stock release
@@ -1794,7 +1794,6 @@ def embedded_frame_settings(frame: Frame) -> dict:
         return extra
 
     return {
-        "interval": float(frame.interval or 300),
         "name": frame.name or "",
         "renderMode": "remote" if embedded_render_mode_for_frame(frame) == EMBEDDED_RENDER_REMOTE else "local",
         "deepSleep": _bool_config("deepSleep", "deep_sleep"),

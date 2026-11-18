@@ -1682,7 +1682,9 @@ describe("command redelivery", () => {
     });
     expect(ready.pending_commands).toBe(3);
     const settings = await device.next((msg) => msg.type === "set_settings", "set_settings");
-    expect(settings.settings).toEqual({ interval: 600, name: "E1002", rotate: 90 });
+    // The row's `interval` (from before frames lost theirs) is not sent: a
+    // device would refuse the whole push on it.
+    expect(settings.settings).toEqual({ name: "E1002", rotate: 90 });
     const schedule = await device.next((msg) => msg.type === "set_schedule", "set_schedule");
     const [event] = (schedule.schedule as { events: Array<{ payload: { sceneId: string } }> }).events;
     // The device's own id for the scene, not the store's.

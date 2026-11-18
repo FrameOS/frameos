@@ -274,10 +274,10 @@ describe("a virtual frame's settings", () => {
     expect((await getViewStatus(get(`/v/${oldToken}/status`), tokenParams(oldToken))).status).toBe(404);
     expect((await getViewStatus(get(`/v/${newToken}/status`), tokenParams(newToken))).status).toBe(200);
 
-    // The cloud renders for it, so its interval has the plan's floor.
+    // A frame has no interval: one sent by an app from before is dropped.
     const fast = await postSettings(post(`/api/frames/${frameId}/settings`, { settings: { interval: 60 } }), frameParams(frameId));
-    expect(fast.status).toBe(400);
-    expect(await fast.json()).toMatchObject({ error: "interval_below_plan_floor", min_interval: 300 });
+    expect(fast.status).toBe(200);
+    expect(await fast.json()).toMatchObject({ command_id: null, status: "applied" });
 
     // Somebody else's session sees no such frame.
     await signIn();

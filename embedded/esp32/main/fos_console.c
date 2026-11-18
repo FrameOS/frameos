@@ -284,8 +284,8 @@ static int cmd_status(int argc, char **argv)
     if (fos_assets_sd_last_error()[0]) {
         printf("sd_error:    %s\n", fos_assets_sd_last_error());
     }
-    printf("interval:    %lu s, deep_sleep=%d, deep_sleep_on_battery=%d, wake_check=%lu s, wake_schedule=%d\n",
-           (unsigned long)config->interval_sec, (int)config->deep_sleep,
+    printf("sleep:       deep_sleep=%d, deep_sleep_on_battery=%d, wake_check=%lu s, wake_schedule=%d\n",
+           (int)config->deep_sleep,
            (int)config->deep_sleep_on_battery, (unsigned long)config->wake_check_sec,
            (int)config->wake_schedule);
     if (config->gpio_button_count > 0) {
@@ -914,7 +914,13 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "render_mode") == 0)
         config->render_mode = (strcmp(value, "remote") == 0 || strcmp(value, "1") == 0)
             ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
-    else if (strcmp(key, "interval") == 0) config->interval_sec = strtoul(value, NULL, 10);
+    /* A frame has no refresh interval any more (its scenes do), but a
+     * control plane from before still provisions `set interval N`: taken and
+     * dropped, so that provisioning does not fail on it. */
+    else if (strcmp(key, "interval") == 0) {
+        printf("ok: interval ignored (a frame renders on its scenes' refresh intervals)\n");
+        return 0;
+    }
     else if (strcmp(key, "spill_force") == 0) config->http_spill_force_bytes = strtoul(value, NULL, 10);
     else if (strcmp(key, "rotate") == 0) {
         uint16_t rot = 0;

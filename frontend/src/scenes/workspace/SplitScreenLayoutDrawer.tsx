@@ -65,7 +65,7 @@ import {
   sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
-import { sceneRefreshSeconds, sceneStateFields } from '../../utils/refreshInterval'
+import { DEFAULT_REFRESH_INTERVAL_SECONDS, sceneRefreshSeconds, sceneStateFields } from '../../utils/refreshInterval'
 
 const DEFAULT_SPLIT_SCENE_NAME = 'Split screen'
 const INITIAL_SPLIT_PRESET_COUNT = 3
@@ -955,8 +955,8 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
     selectedLeafScene,
     selectedLeaf?.state,
     frameScenes,
-    frame.interval || 300,
-    editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300,
+    DEFAULT_REFRESH_INTERVAL_SECONDS,
+    editingScene ? sceneRefreshSeconds(editingScene) : DEFAULT_REFRESH_INTERVAL_SECONDS,
     framePacedByInterval(frame)
   )
   const rects = splitLayoutLeafRects(layout.root)

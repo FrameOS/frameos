@@ -578,7 +578,6 @@ static esp_err_t setup_get_handler(httpd_req_t *req)
                           !frameos_nim_available() || config->render_mode == FOS_RENDER_REMOTE);
     cJSON_AddBoolToObject(root, "renderMode", config->render_mode == FOS_RENDER_REMOTE);
     cJSON_AddBoolToObject(root, "sendLogs", config->server_send_logs);
-    cJSON_AddNumberToObject(root, "interval", config->interval_sec);
     cJSON_AddStringToObject(root, "pins", pins);
     cJSON_AddStringToObject(root, "assetsPath", config->assets_path);
     cJSON_AddBoolToObject(root, "sdEnable", config->assets_sd.enabled);
@@ -714,7 +713,7 @@ char *fos_http_status_json(void)
         "\"wsConnected\":%s,\"error\":\"%s\"},"
         "\"config\":{\"frameId\":%lu,\"panel\":\"%s\","
         "\"hardwarePreset\":\"%s\",\"renderMode\":\"%s\","
-        "\"intervalSec\":%lu,\"maxHttpResponseBytes\":%lu,"
+        "\"maxHttpResponseBytes\":%lu,"
         "\"serverSendLogs\":%s,\"tlsEnabled\":%s,\"tlsActive\":%s,\"tlsPort\":%u,"
         "\"deepSleep\":%s,\"wakeSchedule\":%s,\"pins\":\"%s\","
         "\"backendUrl\":\"%s\",\"wifiSsid\":\"%s\"}}",
@@ -759,7 +758,6 @@ char *fos_http_status_json(void)
         fos_cloud_ws_connected() ? "true" : "false", cloud_error,
         (unsigned long)config->frame_id, panel, hardware_preset,
         config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote",
-        (unsigned long)config->interval_sec,
         (unsigned long)config->max_http_response_bytes,
         config->server_send_logs ? "true" : "false",
         config->tls_enable ? "true" : "false", s_https_server ? "true" : "false", (unsigned)config->tls_port,
@@ -1267,7 +1265,6 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (form_value(body, "panel", value, sizeof(value))) strlcpy(config->panel, value, sizeof(config->panel));
     if (form_value(body, "render_mode", value, sizeof(value))) config->render_mode = atoi(value) ? FOS_RENDER_REMOTE : FOS_RENDER_LOCAL;
     if (form_value(body, "server_send_logs", value, sizeof(value))) config->server_send_logs = atoi(value) != 0;
-    if (form_value(body, "interval", value, sizeof(value)) && atoi(value) >= 5) config->interval_sec = atoi(value);
     if (form_value(body, "pins", value, sizeof(value))) fos_config_parse_pins(value, &config->pins);
     if (form_value(body, "assets_path", value, sizeof(value))) strlcpy(config->assets_path, value, sizeof(config->assets_path));
     if (form_value(body, "assets_sd_enable", value, sizeof(value))) config->assets_sd.enabled = atoi(value) != 0;
@@ -1515,7 +1512,6 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddNullToObject(frame, "color");
     cJSON_AddNullToObject(frame, "timezone");
     cJSON_AddNullToObject(frame, "timezone_updater");
-    cJSON_AddNumberToObject(frame, "interval", config->interval_sec);
     cJSON_AddNumberToObject(frame, "metrics_interval", 60);
     cJSON_AddNumberToObject(frame, "max_http_response_bytes", config->max_http_response_bytes);
     cJSON_AddStringToObject(frame, "scaling_mode", config->scaling_mode);
@@ -1524,7 +1520,6 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddBoolToObject(frame, "frame_settings_on_screen", config->frame_settings_on_screen);
     cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
-    cJSON_AddStringToObject(frame, "background_color", "#000000");
     cJSON_AddItemToObject(frame, "scenes", frame_api_stored_scenes_json());
     cJSON_AddBoolToObject(frame, "debug", false);
     cJSON_AddNullToObject(frame, "last_log_at");
@@ -1688,7 +1683,6 @@ static esp_err_t frame_update_post_handler(httpd_req_t *req)
 
     fos_config_t *config = fos_config();
     uint32_t value = 0;
-    if (json_u32_item(root, "interval", &value) && value >= 5) config->interval_sec = value;
     if (json_u32_item(root, "max_http_response_bytes", &value) && value >= 1024) {
         config->max_http_response_bytes = value;
     }

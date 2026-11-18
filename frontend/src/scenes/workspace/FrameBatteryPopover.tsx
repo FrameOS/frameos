@@ -243,7 +243,7 @@ function BatteryPanel({
         </div>
       </div>
 
-      <BatteryFacts frame={frame} analysis={analysis} loading={loading} />
+      <BatteryFacts analysis={analysis} loading={loading} />
 
       <BatteryChart
         analysis={analysis}
@@ -332,18 +332,9 @@ function Fact({ label, value, title }: { label: string; value: ReactNode; title?
   )
 }
 
-function BatteryFacts({
-  frame,
-  analysis,
-  loading,
-}: {
-  frame: FrameType
-  analysis: BatteryAnalysis
-  loading: boolean
-}): JSX.Element {
+function BatteryFacts({ analysis, loading }: { analysis: BatteryAnalysis; loading: boolean }): JSX.Element {
   const { cadence, segment, drainPerDay, samples, misreadCount, latest } = analysis
   const placeholder = loading ? '…' : '—'
-  const configuredInterval = Number(frame.interval) > 0 ? Number(frame.interval) : null
   const wakeCause = latest?.wakeCause ? ` · woke by ${latest.wakeCause}` : ''
   return (
     <div
@@ -353,13 +344,7 @@ function BatteryFacts({
       <Fact
         label="Wakes up"
         value={cadence.cycleSeconds !== null ? `every ${formatCycle(cadence.cycleSeconds)}` : placeholder}
-        title={
-          configuredInterval
-            ? `Measured from the last ${CADENCE_WINDOW_WAKES} wakes. The frame's render interval is set to ${formatCycle(
-                configuredInterval
-              )}.`
-            : `Measured from the last ${CADENCE_WINDOW_WAKES} wakes.`
-        }
+        title={`Measured from the last ${CADENCE_WINDOW_WAKES} wakes.`}
       />
       <Fact
         label="Awake per wake"
@@ -723,13 +708,13 @@ function BatteryForecastControls({
           {!isCurrent && selectedForecast ? (
             <div className="frameos-muted mt-1 text-[10px]">
               {formatDrain(selectedForecast.drainPerDay)} · empty around {formatDate(selectedForecast.emptyAt)}. Set the
-              render interval in Power settings to make it so.
+              scene&apos;s refresh interval to make it so.
             </div>
           ) : null}
         </div>
       ) : (
         <div className="frameos-muted text-[10px]">
-          Deep sleep is off, so the frame stays awake between renders and the render interval barely changes the drain.
+          Deep sleep is off, so the frame stays awake between renders and the refresh interval barely changes the drain.
           Turn on deep sleep in Power settings to trade refreshes for battery life.
         </div>
       )}

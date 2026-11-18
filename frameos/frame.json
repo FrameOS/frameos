@@ -16,7 +16,6 @@
   "deviceConfig": {},
   "color": null,
   "backgroundColor": "blue",
-  "interval": 1.0,
   "metricsInterval": 60.0,
   "maxHttpResponseBytes": 67108864,
   "scalingMode": "cover",

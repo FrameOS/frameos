@@ -158,18 +158,7 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     const detail = (await response.json().catch(() => ({}))) as {
       error?: string
       min_frameos_version?: string
-      min_interval?: number
       max_cloud_rendered_frames?: number
-    }
-    if (detail.error === 'interval_below_plan_floor') {
-      // A frame the cloud draws (a virtual frame, a C3, an S3 set to render
-      // on the server) has a floor under its interval: renders are what it
-      // costs.
-      throw new Error(
-        `A frame FrameOS Cloud draws refreshes at most every ${
-          detail.min_interval ?? 300
-        } seconds. Set the refresh interval to that or more.`
-      )
     }
     if (detail.error === 'cloud_rendered_frame_quota_exceeded') {
       // "Render scenes: On FrameOS Cloud" (docs/server-rendering.md) takes

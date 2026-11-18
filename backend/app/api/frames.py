@@ -5026,7 +5026,6 @@ async def api_frame_new(
             data.frame_host,
             data.server_host,
             data.device,
-            data.interval,
             project_id=project_id,
             server_port=data.server_port,
             server_scheme=data.server_scheme,
@@ -5162,7 +5161,7 @@ async def api_frame_adopt(
 # by this backend, never read from a file.
 FRAME_IMPORT_KEYS = frozenset(FrameUpdateRequest.model_fields.keys())
 # Handed to new_frame; not set again afterwards.
-FRAME_IMPORT_CREATE_KEYS = frozenset({"name", "frame_host", "server_host", "device", "interval"})
+FRAME_IMPORT_CREATE_KEYS = frozenset({"name", "frame_host", "server_host", "device"})
 MAX_FRAME_IMPORT_BYTES = 16 * 1024 * 1024
 
 
@@ -5211,7 +5210,6 @@ async def api_frame_import(
             data.get("frame_host"),
             data.get("server_host"),
             data.get("device"),
-            data.get("interval"),
             project_id=current_project_id(),
             server_port=data.get("server_port"),
             server_scheme=data.get("server_scheme"),

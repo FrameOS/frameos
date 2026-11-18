@@ -93,6 +93,15 @@ static void test_statuses(void)
     const char *dated = "HTTP/1.1 503 x\r\nRetry-After: Wed, 21 Oct 2026 07:28:00 GMT\r\nContent-Length: 0\r\n\r\n";
     CHECK(feed(&s_response, &s_out, dated, strlen(dated), 50) == PK_HTTP_DONE);
     CHECK(s_response.retry_after == -1); // the date form is ignored, not misread
+    CHECK(s_response.next_render == -1);
+
+    // A render pull's answer says when the scene wants its next picture.
+    const char *paced = "HTTP/1.1 200 OK\r\nX-FrameOS-Next-Render: 900\r\nContent-Length: 2\r\n\r\nok";
+    CHECK(feed(&s_response, &s_out, paced, strlen(paced), 7) == PK_HTTP_DONE);
+    CHECK(s_response.status == 200 && s_response.next_render == 900);
+    const char *garbled = "HTTP/1.1 200 OK\r\nX-FrameOS-Next-Render: soon\r\nContent-Length: 0\r\n\r\n";
+    CHECK(feed(&s_response, &s_out, garbled, strlen(garbled), 7) == PK_HTTP_DONE);
+    CHECK(s_response.next_render == -1);
 
     // No length at all (HTTP/1.0 style): whole only once the peer closes.
     const char *until_close = "HTTP/1.0 200 OK\r\n\r\nstream until close";

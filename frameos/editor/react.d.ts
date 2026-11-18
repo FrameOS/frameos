@@ -58,6 +58,7 @@ export interface EmbeddedSceneEditorProps {
   mode?: string | undefined
   width?: number | undefined
   height?: number | undefined
+  /** @deprecated Ignored: a frame has no refresh interval, its scenes do (300 s for a new one). */
   interval?: number | undefined
   theme?: 'light' | 'dark' | undefined
   /** Same-origin endpoint the wasm preview routes CORS-blocked fetches through. */

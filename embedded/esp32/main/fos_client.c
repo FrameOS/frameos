@@ -3790,21 +3790,20 @@ static void client_task(void *arg)
         if (sample_metrics) log_metrics_sample();
         if (!s_link_on && !input_hold_on()) frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
-        /* The scene's refreshInterval is authoritative when a scene is
-         * loaded and has an opinion, matching the Pi runner where the
-         * frame-level interval is only the no-scene fallback. Snapped and
-         * clamped (fos_animation.h): a layout's wait of 0.9999 s is the
-         * scene's second, not "no opinion" and the frame's 300 s, and a bad
-         * value must not park the frame for months. */
+        /* The scene's refreshInterval paces the frame, as on the Pi runner;
+         * a frame has no interval of its own, so no opinion is 300 s.
+         * Snapped and clamped (fos_animation.h): a layout's wait of
+         * 0.9999 s is the scene's second, not "no opinion" and 300 s, and a
+         * bad value must not park the frame for months. */
         /* Rendered on the server, the runtime here holds no scene (or one
          * left from before, whose interval is not the drawn scene's): the
          * plane says when the scene it drew wants its next picture
-         * (X-FrameOS-Next-Render, its nextSleep folded in), else the frame's
-         * interval, as on a board with no runtime at all. */
+         * (X-FrameOS-Next-Render, its nextSleep folded in), else 300 s, as
+         * on a board with no runtime at all. */
         bool own_scene = renders_locally(config);
         double scene_interval = own_scene ? fos_scene_interval_snap(frameos_nim_scene_interval())
                                           : (double)s_remote_next_render_s;
-        uint32_t interval = fos_pass_interval_seconds(scene_interval, config->interval_sec);
+        uint32_t interval = fos_pass_interval_seconds(scene_interval);
         /* A per-render override from logic/nextSleepDuration beats both
          * intervals, like context.nextSleep on the Pi runner. Only valid
          * right after a render actually ran. */

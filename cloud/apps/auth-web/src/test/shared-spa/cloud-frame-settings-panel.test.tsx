@@ -55,7 +55,6 @@ function cloudFrame(
     metrics_interval: 60,
     rotate: 0,
     scaling_mode: "contain",
-    background_color: "#000000",
     timezone: "Europe/Brussels",
     debug: false,
   } as unknown as FrameType;
@@ -211,11 +210,14 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     expect(flip?.matches(":disabled")).toBe(false);
   });
 
-  it("still offers all six settings the device does accept", () => {
+  it("still offers the settings the device does accept, but the interval", () => {
     renderPanel(cloudFrame("raspberry-pi-64"));
 
     const rendered = new Set(renderedFieldNames());
-    for (const key of cloudFrameSettingKeys) {
+    // `interval` stays on the wire for older firmware and the API, but a
+    // frame renders on its scene's refresh interval: no field offers it.
+    expect(rendered.has("interval")).toBe(false);
+    for (const key of cloudFrameSettingKeys.filter((key) => key !== "interval")) {
       expect(rendered.has(key), `${key} is saveable but the panel omits it`).toBe(
         true,
       );
@@ -350,7 +352,8 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     const rendered = new Set(renderedFieldNames());
     // What the firmware's ws_handle_set_settings actually applies.
     expect(rendered.has("name")).toBe(true);
-    expect(rendered.has("interval")).toBe(true);
+    // No frame interval: a frame renders on its scene's.
+    expect(rendered.has("interval")).toBe(false);
     expect(rendered.has("rotate")).toBe(true);
     expect(rendered.has("scaling_mode")).toBe(true);
     // Time zone arrived in firmware 2026.8.34 (IANA name -> POSIX TZ rule):
@@ -545,6 +548,6 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(oldDebug?.matches(":disabled")).toBe(true);
     expect(screen.getByText(/need FrameOS 2026\.8\.31 or newer/)).toBeTruthy();
     // The ungated set stays editable.
-    expect(document.querySelector<HTMLInputElement>('input[name="interval"]')?.matches(":disabled")).toBe(false);
+    expect(document.querySelector<HTMLInputElement>('input[name="name"]')?.matches(":disabled")).toBe(false);
   });
 });

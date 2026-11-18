@@ -442,7 +442,6 @@ class Frame(Base):
     color = mapped_column(String(256), nullable=True)
     timezone = mapped_column(String(128), nullable=True)
     timezone_updater = mapped_column(JSON, nullable=True)
-    interval = mapped_column(Double, default=300)
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
@@ -525,7 +524,6 @@ class Frame(Base):
     # not used
     apps = mapped_column(JSON, nullable=True)
     image_url = mapped_column(String(256), nullable=True)
-    background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
         result = {
@@ -560,7 +558,6 @@ class Frame(Base):
             'color': self.color,
             'timezone': self.timezone,
             'timezone_updater': compact_timezone_updater(self.timezone_updater, include_enabled_default=True),
-            'interval': self.interval,
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
@@ -568,7 +565,6 @@ class Frame(Base):
             'frame_settings_on_screen': self.frame_settings_on_screen is not False,
             'rotate': self.rotate,
             'flip': self.flip,
-            'background_color': self.background_color,
             'debug': self.debug,
             'scenes': self.scenes,
             # Legacy compiled scenes force a source build on every deploy; the
@@ -681,7 +677,6 @@ async def new_frame(
     frame_host: str,
     server_host: str,
     device: Optional[str] = None,
-    interval: Optional[float] = None,
     project_id: Optional[int] = None,
     server_port: Optional[int] = None,
     server_scheme: Optional[str] = None,
@@ -754,7 +749,6 @@ async def new_frame(
         server_send_logs=True,
         width=dimensions[0] if dimensions else None,
         height=dimensions[1] if dimensions else None,
-        interval=interval or 300,
         max_http_response_bytes=DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         status="uninitialized",
         scenes=[],
@@ -1080,7 +1074,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "height": frame.height or (fallback_dimensions[1] if fallback_dimensions else 0),
         "device": frame.device or "web_only",
         "deviceConfig": serialize_device_config(device_config),
-        "interval": frame.interval or 300.0,
         # 0 is the documented "disabled" value (frameos/src/frameos/metrics.nim);
         # only an unset column falls back to the 60s default.
         "metricsInterval": 60.0 if frame.metrics_interval is None else frame.metrics_interval,

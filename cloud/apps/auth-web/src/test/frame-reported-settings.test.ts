@@ -3,7 +3,9 @@ import { settingsWithReported } from "../lib/frames";
 
 describe("settingsWithReported", () => {
   it("takes the frame's rotation and scale, keeping the rest", () => {
-    expect(settingsWithReported({ interval: 60 }, { rotate: 90 })).toEqual({ interval: 60, rotate: 90 });
+    expect(settingsWithReported({ scaling_mode: "cover" }, { rotate: 90 })).toEqual({ scaling_mode: "cover", rotate: 90 });
+    // A stored `interval` (from before frames lost theirs) is not carried on.
+    expect(settingsWithReported({ interval: 60 }, { rotate: 90 })).toEqual({ rotate: 90 });
     expect(settingsWithReported({ rotate: 0 }, { rotate: 270, renderScale: 1.5 })).toEqual({
       rotate: 270,
       render_scale: 1.5,

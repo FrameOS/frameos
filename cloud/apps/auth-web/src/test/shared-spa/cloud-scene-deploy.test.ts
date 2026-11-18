@@ -44,7 +44,6 @@ function cloudFrame(): FrameType {
     interval: 300,
     metrics_interval: 60,
     scaling_mode: "contain",
-    background_color: "#000000",
     // The runtime reports ad-hoc scenes with the uploaded/ prefix; the
     // deploy push must strip it back to the payload scene id.
     active_scene_id: "uploaded/scene-1",

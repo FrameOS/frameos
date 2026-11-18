@@ -567,9 +567,9 @@ ALBUM_ORDERS = ("random", "sequential", "newest", "oldest")
 MAX_STATE_BYTES = 16 * 1024
 MAX_IMAGE_QUERY_CHARS = 400
 # The contract's rule for the one setting the voice turn may change
-# (docs/cloud-frames-contract.json `rotate`). The frame's render interval is
-# deliberately not a voice tool: a frame sets its own, scenes have theirs, and
-# a model given the key kept inventing `interval: 1` next to a rotation.
+# (docs/cloud-frames-contract.json `rotate`). A frame has no render
+# interval (its scenes have theirs); a model given that key once kept
+# inventing `interval: 1` next to a rotation.
 VOICE_ROTATIONS = (0, 90, 180, 270)
 
 # Queue one command for the frame: the route's own queue helper (frames.py /

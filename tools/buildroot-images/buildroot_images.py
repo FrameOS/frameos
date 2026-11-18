@@ -336,7 +336,6 @@ class ReleaseImageFrame:
     color: str | None = None
     timezone: str = "UTC"
     timezone_updater: dict[str, Any] | None = None
-    interval: float = 60.0
     metrics_interval: float = 60.0
     max_http_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES
     scaling_mode: str = "contain"
@@ -344,7 +343,6 @@ class ReleaseImageFrame:
     frame_settings_on_screen: bool = True
     rotate: int = 0
     flip: str | None = None
-    background_color: str | None = None
     debug: bool = False
     last_log_at: str | None = None
     log_to_file: str | None = "/srv/frameos/logs/frameos-{date}.log"

@@ -3269,8 +3269,6 @@ export async function startFrameHub(
               ${virtualMinIntervalSeconds}::float8,
               coalesce(
                 ${virtualFrames.refreshSeconds}::float8,
-                case when jsonb_typeof(${frames.settings} -> 'interval') = 'number'
-                  then (${frames.settings} ->> 'interval')::float8 end,
                 ${virtualFrameDefaultIntervalSeconds}::float8
               )
             )) <= now()

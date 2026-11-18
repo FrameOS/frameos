@@ -30,6 +30,7 @@ export interface FrameOSEditorMountOptions {
   mode?: string
   width?: number
   height?: number
+  /** @deprecated Ignored: a frame has no refresh interval, its scenes do (300 s for a new one). */
   interval?: number
   theme?: 'light' | 'dark'
   /** Same-origin endpoint the wasm preview routes CORS-blocked fetches through. */
@@ -119,7 +120,6 @@ export function mountFrameOSEditor(container: HTMLElement, options: FrameOSEdito
     mode: options.mode ?? 'rpios',
     width: options.width ?? 800,
     height: options.height ?? 480,
-    interval: options.interval ?? 300,
     theme,
     previewProxyUrl: options.previewProxyUrl,
     description: options.description,

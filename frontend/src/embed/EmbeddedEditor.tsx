@@ -68,6 +68,7 @@ export interface EmbeddedSceneEditorProps {
   mode?: string
   width?: number
   height?: number
+  /** @deprecated Ignored: a frame has no refresh interval, its scenes do (300 s for a new one). */
   interval?: number
   theme?: FrameosTheme
   /** Same-origin endpoint the wasm preview routes CORS-blocked fetches through. */
@@ -157,7 +158,6 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
       mode: (props.mode || 'rpios') as FrameType['mode'],
       width: props.width || 800,
       height: props.height || 480,
-      interval: props.interval ?? 300,
       rotate: 0,
     }
     const sceneList = sanitizeIncomingScenes(props.scenes, frame)
@@ -389,7 +389,6 @@ export function EmbeddedEditor(): JSX.Element {
           mode: message.mode || 'rpios',
           width: message.width || 800,
           height: message.height || 480,
-          interval: message.interval ?? 300,
           rotate: 0,
         }
         const sceneList = sanitizeIncomingScenes(message.scenes, frame)
@@ -402,7 +401,6 @@ export function EmbeddedEditor(): JSX.Element {
           mode: message.mode,
           width: message.width,
           height: message.height,
-          interval: message.interval,
           theme:
             message.theme === 'dark' || message.theme === 'light'
               ? message.theme

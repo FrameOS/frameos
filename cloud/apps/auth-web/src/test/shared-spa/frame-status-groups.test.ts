@@ -96,8 +96,7 @@ describe("deep-sleeping frames in the status groups", () => {
       groupOf({
         connected: false,
         deep_sleep: true,
-        interval: 6 * 3600,
-        last_seen_at: minutesAgo(4 * 60),
+        last_seen_at: minutesAgo(4),
         status: "active",
         wake_check_seconds: 0,
       }),
