@@ -1,0 +1,10 @@
+{
+  "name": "Reversi",
+  "description": "Reversi (Othello) for a touch screen: tap a square to place a disc and turn every line of the other color it closes in; whoever holds the most discs when the board fills wins. Play the computer (easy, medium or hard: it weighs corners and edges and how many moves each side has left) or a friend on the same frame, as black or white. The squares you may play show as dots (a setting), the last disc played is marked, a player without a move passes by itself, and undo takes you back to your last turn. Back undoes and forward starts a new game on frames with buttons. On black-and-white panels it plays in high contrast; the Contrast setting picks it anywhere.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
