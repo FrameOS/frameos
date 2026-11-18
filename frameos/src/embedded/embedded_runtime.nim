@@ -714,6 +714,12 @@ proc loadSceneInputs(inputs: seq[FrameSceneInput]): int =
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
   loadedSceneOrder = @[]
+  # The set is held whole now: it is the list. The catalog read off flash
+  # described the set before it, and the scene list, the switcher's tiles and
+  # next / previous went on reading it until the next boot (a reTerminal E1002
+  # given 4 scenes in place of 17 said "4 loaded, 16 available", 2026-11-18).
+  sceneCatalog.setLen(0)
+  catalogRefresh.setLen(0)
   layoutCatalog.setLen(0)
   for input in inputs:
     if newScenes.hasKey(input.id):

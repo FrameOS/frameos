@@ -385,7 +385,7 @@ def is_app_test_file(name: str) -> bool:
 
 def strip_app_test_files(scenes: list) -> list:
     """`scenes` with every app's test files taken out of its `sources`, in
-    place: an ESP32 keeps all its scenes in 512 KiB and never runs them."""
+    place: an ESP32 keeps its scenes on a small flash partition and never runs them."""
     for scene in scenes:
         apps = scene.get("apps") if isinstance(scene, dict) else None
         if not isinstance(apps, dict):

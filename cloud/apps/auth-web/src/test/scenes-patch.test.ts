@@ -2,7 +2,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { buildScenesPatchMessage, esp32SceneStoreSlots, patchLeavesPanel, sceneHashes } from "../lib/scenes-patch";
+import {
+  buildScenesPatchMessage,
+  esp32SceneStoreSlots,
+  esp32SceneStoreSlotsBefore,
+  esp32SceneStoreSlotsFor,
+  esp32SceneStoreSlotsVersion,
+  patchLeavesPanel,
+  sceneHashes,
+} from "../lib/scenes-patch";
 
 describe("scenes_patch and the board's slots", () => {
   it("counts the firmware's slots", () => {
@@ -21,6 +29,23 @@ describe("scenes_patch and the board's slots", () => {
     const message = buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: seven } }, heldBase);
     expect(message).toMatchObject({ type: "scenes_patch" });
     expect(message?.put).toHaveLength(7);
+    // A board whose store has the slots takes the 24 as a patch.
+    const roomy = { ...heldBase, slots: esp32SceneStoreSlotsFor(esp32SceneStoreSlotsVersion) };
+    const wide = buildScenesPatchMessage({ id: "c", payload: { checksum: "n", scenes: laidOut } }, roomy);
+    expect(wide?.put).toHaveLength(24);
+  });
+
+  it("knows the slots by the firmware a board runs", () => {
+    expect(esp32SceneStoreSlotsBefore).toBe(32);
+    expect(esp32SceneStoreSlotsFor("2026.11.11")).toBe(32);
+    expect(esp32SceneStoreSlotsFor("2026.11.6")).toBe(32);
+    expect(esp32SceneStoreSlotsFor("2026.11.12")).toBe(esp32SceneStoreSlots);
+    expect(esp32SceneStoreSlotsFor("v2026.11.12+abc")).toBe(esp32SceneStoreSlots);
+    expect(esp32SceneStoreSlotsFor("2026.12.1")).toBe(esp32SceneStoreSlots);
+    expect(esp32SceneStoreSlotsFor("2027.1.0")).toBe(esp32SceneStoreSlots);
+    // Not known: the fewest, a patch that fits any board.
+    expect(esp32SceneStoreSlotsFor(null)).toBe(32);
+    expect(esp32SceneStoreSlotsFor("dev")).toBe(32);
   });
 });
 

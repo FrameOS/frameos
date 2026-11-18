@@ -107,10 +107,20 @@ static void read_body(esp_http_client_handle_t client, size_t max_body, const fo
     fos_http_body_io_t io = {
         .read = body_io_read, .alloc = body_io_alloc, .realloc = body_io_realloc, .free = body_io_free, .ctx = &ctx,
     };
-    fos_http_body_err_t err =
-        req->scene_set ? fos_scene_pieces_read(res->content_length, max_body, &io, req->scene_set)
-                       : fos_http_body_read(res->content_length, max_body, FOS_HTTP_FIRST_CHUNK, &io, &res->body,
-                                            &res->body_len);
+    fos_http_body_err_t err;
+    if (req->scene_set == NULL) {
+        err = fos_http_body_read(res->content_length, max_body, FOS_HTTP_FIRST_CHUNK, &io, &res->body, &res->body_len);
+    } else {
+        /* Too much to hold: each scene to the sink as it is read. Else each
+         * into a block of its own (no sink), up to what is held. */
+        const fos_scene_sink_t *sink = req->scene_sink;
+        if (sink != NULL && !(req->scene_held_max == 0 || res->content_length > (int64_t)req->scene_held_max)) {
+            if (req->scene_held_max < max_body) max_body = req->scene_held_max;
+            sink = NULL;
+        }
+        res->spooled = sink != NULL;
+        err = fos_scene_pieces_read_to(res->content_length, max_body, &io, sink, req->scene_set);
+    }
     res->too_large = err == FOS_HTTP_BODY_TOO_LARGE;
     res->body_err = err == FOS_HTTP_BODY_OK || err == FOS_HTTP_BODY_TOO_LARGE ? ESP_OK
                     : err == FOS_HTTP_BODY_NO_MEMORY                          ? ESP_ERR_NO_MEM
@@ -217,7 +227,10 @@ esp_err_t fos_http_fetch(const fos_http_request_t *req, size_t max_body, fos_htt
     }
     res->content_length = esp_http_client_fetch_headers(client);
     res->status = esp_http_client_get_status_code(client);
-    if (max_body > 0 && res->status != 304 && res->status != 204 && (req->scene_set == NULL || res->status == 200)) {
+    if (res->status == 200 && req->skip_etag != NULL && req->skip_etag[0] && strcmp(res->etag, req->skip_etag) == 0) {
+        res->skipped = true;
+    } else if (max_body > 0 && res->status != 304 && res->status != 204 &&
+               (req->scene_set == NULL || res->status == 200)) {
         read_body(client, max_body, req, res);
     }
     esp_http_client_close(client);

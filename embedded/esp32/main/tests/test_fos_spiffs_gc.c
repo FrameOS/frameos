@@ -60,11 +60,13 @@ void spiffs_api_unlock(struct spiffs_t *fs) { (void)fs; }
 
 static u8_t g_flash[FLASH_SIZE];
 static long g_block_erases[BLOCKS];
+static long g_read_bytes = 0;
 
 static s32_t hal_read(struct spiffs_t *fs, u32_t addr, u32_t size, u8_t *dst)
 {
     (void)fs;
     memcpy(dst, g_flash + addr, size);
+    g_read_bytes += size;
     return SPIFFS_OK;
 }
 
@@ -335,6 +337,79 @@ static void test_nothing_erased_when_the_write_fits(void)
     SPIFFS_unmount(&g_fs);
 }
 
+static long erases_now(int *first, int *last)
+{
+    long erases = 0;
+    if (first) *first = -1;
+    for (int b = 0; b < BLOCKS; b++) {
+        if (!g_block_erases[b]) continue;
+        erases += g_block_erases[b];
+        if (first && *first < 0) *first = b;
+        if (last) *last = b;
+    }
+    return erases;
+}
+
+/* Room is made in one walk of the partition, which goes on from where the
+ * last one stopped: SPIFFS_gc_quick, called once a block as this used to,
+ * reads its way from block 0 past every live block for each one it erases
+ * (48 of the 71 seconds a 529 KB set took to store on a 24 MB /state, the
+ * reTerminal Sticky, 2026-11-18). */
+static void test_room_is_made_in_one_walk(void)
+{
+    for (size_t i = 0; i < sizeof(g_big); i++) g_big[i] = (u8_t)(i * 13 + 5);
+    memset(g_flash, 0xff, sizeof(g_flash));
+    CHECK(!mount(), "a blank partition is not a file system yet");
+    SPIFFS_clearerr(&g_fs);
+    CHECK(SPIFFS_format(&g_fs) == SPIFFS_OK, "format");
+    CHECK(mount(), "mount after format");
+    /* Live files at the front, a big one behind them deleted: its blocks hold
+     * nothing but deleted pages, and the partition is nearly out of erased ones. */
+    CHECK(write_file(SPIFFS_gc, "/front", "/front.tmp", g_big, 150 * 1024), "front");
+    CHECK(write_file(SPIFFS_gc, "/gone", "/gone.tmp", g_big, 380 * 1024), "the file to delete");
+    CHECK(write_file(SPIFFS_gc, "/back", "/back.tmp", g_big, 150 * 1024), "back");
+    CHECK(write_file(SPIFFS_gc, "/fill", "/fill.tmp", g_big, 150 * 1024), "fill");
+    CHECK(SPIFFS_remove(&g_fs, "/gone") == SPIFFS_OK, "delete it");
+    SPIFFS_unmount(&g_fs);
+    memcpy(g_image, g_flash, sizeof(g_image));
+
+    /* Room for 60 KB, then for 60 KB more. */
+    CHECK(mount(), "mount");
+    memset(g_block_erases, 0, sizeof(g_block_erases));
+    g_read_bytes = 0;
+    CHECK(__wrap_SPIFFS_gc(&g_fs, 60 * 1024) == SPIFFS_OK, "room for 60 KB");
+    int first = 0, last = 0;
+    long erased = erases_now(&first, &last);
+    long walk_bytes = g_read_bytes;
+    CHECK(erased >= 10, "%ld blocks erased: the image was to be short of erased blocks", erased);
+    /* Every block looked at once at most, by its lookup entries alone. */
+    long entry_bytes = (long)((BLOCK_SIZE / PAGE_SIZE - 1) * sizeof(spiffs_obj_id));
+    CHECK(walk_bytes <= BLOCKS * entry_bytes + 4 * PAGE_SIZE, "%ld bytes read to erase %ld blocks", walk_bytes, erased);
+    /* The write it made room for goes in without a collection of its own. */
+    long before_write = erases_now(NULL, NULL);
+    CHECK(write_file(SPIFFS_gc, "/new", "/new.tmp", g_big, 56 * 1024), "the 56 KB write");
+    CHECK(erases_now(NULL, NULL) == before_write, "the write erased %ld more blocks",
+          erases_now(NULL, NULL) - before_write);
+    /* The next walk goes on behind the last block this one erased. */
+    memset(g_block_erases, 0, sizeof(g_block_erases));
+    CHECK(__wrap_SPIFFS_gc(&g_fs, 60 * 1024) == SPIFFS_OK, "room for 60 KB more");
+    int next_first = 0, next_last = 0;
+    CHECK(erases_now(&next_first, &next_last) >= 10, "the second walk erased too");
+    CHECK(next_first > last, "the second walk began at block %d, the first ended at %d", next_first, last);
+    SPIFFS_unmount(&g_fs);
+
+    /* The same blocks through SPIFFS_gc_quick, one call each. */
+    memcpy(g_flash, g_image, sizeof(g_flash));
+    CHECK(mount(), "mount the image again");
+    g_read_bytes = 0;
+    for (long i = 0; i < erased; i++) CHECK(SPIFFS_gc_quick(&g_fs, 0) == SPIFFS_OK, "quick %ld", i);
+    printf("  room for 60 KB (%ld blocks erased): %ld bytes read in one walk, %ld by SPIFFS_gc_quick a block\n", erased,
+           walk_bytes, g_read_bytes);
+    CHECK(g_read_bytes > 20 * walk_bytes, "one walk read %ld bytes, a quick collection a block %ld", walk_bytes,
+          g_read_bytes);
+    SPIFFS_unmount(&g_fs);
+}
+
 /* More than the partition holds: SPIFFS's answer comes back. */
 static void test_too_big_is_still_full(void)
 {
@@ -405,6 +480,7 @@ static void test_footprint_is_what_spiffs_counts(void)
 int main(void)
 {
     test_nothing_erased_when_the_write_fits();
+    test_room_is_made_in_one_walk();
     test_too_big_is_still_full();
     test_scene_uploads_beside_photos();
     test_a_big_set_pushed_over_itself_splits();

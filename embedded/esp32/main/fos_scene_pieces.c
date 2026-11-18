@@ -9,6 +9,7 @@
 
 typedef struct {
     const fos_http_body_io_t *io;
+    const fos_scene_sink_t *sink; /* NULL: each scene into a block of its own */
     fos_scene_set_t *set;
     size_t rest_cap, piece_cap;
     int depth;
@@ -20,6 +21,11 @@ typedef struct {
 
 static bool push(reader_t *r, char **buf, size_t *len, size_t *cap, char c)
 {
+    if (r->sink != NULL && buf != &r->set->rest) {
+        /* A scene's byte: the sink's, handed over by the read loop. */
+        (*len)++;
+        return true;
+    }
     if (*len + 1 >= *cap) {
         size_t new_cap = *cap ? *cap * 2 : (buf == &r->set->rest ? 64 : FIRST_PIECE);
         char *grown = *buf ? r->io->realloc(r->io->ctx, *buf, new_cap) : r->io->alloc(r->io->ctx, new_cap);
@@ -76,7 +82,7 @@ static fos_http_body_err_t feed(reader_t *r, char c)
             if (!push(r, &s->scenes[r->piece], &s->lens[r->piece], &r->piece_cap, c)) return FOS_HTTP_BODY_NO_MEMORY;
             if (r->depth == r->lift) {
                 /* The scene is whole: its block shrinks to it. */
-                char *fit = r->io->realloc(r->io->ctx, s->scenes[r->piece], s->lens[r->piece] + 1);
+                char *fit = r->sink ? NULL : r->io->realloc(r->io->ctx, s->scenes[r->piece], s->lens[r->piece] + 1);
                 if (fit != NULL) s->scenes[r->piece] = fit;
                 s->count++;
                 r->piece = -1;
@@ -103,11 +109,17 @@ static fos_http_body_err_t feed(reader_t *r, char c)
 fos_http_body_err_t fos_scene_pieces_read(int64_t content_length, size_t max_body, const fos_http_body_io_t *io,
                                           fos_scene_set_t *set)
 {
+    return fos_scene_pieces_read_to(content_length, max_body, io, NULL, set);
+}
+
+fos_http_body_err_t fos_scene_pieces_read_to(int64_t content_length, size_t max_body, const fos_http_body_io_t *io,
+                                             const fos_scene_sink_t *sink, fos_scene_set_t *set)
+{
     memset(set, 0, sizeof(*set));
     if (content_length > (int64_t)max_body) return FOS_HTTP_BODY_TOO_LARGE;
     char *chunk = io->alloc(io->ctx, READ_CHUNK);
     if (chunk == NULL) return FOS_HTTP_BODY_NO_MEMORY;
-    reader_t r = {.io = io, .set = set, .piece = -1, .key = -1};
+    reader_t r = {.io = io, .sink = sink, .set = set, .piece = -1, .key = -1};
     fos_http_body_err_t err = FOS_HTTP_BODY_OK;
     for (;;) {
         int n = io->read(io->ctx, chunk, READ_CHUNK);
@@ -115,7 +127,25 @@ fos_http_body_err_t fos_scene_pieces_read(int64_t content_length, size_t max_bod
         if (n <= 0) break;
         if (set->bytes + (size_t)n > max_body) err = FOS_HTTP_BODY_TOO_LARGE;
         set->bytes += (size_t)n;
-        for (int i = 0; i < n && err == FOS_HTTP_BODY_OK; i++) err = feed(&r, chunk[i]);
+        /* To a sink, a scene's bytes go as the runs of them this read holds:
+         * from its `{` (or the read's first byte) to its `}` (or the last). */
+        int run = 0;
+        for (int i = 0; i < n && err == FOS_HTTP_BODY_OK; i++) {
+            bool was_in = r.piece >= 0;
+            err = feed(&r, chunk[i]);
+            if (sink == NULL || err != FOS_HTTP_BODY_OK) continue;
+            bool is_in = r.piece >= 0;
+            if (!was_in && is_in) {
+                run = i;
+                err = sink->begin(sink->ctx);
+            } else if (was_in && !is_in) {
+                err = sink->bytes(sink->ctx, chunk + run, (size_t)(i + 1 - run));
+                if (err == FOS_HTTP_BODY_OK) err = sink->end(sink->ctx);
+            }
+        }
+        if (sink != NULL && err == FOS_HTTP_BODY_OK && r.piece >= 0) {
+            err = sink->bytes(sink->ctx, chunk + run, (size_t)(n - run));
+        }
         if (err != FOS_HTTP_BODY_OK) break;
     }
     io->free(io->ctx, chunk);
@@ -134,7 +164,9 @@ fos_http_body_err_t fos_scene_pieces_read(int64_t content_length, size_t max_bod
 
 void fos_scene_pieces_free(fos_scene_set_t *set, const fos_http_body_io_t *io)
 {
-    for (int i = 0; i < set->count; i++) io->free(io->ctx, set->scenes[i]);
-    io->free(io->ctx, set->rest);
+    for (int i = 0; i < set->count; i++) {
+        if (set->scenes[i] != NULL) io->free(io->ctx, set->scenes[i]);
+    }
+    if (set->rest != NULL) io->free(io->ctx, set->rest);
     memset(set, 0, sizeof(*set));
 }

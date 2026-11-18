@@ -1541,8 +1541,21 @@ SERVED_SCENES_KEY = "frame:{}:embedded_served_scenes"
 SERVED_SCENES_TTL_SECONDS = 30 * 24 * 3600
 # The ESP32 scene store's slot files (FOS_SCENE_STORE_SLOTS in
 # embedded/esp32/main/fos_scene_store.h; the cloud's esp32SceneStoreSlots in
-# scenes-patch.ts): test_embedded_scenes_patch_slots.py reads both.
-ESP32_SCENE_STORE_SLOTS = 32
+# scenes-patch.ts): test_embedded_scenes_patch_slots.py reads both. 256 from
+# 2026.11.12, twice the 128 scenes a set holds there, so a change to every
+# scene fits beside the set; 32 on the firmware before it, and on one whose
+# version is not known.
+ESP32_SCENE_STORE_SLOTS = 256
+ESP32_SCENE_STORE_SLOTS_BEFORE = 32
+ESP32_SCENE_STORE_SLOTS_VERSION = "2026.11.12"
+
+
+def esp32_scene_store_slots(version: str | None) -> int:
+    from app.utils.versions import version_tuple
+
+    runs = version_tuple(version)
+    first = version_tuple(ESP32_SCENE_STORE_SLOTS_VERSION)
+    return ESP32_SCENE_STORE_SLOTS if runs is not None and first is not None and runs >= first else ESP32_SCENE_STORE_SLOTS_BEFORE
 
 
 def _scene_hash(scene: dict) -> str:
@@ -1576,7 +1589,7 @@ async def _embedded_scenes_patch(redis, frame: Frame, payload: bytes, if_none_ma
     if len(put) == len(scenes):
         # Every scene changed: the whole list is the same message.
         return None
-    if len(hashes) + len(put) > ESP32_SCENE_STORE_SLOTS:
+    if len(hashes) + len(put) > esp32_scene_store_slots(frame_runtime_version(frame)):
         # A patch is one change: each put goes to a new slot while every
         # scene the board holds keeps its own until the index switches, so it
         # would be refused ("no free scene slot") and cost a round trip. The

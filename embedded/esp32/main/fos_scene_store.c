@@ -3,6 +3,7 @@
 #include "fos_scene_store.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -11,6 +12,7 @@
 #include <sys/stat.h>
 
 #include "fos_json_guard.h"
+#include "fos_scene_meta.h"
 
 #define PATH_LEN 96
 
@@ -61,26 +63,47 @@ static long file_size(const char *path)
 }
 
 /* Which slot files exist, as far as the store knows. Every slot file is
- * written and removed here, under the caller's lock, so after the first
- * sweep (a boot's, which removes every file the index does not name) the
- * store asks flash nothing about them. A lookup by name on SPIFFS walks every
- * block's lookup page, about half a second on a 24 MB partition (2026-11-10,
- * the reTerminal Sticky): a put that stat'ed every unnamed slot and a sweep
- * that removed them all cost seconds each, the sweep on the render task.
- * Unknown until that sweep and after fos_scene_store_forget(); a free slot is
- * then checked on flash. */
-static bool s_slot_file[FOS_SCENE_STORE_SLOTS];
+ * written and removed here, under the caller's lock, so once it has listed
+ * the directory (learn_slot_files: the first time it needs to know, a boot's
+ * sweep as a rule) the store asks flash nothing about them. A lookup by name
+ * on SPIFFS walks every block's lookup page, about half a second on a 24 MB
+ * partition (2026-11-10, the reTerminal Sticky): a put that stat'ed every
+ * unnamed slot and a sweep that removed them all cost seconds each, the sweep
+ * on the render task. One listing is one such walk for all of them: asked
+ * slot by slot, 256 slots were two minutes of every boot. Unknown again after
+ * fos_scene_store_forget(). */
+static fos_scene_store_slots_t s_slot_map[3]; /* one array: slot_is() sets all three */
+#define s_slot_file s_slot_map[0]
 /* A slot file the sweep emptied rather than removed, nobody's: the next put
  * writes it. Opening a file that is there is one lookup that finds it
  * (~15 ms); creating one walks the whole partition twice, for the name and
  * for a free id (~1.07 s on 24 MB). An empty file is a page or two. */
-static bool s_slot_spare[FOS_SCENE_STORE_SLOTS];
+#define s_slot_spare s_slot_map[1]
+/* A slot file a set being read is written to (the stage calls): no index
+ * names it yet, and no sweep takes it. */
+#define s_slot_staged s_slot_map[2]
 static bool s_slot_map_known = false;
+/* The listing found the file firmware before 2026.11.6 wrote a slot to first. */
+static bool s_old_slot_tmp = false;
+
+#define has fos_scene_store_slots_has
+#define put_slot fos_scene_store_slots_put
+
+/* What the store knows of one slot file, all three maps in one call (a call
+ * a map at every site was 150 bytes more). */
+enum { SLOT_NONE = 0, SLOT_FILE = 1, SLOT_SPARE = 2, SLOT_STAGED = 4 };
+
+static void slot_is(int slot, unsigned what)
+{
+    for (int map = 0; map < 3; map++) put_slot(&s_slot_map[map], slot, (what >> map) & 1u);
+}
+
+static void stage_forget(void);
 
 void fos_scene_store_forget(void)
 {
-    memset(s_slot_file, 0, sizeof(s_slot_file));
-    memset(s_slot_spare, 0, sizeof(s_slot_spare));
+    stage_forget();
+    memset(s_slot_map, 0, sizeof(s_slot_map));
     s_slot_map_known = false;
 }
 
@@ -91,18 +114,45 @@ static void retire_slot(int slot)
     fos_scene_store_slot_path(slot, path, sizeof(path));
     FILE *f = fopen(path, "wb");
     if (f != NULL && fclose(f) == 0) {
-        s_slot_file[slot] = true;
-        s_slot_spare[slot] = true;
+        slot_is(slot, SLOT_FILE | SLOT_SPARE);
         return;
     }
     remove(path);
-    s_slot_file[slot] = false;
-    s_slot_spare[slot] = false;
+    slot_is(slot, SLOT_NONE);
+}
+
+/* The slot files there are, from one listing of the directory. Without a
+ * listing (the directory cannot be opened) nothing is known and each slot is
+ * asked for by name, as before. */
+static void learn_slot_files(void)
+{
+    if (s_slot_map_known) return;
+    DIR *dir = opendir(s_dir);
+    if (dir == NULL) return;
+    memset(s_slot_map, 0, 2 * sizeof(s_slot_map[0])); /* the files and the spares; a staging stays */
+    struct dirent *item;
+    while ((item = readdir(dir)) != NULL) {
+        if (strcmp(item->d_name, FOS_SCENE_STORE_SLOT_TMP_NAME) == 0) s_old_slot_tmp = true;
+        /* "scene-<slot>.json", as the store writes it: no other spelling. */
+        const char *at = item->d_name;
+        if (strncmp(at, "scene-", 6) != 0) continue;
+        at += 6;
+        int slot = 0, digits = 0;
+        while (*at >= '0' && *at <= '9' && digits < 4) {
+            slot = slot * 10 + (*at++ - '0');
+            digits++;
+        }
+        if (digits == 0 || (digits > 1 && item->d_name[6] == '0') || strcmp(at, ".json") != 0) continue;
+        if (slot < FOS_SCENE_STORE_SLOTS) put_slot(&s_slot_file, slot, true);
+    }
+    closedir(dir);
+    s_slot_map_known = true;
 }
 
 static bool slot_has_file(int slot)
 {
-    if (s_slot_map_known) return s_slot_file[slot];
+    learn_slot_files();
+    if (s_slot_map_known) return has(&s_slot_file, slot);
     char path[PATH_LEN];
     fos_scene_store_slot_path(slot, path, sizeof(path));
     return file_size(path) >= 0;
@@ -113,12 +163,14 @@ static void remove_slot(int slot)
     char path[PATH_LEN];
     fos_scene_store_slot_path(slot, path, sizeof(path));
     remove(path);
-    s_slot_file[slot] = false;
-    s_slot_spare[slot] = false;
+    slot_is(slot, SLOT_NONE);
 }
 
 void fos_scene_store_remove_slots(void)
 {
+    /* A set being read was against the set these files are: it ends here. */
+    fos_scene_store_stage_drop(0);
+    learn_slot_files();
     if (!s_slot_map_known) {
         for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) remove_slot(slot);
         s_slot_map_known = true; /* none now */
@@ -126,25 +178,33 @@ void fos_scene_store_remove_slots(void)
     }
     /* Emptied, so the whole set written next opens files that are there. */
     for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-        if (s_slot_file[slot] && !s_slot_spare[slot]) retire_slot(slot);
+        if (has(&s_slot_file, slot) && !has(&s_slot_spare, slot)) retire_slot(slot);
     }
 }
 
 /* The slot a put writes: a spare first (a file that is there), else the
  * first slot nobody names and no file sits in. FOS_SCENE_STORE_SLOTS: none. */
-static int pick_slot(bool *used)
+static int pick_slot(fos_scene_store_slots_t *used)
 {
+    learn_slot_files();
     if (s_slot_map_known) {
         for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-            if (!used[slot] && s_slot_spare[slot]) return slot;
+            if (!has(used, slot) && has(&s_slot_spare, slot)) return slot;
         }
     }
     int slot = 0;
-    while (slot < FOS_SCENE_STORE_SLOTS && (used[slot] || slot_has_file(slot))) {
-        used[slot] = true;
+    while (slot < FOS_SCENE_STORE_SLOTS && (has(used, slot) || slot_has_file(slot))) {
+        put_slot(used, slot, true);
         slot++;
     }
     return slot;
+}
+
+/* From the caller's big blocks (PSRAM) where it has them, else the heap. */
+static void *big_alloc(size_t size)
+{
+    void *block = s_hooks.big_alloc ? s_hooks.big_alloc(size) : NULL;
+    return block ? block : malloc(size);
 }
 
 char *fos_scene_store_read_file(const char *path, size_t *out_len)
@@ -155,10 +215,7 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     char *buf = NULL;
-    if (size > 0 && size <= FOS_SCENE_STORE_MAX_BYTES) {
-        buf = s_hooks.big_alloc ? s_hooks.big_alloc((size_t)size + 1) : NULL;
-        if (buf == NULL) buf = malloc((size_t)size + 1);
-    }
+    if (size > 0 && size <= FOS_SCENE_STORE_MAX_BYTES) buf = big_alloc((size_t)size + 1);
     if (buf != NULL) {
         size_t got = fread(buf, 1, (size_t)size, f);
         buf[got] = '\0';
@@ -166,6 +223,17 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
     }
     fclose(f);
     return buf;
+}
+
+/* A file is written through a buffer of this size, in PSRAM where the board
+ * has it: SPIFFS rewrites a file's index header page at the end of every
+ * write call, so 2 KB at a time was a page of flash for every four of data,
+ * and a deleted page more for the collector. */
+#define WRITE_BUFFER_BYTES (8 * 1024)
+
+static char *write_buffer_new(void)
+{
+    return big_alloc(WRITE_BUFFER_BYTES);
 }
 
 /* `path` written whole, or not there at all (removed on any failure, errno
@@ -187,6 +255,9 @@ static fos_scene_store_err_t write_parts(const char *path, const fos_scene_store
         errno = err_no;
         return err_no == ENOSPC ? FOS_SCENE_STORE_ERR_NO_SPACE : FOS_SCENE_STORE_ERR_IO;
     }
+    /* Without one the file is written as before, a call for each 2 KB. */
+    char *buffer = write_buffer_new();
+    if (buffer != NULL) setvbuf(f, buffer, _IOFBF, WRITE_BUFFER_BYTES);
     bool ok = !array || fputc('[', f) != EOF;
     for (int i = 0; ok && i < count; i++) {
         if (array && i > 0 && fputc(',', f) == EOF) ok = false;
@@ -202,6 +273,7 @@ static fos_scene_store_err_t write_parts(const char *path, const fos_scene_store
     if (ok && array) ok = fputc(']', f) != EOF;
     if (ferror(f)) ok = false;
     if (fclose(f) != 0) ok = false;
+    free(buffer);
     if (!ok) {
         int err_no = errno ? errno : ENOSPC;
         remove(path);
@@ -269,12 +341,11 @@ static cJSON *find_entry(const cJSON *scenes, const char *scene_id)
     return NULL;
 }
 
-static void mark_slots(const cJSON *index, bool *used)
+static void mark_slots(const cJSON *index, fos_scene_store_slots_t *used)
 {
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
-        int slot = fos_scene_store_entry_slot(entry);
-        if (slot >= 0) used[slot] = true;
+        put_slot(used, fos_scene_store_entry_slot(entry), true);
     }
 }
 
@@ -347,14 +418,20 @@ void fos_scene_store_remove_index(void)
 
 /* FNV-1a over a scene's bytes: whether the file stored is the one a whole set
  * brings again (fos_scene_store_apply_set). */
-static uint32_t content_hash(const char *data, size_t len)
+#define CONTENT_HASH_START 2166136261u
+
+static uint32_t content_hash_more(uint32_t hash, const char *data, size_t len)
 {
-    uint32_t hash = 2166136261u;
     for (size_t i = 0; i < len; i++) {
         hash ^= (unsigned char)data[i];
         hash *= 16777619u;
     }
     return hash;
+}
+
+static uint32_t content_hash(const char *data, size_t len)
+{
+    return content_hash_more(CONTENT_HASH_START, data, len);
 }
 
 static bool entry_hash_is(const cJSON *entry, uint32_t hash)
@@ -452,6 +529,230 @@ static cJSON *take_fresh(cJSON **fresh, int count, const char *id)
     return entry;
 }
 
+/* ------------------------------------------------- a set as it arrives */
+
+/* How much room is asked for ahead of a staged scene's bytes: its length is
+ * not known until it has all come. */
+#define STAGE_ROOM_STEP (64 * 1024)
+
+typedef struct {
+    unsigned int id;        /* 0: nothing is staged */
+    FILE *file;             /* the scene being written; NULL between two */
+    int slot;
+    size_t bytes;           /* of the scene being written */
+    uint32_t hash;
+    size_t room_asked;
+    char *buffer;           /* the file's (write_buffer_new); NULL: none */
+    fos_scene_meta_t *meta; /* what the index keeps of it, read off its bytes */
+    cJSON *old;             /* the index when the staging began: what is stored already */
+    cJSON *entries;         /* the written scenes' index entries, in the order they came */
+    cJSON *order;           /* every scene's id, in the order they came */
+    cJSON *kept;            /* {"<id>": hash} of the scenes stored already */
+    size_t written_bytes;
+} stage_t;
+
+static stage_t s_stage;
+static unsigned int s_stage_ids;
+
+bool fos_scene_store_staging(unsigned int id)
+{
+    return s_stage.id != 0 && s_stage.id == id;
+}
+#define staging fos_scene_store_staging
+
+/* The staging's memory, not its files. */
+static void stage_free(void)
+{
+    if (s_stage.file != NULL) fclose(s_stage.file);
+    free(s_stage.buffer);
+    free(s_stage.meta);
+    cJSON_Delete(s_stage.old);
+    cJSON_Delete(s_stage.entries);
+    cJSON_Delete(s_stage.order);
+    cJSON_Delete(s_stage.kept);
+    memset(&s_stage, 0, sizeof(s_stage));
+}
+
+/* The files are gone already (a wipe). */
+static void stage_forget(void)
+{
+    stage_free();
+}
+
+void fos_scene_store_stage_drop(unsigned int id)
+{
+    if (s_stage.id == 0 || (id != 0 && id != s_stage.id)) return;
+    bool open = s_stage.file != NULL;
+    int open_slot = s_stage.slot;
+    if (open) {
+        fclose(s_stage.file);
+        s_stage.file = NULL;
+        retire_slot(open_slot);
+    }
+    const cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, s_stage.entries) {
+        int slot = fos_scene_store_entry_slot(entry);
+        if (slot >= 0) retire_slot(slot);
+    }
+    stage_free();
+}
+
+unsigned int fos_scene_store_stage_open(void)
+{
+    fos_scene_store_stage_drop(0);
+    s_stage.meta = big_alloc(sizeof(*s_stage.meta));
+    s_stage.buffer = write_buffer_new();
+    s_stage.old = fos_scene_store_read_index(); /* NULL: none yet */
+    s_stage.entries = cJSON_CreateArray();
+    s_stage.order = cJSON_CreateArray();
+    s_stage.kept = cJSON_CreateObject();
+    if (s_stage.meta == NULL || s_stage.entries == NULL || s_stage.order == NULL || s_stage.kept == NULL) {
+        stage_free();
+        return 0;
+    }
+    if (++s_stage_ids == 0) s_stage_ids = 1;
+    s_stage.id = s_stage_ids;
+    return s_stage.id;
+}
+
+fos_scene_store_err_t fos_scene_store_stage_begin(unsigned int id)
+{
+    if (!staging(id) || s_stage.file != NULL) return FOS_SCENE_STORE_ERR_INVALID;
+    if (cJSON_GetArraySize(s_stage.order) >= FOS_SCENE_STORE_SCENES) return FOS_SCENE_STORE_ERR_NO_SLOTS;
+    /* Free of the set as it was when the staging began and of every file the
+     * store knows of since (a slot another change took has a file). */
+    fos_scene_store_slots_t used = {{0}};
+    mark_slots(s_stage.old, &used);
+    int slot = pick_slot(&used);
+    if (slot == FOS_SCENE_STORE_SLOTS) return FOS_SCENE_STORE_ERR_NO_SLOTS;
+    char path[PATH_LEN];
+    fos_scene_store_slot_path(slot, path, sizeof(path));
+    if (s_hooks.make_room) s_hooks.make_room(STAGE_ROOM_STEP);
+    errno = 0;
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        int err_no = errno;
+        remove_slot(slot);
+        errno = err_no;
+        return err_no == ENOSPC ? FOS_SCENE_STORE_ERR_NO_SPACE : FOS_SCENE_STORE_ERR_IO;
+    }
+    slot_is(slot, SLOT_FILE | SLOT_STAGED);
+    if (s_stage.buffer != NULL) setvbuf(f, s_stage.buffer, _IOFBF, WRITE_BUFFER_BYTES);
+    s_stage.file = f;
+    s_stage.slot = slot;
+    s_stage.bytes = 0;
+    s_stage.hash = CONTENT_HASH_START;
+    s_stage.room_asked = STAGE_ROOM_STEP;
+    fos_scene_meta_begin(s_stage.meta);
+    return FOS_SCENE_STORE_OK;
+}
+
+/* The scene being written is given up: its file goes back, the rest stays. */
+static fos_scene_store_err_t stage_abort_scene(fos_scene_store_err_t err)
+{
+    int err_no = errno;
+    if (s_stage.file != NULL) fclose(s_stage.file);
+    s_stage.file = NULL;
+    retire_slot(s_stage.slot);
+    errno = err_no;
+    return err;
+}
+
+fos_scene_store_err_t fos_scene_store_stage_write(unsigned int id, const char *bytes, size_t len)
+{
+    if (!staging(id) || s_stage.file == NULL) return FOS_SCENE_STORE_ERR_INVALID;
+    /* A scene is read whole to be run: one that no read would take is refused
+     * while it comes, not stored. */
+    if (s_stage.bytes + len > FOS_SCENE_STORE_MAX_BYTES) return stage_abort_scene(FOS_SCENE_STORE_ERR_INVALID);
+    size_t written = 0;
+    while (written < len) {
+        size_t chunk = len - written > 2048 ? 2048 : len - written;
+        if (s_stage.bytes + chunk > s_stage.room_asked) {
+            if (s_hooks.make_room) s_hooks.make_room(STAGE_ROOM_STEP);
+            s_stage.room_asked += STAGE_ROOM_STEP;
+        }
+        if (s_hooks.pace) s_hooks.pace();
+        /* Another change's whole payload may have ended the staging while the
+         * pace let the lock go: its file is closed. */
+        if (!staging(id) || s_stage.file == NULL) return FOS_SCENE_STORE_ERR_INVALID;
+        errno = 0;
+        if (fwrite(bytes + written, 1, chunk, s_stage.file) != chunk) {
+            if (errno == 0) errno = ENOSPC;
+            return stage_abort_scene(FOS_SCENE_STORE_ERR_NO_SPACE);
+        }
+        s_stage.hash = content_hash_more(s_stage.hash, bytes + written, chunk);
+        fos_scene_meta_feed(s_stage.meta, bytes + written, chunk);
+        s_stage.bytes += chunk;
+        written += chunk;
+    }
+    return FOS_SCENE_STORE_OK;
+}
+
+fos_scene_store_err_t fos_scene_store_stage_end(unsigned int id, bool *kept)
+{
+    if (kept != NULL) *kept = false;
+    if (!staging(id) || s_stage.file == NULL) return FOS_SCENE_STORE_ERR_INVALID;
+    errno = 0;
+    bool wrote = !ferror(s_stage.file);
+    if (fclose(s_stage.file) != 0) wrote = false;
+    s_stage.file = NULL;
+    if (!wrote) {
+        if (errno == 0) errno = ENOSPC;
+        return stage_abort_scene(FOS_SCENE_STORE_ERR_NO_SPACE);
+    }
+    /* What the index keeps of it, as read off its bytes: one object, an id,
+     * no deeper than a whole parse takes, not in the set twice. */
+    const char *text = fos_scene_meta_text(s_stage.meta);
+    cJSON *scene = text != NULL && fos_scene_meta_depth(s_stage.meta) <= FOS_JSON_MAX_DEPTH ? cJSON_Parse(text) : NULL;
+    const char *scene_id = entry_id(scene);
+    bool ok = cJSON_IsObject(scene) && scene_id[0] && strlen(scene_id) < FOS_SCENE_STORE_ID_LEN;
+    const cJSON *named = NULL;
+    cJSON_ArrayForEach(named, s_stage.order) {
+        if (ok && strcmp(named->valuestring, scene_id) == 0) ok = false;
+    }
+    if (!ok) {
+        cJSON_Delete(scene);
+        return stage_abort_scene(FOS_SCENE_STORE_ERR_INVALID);
+    }
+    /* Stored already when its hash says so, as a set held in memory is told
+     * (fos_scene_store_apply_set). */
+    const cJSON *stored = find_entry(cJSON_GetObjectItem(s_stage.old, "scenes"), scene_id);
+    bool same = stored != NULL && fos_scene_store_entry_slot(stored) >= 0 && entry_hash_is(stored, s_stage.hash);
+    cJSON *order_id = cJSON_CreateString(scene_id);
+    cJSON *entry = same ? cJSON_CreateNumber((double)s_stage.hash)
+                        : make_entry(scene, s_stage.slot, s_stage.bytes, s_stage.hash);
+    cJSON_Delete(scene); /* scene_id with it: the copies are made */
+    if (order_id == NULL || entry == NULL) {
+        cJSON_Delete(order_id);
+        cJSON_Delete(entry);
+        return stage_abort_scene(FOS_SCENE_STORE_ERR_NO_MEMORY);
+    }
+    if (same) {
+        /* Stored already, byte for byte: the file written is given back. */
+        cJSON_AddItemToObject(s_stage.kept, order_id->valuestring, entry);
+        retire_slot(s_stage.slot);
+        if (kept != NULL) *kept = true;
+    } else {
+        cJSON_AddItemToArray(s_stage.entries, entry);
+        s_stage.written_bytes += s_stage.bytes;
+    }
+    cJSON_AddItemToArray(s_stage.order, order_id);
+    return FOS_SCENE_STORE_OK;
+}
+
+void fos_scene_store_stage_counts(unsigned int id, int *written, int *kept, size_t *written_bytes)
+{
+    bool live = staging(id);
+    if (written != NULL) *written = live ? cJSON_GetArraySize(s_stage.entries) : 0;
+    if (kept != NULL) *kept = live ? cJSON_GetArraySize(s_stage.kept) : 0;
+    if (written_bytes != NULL) *written_bytes = live ? s_stage.written_bytes : 0;
+}
+
+/* The work arrays of one change: one writer at a time (the caller's lock),
+ * and 128 pointers are not for an 8 KB task's stack. */
+static cJSON *s_fresh[FOS_SCENE_STORE_SCENES];
+static int16_t s_written[FOS_SCENE_STORE_SCENES];
+
 fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *change,
                                             fos_scene_store_result_t *result,
                                             void (*on_dropped)(const char *id, void *ctx),
@@ -465,18 +766,42 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
      * the index does not name is one a reader may still be holding, until
      * the sweep. Asked of flash only while the store does not know its
      * files (slot_has_file), and only for the slots a put tries. */
-    bool used[FOS_SCENE_STORE_SLOTS] = {false};
-    mark_slots(old, used);
+    fos_scene_store_slots_t used = {{0}};
+    mark_slots(old, &used);
     char path[PATH_LEN];
 
     fos_scene_store_err_t err = FOS_SCENE_STORE_OK;
-    cJSON *fresh[FOS_SCENE_STORE_SLOTS]; /* the puts' new entries, each until it is placed */
+    cJSON **fresh = s_fresh; /* the puts' new entries, each until it is placed */
     int fresh_count = 0;
-    int written[FOS_SCENE_STORE_SLOTS];
+    int16_t *written = s_written;
     int written_count = 0;
 
     const cJSON *item = change->put_items ? change->put_items->child : NULL;
     int put_count = change->put_items ? cJSON_GetArraySize(change->put_items) : change->put_count;
+    const cJSON *order = change->order;
+    const cJSON *staged_kept = NULL;
+    if (change->staged != 0) {
+        /* The puts are in their files already: their entries are the fresh
+         * ones, and a failure gives the files back like any put's. */
+        put_count = 0;
+        if (!staging(change->staged) || s_stage.file != NULL) {
+            err = FOS_SCENE_STORE_ERR_INVALID;
+        } else {
+            while (s_stage.entries->child != NULL) {
+                cJSON *entry = cJSON_DetachItemFromArray(s_stage.entries, 0);
+                written[written_count++] = (int16_t)fos_scene_store_entry_slot(entry);
+                fresh[fresh_count++] = entry;
+                if (!result->first_put_id[0]) {
+                    snprintf(result->first_put_id, sizeof(result->first_put_id), "%s", entry_id(entry));
+                }
+            }
+            result->put_bytes = s_stage.written_bytes;
+            if (order == NULL) order = s_stage.order;
+            staged_kept = s_stage.kept;
+        }
+    } else if (put_count > FOS_SCENE_STORE_SCENES) {
+        err = FOS_SCENE_STORE_ERR_NO_SLOTS;
+    }
     for (int i = 0; i < put_count && err == FOS_SCENE_STORE_OK; i++) {
         const char *json;
         size_t len;
@@ -507,7 +832,7 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
                   fresh_index(fresh, fresh_count, id) < 0;
         /* Only white space after it: one scene, whole. */
         while (ok && end != NULL && end < json + len) ok = isspace((unsigned char)*end++);
-        int slot = pick_slot(used);
+        int slot = pick_slot(&used);
         if (json == NULL) {
             err = FOS_SCENE_STORE_ERR_NO_MEMORY;
         } else if (!ok) {
@@ -519,14 +844,13 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
              * index is written, so a torn file is nobody's (the sweep's),
              * and a tmp, a remove and a rename were three more lookups. */
             fos_scene_store_slot_path(slot, path, sizeof(path));
-            s_slot_file[slot] = true;
-            s_slot_spare[slot] = false;
+            slot_is(slot, SLOT_FILE);
             err = write_plain(path, json, len);
-            if (err != FOS_SCENE_STORE_OK) s_slot_file[slot] = false; /* removed */
+            if (err != FOS_SCENE_STORE_OK) slot_is(slot, SLOT_NONE); /* removed */
         }
         if (err == FOS_SCENE_STORE_OK) {
-            used[slot] = true;
-            written[written_count++] = slot;
+            put_slot(&used, slot, true);
+            written[written_count++] = (int16_t)slot;
             fresh[fresh_count] = make_entry(scene, slot, len, content_hash(json, len));
             if (fresh[fresh_count] == NULL) err = FOS_SCENE_STORE_ERR_NO_MEMORY;
             else fresh_count++;
@@ -544,14 +868,18 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
         scenes = cJSON_AddArrayToObject(index, "scenes");
         if (scenes == NULL) err = FOS_SCENE_STORE_ERR_NO_MEMORY;
     }
-    if (err == FOS_SCENE_STORE_OK && change->order != NULL) {
+    if (err == FOS_SCENE_STORE_OK && order != NULL) {
         const cJSON *named = NULL;
-        cJSON_ArrayForEach(named, change->order) {
+        cJSON_ArrayForEach(named, order) {
             const char *id = cJSON_IsString(named) ? named->valuestring : "";
             cJSON *entry = NULL;
             if (id[0] && find_entry(scenes, id) == NULL) {
                 entry = take_fresh(fresh, fresh_count, id);
                 const cJSON *kept = entry ? NULL : find_entry(old_scenes, id);
+                /* A staged scene found stored already must still be that
+                 * scene: another change may have been made since. */
+                const cJSON *kept_hash = kept ? cJSON_GetObjectItem(staged_kept, id) : NULL;
+                if (kept_hash != NULL && !entry_hash_is(kept, (uint32_t)kept_hash->valuedouble)) kept = NULL;
                 if (kept != NULL) entry = cJSON_Duplicate(kept, true);
             }
             if (entry == NULL) {
@@ -579,7 +907,7 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
         }
         if (change->remove_id != NULL && !removed && err == FOS_SCENE_STORE_OK) err = FOS_SCENE_STORE_ERR_NOT_FOUND;
     }
-    if (err == FOS_SCENE_STORE_OK && change->order == NULL) {
+    if (err == FOS_SCENE_STORE_OK && order == NULL) {
         /* A new scene goes last, in the order they came. */
         for (int i = 0; i < fresh_count; i++) {
             if (fresh[i] != NULL) cJSON_AddItemToArray(scenes, fresh[i]);
@@ -588,6 +916,9 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
     }
 
     if (err == FOS_SCENE_STORE_OK && cJSON_GetArraySize(scenes) == 0) err = FOS_SCENE_STORE_ERR_LAST_SCENE;
+    if (err == FOS_SCENE_STORE_OK && cJSON_GetArraySize(scenes) > FOS_SCENE_STORE_SCENES) {
+        err = FOS_SCENE_STORE_ERR_NO_SLOTS;
+    }
     if (err == FOS_SCENE_STORE_OK) {
         const char *default_id = pick_default(scenes);
         if (default_id != NULL) cJSON_AddStringToObject(index, "default", default_id);
@@ -599,19 +930,34 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
     }
 
     if (err != FOS_SCENE_STORE_OK) {
-        /* The index was not switched: this op's files are nobody's. */
-        for (int i = 0; i < written_count; i++) remove_slot(written[i]);
+        /* The index was not switched: this op's files are nobody's. A staged
+         * set's are emptied for the next put, not removed: a remove is a
+         * lookup by name each, half a second on a big partition. */
+        for (int i = 0; i < written_count; i++) {
+            if (change->staged != 0) retire_slot(written[i]);
+            else remove_slot(written[i]);
+        }
     } else {
         result->scene_count = cJSON_GetArraySize(scenes);
-        bool named[FOS_SCENE_STORE_SLOTS] = {false};
-        mark_slots(index, named);
+        fos_scene_store_slots_t named = {{0}};
+        mark_slots(index, &named);
         const cJSON *kept = NULL;
         cJSON_ArrayForEach(kept, old_scenes) {
             if (on_dropped != NULL && find_entry(scenes, entry_id(kept)) == NULL) on_dropped(entry_id(kept), ctx);
             int slot = fos_scene_store_entry_slot(kept);
-            if (slot >= 0 && !named[slot]) result->freed[slot] = true;
+            if (slot >= 0 && !has(&named, slot)) put_slot(&result->freed, slot, true);
+        }
+        /* The staged files are the index's now. */
+        for (int i = 0; i < written_count; i++) put_slot(&s_slot_staged, written[i], false);
+        /* A staged scene the new index does not name (a patch's order left it
+         * out) is nobody's. */
+        for (int i = 0; change->staged != 0 && i < written_count; i++) {
+            if (!has(&named, written[i])) retire_slot(written[i]);
         }
     }
+    /* Committed or refused, the staging is over: its files went one way or
+     * the other above. */
+    if (change->staged != 0 && staging(change->staged)) stage_free();
     for (int i = 0; i < fresh_count; i++) cJSON_Delete(fresh[i]);
     cJSON_Delete(index);
     cJSON_Delete(old);
@@ -629,11 +975,54 @@ static fos_scene_store_err_t apply_and_retire(const fos_scene_store_change_t *ch
     fos_scene_store_result_t result;
     fos_scene_store_err_t err = fos_scene_store_apply(change, &result, on_dropped, ctx);
     if (err != FOS_SCENE_STORE_OK) return err;
+    /* Emptying a file is a write for each of its pages: the caller's moment
+     * after each, or 71 scenes dropped held its lock for a minute and a half
+     * (the reTerminal Sticky, 2026-11-18). No index names these any more. */
     for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-        if (result.freed[slot]) retire_slot(slot);
+        if (!has(&result.freed, slot)) continue;
+        retire_slot(slot);
+        if (s_hooks.between) s_hooks.between();
     }
     if (s_hooks.between) s_hooks.between();
     return FOS_SCENE_STORE_OK;
+}
+
+/* What an index entry may come to, written twice (the index and its copy):
+ * the room a whole set written at once asks for beside its scenes. */
+#define AT_ONCE_INDEX_ENTRY_BYTES 1536
+/* How much of a scene is written between two of the caller's moments. */
+#define AT_ONCE_PIECE_BYTES (16 * 1024)
+
+/* The changed scenes of a set written to slot files no index names (the
+ * stage calls), then the index switched to all of them in one change. The
+ * caller's moment (`between`: its lock goes) comes after every piece written,
+ * not only between two scenes: nothing the index names changes until the
+ * last step, so a render reads its scene file all the while. Held from the
+ * first scene to the index, the lock kept a reTerminal Sticky's render
+ * waiting 33 s for a 524 KB set (2026-11-18). */
+static fos_scene_store_err_t apply_set_at_once(const fos_scene_store_put_t *puts, const bool *changed, int count,
+                                               const cJSON *order, const char *source,
+                                               void (*on_dropped)(const char *id, void *ctx), void *ctx)
+{
+    unsigned int id = fos_scene_store_stage_open();
+    if (id == 0) return FOS_SCENE_STORE_ERR_NO_MEMORY;
+    fos_scene_store_err_t err = FOS_SCENE_STORE_OK;
+    for (int i = 0; i < count && err == FOS_SCENE_STORE_OK; i++) {
+        if (!changed[i]) continue;
+        err = fos_scene_store_stage_begin(id);
+        for (size_t at = 0; err == FOS_SCENE_STORE_OK && at < puts[i].len; at += AT_ONCE_PIECE_BYTES) {
+            size_t piece = puts[i].len - at < AT_ONCE_PIECE_BYTES ? puts[i].len - at : AT_ONCE_PIECE_BYTES;
+            err = fos_scene_store_stage_write(id, puts[i].json + at, piece);
+            if (err == FOS_SCENE_STORE_OK && s_hooks.between) s_hooks.between();
+        }
+        if (err == FOS_SCENE_STORE_OK) err = fos_scene_store_stage_end(id, NULL);
+    }
+    if (err != FOS_SCENE_STORE_OK) {
+        fos_scene_store_stage_drop(id);
+        return err;
+    }
+    fos_scene_store_change_t all = {.staged = id, .order = order, .source = source};
+    return apply_and_retire(&all, on_dropped, ctx);
 }
 
 /* The index's ids in its order, as an array; NULL out of memory. */
@@ -656,7 +1045,7 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
 {
     memset(result, 0, sizeof(*result));
     if (count <= 0) return FOS_SCENE_STORE_ERR_LAST_SCENE;
-    if (count > FOS_SCENE_STORE_SLOTS) return FOS_SCENE_STORE_ERR_NO_SLOTS;
+    if (count > FOS_SCENE_STORE_SCENES) return FOS_SCENE_STORE_ERR_NO_SLOTS;
     cJSON *old = fos_scene_store_read_index();
     if (old == NULL) return FOS_SCENE_STORE_ERR_NOT_FOUND;
     const cJSON *old_scenes = cJSON_GetObjectItem(old, "scenes");
@@ -705,6 +1094,37 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
         result->dropped = cJSON_GetArraySize(old_scenes) - cJSON_GetArraySize(keep);
         drops = result->dropped > 0;
     }
+
+    /* With room for every changed scene beside the set as it is: all of them
+     * written, then the index once, order and source with them. Refused for
+     * want of slots or room (nothing is changed then), it goes the long way. */
+    int changes = 0;
+    size_t change_bytes = 0;
+    for (int i = 0; i < count && err == FOS_SCENE_STORE_OK; i++) {
+        if (!changed[i]) continue;
+        changes++;
+        change_bytes += puts[i].len;
+    }
+    if (err == FOS_SCENE_STORE_OK && changes > 1 && s_hooks.has_room != NULL &&
+        s_hooks.has_room(change_bytes + 2 * (size_t)count * AT_ONCE_INDEX_ENTRY_BYTES)) {
+        fos_scene_store_err_t once = apply_set_at_once(puts, changed, count, order, source, on_dropped, ctx);
+        if (once == FOS_SCENE_STORE_OK) {
+            result->at_once = true;
+            result->written = changes;
+            result->written_bytes = change_bytes;
+            result->scene_count = count;
+            result->kept = count - changes;
+            cJSON_Delete(keep);
+            cJSON_Delete(order);
+            free(changed);
+            free(id_list);
+            free(ids);
+            cJSON_Delete(old);
+            return FOS_SCENE_STORE_OK;
+        }
+        if (once != FOS_SCENE_STORE_ERR_NO_SLOTS && once != FOS_SCENE_STORE_ERR_NO_SPACE) err = once;
+    }
+
     if (err == FOS_SCENE_STORE_OK && drops && cJSON_GetArraySize(keep) > 0) {
         fos_scene_store_change_t drop = {.order = keep};
         err = apply_and_retire(&drop, on_dropped, ctx);
@@ -803,27 +1223,34 @@ void fos_scene_store_sweep(void)
 {
     cJSON *index = fos_scene_store_read_index();
     if (cJSON_GetArraySize(cJSON_GetObjectItem(index, "scenes")) > 0) {
-        bool named[FOS_SCENE_STORE_SLOTS] = {false};
-        mark_slots(index, named);
-        /* Every unnamed slot while the store does not know its files (a
-         * boot's sweep: what a crash left), then the ones it wrote: a put's
-         * sweep is one remove, not one per slot. */
-        bool known = s_slot_map_known;
-        if (!known) {
+        fos_scene_store_slots_t named = {{0}};
+        mark_slots(index, &named);
+        /* Every file the index does not name is emptied for the next put: on
+         * the first sweep what a crash left and the spares from before (the
+         * listing does not say which are empty), after it the files a change
+         * stopped naming. A set being read keeps the files it is written to. */
+        learn_slot_files();
+        if (s_old_slot_tmp || !s_slot_map_known) {
             /* Where firmware before 2026.11.6 wrote a slot first; a crash
              * there left up to a whole scene's bytes. */
             char tmp[PATH_LEN];
             path_of(FOS_SCENE_STORE_SLOT_TMP_NAME, tmp);
             remove(tmp);
+            s_old_slot_tmp = false;
         }
         for (int slot = 0; slot < FOS_SCENE_STORE_SLOTS; slot++) {
-            if (named[slot]) {
-                s_slot_file[slot] = true;
-                s_slot_spare[slot] = false;
-            } else if (!known) {
-                remove_slot(slot);
-            } else if (s_slot_file[slot] && !s_slot_spare[slot]) {
+            if (has(&named, slot)) {
+                slot_is(slot, SLOT_FILE);
+            } else if (has(&s_slot_staged, slot)) {
+                continue;
+            } else if (!s_slot_map_known) {
+                remove_slot(slot); /* no listing: asked for by name */
+            } else if (has(&s_slot_file, slot) && !has(&s_slot_spare, slot)) {
                 retire_slot(slot); /* emptied, for the next put */
+                /* The caller's moment: no index names this file, and a slot
+                 * with a file that is not a spare is no put's to take, so
+                 * what was named when the sweep began stays right. */
+                if (s_hooks.between) s_hooks.between();
             }
         }
         s_slot_map_known = true;

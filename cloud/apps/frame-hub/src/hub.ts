@@ -89,7 +89,12 @@ import {
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
-import { buildScenesPatchMessage, patchLeavesPanel, scenesPatchMinVersion } from "../../auth-web/src/lib/scenes-patch";
+import {
+  buildScenesPatchMessage,
+  esp32SceneStoreSlotsFor,
+  patchLeavesPanel,
+  scenesPatchMinVersion,
+} from "../../auth-web/src/lib/scenes-patch";
 import { frameosVersionSatisfies } from "../../auth-web/src/lib/store-versions";
 import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
 import {
@@ -969,6 +974,7 @@ export async function startFrameHub(
           const patch = buildScenesPatchMessage(command, {
             checksum: frame.scenesChecksum,
             hashes: hashes as Record<string, string>,
+            slots: esp32SceneStoreSlotsFor(frame.frameosVersion),
           });
           if (patch) {
             session.patchedCommands.add(command.id);
