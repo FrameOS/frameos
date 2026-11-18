@@ -270,7 +270,7 @@ export function isAppTestFile(name: string): boolean {
 }
 
 // `scenes` with every app's test files taken out of its `sources`, in place:
-// an ESP32 keeps all its scenes in 512 KiB and never runs them.
+// an ESP32 keeps its scenes on a small flash partition and never runs them.
 export function stripAppTestFiles<T>(scenes: T[]): T[] {
   for (const scene of scenes) {
     const apps = (scene as { apps?: unknown }).apps;

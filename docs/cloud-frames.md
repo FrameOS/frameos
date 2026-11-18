@@ -311,9 +311,12 @@ provider can tell a smaller profile apart from a protocol violation.
 
 Message size: providers and devices both cap a single text frame. A device
 may cap lower than the provider — the ESP32 firmware refuses anything over
-**512 KiB** (its whole on-device scene store is 512 KiB) and acks
+**512 KiB** (a message is held in memory whole) and acks
 `message_too_large`. Providers should keep pushes well under the smallest
-profile they target rather than relying on the cap.
+profile they target rather than relying on the cap. The cap is on one
+message, not on what a frame stores: from 2026.11.12 an ESP32 keeps as many
+scenes as its state partition has room for (up to 128), and a set past
+512 KiB reaches it a `scenes_patch` at a time.
 
 ### Session start
 
@@ -712,7 +715,7 @@ should drop the batch and keep going rather than reconnect.
 Both ends cap inbound message size and close the socket rather than allocate
 past it. The reference provider caps frames at **4 MiB**; a device may cap
 lower and refuse with `message_too_large` (the ESP32 profile caps at 512 KiB,
-tied to its scene store) — so a provider must be prepared for a `set_scenes`
+what it holds in memory for one message) — so a provider must be prepared for a `set_scenes`
 push to be refused on size by a small device, and should bound the payloads it
 enqueues accordingly rather than relying on the device to absorb them. A
 provider that must shed a slow consumer closes with WebSocket code **1013**

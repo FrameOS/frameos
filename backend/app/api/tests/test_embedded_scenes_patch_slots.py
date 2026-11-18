@@ -3,15 +3,22 @@ whole list goes up front (embedded/esp32/README.md "Scene storage").
 
 A patch is one change in fos_scene_store.c: each put goes to a new slot while
 every scene the board holds keeps its own until the index switches. 25 scenes
-held and 24 changed need 49 of the 32 slots; the board answered
-`no free scene slot` and asked for the whole list anyway."""
+held and 24 changed need 49 of the 32 slots firmware before 2026.11.12 has;
+the board answered `no free scene slot` and asked for the whole list anyway.
+From 2026.11.12 a store has 256 slots for the 128 scenes a set holds, and the
+same change is a patch."""
 
 import re
 from pathlib import Path
 
 import pytest
 
-from app.api.embedded_device import ESP32_SCENE_STORE_SLOTS
+from app.api.embedded_device import (
+    ESP32_SCENE_STORE_SLOTS,
+    ESP32_SCENE_STORE_SLOTS_BEFORE,
+    ESP32_SCENE_STORE_SLOTS_VERSION,
+    esp32_scene_store_slots,
+)
 
 from .test_embedded_device import auth, device_frame
 
@@ -25,6 +32,23 @@ def test_the_slot_count_is_the_firmwares_and_the_clouds():
     cloud = (ROOT / "cloud/apps/auth-web/src/lib/scenes-patch.ts").read_text()
     mirrored = re.search(r"export const esp32SceneStoreSlots = (\d+);", cloud)
     assert mirrored and int(mirrored.group(1)) == ESP32_SCENE_STORE_SLOTS
+    # And both planes say the same of the firmware before it.
+    before = re.search(r"export const esp32SceneStoreSlotsBefore = (\d+);", cloud)
+    assert before and int(before.group(1)) == ESP32_SCENE_STORE_SLOTS_BEFORE
+    since = re.search(r'export const esp32SceneStoreSlotsVersion = "([0-9.]+)";', cloud)
+    assert since and since.group(1) == ESP32_SCENE_STORE_SLOTS_VERSION
+    # A set holds half as many scenes as the store has slots.
+    scenes_max = re.search(r"#define\s+FOS_SCENE_STORE_SCENES\s+(\d+)", header)
+    assert scenes_max and 2 * int(scenes_max.group(1)) == ESP32_SCENE_STORE_SLOTS
+
+
+def test_the_slots_follow_the_firmware_a_board_runs():
+    assert esp32_scene_store_slots("2026.11.11") == 32
+    assert esp32_scene_store_slots("2026.11.12") == ESP32_SCENE_STORE_SLOTS
+    assert esp32_scene_store_slots("v2026.12.0+abc") == ESP32_SCENE_STORE_SLOTS
+    # Not known: the fewest, a patch that fits any board.
+    assert esp32_scene_store_slots(None) == 32
+    assert esp32_scene_store_slots("dev") == 32
 
 
 def scenes(count: int, name: str = "") -> list[dict]:
@@ -58,6 +82,25 @@ async def test_a_patch_that_does_not_fit_the_slots_is_the_whole_list(async_clien
     assert body["patch"] is True
     assert len(body["put"]) == 7
     assert len(body["order"]) == 25
+
+
+@pytest.mark.asyncio
+async def test_a_board_with_the_slots_gets_the_same_change_as_a_patch(async_client, no_auth_client, db, redis):
+    """2026.11.12 on: 256 slots for the 128 scenes a set holds, so 25 scenes
+    held and 24 changed are a patch, not the whole list."""
+    frame = await device_frame(async_client, db)
+    frame.embedded = {**(frame.embedded or {}), "lastBoot": {"frameosVersion": "2026.11.12"}}
+    frame.scenes = scenes(25)
+    db.commit()
+    url = f"/api/frames/{frame.id}/embedded/scenes?patch=1"
+    first = await no_auth_client.get(url, headers=auth(frame))
+    etag = first.headers["etag"]
+    frame.scenes = [scenes(25)[0], *scenes(25, " laid out")[1:]]
+    db.commit()
+    patch = await no_auth_client.get(url, headers={**auth(frame), "If-None-Match": etag})
+    body = patch.json()
+    assert body["patch"] is True
+    assert len(body["put"]) == 24 and len(body["order"]) == 25
 
 
 @pytest.mark.asyncio

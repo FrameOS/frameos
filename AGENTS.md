@@ -423,8 +423,28 @@
   queued `set_scenes` carries them, never a second command); on a backend the
   switch rides the queue behind a forced pull that still asks for a patch. The
   device writes a change that activates its scene unpaced (`s_store_urgent`).
+- **A set is as big as `/state` has room for, in up to 128 scenes** (256 slot
+  files, so a change to every scene fits beside the set; the README's "How
+  big a set may be"). What is HELD in memory stays 512 KB
+  (`SCENES_HELD_MAX_BYTES`: a producer's whole payload, a backend answer in
+  blocks); a backend answer over it, or one there was no block for, is read
+  straight into slot files no index names (`fos_scene_pieces_read_to`, the
+  store's `stage` calls, what the index keeps read off the bytes by
+  `fos_scene_meta.c`) and committed as one change on the render task. A new
+  way to bring a set in goes through the staging or the one-scene calls,
+  never a bigger block. One staging at a time; a staged file is no sweep's
+  and no put's. The planes know the slots by the firmware a board runs
+  (`esp32_scene_store_slots`, `esp32SceneStoreSlotsFor`): change the header
+  and both together.
+- Flash is erased before it is written, and finding what to erase must not
+  cost a walk of the partition per block: `fos_spiffs_gc.c` walks once, from
+  where it stopped. Emptying files is a write a page too: the store task does
+  it (`store_sweep_behind`), and every long hold of the store lock lets go
+  between files or 16 KB pieces (`between`), because a render reads its scene
+  file under that lock.
 - A SPIFFS lookup by name (stat/open/remove/rename) is ~0.5 s on the 32 MB
-  boards' 24 MB `/state`: the store knows its slot files after the boot sweep,
+  boards' 24 MB `/state`: the store lists the directory once to learn its slot
+  files (never one lookup a slot: 256 of them were two minutes of a boot),
   writes slots straight to their names and the index as a kept copy then in
   place. Remove the index and slots ONLY through the store
   (`fos_scene_store_remove_index` / `_remove_slots`; a wipe calls

@@ -21,8 +21,34 @@ export const esp32PushedStateMinVersion = "2026.11.6";
 // The ESP32 scene store's slot files (FOS_SCENE_STORE_SLOTS in
 // embedded/esp32/main/fos_scene_store.h; the backend's
 // ESP32_SCENE_STORE_SLOTS). scenes-patch.test.ts and the backend's
-// test_embedded_scenes_patch_slots.py read the header.
-export const esp32SceneStoreSlots = 32;
+// test_embedded_scenes_patch_slots.py read the header. 256 from 2026.11.12,
+// twice the 128 scenes a set holds there, so a change to every scene fits
+// beside the set; 32 on the firmware before it, and on one whose version is
+// not known.
+export const esp32SceneStoreSlots = 256;
+export const esp32SceneStoreSlotsBefore = 32;
+export const esp32SceneStoreSlotsVersion = "2026.11.12";
+
+function versionParts(version: string | null | undefined): number[] | null {
+  const match = typeof version === "string" ? /^v?(\d+(?:\.\d+)*)/.exec(version.trim()) : null;
+  return match ? match[1].split(".").map(Number) : null;
+}
+
+/** The slot files of the scene store on a board running `frameosVersion`. */
+export function esp32SceneStoreSlotsFor(frameosVersion: string | null | undefined): number {
+  const runs = versionParts(frameosVersion);
+  const first = versionParts(esp32SceneStoreSlotsVersion) as number[];
+  if (runs === null) {
+    return esp32SceneStoreSlotsBefore;
+  }
+  for (let i = 0; i < Math.max(runs.length, first.length); i++) {
+    const difference = (runs[i] ?? 0) - (first[i] ?? 0);
+    if (difference !== 0) {
+      return difference > 0 ? esp32SceneStoreSlots : esp32SceneStoreSlotsBefore;
+    }
+  }
+  return esp32SceneStoreSlots;
+}
 
 function sceneId(scene: unknown): string | null {
   if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
@@ -67,11 +93,13 @@ export function sceneHashes(scenes: readonly unknown[]): Record<string, string> 
 
 /**
  * The verb to send in place of a set_scenes row, or null to send the whole list.
- * `base` is the set the frame holds: its checksum and each scene's digest.
+ * `base` is the set the frame holds: its checksum and each scene's digest, and
+ * the slot files its store has (esp32SceneStoreSlotsFor its firmware; the
+ * fewest when it is not said).
  */
 export function buildScenesPatchMessage(
   command: { id: string; payload: unknown },
-  base: { checksum: string; hashes: Record<string, string> },
+  base: { checksum: string; hashes: Record<string, string>; slots?: number },
 ): Record<string, unknown> | null {
   const payload = command.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -94,7 +122,7 @@ export function buildScenesPatchMessage(
   // every scene it holds keeps its own until the index switches. One that
   // cannot fit would be refused ("no free scene slot") and cost a round trip;
   // the whole list is written a scene at a time and fits.
-  if (Object.keys(base.hashes).length + put.length > esp32SceneStoreSlots) {
+  if (Object.keys(base.hashes).length + put.length > (base.slots ?? esp32SceneStoreSlotsBefore)) {
     return null;
   }
   return {

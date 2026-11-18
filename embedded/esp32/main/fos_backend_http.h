@@ -32,6 +32,14 @@ typedef struct {
     /* Not NULL: a 200's body is read into it, each scene in a block of its
      * own (fos_scene_pieces.h), and `body` stays NULL. */
     fos_scene_set_t *scene_set;
+    /* With `scene_set`, not NULL: an answer declared over `scene_held_max`
+     * bytes (any answer when that is 0) is not held at all: each scene goes
+     * to the sink as it is read (fos_scene_pieces_read_to), up to `max_body`,
+     * and `spooled` says so. Held, it may be `scene_held_max` at most. */
+    const fos_scene_sink_t *scene_sink;
+    size_t scene_held_max;
+    /* Not NULL or empty: a 200 with this ETag is not read (`skipped`). */
+    const char *skip_etag;
 } fos_http_request_t;
 
 typedef struct {
@@ -43,8 +51,10 @@ typedef struct {
     size_t body_len;
     /* Why a body that came was not read (NULL body, not too_large):
      * ESP_ERR_NO_MEM, no buffer for it; ESP_ERR_INVALID_RESPONSE, not what
-     * a scene_set takes; otherwise the read failed. */
+     * a scene_set takes (or its sink refused it); otherwise the read failed. */
     esp_err_t body_err;
+    bool spooled;           /* the scenes went to `scene_sink`, whatever became of the read */
+    bool skipped;           /* its ETag was `skip_etag`: not read */
 } fos_http_response_t;
 
 /* Perform the request. ESP_OK means an answer came (any status, including

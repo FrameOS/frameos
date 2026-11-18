@@ -818,9 +818,11 @@ and wipes the `/state` partition (scenes with whatever secrets their node
 fields carried, the schedule, cached payloads); the SD card is the owner's
 and is left alone (`sd format` if it should go too).
 
-A single management WebSocket message is capped at **512 KiB** (the same
-ceiling as the on-device scene store); larger frames are dropped and acked
-`message_too_large`.
+A single management WebSocket message is capped at **512 KiB**: it is held
+in memory whole, with its JSON tree beside it. Larger frames are dropped and
+acked `message_too_large`. The cap is on one message, not on what the frame
+stores ("How big a set may be" below): a set grows past it a `scenes_patch`
+at a time.
 
 Secrets at rest: `cloud_sk` (the Ed25519 seed), `cloud_token`, the unspent
 claim token and the WiFi PSK live in NVS in plaintext unless the board is
@@ -1512,9 +1514,10 @@ Scenes arrive as one combined `scenes.json` — from the USB upload, the
 backend sync or the cloud's `set_scenes` — and that stays the wire format.
 The device does **not** keep them that way. The payload is split into
 `/state/scene-<slot>.json` plus `/state/scene-index.json`, the old set's
-slots going first and the combined file last (the `state` partition is 1M
-and a payload may be 512K: the old set, the new one and the combined file do
-not fit together), and only the **active** scene is parsed and resident. A
+slots going first and the combined file last (an 8 MB board's `state`
+partition is 1M and a payload held in memory may be 512K: the old set, the
+new one and the combined file do not fit together), and only the **active**
+scene is parsed and resident. A
 push or an upload is stored by the task that received it (the cloud, HTTP or
 the console) and split by the scene store's own task (`store_split_stored`),
 paced around renders and taps like every write off the render task
@@ -1564,11 +1567,95 @@ reboot.
 Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
 32 and a scene id is a 36-character uuid: `/<uuid>.json` cannot be opened at
 all. The id ↔ slot mapping lives in the index. Every failure path (an
-unsplittable payload, more than 32 scenes, a full partition) falls back to
-loading the combined file whole, so a frame cannot lose its scenes to a
-failed optimization; the index of the set it had stays until that payload
-has loaded, and one the runtime refuses too is dropped for the set from
-before.
+unsplittable payload, more scenes than a set holds, a full partition) falls
+back to loading the combined file whole, so a frame cannot lose its scenes
+to a failed optimization; the index of the set it had stays until that
+payload has loaded, and one the runtime refuses too is dropped for the set
+from before.
+
+### How big a set may be (2026.11.12)
+
+**As big as `/state` has room for, in up to 128 scenes**
+(`FOS_SCENE_STORE_SCENES`: the index keeps an icon of up to a kilobyte for
+each and is read whole for every catalog, which is what bounds the count).
+The store has twice as many slot files (`FOS_SCENE_STORE_SLOTS`, 256), so a
+change to every scene of a full set fits beside the set it replaces until
+the index switches. Both planes send such a change as a patch to a board on
+2026.11.12 and keep to the 32 slots of the firmware before it
+(`esp32_scene_store_slots`, `esp32SceneStoreSlotsFor`). Until then a set was
+512 KB and 32 scenes whatever the partition: a reTerminal Sticky refused
+529 KB with 14 MB of its 24 MB `/state` free (`payload-too-large`, the
+hardware bench, 2026-11-18). It holds 97 scenes and 2.3 MB now, and a
+reTerminal E1002 17 scenes and 680 KB on its 1 MB `/state`.
+
+What is **held in memory** is still bounded, at 512 KB
+(`SCENES_HELD_MAX_BYTES`): a whole payload a producer hands over in one
+block (a USB or HTTP upload, one cloud message: the per-scene routes below
+and `scenes_patch` take a bigger set a scene at a time) and a backend's
+answer read into blocks. **A backend's answer over that, or one there was no
+block for, is read straight into the store** (`fos_scenes_backend_fetch`,
+the `spool_*` sink):
+
+- `fos_scene_pieces_read_to` hands each scene's bytes to a sink as they come
+  off the socket, a read's worth at a time, and holds none.
+- The store writes them to a slot file no index names
+  (`fos_scene_store_stage_*`), with the file's hash and what the index keeps
+  of the scene read off the bytes as they go by (`fos_scene_meta.c`: the
+  top-level scalars and the settings' scalars as their own text, which cJSON
+  then reads; host-tested against the whole parse of every repo sample).
+- A scene that arrives as it is stored (the same hash and length) gives its
+  file back and keeps its slot, so the scene on the panel reloads only if it
+  changed.
+- The render task switches the index to all of them in one change
+  (`fos_scenes_take_backend_payload`), as a patch that names every scene.
+  Nothing the index names changes before that.
+
+Memory holds a read's worth of bytes throughout: the reTerminal E1004 had no
+block for one scene of a 465 KB set while its 13.3" render had its PSRAM cut
+up (`no-memory`), and that read is tried again this way. One staging at a
+time: an answer waits in its socket for a set the store task is still
+writing. `scenes:toStore` logs the scenes, the bytes and where the time went
+(opening the files, writing, closing).
+
+What the store cannot take is said once: `payload-too-large` (more than
+`/state` has room for, nothing of it read), `no-room`, `too-many-scenes`,
+`invalid`. That answer is not read again until its ETag changes, the frame
+restarts or, where room was what it wanted, `/state` has that much: a
+backend asks for a sync with every commands answer while the frame is
+behind. On a small partition a set that replaces most of the one before has
+no room beside it (a 1 MB `/state` holding 680 KB takes 120 KB more): where
+`/state` could hold it and memory has twice its size, it is read once more,
+held, and stored a scene at a time, the scenes it drops first.
+
+**One index write for a set, where there is room.** A whole set held in
+memory goes into a per-scene store as changes (above). With room on `/state`
+for every changed scene beside the set as it is (`has_room`, and slots for
+them), they are written to unnamed slots and the index is switched once
+(`apply_set_at_once`); without it, one scene at a time as before. A step a
+scene writes the index twice per scene: for 26 scenes that was three times
+the bytes of the set, and a 525 KB set took 112 s on the Sticky. The store's
+lock goes after every 16 KB written, so a render reads its scene file all
+the while (held for the whole set it kept a render waiting 33 s). The files
+a change stops naming are emptied by the store task, the lock let go after
+each (`store_sweep_behind`): emptying is a flash write for every page, and
+71 dropped scenes were a minute and a half of it.
+
+**Making room is one walk of the partition** (`fos_spiffs_gc.c`). Flash is
+erased a 4 KB block at a time before it is written, and the blocks that hold
+nothing but deleted pages are found by walking the partition's lookup
+entries once, going on from where the last walk stopped. SPIFFS's own quick
+collector starts at block 0 for every block it erases: on a 24 MB `/state`
+that was 48 of the 71 s a 529 KB set took to store, and the same set takes
+14 s now (8 s of erasing, 5 s of writing). The walk also spreads the erases:
+in the host test's thirty uploads the most-erased block went from 52 erases
+to 18. A file is written through an 8 KB buffer, because SPIFFS rewrites its
+index header page at the end of every write call.
+
+**What still costs.** A slot file's first creation is about a second on a
+24 MB partition (SPIFFS walks it three times inside `open`: for the name,
+and twice for a free object id), so the first set that needs 70 new slots
+spends 75 s creating them; they are emptied and kept after that, and opening
+one is milliseconds.
 
 ### One scene at a time
 
@@ -1614,8 +1701,11 @@ same switch `set_current_scene` makes (`select_pushed_scene`).
 about 25 ms on a 1 MB `/state`, about half a second on the 32 MB boards' 24 MB
 one, where a one-scene put used to take 10 s with 0.3 s of it writing data
 (the reTerminal Sticky, 2026-11-10). So the store asks flash as little as it
-can (`fos_scene_store.h`): it knows its slot files after the boot's sweep
-(which still removes everything the index does not name), a slot is written
+can (`fos_scene_store.h`): it lists the directory once, the first time it
+needs to know which slot files there are (a boot's sweep, which empties
+everything the index does not name: asked for by name, 256 slots were two
+minutes of every boot, and the Sticky's bootup event came 2.5 s sooner with
+97 scenes than it did with 26), a slot is written
 straight to its own name (the index switch is the commit), and the index is
 written as a copy (`scene-index.tmp`, kept) and then in place, readers taking
 the copy when the index is torn; `fos_scenes.c` tracks whether a combined

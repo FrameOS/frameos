@@ -17,7 +17,11 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 MAIN_DIR = REPO_ROOT / "embedded" / "esp32" / "main"
 SOURCE = MAIN_DIR / "fos_scene_store.c"
 GUARD_SOURCE = MAIN_DIR / "fos_json_guard.c"
+# What the index keeps of a scene written as it arrives (fos_scene_meta.c).
+META_SOURCE = MAIN_DIR / "fos_scene_meta.c"
+META_TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_scene_meta.c"
 TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_scene_store.c"
+SAMPLES_DIR = REPO_ROOT / "repo" / "scenes" / "samples"
 
 
 def cjson_dir() -> Path | None:
@@ -35,14 +39,16 @@ def test_sources_exist():
 
 
 def test_store_module_is_pure():
-    source = SOURCE.read_text()
-    assert "esp_" not in source, "fos_scene_store.c must not pull in IDF headers or calls"
-    assert "freertos" not in source
+    for path in (SOURCE, META_SOURCE):
+        source = path.read_text()
+        assert "esp_" not in source, f"{path.name} must not pull in IDF headers or calls"
+        assert "freertos" not in source
 
 
 def test_the_workflow_builds_it():
     workflow = (REPO_ROOT / ".github" / "workflows" / "e2e-docker.yml").read_text()
     assert "tests/test_fos_scene_store.c" in workflow
+    assert "tests/test_fos_scene_meta.c" in workflow
 
 
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
@@ -55,7 +61,7 @@ def test_scene_store_host_tests_pass(tmp_path: Path):
         [
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
             "-I", str(MAIN_DIR), "-I", str(cjson),
-            str(cjson / "cJSON.c"), str(GUARD_SOURCE), str(SOURCE), str(TEST_SOURCE),
+            str(cjson / "cJSON.c"), str(GUARD_SOURCE), str(META_SOURCE), str(SOURCE), str(TEST_SOURCE),
             "-lm", "-o", str(binary),
         ],
         capture_output=True,
@@ -63,6 +69,33 @@ def test_scene_store_host_tests_pass(tmp_path: Path):
     )
     assert compile_result.returncode == 0, compile_result.stderr
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
+@pytest.mark.skipif(cjson_dir() is None, reason="no ESP-IDF checkout (IDF_PATH) for cJSON")
+def test_what_the_index_keeps_is_read_off_every_sample_scene(tmp_path: Path):
+    """A scene written to flash as it arrives is never parsed whole: what the
+    index keeps of it (its id, its name, whether it is a layout, its icon) is
+    read off its bytes as they go by. Every repo sample, compact and spread
+    out, reads the same that way as from its whole tree."""
+    cjson = cjson_dir()
+    assert cjson is not None
+    binary = tmp_path / "test_fos_scene_meta"
+    compile_result = subprocess.run(
+        [
+            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+            "-I", str(MAIN_DIR), "-I", str(cjson),
+            str(cjson / "cJSON.c"), str(META_SOURCE), str(META_TEST_SOURCE),
+            "-lm", "-o", str(binary),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert compile_result.returncode == 0, compile_result.stderr
+    samples = sorted(str(path) for path in SAMPLES_DIR.glob("*/scenes.json"))
+    assert len(samples) > 50
+    result = subprocess.run([str(binary), *samples], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -184,7 +217,7 @@ def test_a_whole_set_goes_into_a_per_scene_store_as_changes():
     assert order == sorted(order), "store_backend_payload: as changes, else whole"
     # The index it wrote is the new set's; and a set written store-first was
     # split from its scenes, so the index is the new set's then too.
-    assert "if (!as_changes && !job->reload) fos_scene_store_remove_index();" in backend, (
+    assert "if (!as_changes && !split && !job->reload) fos_scene_store_remove_index();" in backend, (
         "the index it wrote is the new set's"
     )
     # The render task's read of a scene file meets no file the store task is
@@ -266,7 +299,104 @@ def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     assert ".scene_set = pieces," in fns["fos_scenes_backend_fetch"]
     patch = fns["apply_backend_patch"]
     assert "cJSON_ParseWithLength(set->rest, set->rest_len)" in patch
-    assert ".puts = set_puts(set, puts)" in patch
+    assert "change.puts = set_puts(set, puts)" in patch
+
+
+def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
+    """A set was 512 KB and 32 scenes whatever the partition: a reTerminal
+    Sticky refused 529 KB with 14 MB of its 24 MB /state free
+    (`payload-too-large`), and a reTerminal E1004 had no block for one scene
+    of a 465 KB set (`no-memory`; the hardware bench, 2026-11-18). An answer
+    over what is held in memory, or one there was no block for, goes to a
+    sink that writes each scene to a slot file no index names
+    (fos_scene_store_stage_*, host-tested), and the render task switches the
+    index to them in one change."""
+    http = _functions(_source("fos_backend_http.c"))
+    read = http["read_body"]
+    assert "fos_scene_pieces_read_to(res->content_length, max_body, &io, req->scene_sink, req->scene_set)" in read
+    assert "req->scene_held_max == 0 || res->content_length > (int64_t)req->scene_held_max" in read
+    assert "res->spooled = true;" in read
+    # An answer the store refused is told by its ETag before its body is read.
+    fetch_http = http["fos_http_fetch"]
+    assert fetch_http.index("res->skipped = true;") < fetch_http.index("read_body(client, max_body, req, res);")
+
+    scenes = _source("fos_scenes.c")
+    fns = _functions(scenes)
+    fetch = fns["fos_scenes_backend_fetch"]
+    assert ".scene_sink = how == READ_HELD ? NULL : &sink," in fetch
+    assert ".scene_held_max = how == READ_EITHER ? SCENES_HELD_MAX_BYTES : 0," in fetch
+    # No block for a scene held in memory: once more, into the store.
+    assert "how = READ_TO_STORE;" in fetch and "how = READ_HELD;" in fetch
+    # What the store took of an answer that then failed goes back, and a set
+    # it could not take is not read again.
+    assert fetch.index("fos_scene_store_stage_drop(spool.id);") < fetch.index("refused_set(response.etag, spool.err")
+    assert "if (response.spooled) set->staged = spool.id;" in fetch
+    assert "if (force) refused_set" not in fetch, "a backend asks for a sync with every commands answer"
+
+    # The sink: the lock for each call, never across them, and the store
+    # task's own staging first.
+    begin = fns["spool_begin"]
+    assert begin.index("fos_scenes_store_wait(SPOOL_STORE_WAIT_MS)") < begin.index("store_lock()")
+    assert begin.index("fos_scene_store_stage_open()") < begin.index("fos_scene_store_stage_begin(spool->id)")
+    for name, call in (("spool_begin", "fos_scene_store_stage_begin("), ("spool_bytes", "fos_scene_store_stage_write("),
+                       ("spool_end", "fos_scene_store_stage_end(")):
+        body = fns[name]
+        assert body.index("store_lock()") < body.index(call) < body.rindex("store_unlock()"), name
+    # A staging that is gone is another set stored meanwhile, not a bad scene.
+    assert "!fos_scene_store_staging(spool->id)) spool->busy = true;" in fns["spool_answer"]
+
+    # Committed on the render task as one change; a set never committed gives
+    # its files back.
+    take = fns["fos_scenes_take_backend_payload"]
+    assert "fos_scene_store_change_t change = {.staged = set->staged};" in take
+    assert take.index("if (set->staged != 0)") < take.index("runtime_room_for_whole(len)")
+    assert "fos_scene_store_change_t change = {.order = order, .staged = set->staged};" in fns["apply_backend_patch"]
+    free_set = fns["scene_set_free"]
+    assert free_set.index("store_lock()") < free_set.index("fos_scene_store_stage_drop(set->staged)")
+    # More than one file may be never becomes a combined file.
+    store = fns["store_backend_payload"]
+    assert store.index("set->bytes > FOS_SCENE_STORE_MAX_BYTES") < store.index("fos_scene_store_write_set(SCENES_PATH")
+    assert "(512 * 1024)" in scenes and "SCENES_MAX_BYTES" not in scenes.replace("FOS_SCENE_STORE_MAX_BYTES", "")
+
+
+def test_old_scene_files_are_emptied_off_the_render_task():
+    """Emptying a file is a flash write for each of its pages. The files a
+    change stops naming were emptied by the render task's apply, before its
+    render (25 scenes replaced: seconds), and 71 dropped scenes held the
+    store's lock a minute and a half on the store task (the reTerminal
+    Sticky, 2026-11-18). The store task empties them, and lets the lock go
+    after each."""
+    fns = _functions(_source("fos_scenes.c"))
+    apply = fns["apply_index_change"]
+    assert "if (!store_sweep_behind()) fos_scene_store_sweep();" in apply
+    assert apply.index("if (!s_patch_pending) {") < apply.index("store_sweep_behind()")
+    sweep = fns["store_sweep"]
+    order = [sweep.index(s) for s in (
+        "store_lock()", "if (!s_patch_pending && !s_store_changing)", "fos_scene_store_sweep()", "store_unlock()")]
+    assert order == sorted(order), "the sweep waits for the apply of a change made since"
+    assert "store_sweep();" in fns["store_task"]
+    # The boot's sweep holds the lock the store's `between` lets go.
+    init = fns["fos_scenes_init"]
+    assert init.index("store_lock();") < init.index("fos_scene_store_sweep();") < init.index("store_unlock();")
+    store = _functions(_source("fos_scene_store.c"))
+    assert "if (s_hooks.between) s_hooks.between();" in store["fos_scene_store_sweep"]
+    assert store["apply_and_retire"].count("if (s_hooks.between) s_hooks.between();") == 2
+    # One listing, never a lookup a slot.
+    assert "opendir(s_dir)" in store["learn_slot_files"]
+
+
+def test_room_on_state_is_made_in_one_walk():
+    """SPIFFS_gc_quick starts at block 0 for every block it erases: 48 of the
+    71 s a 529 KB set took to store on a 24 MB /state (the reTerminal Sticky,
+    2026-11-18). fos_spiffs_gc.c walks the partition once, from where the last
+    walk stopped (host-tested: test_fos_spiffs_gc.c)."""
+    source = _source("fos_spiffs_gc.c")
+    assert "SPIFFS_gc_quick(" not in source
+    fns = _functions(source)
+    walk = fns["erase_deleted_blocks"]
+    assert "s_walk_block = (spiffs_block_ix)((s_walk_block + 1) % fs->block_count);" in walk
+    assert walk.index("SPIFFS_LOCK(fs)") < walk.index("erase_deleted_block(fs, bix)") < walk.index("SPIFFS_UNLOCK(fs)")
+    assert "erase_deleted_blocks(fs, size)" in fns["__wrap_SPIFFS_gc"]
 
 
 def test_a_paced_write_gives_way_to_a_render_task_waiting_for_the_store():
@@ -326,7 +456,8 @@ def test_a_forced_backend_sync_still_asks_for_a_patch():
     assert "bool holds_set = s_slot_count > 0 || s_loaded > 0;" in fetch
     # A set fetched and not taken yet is named whatever the rest says (one
     # fetch at a time: test_esp32_backend_link.py).
-    assert '.if_none_match = (fetched || (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set))) ? etag : NULL' in fetch
+    assert 'held = (fetched || (etag[0] && strcmp(etag, "local") != 0 && (!force || holds_set))) ? etag : NULL' in fetch
+    assert ".if_none_match = held," in fetch
     assert "/embedded/scenes?patch=1" in fetch
 
 

@@ -81,8 +81,9 @@ static const char *NVS_NS = "frameos";
 #define FOS_CLOUD_TASK_STACK 8192
 /* Device cap on a single management WebSocket text frame. Deliberately well
  * under the provider-side limit: the reassembly buffer plus the cJSON tree of
- * a max-size set_scenes already crowd an ESP32, and /state itself only holds
- * SCENES_MAX_BYTES (512 KiB) of scene JSON. */
+ * a max-size set_scenes already crowd an ESP32. It bounds one message, not
+ * what the frame stores: a set grows past it a scenes_patch at a time, as
+ * far as /state has room (fos_scene_store.h). */
 #define FOS_CLOUD_WS_MAX_MSG (512 * 1024)
 #define FOS_CLOUD_NONCE_MAX 256
 /* WS redial: jittered exponential backoff per docs/cloud-frames.md. */
@@ -2219,7 +2220,7 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
  * straight to the storage layer. Going through
  * fos_http_store_uploaded_scenes_payload() would reprint the whole envelope,
  * then parse and print it a second time inside that function — four to five
- * copies live at once on a device whose scene store tops out at 512 KiB.
+ * copies live at once of a message that may be 512 KiB.
  *
  * scenes_patch (`patch`): the same set the full push would have sent, as the
  * difference from the one this frame holds. `base_checksum` names that set; a

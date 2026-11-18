@@ -30,6 +30,7 @@ idf_component_register(
         "fos_code.c"
         "fos_store_scan.c"
         "fos_http_body.c"
+        "fos_scene_meta.c"
         "fos_scene_pieces.c"
         "fos_http.c"
         "fos_animation.c"

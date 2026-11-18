@@ -78,7 +78,7 @@ typedef struct {
     char preview_id[SCENE_ID_LEN];
     char preview_name[NAME_LEN];
     char preview_from[SCENE_ID_LEN];
-    origin_t origins[FOS_SCENE_STORE_SLOTS];
+    origin_t origins[FOS_SCENE_STORE_SCENES];
     int origin_count;
     uint32_t origins_generation;
     /* The work asked for, until the task takes it. */
@@ -371,15 +371,15 @@ static bool scan_origins(void)
     bool changed = false;
     uint32_t generation = fos_scenes_store_generation();
     cJSON *index = fos_scenes_read_index();
-    origin_t *found = fos_big_malloc(sizeof(origin_t) * FOS_SCENE_STORE_SLOTS);
+    origin_t *found = fos_big_malloc(sizeof(origin_t) * FOS_SCENE_STORE_SCENES);
     /* Zeroed: the rows are compared whole with the last read's. */
-    if (found != NULL) memset(found, 0, sizeof(origin_t) * FOS_SCENE_STORE_SLOTS);
+    if (found != NULL) memset(found, 0, sizeof(origin_t) * FOS_SCENE_STORE_SCENES);
     int count = 0;
     const cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(index, "scenes")) {
         const cJSON *id = cJSON_GetObjectItem(entry, "id");
         const cJSON *hash = cJSON_GetObjectItem(entry, "hash");
-        if (found == NULL || count >= FOS_SCENE_STORE_SLOTS || !cJSON_IsString(id)) continue;
+        if (found == NULL || count >= FOS_SCENE_STORE_SCENES || !cJSON_IsString(id)) continue;
         origin_t *row = &found[count];
         snprintf(row->id, sizeof(row->id), "%s", id->valuestring);
         row->hash = cJSON_IsNumber(hash) ? hash->valuedouble : -1;

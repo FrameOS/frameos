@@ -111,7 +111,7 @@ def test_retired_app_config_is_the_replacements_config():
 
 
 def test_embedded_runtime_gets_no_app_test_files():
-    """An ESP32 keeps every scene in 512 KiB and never runs an app's tests
+    """An ESP32 keeps its scenes on a small flash partition and never runs an app's tests
     (docs/js-apps-and-code-nodes.md, "Testing an app")."""
     from app.utils.retired_apps import is_app_test_file, scenes_for_embedded_runtime, strip_app_test_files
 
