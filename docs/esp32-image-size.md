@@ -852,3 +852,297 @@ the locale table and their literals.
   planes add each clock's pattern translated to chrono's on delivery
   (−15,520): three translators and a delivery rule for one app. Retiring it
   is what the other Nim apps with a JS replacement did.
+
+---
+
+# Calls, alignment and strings: how the image is laid out (2026-11-18)
+
+*Same recipe (`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, `ci_build_image.sh` in
+`frameos-esp32-ci-local`). Main at 93522727d builds at 3,264,288 bytes, 90.6%
+of the slot. Link-only variants are relinks of that build: its link line with
+one more flag, `esptool elf2image` after it, which gives back the build's own
+image byte for byte when nothing is added.*
+
+**3,264,288 → 3,125,904 bytes (−138,384, −4.2%). OTA slot 90.6% → 86.7%
+full, 478 KB free.** No source of the runtime changed for the first three
+rows: the same objects, placed and assembled differently, and on a board the
+image is a little faster, not slower.
+
+| Cut | Saves | Behaviour |
+|---|---:|---|
+| Objects in an order that keeps callers near what they call (`link_order.txt`) | −54,256 | none; a call is one instruction shorter |
+| No branch-target alignment outside the -O2 modules (`-mno-target-align`) | −15,856 | none; see "On a board" |
+| The linker does not keep it either (`--size-opt`) | −31,248 | none; see "On a board" |
+| String literals that several Nim modules hold, one copy (`fold_nim_strings.py`) | −28,437 | none |
+| The console's `help` and command table our own, not `esp_console`'s | −8,587 | `help` lists a line per command; `help -v` is gone |
+
+## A third of the calls were six bytes long
+
+ESP-IDF compiles everything with `-mlongcalls`: a call is written as an
+`L32R` of the target's address out of a literal pool and a `CALLX8` through
+it, six bytes and a four-byte literal, and the linker shrinks it to a
+three-byte `CALL8` when the target is in reach. `CALL8` reaches 512 KB either
+way. The image's code is 2.6 MB and the Nim runtime's alone 1.24 MB in one
+block, and the linker places objects in the order it meets them: by name, so
+Nim's `system`, `tables` and `json`, which everything calls, stood at the
+start of that block and half of it could not reach them.
+
+| | calls between functions in flash | of them long |
+|---|---:|---:|
+| main | 76,200 | 24,402 |
+| this change | 76,578 | 7,275 |
+
+The callees say what happened: 1,957 long calls to `JsonNode`'s destructor,
+1,863 to `dealloc`, 1,673 to `nimZeroMem`, 973 to `appendString`. Another
+15,009 calls go to ROM (`memcpy`, `memset`, the soft-float `__muldf3` and
+friends) or IRAM (`free`, `esp_log`, FreeRTOS): out of reach from flash
+whatever the order.
+
+`embedded/esp32/link_order.txt` names the 367 objects of FrameOS's own
+archives (libmain, the display drivers, the Nim runtime, QuickJS, Monocypher)
+in the order they should stand: `system` and `tables` in the middle of the
+Nim modules that call them most, and what calls them least at the ends
+(QuickJS, the JPEG and WebP decoders, pixie's raster loops, the firmware's C).
+CMake turns it into a script for the linker's `--section-ordering-file`
+(binutils 2.43; `tools/link_order.py emit`), which puts the named sections
+first in `.flash.text`, after `_text_start`, so the MMU's symbols stay where
+ESP-IDF expects them.
+
+- **The order is written by a tool, from a finished build**:
+  `tools/link_order.py optimize --build-dir <build> --out link_order.txt`
+  reads the map and the ELF, finds every call (instructions walked by length,
+  the literal pools skipped by their sections in the map) and searches an
+  order by simulated annealing, seeded, 250,000 steps in half a minute with
+  numpy. It measures distances in the sizes *before* relaxing, which is what
+  the linker does, and leaves 32 KB of reach unused so the image can grow
+  before a call near the limit goes long again. A second pass from the
+  ordered build changed nothing (3,210,032 → 3,210,384).
+- **It goes stale gracefully.** A module the file does not name stands where
+  the file's `*` line is (beside `system`); a name with no object matches
+  nothing; a call that drifts out of reach costs three bytes. Every
+  `ci_build_image.sh` prints the count (`link_order: … calls between
+  functions in flash, … of them long`) and what the file no longer matches:
+  run `optimize` again when that climbs, or before a release.
+- A Nim object is named by its source path (`frameos/interpreter.nim`,
+  `nim/lib/system.nim`, `pkgs/flatty/flatty/binny.nim`), not by the file Nim
+  writes, so the Docker image's Nim, a choosenim one and nixpkgs' ROT13 names
+  read the same file.
+- The centre-out order a greedy pass gives (most-called first, alternating
+  sides) left 10,380 long calls in the model where the search leaves 5,239:
+  the search is worth its half minute.
+- Listing every object of the image, ESP-IDF's included, was 3.9 KB better
+  still and is not done: an ESP-IDF archive can hold functions its linker
+  fragments move to IRAM, and its objects are not ours to name.
+
+## Alignment
+
+The Xtensa assembler widens two-byte instructions to three so that branch
+targets land on a word boundary (a taken branch to an instruction that
+straddles one costs a cycle), and the linker keeps those targets aligned when
+it shrinks a call, by widening something else. Two switches, measured alone
+on main and together:
+
+| | bytes | Δ |
+|---|---:|---:|
+| main | 3,264,288 | |
+| `-mno-target-align` on everything compiled | 3,243,600 | −20,688 |
+| `-Wl,--size-opt` (the linker stops preserving it) | 3,229,520 | −34,768 |
+| both | 3,219,168 | −45,120 |
+
+Both are on. `-mno-target-align` is for the image, with `-mtarget-align` back
+on the files that are at -O2 because their loops are the frame rate
+(`FRAMEOS_NIM_HOT_MODULES`, and `quickjs_hot.c` whole, since a flag cannot
+follow six functions): what the assembler aligned there stays aligned unless
+the linker shrinks a call in the same function before it. `--size-opt` is one
+flag for the whole link; it is most of what the prebuilt libraries (Wi-Fi,
+libc) give, which no compiler flag of ours reaches.
+
+## On a board
+
+The SenseCAP Indicator (480×480 RGB LCD, 8 MB), twelve scenes, the bench's
+`scenes` suite, each image written to the slot the board was not running:
+main; the order with `-mno-target-align` (A); A with `--size-opt` (B); and
+the image of this change, everything above. A warm render is the median of
+five, in ms; an animation is frames per second over ten seconds.
+
+| scene | main | A | B | all of it |
+|---|---:|---:|---:|---:|
+| DVD Logo Bounce, warm | 273 | 271 | 272 | 266 |
+| DVD Logo Bounce, fps | 18.9 | 19.2 | 20.9 | 21.4 |
+| Slideshow with motion, warm | 347 | 338 | 336 | 340 |
+| Kitchen sink, warm | 296 | 289 | 279 | 286 |
+| Chart, warm | 283 | 273 | 272 | 271 |
+| Pixel toys, warm | 50 | 47 | 47 | 51 |
+| Pixel toys, fps | 21.1 | 22.1 | 23.6 | 20.5 |
+| Color cycling, warm | 48 | 47 | 52 | 47 |
+| Color cycling, fps | 19.0 | 19.1 | 20.3 | 20.3 |
+| Low Poly Animals, warm | 4,702 | 4,775 | 4,784 | 4,691 |
+| Home / Calculator / Form showcase, warm | 32 / 31 / 32 | 32 / 31 / 31 | 32 / 32 / 32 | 33 / 32 / 32 |
+
+One run each, and the spread of a run shows in the rows that go both ways
+(Pixel toys 20.5 to 23.6 fps, Color cycling's render 47 to 52 ms): nothing
+under 5% is a finding. What holds in every image is that nothing got slower
+and the scenes that draw the most got 2–4% faster (DVD Logo Bounce, Kitchen
+sink, Chart; a direct call is one instruction where a long one was two and a
+load, and denser code misses the instruction cache less). The switcher, the
+settings, a drag, a switch storm and a restart ran clean on the last image.
+Not benched: an e-paper board, where a render is a small part of a refresh.
+
+## String literals
+
+Nim writes a string literal into every C file that uses it as a private
+constant (the text behind its capacity, and an eight-byte header where the
+string is used as a value). The linker cannot merge them: they are structs in
+sections of their own. In the image: 3,841 texts, 168.6 KB (the font and the
+preludes' bytecode are two of them, 72 KB), of which 19.2 KB said what
+another module's constant already said: "event" 14 times, "name" 13, the
+empty string 89, and the message of a failed variant-field check
+(`field 'fields' is not accessible for type 'JsonNodeObj' using 'kind = `)
+30 times.
+
+`tools/fold_nim_strings.py`, run by `build_nim.sh` after the inline fold:
+a text more than one file holds becomes one external constant named after
+its text, defined in the first of those files and declared in the rest, and
+each file's own name for it is a `#define` onto that one, so nothing else in
+the file changes. Headers fold the same way once their text has. 467 texts
+and 403 headers; −26,720 of rodata and −1,700 of literal pools.
+`test_esp32_fold_nim_strings.py` folds a small nimcache and links it before
+and after.
+
+`-fmerge-all-constants` would do a part of this in the compiler (constants of
+8, 16 and 32 bytes without a pointer in them); not tried once the fold was in.
+
+## The console
+
+`esp_console_register_help_command` parses `help`'s two options with
+argtable3 and `getopt_long`; `esp_console_cmd_register` draws argtable3 in
+again for the hints no FrameOS command has. The table of commands is
+`fos_console.c`'s own now, `help [command]` prints a line per command, and a
+line is still split by `esp_console_split_argv` (quotes and backslashes as
+before). `libconsole.a` 6,613 → 166 bytes, `getopt` 1,757 → 0.
+
+## Measured, needs a decision
+
+| Lever | Saves | Cost |
+|---|---:|---|
+| QuickJS without `Atomics` | −6,976 | the `Atomics` object is gone on the ESP32; one thread, no shared buffer to use it on. `#define CONFIG_ATOMICS` is unconditional in quickts: a guard there, or one more line in the copy `components/frameos_quickjs` already makes. |
+| QuickJS without `Proxy` | −5,968 | `JS_NewContextRaw` and the intrinsics by hand; a scene that uses `Proxy` fails on the ESP32 alone |
+| QuickJS without `WeakRef` / `FinalizationRegistry` | −2,176 | the same |
+| (QuickJS without `String#normalize`) | (−19,872) | kept: the Unicode tables stay (2026-11-17) |
+
+Still open from before: `--panics:on` (−149 KB) stays off the table. A
+Defect must fail a node or a window, not the frame, and with the desktops
+that is one scene of several.
+
+## Rethinking the fundamentals: what each would buy
+
+**No compiler on the device.** Three steps, each a different amount of
+"final":
+
+| Step | Saves | How it was counted |
+|---|---:|---|
+| The plane compiles the scene's graph and sends the program's text | −27 KB | `scene_compiler.nim` is 26,937 B in the image; its natives stay |
+| ...and strips TypeScript and JSX to plain JavaScript | −7 KB | quickts' syntax, the 2026-11-10 estimate, not built |
+| ...and sends bytecode: no parser in the image at all | −69,392 | built: a QuickJS whose contexts are given no `eval` (`JS_AddIntrinsicEval` left out, the linker drops the parser and the bytecode emitter). Includes the row above. |
+
+About 96 KB for all of it. What it costs:
+
+- **Bytecode is not checked.** `JS_ReadObject` trusts what it reads; crafted
+  bytecode is memory corruption. Today the only native code a frame runs is
+  the signed image: a plane, or whoever answers for a backend over plain
+  HTTP on a LAN, can hand it a scene but not a way out of the interpreter.
+  Bytecode from the plane moves that line to the plane. A verifier would
+  give some of the bytes back and is not a small thing to get right.
+- A frame with no plane installs scenes by itself, the Code editor scene
+  changes a scene's files on the frame, and `eval` / `new Function` exist:
+  each needs a plane to compile for it, or goes.
+- Bytecode belongs to one build of quickts, so a plane needs a compiler for
+  every firmware version in the field (the program's text has the same
+  problem in a milder form: the natives and the kit it calls).
+- What speaks for it besides flash: a deep sleeper parses its scene at every
+  wake. That part can be had without the plane and without the risk: bytecode
+  the device compiled itself, kept beside the scene on `/state`.
+
+**Rewriting the runtime in C.** Nim is 1.49 MB of the image (46%): the
+runtime 813 KB, pixie 372 KB, the stdlib 158 KB, the apps 65 KB, packages
+26 KB, the font 58 KB. What of that is Nim's way of doing things rather than
+the work itself can be counted:
+
+| | Bytes |
+|---|---:|
+| Error propagation after every call that can raise a Defect (`--panics:on` is this number) | 148 KB |
+| String literals: capacity words, headers and padding around about 72 KB of text | ~50 KB |
+| Hooks and generics that are byte for byte another type's (the identical-code count below) | 22 KB |
+| One hash-table and one seq implementation per type, after the sharing patches | ~58 KB |
+
+A careful C version would keep the checks in some form and most of the
+tables, so perhaps 150–250 KB less, for a rewrite of everything three hosts
+share (the Pi, the ESP32 and the browser preview run the same Nim), or a fork
+of the ESP32's half of it. Not recommended. What has paid, per byte of
+effort, is the opposite direction: cold code as JavaScript bytecode in the
+kit, which is about five times denser than what Nim compiles to (the program
+apps: 8,650 B of Nim, 1,760 B of bytecode). The candidates by size are the
+scene settings (37 KB), the scene switcher (15.6 KB) and the status screen
+(12.7 KB): they are UI trees built in Nim so that they work with no
+interpreter to hand, which is the thing to decide.
+
+**Modular drivers.** Every panel is in every image so that one signed image
+flashes any board and the panel is a setting. What a board never uses:
+
+| | Bytes |
+|---|---:|
+| The 80 e-paper panel drivers and their table | ~62 KB |
+| The LCD path in C (ST7701S, the splash, ESP-IDF's RGB panel driver) | ~21 KB |
+| IT8951 (the E1003 alone) | 4.6 KB |
+| Touch, codec, microphone, voice | ~14 KB |
+| The SD card (FatFS, sdmmc, sdspi, the probe) | ~41 KB |
+
+An image per board would be 70–120 KB smaller and an image per family
+(e-paper, LCD) 25–65 KB, at the price of the one-image model: release assets
+per family, an OTA manifest that knows the family, a reflash to change a
+panel across families. Drivers loaded from `/state` keep one image but need
+an ELF loader, position-independent drivers and signatures on them: not less
+than 10 KB of loader for about 60 KB of drivers, and a new way to brick a
+frame. The part that needs neither is below: 67 of the panel drivers carry
+the same `SendCommand`, 62 the same `SendData`.
+
+**The slot, not the image.** The limit is the 8 MB layout's two 3520 KB OTA
+slots. The image compresses to 60% (xz 1,958,544 B, gzip 2,202,668): one
+app slot of about 5 MB and a 2.5 MB slot for a compressed update would end
+the problem, with a bootloader that unpacks, no previous version to roll back
+to, and no way to move the frames already in the field (a partition table is
+not changed over the air). A layout for new boards only does not lift the
+limit while the old layout gets the same image.
+
+## Counted, not built
+
+- **Identical code.** `ld.bfd` folds none. Hashing every function that
+  survives into the image (its bytes and what its relocations name): 294
+  groups, 36,089 B to win: 22.4 KB in Nim (`=destroy` / `=wasMoved` /
+  `=trace` hooks of types that happen to have the same shape, `[]` and `add`
+  instantiated again per module), 10.5 KB in the panel drivers, 1.3 KB in
+  `main`. For the Nim ones the route is `objcopy`: every copy renamed to one
+  name and weakened, and the linker's garbage collection drops the rest. The
+  drivers' copies are `static`, so theirs is a change to the vendored files
+  or a fold like the inline one.
+- **Calls into ROM and IRAM.** About 15,000 of them, 8,100 from FrameOS's own
+  code, six bytes each for ever. A veneer in flash (`l32r a9, target; jx a9`: `a9`
+  is free between a `CALL8` and the callee's `ENTRY`, ten bytes a target)
+  within reach of the callers would make each a `CALL8`: up to 23 KB, less
+  what the veneers cost and the hot modules left alone. The plain-C half of
+  it is `memcpy` and `memset` in the generated Nim (1,758 calls, 5 KB).
+- **newlib.** `tzset` parses `TZ` with `siscanf`, which is the only thing
+  keeping the scanf engine (8,270 B); a TZ parser of our own would be about
+  1 KB. `_svfprintf_r`, `_dtoa_r` and the bignum behind them are 19.9 KB for
+  formatting, where QuickJS's `dtoa.c` already prints doubles; `strtod` is
+  5.6 KB beside `js_atod`; `strerror`'s table 3.1 KB.
+
+## Dead ends
+
+- **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim
+  runtime and QuickJS; ESP-IDF turns them off for code that may run with the
+  cache off, which neither does): text −8.3 KB, rodata +11.3 KB, the image
+  +2,992 bytes.
+- Literal pools are not the problem they look like: 79 KB of them, of which
+  16 KB repeat a value another pool in reach already holds. The linker merges
+  what it can.

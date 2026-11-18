@@ -54,11 +54,17 @@ if(NIM_GENERATED_SRCS)
         "@sframeos@sutils@sresample.nim.c" "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c" # frameos/utils/resample: zoomPan's frame
         "@sframeos@sjs_runtime@spixel_ops.nim.c" "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c" # frameos/js_runtime/pixel_ops: frameos.pixels
         "@sframeos@sjs_runtime@styped_ops.nim.c" "@fsenzrbf@fwf_ehagvzr@fglcrq_bcf.nim.c") # frameos/js_runtime/typed_ops: frameos.ops
+    # The image is built without the assembler's branch-target alignment
+    # (-mno-target-align, the project's CMakeLists.txt); these loops keep it.
+    set(FRAMEOS_NIM_HOT_OPTIONS "-O2")
+    if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+        list(APPEND FRAMEOS_NIM_HOT_OPTIONS "-mtarget-align")
+    endif()
     foreach(src ${NIM_GENERATED_SRCS})
         foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
             string(FIND "${src}" "${hot}" at)
             if(NOT at EQUAL -1)
-                set_source_files_properties("${src}" PROPERTIES COMPILE_OPTIONS "-O2")
+                set_source_files_properties("${src}" PROPERTIES COMPILE_OPTIONS "${FRAMEOS_NIM_HOT_OPTIONS}")
             endif()
         endforeach()
     endforeach()
