@@ -1362,12 +1362,12 @@ bool fos_scenes_apply_pending(void)
         int slots_before = s_slot_count;
         s_slot_count = 0;
         /* More scenes than a store holds is refused, not cut. */
-        const char **starts = fos_big_malloc(sizeof(*starts) * (SCENES_SET_MAX + 1));
-        size_t *lens = fos_big_malloc(sizeof(*lens) * (SCENES_SET_MAX + 1));
-        int count = starts && lens ? fos_store_split_scenes(json, len, starts, lens, SCENES_SET_MAX + 1) : 0;
+        /* Where each scene starts and how long it is: one block for both. */
+        const char **starts = fos_big_malloc((sizeof(*starts) + sizeof(size_t)) * (SCENES_SET_MAX + 1));
+        size_t *lens = (size_t *)(starts + SCENES_SET_MAX + 1);
+        int count = starts ? fos_store_split_scenes(json, len, starts, lens, SCENES_SET_MAX + 1) : 0;
         ok = load_into_nim(starts, lens, count > SCENES_SET_MAX ? 0 : count, len, "stored");
         free(starts);
-        free(lens);
         free(json);
         json = NULL;
         if (ok) {
@@ -2681,11 +2681,11 @@ static bool store_task_ready(void)
 
 /* The stored payload to the store task for its split; false when there is no
  * task (the caller splits). */
-static bool store_split_behind(void)
+static bool store_wanted_behind(bool *wanted)
 {
     if (!store_task_ready()) return false;
     portENTER_CRITICAL(&s_store_mux);
-    s_store_split_wanted = true;
+    *wanted = true;
     bool start = !s_store_busy;
     s_store_busy = true;
     portEXIT_CRITICAL(&s_store_mux);
@@ -2693,18 +2693,16 @@ static bool store_split_behind(void)
     return true;
 }
 
+static bool store_split_behind(void)
+{
+    return store_wanted_behind(&s_store_split_wanted);
+}
+
 /* The sweep to the store task; false when there is no task (the caller
  * sweeps). */
 static bool store_sweep_behind(void)
 {
-    if (!store_task_ready()) return false;
-    portENTER_CRITICAL(&s_store_mux);
-    s_store_sweep_wanted = true;
-    bool start = !s_store_busy;
-    s_store_busy = true;
-    portEXIT_CRITICAL(&s_store_mux);
-    if (start) xTaskNotifyGive(s_store_task);
-    return true;
+    return store_wanted_behind(&s_store_sweep_wanted);
 }
 
 /* `set` to the store task, which frees it; false (and `set` still the
