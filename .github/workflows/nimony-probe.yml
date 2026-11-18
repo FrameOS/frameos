@@ -37,7 +37,8 @@ jobs:
 
       - name: Pinned Nimony commit
         id: nimony
-        run: echo "commit=$(sed -n 's/^NIMONY_COMMIT="${NIMONY_COMMIT:-\([0-9a-f]*\)}"$/\1/p' tools/nimony/probe.sh)" >> "$GITHUB_OUTPUT"
+        # The one 40-hex hash in the script is its NIMONY_COMMIT default.
+        run: echo "commit=$(grep -m1 -oE '[0-9a-f]{40}' tools/nimony/probe.sh)" >> "$GITHUB_OUTPUT"
 
       # Building Nimony is most of the job (about eight minutes on a laptop).
       - name: Cache Nimony
