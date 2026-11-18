@@ -1,0 +1,10 @@
+{
+  "name": "Blackjack",
+  "description": "Blackjack against the dealer for a touch screen. Pick a bet with the chips and deal, then hit, stand, double or split (up to four hands). The dealer peeks for blackjack and draws to 17. Your bank is kept between games, with your best bank and the rounds played; reset it whenever you like, or start again when the chips run out. Set the number of decks in the shoe, whether the dealer hits a soft 17, what a blackjack pays and the starting bank in the settings. On a keyboard: H hit, S stand, D double, P split, Enter deals; the frame's forward hits or deals and back stands. High contrast on black-and-white panels: the red suits are drawn as outlines.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

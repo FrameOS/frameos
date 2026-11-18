@@ -1,0 +1,10 @@
+{
+  "name": "Connect four",
+  "description": "Connect four for a touch screen: tap anywhere in a column to drop a disc, and line up four before the other side does. Play the computer (easy to expert, it answers in the same refresh) or a friend on the same frame, choose who opens, undo, and keep the score. The winning four is ringed. Back undoes and forward starts a new game on frames with buttons, and 1-7 drop a disc on a keyboard. On black-and-white panels it plays in high contrast, black discs against white ones; the Contrast setting picks it anywhere.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
