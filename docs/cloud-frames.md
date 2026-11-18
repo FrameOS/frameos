@@ -1249,10 +1249,10 @@ provider renders with.
 | `get_metrics`, `set_display_power`, `notify_update_available`, `scenes_get`, the asset write verbs, `lan_access_*` | `unsupported_verb` |
 
 **When it renders.** On every verb that changes what it shows, and, while
-somebody is looking, on its interval: its scene's own refresh interval, else
-the frame's `interval` setting, never under the plan's floor (300 s on
-cloud.frameos.net; a settings push below it is refused
-`interval_below_plan_floor`). "Looking" is a read of the view link or an open
+somebody is looking, on its interval: its scene's own refresh interval (300 s
+when the scene names none; a frame has no interval of its own), never under
+the plan's floor (300 s on cloud.frameos.net; an `interval` settings push
+below it is refused `interval_below_plan_floor`). "Looking" is a read of the view link or an open
 workspace page within the last three minutes. A picture nobody looks at is
 not drawn again, and the first look after a quiet spell gets the picture that
 is there and a new one seconds later. A render that fails keeps the previous
@@ -1333,8 +1333,10 @@ POST, the same, with {nowMs, edges?, events?} (at most 16 KiB) when the device h
   …/settings {render_mode: "remote"}` is refused past the plan's number with
   `403 cloud_rendered_frame_quota_exceeded {max_cloud_rendered_frames}`,
   counted behind the same per-account lock virtual frames are created under,
-  and with `interval_below_plan_floor {min_interval}` while the frame's
-  interval is under the floor; the floor applies to every later push. Only
+  and a later `interval` push under the floor gets
+  `interval_below_plan_floor {min_interval}`. An interval stored from before
+  does not refuse the switch: what the cloud draws is paced by the scene,
+  held to the floor in the render route's `X-FrameOS-Next-Render`. Only
   the plane's setting makes a frame one of these: a board set to remote over
   its own console is refused at the pull and renders that pass itself. An
   account over its plan (a downgrade) keeps its frames and gets `403` at the

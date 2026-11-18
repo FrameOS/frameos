@@ -452,7 +452,7 @@ export function DeviceSettingsSection(): JSX.Element {
  * at the URLs below.
  */
 export function VirtualFrameSection(): JSX.Element | null {
-  const { frame, frameForm, isVirtualPlatform, virtualViewToken, virtualImageUrl, virtualPageUrl } = useFrameSettings()
+  const { isVirtualPlatform, virtualViewToken, virtualImageUrl, virtualPageUrl } = useFrameSettings()
   if (!isVirtualPlatform) {
     return null
   }
@@ -473,7 +473,7 @@ export function VirtualFrameSection(): JSX.Element | null {
         ) : null}
         <VirtualFrameUrlRow label="Image URL (PNG, rendered on request)" url={virtualImageUrl} />
         <VirtualFrameUrlRow
-          label={`Kiosk page URL (refreshes every ${frameForm.interval ?? frame.interval ?? 300} seconds)`}
+          label="Kiosk page URL (shows a new picture when the scene renders again)"
           url={virtualPageUrl}
         />
         <Field name="width" label="Width">

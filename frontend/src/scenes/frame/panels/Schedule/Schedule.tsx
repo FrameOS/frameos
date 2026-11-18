@@ -25,6 +25,7 @@ import {
 import { cloudFrameSupportsSettingsFrom } from '../../../../utils/cloudFrameSettings'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { REFRESH_INTERVAL_ROLE } from '../../../../utils/refreshInterval'
 import { type GeoLocation, locationFieldPair } from '../../../../utils/geolocation'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
@@ -483,8 +484,18 @@ function EditRow({
         {scheduledEventIsSceneChange(event) && event.payload?.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
+              <p className="frameos-muted text-xs">The scene&apos;s own settings, applied when this entry shows it.</p>
               {stateFields.map((field) => (
-                <Field key={field.name} name={field.name} label={field.label || field.name}>
+                <Field
+                  key={field.name}
+                  name={field.name}
+                  label={field.label || field.name}
+                  tooltip={
+                    field.role === REFRESH_INTERVAL_ROLE
+                      ? "The scene's refresh interval from this time on: how often it renders while it shows. The same setting as in the scene's own settings."
+                      : undefined
+                  }
+                >
                   {({ value, onChange }) => (
                     <StateFieldEdit
                       field={field}

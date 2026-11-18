@@ -33,6 +33,7 @@ typedef struct {
     int status;
     char etag[PK_HTTP_ETAG_MAX];
     long retry_after;     // seconds, -1 when absent
+    long next_render;     // X-FrameOS-Next-Render seconds, -1 when absent
     size_t body_bytes;    // decoded body bytes seen (any status)
 
     // Internals.

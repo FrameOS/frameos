@@ -43,6 +43,7 @@ import { v4 as uuidv4 } from 'uuid'
 import { duplicateScenes } from '../../utils/duplicateScenes'
 import { withActiveLayoutOnNewScenes } from '../../utils/sceneLayouts'
 import { apiFetch } from '../../utils/apiFetch'
+import { DEFAULT_REFRESH_INTERVAL_SECONDS } from '../../utils/refreshInterval'
 import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
 import {
@@ -2207,7 +2208,7 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
       // Always materialized: templates, imports and chat scenes arrive
       // without it, and "absent" used to be read as compiled downstream.
       execution: frameRunsInterpreted ? ('interpreted' as const) : normalizeSceneExecution(scene),
-      refreshInterval: settings.refreshInterval || frame.interval || 300,
+      refreshInterval: settings.refreshInterval || DEFAULT_REFRESH_INTERVAL_SECONDS,
       backgroundColor: cleanBackgroundColor(settings.backgroundColor || '#000000'),
     },
   } satisfies FrameScene)
@@ -2608,7 +2609,7 @@ export interface frameLogicMeta {
     defaultScene: (frame: FrameType, frameForm: Partial<FrameType>) => string
     width: (frameForm: Partial<FrameType>) => number | undefined
     height: (frameForm: Partial<FrameType>) => number | undefined
-    defaultInterval: (frameForm: Partial<FrameType>) => number
+    defaultInterval: () => number
     deployWithAgent: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     deployTransportToggleVisible: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     frameSyncSectionsWithChanges: (frameSyncStatus: FrameSyncStatus | null) => FrameSyncSection[]
@@ -3493,7 +3494,9 @@ export const frameLogic = kea<frameLogicType>([
       (frameForm: frameLogicValues['frameForm']) =>
         frameForm.rotate === 90 || frameForm.rotate === 270 ? frameForm.width : frameForm.height,
     ],
-    defaultInterval: [(s) => [s.frameForm], (frameForm: frameLogicValues['frameForm']) => frameForm.interval ?? 300],
+    // A new scene's refresh interval. The frame has none of its own to offer:
+    // every scene carries its own (utils/refreshInterval.ts).
+    defaultInterval: [(s) => [s.frameForm], (): number => DEFAULT_REFRESH_INTERVAL_SECONDS],
     deployWithAgent: [
       (s) => [s.frameForm, s.frame],
       (frameForm: frameLogicValues['frameForm'], frame: frameLogicValues['frame']) => {

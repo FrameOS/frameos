@@ -18,7 +18,11 @@ import type { FrameId } from '../../../../types'
 import clsx from 'clsx'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
-import { REFRESH_INTERVAL_FIELD_NAME, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
+import {
+  DEFAULT_REFRESH_INTERVAL_SECONDS,
+  REFRESH_INTERVAL_FIELD_NAME,
+  refreshIntervalFieldIndex,
+} from '../../../../utils/refreshInterval'
 import {
   SCENE_RENDER_SCALE_HELP,
   sceneRenderScaleFromSelect,
@@ -161,7 +165,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               >
                 <RefreshIntervalInput
                   name="refreshInterval"
-                  placeholder={String(frameForm.interval || 300)}
+                  placeholder={String(DEFAULT_REFRESH_INTERVAL_SECONDS)}
                   className="h-10 @md:max-w-[9rem]"
                 />
               </Field>

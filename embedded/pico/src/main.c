@@ -301,14 +301,24 @@ int main(void)
 
         pk_render_sync_settings();
         uint32_t retry_after = 0;
+        uint32_t scene_wants = 0;
         static char input[PK_BUTTONS_JSON_MAX];
         size_t input_edges = 0;
         size_t input_len = pk_buttons_json(&s_buttons, now_ms(), input, sizeof(input), &input_edges);
         bool input_taken = false;
         pk_render_result_t result =
-            pk_render_once(&retry_after, input_edges ? input : NULL, input_edges ? input_len : 0, &input_taken);
+            pk_render_once(&retry_after, &scene_wants, input_edges ? input : NULL, input_edges ? input_len : 0,
+                           &input_taken);
         if (input_taken) pk_buttons_consume(&s_buttons, input_edges);
-        uint32_t wait_seconds = config->interval_seconds;
+        // The scene paces the frame: the backend says when the scene it drew
+        // wants its next picture. The frame's own interval is the fallback
+        // for a backend that does not say (an older one, a failed pass), and
+        // a failed pass keeps the last pace a scene asked for.
+        static uint32_t s_scene_seconds = 0;
+        if (scene_wants > 0) s_scene_seconds = scene_wants;
+        uint32_t interval_seconds = s_scene_seconds > 0 ? s_scene_seconds : config->interval_seconds;
+        if (interval_seconds < PK_INTERVAL_MIN_SECONDS) interval_seconds = PK_INTERVAL_MIN_SECONDS;
+        uint32_t wait_seconds = interval_seconds;
         // A backend whose queue stays full must not keep a battery frame
         // awake: after a few polite retries it counts as a failed pass.
         if (result == PK_RENDER_RETRY_LATER && ++busy_retries > MAX_BUSY_RETRIES) {
@@ -334,10 +344,10 @@ int main(void)
             char line[PK_LOG_LINE_MAX];
             snprintf(line, sizeof(line),
                      "{\"event\":\"sleep\",\"source\":\"pico\",\"wakeInSeconds\":%lu,\"onBattery\":%s}",
-                     (unsigned long)config->interval_seconds, pk_usb_powered() ? "false" : "true");
+                     (unsigned long)interval_seconds, pk_usb_powered() ? "false" : "true");
             pk_log_event(line);
             pk_render_flush_logs();
-            pk_rtc_sleep(config->interval_seconds, sleep_should_end);
+            pk_rtc_sleep(interval_seconds, sleep_should_end);
             // Still here: USB power. Carry on as if freshly woken.
             next_render = get_absolute_time();
             continue;

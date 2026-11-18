@@ -62,17 +62,6 @@ struct FrameSettingsView: View {
                 }
 
                 Section {
-                    if keys.contains("interval") {
-                        LabeledContent("Render every") {
-                            HStack(spacing: 4) {
-                                TextField("300", value: doubleBinding("interval", frame, fallback: 300), format: .number)
-                                    .multilineTextAlignment(.trailing)
-                                    .numberInput()
-                                    .frame(maxWidth: 90)
-                                Text("seconds").foregroundStyle(.secondary)
-                            }
-                        }
-                    }
                     if keys.contains("timezone") {
                         let zone = stringBinding("timezone", frame, fallback: "")
                         Picker("Time zone", selection: zone) {
@@ -92,10 +81,6 @@ struct FrameSettingsView: View {
                     }
                 } header: {
                     Text("Behavior")
-                } footer: {
-                    if keys.contains("interval") {
-                        Text("A scene's own refresh interval can make the frame render more often.")
-                    }
                 }
 
                 if keys.contains("deep_sleep") || keys.contains("deep_sleep_on_battery") {

@@ -772,13 +772,15 @@ describe("the switch", () => {
   it("holds the frame to the plan's refresh floor", async () => {
     const accountId = await signIn();
     await subscribe(accountId, 2);
+    // An interval stored from before is no reason to refuse: the scene paces
+    // what the cloud draws, held to the floor at the render route.
     const fast = await createFrame(accountId, { interval: 60 });
-    const tooFast = await pushSettings(fast.frame.id, { render_mode: "remote" });
-    expect(tooFast.status).toBe(400);
-    expect(await tooFast.json()).toMatchObject({ error: "interval_below_plan_floor", min_interval: 300 });
-    expect((await pushSettings(fast.frame.id, { interval: 600, render_mode: "remote" })).status).toBe(200);
+    expect((await pushSettings(fast.frame.id, { render_mode: "remote" })).status).toBe(200);
+    // One pushed under the floor still is.
     const under = await pushSettings(fast.frame.id, { interval: 120 });
     expect(under.status).toBe(400);
+    expect(await under.json()).toMatchObject({ error: "interval_below_plan_floor", min_interval: 300 });
+    expect((await pushSettings(fast.frame.id, { interval: 600 })).status).toBe(200);
   });
 
   it("needs firmware that knows it", async () => {

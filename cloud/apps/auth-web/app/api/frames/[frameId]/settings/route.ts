@@ -13,7 +13,6 @@ import {
   frameHardwareIsEsp32,
   frameSettingsRefusal,
   mergeFrameSettings,
-  readFrameSettings,
   redeployAssignedScenesToFrame,
   validateFrameSettings,
 } from '../../../../../src/lib/frames'
@@ -32,19 +31,6 @@ class CloudRenderedQuotaError extends Error {
   constructor(readonly maxCloudRenderedFrames: number) {
     super('cloud_rendered_frame_quota_exceeded')
   }
-}
-
-// The interval a frame runs at now: the last one pushed, else what it reports.
-function currentInterval(frame: { hardware: unknown; settings: unknown }): number | undefined {
-  const stored = readFrameSettings(frame.settings).interval
-  if (typeof stored === 'number') {
-    return stored
-  }
-  const reported =
-    frame.hardware && typeof frame.hardware === 'object' && !Array.isArray(frame.hardware)
-      ? (frame.hardware as Record<string, unknown>).interval
-      : undefined
-  return typeof reported === 'number' && Number.isFinite(reported) ? reported : undefined
 }
 
 // Declarative settings push. The allowlist is enforced here AND on the
@@ -113,12 +99,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // A board with its own runtime set to render on the server
   // (`render_mode: "remote"`, docs/server-rendering.md) becomes one of these
   // frames with this push: it takes one of the plan's cloud-rendered frames,
-  // and its interval may not be under the floor from then on.
+  // and an interval pushed to it may not be under the floor. What the cloud
+  // draws is paced by the scene's interval, held to the floor where it is
+  // drawn (the render route's X-FrameOS-Next-Render); the frame's own
+  // interval is only an older firmware's fallback, so one stored from before
+  // never stands in the way of turning this on.
   const mergedSettings = mergeFrameSettings(frame.settings, settings)
   const renderedBefore = frameIsCloudRendered(frame)
   const renderedAfter = frameIsCloudRendered({ hardware: frame.hardware, settings: mergedSettings ?? frame.settings })
   const turningOn = renderedAfter && !renderedBefore
-  const interval = typeof settings.interval === 'number' ? settings.interval : turningOn ? currentInterval(frame) : undefined
+  const interval = typeof settings.interval === 'number' ? settings.interval : undefined
   if (renderedAfter && interval !== undefined && interval < cloudRenderedMinIntervalSeconds) {
     return jsonError('interval_below_plan_floor', 400, { min_interval: cloudRenderedMinIntervalSeconds })
   }

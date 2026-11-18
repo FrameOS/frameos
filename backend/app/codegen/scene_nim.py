@@ -1243,7 +1243,7 @@ class SceneWriter:
         public_state_fields = []
         persisted_state_fields = []
         refresh_interval = float(
-            self.scene.get("settings", {}).get("refreshInterval", None) or self.frame.interval or 300
+            self.scene.get("settings", {}).get("refreshInterval", None) or 300
         )
         if math.isnan(refresh_interval):
             refresh_interval = 300.0

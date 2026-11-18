@@ -4,7 +4,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { frames, linkedClients, virtualFrames, type createDb } from "@frameos-cloud/db";
 import { cloudRenderedMinIntervalSeconds } from "./cloud-rendered";
-import { readFrameSettings } from "./frames";
 import {
   isVirtualViewToken,
   virtualFrameSize,
@@ -18,11 +17,9 @@ type Database = ReturnType<typeof createDb>;
 
 /** How often this frame renders while someone looks, in seconds. */
 export function virtualFrameIntervalSeconds(
-  frame: Pick<typeof frames.$inferSelect, "settings">,
   virtual: Pick<typeof virtualFrames.$inferSelect, "refreshSeconds">,
 ): number {
   return virtualRenderIntervalSeconds({
-    frameIntervalSeconds: readFrameSettings(frame.settings).interval,
     minIntervalSeconds: cloudRenderedMinIntervalSeconds,
     sceneRefreshSeconds: virtual.refreshSeconds,
   });
@@ -40,7 +37,7 @@ export function virtualFrameDetails(
     image_url: `${origin}${virtualImagePath(virtual.viewToken)}`,
     // What the frame renders at while someone looks, and the least a plan
     // allows: the Settings panel says both.
-    interval_seconds: virtualFrameIntervalSeconds(frame, virtual),
+    interval_seconds: virtualFrameIntervalSeconds(virtual),
     min_interval_seconds: cloudRenderedMinIntervalSeconds,
     render_error: virtual.renderError,
     render_ms: virtual.renderMs,

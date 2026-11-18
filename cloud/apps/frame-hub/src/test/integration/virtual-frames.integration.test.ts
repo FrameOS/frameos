@@ -627,15 +627,15 @@ describe("rendering on the interval", () => {
     await passes(400, 1, "the scene's own interval has not passed");
     await passes(601, 2, "the render on the scene's interval");
 
-    // A frame that asks for less than the plan's floor gets the floor.
-    await db.update(frames).set({ settings: { interval: 10 } }).where(eq(frames.id, frame.id));
-    await db.update(virtualFrames).set({ refreshSeconds: null }).where(eq(virtualFrames.frameId, frame.id));
+    // A scene that asks for less than the plan's floor gets the floor.
+    await db.update(virtualFrames).set({ refreshSeconds: 10 }).where(eq(virtualFrames.frameId, frame.id));
     await passes(200, 2, "under the floor");
-    await db.update(virtualFrames).set({ refreshSeconds: null }).where(eq(virtualFrames.frameId, frame.id));
+    await db.update(virtualFrames).set({ refreshSeconds: 10 }).where(eq(virtualFrames.frameId, frame.id));
     await passes(301, 3, "the render at the floor");
 
-    // A workspace page open on the frame counts as looking too, and the
-    // frame's own interval holds when it is over the floor.
+    // A workspace page open on the frame counts as looking too. A scene with
+    // no interval draws on the default, whatever the frame's settings hold:
+    // a frame has no interval of its own.
     await db
       .update(virtualFrames)
       .set({ refreshSeconds: null, viewedAt: null })
@@ -644,9 +644,9 @@ describe("rendering on the interval", () => {
       .update(frames)
       .set({ previewWatchedAt: new Date(), settings: { interval: 900 } })
       .where(eq(frames.id, frame.id));
-    await passes(600, 3, "the frame's interval has not passed");
+    await passes(200, 3, "the default interval has not passed");
     await db.update(virtualFrames).set({ refreshSeconds: null }).where(eq(virtualFrames.frameId, frame.id));
-    await passes(901, 4, "the render on the frame's interval");
+    await passes(301, 4, "the render on the default interval, not the frame's 900");
   });
 
   it("paces a scene that cannot render by the interval too", async () => {

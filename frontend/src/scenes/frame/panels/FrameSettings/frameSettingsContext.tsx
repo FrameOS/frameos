@@ -434,7 +434,7 @@ export function FrameSettingsProvider({
           disabledReason: cloudFrameSupportsEsp32RenderMode(frame.frameos_version)
             ? undefined
             : `Rendering on the server needs FrameOS ${esp32RenderModeCloudFrameSettingsMinVersion} or newer on the frame.`,
-          note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and its refresh interval cannot go below the plan's minimum.",
+          note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and the cloud draws it no more often than your plan's minimum interval.",
         }
       : undefined
 

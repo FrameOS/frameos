@@ -1256,9 +1256,9 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
             tone={stale ? 'warning' : 'neutral'}
           />
           <OverviewStatCard
-            label="Render interval"
-            value={`${frame.interval}s`}
-            detail={`Metrics every ${frame.metrics_interval}s`}
+            label="Metrics"
+            value={`Every ${frame.metrics_interval}s`}
+            detail="How often the frame reports its health"
           />
           <OverviewStatCard
             label="Storage"

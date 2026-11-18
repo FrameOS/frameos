@@ -280,19 +280,6 @@ export function DefaultsSection(): JSX.Element {
         <Field name="height" label="Height">
           <TextInput name="height" placeholder="1080" />
         </Field>
-        <Field
-          name="interval"
-          label="Default refresh interval in seconds for new scenes"
-          tooltip={
-            <>
-              How often do we trigger a refresh, in seconds. Pass a large number like &quot;60&quot; or even more for
-              e-ink frames. A number below 1 activates realtime mode (0.041s = 24fps, 0.016s = 60fps). This should be
-              used when you&apos;re certain of your setup and only if your hardware supports it.
-            </>
-          }
-        >
-          <TextInput name="interval" placeholder="300" />
-        </Field>
         <MetricsIntervalField />
         <TimezoneUpdaterFields />
         <MaxHttpResponseBytesField />

@@ -369,7 +369,7 @@ describe("frameos-cloud MCP server", () => {
       ["frame_scene_update", { frame_id: frameId, scene_id: sceneId }],
       ["frame_device_scenes_import", { frame_id: frameId }],
       ["frame_scenes_set", { frame_id: frameId, scenes: [{ scene_id: sceneId }] }],
-      ["frame_settings_update", { frame_id: frameId, settings: { interval: 60 } }],
+      ["frame_settings_update", { frame_id: frameId, settings: { rotate: 90 } }],
       ["frame_service_settings_enable", { enabled: true, frame_id: frameId }],
       ["frame_firmware_update", { frame_id: frameId }],
     ] as const) {

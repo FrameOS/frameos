@@ -164,7 +164,8 @@ extension FrameOSService {
     /// it is what the contract lets this frame's profile and firmware take;
     /// on a backend every one of them (the backend validates the rest).
     public func editableSettings(_ frame: Frame) -> Set<String> {
-        let common: Set<String> = ["rotate", "interval", "scaling_mode", "render_scale", "timezone", "frame_settings_on_screen",
+        // No "interval": a frame renders on its scene's own refresh interval.
+        let common: Set<String> = ["rotate", "scaling_mode", "render_scale", "timezone", "frame_settings_on_screen",
                                    "debug", "flip", "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds"]
         switch kind {
         case .cloud:
@@ -242,7 +243,7 @@ extension FrameOSService {
                 serverName: "FrameOS Cloud",
                 reach: "Scenes then fetch their data from FrameOS Cloud, which reaches public addresses only, not your network.",
                 disabledReason: supported ? nil : "Rendering on the server needs FrameOS \(since) or newer on the frame.",
-                note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and its refresh interval cannot go below the plan's minimum."
+                note: "Counts as one of your plan's cloud-rendered frames (Settings, Usage), and the cloud draws it no more often than your plan's minimum interval."
             )
         case .backend:
             guard frame.mode == "embedded", RenderOnServer.backendOffers(platform: embeddedPlatform(frame)) else { return nil }

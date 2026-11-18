@@ -10,8 +10,9 @@ show a picture. Self-hosted backends only.
   at the frame's configured size, optionally quantized to an e-ink-style
   palette (``device_config.colorMode``).
 - ``GET /api/frames/{id}/virtual/page?k=<view_token>`` — a black
-  full-screen HTML page that shows the image and refreshes it on the
-  frame's interval. Paste into any kiosk browser and walk away.
+  full-screen HTML page that shows the image and asks for the next one
+  when the scene wants it (the image's ``X-FrameOS-Next-Render``, else a
+  minute). Paste into any kiosk browser and walk away.
 
 The token is ``device_config.viewToken``, a view-only credential minted for
 this purpose — deliberately NOT the frame's ``server_api_key``, which would
@@ -46,11 +47,13 @@ from app.utils.server_render import bump_render_revision
 from . import api_public
 from .embedded_device import (
     BWYR_PALETTE,
+    SERVER_RENDER_NEXT_RENDER_HEADER,
     SEVEN_COLOR_PALETTE,
     SPECTRA6_PALETTE,
     _active_scene_id,
     embedded_diagnostic_image,
     embedded_settings_payload,
+    next_render_seconds,
 )
 
 VIRTUAL_STATE_QUOTA_BYTES = 256 * 1024  # per frame, across all scenes
@@ -300,6 +303,23 @@ async def _virtual_frame_png(
     scenes_override: list | None = None,
     scene_id_override: str | None = None,
 ) -> bytes:
+    png, _next_render = await _virtual_frame_render(
+        db, redis, frame, scenes_override=scenes_override, scene_id_override=scene_id_override
+    )
+    return png
+
+
+async def _virtual_frame_render(
+    db: Session,
+    redis,
+    frame: Frame,
+    *,
+    scenes_override: list | None = None,
+    scene_id_override: str | None = None,
+) -> tuple[bytes, int | None]:
+    """The picture, and when the scene it drew wants the next one
+    (next_render_seconds: its nextSleep, else its refresh interval; None when
+    the render did not say)."""
     from PIL import Image
 
     width, height = virtual_frame_dimensions(frame)
@@ -345,7 +365,7 @@ async def _virtual_frame_png(
     image = _quantize(image, virtual_color_mode(frame))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
-    return buffer.getvalue()
+    return buffer.getvalue(), next_render_seconds(rendered_state)
 
 
 async def render_virtual_frame_png(db: Session, redis, frame: Frame) -> bytes:
@@ -432,20 +452,26 @@ async def api_virtual_frame_image(
 ):
     frame = _virtual_frame(db, id, k)
     try:
-        png = await _virtual_frame_png(db, redis, frame)
+        png, next_render = await _virtual_frame_render(db, redis, frame)
     except RenderQueueFull as exc:
-        # The kiosk page keeps the image it has and retries on its interval;
+        # The kiosk page keeps the image it has and retries after Retry-After;
         # a full queue must not park one coroutine per kiosk poll.
         raise HTTPException(
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
             detail="Render queue is full, retry later",
             headers={"Retry-After": str(exc.retry_after)},
         )
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={"Cache-Control": "no-store"},
-    )
+    headers = {"Cache-Control": "no-store"}
+    if next_render is not None:
+        # When the scene wants its next picture: the kiosk page asks again then.
+        headers[SERVER_RENDER_NEXT_RENDER_HEADER] = str(next_render)
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
+# The kiosk page's wait when the picture did not say when the next one is due
+# (an older runtime, a failed render): a fetch of the image, no more.
+VIRTUAL_PAGE_FALLBACK_SECONDS = 60
+VIRTUAL_PAGE_MIN_SECONDS = 15
 
 
 @api_public.get("/frames/{id:int}/virtual/page")
@@ -456,8 +482,6 @@ async def api_virtual_frame_page(
     redis=Depends(get_redis),
 ):
     frame = _virtual_frame(db, id, k)
-    interval = frame.interval if isinstance(frame.interval, (int, float)) else 300
-    interval = max(15, int(interval or 300))
     width, height = virtual_frame_dimensions(frame)
     # The page never embeds the key in rendered text, only in the image URL
     # it already arrived with; JS swaps the image in place so e-ink-style
@@ -471,16 +495,39 @@ async def api_virtual_frame_page(
         image-rendering: auto; }}
 </style></head>
 <body>
-<img id="frame" width="{width}" height="{height}"
-     src="/api/frames/{frame.id}/virtual/image?k={html_escape(urllib.parse.quote(k, safe=''), quote=True)}" alt="">
+<img id="frame" width="{width}" height="{height}" alt=""
+     data-src="/api/frames/{frame.id}/virtual/image?k={html_escape(urllib.parse.quote(k, safe=''), quote=True)}">
 <script>
+  // Asks for the next picture when the scene wants one: the image's
+  // X-FrameOS-Next-Render, else Retry-After on a busy queue, else a minute.
   const img = document.getElementById('frame');
-  const base = img.src;
-  setInterval(() => {{
-    const next = new Image();
-    next.onload = () => {{ img.src = next.src; }};
-    next.src = base + '&t=' + Date.now();
-  }}, {interval * 1000});
+  const base = img.dataset.src;
+  const seconds = (value) => {{
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.max({VIRTUAL_PAGE_MIN_SECONDS}, n) : null;
+  }};
+  async function refresh(wait) {{
+    await new Promise((done) => setTimeout(done, wait * 1000));
+    let next = {VIRTUAL_PAGE_FALLBACK_SECONDS};
+    try {{
+      const response = await fetch(base + '&t=' + Date.now(), {{ cache: 'no-store' }});
+      if (response.ok) {{
+        next = seconds(response.headers.get('{SERVER_RENDER_NEXT_RENDER_HEADER}')) ?? next;
+        const url = URL.createObjectURL(await response.blob());
+        const loaded = new Image();
+        loaded.onload = () => {{
+          const old = img.src;
+          img.src = url;
+          if (old.startsWith('blob:')) URL.revokeObjectURL(old);
+        }};
+        loaded.src = url;
+      }} else {{
+        next = seconds(response.headers.get('Retry-After')) ?? next;
+      }}
+    }} catch (error) {{}}
+    refresh(next);
+  }}
+  refresh(0);
 </script>
 </body></html>"""
     return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})

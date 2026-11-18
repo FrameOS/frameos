@@ -127,9 +127,11 @@ async def test_virtual_image_bw_color_mode(async_client, no_auth_client, db):
 
 
 @pytest.mark.asyncio
-async def test_virtual_page_embeds_image_and_interval(async_client, no_auth_client, db):
+async def test_virtual_page_embeds_image_and_paces_by_the_scene(async_client, no_auth_client, db):
     frame = await create_virtual_frame(async_client, db)
-    frame.interval = 60
+    # The frame's own interval is no part of it: the page asks again when the
+    # picture says the scene wants its next one, else after a minute.
+    frame.interval = 7
     db.add(frame)
     db.commit()
 
@@ -138,7 +140,38 @@ async def test_virtual_page_embeds_image_and_interval(async_client, no_auth_clie
     assert response.status_code == 200
     body = response.text
     assert f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}' in body
-    assert '60000' in body  # refresh interval in ms
+    assert 'X-FrameOS-Next-Render' in body
+    assert 'let next = 60;' in body
+    assert '7000' not in body
+
+
+@pytest.mark.asyncio
+async def test_virtual_image_says_when_the_scene_wants_the_next(async_client, no_auth_client, db, monkeypatch):
+    from app.api import virtual_frame as vf
+
+    frame = await create_virtual_frame(async_client, db)
+    next_state: dict = {'sceneId': 'scene-a', 'state': {}, 'refreshInterval': 900}
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        return b'\x00' * (width * height * 4), dict(next_state), None
+
+    monkeypatch.setattr(vf, 'render_scene_rgba_and_state', fake_render)
+    url = f'/api/frames/{frame.id}/virtual/image?k={frame.device_config["viewToken"]}'
+
+    response = await no_auth_client.get(url)
+    assert response.status_code == 200
+    assert response.headers['X-FrameOS-Next-Render'] == '900'
+
+    # This render's nextSleep wins over the interval.
+    next_state['nextSleep'] = 120
+    response = await no_auth_client.get(url)
+    assert response.headers['X-FrameOS-Next-Render'] == '120'
+
+    # A render that says nothing: no header, and the page waits its minute.
+    next_state.clear()
+    response = await no_auth_client.get(url)
+    assert response.status_code == 200
+    assert 'X-FrameOS-Next-Render' not in response.headers
 
 
 @pytest.mark.asyncio

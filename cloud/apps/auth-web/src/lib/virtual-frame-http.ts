@@ -53,8 +53,8 @@ async function viewContext(request: NextRequest, token: string) {
 }
 
 function statusBody(
-  frame: Parameters<typeof virtualFrameIntervalSeconds>[0] & { hardware: unknown },
-  virtual: Parameters<typeof virtualFrameIntervalSeconds>[1] & {
+  frame: { hardware: unknown },
+  virtual: Parameters<typeof virtualFrameIntervalSeconds>[0] & {
     imageVersion: string | null;
     renderedAt: Date | null;
   },
@@ -62,7 +62,7 @@ function statusBody(
   const size = virtualFrameSize(frame.hardware);
   return {
     height: size.height,
-    interval_seconds: virtualFrameIntervalSeconds(frame, virtual),
+    interval_seconds: virtualFrameIntervalSeconds(virtual),
     rendered_at: virtual.renderedAt,
     // Changes when the picture does; null until the frame has drawn one.
     version: virtual.imageVersion,

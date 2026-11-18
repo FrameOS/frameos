@@ -172,17 +172,14 @@ export function sceneRefreshSeconds(scene: unknown, state: unknown): number | nu
 
 /**
  * How often a virtual frame renders while someone looks: its scene's
- * interval, else the frame's, never under the plan's floor.
+ * interval, never under the plan's floor. The frame has no interval of its
+ * own to fall back on (a scene always carries one).
  */
 export function virtualRenderIntervalSeconds(input: {
-  frameIntervalSeconds: unknown;
   minIntervalSeconds: number;
   sceneRefreshSeconds: number | null | undefined;
 }): number {
-  const wanted =
-    positiveSeconds(input.sceneRefreshSeconds) ||
-    positiveSeconds(input.frameIntervalSeconds) ||
-    virtualFrameDefaultIntervalSeconds;
+  const wanted = positiveSeconds(input.sceneRefreshSeconds) || virtualFrameDefaultIntervalSeconds;
   return Math.max(input.minIntervalSeconds, wanted);
 }
 

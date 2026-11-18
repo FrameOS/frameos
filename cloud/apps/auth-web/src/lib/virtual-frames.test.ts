@@ -106,11 +106,12 @@ describe("the scene's refresh interval", () => {
 
   it("never renders more often than the plan allows", () => {
     const floor = 300;
-    expect(virtualRenderIntervalSeconds({ frameIntervalSeconds: 60, minIntervalSeconds: floor, sceneRefreshSeconds: null })).toBe(300);
-    expect(virtualRenderIntervalSeconds({ frameIntervalSeconds: 60, minIntervalSeconds: floor, sceneRefreshSeconds: 10 })).toBe(300);
-    expect(virtualRenderIntervalSeconds({ frameIntervalSeconds: 60, minIntervalSeconds: floor, sceneRefreshSeconds: 3600 })).toBe(3600);
-    expect(virtualRenderIntervalSeconds({ frameIntervalSeconds: 900, minIntervalSeconds: floor, sceneRefreshSeconds: null })).toBe(900);
-    expect(virtualRenderIntervalSeconds({ frameIntervalSeconds: undefined, minIntervalSeconds: 60, sceneRefreshSeconds: undefined })).toBe(300);
+    expect(virtualRenderIntervalSeconds({ minIntervalSeconds: floor, sceneRefreshSeconds: 10 })).toBe(300);
+    expect(virtualRenderIntervalSeconds({ minIntervalSeconds: floor, sceneRefreshSeconds: 3600 })).toBe(3600);
+    // No interval from the scene: the default, still held to the floor.
+    expect(virtualRenderIntervalSeconds({ minIntervalSeconds: floor, sceneRefreshSeconds: null })).toBe(300);
+    expect(virtualRenderIntervalSeconds({ minIntervalSeconds: 60, sceneRefreshSeconds: undefined })).toBe(300);
+    expect(virtualRenderIntervalSeconds({ minIntervalSeconds: 900, sceneRefreshSeconds: undefined })).toBe(900);
   });
 });
 

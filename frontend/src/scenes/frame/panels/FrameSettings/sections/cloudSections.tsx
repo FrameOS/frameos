@@ -67,7 +67,7 @@ import {
  * which surface is declared in frameSettingsSurface.ts, not here.
  */
 
-/** Name, refresh interval, rotation, scaling — what both cloud surfaces push. */
+/** Name, rotation, scaling — what both cloud surfaces push. A scene has its own refresh interval. */
 export function CloudBaseSettingsSection(): JSX.Element {
   const { surface, frame, frameTimezoneOptions, cloudEsp32TimeZoneSupported } = useFrameSettings()
   const esp32 = surface === 'cloudEsp32'
@@ -82,17 +82,6 @@ export function CloudBaseSettingsSection(): JSX.Element {
       <SectionBody>
         <Field name="name" label="Name">
           <TextInput name="name" placeholder="Hallway frame" required />
-        </Field>
-        <Field
-          name="interval"
-          label="Refresh interval in seconds"
-          tooltip={
-            virtual
-              ? 'How often the frame is drawn again while someone is looking at it, unless its scene has an interval of its own. A frame the cloud draws refreshes at most every five minutes (300).'
-              : 'How often the frame re-renders its active scene. E-paper panels want large values (300 or more); the firmware enforces a 5 second minimum.'
-          }
-        >
-          <TextInput name="interval" placeholder="300" />
         </Field>
         {virtual ? null : (
           <>
@@ -178,7 +167,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
           {virtual
             ? 'This frame has no hardware: FrameOS Cloud draws its scenes and shows the picture at the link under Virtual frame below. Its size and that link are set there.'
             : esp32
-            ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
+            ? 'This ESP32 frame accepts its name, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
             : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
       </SectionBody>

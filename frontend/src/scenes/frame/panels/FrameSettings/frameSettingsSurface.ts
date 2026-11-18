@@ -102,7 +102,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     nav: [],
     navNote: 'The first thing the cloud panel renders, so a link to it scrolls nowhere.',
     conditions:
-      "A virtual frame gets name, interval, scale and time zone only: rotation, scaling mode and debug logging are a panel's and a device's.",
+      "A virtual frame gets name, scale and time zone only: rotation, scaling mode and debug logging are a panel's and a device's.",
   },
   {
     key: 'cloud-defaults',
