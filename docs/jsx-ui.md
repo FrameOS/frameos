@@ -727,6 +727,36 @@ export function get(app) {
   color. `focus:` classes apply while it has the keyboard.
 - **A field without `value`** shows what is typed while it has the keyboard
   and forgets it after: always give it one.
+- **A `value` the app changed** (in `onChange`, or anywhere since) is what
+  the next edit starts from, as in React. The caret, and a selection, stay
+  on their text when what is before them is unchanged, or what is after
+  them (lines added above or below, as a code editor's window of lines
+  slides: [Scrolling](#scrolling-and-clipping)); otherwise the caret goes to
+  the end (a line the Terminal empties on Enter).
+- **Colored text**: `<span>`s (and text) inside a field, whose text together
+  is its `value`, draw it each in its own classes (`text-*`, `font-*`), as a
+  code editor colors its tokens. The caret, the selection and the keyboard
+  work on the value as before. Children that do not spell the value (an edit
+  the app has not seen yet) are not drawn: the value is, in the field's own
+  style.
+
+  ```tsx
+  <textarea value={code} onChange={(e) => { code = e.value }}
+    className="whitespace-nowrap overflow-x-auto font-[Cascadia_Mono]">
+    <span className="text-[#569cd6]">const</span>{' x = '}<span className="text-[#b5cea8]">1</span>
+  </textarea>
+  ```
+
+- **`whitespace-nowrap` on a `<textarea>`**: its lines are not wrapped, and
+  with `overflow-x-auto` a long one scrolls it sideways under a finger or the
+  wheel, as the caret does.
+- **`frameos.measureText(texts, {className, width})`**: how tall each text is,
+  in pixels, set in those classes' font, size and `leading-*` into `width`
+  exactly as a `<textarea>` of that width sets it (the same typesetting:
+  wrapped at spaces, spaces kept, an empty text one line). An app that lays
+  out wrapped rows itself measures them before they are drawn: the Code
+  editor's line numbers beside each line's first row, and the height of the
+  lines out of sight in a virtualized list (`layout.nim` `measureText`).
 
 How: the field is a region of the UI's layout (`UiRegion.field`), its
 text and caret are kept with the UI's input state (`UiInput`: `focus`,
@@ -933,7 +963,8 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 
 - **A finger drags it**: once a press on it moves past the tap's slop
   along the way it scrolls, the content follows the finger and nothing is
-  pressed; the swipe that ends the drag is the box's, not a handler's. A
+  pressed (from where the box is at each move, so a `scrollTop` the app set
+  during a drag holds); the swipe that ends the drag is the box's, not a handler's. A
   press on an element that takes it (`onPointerDown`, `onPointerMove`: a
   slider) stays that element's, unless the box that scrolls is that element
   or drawn over it (inside it, or over it): a menu that takes its presses, so the
@@ -953,7 +984,23 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 - **What shows answers the pointer**: the elements inside it are hit where
   they are drawn, and only where it shows them.
 - **A focused field inside it** is scrolled into sight, with the keyboard
-  up too.
+  up too. A `<textarea>` taller than the box (a code editor's lines) has the
+  line of its caret scrolled into sight, or the line a tap placed it on.
+- **A drag along a way the box under it does not scroll** (down, over a row
+  that scrolls sideways) scrolls the box around it that does, as in a browser.
+  So does the wheel.
+- **`onScroll`** hears every scroll a finger or the wheel makes (on a slow
+  panel, once the finger lifts): `e.scrollTop` and `e.scrollLeft` (also on
+  `e.target`, as React's), in the UI's pixels. A scroll the layout makes
+  itself (a caret brought into sight) is heard with the next event (a key,
+  a tap): the layout runs inside a render, where no handler can.
+- **`scrollTop={y}`** scrolls the box to `y` when the app changes it (a file
+  opened at the top, or where it was left), kept in range; the same value
+  render after render leaves the box where a finger took it, as a browser
+  does. The two together make a **virtualized list**: a box as tall as all
+  its rows, spacers for the rows out of sight, and only the rows around
+  `scrollTop` built and laid out. The Code editor does this with 2,000-line
+  files (`docs/code-editor.md` "The file open").
 - **A bar** at its right edge says where in it you are, in the text color.
 - **`overflow-hidden`** clips at the padding box without scrolling: a
   picture in a box, a long name cut at the box's edge. Clipping is

@@ -653,6 +653,180 @@ suite "fields, clipping and scrolling":
     discard layout.layoutUi(el("div", "bg-white", line), 240, 60, state, regions)
     check state.scrolled(regions[0].key)[0] == 0 and regions[0].scrollY == 0
 
+  test "a field's spans color its value; what does not spell it is one run":
+    proc colored(value: string): SvgNode =
+      result = input("textarea", "w-[200px] h-[40px] text-black bg-white whitespace-nowrap", {"value": value})
+      result.children.add el("span", "text-[#ff0000]", txt("let"))
+      result.children.add txt(" x  = ")
+      result.children.add el("span", "text-[#0000ff]", txt("1"))
+    proc inks(svg: SvgNode): (bool, bool) =
+      let image = newImage(parseSvg(svg, 240, 60))
+      for y in 0 ..< 60:
+        for x in 0 ..< 240:
+          let c = image[x, y]
+          if c.r > 150 and c.g < 80 and c.b < 80: result[0] = true
+          if c.b > 150 and c.r < 80 and c.g < 80: result[1] = true
+    check inks(layoutUi(el("div", "bg-white", colored("let x  = 1")), 240, 60)) == (true, true)
+    # Spans that do not spell the value (an edit the app has not seen): its
+    # text in the field's color.
+    check inks(layoutUi(el("div", "bg-white", colored("let y = 1")), 240, 60)) == (false, false)
+    # Its lines unwrapped: a long one scrolls the field sideways.
+    var regions: seq[UiRegion]
+    let wide = input("textarea", "w-[100px] text-black whitespace-nowrap overflow-x-auto",
+      {"value": "a line far longer than the field is wide\nb"})
+    var state: UiInput
+    discard layout.layoutUi(el("div", "bg-white", wide), 240, 60, state, regions)
+    check regions.len == 1 and regions[0].scrollX > 100 and regions[0].scrollY == 0
+
+  test "a value the app changed keeps the caret on its text, before or after":
+    let area = proc(value: string): SvgNode =
+      el("div", "bg-white", input("textarea", "w-[200px] h-[40px] text-black", {"value": value}))
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard layout.layoutUi(area("b\nc"), 240, 60, state, regions)
+    state.focus = regions[0].key + 1
+    state.text = "b\nc"
+    state.caret = 2 # before the c
+    for (value, caret) in [("a\nb\nc", 4), ("a\nb\nc\nd", 4), ("b\nc\nd", 2), ("XYZ", 3), ("", 0)]:
+      regions.setLen(0)
+      discard layout.layoutUi(area(value), 240, 60, state, regions)
+      check state.text == value and state.caret == caret
+    # A selection moves with it.
+    state.text = "abc"
+    state.caret = 3
+    state.sel = 2 # "bc"
+    regions.setLen(0)
+    discard layout.layoutUi(area("x\nabc"), 240, 60, state, regions)
+    check state.caret == 5 and state.sel == 4
+
+  test "a textarea taller than the box around it: an edit reveals its caret's line":
+    # 20 lines of 24 px (480 px) below 50 px of something else, in 100 px.
+    var lines: seq[string]
+    for i in 0 ..< 20: lines.add "line " & $i
+    let value = lines.join("\n")
+    proc page(): SvgNode =
+      el("div", "flex flex-col h-[100px] w-[240px] overflow-y-auto bg-white",
+        el("div", "shrink-0 h-[50px]"),
+        input("textarea", "shrink-0 w-[200px] text-black whitespace-nowrap", {"value": value}))
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard layout.layoutUi(page(), 240, 100, state, regions)
+    var box, field = -1
+    for i, r in regions:
+      if r.field == 2: field = i
+      elif r.scrollY > 0: box = i
+    check field >= 0 and box >= 0
+    check regions[field].scrollY == 0 # as tall as its lines: nothing of its own to scroll
+    state.focus = regions[field].key + 1
+    state.text = value
+    state.caret = value.find("line 15")
+    state.reveal = true
+    let boxKey = regions[box].key
+    regions.setLen(0)
+    discard layout.layoutUi(page(), 240, 100, state, regions)
+    let sy = state.scrolled(boxKey)[1]
+    checkpoint "scrolled to " & $sy
+    check sy > 50 + 15 * 24 + 24 - 100 - 1 and sy < 50 + 15 * 24 + 1
+
+  test "onScroll hears where a finger or the wheel scrolled a box to":
+    let target = uiTarget("scrolled", 5)
+    target.input.slow = false
+    var heard: seq[(int, float)]
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) =
+      if name == "scroll": heard.add((handler, event{"scrollTop"}.getFloat()))
+    proc relayout() =
+      let rows = el("div", "h-[100px] w-[100px] overflow-y-auto bg-white", el("div", "h-[400px]"))
+      rows.attrs.add(("on-scroll", "4"))
+      target.regions.setLen(0)
+      discard layout.layoutUi(rows, 100, 100, target.input, target.regions, target.memo)
+    relayout()
+    check target.regions.len == 1 and target.regions[0].handlers[ueScroll] == 5
+    proc at(event: string, y: float32): bool =
+      dispatchUiEvent("scrolled", event, %*{"x": 50, "y": y, "pointerId": 1,
+        "pointerType": "touch", "buttons": (if event == "pointerUp": 0 else: 1)})
+    discard at("pointerDown", 80)
+    discard at("pointerMove", 60)
+    check heard == @[(4, 20.0)] and not target.inputOnly
+    discard at("pointerMove", 30)
+    discard at("pointerUp", 30)
+    check heard[^1] == (4, 50.0) and heard.len == 2
+    relayout()
+    check dispatchUiEvent("scrolled", "wheel", %*{"x": 50, "y": 50, "deltaY": 1})
+    check heard[^1] == (4, 50.0 + 72.0)
+    # A slow panel hears it once, when the finger lifts.
+    target.input.slow = true
+    heard.setLen(0)
+    relayout()
+    discard at("pointerDown", 80)
+    discard at("pointerMove", 60)
+    discard at("pointerMove", 40)
+    check heard.len == 0
+    discard at("pointerUp", 40)
+    check heard == @[(4, 122.0 + 40.0)]
+    # A scroll the layout made (a caret brought into sight) is heard with
+    # the next event, once.
+    target.input.scrollTo(target.regions[0].key, 0, 250)
+    discard dispatchUiEvent("scrolled", "uiTimer", newJObject())
+    check heard.len == 1
+    discard at("pointerDown", 10)
+    check heard[^1] == (4, 250.0) and heard.len == 2
+    discard at("pointerUp", 10)
+    check heard.len == 2
+
+  test "scrollTop scrolls a box when the app changes it":
+    proc page(top: string): SvgNode =
+      result = input("div", "h-[100px] w-[100px] overflow-y-auto", {"scroll-top": top})
+      result.children.add el("div", "h-[400px]")
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let memo = UiMemo()
+    discard layout.layoutUi(page("50"), 100, 100, state, regions, memo)
+    let key = regions[0].key
+    check state.scrolled(key) == (0'f32, 50'f32)
+    # Scrolled by hand since, the same scrollTop leaves it where it went.
+    state.scrollTo(key, 0, 80)
+    regions.setLen(0)
+    discard layout.layoutUi(page("50"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 80'f32)
+    regions.setLen(0)
+    discard layout.layoutUi(page("0"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 0'f32)
+    regions.setLen(0)
+    discard layout.layoutUi(page("9000"), 100, 100, state, regions, memo)
+    check state.scrolled(key) == (0'f32, 300'f32) # kept in range
+
+  test "a drag along a way the box under it does not scroll scrolls the box around it":
+    let target = uiTarget("nested", 6)
+    target.input.slow = false
+    target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    proc relayout() =
+      # A page that scrolls down, and in it a row that scrolls sideways.
+      let page = el("div", "h-[100px] w-[100px] overflow-y-auto bg-white",
+        el("div", "h-[40px] w-[100px] overflow-x-auto", el("div", "h-[40px] w-[300px]")),
+        el("div", "h-[300px]"))
+      target.regions.setLen(0)
+      discard layout.layoutUi(page, 100, 100, target.input, target.regions, target.memo)
+    relayout()
+    check target.regions.len == 2
+    let (outer, inner) = (target.regions[0].key, target.regions[1].key)
+    proc at(event: string, x, y: float32): bool =
+      dispatchUiEvent("nested", event, %*{"x": x, "y": y, "pointerId": 1,
+        "pointerType": "touch", "buttons": (if event == "pointerUp": 0 else: 1)})
+    # Down on the row, up the screen: the page scrolls.
+    discard at("pointerDown", 50, 30)
+    discard at("pointerMove", 50, 10)
+    discard at("pointerUp", 50, 10)
+    check target.input.scrolled(outer) == (0'f32, 20'f32) and target.input.scrolled(inner) == (0'f32, 0'f32)
+    # Sideways on it: the row does.
+    relayout()
+    discard at("pointerDown", 80, 10)
+    discard at("pointerMove", 50, 10)
+    discard at("pointerUp", 50, 10)
+    check target.input.scrolled(inner) == (30'f32, 0'f32) and target.input.scrolled(outer) == (0'f32, 20'f32)
+
   test "the on-screen keyboard: under the UI, its keys regions":
     let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
     var

@@ -53,11 +53,12 @@ type
                                 ## render needs no new tree (app_runtime.get)
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
+    heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
     # A press on a box that scrolls: the pointer, the box, where the press
     # began and how far the box was scrolled then; `dragging` once it moved
     # far enough to be a scroll rather than a tap.
     dragPointer, dragKey: int
-    dragX, dragY, dragSX, dragSY: float32
+    dragX, dragY: float32
     dragging, dragged: bool
     holdPointer: int            ## the pointer whose hold opened a key's accents, -1 for none
     # A key held that types again (backspace): its pointer (-1 for none), the
@@ -572,6 +573,28 @@ proc fieldCall(target: UiTarget, kind: UiEvent, name: string, payload: JsonNode)
       [0'f32, 0, target.regions[i].w, target.regions[i].h])
     target.inputOnly = false # whatever the handler changed, get() shows it
 
+proc scrolledBy(target: UiTarget, r: UiRegion, unheard = false) =
+  ## A finger or the wheel scrolled the box: its onScroll hears where to, as
+  ## `scrollTop` and `scrollLeft` (a code editor's lines that show). With
+  ## `unheard`, only when it is not where it last heard: a scroll the layout
+  ## made (the caret brought into sight) is heard with the next event.
+  if r.handlers[ueScroll] > 0 and not target.call.isNil:
+    let (x, y) = target.input.scrolled(r.key)
+    var at = target.heard.len
+    for i in 0 ..< target.heard.len:
+      if target.heard[i][0] == r.key: at = i
+    if at == target.heard.len:
+      target.heard.add((r.key, x, y))
+      if unheard: return # first seen: where the app put it
+    elif unheard and target.heard[at][1] == x and target.heard[at][2] == y:
+      return
+    target.heard[at] = (r.key, x, y)
+    let payload = newJObject()
+    payload["scrollTop"] = newJFloat(y)
+    payload["scrollLeft"] = newJFloat(x)
+    target.call(r.handlers[ueScroll] - 1, "scroll", payload, [0'f32, 0, r.w, r.h])
+    target.inputOnly = false # whatever the handler changed, get() shows it
+
 proc keyDown(target: UiTarget, key: string) =
   let payload = newJObject()
   payload["key"] = newJString(key)
@@ -987,6 +1010,7 @@ when not defined(frameosEmbedded):
       return false
     target.input.scrollTo(r.key, sx, sy)
     target.inputOnly = true
+    target.scrolledBy(r)
     wheelScrolled = true
     true
 
@@ -1166,6 +1190,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   for target in targets:
     if target.sceneId != sceneId:
       continue
+    if not target.dragging:
+      for r in target.regions:
+        target.scrolledBy(r, unheard = true)
     when not defined(frameosEmbedded):
       if event in ["keyDown", "textInput"]:
         if (target.input.open > 0 or target.input.link.len > 0) and payload{"key"}.getStr() == "Escape":
@@ -1212,25 +1239,49 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         let
           dx = x - target.dragX
           dy = y - target.dragY
-          box = target.regions[r]
+        var box = target.regions[r]
+        if not target.dragging and max(abs(dx), abs(dy)) > GestureTapSlopPx and
+            (if abs(dy) > abs(dx): box.scrollY == 0 else: box.scrollX == 0):
+          # Along a way this box does not scroll (a code editor's lines that
+          # scroll sideways, in a page that scrolls down): the box around it
+          # that does, under where the press went down, as in a browser.
+          let
+            downX = (target.dragX - target.offsetX) / scale
+            downY = (target.dragY - target.offsetY) / scale
+          for i in countdown(r - 1, 0):
+            let o = target.regions[i]
+            if (if abs(dy) > abs(dx): o.scrollY > 0 else: o.scrollX > 0) and o.inside(downX, downY):
+              box = o
+              target.dragKey = o.key
+              break
         if not target.dragging and (box.scrollX > 0 and abs(dx) > GestureTapSlopPx or
             box.scrollY > 0 and abs(dy) > GestureTapSlopPx):
           target.dragging = true
           target.input.pressed.setLen(0)
         if target.dragging:
+          # From where the box is now, by how far the finger moved since the
+          # last move: an app that moved it meanwhile (scrollTop, a code
+          # editor's lines measured above the screen) keeps what it did.
+          let (sx, sy) = target.input.scrolled(box.key)
           target.input.scrollTo(box.key,
             # The finger moved in the canvas's pixels; the box scrolls in the UI's.
-            if box.scrollX > 0: clamp(target.dragSX - dx / scale, 0, box.scrollX) else: target.dragSX,
-            if box.scrollY > 0: clamp(target.dragSY - dy / scale, 0, box.scrollY) else: target.dragSY)
+            if box.scrollX > 0: clamp(sx - dx / scale, 0, box.scrollX) else: sx,
+            if box.scrollY > 0: clamp(sy - dy / scale, 0, box.scrollY) else: sy)
+          target.dragX = x
+          target.dragY = y
           target.inputOnly = true
           # A slow panel shows where it got to when the finger lifts.
-          result = result or not target.input.slow
+          if not target.input.slow:
+            target.scrolledBy(box)
+            result = true
           continue
       elif released:
         target.dragKey = -1
         if target.dragging:
           target.dragging = false
           target.dragged = true
+          if target.input.slow:
+            target.scrolledBy(target.regions[r])
           result = true
     if target.repeatPointer == pointer and (released or down):
       target.repeatPointer = -1 # backspace let go
@@ -1409,7 +1460,6 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.captures.add((pointer, target.regions[takes].key))
         elif box >= 0:
           let r = target.regions[box]
-          (target.dragSX, target.dragSY) = target.input.scrolled(r.key)
           target.dragKey = r.key
           target.dragPointer = pointer
           target.dragX = x

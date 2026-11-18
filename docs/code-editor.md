@@ -24,20 +24,20 @@ nothing of a plane: `previewOnly`).
 
 - **The look** is a code editor's workbench, after VS Code's Dark+: an
   activity bar (the scenes, the files, the AI), the explorer, a tab bar with
-  the editor's actions (the page, Edit, Ask AI, Save; a draft's Discard and
-  Save & show) and breadcrumbs over the code, and a blue status bar (purple
-  for an AI draft). No title bar: a desktop's window has its own, and the
-  activity bar is the way back to the scenes (a narrow screen's tab bar starts
-  with a ‹). The status bar says
-  the lines showing, the page and the language. Text is 13 px like other windows
-  (the frame's render scale makes it bigger on a big screen, never the app).
-  The code is colored by kind (keywords, strings, numbers, calls, comments,
-  JSON keys) in Cascadia Mono where the frame has it in its fonts (a Pi's
-  assets folder), else in the frame's own face; lines are not wrapped, as in
-  VS Code: a long one is cut at the edge, and Edit shows it whole. A screen
-  under 600 px wide drops the activity bar and the explorer for a select of
-  the files; e-paper and a grey panel are black on white, uncolored. A refusal
-  or a note is a notification over the bottom right corner; a tap puts it away.
+  the scene's actions (Ask AI, Save; a draft's Discard and Save & show) and
+  breadcrumbs over the code, and a blue status bar (purple for an AI draft).
+  No title bar: a desktop's window has its own, and the activity bar is the
+  way back to the scenes (a narrow screen's tab bar starts with a ‹). The
+  status bar says the lines showing and the language. Text is 13 px like
+  other windows (the frame's render scale makes it bigger on a big screen,
+  never the app). The code is colored by kind (keywords, strings, numbers,
+  calls, comments, JSON keys) in Cascadia Mono where the frame has it in its
+  fonts (a Pi's assets folder), else in the frame's own face. Long lines wrap
+  at spaces, each line's number beside its first row; **Wrap** in the status
+  bar turns it off (VS Code's Alt+Z), and a long line then scrolls sideways. A screen under 600 px
+  wide drops the activity bar and the explorer for a select of the files;
+  e-paper and a grey panel are black on white, uncolored. A refusal or a note
+  is a notification over the bottom right corner; a tap puts it away.
 - **The scenes.** It opens on the frame's scenes (`app.frame.scenes`) in the
   explorer, a folder per category with each scene's own icon (the desktops'
   `grouped` and `ownIcon`, the same text: Other last), beside a start page
@@ -46,23 +46,64 @@ nothing of a plane: `previewOnly`).
   scene without its apps' sources and its code nodes' code: name, settings,
   fields, nodes, edges), a folder per app with its files (`config.json`,
   `app.tsx`, …) and a `code` folder with every code node's code as
-  `<node id>.js`. A file shows as lines with their numbers, a page a screen;
-  a swipe or the arrows in the tab bar turn the page.
-- **Changing a file.** **Edit** puts the page showing into a `<textarea>` (the
-  keyboard on the screen, or a real one); **Done** puts it back into the file.
-  A page at a time keeps the layout small on an ESP32 and a 2,000-line app
-  workable. A changed file is marked; **Save** puts the files back together
-  into the scene (a `.json` file that does not parse says where, and nothing
-  is saved) and asks the host to save it.
+  `<node id>.js`. A file is one text with its line numbers, scrolled by a
+  finger or the wheel, and each file opens where it was left.
+- **Changing a file.** Tap where the text should change and type, as in any
+  editor: the caret goes there, and the keyboard comes up on a screen without
+  one of its own (a real one types straight in; selecting, copying and pasting
+  are the fields', `docs/jsx-ui.md`). A changed file is marked; **Save** puts
+  the files back together into the scene (a `.json` file that does not parse
+  says where, and nothing is saved) and asks the host to save it.
 - **Asking the AI.** **Ask AI** opens a box for a request. On a scene it is a
   change to that scene (with the edits not yet saved), else a new scene. The
   answer is a **draft**: its files open like a scene's, with what the AI said
   above them; **Save** installs it (a change replaces the scene, a new scene
   goes on the list and shows), **Discard** drops it, and a further request
   changes the draft.
-- **Where it is** (the scene open, the file, the page, the draft's name) is a
-  private disk field, `spot`; the files' edits and the draft are kept with
-  `frameos.remember`, so they outlast an interpreter the frame let go.
+- **Where it is** (the scene open, the file, the draft's name) is a private
+  disk field, `spot`; the files' edits, what is being typed, where each file
+  is scrolled to and the draft are kept with `frameos.remember`, so they
+  outlast an interpreter the frame let go (scrolling writes nothing to flash).
+
+## The file open
+
+A file is ONE box that scrolls (`overflow-y-auto`), as tall as all its lines,
+and in it only the lines around where it is scrolled to: the screen showing
+and a screen above and below, a hundred lines or so whatever the file's
+length, as ONE `<textarea>` beside their numbers, with spacers standing in
+for the lines above and below. The field is the code editor's
+`contenteditable`: colored by the `<span>`s inside it (`tokensOf`, the tokens
+of each line read once and kept until an edit above them), unwrapped
+(`whitespace-nowrap overflow-x-auto`), and typed into where it is tapped.
+`onScroll` tells the app where the box went and the window slides
+(`slide`); `scrollTop` puts a file back where it was left. All of it is the
+JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
+"Scrolling and clipping"); the editor adds nothing to the runtime.
+
+- **A window changes at one end at a time**: it grows at the end the screen
+  is heading to, and shrinks at the far end once it is six screens long; one
+  the screen jumped clear of (e-paper, which scrolls once the finger lifts)
+  is set anew. A field whose value changes at one end keeps its caret on its
+  text, so the keyboard stays where it was typing while the window slides.
+- **Wrapped lines** take as many rows as the field sets them in. The rows of
+  the lines in the window are measured with `frameos.measureText` (the field's
+  own typesetting, its classes and width), so each number sits by its line's
+  first row; the lines never near the screen are guessed from their length.
+  Where a line starts is the rows above it, summed (`rowSums`). When guessed
+  lines above the screen are measured and turn out taller or shorter, the
+  box is scrolled by the difference (`scrollTop`), so what shows does not
+  move; a drag scrolls from where the box is, so it keeps that. A line typed
+  into is measured again.
+- **What was typed** is the file's lines in memory (`current`), folded back
+  into the file's text when the window moves, the file changes, or the scene
+  is saved or sent to the AI; until then it is remembered as the window's
+  text (`typing`), so an interpreter the frame let go loses nothing.
+- **What it costs**: a drag is the app's `get()` once a move (the window, the
+  spans kept from the last render while it did not change) and a layout of
+  the window's lines. On a desktop build with optimisation (2026-11-18): get
+  0.8 ms, the JSX walk 0.3 ms, the layout 1.6 ms (1.2 of it the text set in
+  type when the window changed) for a 2,000-line file; the raster of the
+  scrolled box is the rest, as in any scroller.
 - **Opened from the scene settings** (`Code`), it opens on that scene: the
   button switches to the editor with its public field `open` set to the
   scene's id (`setCurrentScene {sceneId: "code-editor", state: {open}}`), and
@@ -182,7 +223,9 @@ hook (2026-11-17, against the branch's base).
   they list the Terminal and the Scene store; it is a scene on the scene list.
 - A draft cannot be previewed before it is saved (`docs/scene-previews.md`
   would be the way: a `preview` action pushing it beside the list).
-- Syntax colors, search and undo in a file.
+- Search, undo and indenting with Tab in a file. A file's caret position
+  (line and column) in the status bar: the app hears where the caret is only
+  when the text changes.
 - On an ESP32 an ask holds the request task while the AI works (up to three
   minutes): a scene's `fetch` and the scene store wait behind it. A task of
   its own would cost internal RAM for a TLS stack.

@@ -29,6 +29,15 @@ var
 let held = %*{"id": "clock", "name": "Clock", "settings": {"execution": "interpreted"}, "fields": [],
   "nodes": [{"id": "c1", "type": "code", "data": {"codeJS": "return 42"}}], "edges": []}
 
+proc longCode(): string =
+  ## 2,000 lines of an app: what the editor holds a window of.
+  for i in 1 .. 2000:
+    if i > 1: result.add '\n'
+    result.add "  const line" & $i & " = fetch('/api/" & $i & "') // line " & $i
+
+let long = %*{"id": "long", "name": "Long", "settings": {"execution": "interpreted"}, "fields": [],
+  "nodes": [], "edges": [], "apps": {"face": {"name": "Face", "sources": {"app.tsx": longCode()}}}}
+
 proc host(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
   ## A host as scene_code_hooks.nim says one answers.
   {.cast(gcsafe).}:
@@ -36,7 +45,7 @@ proc host(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
       return if op == "read": "" else: SettingsOffCode
     case op
     of "read": $(%*{"busy": "", "error": "", "done": "", "draft": nil, "ask": true, "save": true})
-    of "source": (if arg == "clock": $held else: "")
+    of "source": (if arg == "clock": $held elif arg == "long": $long else: "")
     of "draft": draft
     else:
       try: asked.add (op, parseJson(arg))
@@ -135,6 +144,14 @@ suite "frameos.code":
       check call(%*["code"], expression)["error"].getStr() == "frameos.code: settings on the frame's screen are off"
     check asked.len == 0
 
+  test "frameos.measureText sets texts as a field of that width would":
+    let heights = call(%*[], "frameos.measureText(['a', 'word '.repeat(60), ''], " &
+      "{ className: 'text-[13px] leading-[19px]', width: 200 })")["value"]
+    check heights.len == 3
+    check heights[0].getInt() == 19 and heights[2].getInt() == 19
+    check heights[1].getInt() > 3 * 19 and heights[1].getInt() mod 19 == 0
+    check call(%*[], "frameos.measureText([], { width: 200 })")["value"].len == 0
+
   test "is null where no host reads code":
     sceneCode = nil
     check call(%*["code"], "frameos.code('read')")["value"].kind == JNull
@@ -169,6 +186,10 @@ suite "the Code editor scene":
       result.writeFile(dir / ($shot & "-" & name & ".png"))
     rhythmClockOverride += 1.0
 
+  proc send(scene: FrameScene, event: string, payload: JsonNode) =
+    runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload, loopIndex: 0,
+      loopKey: ".", nextSleep: -1))
+
   proc load(config: FrameConfig, state = %*{}): FrameScene =
     setUploadedInterpretedScenes(parseInterpretedScenes($(%*[sample])))
     resetInterpretedScenes()
@@ -193,5 +214,39 @@ suite "the Code editor scene":
       let scene = load(config)
       scene.state["open"] = %"clock"
       discard draw(scene, config, "small")
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "scrolls a long file, colored, and types where it is tapped":
+    let config = testConfig()
+    let scene = load(config, %*{"spot": {"view": "code", "id": "long", "file": "face/app.tsx"}})
+    proc drawn(name: string): Image = draw(scene, config, name)
+    proc blue(image: Image): int =
+      ## Pixels in the keywords' blue (#569cd6), anti-aliased edges aside.
+      for y in 0 ..< image.height:
+        for x in 0 ..< image.width:
+          let c = image[x, y]
+          if abs(c.r.int - 0x56) < 12 and abs(c.g.int - 0x9c) < 12 and abs(c.b.int - 0xd6) < 12: inc result
+    discard drawn("long-open")
+    let top = drawn("long-top")
+    check top.blue > 200
+    # A finger drags the code up a screen and more.
+    scene.send("pointerDown", %*{"x": 600, "y": 400, "pointerId": 1, "pointerType": "touch", "buttons": 1})
+    for y in countdown(380, 60, 40):
+      scene.send("pointerMove", %*{"x": 600, "y": y, "pointerId": 1, "pointerType": "touch", "buttons": 1})
+      discard drawn("long-drag")
+    scene.send("pointerUp", %*{"x": 600, "y": 60, "pointerId": 1, "pointerType": "touch"})
+    let scrolled = drawn("long-scrolled")
+    check scrolled.blue > 200
+    # A tap on a line, then typing: into that line.
+    scene.send("tap", %*{"x": 420, "y": 200, "pointerId": 0, "pointerType": "touch"})
+    discard drawn("long-focused")
+    scene.send("textInput", %*{"text": "typed()"})
+    discard drawn("long-typed")
+    # Save (the tab bar's last button): the whole file, with what was typed.
+    scene.send("tap", %*{"x": 768, "y": 18, "pointerId": 0, "pointerType": "touch"})
+    check asked.len == 1 and asked[0][0] == "save"
+    let text = asked[0][1]{"scene", "apps", "face", "sources", "app.tsx"}.getStr()
+    check text.count('\n') == 1999 and text.contains("typed()") and text != longCode()
     check problems.len == 0
     if problems.len > 0: echo problems

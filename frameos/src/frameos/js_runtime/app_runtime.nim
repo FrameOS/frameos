@@ -610,6 +610,17 @@ proc jsCode(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} 
     answer = if host.isNil: "" else: host(storeAsker(e), toNimString(ctx, op), toNimString(ctx, arg))
   nimStringToJS(ctx, answer)
 
+proc jsMeasureText(ctx: ptr JSContext, texts: JSValue, classes: JSValue, width: JSValue): JSValue {.nimcall.} =
+  ## `frameos.measureText(texts, {className, width})` (docs/jsx-ui.md): each
+  ## text's height as a field would set it. The texts come joined by newlines
+  ## (a line holds none) and the heights go back as whole pixels between
+  ## spaces: no JSON either way.
+  var answer = ""
+  for h in measureText(toNimString(ctx, texts).split('\n'), toNimString(ctx, classes), toNimFloat(ctx, width).float32):
+    if answer.len > 0: answer.add ' '
+    answer.addInt int(h + 0.5)
+  nimStringToJS(ctx, answer)
+
 proc jsSetNextSleep(ctx: ptr JSContext, seconds: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e != nil:
@@ -3026,6 +3037,9 @@ const appJsPrelude* = compactJs("""
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __appReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
+    measureText: (texts, o = {}) => texts.length
+      ? jsMeasureText(texts.join("\n"), String(o.className || ""), Number(o.width || 0)).split(" ").map(Number)
+      : [],
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
@@ -3244,7 +3258,7 @@ const appJsPrelude* = compactJs("""
     const handler = ((__frameosApps[key] || {}).handlers || [])[id];
     if (typeof handler !== "function") return;
     const e = { ...JSON.parse(event), type, localX, localY, width, height };
-    if (type === "change") e.target = { value: e.value }; // React's e.target.value
+    e.target = { ...e }; // React's e.target.value (a field), e.target.scrollTop (a box)
     handler(e);
   };
   // A node in a flow calls run(), a node feeding a field calls get(). An app
@@ -3332,6 +3346,7 @@ proc registerAppNatives(js: var QuickJS) =
   js.registerFunction("jsAssets", jsAssets)
   js.registerFunction("jsAsyncStart", jsAsyncStart)
   js.registerFunction("jsTypedOps", jsTypedOps)
+  js.registerFunction("jsMeasureText", jsMeasureText)
   probe(phPrelude):
     evalAppPrelude(js)
 
