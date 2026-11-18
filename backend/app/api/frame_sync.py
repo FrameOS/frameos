@@ -239,7 +239,6 @@ FRAME_SYNC_LABELS = {
     "scaling_mode": "Scaling mode",
     "render_scale": "Scale",
     "frame_settings_on_screen": "Frame settings on the screen",
-    "background_color": "Background color",
     "log_to_file": "Log file",
     "assets_path": "Assets path",
     "save_assets": "Save assets",

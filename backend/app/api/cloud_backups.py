@@ -82,7 +82,6 @@ FRAME_RESTORE_FIELDS = (
     "frame_settings_on_screen",
     "rotate",
     "flip",
-    "background_color",
     "debug",
     "scenes",
     "log_to_file",

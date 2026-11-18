@@ -525,7 +525,6 @@ class Frame(Base):
     # not used
     apps = mapped_column(JSON, nullable=True)
     image_url = mapped_column(String(256), nullable=True)
-    background_color = mapped_column(String(64), nullable=True) # still used as fallback in frontend
 
     def to_dict(self):
         result = {
@@ -568,7 +567,6 @@ class Frame(Base):
             'frame_settings_on_screen': self.frame_settings_on_screen is not False,
             'rotate': self.rotate,
             'flip': self.flip,
-            'background_color': self.background_color,
             'debug': self.debug,
             'scenes': self.scenes,
             # Legacy compiled scenes force a source build on every deploy; the

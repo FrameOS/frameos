@@ -2479,7 +2479,6 @@ def test_buildroot_bootstrap_frame_uses_web_only_and_clears_scenes():
             "scaling_mode": "contain",
             "rotate": 0,
             "flip": None,
-            "background_color": None,
             "debug": False,
             "scenes": [{"id": "scene-1"}],
             "last_log_at": None,

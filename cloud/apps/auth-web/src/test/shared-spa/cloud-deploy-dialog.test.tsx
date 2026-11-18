@@ -47,7 +47,6 @@ function cloudFrame(
     interval: 300,
     metrics_interval: 60,
     scaling_mode: "contain",
-    background_color: "#000000",
     scenes: [],
     ...overrides,
   } as unknown as FrameType;

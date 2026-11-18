@@ -160,7 +160,6 @@ suite "Server API helpers":
     globalFrameConfig = baseConfig(tempRoot)
     writeFrameJson(configPath, globalFrameConfig, %*{
       "interval": 42,
-      "backgroundColor": "#123456",
       "color": "#ffffff"
     })
     putEnv("FRAMEOS_CONFIG", configPath)
@@ -178,7 +177,6 @@ suite "Server API helpers":
     check payload{"interval"}.getFloat() == 42
     # A hand-built config reads back with defaults applied, like a loaded one.
     check payload{"max_http_response_bytes"}.getInt() == DefaultMaxHttpResponseBytes
-    check payload{"background_color"}.getStr() == "#123456"
     check payload{"active_connections"}.getInt() == 2
     # The active scene rides the payload so the panel marks its tile on load.
     check payload{"active_scene_id"}.getStr("") == getLastPublicState()[0].string or

@@ -344,7 +344,6 @@ class ReleaseImageFrame:
     frame_settings_on_screen: bool = True
     rotate: int = 0
     flip: str | None = None
-    background_color: str | None = None
     debug: bool = False
     last_log_at: str | None = None
     log_to_file: str | None = "/srv/frameos/logs/frameos-{date}.log"

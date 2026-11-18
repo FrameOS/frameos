@@ -61,7 +61,6 @@ function makeFrame(overrides: Partial<FrameType> = {}): FrameType {
     interval: 300,
     metrics_interval: 60,
     scaling_mode: "contain",
-    background_color: "#000000",
     device: "waveshare.EPD_7in5_V2",
     lan_access: false,
     ...overrides,

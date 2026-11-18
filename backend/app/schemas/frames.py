@@ -118,7 +118,6 @@ class FrameBase(BaseModel):
     frame_settings_on_screen: bool = True
     rotate: Optional[int]
     flip: Optional[str]
-    background_color: Optional[str]
     debug: Optional[bool]
     last_log_at: Optional[datetime]
     # The device's own sleep forecast (an ESP32 between renders): when it is

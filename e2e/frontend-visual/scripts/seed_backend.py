@@ -121,7 +121,6 @@ def base_frame_kwargs() -> dict[str, Any]:
         "scaling_mode": "contain",
         "rotate": 0,
         "flip": None,
-        "background_color": "#111827",
         "debug": True,
         "log_to_file": "/srv/frameos/logs/frame-{date}.log",
         "assets_path": "/srv/assets",

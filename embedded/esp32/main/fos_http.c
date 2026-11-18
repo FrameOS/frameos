@@ -1524,7 +1524,6 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddBoolToObject(frame, "frame_settings_on_screen", config->frame_settings_on_screen);
     cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
-    cJSON_AddStringToObject(frame, "background_color", "#000000");
     cJSON_AddItemToObject(frame, "scenes", frame_api_stored_scenes_json());
     cJSON_AddBoolToObject(frame, "debug", false);
     cJSON_AddNullToObject(frame, "last_log_at");

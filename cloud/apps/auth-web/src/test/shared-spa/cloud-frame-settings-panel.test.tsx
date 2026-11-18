@@ -55,7 +55,6 @@ function cloudFrame(
     metrics_interval: 60,
     rotate: 0,
     scaling_mode: "contain",
-    background_color: "#000000",
     timezone: "Europe/Brussels",
     debug: false,
   } as unknown as FrameType;
