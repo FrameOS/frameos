@@ -221,9 +221,13 @@ def suite_scenes(ctx, frame, scene_filter=None):
             # JS compiled, its pictures decoded): judge the steady state after it.
             running = [a for a in w['animation'] if a.get('status') == 'running']
             anim = running[1:] if len(running) > 1 else running
+            # Where a quiet frame went (the logged frame's line carries their
+            # average, firmware after 2026.11.11): the last one in the window.
+            quiet = next((r['probe']['quiet'] for r in reversed(w['renders']) if r['probe'].get('quiet')), None)
             entry['passive'] = {
                 'seconds': ctx.passive,
                 'renders': len(w['done']),
+                'quiet': quiet,
                 'animation': [{k: a.get(k) for k in ('frames', 'fps', 'avgMs', 'maxMs', 'periodMs', 'seconds', 'jsKB', 'freePsramKB')} for a in anim],
                 'burst': [{k: b.get(k) for k in ('frames', 'avgMs', 'maxMs')} for b in w['burst']],
             }
@@ -231,8 +235,12 @@ def suite_scenes(ctx, frame, scene_filter=None):
                 period = a.get('periodMs') or 0
                 fps = a.get('fps') or 0
                 if period and fps and fps < ANIMATION_MIN_FPS_RATIO * 1000.0 / period:
+                    split = ''
+                    if quiet:
+                        top = sorted(((k, v) for k, v in quiet.items() if k != 'frames'), key=lambda kv: -kv[1])[:6]
+                        split = '; a quiet frame: ' + ', '.join(f'{k} {v:g}' for k, v in top) + ' ms'
                     issues.append(issue('slow', 'animation_fps', where,
-                                        f"{fps} fps against a {1000.0 / period:.0f} fps target (avg {a.get('avgMs')} ms, max {a.get('maxMs')} ms)"))
+                                        f"{fps} fps against a {1000.0 / period:.0f} fps target (avg {a.get('avgMs')} ms, max {a.get('maxMs')} ms){split}"))
                     break
             for a in anim:
                 if (a.get('maxMs') or 0) > 1000 and (a.get('avgMs') or 0) < 500:

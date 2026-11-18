@@ -245,6 +245,7 @@ hot = {
     "pixie/internal": ("@spixie@sinternal.nim.c", "@fcvkvr@fvagreany.nim.c"),
     "pixie/rgb565": ("@spixie@srgb565.nim.c", "@fcvkvr@feto565.nim.c"),
     "pixie/common": ("@spixie@scommon.nim.c", "@fcvkvr@fpbzzba.nim.c"),
+    "pixie/paints": ("@spixie@spaints.nim.c", "@fcvkvr@fcnvagf.nim.c"),
     "frameos/utils/resample": ("@sframeos@sutils@sresample.nim.c", "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c"),
     "frameos/js_runtime/pixel_ops": ("@sframeos@sjs_runtime@spixel_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fcvkry_bcf.nim.c"),
     "frameos/js_runtime/typed_ops": ("@sframeos@sjs_runtime@styped_ops.nim.c", "@fsenzrbf@fwf_ehagvzr@fglcrq_bcf.nim.c"),

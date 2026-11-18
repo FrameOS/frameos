@@ -16,7 +16,7 @@ import frameos/types
 import frameos/utils/asset_colors
 from frameos/render_scale import MaxRenderScale
 import lib/tz
-import std/times
+import std/[monotimes, times]
 import frameos/channels
 import frameos/single_scene_host
 import frameos/scene_rhythm
@@ -104,6 +104,11 @@ proc hasScene*(): bool =
 
 proc currentSceneName*(): string =
   host.sceneName
+
+proc currentSceneId*(): string =
+  ## The scene showing, "" for none: what `sceneInfoJson` says as
+  ## `currentSceneId`, without the list around it.
+  if host.sceneId.isSome: host.sceneId.get().string else: ""
 
 proc sceneInfoJson*(): string =
   ## The scene list as the console, the USB API and the cloud see it.
@@ -230,12 +235,23 @@ proc persistableSceneState(): JsonNode =
   ## The resident scene's keys worth a file.
   residentSceneState(persistable = true)
 
+var persistOwed = false
+  ## An animation's quiet frame left its look at the state for later
+  ## (renderCurrentScene): any look pays it, and a scene about to go is
+  ## looked at first (persistOwedSceneState).
+
 proc persistSceneState*() =
   ## Write the resident scene's state when it differs from what was written.
   ## The scene switcher keeps none: a reboot never comes back to it.
+  persistOwed = false
   if host.scene.isNil or host.sceneId.isNone or isBuiltInScene(host.sceneId.get().string):
     return
   saveSceneState(host.sceneId.get().string, persistableSceneState())
+
+proc persistOwedSceneState() =
+  ## Before the resident scene changes: the look a quiet frame put off.
+  if persistOwed:
+    persistSceneState()
 
 proc mergePersistedSceneState(sceneId: string, state: JsonNode) =
   ## State for a scene that is not resident — a `setSceneState` on a
@@ -671,6 +687,7 @@ proc loadScenes*(scenes: ptr UncheckedArray[cstring], lens: ptr UncheckedArray[c
   ## alone, never a second block the size of the whole set.
   ## Returns the number of scenes loaded; the current scene is re-created
   ## on the next render so hot updates don't tear down mid-render state.
+  persistOwedSceneState()
   var inputs: seq[FrameSceneInput]
   for i in 0 ..< count:
     var text = newString(lens[i].int)
@@ -789,6 +806,7 @@ proc setSceneCatalog*(indexJson: string): int =
 
 proc loadScene*(payload: string, alongside = false): bool =
   when defined(memProbe): memProbe("  >>> loadScene payload=" & $payload.len & "B")
+  persistOwedSceneState()
   ## Build ONE scene and make it the only resident one, tearing down whatever
   ## was live. `payload` is a single scene object (the element the combined
   ## scenes.json holds in its array); it is wrapped so the existing array
@@ -906,6 +924,14 @@ proc embeddedBreathe() {.nimcall, gcsafe, raises: [].} =
 renderBreathe = embeddedBreathe
 scriptBreathe = embeddedBreathe
 
+# pixie's row jobs (a gradient's rows into a grey or 565 canvas) on both cores
+# (components/frameos_nim/fos_rows.c). Two workers' scratch whether or not
+# the helper task can be made: without it every row is the caller's.
+proc fosRowsRun(fn: RowsProc, ctx: pointer, rows, blockRows: int32)
+  {.importc: "fos_rows_run", cdecl, gcsafe, raises: [].}
+rowsRunner = fosRowsRun
+rowsWorkers = 2
+
 # The settings panel's frame page, behind its gear (docs/scene-settings.md
 # "The frame page"): the facts it shows and what it sets (Wi-Fi, rotation,
 # scale), from main/fos_frame_settings.c. Every call comes from the scene, on
@@ -968,6 +994,7 @@ sceneCode = sceneCodeDo
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
+  persistOwedSceneState()
   let sceneId = SceneId(sceneIdText)
   if isBuiltInScene(sceneIdText):
     # The scene switcher (fos_scenes.c applies it without a slot): the scene
@@ -1266,6 +1293,7 @@ proc sceneAwaited*(): bool =
   rhythmAwaited(host.scene)
 
 var lastNextSleep: float = -1
+var lastPersistLook: MonoTime
 
 proc sceneNextSleepSeconds*(): float =
   ## Per-render sleep override the scene's last render set through
@@ -1296,8 +1324,17 @@ proc renderCurrentScene*(): Option[Image] =
   var image: Image
   probe(phScene):
     image = host.renderScene(context)
-  probe(phPersist):
-    persistSceneState()
+  # An animation's quiet frames look four times a second: the look builds the
+  # state it would write and compares the text, 0.9 ms of a 34 ms frame of
+  # DVD Logo Bounce on the SenseCAP Indicator (2026-11-18). Every other
+  # render looks, the frame an animation logs in full among them.
+  let persistAt = getMonoTime()
+  if not quietRenders or (persistAt - lastPersistLook).inMilliseconds >= 250:
+    lastPersistLook = persistAt
+    probe(phPersist):
+      persistSceneState()
+  else:
+    persistOwed = true
   when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")

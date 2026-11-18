@@ -2476,83 +2476,306 @@ proc shapeBounds(path: SomePath, transform: Mat3): Rect {.raises: [PixieError].}
   shapes.transform(transform)
   computeBounds(shapes.shapesToSegments(skipHorizontal = false))
 
-proc paintStripRows*(width, height: int): int {.raises: [].} =
+proc paintStripRows*(width, height: int, coverageOnly = false): int {.raises: [].} =
   ## Rows per strip when a path is filled with a paint server (gradient or
   ## image paint). Such a fill goes through a coverage mask and a paint image
   ## the size of the strip, and pixie used to size both to the whole target:
   ## on a 1200x960 canvas that pair is 9.2 MB, which no ESP32 has spare. The
   ## pair may take half the decode budget and each image must fit the
   ## contiguous budget; with both unlimited (the host default) the strip is
-  ## the whole image and nothing changes.
+  ## the whole image and nothing changes. `coverageOnly`: a gradient into a
+  ## grey or 565 image has no paint image and its mask is a byte a pixel, so
+  ## its strips are eight times as tall.
   if width <= 0 or height <= 0:
     return max(1, height)
-  let rowBytes = width.int64 * 4
+  let rowBytes = width.int64 * (if coverageOnly: 1 else: 4)
   var rows = height.int64
   let budget = decodeBudgetBytes()
   if budget > 0:
-    rows = min(rows, budget.int64 div (4 * rowBytes))
+    rows = min(rows, budget.int64 div ((if coverageOnly: 2 else: 4) * rowBytes))
   let contiguous = decodeContiguousBudgetBytes()
   if contiguous > 0:
     rows = min(rows, contiguous.int64 div rowBytes)
   max(min(height.int64, paintStripMinRows.int64), rows).int
 
-proc paintGradientNarrow(
-  image, mask: Image, rows: GradientRows, colors: ptr UncheckedArray[ColorRGBX],
-  x, y: int
-) =
-  ## A gradient blended normally onto a grey or 565 canvas through a
-  ## coverage `mask` whose top left sits at (x, y): each row painted where
-  ## the mask covers it, the gradient evaluated there alone into `colors`
-  ## (the mask's width) and stored straight into the canvas. The arithmetic
-  ## is the paint image's, its mask multiply's and the normal composite's,
-  ## stored as `setPixel` stores (a 565 canvas's dither included), so the
-  ## same pixels. A pixel the mask leaves out is left as it is: the
-  ## composite of nothing stores back what it read.
+# -------- A gradient into a grey or 565 image
+#
+# Blended normally into a canvas that is not RGBA, a gradient needs no paint
+# image: each row is painted where the shape covers it, the gradient
+# evaluated there alone and stored straight into the canvas, with the
+# arithmetic the paint image, its mask multiply and the normal composite had
+# (a 565 canvas's dither and a sixteen-grey one's included), so the same
+# pixels. A grey target takes its rows as luma and alpha (`prepareGrey`)
+# where the shape covers a pixel whole, two pixels of a sixteen-grey byte in
+# one store. The rows are a job a host may share between its cores
+# (`rowsRunner`).
+#
+# A page's background is a rectangle the size of the page filled with a
+# gradient, often two or three of them over each other. Each was an RGBA
+# image the size of the page made and cleared, the rectangle filled into it,
+# and the fill reading it back a pixel at a time to learn that every pixel is
+# covered whole: on a reTerminal E1003 (1872x1404, sixteen greys) three such
+# fills were 8.8 s of Word clock's 10.3 s, 9 to 10.6 s of the 11 to 15 s of
+# the other clocks and the chess puzzle (the hardware bench, 2026-11-18). A
+# box of whole pixels has no mask at all (`fillGradientBox`), and any other
+# shape's is a byte a pixel.
+
+const boxEdgeSlack = 1'f32 / 1024
+  ## How far from a whole pixel a box's edge may be: under it the mask's
+  ## coverage of the pixels along that edge rounds to all or nothing too.
+
+type GradientFillJob = object
+  rows: ptr GradientRows
+  data8: ptr UncheckedArray[uint8]
+  data16: ptr UncheckedArray[uint16]
+  four, dither, grey, lines: bool ## `lines`: a grey target's rows as luma and alpha
+  origin, stride: int ## the image's, as `dataIndex` reads them
+  x0, x1, y0: int     ## the box in the image's pixels
+  rowsX0: int         ## where the gradient rows count x from
+  coverage: uint8     ## without a mask: every pixel's. With one: a whole pixel's
+  mask: ptr UncheckedArray[uint8] ## the shape's coverage of the box, a byte a pixel from (x0, y0); nil = all of it
+  scratch: ptr UncheckedArray[uint8] ## per worker `scratchBytes`: luma then alpha, or one row of colours
+  scratchBytes: int
+
+proc storeGreyLine(
+  job: ptr GradientFillJob, start, n: int, luma, alpha: ptr UncheckedArray[uint8]
+) {.inline.} =
+  ## One run of luma and alpha blended normally into a grey image from the
+  ## pixel at `start`: blended over a grey G, a colour's luma is its own plus
+  ## G * (255 - alpha) / 255, exactly. A sixteen-grey byte holds two pixels
+  ## and is read and written once.
+  let data = job.data8
+  template blended(backdrop: uint32, i: int): uint8 =
+    luma[i] + uint8((backdrop * (255'u32 - alpha[i].uint32)) div 255)
+  if not job.four:
+    for i in 0 ..< n:
+      let a = alpha[i]
+      if a == 255: data[start + i] = luma[i]
+      elif a != 0: data[start + i] = blended(data[start + i].uint32, i)
+    return
+  let cell = ((start div job.stride) and 3) * 4
+  var
+    column = start mod job.stride
+    idx = start
+    i = 0
+  template level(value: uint8, col: int): uint8 =
+    grayLevel16Ordered(value, OrderedThresholds4x4[cell + (col and 3)])
+  template nibble(old: uint8, i, col: int): uint8 =
+    # The pixel's new level, `old` (its level now) where nothing covers it.
+    (if alpha[i] == 255: level(luma[i], col)
+     elif alpha[i] == 0: old
+     else: level(blended(old.uint32 * 17, i), col))
+  if (idx and 1) != 0 and n > 0:
+    gray4Put(data, idx, nibble(gray4Level(data, idx), 0, column))
+    inc i
+    inc idx
+    inc column
+  while i + 1 < n:
+    let
+      at = idx shr 1
+      packed = data[at]
+    data[at] = (nibble(packed shr 4, i, column) shl 4) or nibble(packed and 15, i + 1, column + 1)
+    i += 2
+    idx += 2
+    column += 2
+  if i < n:
+    gray4Put(data, idx, nibble(gray4Level(data, idx), i, column))
+
+proc storeColor(job: ptr GradientFillJob, idx: int, color: ColorRGBX, coverage: uint8) {.inline.} =
+  ## One colour under a coverage, blended normally into the pixel at `idx`.
+  var c = color
+  if coverage != 255:
+    c = blendMask(c, rgbx(coverage, coverage, coverage, coverage))
+  if c.a == 0:
+    return
+  if not job.grey:
+    if c.a != 255:
+      c = blendNormal(rgb565ToRgbx(job.data16[idx]), c)
+    job.data16[idx] = if job.dither: rgbxToRgb565Dithered(c, idx) else: rgbxToRgb565(c)
+    return
+  let data = job.data8
+  if c.a != 255:
+    c = blendNormal(
+      (if job.four: gray4ToRgbx(gray4Level(data, idx)) else: gray8ToRgbx(data[idx])), c)
+  let value = rgbxToGray8(c)
+  if job.four:
+    gray4Put(data, idx, grayLevel16Ordered(value,
+      OrderedThresholds4x4[((idx div job.stride) and 3) * 4 + ((idx mod job.stride) and 3)]))
+  else:
+    data[idx] = value
+
+proc gradientFillSpan(
+  job: ptr GradientFillJob, y, a, b: int, covered, scratch: ptr UncheckedArray[uint8]
+) {.inline.} =
+  ## Columns a ..< b of the box in row `y`: all of them covered, or as
+  ## `covered` (the mask's row) says.
   let
-    grey = image.format >= pfGray8
-    data16 = image.data16
-    dither = image.ditherStores
-  template source(i: int): ColorRGBX =
-    let m = coverage[i]
-    if m.a == 255: colors[i - x0] # blendMask by a whole mask is the colour
-    else: blendMask(colors[i - x0], m)
-  for r in 0 ..< mask.height:
-    let coverage = mask.getUncheckedArray(0, r)
-    var x0 = 0
-    while x0 < mask.width and coverage[x0].a == 0:
-      inc x0
-    if x0 == mask.width:
-      continue
-    var x1 = mask.width
-    while coverage[x1 - 1].a == 0:
-      dec x1
-    rows.row(y + r, x0, x1, colors)
-    if grey:
-      image.greyRowStore(image.dataIndex(x + x0, y + r)):
-        for i in x0 ..< x1:
-          let m = coverage[i]
-          if m.a != 0:
-            # `source`, without its if-expression: that was two zeroed
-            # temporaries a pixel, each a call on an -Os firmware (6 s of
-            # the reTerminal E1003's Word clock, 2026-11-16).
-            var s = colors[i - x0]
-            if m.a != 255:
-              s = blendMask(s, m)
-            if s.a == 255:
-              store(rgbxToGray8(s))
-            elif s.a != 0:
-              store(rgbxToGray8(blendNormal(backdrop(), s)))
-          step()
+    start = job.origin + job.stride * y + job.x0 + a
+    rowsAt = job.x0 + a - job.rowsX0
+  if not job.lines:
+    let colors = cast[ptr UncheckedArray[ColorRGBX]](scratch)
+    job.rows[].row(y, rowsAt, rowsAt + b - a, colors)
+    for i in 0 ..< b - a:
+      job.storeColor(start + i, colors[i], if covered.isNil: job.coverage else: covered[a + i])
+    return
+  let alpha = cast[ptr UncheckedArray[uint8]](scratch[job.x1 - job.x0].addr)
+  job.rows[].greyRow(y, rowsAt, rowsAt + b - a, scratch, alpha)
+  if covered.isNil:
+    job.storeGreyLine(start, b - a, scratch, alpha)
+    return
+  # Runs the shape covers whole, from the lines; its edge a pixel at a time,
+  # the colour under that pixel's own coverage.
+  var i = a
+  while i < b:
+    let m = covered[i]
+    if m == job.coverage:
+      var j = i + 1
+      while j < b and covered[j] == job.coverage:
+        inc j
+      job.storeGreyLine(start + i - a, j - i,
+        cast[ptr UncheckedArray[uint8]](scratch[i - a].addr), cast[ptr UncheckedArray[uint8]](alpha[i - a].addr))
+      i = j
     else:
-      var idx = image.dataIndex(x + x0, y + r)
-      for i in x0 ..< x1:
-        if coverage[i].a != 0:
-          var s = source(i)
-          if s.a != 0:
-            if s.a != 255:
-              s = blendNormal(rgb565ToRgbx(data16[idx]), s)
-            data16[idx] = if dither: rgbxToRgb565Dithered(s, idx) else: rgbxToRgb565(s)
-        inc idx
+      if m != 0:
+        var c: ColorRGBX
+        job.rows[].row(y, rowsAt + i - a, rowsAt + i - a + 1, cast[ptr UncheckedArray[ColorRGBX]](c.addr))
+        job.storeColor(start + i - a, c, m)
+      inc i
+
+proc gradientFillRows(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].} =
+  ## Rows [first, last) of the box. On either core: its own rows, its own
+  ## scratch, nothing allocated.
+  let
+    job = cast[ptr GradientFillJob](ctx)
+    width = job.x1 - job.x0
+    scratch = cast[ptr UncheckedArray[uint8]](job.scratch[worker.int * job.scratchBytes].addr)
+    toRows = job.x0 - job.rowsX0
+  var spans: array[2, tuple[a, b: int]]
+  for r in first.int ..< last.int:
+    if worker == 0:
+      breathe()
+    let
+      y = job.y0 + r
+      covered = if job.mask.isNil: nil else: cast[ptr UncheckedArray[uint8]](job.mask[r * width].addr)
+    # What the row covers: all of the box, or the mask's first pixel to its last.
+    var
+      a = 0
+      b = width
+    if not covered.isNil:
+      while a < width and covered[a] == 0:
+        inc a
+      if a == width:
+        continue
+      while covered[b - 1] == 0:
+        dec b
+    # And of that, where the gradient has any ink.
+    for i in 0 ..< job.rows[].inkSpans(y, a + toRows, b + toRows, spans):
+      job.gradientFillSpan(y, spans[i].a - toRows, spans[i].b - toRows, covered, scratch)
+
+const
+  gradientFillBlockRows = 16 ## a worker's share at a time
+  gradientFillSharedPixels = 16 * 1024 ## a smaller fill is not worth waking the other core for
+
+proc gradientFill(
+  image: Image, rows: var GradientRows, x0, y0, x1, y1, rowsX0: int, coverage: uint8,
+  mask: Image, scratch: var seq[uint8]
+) {.raises: [].} =
+  ## The rows of a gradient into the box (x0, y0) .. (x1, y1) of a grey or
+  ## 565 `image`: under `coverage` everywhere, or where a grey `mask` the
+  ## size of the box says, whose whole pixels hold `coverage`. `rows` were
+  ## prepared for that coverage if the image is grey (`prepareGrey`, which
+  ## said yes: `lines`).
+  let
+    width = x1 - x0
+    workers = max(1, rowsWorkers.int)
+    grey = image.format >= pfGray8
+    lines = grey and rows.greyReady
+  var job = GradientFillJob(
+    rows: rows.addr,
+    data8: image.data8,
+    data16: image.data16,
+    four: image.format == pfGray4,
+    dither: image.ditherStores,
+    grey: grey,
+    lines: lines,
+    origin: image.origin,
+    stride: image.stride,
+    x0: x0, x1: x1, y0: y0,
+    rowsX0: rowsX0,
+    coverage: coverage,
+    mask: (if mask.isNil: nil else: mask.data8),
+    scratchBytes: (if lines: 2 * width else: 4 * width))
+  if scratch.len < workers * job.scratchBytes:
+    scratch = newSeq[uint8](workers * job.scratchBytes)
+  job.scratch = cast[ptr UncheckedArray[uint8]](scratch[0].addr)
+  runRows(gradientFillRows, job.addr, y1 - y0, gradientFillBlockRows,
+    rows.readsPlainRows and width * (y1 - y0) >= gradientFillSharedPixels)
+
+var gradientBoxFills* {.threadvar.}: int ## fills that went without a mask so far (a test asks which way ran)
+
+proc fillGradientBox(
+  image: Image, path: SomePath, paint: Paint, transform: Mat3
+): bool {.raises: [PixieError].} =
+  ## The gradient `paint` blended normally into a grey or 565 `image` over
+  ## `path`, when the path under `transform` is one box of whole pixels;
+  ## false, with nothing drawn, when it is anything else.
+  if image.format == pfRgbx or paint.blendMode != NormalBlend or
+      paint.kind notin {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}:
+    return false
+  var shapes = parseSomePath(path, true, transform.pixelScale())
+  if shapes.len != 1 or shapes[0].len notin {4, 5}:
+    return false
+  shapes.transform(transform)
+  let s = shapes[0]
+  if s.len == 5 and s[4] != s[0]:
+    return false
+  # Four corners, each edge along an axis.
+  let flat = s[0].y == s[1].y
+  for i in 0 ..< 4:
+    let
+      a = s[i]
+      b = s[(i + 1) and 3]
+    if (if ((i and 1) == 0) == flat: a.y != b.y else: a.x != b.x):
+      return false
+  let
+    left = min(s[0].x, s[2].x)
+    right = max(s[0].x, s[2].x)
+    top = min(s[0].y, s[2].y)
+    bottom = max(s[0].y, s[2].y)
+  for edge in [left, right, top, bottom]:
+    if not (abs(edge - round(edge)) <= boxEdgeSlack): # NaN is no box
+      return false
+  let
+    x0 = clamp(round(left).int, 0, image.width)
+    x1 = clamp(round(right).int, 0, image.width)
+    y0 = clamp(round(top).int, 0, image.height)
+    y1 = clamp(round(bottom).int, 0, image.height)
+    # The masked fill's box (`paintThroughMask`), which its gradient is
+    # set up for: the same table, the same colours.
+    boxX0 = clamp(floor(left).int - 1, 0, image.width)
+    boxY0 = clamp(floor(top).int - 1, 0, image.height)
+    boxX1 = clamp(ceil(right).int + 1, boxX0, image.width)
+    boxY1 = clamp(ceil(bottom).int + 1, boxY0, image.height)
+    coverage = round(255 * paint.opacity).uint8 # as `applyOpacity` makes the mask's
+    savedOpacity = paint.opacity
+  if x1 <= x0 or y1 <= y0 or coverage == 0:
+    return true
+  # The colours `gradientColor` gives (the opacity is the coverage), for as
+  # long as the rows read the paint: a vertical gradient's colour a row.
+  paint.opacity = 1
+  try:
+    var rows = initGradientRows(paint, vec2(boxX0.float32, 0),
+      false, image.width * image.height, boxX1 - boxX0, boxY1 - boxY0)
+    if rows.empty:
+      return true
+    if image.format >= pfGray8 and not rows.prepareGrey(coverage):
+      return false
+    var scratch: seq[uint8]
+    inc gradientBoxFills
+    image.gradientFill(rows, x0, y0, x1, y1, boxX0, coverage, nil, scratch)
+  finally:
+    paint.opacity = savedOpacity
+  true
 
 template paintThroughMask(
   image: Image, paint: Paint, transform: Mat3, bounds: Rect, rasterise: untyped
@@ -2591,15 +2814,17 @@ template paintThroughMask(
     boxY1 = clamp(ceil(bounds.y + bounds.h).int + 1, boxY0, image.height)
   let
     boxW = boxX1 - boxX0
-    stripRows = paintStripRows(max(boxW, 1), max(boxY1 - boxY0, 1))
     savedOpacity = paint.opacity
     # A gradient blended normally onto grey or 565: no paint image
-    # (`paintGradientNarrow`), so half the memory and a third of the passes.
+    # (`gradientFill`) and a mask of a byte a pixel.
     narrowGradient = image.format != pfRgbx and paint.blendMode == NormalBlend and
       paint.kind in {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}
+    stripRows = paintStripRows(max(boxW, 1), max(boxY1 - boxY0, 1), narrowGradient)
+    # A pixel the shape covers whole, as `applyOpacity` leaves it in the mask.
+    wholeCoverage = round(255 * savedOpacity).uint8
   var
     gradientRows: GradientRows
-    gradientLine: seq[ColorRGBX]
+    gradientScratch: seq[uint8]
   if narrowGradient and boxW > 0:
     # The table is chosen as for one pass over the whole image, as before
     # strips and boxes: every strip of the fill alike, the same colours.
@@ -2607,7 +2832,8 @@ template paintThroughMask(
     gradientRows = initGradientRows(paint, vec2(boxX0.float32, 0),
       false, image.width * image.height, boxW, boxY1 - boxY0)
     paint.opacity = savedOpacity
-    gradientLine = newSeq[ColorRGBX](boxW)
+    if image.format >= pfGray8:
+      discard gradientRows.prepareGrey(wholeCoverage)
   var stripY = boxY0
   while boxW > 0 and stripY < boxY1:
     let
@@ -2616,17 +2842,21 @@ template paintThroughMask(
       stripOffset = vec2(-boxX0.float32, -stripY.float32)
       stripTransform {.inject.} =
         if wholeImage: transform else: translate(stripOffset) * transform
-      mask {.inject.} = newImage(boxW, stripHeight)
+      # White into a grey image is the coverage, as white into an RGBA one
+      # is its alpha.
+      mask {.inject.} =
+        if narrowGradient: newImageGray8(boxW, stripHeight) else: newImage(boxW, stripHeight)
 
     rasterise
 
     if narrowGradient:
       if savedOpacity != 1:
         mask.applyOpacity(savedOpacity)
-      paint.opacity = 1 # the colours `gradientColor` gives, as the paint image had them
-      image.paintGradientNarrow(mask, gradientRows,
-        cast[ptr UncheckedArray[ColorRGBX]](gradientLine[0].addr), boxX0, stripY)
-      paint.opacity = savedOpacity
+      if not gradientRows.empty and wholeCoverage != 0:
+        paint.opacity = 1 # the colours `gradientColor` gives, as the paint image had them
+        image.gradientFill(gradientRows, boxX0, stripY, boxX1, stripY + stripHeight, boxX0,
+          wholeCoverage, mask, gradientScratch)
+        paint.opacity = savedOpacity
       stripY += stripHeight
       continue
 
@@ -3058,8 +3288,9 @@ proc fillPath*(
     return
 
   pathProbe(ppPaint):
-    image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
-      mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
+    if not image.fillGradientBox(path, paint, transform):
+      image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
+        mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
 
 proc strokePath*(
   image: Image,

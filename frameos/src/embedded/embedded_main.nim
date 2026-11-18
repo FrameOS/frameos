@@ -1083,6 +1083,22 @@ proc fos_nim_next_async_ms_impl(): cint {.exportc, cdecl.} =
   except Exception:
     -1.cint
 
+proc fos_nim_current_scene_id_impl(buf: ptr UncheckedArray[char]; bufLen: csize_t) {.exportc, cdecl.} =
+  ## The id of the scene showing into `buf`, NUL-terminated and cut to fit:
+  ## what a render pass asks every frame (fos_client.c), without the scene
+  ## list fos_nim_scene_info_json_impl builds around it.
+  if bufLen == 0:
+    return
+  var n = 0
+  try:
+    let id = currentSceneId()
+    n = min(id.len, bufLen.int - 1)
+    if n > 0:
+      copyMem(buf, id[0].unsafeAddr, n)
+  except CatchableError, Defect:
+    n = 0
+  buf[n] = '\0'
+
 proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
   try:
     sceneInfoBuffer = sceneInfoJson()

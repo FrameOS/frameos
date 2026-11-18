@@ -124,6 +124,85 @@ Hosts:
   queueing, and both runner loops end their sleep on it.
 - `frameos/render_probe.nim`: the per-phase split on the device's render line.
 
+## The hardware bench's slow renders (2026-11-18)
+
+The bench run of 2026-11-18 (2026.11.11) flagged four scenes at 10 to 16 s a
+render on the reTerminal E1003 (1872x1404, sixteen greys) and two animations
+below their frame rate on the SenseCAP Indicator. Where the time was, from
+the render line's probe (which gained `paint`, the gradient and image fills
+through a shape, and the average split of an animation's quiet frames,
+`| quiet 234: scene 33.2 ...`: the frame logged in full builds its log
+lines, so its own split says little about the frames between):
+
+**A page's gradients, on any panel that is not RGBA.** Analog clock face,
+Big typographic clock, Word clock and Chess puzzle of the day each lay three
+to five gradients over the page: a background, a corner glow, a vignette.
+Each was an RGBA mask the size of the page made and cleared (0.5 s of PSRAM
+writes each), the rectangle filled into it, and a fill that read the mask
+back a pixel at a time, evaluated the gradient with a division or a square
+root a pixel (library calls on an S3) and blended through the general store:
+8.8 to 10.6 s of each render. Now (`pixie/paths.nim` "A gradient into a grey
+or 565 image", `pixie/paints.nim`):
+
+- a box of whole pixels has no mask (`fillGradientBox`), and any other
+  shape's mask is a byte a pixel, in strips eight times as tall;
+- a grey target takes its rows as luma and alpha from tables made once a
+  fill (`prepareGrey`): blended over a grey G, a colour's luma is its own
+  plus G * (255 - alpha) / 255, exactly, and two pixels of a sixteen-grey
+  byte go in one store;
+- the table entry of a diagonal gradient is a fixed-point sum along the row
+  and a radial one's is found by the squared distance against thresholds,
+  stepped from the pixel before (`forEachIndex`): no division, no root;
+- a radial table whose ends hold no ink (a glow fades out, a vignette starts
+  from nothing) is only looked at between the ellipse's crossings of the row
+  (`inkSpans`): two thirds of those pages' gradient pixels were transparent;
+- the rows are a job both cores take (`rowsRunner`, the firmware's
+  `fos_rows.c`), and `pixie/paints` is on the -O2 list.
+
+The pictures are the ones the masked fill made: `tests/test_gradient_box.nim`
+holds a box to the mask's pixels and any shape to the composite spelled out,
+a pixel at a time. Two things may differ from before by one table entry (a
+quarter of a colour level): a pixel on the line between two entries of a
+diagonal or radial table.
+
+| E1003, warm render | 2026.11.11 | main, same day | this branch |
+| --- | --- | --- | --- |
+| Word clock | 10.4 s | 10.2 s (gradients 8.8) | 2.7 s (1.2) |
+| Analog clock face | 12.4 s | 11.1 s (9.1) | 3.3 s (1.3) |
+| Big typographic clock | 15.3 s | 15.1 s (10.3) | 6.7 s (2.0) |
+| Chess puzzle of the day | 15.6 s | 14.3 s (10.6) | 5.3 s (1.6) |
+
+What is left of them: the solid fills (0.6 to 2.2 s: a thousand decorative
+shapes in the big clock), `get()` in QuickJS (0.9 s for the big clock, 1.5 s
+for the chess board), and the gradients that remain.
+
+**Every frame built the frame's whole scene list.** `render_once` asked
+`frameos_nim_scene_info_json` for the id of the scene showing, which builds
+and prints every scene of the frame as JSON: 5.7 ms a frame on a SenseCAP
+Indicator holding 25 scenes, a seventh of a DVD Logo Bounce frame, more with
+more scenes. It asks `frameos_nim_current_scene_id` now. And a quiet frame
+looks at the state to persist four times a second, not every frame (0.9 ms;
+an event's look and a scene about to go are unchanged).
+
+| SenseCAP Indicator | 2026.11.11 | main, same day | this branch |
+| --- | --- | --- | --- |
+| DVD Logo Bounce (30 fps asked) | 18.8 to 20.8 fps | 23.2 fps, 42 ms a frame | 27.4 fps, 36 ms |
+| Pixel toys (50 fps asked) | 17.1 to 17.7 fps | 18.4 fps, 54 ms | 20 to 21 fps, 47 to 49 ms |
+
+Neither reaches what it asks for. The panel scans 42.3 times a second
+(12 MHz, 548x518 with its porches), so 50 fps is not there to have, and its
+refill interrupt takes about half of the render's core while it scans.
+
+- DVD Logo Bounce is 3 ms a frame short of 30 fps. A quiet frame: `get()`
+  7.6 ms, the raster 9.2 (two marks of three paths from the coverage cache,
+  one of them a translucent shadow), pixie's parse of six paths 4.4, the
+  scene program around the app 4.5, its natives 2.1, the JSX walk 1.7. The
+  parse is the place to look next.
+- Pixel toys' `get()` alone is 25 ms of JavaScript a frame (the effect's
+  cells), and the cells' way into the panel buffer another 12: 20 fps is
+  about what this board has for it. 50 fps would need the effect out of
+  QuickJS.
+
 ## Still open
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside

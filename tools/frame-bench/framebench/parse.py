@@ -23,20 +23,34 @@ PROBE = re.compile(r'\[(.*)\]\s*$')
 IT8951 = re.compile(r'^it8951: (.*)$')
 
 
-def parse_probe(text: str) -> dict:
-    """`[prelude 19.9 compile 97.7 ... | fill 387x553.7 ...]` -> {'prelude': 19.9, ...}."""
-    m = PROBE.search(text)
-    if not m:
-        return {}
+def _phases(words) -> dict:
     out = {}
-    head = m.group(1).split('|')[0].split()
     i = 0
-    while i < len(head) - 1:
+    while i < len(words) - 1:
         try:
-            out[head[i]] = float(head[i + 1])
+            out[words[i]] = float(words[i + 1])
             i += 2
         except ValueError:
             i += 1
+    return out
+
+
+def parse_probe(text: str) -> dict:
+    """`[prelude 19.9 compile 97.7 ... | fill 387x553.7 ...]` -> {'prelude': 19.9, ...}.
+
+    An animation's logged frame also carries the average of the quiet frames
+    before it, `| quiet 234: scene 33.2 native 2.1 ...`, as `quiet`:
+    {'frames': 234, 'scene': 33.2, ...} in ms a frame.
+    """
+    m = PROBE.search(text)
+    if not m:
+        return {}
+    sections = m.group(1).split('|')
+    out = _phases(sections[0].split())
+    for section in sections[1:]:
+        words = section.split()
+        if len(words) >= 2 and words[0] == 'quiet' and words[1].rstrip(':').isdigit():
+            out['quiet'] = {'frames': int(words[1].rstrip(':')), **_phases(words[2:])}
     return out
 
 
