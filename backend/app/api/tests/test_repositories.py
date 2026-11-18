@@ -88,8 +88,8 @@ async def test_get_system_repositories_includes_packaged_templates(async_client)
     # Templates that cannot run on ESP32 frames carry embedded: false.
     samples = next(repo for repo in repos if repo["id"] == "system-samples")
     by_name = {template["name"]: template for template in samples["templates"]}
-    assert by_name["Chromium Screenshot"]["embedded"] is False
-    assert by_name["Webcam RSTP"]["embedded"] is False
+    assert by_name["Chromium screenshot"]["embedded"] is False
+    assert by_name["Webcam (RTSP)"]["embedded"] is False
     assert "embedded" not in by_name["Weather"]
 
 

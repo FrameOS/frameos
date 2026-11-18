@@ -205,13 +205,13 @@ async function slowPublishWork(
 
   // Auto-categorize: new scenes (and republishes of scenes that never got a
   // category) are filed by the rules, else classified into the fixed store
-  // taxonomy, and get suggested tags when the owner has not set any (the
-  // model is asked for tags alone too). Owner-set values are never
-  // overwritten; a classifier outage leaves the category to the rules and
-  // the tags to ruleTags (publishStoreScene).
+  // taxonomy, and get the model's tags when the owner has not set any. A
+  // scene the rules or its owner filed is not sent to the model: its tags,
+  // if it has none, are ruleTags' (publishStoreScene). Owner-set values are
+  // never overwritten.
   const category = listingCategory(validated, existing, { description, name });
   const tags = validated.manifestTags ?? existing?.tags ?? [];
-  const classified = category && tags.length > 0
+  const classified = category
     ? undefined
     : await classifyStoreScene({
         appKeywords: validated.appKeywords,

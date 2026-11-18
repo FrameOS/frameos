@@ -163,7 +163,9 @@ describe("save_scene", () => {
     });
     // Nothing to inherit: a scene built in the chat has no source.
     expect(await imageSetForVersion(db, saved!.id, null)).toEqual([]);
-    expect(saved?.tags).toEqual([]);
+    // No tags of its own: the rules' stand in (store-classify.ts ruleTags), so
+    // the store's search finds it by more than its name.
+    expect(saved?.tags).toEqual(["e-ink"]);
   });
 
   it("forks with lineage when the scene came from the store", async () => {

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   classifyStoreScene,
   isClassificationConfigured,
+  ruleCategory,
+  ruleTags,
 } from "./store-classify";
 import { extractAppKeywords, sanitizeTagCandidates } from "./store";
 
@@ -129,5 +131,26 @@ describe("extractAppKeywords", () => {
       ]),
     ).toEqual(["data/openWeather", "render/split", "render/text"]);
     expect(extractAppKeywords("junk")).toEqual([]);
+  });
+});
+
+describe("ruleCategory", () => {
+  it("files what the node graph and the name say for sure, and leaves the rest to the model", () => {
+    expect(ruleCategory({ appKeywords: ["openaiImage"], name: "Dream" })).toBe("ai");
+    expect(ruleCategory({ name: "Sudoku" })).toBe("games");
+    expect(ruleCategory({ name: "Word clock" })).toBe("clocks");
+    expect(ruleCategory({ appKeywords: ["icalJson"], name: "Week" })).toBe("calendar");
+    expect(ruleCategory({ appKeywords: ["immich"], name: "Family" })).toBe("photos");
+    expect(ruleCategory({ description: "A week of made-up weather.", name: "Weather demo" })).toBe("demos");
+    expect(ruleCategory({ appKeywords: ["jsxUi"], name: "Something" })).toBeUndefined();
+  });
+});
+
+describe("ruleTags", () => {
+  it("names what it needs, the services it uses and its category, never nothing", () => {
+    expect(ruleTags({ category: "games", name: "Snake", needs: ["fast", "keys"] })).toEqual(["lcd", "buttons", "games"]);
+    expect(ruleTags({ appKeywords: ["immich"], name: "Family", needs: [] })).toEqual(["e-ink", "immich"]);
+    expect(ruleTags({ name: "Shell", needs: ["linux"] })).toEqual(["raspberry-pi"]);
+    expect(ruleTags({ name: "x", needs: ["touch"] }).length).toBeGreaterThan(0);
   });
 });

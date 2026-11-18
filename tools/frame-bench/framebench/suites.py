@@ -32,7 +32,7 @@ ROTATION = 3
 # ones (a set too large to take whole), the clocks and their gradients (the
 # E1003's 15 s renders).
 TROUBLE_SCENES = ['Google Photos', 'Immich', 'Wikimedia Commons', 'SD card image', 'Unsplash image',
-                  'Visited World Map', 'Chess puzzle of the day', 'Word clock', 'Big typographic clock',
+                  'Visited world map', 'Chess puzzle of the day', 'Word clock', 'Big typographic clock',
                   'Analog clock face']
 # Desktop layouts pushed every time, in this order: two big sets in a row
 # with windows open is what left a scene on the set before's layout (#828,
