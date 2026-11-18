@@ -101,6 +101,13 @@ proc maxChannelDelta(a, b: Image): int =
         abs(pa.b.int - pb.b.int),
         abs(pa.a.int - pb.a.int)))))
 
+# One instant for every render (utils/frame_time.nim, as the e2e snapshots
+# pin it): a scene drawn from the clock (a game's blink, its seed, a clock
+# face) is then the same picture fused or not, and is compared instead of
+# skipped. Unpinned, Road racer's two materialized renders could land on the
+# same picture with the fused one between them on another (CI, 2026-11-18).
+putEnv("FRAMEOS_E2E_FIXED_EPOCH", "1767225600")
+
 let fixtureDir = getTempDir() / "frameos-differential-assets"
 removeDir(fixtureDir)
 createDir(fixtureDir)

@@ -257,6 +257,7 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
     updated = result_json(await call(async_client, "frame_update", {
         "confirm": True, "frame_id": frame.id, "settings": {"metrics_interval": 120, "rotate": 90},
     }))
+    assert updated["frame"]["id"] == frame.id
     db.expire_all()
     assert frame_row(db, frame.id).metrics_interval == 120
     # A frame has no refresh interval of its own to set: its scenes do.
