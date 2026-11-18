@@ -571,7 +571,9 @@ what was typed; pointer events not at all.
 **Hosts.** Pointer and keyboard events are described for every host. The
 ESP32 has buttons, on some boards a touch panel, and, with `set bluetooth 1`
 on an S3, Bluetooth LE keyboards and mice (`embedded/esp32/main/fos_bt.c`:
-HID over GATT, "Just Works" pairing with `bt pair`, bonds in NVS). It compiles
+HID over GATT, "Just Works" pairing with `bt pair`, bonds in NVS; off by
+default, and not a Bluetooth-qualified product: `embedded/esp32/README.md`
+"Qualification and licences"). It compiles
 the whole input state but the Linux driver struct and round panels: a key
 arrives as `keyDown` / `keyUp` with its Linux number (`linuxCode`, from the
 HID usage) and the dispatcher's keyboard tables name it under the frame's

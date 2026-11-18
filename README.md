@@ -106,6 +106,22 @@ Pimoroni's boards plug straight onto a Raspberry Pi's header, no wiring:
 - [Inky Frame](https://frameos.net/devices/pimoroni-inky-frame-7-3-spectra) - all-in-one
   Pico W frames, run as thin clients that the backend renders for
 
+## Bluetooth
+
+FrameOS is not a Bluetooth-qualified product, and neither the project nor
+FrameOS Cloud is listed with the Bluetooth SIG. The Bluetooth support in the
+ESP32 firmware (keyboards and mice) is off unless you turn it on. If you sell
+or distribute hardware with FrameOS and Bluetooth turned on, you are the
+product's maker: qualifying it with the Bluetooth SIG, and the radio approvals
+of the market you sell in (FCC, CE / RED, ...), are yours to do. The word
+"Bluetooth" is used here only to say what the feature does; the Bluetooth word
+mark and logos belong to Bluetooth SIG, Inc., and FrameOS uses no logo and
+claims no qualification.
+
+The firmware's Bluetooth stack is Apache NimBLE (Apache License 2.0), with
+Espressif's Bluetooth controller libraries as ESP-IDF ships them (licensed by
+Espressif for use on Espressif chips).
+
 ## FrameOS backend
 
 The FrameOS backend is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll just miss out on log aggregation if the backend is offline. The frames run independently.

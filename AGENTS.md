@@ -177,7 +177,10 @@
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
   delivers them) and the old-name aliases with them, and since the Bluetooth
   keyboards and mice (`main/fos_bt.c`, `set bluetooth 1`) the keyboard half
-  and the relative mouse as well (`movementX` / `movementY`). `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
+  and the relative mouse as well (`movementX` / `movementY`). Bluetooth
+  stays off by default and FrameOS is no Bluetooth-qualified product: no
+  Bluetooth logo, no "certified" / "qualified", and never a paid plan's
+  feature (`embedded/esp32/README.md` "Qualification and licences"). `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
   A JS app subscribes in its `config.json` (`events`, `"*"` per the contract's
   `heardByAll`) and hears through `onEvent`: `eventApps` beside `eventListeners`,

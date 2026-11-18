@@ -1318,6 +1318,23 @@ the mouse is pointer 0 (`movementX` / `movementY`, buttons, wheel), and its
 cursor is drawn on the RGB LCD (docs/events.md "The cursor"). No C3: its
 overlay leaves `CONFIG_BT_ENABLED` off.
 
+**Qualification and licences.** FrameOS is not a Bluetooth-qualified product, and neither the project nor
+FrameOS Cloud is listed with the Bluetooth SIG. The Bluetooth support in the
+ESP32 firmware (keyboards and mice) is off unless you turn it on. If you sell
+or distribute hardware with FrameOS and Bluetooth turned on, you are the
+product's maker: qualifying it with the Bluetooth SIG, and the radio approvals
+of the market you sell in (FCC, CE / RED, ...), are yours to do. The word
+"Bluetooth" is used here only to say what the feature does; the Bluetooth word
+mark and logos belong to Bluetooth SIG, Inc., and FrameOS uses no logo and
+claims no qualification.
+
+The firmware's Bluetooth stack is Apache NimBLE (Apache License 2.0), with
+Espressif's Bluetooth controller libraries as ESP-IDF ships them (licensed by
+Espressif for use on Espressif chips). Keep Bluetooth off by default,
+keep the Bluetooth logo and the words "certified" / "qualified" out of the
+firmware, the frame page, the docs and the cloud's plans, and do not sell it
+as a feature of a paid plan.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds
