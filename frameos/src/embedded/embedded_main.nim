@@ -69,9 +69,17 @@ proc armEmergencyReserve() {.importc: "fos_nim_arm_emergency_reserve", cdecl.}
 proc emergencyReserveUsed(): bool {.importc: "fos_nim_emergency_reserve_used", cdecl.}
 proc emergencyReserveDetail(need, freeBytes, largest: var csize_t) {.
   importc: "fos_nim_emergency_reserve_detail", cdecl.}
+proc emergencyReserveUnarmed(): bool {.importc: "fos_nim_emergency_reserve_unarmed", cdecl.}
 
 proc recoverEmergencyReserve(where: string) =
-  if emergencyReserveUsed():
+  if not emergencyReserveUsed():
+    # A reserve that could not be armed when it was last asked for (no free
+    # megabyte in one block then) is asked for again after every pass: the
+    # scene that held the memory has usually gone by the next one.
+    if emergencyReserveUnarmed():
+      armEmergencyReserve()
+    return
+  block:
     # Name the request: which allocation could not be served, and whether
     # it was a shortage (free < need) or fragmentation (free > need > largest
     # block). The 2026-08-27 E1004 logged this line on every Weather render

@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include "fos_http_chunks.h"
 #include "fos_oom_policy.h"
 #include <string.h>
 #include <limits.h>
@@ -530,17 +531,46 @@ void fos_nim_internal_free(void *p)
     if (p != NULL) heap_caps_free(p);
 }
 
+/* The reserve could not be armed when last tried: the render loop tries again
+ * after every pass (embedded_main.nim recoverEmergencyReserve). Left at the
+ * one try, a frame whose heap had no free megabyte at that moment ran on
+ * without a reserve until its next failed allocation, which then had nothing
+ * to release and aborted the render: a reTerminal E1004 lost its reserve in
+ * the desktop suite and aborted three renders in the soak twenty minutes
+ * later, each with over 1.5 MB free (the hardware bench, 2026-11-18). */
+static bool s_nim_emergency_unarmed = false;
+
 void fos_nim_arm_emergency_reserve(void)
 {
     if (s_nim_emergency_reserve == NULL) {
         s_nim_emergency_reserve = heap_caps_malloc(
             FOS_NIM_EMERGENCY_RESERVE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_nim_emergency_reserve == NULL) {
-            ESP_LOGW("fos_nim", "could not arm %u byte emergency heap reserve",
-                     (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES);
+            /* Once per shortage, not once per pass. */
+            if (!s_nim_emergency_unarmed) {
+                ESP_LOGW("fos_nim", "could not arm %u byte emergency heap reserve",
+                         (unsigned)FOS_NIM_EMERGENCY_RESERVE_BYTES);
+            }
+            s_nim_emergency_unarmed = true;
+        } else if (s_nim_emergency_unarmed) {
+            s_nim_emergency_unarmed = false;
+            ESP_LOGI("fos_nim", "emergency heap reserve armed again");
         }
     }
     s_nim_emergency_used = false;
+}
+
+bool fos_nim_emergency_reserve_unarmed(void)
+{
+    return s_nim_emergency_unarmed;
+}
+
+/* What a failed allocation could still be given: the armed reserve's bytes,
+ * 0 without one. Asked before an allocation the size of a download
+ * (utils/memory.nim roomForBlock). */
+size_t fos_nim_emergency_reserve_bytes(void)
+{
+    return s_nim_emergency_reserve != NULL ? FOS_NIM_EMERGENCY_RESERVE_BYTES : 0;
 }
 
 bool fos_nim_release_emergency_reserve(size_t need)
@@ -2485,6 +2515,9 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                 body_status = FOS_NIM_BODY_TOO_BIG;
                 break;
             }
+            /* The whole of a body whose length the server stated: the next
+             * read would only say so, and it would get a chunk for it. */
+            if (fos_http_body_whole(total, content_length)) break;
             if (chunk_count == chunk_capacity) {
                 size_t new_capacity = chunk_capacity ? chunk_capacity * 2u : 8u;
                 fos_nim_http_chunk *new_chunks =
@@ -2496,9 +2529,9 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                 chunks = new_chunks;
                 chunk_capacity = new_capacity;
             }
-            size_t want = FOS_NIM_HTTP_CHUNK_BYTES;
-            if (want > limit - total) want = limit - total;
-            if (want < 1) want = 1;
+            /* What is left of a stated length, a chunk at most
+             * (fos_http_chunks.h): a body up to one chunk long is one block. */
+            size_t want = fos_http_chunk_want(FOS_NIM_HTTP_CHUNK_BYTES, limit, total, content_length);
             uint8_t *buf = NULL;
             /* Debug knob (`set spill_force <bytes>`): pretend PSRAM ran out
              * once this many bytes are buffered, so the spill path can be

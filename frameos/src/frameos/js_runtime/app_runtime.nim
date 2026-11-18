@@ -698,6 +698,46 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
       frameos_apps.logError(e.owner, "JS app fetchText failed: " & redactedUrlsIn(err.msg))
     return nimStringToJS(ctx, "")
 
+when defined(testing):
+  type JsHttpRequestHook* = proc(url, httpMethod, body: string,
+    headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
+  var jsHttpRequestHook*: JsHttpRequestHook = nil
+    ## Test seam for `frameos.httpRequest` and `frameos.fetchJson`: when set,
+    ## every request a JS app makes through them is answered here instead of
+    ## on the network, so an app whose API host is fixed (OpenAI, Unsplash,
+    ## Commons, …) runs against canned replies. Images have their own seam
+    ## (app_images.contextDownloadHook). Compiled out of real builds.
+
+proc jsFetchJson(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
+  ## `frameos.fetchJson`: the answer parsed straight from the bytes that came
+  ## (http_client.boundedGetWhole says what the text's three copies cost).
+  ## `null` for an empty answer and for a request that failed, which is
+  ## logged, as `fetchText` answers ""; text that is not JSON throws, as
+  ## JSON.parse did.
+  let e = env(ctx)
+  let urlStr = toNimString(ctx, url)
+  var parsed = jsNull(ctx)
+  if urlStr.len == 0:
+    return parsed
+  proc parse(text: cstring, len: int) =
+    if len > 0:
+      when defined(memProbe): memProbe("      fetchJson body=" & $len & "B BEFORE parse")
+      parsed = JS_ParseJSON(ctx, text, len.csize_t, "<fetchJson>")
+      when defined(memProbe): memProbe("      fetchJson AFTER parse")
+  try:
+    when defined(testing):
+      if jsHttpRequestHook != nil:
+        let (code, body) = jsHttpRequestHook(urlStr, "GET", "", @[])
+        if code >= 400:
+          raise newException(IOError, "HTTP " & $code)
+        parse(body.cstring, body.len)
+        return parsed
+    boundedGetWhole(urlStr, parse, maxBytes = jsFetchMaxBytes(e))
+  except CatchableError as err:
+    if e != nil:
+      frameos_apps.logError(e.owner, "JS app fetchJson failed: " & redactedUrlsIn(err.msg))
+  parsed
+
 proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
 proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode
 
@@ -708,14 +748,6 @@ proc assetWriteTarget(e: JsAppEvalEnv, opName: string, pathStr: string, bytes: i
 proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int
 
 when defined(testing):
-  ## Test seam for `frameos.httpRequest`: when set, every request a JS app
-  ## makes is answered here instead of on the network, so an app whose API
-  ## host is fixed (OpenAI, Unsplash, Commons, …) runs against canned replies.
-  ## Images have their own seam (app_images.contextDownloadHook). Compiled out
-  ## of real builds.
-  type JsHttpRequestHook* = proc(url, httpMethod, body: string,
-    headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
-  var jsHttpRequestHook*: JsHttpRequestHook = nil
   var jsHttpHookHeaders*: string
     ## The response headers the hook's answers carry, as the ESP32 glue and
     ## the wasm library hand them over: "Name: value\n" lines.
@@ -2712,7 +2744,7 @@ proc jsCanvasDraw(ctx: ptr JSContext, id: JSValue, content: JSValue): JSValue {.
       for (name, value) in size:
         node.setAttr(name, value)
     let
-      drawn = parseSvg(node, image.width, image.height)
+      drawn = parseSvg(node, image.width, image.height, lateData = true) # drawn once, below
       nothing = parseSvg(SvgNode(tag: "svg", attrs: @size), image.width, image.height)
       box = damage(nothing, drawn, image.width, image.height)
     if box.w <= 0 or box.h <= 0:
@@ -3149,7 +3181,7 @@ const appJsPrelude* = compactJs("""
       ? jsMeasureText(texts.join("\n"), String(o.className || ""), Number(o.width || 0)).split(" ").map(Number)
       : [],
     fetchText: (url) => jsFetchText(String(url || "")),
-    fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
+    fetchJson: (url) => jsFetchJson(String(url || "")),
     httpRequest: (url, options) => __frameosAnswer(
       jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __appReplacer))
     ),
@@ -3445,7 +3477,8 @@ proc registerAppNatives(js: var QuickJS) =
   ## each: 35 inline registrations were 875 bytes of the ESP32 image.
   const
     natives1 = [("jsSetNextSleep", NimFunction1(jsSetNextSleep)), ("jsRecall", jsRecall),
-      ("jsFetchText", jsFetchText), ("jsReleaseImage", jsReleaseImage), ("jsNextLine", jsNextLine),
+      ("jsFetchText", jsFetchText), ("jsFetchJson", jsFetchJson), ("jsReleaseImage", jsReleaseImage),
+      ("jsNextLine", jsNextLine),
       ("jsTimeZoneInfo", jsTimeZoneInfo), ("jsGetSetting", jsGetSetting), ("jsGetAppMeta", jsGetAppMeta),
       ("jsGetAppConfig", jsGetAppConfig), ("jsGetAppState", jsGetAppState), ("jsGetAppFrame", jsGetAppFrame),
       ("jsGetAppContext", jsGetAppContext), ("jsGetAppKeys", jsGetAppKeys), ("jsAsyncCancel", jsAsyncCancel)]
@@ -4000,6 +4033,12 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
+    # A tree that says what the last one said was laid out as the last one
+    # (ui/layout.nim build): that one is the tree to keep for the pointer's
+    # render, and this equal copy goes.
+    let kept = target.memo.source
+    if not kept.isNil and kept != root and runtime.lastJsx == root:
+      runtime.lastJsx = kept
   # `<img src="https://…">`: each picture at the size it got, here or on its
   # way (a slow panel fetches it now: one refresh with every picture).
   if runtime.jsxMemo.sawUrl and root.tag != "svg":
@@ -4322,7 +4361,10 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     frame.palette = palette
     keepPanelPixelFrame(move frame)
 
-proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst, expectedType: string): Value =
+proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst,
+    expectedType: string, spent: ptr bool = nil): Value =
+  ## `spent`: the caller owns `payload` and lets it go here once it has been
+  ## read, where that is before the work it asks for; set when it went.
   let ctx = runtime.js.context
 
   if jsIsUndefined(payload) or jsIsNull(payload):
@@ -4336,11 +4378,22 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
+      when defined(memProbe): memProbe("    jsx walk BEFORE")
       probe(phWalk):
         let entry = runtime.appEntry()
         runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, entry, addr runtime.jsxMemo)
         JS_FreeValue(ctx, entry)
-      return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
+      when defined(memProbe): memProbe("    jsx walk AFTER")
+      if not spent.isNil:
+        # What get() returned goes before its tree is drawn: the tree is the
+        # walker's own now, and the strings the objects held (a map's paths,
+        # a third of a megabyte) are memory the drawing is short of on an
+        # ESP32.
+        JS_FreeValue(ctx, payload)
+        spent[] = true
+      result = VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
+      when defined(memProbe): memProbe("    jsx image AFTER")
+      return
     let pixels = runtime.imageFromPixels(owner, context, payload)
     if pixels.isPixels:
       if pixels.image.isNil:
@@ -4480,10 +4533,17 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # defaults the consumer's arg or paints the error into its image, and the
       # node cache keeps nothing. It used to hand the consumer null instead,
       # which the cache then served until it expired.
-      let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
-      defer: JS_FreeValue(runtime.js.context, payload)
+      # The tree of the render before goes before the next is made: only the
+      # pointer's render above reads it, and get() and its drawing want the
+      # memory (a map's tree held a third of a megabyte while the next map
+      # was fetched and parsed).
       runtime.lastJsx = nil
-      result = toValue(runtime, owner, context, payload, runtime.outputType)
+      let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
+      var spent = false
+      defer:
+        if not spent:
+          JS_FreeValue(runtime.js.context, payload)
+      result = toValue(runtime, owner, context, payload, runtime.outputType, addr spent)
       if not runtime.lastJsx.isNil:
         runtime.lastJsxConfig = copy(configJson)
         runtime.lastJsxAt = getMonoTime()

@@ -268,3 +268,56 @@ block: # A window repaint draws a clipped element as the whole render does
   doAssert whole[5, 1] == rgbx(255, 0, 0, 255) # y 3 of the content: red
   doAssert whole[5, 3] == rgbx(0, 255, 0, 255) # y 5: green
   doAssert whole[5, 7] == rgbx(0, 0, 0, 0)     # below the viewport
+
+block: # Long path data read when its element is drawn draws the same picture
+  # A coastline: one subpath of relative lines, long past the path cache's
+  # limit (a map's are 20-95 KB). With `lateData` its commands are made when
+  # the element is drawn, not at the parse, and nothing else changes: the
+  # fill, the stroke over it, a short path beside it, a window of the image
+  # and the box it damages.
+  var coast = "M10 100"
+  for i in 0 ..< 6000:
+    coast.add (if i mod 2 == 0: "l.03 -9" else: "l.03 9.02")
+  coast.add "L190 190 10 190z"
+  doAssert coast.len * 4 > 64 * 1024
+  proc drawing(): SvgNode =
+    el("svg", {"width": "200", "height": "200", "viewBox": "0 0 200 200"},
+      el("rect", {"width": "200", "height": "200", "fill": "#f5f3ee"}),
+      el("g", {"transform": "translate(0 -20)"},
+        el("path", {"d": coast, "fill": "#a7d3f5", "stroke": "#4f86bd", "stroke-width": "1.5",
+          "stroke-linejoin": "round"})),
+      el("path", {"d": "M20 20h40v30z", "fill": "#e5484d"}))
+  let
+    early = parseSvg(drawing(), 200, 200)
+    late = parseSvg(drawing(), 200, 200, lateData = true)
+    whole = newImage(early)
+  doAssert same(whole, newImage(late))
+  doAssert whole[100, 120] == rgbx(167, 211, 245, 255) # inside the coast's fill
+  doAssert late.coversOpaque(200, 200)
+  # Drawn in two windows, each reading the data for itself.
+  let parts = newImage(200, 200)
+  late.renderInto(parts.view(0, 0, 200, 90), 0, 0)
+  late.renderInto(parts.view(0, 90, 200, 110), 0, 90)
+  doAssert same(whole, parts)
+  # The same text is the same element, whichever way it was parsed twice.
+  let
+    empty = parseSvg(el("svg", {"width": "200", "height": "200"}), 200, 200)
+    again = parseSvg(drawing(), 200, 200, lateData = true)
+  doAssert damageRects(late, again, 200, 200).rects.len == 0
+  doAssert damageRects(empty, late, 200, 200).rects == damageRects(empty, early, 200, 200).rects
+  # A paint server's fill (strips, each asking for the outline) and a
+  # translucent stroke draw the same too.
+  proc shaded(): SvgNode =
+    el("svg", {"width": "200", "height": "200", "viewBox": "0 0 200 200"},
+      el("defs", newSeq[(string, string)](), el("linearGradient", {"id": "sea", "gradientUnits": "userSpaceOnUse",
+        "x1": "0", "y1": "0", "x2": "0", "y2": "200"},
+        el("stop", {"offset": "0", "stop-color": "#a7d3f5"}),
+        el("stop", {"offset": "1", "stop-color": "#17385a"}))),
+      el("path", {"d": coast, "fill": "url(#sea)", "stroke": "#4f86bd", "stroke-opacity": "0.5",
+        "stroke-width": "2"}))
+  doAssert same(newImage(parseSvg(shaded(), 200, 200)),
+    newImage(parseSvg(shaded(), 200, 200, lateData = true)))
+  # A caller that keeps what it parsed (`reuse`) keeps its paths parsed.
+  let kept = drawing()
+  doAssert same(whole, newImage(parseSvg(kept, 200, 200, reuse = true, lateData = true)))
+  doAssert same(whole, newImage(parseSvg(kept, 200, 200, reuse = true, lateData = true)))

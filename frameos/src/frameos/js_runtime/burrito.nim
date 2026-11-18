@@ -770,11 +770,27 @@ proc clearContextDeadlineTrip*(ctx: ptr JSContext): int {.discardable.} =
 
 const SceneHeapBudgetNote* = " (the scene's JS heap budget is shared by all of its code nodes and apps)"
 
+const DeviceMemoryNote* = " (the frame's memory is short: "
+
+when defined(frameosEmbedded):
+  proc fos_js_take_refusal(bytes: ptr csize_t): cint {.importc, header: "fos_qjs_glue.h".}
+  proc fos_psram_free_bytes(): csize_t {.importc, cdecl.}
+  const FosJsRefusedByHeap = 2 # FOS_JS_REFUSED_BY_HEAP
+
 proc describeJsError*(errorMsg: string): string =
   ## QuickJS's own text, plus what it means on a frame where that text is
   ## easy to misread: `out of memory` is the SCENE's shared ceiling
-  ## (JsHeapBudget), not the device running dry. Idempotent.
-  if errorMsg.contains("out of memory") and not errorMsg.contains(SceneHeapBudgetNote):
+  ## (JsHeapBudget), or, on an ESP32 whose allocator says so
+  ## (fos_qjs_glue.c), the device with no free block of the size asked: the
+  ## one read as the other for a map that did not fit beside a 13.3" panel's
+  ## canvas. Idempotent.
+  if errorMsg.contains("out of memory") and not errorMsg.contains(SceneHeapBudgetNote) and
+      not errorMsg.contains(DeviceMemoryNote):
+    when defined(frameosEmbedded):
+      var bytes: csize_t
+      if fos_js_take_refusal(addr bytes) == FosJsRefusedByHeap:
+        return errorMsg & DeviceMemoryNote & "no free block of " & $bytes & " bytes, " &
+          $fos_psram_free_bytes() & " free)"
     return errorMsg & SceneHeapBudgetNote
   errorMsg
 

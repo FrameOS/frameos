@@ -83,18 +83,41 @@ static inline void fos_js_release(JSMallocState *s, size_t bytes)
     if (b != NULL) b->used_bytes = b->used_bytes > bytes ? b->used_bytes - bytes : 0;
 }
 
+/* The last allocation a runtime was refused, and by what: QuickJS says "out
+ * of memory" for a scene past its own ceilings and for a heap with no block
+ * that size alike, and the second read as the first for a reTerminal E1004
+ * whose map did not fit beside its canvas ("the scene's JS heap budget",
+ * with 4 MB of budget unused: the hardware bench, 2026-11-18). */
+static size_t s_refused_bytes;
+static int s_refused_by = FOS_JS_REFUSED_NONE;
+
+static void *fos_js_refuse(size_t size, int by)
+{
+    s_refused_bytes = size;
+    s_refused_by = by;
+    return NULL;
+}
+
+int fos_js_take_refusal(size_t *bytes)
+{
+    int by = s_refused_by;
+    if (bytes != NULL) *bytes = s_refused_bytes;
+    s_refused_by = FOS_JS_REFUSED_NONE;
+    return by;
+}
+
 static void *fos_js_malloc(JSMallocState *s, size_t size)
 {
     void *ptr;
 
     assert(size != 0);
     if (s->malloc_size + size > s->malloc_limit)
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_LIMIT);
     if (!fos_js_budget_allows(fos_js_budget(s), size))
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_LIMIT);
     ptr = fos_js_alloc(size);
     if (ptr == NULL)
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_HEAP);
     s->malloc_count++;
     fos_js_charge(s, fos_js_usable_size(ptr) + FOS_JS_MALLOC_OVERHEAD);
     return ptr;
@@ -141,9 +164,9 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
         return NULL;
     }
     if (s->malloc_size + size - old_size > s->malloc_limit)
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_LIMIT);
     if (size > old_size && !fos_js_budget_allows(fos_js_budget(s), size - old_size))
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_LIMIT);
 
     // No heap_caps_realloc with caps fallback chain: realloc keeps the
     // original heap, which is what we want (stays in PSRAM).
@@ -151,7 +174,7 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
     if (new_ptr == NULL)
         new_ptr = fos_heap_realloc(ptr, size, MALLOC_CAP_8BIT);
     if (new_ptr == NULL)
-        return NULL;
+        return fos_js_refuse(size, FOS_JS_REFUSED_BY_HEAP);
     size_t new_size = fos_js_usable_size(new_ptr);
     if (new_size >= old_size)
         fos_js_charge(s, new_size - old_size);

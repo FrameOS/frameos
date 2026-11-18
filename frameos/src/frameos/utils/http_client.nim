@@ -123,6 +123,7 @@ proc noteHttpWait(what, url: string, startedAt: MonoTime) =
 
 when defined(frameosEmbedded) or defined(frameosWasm):
   import std/strformat
+  import frameos/utils/memory
 
   type
     HttpRequestError* = object of IOError
@@ -568,6 +569,15 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       if buf != nil:
         result.chunks = @[HttpBodyChunk(data: buf, len: outLen.int)]
 
+  proc requireRoomForBody(bytes: int) =
+    ## Before a body is copied into one string: an allocation of a download's
+    ## size that fails is the end of the render on an ESP32
+    ## (memory.roomForBlock), so one that would is an error for the caller's
+    ## node instead.
+    if not makeRoomForBlock(bytes + 1):
+      raise newException(IOError,
+        &"HTTP response ({bytes} bytes) does not fit in the frame's free memory")
+
   proc boundedRequest*(
       url: string,
       httpMethod = "GET",
@@ -604,6 +614,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       result.status = response.status
       result.headers = move response.headers
       if response.bodyLen > 0:
+        requireRoomForBody(response.bodyLen)
         result.body = newString(response.bodyLen)
         var pos = 0
         for chunk in response.chunks:
@@ -652,12 +663,58 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                           maxSeconds = maxSeconds, headers = headers)
 
   proc bufferChunksToString(response: BoundedHttpBufferResponse): string =
+    if response.bodyLen > 0:
+      requireRoomForBody(response.bodyLen)
     result = newString(response.bodyLen)
     var pos = 0
     for chunk in response.chunks:
       if chunk.len > 0:
         copyMem(addr result[pos], chunk.data, chunk.len)
         pos += chunk.len
+
+  const HttpErrorDetailBytes = 300
+    ## How much of a refused request's body its error quotes.
+
+  proc boundedGetWhole*(
+      url: string,
+      use: proc(text: cstring, len: int),
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes
+    ) =
+    ## A GET's body lent to `use` as one NUL-terminated block, for a reader
+    ## that wants its text whole and keeps none of it (a JSON parser): the
+    ## block the body arrived in where it arrived in one (an ESP32's chunk,
+    ## the size of a stated Content-Length up to 512 KB), a string of the
+    ## pieces otherwise. `frameos.fetchJson` made a string of the body, a JS
+    ## string of that (two bytes a character once one of them is past
+    ## Latin-1) and, in JSON.parse, a UTF-8 copy of that: about 1.7 MB of
+    ## text for a 341 KB map, which a reTerminal E1004 did not have beside
+    ## its canvas (the hardware bench, 2026-11-18). An empty body is `use`d
+    ## as "". Raises as boundedGetContent does.
+    var response = boundedRequestBuffer(url, timeoutMs = timeoutMs, maxBytes = maxBytes)
+    try:
+      if response.spillPath.len > 0:
+        raise newException(IOError,
+          &"HTTP response ({response.bodyLen} bytes) was spilled to storage; " &
+          "it is too large to load into memory")
+      if response.code >= 400:
+        var detail = ""
+        for chunk in response.chunks:
+          if chunk.len > 0 and detail.len == 0:
+            detail = newString(min(chunk.len, HttpErrorDetailBytes))
+            copyMem(addr detail[0], chunk.data, detail.len)
+        raise newException(HttpRequestError,
+          "HTTP " & response.status & (if detail.len > 0: ": " & detail else: ""))
+      when defined(frameosEmbedded):
+        # One chunk, which the glue ends with a NUL: used where it is.
+        if response.body != nil and response.bodyLen > 0:
+          use(cast[cstring](response.body), response.bodyLen)
+          return
+      let text = bufferChunksToString(response)
+      response.freeHttpBufferResponse()
+      use(text.cstring, text.len)
+    finally:
+      response.freeHttpBufferResponse()
 
   proc httpBufferText*(response: BoundedHttpBufferResponse): string =
     ## A buffered body as one string (the caller still frees the buffer).
@@ -1334,6 +1391,17 @@ else:
       maxBytes = maxBytes,
       maxSeconds = maxSeconds
     )
+
+  proc boundedGetWhole*(
+      url: string,
+      use: proc(text: cstring, len: int),
+      timeoutMs = DefaultFetchTimeoutMs,
+      maxBytes = DefaultFetchMaxBytes
+    ) =
+    ## A GET's body lent to `use` as one NUL-terminated block (the ESP32's
+    ## says why: there it is the block the body arrived in).
+    let text = boundedGetContent(url, timeoutMs = timeoutMs, maxBytes = maxBytes)
+    use(text.cstring, text.len)
 
   proc boundedPostContent*(
       url: string,

@@ -922,6 +922,24 @@
   store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
   making it public is those two plus the AI evals.
 
+## ESP32 memory: `docs/esp32-memory.md`
+
+- Nim's allocator cannot refuse: on the device a failed allocation spends the
+  1 MB emergency reserve, and without one it is a longjmp out of the render
+  that leaks what the render held (the JS interpreters it was in included).
+  **An allocation the size of a download asks first**
+  (`memory.makeRoomForBlock`, as `http_client.requireRoomForBody` does) and
+  raises an error its node can show. A text an app only parses is never made
+  a string of: `frameos.fetchJson` parses the block the body came in
+  (`boundedGetWhole`), and a body with a stated length is one block of that
+  size (`fos_http_chunks.h`).
+- An SVG that is drawn once and let go is parsed with pixie's `lateData`
+  (`renderSvgIntoTarget`, `decodeSvgWithFallback`, `frameos.draw`): a long
+  path's commands exist only while it is drawn. A parse kept for its damage
+  (`svg_frames.nim`, `reuse`) is not.
+- Measure on the board (`-d:memProbe`, `heapinfo`'s `min_ever_free`) and add
+  what you find to the doc: a host model has been wrong both ways.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →

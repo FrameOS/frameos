@@ -14,6 +14,7 @@ type
     elements: seq[SvgElement]
     gradients: Table[string, SvgGradient]
     viewBoxWidth, viewBoxHeight: float32 # what percentage lengths refer to
+    lateData: bool # long path data is read when its element is drawn (parseSvg)
 
   SvgNode* {.acyclic.} = ref object
     ## What `parseSvg` reads: an element (`tag`, `attrs`, `children`), a run
@@ -49,6 +50,8 @@ type
     ## copy of its properties each. The same element in two parses is one
     ## object, which is how damageRects knows it without comparing.
     path: Path
+    late: SvgNode # the `<path>` whose data is read when it is drawn, `path`
+                  # nil until then and after (parseSvg's `lateData`)
     props: SvgProperties
     bounds: Rect # paintBounds, once measured (w < 0: not yet)
 
@@ -146,6 +149,12 @@ proc attr*(node: SvgNode, name: string): string =
   for i in 0 ..< node.attrs.len:
     if node.attrs[i][0] == name:
       return node.attrs[i][1]
+
+proc attrLen(node: SvgNode, name: string): int =
+  ## The length of attribute `name`'s value, without a copy of it.
+  for i in 0 ..< node.attrs.len:
+    if node.attrs[i][0] == name:
+      return node.attrs[i][1].len
 
 proc setAttr*(node: SvgNode, name, value: string) =
   for i in 0 ..< node.attrs.len:
@@ -1116,12 +1125,17 @@ proc parseSvgElement(
       elements.add newSvgElement(element)
 
   of "path":
-    let
-      d = node.attr("d")
-      props = node.parseSvgProperties(propertiesStack[^1])
-      path = if node.path.isNil: parsePathCached(d) else: node.path
-
-    elements.add newSvgElement(path, props)
+    let props = node.parseSvgProperties(propertiesStack[^1])
+    if node.path.isNil and svg.lateData and node.attrLen("d") * 4 > PathCacheMaxChars:
+      # Too long for the path cache, in a document drawn once: its commands
+      # are made when it is drawn and go when it has been (pathOf), instead
+      # of every such path's standing beside the others from the parse to
+      # the last fill. A map of 49,000 points was 1.15 MB of them at once,
+      # twelve bytes a point, on a frame with 2 MB to draw it in.
+      elements.add SvgElement(late: node, props: props, bounds: rect(0, 0, -1, -1))
+    else:
+      let path = if node.path.isNil: parsePathCached(node.attr("d")) else: node.path
+      elements.add newSvgElement(path, props)
 
   of "line":
     let
@@ -1252,7 +1266,7 @@ proc parseSvgElement(
     raise newException(PixieError, "Unsupported SVG tag: " & node.tag)
 
 proc parseSvg*(
-  root: SvgNode, width = 0, height = 0, reuse = false
+  root: SvgNode, width = 0, height = 0, reuse = false, lateData = false
 ): Svg {.raises: [PixieError].} =
   ## Parse an SVG node tree. Defaults to the SVG's view box size.
   ##
@@ -1261,6 +1275,12 @@ proc parseSvg*(
   ## same inherited properties brings its elements back without a parse,
   ## and damageRects knows them for the same elements without comparing
   ## them. Each child keeps what it made for that.
+  ##
+  ## `lateData`: for a document drawn once and let go. A `<path>` whose data
+  ## is too long for the path cache keeps it as text in its node and reads
+  ## it when the element is drawn, one path's commands at a time; the tree
+  ## must stay as it is until the Svg has been drawn. Not with `reuse`: a
+  ## frame kept for its damage would read the data again for every box.
   try:
     if root.tag != "svg":
       failInvalid()
@@ -1276,7 +1296,8 @@ proc parseSvg*(
 
     result = Svg(
       viewBoxWidth: box.width,
-      viewBoxHeight: box.height
+      viewBoxHeight: box.height,
+      lateData: lateData and not reuse
     )
 
     if width == 0 and height == 0: # Default to the view box size
@@ -1639,13 +1660,36 @@ proc drawSvgImage(target: Image, props: SvgProperties) {.raises: [PixieError].} 
   elif not (props.imagePixelated and target.drawNearest565(image, transform)):
     target.draw(image, transform)
 
+let noPathData = ""
+
+proc lateData(element: SvgElement): lent string =
+  ## The path data waiting in a `late` element's node, where it lies.
+  for i in 0 ..< element.late.attrs.len:
+    if element.late.attrs[i][0] == "d":
+      return element.late.attrs[i][1]
+  noPathData
+
+proc pathOf(element: SvgElement): Path {.raises: [PixieError].} =
+  ## The element's outline: its own, or, for one whose data waits in its node
+  ## (`late`), that data read now, for the caller to draw or measure and let
+  ## go. Not shared and not kept: keeping it is what `late` is there to avoid.
+  if not element.path.isNil or element.late.isNil:
+    return element.path
+  parsePath(element.lateData)
+
 proc sameElement(a: Svg, i: int, b: Svg, j: int): bool =
   ## Element i of `a` and j of `b` draw the same: one element, handed over
   ## twice (the same node's parse), or two equal ones.
   let
     x = a.elements[i]
     y = b.elements[j]
-  x == y or (sameCommands(x.path, y.path) and x.props == y.props)
+  if x == y:
+    return true
+  if not x.late.isNil or not y.late.isNil:
+    # Data not read yet: the same when it is the same text.
+    return not x.late.isNil and not y.late.isNil and x.props == y.props and
+      (x.late == y.late or x.late.attr("d") == y.late.attr("d"))
+  sameCommands(x.path, y.path) and x.props == y.props
 
 proc transformedBounds(bounds: Rect, m: Mat3): Rect =
   ## The box around a box's four corners under `m`: it holds whatever the box
@@ -1701,7 +1745,7 @@ proc paintBounds(element: SvgElement): Rect {.raises: [PixieError].} =
   ## share it: a frame's repaint boxes each look at every element, and
   ## damageRects at the changed ones of the frame before as well.
   if element.bounds.w < 0:
-    element.bounds = paintBounds(element.path, element.props)
+    element.bounds = paintBounds(element.pathOf(), element.props)
     if element.props.clip.w >= 0:
       element.bounds = element.bounds.intersect(element.props.clip)
   element.bounds
@@ -1790,7 +1834,6 @@ proc renderSvg(
           break
     for i in first ..< svg.elements.len:
       let element = svg.elements[i]
-      let path = element.path
       template elementProps: untyped = element.props
       if window.w > 0 and elementProps.display and elementProps.opacity > 0:
         var bounds = window
@@ -1822,6 +1865,15 @@ proc renderSvg(
           blendMode = NormalBlend
         continue
       if props.display and props.opacity > 0:
+        # A long path's data waiting in its node (`late`) is read by the fill
+        # and by the stroke for themselves where the paint is one color
+        # (fillPath and strokePath of the text): its commands go as soon as
+        # they are flattened, before the edges of the fill are made, where a
+        # Path held here stood beside them for the whole of both. A paint
+        # server fills in strips, each asking for the outline again: there
+        # the commands are made once, as for any other element.
+        let late = not element.late.isNil
+        var path = element.path
         if props.fill != "none":
           var paint: Paint
           if props.fill.startsWith("url("):
@@ -1858,23 +1910,42 @@ proc renderSvg(
           paint.opacity = props.fillOpacity * props.opacity
           paint.blendMode = blendMode
 
-          target.fillPath(path, paint, props.transform, props.fillRule)
+          if late and paint.kind == SolidPaint:
+            target.fillPath(element.lateData, paint, props.transform, props.fillRule)
+          else:
+            if late and path.isNil:
+              path = element.pathOf()
+            target.fillPath(path, paint, props.transform, props.fillRule)
 
         blendMode = NormalBlend # Switch to normal when compositing multiple paths
 
         if props.stroke != rgbx(0, 0, 0, 0) and props.strokeWidth > 0:
           let paint = props.stroke.copy()
           paint.color.a *= (props.opacity * props.strokeOpacity)
-          target.strokePath(
-            path,
-            paint,
-            props.transform,
-            props.strokeWidth,
-            props.strokeLineCap,
-            props.strokeLineJoin,
-            miterLimit = props.strokeMiterLimit,
-            dashes = props.strokeDashArray
-          )
+          if late and paint.kind == SolidPaint:
+            target.strokePath(
+              element.lateData,
+              paint,
+              props.transform,
+              props.strokeWidth,
+              props.strokeLineCap,
+              props.strokeLineJoin,
+              miterLimit = props.strokeMiterLimit,
+              dashes = props.strokeDashArray
+            )
+          else:
+            if late and path.isNil:
+              path = element.pathOf()
+            target.strokePath(
+              path,
+              paint,
+              props.transform,
+              props.strokeWidth,
+              props.strokeLineCap,
+              props.strokeLineJoin,
+              miterLimit = props.strokeMiterLimit,
+              dashes = props.strokeDashArray
+            )
   except PixieError as e:
     raise e
   except:

@@ -1562,6 +1562,55 @@ suite "js app runtime":
     check payload["failed"]["status"].getInt() == 0
     check payload["failed"]["error"].getStr().len > 0
 
+  test "fetchJson parses the answer as it came, and answers null for a failed request":
+    # No JS string of the text: a 341 KB map with one name past Latin-1 was a
+    # 682 KB string and then JSON.parse's own UTF-8 copy of it, which a
+    # reTerminal E1004 did not have (the hardware bench, 2026-11-18).
+    let places = """{"layers": {"places": [{"name": "Αθήνα", "x": 1.5}, {"name": "München", "x": 2}]},
+      "attribution": "© OpenStreetMap"}"""
+    var asked: seq[string]
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      asked.add(httpMethod & " " & url)
+      if url.endsWith("/missing"): (404, "not here")
+      elif url.endsWith("/empty"): (200, "")
+      elif url.endsWith("/broken"): (200, """{"layers": [""")
+      else: (200, places)
+    defer: jsHttpRequestHook = nil
+
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-json".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsFetchJson", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app) {
+          let broken = null
+          try { frameos.fetchJson('https://maps.example/broken') } catch (err) { broken = err.name }
+          return {
+            data: frameos.fetchJson('https://maps.example/lines'),
+            missing: frameos.fetchJson('https://maps.example/missing'),
+            empty: frameos.fetchJson('https://maps.example/empty'),
+            none: frameos.fetchJson(''),
+            broken,
+          }
+        }"""
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+
+    check payload["data"]["layers"]["places"][0]["name"].getStr() == "Αθήνα"
+    check payload["data"]["layers"]["places"][0]["x"].getFloat() == 1.5
+    check payload["data"]["layers"]["places"][1]["name"].getStr() == "München"
+    check payload["data"]["attribution"].getStr() == "© OpenStreetMap"
+    check payload["missing"].kind == JNull
+    check payload["empty"].kind == JNull
+    check payload["none"].kind == JNull
+    check payload["broken"].getStr() == "SyntaxError"
+    check asked == @["GET https://maps.example/broken", "GET https://maps.example/lines",
+      "GET https://maps.example/missing", "GET https://maps.example/empty"]
+
   test "httpRequest find hands back the text at each occurrence, not the body":
     # A page bigger than an ESP32's JS heap (Google Photos: 1.2 MB) reaches
     # the app as a few KB of snippets; the body never becomes a JS string.

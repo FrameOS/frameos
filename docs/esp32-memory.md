@@ -202,6 +202,69 @@ again, and right after an abort it is exactly 1,048,576 bytes, the reserve's
 own slot. Not changed here; the two allocations above no longer need the
 block it splits.
 
+## A map of 49,000 points on the 13.3" (2026-11-18)
+
+The hardware bench's reTerminal E1004 failed the Map sample every time:
+"out of memory" in `frameos.fetchJson` with 2.4 MB free, and in the soak the
+body's own copy aborted the render three times (1.7 MB free, largest block
+278 KB), each abort leaving its interpreters behind (`jsDroppedBytes` 299 KB),
+until Flights Above Me ran out and the frame restarted. The map is 341,366
+bytes of JSON (`maxkb=400`): 338 KB of path data, 48,962 points, 62 bytes of
+it past ASCII. What it cost, measured with `-d:memProbe` and the heap's
+low-water mark (`heapinfo`, `min_ever_free`):
+
+| step | before | now |
+|---|---|---|
+| the body | a 512 KB chunk, a 341 KB string of it, a 682 KB JS string of that (two bytes a character: one Greek name), JSON.parse's UTF-8 copy of that | one 341 KB chunk, parsed where it lies |
+| the values parsed (JS) | 325 KB, held to the end of the render | 325 KB, let go before the tree is drawn |
+| the tree (the walker's nodes) | 365 KB, and the render before's beside it from the second render on | 365 KB, once |
+| every path's commands (twelve bytes a point) | 1,155 KB at once, from the parse to the last fill | one path's, while it is flattened |
+| the largest fill (13,600 edges) | 1.4 MB: commands, shapes, edges, a seq of partition entries and the partitions' own | 1.2 MB less the commands and that seq |
+| free at the worst moment, first render | 552 bytes after the 1 MB reserve was spent | 880 KB, reserve untouched |
+| free at the worst moment, a render after it | abort, 2.25 MB leaked, restart | 843-849 KB, reserve untouched (486 KB while the tree was held twice) |
+| free with the map on the panel | 2.25 MB after the first render, 1.87 MB after the next | 2.24-2.25 MB |
+
+What changed:
+
+- **`fetchJson` parses the bytes that came** (`http_client.boundedGetWhole`,
+  `app_runtime.jsFetchJson`): a body whose length the server states is read
+  into one block of that size (`fos_http_chunks.h`; every answer took a
+  512 KB block before, a 2 KB one too), ended with a NUL, and handed to
+  `JS_ParseJSON` as it is. The 1 MB allocation that failed was JSON.parse's
+  own copy of the 682 KB string; QuickJS says "out of memory" for that as for
+  a scene past its heap budget, so the error now says which
+  (`fos_js_take_refusal`, `describeJsError`: "the frame's memory is short: no
+  free block of N bytes").
+- **An allocation the size of a download asks first** (`memory.roomForBlock`
+  / `makeRoomForBlock`, `http_client.requireRoomForBody`): Nim's allocator
+  cannot refuse, and on the device a failed one is the longjmp. A body with
+  no block to go in is an IOError its node shows; what a render can rebuild
+  goes first.
+- **The reserve is armed again when it could not be**
+  (`fos_nim_emergency_reserve_unarmed`, `recoverEmergencyReserve`): one failed
+  arm in the desktop suite left the frame without a reserve for the twenty
+  minutes until the soak's first abort, which a reserve would have served.
+  It is tried after every pass now.
+- **An SVG drawn once reads its long paths late** (pixie `parseSvg`'s
+  `lateData`: `renderSvgIntoTarget`, `decodeSvgWithFallback`,
+  `frameos.draw`): a `<path>` too long for the path cache keeps its data as
+  text and the fill and the stroke read it for themselves, so its commands go
+  before the fill's edges are made. Not for a frame kept for its damage.
+- **A fill holds less** (pixie `shapesToSegments`, `partitionSegments`): the
+  edge list is made at its size, and the partition entries are made as they
+  are handed out, not in a seq of their own first.
+- **One tree, not two** (`ui/layout.nim` build, `UiMemo.source`,
+  `app_runtime.get`): the layout keeps the element it was built from when the
+  next render's says the same; the app's tree now takes that element in place
+  of its own equal one, get()'s JS result goes before the tree is drawn, and
+  the tree of the render before goes before the next get().
+
+Not changed: the abort itself still leaves the interpreters it jumped out of
+(they can be neither run nor freed, see below), and a fill still holds its
+shapes and its edge list beside the partitions (about 380 KB of the largest
+fill above): making the partitions straight from the shapes is the next
+400 KB.
+
 ## Gradient fills paint in strips (2026-08-24)
 
 The 16 MB 13.3" (frame 529463b4, fw 2026.8.35) OOM-aborted every Weather

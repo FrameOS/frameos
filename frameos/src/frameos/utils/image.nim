@@ -152,7 +152,7 @@ proc decodeSvgWithFallback*(root: SvgNode, width: int, height: int): Option[Imag
   if root.isNil:
     return none(Image)
   try:
-    return some(newImage(parseSvg(root, width, height)))
+    return some(newImage(parseSvg(root, width, height, lateData = true)))
   except CatchableError:
     return none(Image)
 
@@ -217,9 +217,14 @@ proc renderSvgIntoTarget*(root: SvgNode, target: Image, owed: var Option[Color])
     return false
   refreshDecodeBudgetInto()
   try:
-    let parsedSvg = parseSvg(root, target.width, target.height)
+    when defined(memProbe): memProbe("      svg parse BEFORE")
+    # Drawn once and let go: a long path's commands are made when it is drawn
+    # (pixie's `lateData`), not all of them before the first fill.
+    let parsedSvg = parseSvg(root, target.width, target.height, lateData = true)
+    when defined(memProbe): memProbe("      svg parse AFTER")
     settleOwedBackground(parsedSvg, target, owed)
     parsedSvg.renderInto(target)
+    when defined(memProbe): memProbe("      svg raster AFTER")
     true
   except CatchableError:
     false
