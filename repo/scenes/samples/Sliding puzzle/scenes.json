@@ -3,7 +3,7 @@
     "id": "sliding-puzzle",
     "name": "Sliding puzzle",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#efece4",

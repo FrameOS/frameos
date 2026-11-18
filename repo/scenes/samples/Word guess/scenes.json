@@ -3,7 +3,7 @@
     "id": "word-guess",
     "name": "Word guess",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f3f0e8",

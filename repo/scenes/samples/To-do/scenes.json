@@ -3,7 +3,7 @@
     "id": "to-do",
     "name": "To-do",
     "settings": {
-      "category": "Real time",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f1f5f9",

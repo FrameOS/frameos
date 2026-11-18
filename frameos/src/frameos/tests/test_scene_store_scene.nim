@@ -10,6 +10,7 @@ import ../channels
 import ../interpreter
 import ../scene_rhythm
 import ../scene_store_hooks
+import ../layout_choice
 import ../types
 import ../js_runtime/app_runtime
 import ../js_runtime/js_io
@@ -63,13 +64,13 @@ proc listing(names: openArray[string], more = false, categories = true): JsonNod
   result = %*{"page": 1, "more": more, "scenes": []}
   for i, name in names:
     result["scenes"].add %*{"id": "0000000" & $i & "-0000-4000-8000-00000000000" & $i, "name": name,
-      "category": (if i == 0: "realtime" else: "weather"), "version": 3, "by": "FrameOS",
+      "category": (if i == 0: "fun" else: "weather"), "version": 3, "by": "FrameOS",
       "about": name & " on the frame, all day long.",
       "image": (if networkCovers: "https://cdn.test/cover" & $i & ".png"
                 else: coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6]))}
   if categories:
     result["categories"] = %*[{"slug": "photos", "title": "Photos"}, {"slug": "weather", "title": "Weather"},
-      {"slug": "realtime", "title": "Real time"}, {"slug": "layouts", "title": "Layouts"}]
+      {"slug": "fun", "title": "Fun & animations"}, {"slug": "layouts", "title": "Full screen layouts", "layout": true}]
 
 let sixScenes = ["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"]
 page = $listing(sixScenes, more = true)
@@ -165,10 +166,12 @@ suite "the Scene store scene":
     check settle() >= 1
     let pages = requested("/api/store/device/scenes?")
     check pages.len == 1
-    # A fast panel puts the scenes that move first; the shelves come with the
-    # first page; the page is the grid's; the store is the host's.
+    # A fast panel puts the scenes made for it first, Featured is scenes (the
+    # layouts have shelves of their own); the shelves come with the first page;
+    # the page is the grid's; the store is the host's.
     check pages[0].startsWith("https://store.test/") and "version=2026.11.8" in pages[0]
-    check "prefer=realtime" in pages[0] and "categories=1" in pages[0] and "page=1" in pages[0]
+    check "prefer=fast" in pages[0] and "categories=1" in pages[0] and "page=1" in pages[0]
+    check "exclude=desktops,layouts" in pages[0] and "without=" notin pages[0]
     check "limit=8" in pages[0]
     # Data URL covers are there at once; covers from the network are the test
     # below.
@@ -322,6 +325,47 @@ suite "the Scene store scene":
     facts["preview"] = newJNull()
     facts.delete("previewOnly")
 
+  test "a layout is tried, worn by every scene, and put back by Discard":
+    let config = frame(800, 480)
+    let scene = load(config)
+    facts["installed"] = %*[]
+    chooseLayout("")
+    var detail = listing(sixScenes)["scenes"][2]
+    detail["category"] = %"layouts"
+    detail["name"] = %"Top bar"
+    proc tapAll(): seq[(string, JsonNode)] =
+      asked = @[]
+      for x in countup(420, 780, 20):
+        for y in countup(40, 470, 10):
+          scene.state["spot"] = %*{"page": 1, "detail": detail, "tried": scene.state{"spot", "tried"}}
+          scene.tap(x, y)
+      for (_, action, args) in asked:
+        result.add (action, args)
+    scene.state["spot"] = %*{"page": 1, "detail": detail}
+    discard draw(scene, config, "layout")
+    # Try is a preview that stays on the store; there is no Preview or Open.
+    let tries = tapAll()
+    var tried = false
+    for (action, args) in tries:
+      if action == "preview":
+        check args{"show"}.getBool(true) == false
+        tried = true
+    check tried
+    # The frame holds it now: the store puts it on every scene, itself too.
+    scene.state["spot"] = %*{"page": 1, "detail": detail,
+      "tried": {"store": detail["id"].getStr(), "before": ""}}
+    facts["preview"] = %*{"store": detail["id"], "id": "layout-top-bar", "name": "Top bar"}
+    discard draw(scene, config, "layout-tried")
+    check chosenLayout() == "layout-top-bar"
+    check parseJson(sceneStoreFactsForTests("store")){"layout"}.getStr() == "layout-top-bar"
+    # Discard drops the preview and gives the frame back what it wore.
+    var discarded = false
+    for (action, _) in tapAll():
+      if action == "discard": discarded = true
+    check discarded
+    check chosenLayout() == ""
+    facts["preview"] = newJNull()
+
   test "a square screen gets the shelves as a select and a smaller grid":
     problems = @[]
     withLock requestsLock: requests = @[]
@@ -345,7 +389,7 @@ suite "the Scene store scene":
     # One refresh an answer: the page is fetched in the render, nothing after.
     check requested("/api/store/").len == 0
     check jsAsyncPending() == 0
-    check fetched.len > 0 and "exclude=realtime" in fetched[^1] and "prefer=realtime" notin fetched[^1]
+    check fetched.len > 0 and "without=fast" in fetched[^1] and "prefer=fast" notin fetched[^1]
     check problems.len == 0
 
   test "with no host it browses on its own and installs nothing":

@@ -629,6 +629,8 @@ export const storeScenes = pgTable(
     // Risk flags of the latest version (e.g. 'shell'), denormalized here so
     // listings can badge scenes without joining versions.
     riskFlags: text("risk_flags").array().default([]).notNull(),
+    // What it needs of a frame (fast, touch, keys, linux): sceneNeeds.ts, 0084.
+    needs: text("needs").array().default([]).notNull(),
     // High-entropy sharing secret: ?share={token} grants read access to a
     // private scene (page, zip, images) without an account. Never rendered
     // to anyone but the owner.
@@ -706,6 +708,8 @@ export const storeSceneVersions = pgTable(
     icon: text("icon"),
     // Computed at publish from the scenes JSON (see detectRiskFlags).
     riskFlags: text("risk_flags").array().default([]).notNull(),
+    // What it needs of a frame (fast, touch, keys, linux): sceneNeeds.ts, 0084.
+    needs: text("needs").array().default([]).notNull(),
     sceneId: uuid("scene_id")
       .notNull()
       .references(() => storeScenes.id, { onDelete: "cascade" }),

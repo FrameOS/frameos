@@ -12,7 +12,8 @@ import { logWarn } from "./log";
 import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
 import { meterAiUsage } from "./billing";
-import { classifyStoreScene } from "./store-classify";
+import { classifyStoreScene, ruleCategory, ruleTags } from "./store-classify";
+import { isLayoutCategory } from "./categories";
 import { newSceneDailyLimit } from "./store-publish-limit";
 import {
   detectImageContentType,
@@ -120,24 +121,38 @@ export async function preflightStorePublish(
 }
 
 // What the listing says the category is before any model is asked: the one
-// the scene names itself (its settings.category, a store title), the
-// manifest's, then the row's, then a layouts shelf for a layout (Desktop
-// layouts for a desktop, else Full screen layouts).
+// the scene names itself (its settings.category, a store title; a layout's is
+// always its kind's shelf, validateSceneZip), the manifest's, then the row's,
+// then what the rules are sure of (store-classify.ts). A scene is never
+// filed on a layouts' shelf.
 function listingCategory(
   validated: {
+    appKeywords: string[];
     isLayout: boolean;
     isDesktop: boolean;
     manifestCategory: string | null | undefined;
+    needs: string[];
     sceneCategory: string | undefined;
   },
   existing: { category: string | null } | undefined,
+  facts: { name: string; description: string | null },
 ): string | null {
   if (validated.sceneCategory) {
     return validated.sceneCategory;
   }
   const stated =
     validated.manifestCategory !== undefined ? validated.manifestCategory : (existing?.category ?? null);
-  return stated ?? (validated.isDesktop ? "desktops" : validated.isLayout ? "layouts" : null);
+  if (stated && !isLayoutCategory(stated)) {
+    return stated;
+  }
+  return (
+    ruleCategory({
+      appKeywords: validated.appKeywords,
+      description: facts.description,
+      name: facts.name,
+      needs: validated.needs,
+    }) ?? null
+  );
 }
 
 // Moderation and classification: network calls to a model, up to ~80 s.
@@ -189,12 +204,14 @@ async function slowPublishWork(
   }
 
   // Auto-categorize: new scenes (and republishes of scenes that never got a
-  // category) are classified into the fixed store taxonomy, and get suggested
-  // tags when the owner has not set any. Owner-set values are never
-  // overwritten, and a classifier outage just leaves the scene uncategorized.
-  const category = listingCategory(validated, existing);
+  // category) are filed by the rules, else classified into the fixed store
+  // taxonomy, and get suggested tags when the owner has not set any (the
+  // model is asked for tags alone too). Owner-set values are never
+  // overwritten; a classifier outage leaves the category to the rules and
+  // the tags to ruleTags (publishStoreScene).
+  const category = listingCategory(validated, existing, { description, name });
   const tags = validated.manifestTags ?? existing?.tags ?? [];
-  const classified = category
+  const classified = category && tags.length > 0
     ? undefined
     : await classifyStoreScene({
         appKeywords: validated.appKeywords,
@@ -398,13 +415,17 @@ export async function publishStoreScene(
 
   // The listing this version records. Manifest values win where present;
   // otherwise the row's stand (a re-publish keeps the tags the owner set).
-  const category = listingCategory(validated, existing);
+  const category = listingCategory(validated, existing, { description, name }) ?? classified?.category ?? null;
   const tags = validated.manifestTags ?? existing?.tags ?? [];
+  const suggested = classified?.tags.length ? classified.tags : undefined;
   const listing: SceneListing = {
-    category: category ?? classified?.category ?? null,
+    category,
     description,
     frameosVersion: validated.frameosVersion ?? null,
-    tags: tags.length ? tags : (classified?.tags ?? []),
+    tags: tags.length
+      ? tags
+      : (suggested ??
+        ruleTags({ appKeywords: validated.appKeywords, category, description, name, needs: validated.needs })),
   };
 
   const scene = existing ?? (await createScene(db, accountId, name));

@@ -3,7 +3,7 @@
     "id": "gomoku",
     "name": "Gomoku",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#efe7d8",

@@ -3,7 +3,7 @@
     "id": "blackjack",
     "name": "Blackjack",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#1d4a3a",

@@ -1,5 +1,5 @@
 {
-  "name": "Flights Above Me",
+  "name": "Flights above me",
   "description": "Shows airplanes around you over a map of the area. Flight data from OpenSky Network, map lines from OpenStreetMap via maps.frameos.net.",
   "config": null,
   "image": "./image.jpg",

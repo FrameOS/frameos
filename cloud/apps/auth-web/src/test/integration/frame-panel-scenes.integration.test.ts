@@ -112,6 +112,8 @@ async function storeScene(
   {
     category = "weather",
     description = "",
+    isLayout = false,
+    needs = [] as string[],
     riskFlags = [] as string[],
     runtimeIds = [`rt-${sceneCounter + 1}`],
     visibility = "public",
@@ -126,6 +128,7 @@ async function storeScene(
       description,
       latestVersion: 1,
       name,
+      needs,
       riskFlags,
       slug: `panel-scene-${sceneCounter}`,
       status: "active",
@@ -135,12 +138,25 @@ async function storeScene(
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  await addVersion(scene.id, 1, runtimeIds, name, riskFlags);
+  await addVersion(scene.id, 1, runtimeIds, name, riskFlags, isLayout);
   return { id: scene.id, runtimeIds };
 }
 
-async function addVersion(sceneId: string, version: number, runtimeIds: string[], name: string, riskFlags: string[] = []) {
-  const scenes = runtimeIds.map((id) => ({ edges: [], id, name: `${name} ${id}`, nodes: [], settings: { execution: "interpreted" } }));
+async function addVersion(
+  sceneId: string,
+  version: number,
+  runtimeIds: string[],
+  name: string,
+  riskFlags: string[] = [],
+  isLayout = false,
+) {
+  const scenes = runtimeIds.map((id) => ({
+    edges: [],
+    id,
+    name: `${name} ${id}`,
+    nodes: [],
+    settings: { execution: "interpreted", ...(isLayout ? { isLayout: true } : {}) },
+  }));
   await db.insert(storeSceneVersions).values({
     content: Buffer.from(zipSync({ "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)) })),
     contentType: "application/zip",
@@ -283,16 +299,19 @@ describe("GET /api/store/device/scenes", () => {
     expect(shelf.scenes).toEqual([]);
   });
 
-  it("takes the page size of the frame's grid, a shelf to put first and shelves to leave out", async () => {
+  it("takes the page size of the frame's grid, what to put first and what it cannot run", async () => {
     const { accountId } = await account("Publisher");
     for (let i = 0; i < 4; i += 1) {
       await storeScene(accountId, `Weather ${i}`);
     }
-    const movers = [await storeScene(accountId, "Bounce", { category: "realtime" }), await storeScene(accountId, "Spin", { category: "realtime" })];
+    const movers = [
+      await storeScene(accountId, "Bounce", { category: "fun", needs: ["fast"] }),
+      await storeScene(accountId, "Spin", { category: "games", needs: ["fast", "touch"] }),
+    ];
     const read = async (query: string) =>
       (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
         more: boolean;
-        scenes: { category: string; id: string }[];
+        scenes: { category: string; id: string; needs?: string[] }[];
       };
 
     const small = await read("limit=3");
@@ -304,13 +323,26 @@ describe("GET /api/store/device/scenes", () => {
     // Out of range: held to 1..24.
     expect((await read("limit=0")).scenes).toHaveLength(1);
 
-    // A fast panel's real time shelf first.
-    const fast = await read("prefer=realtime");
+    // A fast panel gets the scenes made for it first, each saying what it needs.
+    const fast = await read("prefer=fast");
     expect(fast.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual(movers.map((scene) => scene.id).sort());
-    // E-paper leaves it out; a slug the store does not know is no filter.
-    const paper = await read("exclude=realtime,nonsense");
+    expect(fast.scenes.find((scene) => scene.id === movers[1]!.id)?.needs).toEqual(["fast", "touch"]);
+    expect(fast.scenes.find((scene) => scene.category === "weather")?.needs).toBeUndefined();
+    // E-paper is not offered them; a need or slug the store does not know is no filter.
+    const paper = await read("without=fast,nonsense");
     expect(paper.scenes.map((scene) => scene.category)).toEqual(["weather", "weather", "weather", "weather"]);
     expect((await read("prefer=nonsense")).scenes).toHaveLength(6);
+    // The app before needs asked for the Real time shelf by name: the same scenes.
+    const before = await read("prefer=realtime");
+    expect(before.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual(movers.map((scene) => scene.id).sort());
+    expect((await read("exclude=realtime")).scenes.map((scene) => scene.category)).toEqual([
+      "weather",
+      "weather",
+      "weather",
+      "weather",
+    ]);
+    // A shelf left out by name still is.
+    expect((await read("exclude=games")).scenes).toHaveLength(5);
   });
 
   it("answers one listed scene with its newest version and a short description", async () => {
@@ -466,5 +498,31 @@ describe("POST /api/frames/{id}/panel/scenes", () => {
     expect(back?.scenes.map((scene) => scene.id)).toEqual([clock.runtimeIds[0]]);
     expect(back?.scene_id).toBe(clock.runtimeIds[0]);
     expect(back?.preview).toBeUndefined();
+  });
+
+  it("tries a layout without leaving the scene showing, and keeping it puts it around every scene", async () => {
+    const frame = await activeFrame();
+    const clock = await storeScene(frame.accountId, "Clock", { visibility: "private" });
+    await assignScenes(frame.frame_id, [clock.id]);
+    const { accountId: publisherId } = await account("Publisher");
+    const bar = await storeScene(publisherId, "Top bar", { category: "layouts", isLayout: true, runtimeIds: ["bar-rt"] });
+
+    // Tried: beside the list as a preview, and nothing switches (the store wears it).
+    const tried = await panel(frame.frame_id, frame.access_token, { action: "preview", scene_id: bar.id, show: false });
+    expect(tried.status).toBe(200);
+    expect(await tried.json()).toMatchObject({ ok: true, scene_id: "bar-rt" });
+    const push = await newestPush(frame.frame_id);
+    expect(push?.scenes.map((scene) => scene.id)).toEqual([clock.runtimeIds[0], "bar-rt"]);
+    expect(push?.scene_id).toBeUndefined();
+    expect(push?.preview).toMatchObject({ scene_id: "bar-rt", source: "panel" });
+
+    // Kept: installed, and every scene the frame holds wears it.
+    const kept = await panel(frame.frame_id, frame.access_token, { action: "install", scene_id: bar.id, show: true });
+    expect(kept.status).toBe(200);
+    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([clock.id, bar.id]);
+    const after = await newestPush(frame.frame_id);
+    const worn = after?.scenes.find((scene) => scene.id === clock.runtimeIds[0]) as { layout?: unknown } | undefined;
+    expect(worn?.layout).toEqual({ sceneId: "bar-rt" });
+    expect(after?.scene_id).not.toBe("bar-rt");
   });
 });

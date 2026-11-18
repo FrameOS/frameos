@@ -1,6 +1,6 @@
 {
-  "name": "Render Counter",
-  "description": "Increment a number on every render. Useful for debugging.",
+  "name": "Render counter",
+  "description": "Counts up on every render. Useful for checking how often a frame draws.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

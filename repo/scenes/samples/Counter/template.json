@@ -1,6 +1,6 @@
 {
   "name": "Counter",
-  "description": "Press GPIO buttons to show funny numbers.",
+  "description": "Press the frame's buttons to change the number.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,

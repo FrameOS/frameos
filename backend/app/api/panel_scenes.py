@@ -341,10 +341,19 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             scenes = [_carried(by_id[scene["id"]], scene) if scene["id"] in by_id else scene for scene in scenes]
             new_ids = {scene["id"] for scene in scenes}
             kept = [scene for scene in saved if scene.get("id") not in new_ids]
+            # A layout is never shown on its own: shown, it goes around every
+            # scene (docs/scene-store.md "Trying a layout"), and the frame
+            # stays on the scene it shows.
+            layout = str(scenes[0]["id"]) if _is_layout(scenes[0]) else ""
+            if layout and show:
+                kept = [_wearing(scene, layout) for scene in kept]
             await _save(db, redis, frame, [*kept, *scenes], f"Installed on the frame's screen: {scenes[0].get('name') or scenes[0]['id']}")
             # Shown now, or the frame stays on the scene it shows (the store).
-            showing = "" if show else await _active_scene(redis, frame)
-            await _show(db, redis, frame, showing or str(scenes[0]["id"]))
+            if show and not layout:
+                await _show(db, redis, frame, str(scenes[0]["id"]))
+            else:
+                showing = await _active_scene(redis, frame)
+                await _show(db, redis, frame, showing or str((kept or scenes)[0]["id"]))
             return {"ok": True, "status": "queued", "version": (scenes[0].get("origin") or {}).get("version")}
 
         if action == "update":
@@ -377,12 +386,27 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             return _refused("already_assigned", HTTPStatus.CONFLICT)
         shown = str(previewed[0]["id"])
         outcome = await queue_embedded_scene_preview(
-            db, redis, frame, [*saved, *previewed], shown, source="panel"
+            # `show: false` (a layout tried) keeps the scene showing: it wears it.
+            db, redis, frame, [*saved, *previewed], shown, source="panel", switch=show
         )
         return {"ok": True, "status": "queued", "scene_id": shown, "command": outcome.get("status")}
     except HTTPException as error:
         detail = error.detail if isinstance(error.detail, str) else "failed"
         return _refused(detail, error.status_code)
+
+
+def _is_layout(scene: dict) -> bool:
+    settings = scene.get("settings")
+    return isinstance(settings, dict) and settings.get("isLayout") is True
+
+
+def _wearing(scene: dict, layout_id: str) -> dict:
+    """The scene with `layout_id` around it, its settings for the layout
+    starting over (a layout is the frame's settings' to choose; a layout
+    scene itself wears none)."""
+    if _is_layout(scene):
+        return scene
+    return {**scene, "layout": {"sceneId": layout_id, "state": {}}}
 
 
 async def _active_scene(redis: Redis, frame: Frame) -> str:

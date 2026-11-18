@@ -3,7 +3,7 @@
     "id": "connect-four",
     "name": "Connect four",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f4efe6",

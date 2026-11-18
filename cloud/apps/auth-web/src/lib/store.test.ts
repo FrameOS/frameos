@@ -321,8 +321,19 @@ describe("validateSceneZip transparency rejection", () => {
     // A scene that names one of the store's categories by its title is filed
     // under it; a name of its own is not one of the store's.
     expect(plain.ok && plain.value.sceneCategory).toBeUndefined();
-    const named = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Real time" } }]);
-    expect(named.ok && named.value.sceneCategory).toBe("realtime");
+    const named = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Games" } }]);
+    expect(named.ok && named.value.sceneCategory).toBe("games");
+    // A title the store had before files it under the shelf that took its place.
+    const former = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Tools & utilities" } }]);
+    expect(former.ok && former.value.sceneCategory).toBe("utilities");
+    // A scene is never on a layouts' shelf, and a layout always on its kind's.
+    const posing = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Desktop layouts" } }]);
+    expect(posing.ok && posing.value.sceneCategory).toBeUndefined();
+    expect(desktop.ok && desktop.value.sceneCategory).toBe("desktops");
+    // What it needs of a frame is read from it.
+    const fast = pack([{ id: "a", nodes: [], edges: [], settings: { refreshInterval: 0.05 } }]);
+    expect(fast.ok && fast.value.needs).toEqual(["fast"]);
+    expect(plain.ok && plain.value.needs).toEqual([]);
     const own = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Clocks" } }]);
     expect(own.ok && own.value.sceneCategory).toBeUndefined();
   });

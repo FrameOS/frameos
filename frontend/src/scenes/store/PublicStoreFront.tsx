@@ -9,7 +9,14 @@ import { urls } from '../../urls'
 import { authThemeLogic } from '../auth/authThemeLogic'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import { publicStoreLogic } from './publicStoreLogic'
-import { StoreShelves, StoreSortSelect, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
+import {
+  StoreFitSelect,
+  StoreKindTabs,
+  StoreShelves,
+  StoreSortSelect,
+  scrollStoreToTop,
+  watchVisibleShelf,
+} from './StoreTiles'
 
 // The scene store for a visitor without a session: the cloud's /store and
 // the scenes host's root. The same shelves the signed-in library shows,
@@ -36,18 +43,22 @@ export function PublicStoreFront(): JSX.Element {
     category,
     visibleShelf,
     storeSort,
+    storeFit,
+    storeKind,
+    storeKindCounts,
   } = useValues(publicStoreLogic)
-  const { setSearch, setVisibleShelf, setStoreSort } = useActions(publicStoreLogic)
+  const { setSearch, setVisibleShelf, setStoreSort, setStoreFit } = useActions(publicStoreLogic)
   const shelvesRef = useRef<HTMLDivElement>(null)
-  const goTo = (filters: { category?: string | null }) =>
-    router.actions.push(urls.scenesHome('store', { category, ...filters }))
+  const kindParam = storeKind === 'layout' ? 'layouts' : null
+  const goTo = (filters: { category?: string | null; kind?: string | null }) =>
+    router.actions.push(urls.scenesHome('store', { category, kind: kindParam, ...filters }))
   const highlightedCategory = category ?? visibleShelf
   const activeShelf = category ? storeShelfForCategory(category) : null
   const loginUrl = injected('cloud_login_url') ?? '/login'
 
   useEffect(() => {
     scrollStoreToTop()
-  }, [category])
+  }, [category, storeKind])
   useEffect(() => {
     if (category) {
       return
@@ -77,6 +88,7 @@ export function PublicStoreFront(): JSX.Element {
                 className="frameos-input h-10 w-full rounded-xl border bg-white/90 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
+            <StoreFitSelect value={storeFit} onChange={setStoreFit} />
             <StoreSortSelect value={storeSort} onChange={setStoreSort} />
             <a
               href={`${storeOrigin}/my-scenes/new`}
@@ -107,18 +119,31 @@ export function PublicStoreFront(): JSX.Element {
               {activeShelf ? activeShelf.title : 'Public scene store'}
             </h1>
             <p className="frameos-muted mt-1 max-w-3xl text-sm leading-relaxed">
-              Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own
-              and install them on your frames.
+              {storeKind === 'layout'
+                ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
+                : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own and install them on your frames.'}
             </p>
           </div>
+          <StoreKindTabs
+            kind={storeKind}
+            counts={storeKindCounts}
+            href={(kind) => urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null })}
+            onPick={(kind) => goTo({ category: null, kind: kind === 'layout' ? 'layouts' : null })}
+          />
           {storeShelfCounts.length > 0 ? (
             <nav aria-label="Categories" className="flex flex-wrap gap-1.5">
-              {[{ slug: null as string | null, title: 'All scenes', count: storeScenesCount }]
+              {[
+                {
+                  slug: null as string | null,
+                  title: storeKind === 'layout' ? 'All layouts' : 'All scenes',
+                  count: storeKindCounts[storeKind],
+                },
+              ]
                 .concat(storeShelfCounts.map(({ shelf, count }) => ({ slug: shelf.slug, title: shelf.title, count })))
                 .map((entry) => (
                   <a
                     key={entry.slug ?? 'all'}
-                    href={urls.scenesHome('store', { category: entry.slug })}
+                    href={urls.scenesHome('store', { category: entry.slug, kind: kindParam })}
                     onClick={(event) => {
                       if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
                         event.preventDefault()
@@ -151,7 +176,10 @@ export function PublicStoreFront(): JSX.Element {
                 emptyMessage={
                   storeScenesCount === 0
                     ? 'The scene store is not available right now.'
-                    : `No store scenes match "${search}".`
+                    : search
+                      ? `No store scenes match "${search}".`
+                      : 'No store scenes fit this screen.'
+
                 }
               />
             )}

@@ -1,6 +1,6 @@
 {
   "name": "GitHub stars",
-  "description": "Display the star count of your project",
+  "description": "The star count of a GitHub project, updated every few minutes.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 250,

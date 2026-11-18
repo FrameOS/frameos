@@ -3,7 +3,7 @@
     "id": "memory-match",
     "name": "Memory match",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f1eee6",

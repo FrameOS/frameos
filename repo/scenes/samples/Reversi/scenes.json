@@ -3,7 +3,7 @@
     "id": "reversi",
     "name": "Reversi",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f2efe7",

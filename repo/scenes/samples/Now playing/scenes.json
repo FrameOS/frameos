@@ -3,7 +3,7 @@
     "id": "now-playing",
     "name": "Now playing",
     "settings": {
-      "category": "Real time",
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#000000",

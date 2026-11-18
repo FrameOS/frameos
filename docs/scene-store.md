@@ -93,14 +93,19 @@ next one.
 The store this frame knows (its cloud provider, else `https://cloud.frameos.net`)
 lists for frames at `GET /api/store/device/scenes`: the store front's filters
 (`q`, `category`, `version`: only what runs on this FrameOS), `page`, `limit`
-(the app's grid, 1 to 24), `prefer` (a shelf that goes first), `exclude`
-(shelves left out, comma separated) and `categories=1` for the shelves. Each
-scene is `{id, name, category, version, by, about, image, thumb, icon?}`:
+(the app's grid, 1 to 24), `prefer` (a shelf, or the need `fast`, that goes
+first), `exclude` (shelves left out, comma separated), `without` (what the
+frame cannot run: `fast`, `linux`; below) and `categories=1` for the shelves
+(`{slug, title, layout?}`, `layout: true` on the two layouts' shelves). The
+app before needs asked `prefer=realtime` / `exclude=realtime` of the Real time
+shelf, which was the fast scenes: both still mean `fast`. Each
+scene is `{id, name, category, version, by, about, image, thumb, icon?, needs?}`:
 `about` the description cut to 140 characters, `image` the cover's path on
 that host (`/api/store/scenes/{id}/image?version=N`, a redirect to the CDN for
 a public scene), `thumb` the cover as a JPEG of at most 512 px, a URL on the
 CDN (null without one, and on a store with no CDN), `icon` the scene's own
-icon (docs/scene-icons.md), only when it has one. Public, cached a minute,
+icon (docs/scene-icons.md), only when it has one, `needs` what it needs of a
+frame (below), only when it needs something. Public, cached a minute,
 readable from any page (the browser preview runs the app), limited per
 address. The app draws the icon in a card's placeholder (in the letter's
 place) until the cover is in, and beside the name on a scene's page; it checks
@@ -117,6 +122,43 @@ fetches it from the CDN itself: the store scaling its own pictures, not a
 proxy for a frame's images. The app takes the `thumb` for a picture up to 640
 px wide (cards everywhere, a scene's page on a small screen) and the cover
 itself above that.
+
+### Categories
+
+The store's shelves are `cloud/apps/auth-web/src/lib/categories.ts` (the SPA's
+copy `frontend/src/utils/storeCategories.ts`, the iOS app's
+`StoreCategories.swift`, kept equal by tests). The store front's first split is
+**Scenes | Layouts**: what a scene is (`settings.isLayout`, `settings.desktop`),
+never a category it states. The scenes' shelves say what a scene is about:
+Photos, Art & galleries, Clocks & time, Calendars & agendas, Weather, Home &
+dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
+examples. The layouts' are Desktop layouts and Full screen layouts, and a
+layout is always on its kind's (`validateSceneZip`), a scene never.
+
+A version's category is the one the scene names (`settings.category`, a
+store title; docs/scene-icons.md), else the listing's, else the rules'
+(`ruleCategory` in `store-classify.ts`: the node graph's apps and the name,
+narrow on purpose), else the classifier's (an LLM, on the operator's key).
+Every version has tags: the owner's, else the classifier's, else the rules'
+(`ruleTags`: what it needs, the services its apps use, its category), so the
+store's search finds every scene by more than its name. The Real time shelf
+went on 2026-11-18 (migration 0084 filed its scenes under Fun): a fast screen
+is what a scene needs, not what it is about.
+
+### What a scene needs
+
+`frontend/src/utils/sceneNeeds.ts`, read from a version's scenes.json when it
+is published and kept on the version (`needs`, migration 0084; the row holds
+the latest's): `fast` (it redraws more than once a second: a
+`refreshInterval` under 1 s; never a layout), `touch` (JSX handlers, pointer
+events), `keys` (key events, the frame's buttons), `linux` (Chromium, FFmpeg,
+a shell command). The store front shows them on each tile ("Fast screen",
+"Touch", "Keys", "Pi only") and filters by screen (Any screen, Fits e-paper,
+Made for fast screens, Touch). A frame's own store leaves out what it cannot
+run (`without=fast` on a slow panel, `linux` on an ESP32) and puts `fast`
+first on a fast one. Touch and keys rule nothing out: the frame's buttons and
+its pages reach any scene. Versions from before the column are read by
+`pnpm --filter @frameos-cloud/auth-web scene:backfill-needs`.
 
 ### Changes go to the plane
 
@@ -137,8 +179,8 @@ must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
-| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`) |
-| `preview` | store scene uuid | pushes it beside the list, shown now, as a preview (source `panel`, `docs/scene-previews.md`): Install or Discard ends it |
+| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
+| `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it |
 | `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is) |
 | `remove` | the same | takes it off the list and pushes the rest |
 | `discard` | the runtime id to go back to | ends the preview and pushes the list, showing that scene (the store) |
@@ -186,6 +228,24 @@ each scene: the ESP32 from each scene's file, found by its keys without parsing
 the scene, cached by the content hash the index already has; the Pi from its
 scenes on disk. That is what "on frame" and Update are measured against.
 
+### Trying a layout
+
+A layout (the Layouts shelves) is tried, not previewed: **Try** is a `preview`
+with `show: false`, so the frame takes it beside its scenes and stays on the
+store. Once the store sees the preview in its facts it asks for `layout {id}`,
+which no host does: `app_runtime.nim` chooses it as the frame's layout
+(`layout_choice.nim`, the frame page's own choice) and shows the store again,
+so every scene wears it at once, the store included, and a desktop opens its
+windows. `frameos.store()` says which layout is chosen (`layout`: "" for each
+scene's own). **Keep** installs it shown (`install`, `show: true`): the plane
+writes it onto every scene the frame holds (the cloud's `layouts` column, a
+backend's `layout` on each `frame.scenes` entry, the way the frame's Settings
+choose one for every scene) and the store sets the frame's own choice back to
+each scene's. **Discard** drops the preview and puts back the choice the frame
+had before the try. A layout already on the frame has **Use**, the frame's own
+choice alone. In the browser preview, Try works the same way and nothing is
+kept.
+
 ## The Scene store app
 
 - **A page a screen.** The grid is as many cards as fit (`limit`), so paging
@@ -210,14 +270,15 @@ scenes on disk. That is what "on frame" and Update are measured against.
   and more a pass on a Pi and on an ESP32 (2026-11-15). A board that sleeps
   between renders, e-paper and the browser preview fetch them in the render
   (the preview one picture a render).
-- **What this frame is** decides what it is offered: a panel that animates puts
-  the Real time shelf first (`prefer=realtime` under Featured, the shelf right
-  after Featured); e-paper is not offered it (`exclude=realtime`, no shelf),
+- **What this frame is** decides what it is offered: a panel that animates gets
+  the scenes made for a fast screen first under Featured (`prefer=fast`);
+  e-paper is not offered them at all (`without=fast`), an ESP32 nothing that
+  needs Linux (`without=linux`). Featured is scenes (`exclude=desktops,layouts`):
+  the layouts' shelves come after the others under a Layouts heading. E-paper
   fetches its own pages (`httpRequest` in the render, so one answer is one
   refresh) and takes a page's covers before its one refresh. A grey or black
   and white panel (`app.frame.color === false`) gets the high-contrast look,
-  as e-paper does. A layout has no Preview (it wraps other scenes), and its page
-  says where to pick it.
+  as e-paper does. A layout has Try instead of Preview (above).
 - **Keys alone** (a frame with buttons and no glass) cannot drive it yet: the
   JSX layer has no focus for keys (`docs/ui-todo.md`).
 

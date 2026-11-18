@@ -1,6 +1,6 @@
 {
   "name": "Rainbow clock",
-  "description": "Show the time in style!",
+  "description": "The time, in rainbow colors.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

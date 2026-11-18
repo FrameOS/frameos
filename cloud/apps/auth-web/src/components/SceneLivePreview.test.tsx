@@ -746,20 +746,46 @@ describe("SceneLivePreviewPanel layout", () => {
     expect(ranScenes(2)[0]!.layout).toEqual({ sceneId: "frame-chrome", state: { twentyFourHour: true } });
   });
 
-  it("has nothing to offer while the scene shown is a layout itself", async () => {
+  it("runs a layout being edited around samples, opening on the first that wears it", async () => {
     const layout = { fields: [], id: "my-chrome", name: "My chrome", nodes: [], settings: { isLayout: true } };
     render(<SceneLivePreviewPanel editorSceneId="my-chrome" sceneId="scene-1" scenes={[layout]} />);
+    // The samples load with the panel: the runtime boots again with them.
+    await waitFor(() => expect(ranScenes(previews.length - 1).length).toBeGreaterThan(1));
+    const last = previews[previews.length - 1]!;
+    const ran = last.options.scenes as RunScene[];
+    expect(ran[0]!.id).toBe("my-chrome");
+    const worn = ran.slice(1);
+    for (const scene of worn) {
+      expect(scene.layout).toEqual({ sceneId: "my-chrome" });
+    }
+    // Opens on a scene wearing it, never on the layout alone; not a desktop.
+    const options = last.options as unknown as { sceneId?: string; windowed?: boolean };
+    expect(options.sceneId).toBe(worn[0]!.id);
+    expect(options.windowed).toBe(false);
+    // The Layout select shows the layout and is not changed there.
+    const select = (await screen.findByLabelText("Layout")) as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+    expect(select.value).toBe("my-chrome");
+  });
+
+  it("runs a desktop being edited windowed, around the scenes beside it", async () => {
+    const desktop = {
+      fields: [],
+      id: "my-desk",
+      name: "My desk",
+      nodes: [],
+      settings: { desktop: true, isLayout: true },
+    };
+    const other = { ...clockScene, id: "clock-2", name: "Clock" };
+    render(<SceneLivePreviewPanel editorSceneId="my-desk" sceneId="scene-1" scenes={[desktop, other]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
-    act(() =>
-      previews[0]!.options.onReady!({
-        currentSceneId: "my-chrome",
-        scenes: [{ id: "my-chrome", name: "My chrome", refreshInterval: 1 }],
-      }),
-    );
-    // The starters load with the panel; still no select.
-    await screen.findByText(/Runs in your browser/);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(screen.queryByLabelText("Layout")).toBeNull();
+    const ran = previews[0]!.options.scenes as RunScene[];
+    // A scene of its own beside it: no samples.
+    expect(ran.map((scene) => scene.id)).toEqual(["my-desk", "clock-2"]);
+    expect(ran[1]!.layout).toEqual({ sceneId: "my-desk" });
+    const options = previews[0]!.options as unknown as { sceneId?: string; windowed?: boolean };
+    expect(options.sceneId).toBe("clock-2");
+    expect(options.windowed).toBe(true);
   });
 });
 

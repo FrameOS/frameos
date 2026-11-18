@@ -3,7 +3,7 @@
     "id": "pomodoro",
     "name": "Pomodoro",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Clocks & time",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f6f1e9",

@@ -3,7 +3,7 @@
     "id": "5dcce227-a996-5c59-b782-145758d827c1",
     "name": "Chart",
     "settings": {
-      "category": "Data & dashboards",
+      "category": "Home & dashboards",
       "refreshInterval": 300,
       "backgroundColor": "#000000",
       "execution": "interpreted",

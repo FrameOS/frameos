@@ -176,7 +176,7 @@
       }
     ],
     "settings": {
-      "category": "Data & dashboards",
+      "category": "Home & dashboards",
       "execution": "interpreted",
       "refreshInterval": 60,
       "backgroundColor": "#0f172a",

@@ -3,7 +3,7 @@
     "id": "9f5a338b-0048-495a-a64f-e3190071ff51",
     "name": "Browser Screenshot",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#000000",

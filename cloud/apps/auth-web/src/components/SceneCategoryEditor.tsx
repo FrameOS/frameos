@@ -12,9 +12,12 @@ import { getStoreCategory, storeCategories } from "../lib/categories";
 // left the page for the store.
 export function SceneCategoryEditor({
   category,
+  layout = false,
   onChange,
 }: {
   category: string | null;
+  /** A layout picks only between the layouts' shelves (its kind decides on publish anyway). */
+  layout?: boolean;
   onChange: (category: string | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -58,7 +61,7 @@ export function SceneCategoryEditor({
         value={value}
       >
         <option value="">(none)</option>
-        {storeCategories.map((entry) => (
+        {storeCategories.filter((entry) => (entry.kind === "layout") === layout).map((entry) => (
           <option key={entry.slug} value={entry.slug}>
             {entry.title}
           </option>

@@ -80,12 +80,15 @@ import {
 import {
   isPreviewLayout,
   layoutSettingAppliesAtOnce,
+  loadLayoutPreviewScenes,
   loadLayoutStarters,
   parsePreviewLayoutSettings,
   PREVIEW_LAYOUT_SETTINGS_STORAGE_KEY,
   previewLayoutGroups,
+  previewLayoutIsDesktop,
   previewLayouts,
   previewLayoutScene,
+  scenesAroundEditedLayout,
   scenesWithPreviewLayout,
   withoutPreviewLayoutSettings,
   withPreviewLayoutSetting,
@@ -409,6 +412,28 @@ export function SceneLivePreviewPanel({
   );
   const layoutGroups = useMemo(() => previewLayoutGroups(layouts), [layouts]);
   const [layoutChoice, setLayoutChoice] = useState<string | null>(null);
+  // The scene being edited is a layout: it runs around the scenes beside it,
+  // or around the samples when it has none, never on its own with nothing in
+  // its yield (docs/scene-layouts.md "In the preview").
+  const editedLayoutId = useMemo(() => {
+    const edited = editorScenes?.find((scene) => scene.id === editorSceneId);
+    return edited && isPreviewLayout(edited) ? edited.id : null;
+  }, [editorScenes, editorSceneId]);
+  const [layoutSamples, setLayoutSamples] = useState<readonly PreviewLayoutScene[]>([]);
+  useEffect(() => {
+    if (!editedLayoutId) {
+      return;
+    }
+    let cancelled = false;
+    void loadLayoutPreviewScenes().then((samples) => {
+      if (!cancelled) {
+        setLayoutSamples(samples as unknown as PreviewLayoutScene[]);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editedLayoutId]);
   // "Layout settings": the layout's fields as tried here, by layout id, over
   // what each scene gives the layout it wears. Remembered per browser (read
   // before the first boot: nothing on the page shows them until the dialog
@@ -431,13 +456,35 @@ export function SceneLivePreviewPanel({
   const chosenAmong = layoutChoice === null ? NO_LAYOUTS : layouts;
   // What the runtime runs: the editor's scenes, each wearing the chosen layout
   // (or its own) with the settings tried here.
+  const aroundLayout = useMemo(
+    () =>
+      editorScenes && editedLayoutId
+        ? scenesAroundEditedLayout(editorScenes, editedLayoutId, layoutSamples, ranLayoutSettings)
+        : null,
+    [editorScenes, editedLayoutId, layoutSamples, ranLayoutSettings],
+  );
   const scenes = useMemo(
     () =>
-      editorScenes
-        ? scenesWithPreviewLayout(editorScenes, chosenAmong, layoutChoice, ranLayoutSettings)
-        : editorScenes,
-    [editorScenes, chosenAmong, layoutChoice, ranLayoutSettings],
+      aroundLayout
+        ? aroundLayout.scenes
+        : editorScenes
+          ? scenesWithPreviewLayout(editorScenes, chosenAmong, layoutChoice, ranLayoutSettings)
+          : editorScenes,
+    [aroundLayout, editorScenes, chosenAmong, layoutChoice, ranLayoutSettings],
   );
+  // A desktop runs the scenes side by side, as a Pi or an ESP32 does: the
+  // preview's host is windowed for one (the layout edited, chosen, or worn).
+  const windowed = useMemo(() => {
+    if (!editorScenes) {
+      return false;
+    }
+    const layoutId = editedLayoutId ?? layoutChoice ?? wornPreviewLayout(editorScenes, editorSceneId);
+    return previewLayoutIsDesktop(editorScenes, layouts, layoutId);
+  }, [editorScenes, editedLayoutId, layoutChoice, editorSceneId, layouts]);
+  // The scene the runtime opens on: the one edited, or, for a layout, the
+  // first scene wearing it.
+  const startSceneRef = useRef<string | null>(null);
+  startSceneRef.current = aroundLayout ? aroundLayout.start : (editorSceneId ?? null);
   // A starter runs beside the scenes; it is no scene to pick.
   const addedLayoutIds = useMemo(
     () =>
@@ -835,7 +882,7 @@ export function SceneLivePreviewPanel({
     // values being tried out until the runtime reported them back.
     setRuntimeState(replay);
     // The scene being edited, from the first render on.
-    const wanted = editorSceneIdRef.current;
+    const wanted = startSceneRef.current;
     const startScene =
       wanted !== null && scenes.some((scene) => scene.id === wanted) ? wanted : undefined;
     // Leading-edge throttle: the first line (or frame) after a quiet spell
@@ -893,6 +940,7 @@ export function SceneLivePreviewPanel({
         ...(sceneWorkspaceHost().previewProxyUrl ? { proxyUrl: sceneWorkspaceHost().previewProxyUrl! } : {}),
         fastMode,
         drawnCursor,
+        windowed,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
         deviceLimits: deviceLimitsFor(
@@ -1033,7 +1081,7 @@ export function SceneLivePreviewPanel({
     // fastMode and drawnCursor reach a running runtime through their setters
     // below; only a fresh runtime reads them from the options, so they are
     // no dependency here.
-  }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated]);
+  }, [scenes, viewport, storedSettings, previewSettings, restartCount, previewGated, windowed]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1057,13 +1105,17 @@ export function SceneLivePreviewPanel({
     if (!runtimeReady || !editorSceneId || !scenes?.some((scene) => scene.id === editorSceneId)) {
       return;
     }
+    // A layout being edited is shown around a scene, never on its own.
+    if (editedLayoutId === editorSceneId) {
+      return;
+    }
     setCurrentSceneId((current) => {
       if (current !== editorSceneId) {
         previewRef.current?.selectScene(editorSceneId);
       }
       return editorSceneId;
     });
-  }, [runtimeReady, editorSceneId, scenes]);
+  }, [runtimeReady, editorSceneId, scenes, editedLayoutId]);
 
   // The scene whose fields the form shows: the runtime's current one, else
   // the default from scenes.json (so the form is there before the worker is).
@@ -1337,10 +1389,11 @@ export function SceneLivePreviewPanel({
 
   const runtimeScenes = (sceneInfo?.scenes ?? []).filter((item) => !addedLayoutIds.has(item.id));
   // The Layout select shows the choice made here, else what the scene wears.
+  // A layout being edited is the one shown, and its settings are tried here.
   const wantedLayoutId =
-    layoutChoice ?? (editorScenes ? wornPreviewLayout(editorScenes, currentScene?.id) : "");
+    editedLayoutId ?? layoutChoice ?? (editorScenes ? wornPreviewLayout(editorScenes, currentScene?.id) : "");
   const shownLayoutId = layouts.some((layout) => layout.id === wantedLayoutId) ? wantedLayoutId : "";
-  const layoutSelectShown = layouts.length > 0 && !isPreviewLayout(currentScene);
+  const layoutSelectShown = layouts.length > 0 && (!!editedLayoutId || !isPreviewLayout(currentScene));
   // The Layout settings of the layout shown: its fields, the values the scene
   // gives it (a frame's install) and what was set here.
   const shownLayout = layouts.find((layout) => layout.id === shownLayoutId) ?? null;
@@ -1758,9 +1811,14 @@ export function SceneLivePreviewPanel({
           </label>
           <select
             className="viewport-controls__select viewport-controls__select--device"
+            disabled={!!editedLayoutId}
             id={`${fieldIdPrefix}-layout`}
             onChange={(event) => setLayoutChoice(event.target.value)}
-            title="Show the scene inside a layout, as a frame wearing one draws it"
+            title={
+              editedLayoutId
+                ? "The layout being edited, around the scenes beside it (or samples)"
+                : "Show the scene inside a layout, as a frame wearing one draws it"
+            }
             value={shownLayoutId}
           >
             <option value="">No layout</option>

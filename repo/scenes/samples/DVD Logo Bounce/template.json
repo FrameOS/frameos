@@ -1,5 +1,5 @@
 {
-  "name": "DVD Logo Bounce",
+  "name": "DVD logo bounce",
   "description": "Classic bouncing DVD logo at 30 fps. For LCD and HDMI frames that render many times per second.",
   "config": null,
   "image": "./image.jpg",

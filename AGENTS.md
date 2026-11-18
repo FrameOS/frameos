@@ -242,7 +242,7 @@
   through `listingItem` (an ESP32 off its scene index, `make_entry`), and the
   switcher draws it on its tiles. An SVG becomes one path in the editor alone
   (`utils/svgToSceneIcon.ts`), never on a frame.
-- `settings.category` is the category's NAME as text ("Photos", "Real time"),
+- `settings.category` is the category's NAME as text ("Photos", "Clocks & time"),
   picked from the store's titles in the editor and listed as `category` the
   same way. Nothing on a frame maps it or checks it: no ids, no table, no rule
   (an ESP32's scene index only keeps one of 128 bytes or fewer, through the
@@ -323,8 +323,11 @@
   beside the page's scenes, and the page's scene select follows the runtime
   (the worker's `sceneInfo`).
 - Browsing is the app's own `fetch` of the store's listing for frames
-  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer` / `exclude` for the Real time
-  shelf). A change is asked of the frame's plane (`POST
+  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer=fast` / `without=fast,linux`
+  from what the scene needs, `frontend/src/utils/sceneNeeds.ts`, never a category). A layout is tried: a `preview` with
+  `show: false` and then the frame's own layout choice (`storeAction('layout')`, `app_runtime.nim`); Keep installs it
+  around every scene (doc section "Trying a layout"). The store front's first split is Scenes | Layouts; a layout's
+  shelf is its kind, never a stated category (`categories.ts`, doc section "Categories"). A change is asked of the frame's plane (`POST
   /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
   `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public store
   scenes only, no service key ever granted, refused while the settings on the

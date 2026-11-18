@@ -346,7 +346,7 @@ interface FrameOSApp {
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
      * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
-     * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Real time"; its
+     * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
      * (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];

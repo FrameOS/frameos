@@ -512,7 +512,7 @@ static void run(const char *job)
             if (error == NULL && from[0]) fos_scenes_select(from);
         } else {
             /* install, update, preview: the newest version, written here. */
-            error = install_here(store, strcmp(job, "preview") == 0 || (show && strcmp(job, "install") == 0), shown,
+            error = install_here(store, show && (strcmp(job, "preview") == 0 || strcmp(job, "install") == 0), shown,
                                  sizeof(shown));
         }
         lock();

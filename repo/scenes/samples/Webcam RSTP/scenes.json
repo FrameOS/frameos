@@ -1,7 +1,7 @@
 [
   {
     "id": "028c3146-c3af-4158-ba9b-3dd139f744bf",
-    "name": "Webcam RSTP",
+    "name": "Webcam (RTSP)",
     "nodes": [
       {
         "id": "463556ab-e4fe-40c7-93f3-40bc723f454e",
@@ -164,7 +164,7 @@
       }
     ],
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "refreshInterval": 300,
       "backgroundColor": "#000000",
       "execution": "interpreted",

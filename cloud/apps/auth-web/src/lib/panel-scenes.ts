@@ -18,6 +18,37 @@ import {
   readFrameSettings,
   supersedePendingCommands,
 } from "./frames";
+import { versionIsLayout, type SceneLayouts } from "./scene-layouts";
+import type { RequestedScene } from "./frame-scenes";
+
+// A store layout's install shown on the frame is the layout put around every
+// scene (docs/scene-store.md "Trying a layout"): each installed scene's
+// layout becomes it, by runtime scene id, the way the frame's settings choose
+// one for every scene. The scenes the frame holds now say which runtime ids
+// each install has (their `origin.storeSceneId`); a layout among them is
+// left alone.
+function wearingLayout(
+  existing: readonly RequestedScene[],
+  held: readonly unknown[],
+  layoutId: string,
+): RequestedScene[] {
+  return existing.map((entry) => {
+    const ids = held
+      .filter((scene): scene is Record<string, unknown> => !!scene && typeof scene === "object")
+      .filter((scene) => (scene.origin as { storeSceneId?: unknown } | undefined)?.storeSceneId === entry.sceneId)
+      .filter((scene) => !versionIsLayout([scene]))
+      .map((scene) => scene.id)
+      .filter((id): id is string => typeof id === "string");
+    if (ids.length === 0) {
+      return entry;
+    }
+    const layouts: SceneLayouts = { ...(entry.layouts ?? {}) };
+    for (const id of ids) {
+      layouts[id] = { sceneId: layoutId };
+    }
+    return { ...entry, layouts };
+  });
+}
 
 // What a frame may ask of the cloud about its scenes (docs/scene-store.md):
 // the Scene store scene on the frame installs, previews, updates and removes
@@ -125,14 +156,24 @@ export async function runPanelSceneAction(
     if ("error" in scene) {
       return refused(scene.error, scene.error === "invalid_scene" ? 404 : 409);
     }
+    // A layout is never shown on its own: shown, it goes around every scene,
+    // and the frame stays on the scene it shows.
+    const layout = versionIsLayout(scene.scenes.slice(0, 1)) ? (scene.scenes[0]?.id as string | undefined) : undefined;
+    let requested: RequestedScene[] = existing;
+    if (layout && show) {
+      const built = await buildScenesPayloadForFrame(db, frame.id);
+      if (!("error" in built)) {
+        requested = wearingLayout(existing, built.scenes, layout);
+      }
+    }
     const outcome = await assignScenesToFrame(db, {
       accountId,
       // Shown now, or the frame stays on the scene it shows (the store).
-      ...(show ? { activateStoreSceneId: sceneId } : { activeSceneId: active }),
+      ...(show && !layout ? { activateStoreSceneId: sceneId } : { activeSceneId: active }),
       actor,
       frame,
       // Nothing granted (settingsGroups: []): see the top of this file.
-      requested: [...existing, { latest: true, sceneId, sceneVersion: null, settingsGroups: [] }],
+      requested: [...requested, { latest: true, sceneId, sceneVersion: null, settingsGroups: [] }],
       via: "panel",
     });
     if (!outcome.ok) {
@@ -224,7 +265,9 @@ export async function runPanelSceneAction(
     payload: {
       checksum,
       preview: { name: scene.name, scene: shown, scene_id: shownId, source: "panel" },
-      scene_id: shownId,
+      // Shown now, unless the store asks to stay: a layout tried is worn by
+      // the scene showing, never shown on its own.
+      ...(show ? { scene_id: shownId } : {}),
       scenes,
     },
     type: "set_scenes",

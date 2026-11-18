@@ -3,6 +3,10 @@
 // repo sample whose scene is a layout, embedded so they work on both control
 // planes with no repository to reach. The iOS app gets the same list as JSON
 // (ios/FrameOSKit, LayoutStarters.swift).
+//
+// Beside them, the scenes a layout is previewed around when it is all there
+// is (a layout's store page, a starter on its own: docs/scene-layouts.md "In
+// the preview"): small keyless samples, a clock first.
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,6 +44,14 @@ for (const entry of await fs.readdir(samplesRoot, { withFileTypes: true })) {
     scene: scenes[0],
   })
 }
+const PREVIEW_SAMPLES = ['Clock', 'Weather demo', 'Calculator']
+const previewScenes = []
+for (const name of PREVIEW_SAMPLES) {
+  const scenes = JSON.parse(await fs.readFile(path.join(samplesRoot, name, 'scenes.json'), 'utf8'))
+  const { default: _default, ...scene } = scenes[0]
+  previewScenes.push(scene)
+}
+
 // The desktops (`settings.desktop`), then the layouts around one scene, each by
 // name: the order the frame's own settings page lists them in, and the two
 // groups every list of starters shows (sceneLayouts.ts `layoutGroups`).
@@ -62,6 +74,9 @@ export interface LayoutStarter {
 }
 
 export const LAYOUT_STARTERS: LayoutStarter[] = ${JSON.stringify(starters, null, 2)} as unknown as LayoutStarter[]
+
+/** The scenes a layout is previewed around when there are no others (${PREVIEW_SAMPLES.join(', ')}). */
+export const LAYOUT_PREVIEW_SCENES: FrameScene[] = ${JSON.stringify(previewScenes, null, 2)} as unknown as FrameScene[]
 `
 )
 // Only where the app is checked out: a build that copies frontend/ and repo/

@@ -32,6 +32,8 @@ import {
   Note,
   SceneTile,
   StoreShelves,
+  StoreFitSelect,
+  StoreKindTabs,
   StoreSortSelect,
   TileGrid,
   scrollStoreToTop,
@@ -94,6 +96,8 @@ export function ScenesSidePanel({
     storeShelfCounts,
     category,
     storeScenesCount,
+    storeKind,
+    storeKindCounts,
     visibleShelf,
     driveTemplates,
     hasDriveScope,
@@ -175,6 +179,13 @@ export function ScenesSidePanel({
                       slug={shelf.slug}
                     />
                   ))}
+                  {/* The other side of the store's first split. */}
+                  <SubPageLink
+                    label={storeKind === 'layout' ? 'Scenes' : 'Layouts'}
+                    count={storeKindCounts[storeKind === 'layout' ? 'scene' : 'layout']}
+                    active={false}
+                    href={urls.scenesHome('store', { kind: storeKind === 'layout' ? null : 'layouts' })}
+                  />
                 </div>
               ) : null}
             </div>
@@ -481,9 +492,19 @@ function StoreActionCards(): JSX.Element {
 }
 
 function StorePage(): JSX.Element {
-  const { storeShelves, storeScenesCount, repositoriesLoading, search, category, repositories, storeSort } =
-    useValues(scenesLibraryLogic)
-  const { refreshStore, setVisibleShelf, setStoreSort } = useActions(scenesLibraryLogic)
+  const {
+    storeShelves,
+    storeScenesCount,
+    repositoriesLoading,
+    search,
+    category,
+    repositories,
+    storeSort,
+    storeFit,
+    storeKind,
+    storeKindCounts,
+  } = useValues(scenesLibraryLogic)
+  const { refreshStore, setVisibleShelf, setStoreSort, setStoreFit } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const shelvesRef = useRef<HTMLDivElement>(null)
 
@@ -495,20 +516,29 @@ function StorePage(): JSX.Element {
     }
     return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
   }, [category, storeShelves.length, setVisibleShelf])
-  const goTo = (filters: { category?: string | null }) =>
-    router.actions.push(urls.scenesHome('store', { category, ...filters }))
   const activeShelf = category ? storeShelfForCategory(category) : null
   return (
     <>
       <PageHeader
         title={activeShelf ? activeShelf.title : 'Public scene store'}
-        description="Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame."
+        description={
+          storeKind === 'layout'
+            ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
+            : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame.'
+        }
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <StoreFitSelect value={storeFit} onChange={setStoreFit} />
             <StoreSortSelect value={storeSort} onChange={setStoreSort} />
             <RefreshButton onClick={refreshStore} loading={repositoriesLoading} />
           </div>
         }
+      />
+      <StoreKindTabs
+        kind={storeKind}
+        counts={storeKindCounts}
+        href={(kind) => urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null })}
+        onPick={(kind) => router.actions.push(urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null }))}
       />
       <div className="space-y-8" ref={shelvesRef}>
         {repositoriesLoading && storeScenesCount === 0 ? (
@@ -529,7 +559,9 @@ function StorePage(): JSX.Element {
                 ? mode === 'frameAdmin'
                   ? "The scene store could not be reached. Check the frame's connection and try again."
                   : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
-                : `No store scenes match "${search}".`
+                : search
+                  ? `No store scenes match "${search}".`
+                  : 'No store scenes fit this screen.'
             }
           />
         )}

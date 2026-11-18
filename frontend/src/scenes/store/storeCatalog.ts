@@ -1,41 +1,14 @@
 import type { RepositoryType, TemplateType } from '../../types'
 import { isCloudMode } from '../../utils/cloudMode'
-import { searchInText } from '../../utils/searchInText'
-import { groupByStoreShelf, storeShelfForCategory, type StoreCategoryShelf } from '../../utils/storeCategories'
 import { isCloudStoreRepository } from '../frame/panels/Templates/templatesLogic'
-import { sortStoreTemplates, type StoreSort } from '../../utils/storeSort'
+
+export * from './storeShelves'
 
 export { STORE_SORT_OPTIONS, sortStoreTemplates, storeSortOf, type StoreSort } from '../../utils/storeSort'
 
 // The store catalog as the SPA shows it: pure functions over the
 // repositories a plane tracks, shared by the signed-in library
 // (scenesLibraryLogic) and the signed-out store front (publicStoreLogic).
-
-export interface StoreShelfGroup {
-  shelf: StoreCategoryShelf
-  templates: TemplateType[]
-}
-
-export interface StoreShelfCount {
-  shelf: StoreCategoryShelf
-  count: number
-}
-
-export interface StoreFilters {
-  search: string
-  category: string | null
-  sort?: StoreSort
-}
-
-export function templateMatchesSearch(search: string, template: TemplateType): boolean {
-  return (
-    search === '' ||
-    searchInText(search, template.name) ||
-    searchInText(search, template.description) ||
-    searchInText(search, template.author) ||
-    (template.tags ?? []).some((tag) => searchInText(search, tag))
-  )
-}
 
 /** The cloud store's scenes, whichever row(s) track it; one entry per
  * store scene even when a backend tracks the store twice. */
@@ -100,19 +73,3 @@ export function storeRepositoryOf(repositories: RepositoryType[], template: Temp
   )
 }
 
-export function storeShelfCountsOf(storeTemplates: TemplateType[]): StoreShelfCount[] {
-  return groupByStoreShelf(storeTemplates).map(({ shelf, templates }) => ({ shelf, count: templates.length }))
-}
-
-export function storeShelvesOf(
-  storeTemplates: TemplateType[],
-  { search, category, sort = 'popular' }: StoreFilters
-): StoreShelfGroup[] {
-  return groupByStoreShelf(
-    sortStoreTemplates(storeTemplates, sort).filter(
-      (template) =>
-        templateMatchesSearch(search, template) &&
-        (!category || storeShelfForCategory(template.category).slug === category)
-    )
-  )
-}

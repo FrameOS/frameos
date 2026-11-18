@@ -3,7 +3,7 @@
     "id": "download-to-assets",
     "name": "Download to assets",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#eef1f4",

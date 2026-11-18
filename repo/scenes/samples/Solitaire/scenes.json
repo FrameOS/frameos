@@ -3,7 +3,7 @@
     "id": "solitaire",
     "name": "Solitaire",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#2f5a48",

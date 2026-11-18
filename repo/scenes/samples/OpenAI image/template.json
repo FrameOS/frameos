@@ -1,6 +1,6 @@
 {
-  "name": "OpenAI Image",
-  "description": "Generate an image with Dall-E.",
+  "name": "OpenAI image",
+  "description": "Generates a new image with OpenAI on every refresh, from a prompt you set.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1280,

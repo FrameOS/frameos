@@ -1,6 +1,6 @@
 {
-  "name": "Webcam RSTP",
-  "description": "Using ffmpeg, extract an image from an RSTP feed and render it",
+  "name": "Webcam (RTSP)",
+  "description": "A still from an RTSP camera feed, taken with FFmpeg on the frame. Needs a Raspberry Pi.",
   "embedded": false,
   "config": null,
   "image": "./image.jpg",

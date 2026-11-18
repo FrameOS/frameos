@@ -50,6 +50,7 @@ export async function buildStoreRepository(
       previewImageHeight: sceneCoverHeightSql,
       previewImageWidth: sceneCoverWidthSql,
       riskFlags: storeScenes.riskFlags,
+      needs: storeScenes.needs,
       slug: storeScenes.slug,
       tags: storeScenes.tags,
       updatedAt: storeScenes.updatedAt,
@@ -96,6 +97,8 @@ export async function buildStoreRepository(
       // this count). Older frameos installs ignore extra fields.
       downloads: scene.downloadCount,
       flags: scene.riskFlags.length > 0 ? scene.riskFlags : undefined,
+      // What it needs of a frame (sceneNeeds.ts): the store front's badges and filter.
+      needs: scene.needs.length > 0 ? scene.needs : undefined,
       frameosVersion: scene.frameosVersion ?? undefined,
       // The scene's own icon (docs/scene-icons.md): one SVG path in a 24 box,
       // which the tiles draw where there is no cover. Older frameos installs

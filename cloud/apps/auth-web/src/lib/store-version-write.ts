@@ -6,6 +6,8 @@ import {
   storeScenes,
 } from "@frameos-cloud/db";
 import { blobNamespaces, blobSha256, storeBlob, type StoredBlob } from "./blobs";
+import { isLayoutCategory } from "./categories";
+import { ruleTags } from "./store-classify";
 import type { SceneListing } from "./store-listing";
 import {
   readStoreImage,
@@ -28,7 +30,7 @@ type Database =
 // save_scene — ends here, so a version always records the same three
 // things: the zip, the listing it was published with, and its image set,
 // with the scene row projected from it in the same transaction. What the zip
-// itself says (its risk flags, its icon) is read here from `validated`, so
+// itself says (its risk flags, its icon, its needs) is read here from `validated`, so
 // no path can publish a version without it.
 
 /** Make the zip's single cover (image.jpg) the set's position 0 — the
@@ -106,9 +108,24 @@ export async function writeSceneVersion(
     { extension: "zip" },
   );
   // A scene that names one of the store's categories (its settings.category,
-  // by title) is filed under it, so the shelf and the scene agree; otherwise
-  // the listing's category stands.
-  const category = input.validated.sceneCategory ?? input.listing.category;
+  // by title) is filed under it, so the shelf and the scene agree; a layout
+  // always goes on its kind's shelf (validateSceneZip says which); otherwise
+  // the listing's category stands, unless it is a layout's and this is none.
+  const category =
+    input.validated.sceneCategory ??
+    (isLayoutCategory(input.listing.category) ? null : input.listing.category);
+  // A version is never listed without tags: the store's search reads them,
+  // and the editor's Save, an AI save or a fork may carry none. The rules'
+  // (store-classify.ts) stand in until the owner sets some.
+  const tags =
+    input.listing.tags.length > 0
+      ? input.listing.tags
+      : ruleTags({
+          appKeywords: input.validated.appKeywords,
+          category,
+          name: input.validated.manifestName ?? "",
+          needs: input.validated.needs,
+        });
   const result = await db.transaction(async (tx) => {
     const [version] = await tx
       .insert(storeSceneVersions)
@@ -120,6 +137,7 @@ export async function writeSceneVersion(
         icon: input.validated.icon,
         listingRecorded: true,
         message: input.message ?? null,
+        needs: input.validated.needs,
         objectKey: stored.objectKey,
         ...(input.publishedByLinkedClientId
           ? { publishedByLinkedClientId: input.publishedByLinkedClientId }
@@ -128,7 +146,7 @@ export async function writeSceneVersion(
         sceneId: input.sceneId,
         sha256: stored.sha256,
         sizeBytes: stored.sizeBytes,
-        tags: input.listing.tags,
+        tags,
         version: input.version,
       })
       .returning({ id: storeSceneVersions.id });
@@ -152,8 +170,9 @@ export async function writeSceneVersion(
         frameosVersion: input.listing.frameosVersion,
         icon: input.validated.icon,
         latestVersion: input.version,
+        needs: input.validated.needs,
         riskFlags: input.validated.riskFlags,
-        tags: input.listing.tags,
+        tags,
         updatedAt: new Date(),
         ...(input.rowChanges ?? {}),
       })
@@ -226,6 +245,7 @@ export async function syncLatestVersion(
       frameosVersion: storeSceneVersions.frameosVersion,
       icon: storeSceneVersions.icon,
       listingRecorded: storeSceneVersions.listingRecorded,
+      needs: storeSceneVersions.needs,
       riskFlags: storeSceneVersions.riskFlags,
       tags: storeSceneVersions.tags,
     })
@@ -242,6 +262,8 @@ export async function syncLatestVersion(
     .set({
       icon: latest?.icon ?? null,
       latestVersion: newest,
+      // Read from the zip like the icon, so it always follows.
+      needs: latest?.needs ?? [],
       ...(latest?.listingRecorded
         ? {
             category: latest.category,

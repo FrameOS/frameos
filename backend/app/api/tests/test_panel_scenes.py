@@ -266,3 +266,34 @@ async def test_a_scene_of_the_same_id_is_replaced_keeping_its_values(async_clien
     radar = frame.scenes[1]
     assert radar["name"] == "My radar" and radar["fields"][0]["value"] == "Ghent"
     assert radar["origin"]["storeSceneId"] == RADAR and radar["origin"]["version"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_a_layout_is_tried_in_place_and_kept_around_every_scene(
+    async_client, no_auth_client, db, store, monkeypatch
+):
+    frame = await panel_frame(async_client, db)
+    layout = store_scene(RADAR, 1, ids=("bar-rt",))
+    layout[0]["settings"]["isLayout"] = True
+    store[RADAR] = layout
+
+    async def showing(redis, frame):
+        return "clock-1"
+
+    monkeypatch.setattr(panel_scenes, "_active_scene", showing)
+    # Tried: beside the list as a preview, and nothing switches (the store wears it).
+    tried = await ask(no_auth_client, frame, {"action": "preview", "scene_id": RADAR, "show": False})
+    assert tried.status_code == 200, tried.text
+    assert tried.json()["scene_id"] == "bar-rt"
+    pushed = commands(db, frame, "set_scenes")[-1].payload["_preview"]
+    assert [scene["id"] for scene in pushed["scenes"]] == ["clock-1", "bar-rt"]
+    assert commands(db, frame, "set_current_scene") == []
+
+    # Kept: installed, every scene wears it, and the frame stays where it is.
+    kept = await ask(no_auth_client, frame, {"action": "install", "scene_id": RADAR, "show": True})
+    assert kept.status_code == 200, kept.text
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "bar-rt"]
+    assert frame.scenes[0]["layout"] == {"sceneId": "bar-rt", "state": {}}
+    assert "layout" not in frame.scenes[1]
+    assert commands(db, frame, "set_current_scene")[-1].payload["scene_id"] == "clock-1"

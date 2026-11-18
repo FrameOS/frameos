@@ -1,7 +1,7 @@
 [
   {
     "id": "25cd3dfa-6fc2-4735-b9ab-ca429ba27dd9",
-    "name": "Render Counter",
+    "name": "Render counter",
     "nodes": [
       {
         "id": "event-render",

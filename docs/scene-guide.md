@@ -36,13 +36,16 @@ A scenes file is a JSON array of scenes. Each scene is
 - `settings.category` (optional): the scene's category by its name, which a
   desktop layout groups its list of scenes by. Pick one of the store's:
   `"Photos"` (the owner's photos or a photo service), `"Art & galleries"` (a
-  collection of artwork the scene carries), `"Calendars & agendas"`,
-  `"Weather"`, `"AI & generative"` (made by an AI service), `"Data &
-  dashboards"` (data, charts, stats, news from a service), `"Fun & comics"`
-  (comics, games), `"Real time"` (animates every second or faster, for a fast
-  screen), `"Tools & utilities"` (clocks and practical tools), `"Demos &
-  examples"` (a demo or a building block); a layout's is `"Desktop layouts"` or
-  `"Full screen layouts"`. Write the name exactly.
+  collection of artwork the scene carries), `"Clocks & time"` (clocks, timers,
+  the year at a glance), `"Calendars & agendas"`, `"Weather"` (real
+  forecasts), `"Home & dashboards"` (a smart home, data, charts, maps, stats
+  from a service), `"Games"`, `"Fun & animations"` (comics, toys,
+  animations), `"Notes & tools"` (to-dos, notes, drawing, practical tools),
+  `"AI & generative"` (made by an AI service), `"Demos & examples"` (a demo,
+  made-up data or a building block); a layout's is `"Desktop layouts"` or
+  `"Full screen layouts"`. Write the name exactly. Which screen a scene is for
+  is no category: the store reads that from the scene itself (a
+  `refreshInterval` under a second needs a fast screen).
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -1199,7 +1202,7 @@ interface FrameOSApp {
      * windowSize is a scene's own size for a new window, "WxH" (its settings.windowSize), where it says
      * one (FrameOS 2026.11.10+). icon is the scene's icon, where it has one (its settings.icon): one SVG
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
-     * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Real time"; its
+     * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
      * (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];

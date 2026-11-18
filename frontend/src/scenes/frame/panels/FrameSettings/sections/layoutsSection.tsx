@@ -1,9 +1,11 @@
-import { Cog6ToothIcon } from '@heroicons/react/24/outline'
+import { Cog6ToothIcon, PencilSquareIcon } from '@heroicons/react/24/outline'
 import { useActions, useValues } from 'kea'
+import { A } from 'kea-router'
 
 import { Button } from '../../../../../components/Button'
 import { H6 } from '../../../../../components/H6'
 import type { FrameId, FrameScene } from '../../../../../types'
+import { urls } from '../../../../../urls'
 import { LayoutOptions, SceneLayoutPicker } from '../../Scenes/SceneLayoutPicker'
 import { SceneLayoutSettingsModal } from '../../Scenes/SceneLayoutSettingsModal'
 import { sceneLayoutLogic } from '../../Scenes/sceneLayoutLogic'
@@ -44,6 +46,30 @@ function LayoutSettingsButton({
         <SceneLayoutSettingsModal frameId={frameId} sceneId={sceneId} />
       ) : null}
     </span>
+  )
+}
+
+/** The frame's layouts, each a link to its editor: a layout is a scene, edited like one, and its
+ * preview there runs it around the frame's scenes (docs/scene-layouts.md "In the preview"). */
+function EditLayoutLinks({ frameId, layouts }: { frameId: FrameId; layouts: FrameScene[] }): JSX.Element | null {
+  if (layouts.length === 0) {
+    return null
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-layout-edit>
+      <span className="frameos-muted text-xs">Edit a layout:</span>
+      {layouts.map((layout) => (
+        <A
+          key={layout.id}
+          href={urls.scenes(frameId, layout.id)}
+          title={`Open ${layout.name || 'this layout'} in the scene editor`}
+          className="frameos-secondary-button inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold"
+        >
+          <PencilSquareIcon className="h-3.5 w-3.5" aria-hidden />
+          {layout.name || 'Untitled layout'}
+        </A>
+      ))}
+    </div>
   )
 }
 
@@ -118,6 +144,7 @@ export function FrameLayoutsFields({ frameId }: { frameId: FrameId }): JSX.Eleme
               )}
             </div>
             <div className="frameos-muted text-xs">Drawn around every scene. Save the frame to push the change.</div>
+            <EditLayoutLinks frameId={frameId} layouts={layouts as FrameScene[]} />
             <details
               data-layouts-advanced
               open={advancedOpen}

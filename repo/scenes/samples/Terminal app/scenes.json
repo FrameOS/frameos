@@ -3,7 +3,7 @@
     "id": "terminal-app",
     "name": "Terminal",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 86400,
       "backgroundColor": "#000000",

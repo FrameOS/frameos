@@ -3,7 +3,7 @@
     "id": "sudoku",
     "name": "Sudoku",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f5f2ec",

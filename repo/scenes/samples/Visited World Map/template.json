@@ -1,5 +1,5 @@
 {
-  "name": "Visited World Map",
+  "name": "Visited world map",
   "description": "Responsive world map dashboard that highlights visited countries from ISO-2 codes, shows your next destination, counts down to your trip date, and supports adjustable line weight, border and color themes.",
   "config": null,
   "image": "./image.jpg",

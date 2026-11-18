@@ -27,20 +27,26 @@ type SceneSummary = Record<string, unknown> & { id: string; name: string };
 const sceneGuideTools =
   "On this server: apps_list and app_source_get look apps up (fields, options, a repo JS app's files), scene_lint checks a scene the way publishing does, scene_render renders it in the real runtime and returns the logs, and frame_scene_install puts it on a frame.";
 
+// The store's shelves (cloud/apps/auth-web/src/lib/categories.ts, which this
+// package cannot import; its test reads this list). A layout's shelf
+// (desktops, layouts) follows from what it is: setting one on a scene is
+// ignored.
 const storeCategories = [
   "photos",
   "art",
+  "clocks",
   "calendar",
   "weather",
-  "ai",
   "dashboards",
+  "games",
   "fun",
-  "realtime",
+  "utilities",
+  "ai",
+  "demos",
   "desktops",
   "layouts",
-  "utilities",
-  "demos",
 ] as const;
+const storeCategoryList = storeCategories.join("|");
 
 function sceneStats(scenes: Record<string, unknown>[]) {
   return scenes.map((scene) => ({
@@ -193,7 +199,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     "scene_update",
     {
       description:
-        "Edit a scene's listing — description, tags (max 5, lowercase a-z0-9-), category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos, null to clear), frameos_version (minimum FrameOS version, null to clear). The listing is part of a version: this publishes a new version carrying the edit with the scene's current content and images. For the name use scene_rename; for publishing use scene_publish.",
+        `Edit a scene's listing — description, tags (max 5, lowercase a-z0-9-), category (${storeCategoryList}, null to clear; a layout's is its kind), frameos_version (minimum FrameOS version, null to clear). The listing is part of a version: this publishes a new version carrying the edit with the scene's current content and images. For the name use scene_rename; for publishing use scene_publish.`,
       inputSchema: {
         category: z.enum(storeCategories).nullable().optional(),
         description: z.string().max(2000).nullable().optional(),
@@ -645,7 +651,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (photos|art|calendar|weather|ai|dashboards|fun|realtime|layouts|utilities|demos), frameos_version (only scenes that run on that version), page (48 per page). Each row carries the scene's icon (an SVG path in a 24 box, or null). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).",
+        `Browse the public scene store: full-text q (name, description, publisher, tags), one tag, a category (${storeCategoryList}), frameos_version (only scenes that run on that version), page (48 per page). Each row carries the scene's icon (an SVG path in a 24 box, or null). Featured and popular scenes come first. Install a result on a frame with frame_scene_install(scene_id).`,
       inputSchema: {
         category: z.enum(storeCategories).optional(),
         frameos_version: z.string().max(40).optional(),

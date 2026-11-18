@@ -4,25 +4,31 @@ import type { TemplateType } from '../types'
 // does not drag the templates logic (and the whole SPA) into the cloud typecheck.
 
 /**
- * How a store page orders the scenes on a shelf. `popular` is the index's own
- * order (featured scenes first, then by install count, then latest change);
- * `latest` is by the scene's last change; `name` is alphabetical.
+ * How a store page orders the scenes on a shelf. `newest` (the default) is by
+ * when each scene was added, so a new scene is not buried under the oldest
+ * ones' installs; `popular` is the index's own order (featured scenes first,
+ * then by install count, then latest change); `latest` is by the scene's last
+ * change; `name` is alphabetical.
  */
-export type StoreSort = 'popular' | 'latest' | 'name'
+export type StoreSort = 'newest' | 'popular' | 'latest' | 'name'
 
 export const STORE_SORT_OPTIONS: { value: StoreSort; label: string }[] = [
+  { value: 'newest', label: 'Newest' },
   { value: 'popular', label: 'Most installed' },
-  { value: 'latest', label: 'Latest' },
+  { value: 'latest', label: 'Recently updated' },
   { value: 'name', label: 'A to Z' },
 ]
 
 export function storeSortOf(value: unknown): StoreSort {
-  return value === 'latest' || value === 'name' ? value : 'popular'
+  return value === 'popular' || value === 'latest' || value === 'name' ? value : 'newest'
 }
 
 export function sortStoreTemplates(templates: TemplateType[], sort: StoreSort): TemplateType[] {
   if (sort === 'popular') {
     return templates
+  }
+  if (sort === 'newest') {
+    return latestStoreAdditions(templates)
   }
   const name = (template: TemplateType): string => String(template.name ?? '')
   const updated = (template: TemplateType): string => String(template.updated ?? '')

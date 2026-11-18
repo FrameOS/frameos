@@ -203,6 +203,7 @@ async def queue_embedded_scene_preview(
     *,
     wait_seconds: float = 0.0,
     source: str = "editor",
+    switch: bool = True,
 ) -> dict[str, Any]:
     """"Preview on frame": what the device's own /uploadScenes does with
     {scenes, sceneId}, in two queued halves. The scenes become a set_scenes
@@ -213,7 +214,9 @@ async def queue_embedded_scene_preview(
     reports holding them; set_scenes rows never fail, so neither does this.
     `source` (`editor`, `voice`) and the shown scene's name stay on the row
     after its bundle is spent: the workspace's preview row reads them
-    (frame_commands.scene_preview_info)."""
+    (frame_commands.scene_preview_info). `switch=False` leaves the frame on
+    the scene it shows (a layout tried from the frame's store: every scene
+    wears it, docs/scene-store.md)."""
     shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None) if scene_id else None
     if shown is not None:
         name = shown.get("name") if isinstance(shown.get("name"), str) and shown.get("name") else scene_id
@@ -226,7 +229,7 @@ async def queue_embedded_scene_preview(
         {"_preview": {"scenes": scenes, "scene_id": scene_id, "name": name, "source": source}},
         detail=f"preview of {name}",
     )
-    if scene_id:
+    if scene_id and switch:
         enqueue_frame_command(db, frame, "set_current_scene", {"scene_id": scene_id}, detail=name)
     await new_log(db, redis, int(frame.id), "stdinfo", f"Queued for the frame: {command_label(command)}")
     nudged = await nudge_embedded_frame(frame, redis)

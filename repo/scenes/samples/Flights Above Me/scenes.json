@@ -1,7 +1,7 @@
 [
   {
     "id": "3f42d839-7bdd-41df-8091-5fad1e9e759f",
-    "name": "Flights Above Me",
+    "name": "Flights above me",
     "nodes": [
       {
         "id": "render-event",
@@ -300,7 +300,7 @@
       }
     ],
     "settings": {
-      "category": "Data & dashboards",
+      "category": "Home & dashboards",
       "execution": "interpreted",
       "refreshInterval": 900,
       "backgroundColor": "#07151a",

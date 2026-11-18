@@ -1,6 +1,6 @@
-import { and, desc, eq, isNotNull, notInArray, sql, type SQL } from "drizzle-orm";
+import { and, arrayOverlaps, desc, eq, isNotNull, not, notInArray, sql, type SQL } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
-import { storeCategories } from "./categories";
+import { formerCategorySlugs, storeCategories } from "./categories";
 import { storeBrowseConditions } from "./store-browse";
 import { deviceCoverUrls } from "./store-device-covers";
 import { sceneCoverObjectKeySql, sceneHasImageSql } from "./store-listing";
@@ -47,42 +47,68 @@ export type StoreDeviceScene = {
   // box, filled with the text color, which the app draws where there is no
   // cover. Left out when the scene has none: a frame parses every byte.
   icon?: string;
+  // What it needs of a frame (sceneNeeds.ts: fast, touch, keys, linux), left
+  // out when nothing.
+  needs?: string[];
 };
 
 export type StoreDeviceSceneInfo = StoreDeviceScene & { description: string };
 
 // What a frame asks beyond the store front's filters: how many a page (its
-// grid), a shelf to put first (a fast panel puts "realtime" first) and shelves
-// to leave out (e-paper leaves "realtime" out).
+// grid), a shelf to put first, shelves to leave out, what it cannot do
+// (`without=fast` on e-paper, `linux` on an ESP32: docs/scene-store.md "What a
+// scene needs") and a need to put first (`prefer=fast` on an LCD). The app
+// before needs asked `prefer=realtime` / `exclude=realtime` of the Real time
+// shelf, which was the fast scenes: both still mean that.
 export type StoreDeviceOptions = {
   limit?: number;
   prefer?: string;
+  preferNeed?: string;
   exclude?: string[];
+  without?: string[];
 };
 
 const categorySlugs = new Set(storeCategories.map((category) => category.slug));
+// The needs a frame can say it lacks: touch and keys never rule a scene out.
+const ruledOutNeeds = new Set(["fast", "linux"]);
+const fastAliases = new Set(["fast", "realtime"]);
 
 export function parseStoreDeviceOptions(params: URLSearchParams): StoreDeviceOptions {
   const limit = Number.parseInt(params.get("limit") ?? "", 10);
-  const prefer = params.get("prefer") ?? "";
-  const exclude = (params.get("exclude") ?? "")
-    .split(",")
-    .map((slug) => slug.trim())
-    .filter((slug) => categorySlugs.has(slug))
+  const prefer = (params.get("prefer") ?? "").trim();
+  const asked = (params.get("exclude") ?? "").split(",").map((slug) => slug.trim());
+  const exclude = asked
+    .filter((slug) => categorySlugs.has(slug) && !formerCategorySlugs[slug])
     .slice(0, storeCategories.length);
+  const without = new Set(
+    (params.get("without") ?? "")
+      .split(",")
+      .map((need) => need.trim())
+      .filter((need) => ruledOutNeeds.has(need)),
+  );
+  if (asked.includes("realtime")) {
+    without.add("fast");
+  }
   return {
     limit: Number.isFinite(limit) ? Math.min(storeDeviceMaxPageSize, Math.max(1, limit)) : storeDevicePageSize,
     ...(categorySlugs.has(prefer) ? { prefer } : {}),
+    ...(fastAliases.has(prefer) ? { preferNeed: "fast" } : {}),
     exclude,
+    without: [...without],
   };
 }
 
-function storeDeviceConditions(filters: StoreBrowseFilters, exclude: string[] = []): SQL[] {
+function storeDeviceConditions(
+  filters: StoreBrowseFilters,
+  exclude: string[] = [],
+  without: string[] = [],
+): SQL[] {
   return [
     ...storeBrowseConditions(filters),
     isNotNull(storeScenes.category),
     sql`not (${storeScenes.riskFlags} @> array['shell']::text[])`,
     ...(exclude.length > 0 ? [notInArray(storeScenes.category, exclude)] : []),
+    ...(without.length > 0 ? [not(arrayOverlaps(storeScenes.needs, without))] : []),
   ];
 }
 
@@ -95,6 +121,7 @@ function clip(text: string | null | undefined, max: number): string {
 
 type DeviceRow = {
   category: string | null;
+  needs: string[];
   coverKey: string | null;
   description: string | null;
   hasPreview: boolean;
@@ -117,6 +144,7 @@ function deviceScene(row: DeviceRow, thumb: string | null): StoreDeviceScene {
     thumb,
     version: row.latestVersion,
     ...(row.icon ? { icon: row.icon } : {}),
+    ...(row.needs.length > 0 ? { needs: row.needs } : {}),
   };
 }
 
@@ -134,6 +162,7 @@ const deviceColumns = {
   id: storeScenes.id,
   latestVersion: storeScenes.latestVersion,
   name: storeScenes.name,
+  needs: storeScenes.needs,
   publisher: accounts.displayName,
 };
 
@@ -149,9 +178,10 @@ export async function listStoreScenesForDevice(
     .select(deviceColumns)
     .from(storeScenes)
     .innerJoin(accounts, eq(accounts.id, storeScenes.accountId))
-    .where(and(...storeDeviceConditions(filters, options.exclude)))
+    .where(and(...storeDeviceConditions(filters, options.exclude, options.without)))
     .orderBy(
       ...(options.prefer ? [sql`(${storeScenes.category} = ${options.prefer}) desc`] : []),
+      ...(options.preferNeed ? [sql`(${options.preferNeed} = any(${storeScenes.needs})) desc`] : []),
       sql`${storeScenes.featuredAt} desc nulls last`,
       desc(storeScenes.downloadCount),
       desc(storeScenes.updatedAt),
@@ -184,7 +214,12 @@ export async function storeSceneForDevice(
   return { ...scene!, description: clip(row.description, maxDescriptionLength) };
 }
 
-// The shelves, in the store front's order, as slug and title alone.
-export function storeDeviceCategories(): { slug: string; title: string }[] {
-  return storeCategories.map((category) => ({ slug: category.slug, title: category.title }));
+// The shelves, in the store front's order, as slug and title, and `layout:
+// true` on a layouts' shelf (the app's Layouts side, docs/scene-store.md).
+export function storeDeviceCategories(): { slug: string; title: string; layout?: true }[] {
+  return storeCategories.map((category) => ({
+    slug: category.slug,
+    title: category.title,
+    ...(category.kind === "layout" ? { layout: true as const } : {}),
+  }));
 }

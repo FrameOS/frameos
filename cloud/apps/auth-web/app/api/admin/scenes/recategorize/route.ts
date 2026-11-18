@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray, or } from "drizzle-orm";
 import { storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
@@ -18,6 +18,7 @@ import {
   classifyStoreScene,
   isClassificationConfigured,
 } from "../../../../../src/lib/store-classify";
+import { layoutCategories } from "../../../../../src/lib/categories";
 
 export const runtime = "nodejs";
 
@@ -77,6 +78,14 @@ export async function POST(request: NextRequest) {
       and(
         eq(storeScenes.status, "active"),
         ...(mode === "missing" ? [isNull(storeScenes.category)] : []),
+        // A layout's shelf is its kind (categories.ts): nothing to classify.
+        or(
+          isNull(storeScenes.category),
+          notInArray(
+            storeScenes.category,
+            layoutCategories.map((category) => category.slug),
+          ),
+        ),
       ),
     )
     .orderBy(desc(storeScenes.updatedAt))

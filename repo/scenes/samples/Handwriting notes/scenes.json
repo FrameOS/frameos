@@ -3,7 +3,7 @@
     "id": "handwriting-notes",
     "name": "Handwriting notes",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#fffdf7",

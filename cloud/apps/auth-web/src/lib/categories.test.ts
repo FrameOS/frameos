@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { categorySlugForTitle, getStoreCategory, normalizeCategory, storeCategories } from './categories'
+import {
+  categorySlugForTitle,
+  getStoreCategory,
+  isLayoutCategory,
+  layoutCategorySlug,
+  normalizeCategory,
+  sceneCategories,
+  storeCategories,
+} from './categories'
 import { storeCategoryShelves } from '../../../../../frontend/src/utils/storeCategories'
 
 describe('storeCategories', () => {
@@ -15,12 +23,23 @@ describe('storeCategories', () => {
     // frontend/src/utils/storeCategories.ts is the copy the Add scene
     // drawer uses (it cannot import this package); keep slugs, titles and
     // order identical so the picker's shelves are the store front's.
-    expect(storeCategoryShelves).toEqual(storeCategories.map(({ slug, title }) => ({ slug, title })))
+    expect(storeCategoryShelves).toEqual(storeCategories.map(({ slug, title, kind }) => ({ slug, title, kind })))
   })
 
-  it('has a shelf for real-time scenes (animations, fast panels)', () => {
-    expect(getStoreCategory('realtime')?.title).toBe('Real time')
-    expect(normalizeCategory('Realtime')).toBe('realtime')
+  it('lists the scenes\' shelves first and the layouts\' after, a layout\'s shelf by its kind', () => {
+    const kinds = storeCategories.map((category) => category.kind)
+    expect(kinds.indexOf('layout')).toBe(sceneCategories.length)
+    expect(layoutCategorySlug(true)).toBe('desktops')
+    expect(layoutCategorySlug(false)).toBe('layouts')
+    expect(isLayoutCategory('layouts')).toBe(true)
+    expect(isLayoutCategory('games')).toBe(false)
+  })
+
+  it('has no Real time shelf: a fast screen is what a scene needs, and the old slug reads as Fun', () => {
+    expect(getStoreCategory('realtime')).toBeUndefined()
+    expect(normalizeCategory('Realtime')).toBe('fun')
+    expect(getStoreCategory('clocks')?.title).toBe('Clocks & time')
+    expect(getStoreCategory('games')?.title).toBe('Games')
   })
 
   it('gives every category shelf copy and a classifier hint', () => {
@@ -64,7 +83,9 @@ describe('getStoreCategory', () => {
 describe('categorySlugForTitle', () => {
   it("is the store category a scene names by its title (settings.category)", () => {
     expect(categorySlugForTitle('Art & galleries')).toBe('art')
-    expect(categorySlugForTitle(' Real time ')).toBe('realtime')
+    expect(categorySlugForTitle(' Real time ')).toBe('fun')
+    expect(categorySlugForTitle('Data & dashboards')).toBe('dashboards')
+    expect(categorySlugForTitle('Clocks & time')).toBe('clocks')
     expect(categorySlugForTitle('art')).toBeUndefined()
     expect(categorySlugForTitle('Clocks')).toBeUndefined()
     expect(categorySlugForTitle(undefined)).toBeUndefined()

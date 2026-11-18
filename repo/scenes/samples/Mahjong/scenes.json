@@ -3,7 +3,7 @@
     "id": "mahjong-solitaire",
     "name": "Mahjong solitaire",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#23463f",

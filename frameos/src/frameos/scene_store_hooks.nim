@@ -24,10 +24,14 @@ type
     ## previewOnly: the browser preview's host, which installs nothing}.
     ## `asker` is the scene reading: news redraws it while it shows.
   SceneStoreAction* = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].}
-    ## `args` is a JSON object's text. preview {store, name},
+    ## `args` is a JSON object's text. preview {store, name, show},
     ## install {store, name, show}, update {store or id}, remove {store or
-    ## id}, discard. One at a time: an action while one runs is dropped. The
+    ## id}, discard. `show: false` keeps the scene showing (a preview of a
+    ## layout, which every scene then wears: docs/scene-store.md "Trying a
+    ## layout"). One at a time: an action while one runs is dropped. The
     ## host asks for a render of `asker` when what it knows changed.
+    ## `layout {id}` is no host's: app_runtime.nim chooses the frame's layout
+    ## (layout_choice.nim) and adds `layout`, the one chosen, to the facts.
 
 var
   sceneStoreRead*: SceneStoreRead

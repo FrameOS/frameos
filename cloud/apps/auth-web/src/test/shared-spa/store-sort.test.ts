@@ -1,6 +1,7 @@
 // The order of a store shelf (frontend/src/utils/storeSort.ts, applied by
-// storeShelvesOf): the index's own order by default (featured first, then
-// installs), by last change, or by name.
+// storeShelvesOf): newest first by default (when each was added), the
+// index's own order (featured first, then installs), by last change, or by
+// name.
 import { describe, expect, it } from "vitest";
 import {
   latestStoreAdditions,
@@ -30,10 +31,15 @@ describe("store sort", () => {
     expect(names(sortStoreTemplates(templates, "name"))).toEqual(["Agenda", "birds", "Clock", "Weather"]);
   });
 
-  it("an unknown sort is popular", () => {
+  it("newest is by when each was added, so a new scene is not buried under old installs", () => {
+    expect(names(sortStoreTemplates(templates, "newest"))).toEqual(names(latestStoreAdditions(templates)));
+  });
+
+  it("an unknown sort is newest", () => {
     expect(storeSortOf("name")).toBe("name");
-    expect(storeSortOf("downloads")).toBe("popular");
-    expect(storeSortOf(undefined)).toBe("popular");
+    expect(storeSortOf("popular")).toBe("popular");
+    expect(storeSortOf("downloads")).toBe("newest");
+    expect(storeSortOf(undefined)).toBe("newest");
   });
 });
 

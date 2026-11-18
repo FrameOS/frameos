@@ -263,6 +263,7 @@ export function SceneInfoPanel({
                   <SceneCategoryEditor
                     category={listing.category}
                     key={listing.category ?? ""}
+                    layout={isLayout === true}
                     onChange={(category) => draft.onListingChange({ category })}
                   />
                 ) : (

@@ -279,7 +279,7 @@ describe("lintScenes", () => {
 
   it("warns about a settings.category that is none of the store's titles", () => {
     expect(messages([scene({ settings: { category: "Photos" } })])).toEqual({ errors: [], warnings: [] });
-    expect(messages([scene({ settings: { category: " Real time " } })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([scene({ settings: { category: " Games " } })])).toEqual({ errors: [], warnings: [] });
     expect(messages([scene({ settings: { category: "Clocks" } })]).warnings).toEqual([
       expect.stringContaining('settings.category "Clocks" is none of the store\'s categories'),
     ]);

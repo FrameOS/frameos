@@ -3,7 +3,7 @@
     "id": "pixel-art",
     "name": "Pixel art",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#1a1c2c",

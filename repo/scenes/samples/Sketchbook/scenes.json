@@ -3,7 +3,7 @@
     "id": "sketchbook",
     "name": "Sketchbook",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#fbf8f1",

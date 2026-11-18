@@ -3,7 +3,7 @@
     "id": "minesweeper",
     "name": "Minesweeper",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f3f1ec",

@@ -1,7 +1,7 @@
 [
   {
     "id": "e90c4175-8156-4a0e-824f-ff54bec706e5",
-    "name": "OpenAI Image",
+    "name": "OpenAI image",
     "settings": {
       "category": "AI & generative",
       "backgroundColor": "#000000",

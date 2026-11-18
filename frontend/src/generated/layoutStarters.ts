@@ -2593,3 +2593,354 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
     }
   }
 ] as unknown as LayoutStarter[]
+
+/** The scenes a layout is previewed around when there are no others (Clock, Weather demo, Calculator). */
+export const LAYOUT_PREVIEW_SCENES: FrameScene[] = [
+  {
+    "id": "clock",
+    "name": "Clock",
+    "settings": {
+      "category": "Clocks & time",
+      "execution": "interpreted",
+      "refreshInterval": 1,
+      "backgroundColor": "#0b1020",
+      "windowSize": "480x480",
+      "icon": "M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M16.2,16.2L11,13V7H12.5V12.2L17,14.9L16.2,16.2Z"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Clock",
+        "category": "data",
+        "description": "An analog clock with a ticking second hand and the date.",
+        "version": "1.1.0",
+        "fields": [
+          {
+            "name": "at",
+            "label": "Time to show (empty: now)",
+            "type": "string",
+            "value": ""
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Clock\",\n  \"category\": \"data\",\n  \"description\": \"An analog clock with a ticking second hand and the date.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"at\",\n      \"label\": \"Time to show (empty: now)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Clock\n// @background #0b1020\n// @refresh 1\n// An analog clock drawn as a JSX <svg>: no markup is built or parsed.\n// `at` (a field) pins the time, for a snapshot; empty, it is the clock.\nconst C = 240\nconst at = (angle, r) => [C + r * Math.sin(angle), C - r * Math.cos(angle)]\nconst Hand = ({ angle, from, to, width, color }) => {\n  const [x1, y1] = at(angle, from)\n  const [x2, y2] = at(angle, to)\n  return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={width} strokeLinecap=\"round\" />\n}\nconst days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: '#0b1020', face: '#131c38', rim: '#2a3a6b', tick: '#e2e8f0', minor: '#475569',\n    dateBox: '#0b1020', dateRim: 'none', date: '#fbbf24', hand: '#e2e8f0', second: '#f97316', pin: '#0b1020',\n  },\n  high: {\n    page: '#ffffff', face: '#ffffff', rim: '#000000', tick: '#000000', minor: '#000000',\n    dateBox: '#ffffff', dateRim: '#000000', date: '#000000', hand: '#000000', second: '#000000', pin: '#ffffff',\n  },\n}\n\nexport function get(app, context) {\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  // The dial is 480 units across and stays round: the view around it grows with the panel.\n  const W = context?.imageWidth ?? app.frame.width\n  const H = context?.imageHeight ?? app.frame.height\n  const unit = 480 / Math.min(W, H)\n  const viewW = W * unit, viewH = H * unit\n  const viewX = C - viewW / 2, viewY = C - viewH / 2\n  const now = app.config.at ? new Date(app.config.at) : new Date()\n  const s = now.getSeconds()\n  const m = now.getMinutes() + s / 60\n  const h = (now.getHours() % 12) + m / 60\n  const tau = Math.PI * 2\n  return (\n    <svg width={W} height={H} viewBox={`${viewX} ${viewY} ${viewW} ${viewH}`}>\n      <rect x={viewX} y={viewY} width={viewW} height={viewH} fill={t.page} />\n      <circle cx={C} cy={C} r={220} fill={t.face} />\n      <circle cx={C} cy={C} r={220} fill=\"none\" stroke={t.rim} strokeWidth={4} />\n      {Array.from({ length: 60 }).map((_, i) => (\n        <Hand angle={(i * tau) / 60} from={i % 5 === 0 ? 178 : 194} to={204}\n          width={i % 5 === 0 ? 6 : 2} color={i % 5 === 0 ? t.tick : t.minor} />\n      ))}\n      <rect x={C + 52} y={C - 18} width={88} height={36} rx={8} fill={t.dateBox} stroke={t.dateRim} strokeWidth={2} />\n      <text x={C + 96} y={C + 9} fontSize={24} fill={t.date} textAnchor=\"middle\">{`${days[now.getDay()]} ${now.getDate()}`}</text>\n      <Hand angle={(h * tau) / 12} from={-16} to={110} width={12} color={t.hand} />\n      <Hand angle={(m * tau) / 60} from={-20} to={170} width={8} color={t.hand} />\n      <Hand angle={(s * tau) / 60} from={-30} to={186} width={3} color={t.second} />\n      <circle cx={C} cy={C} r={9} fill={t.second} />\n      <circle cx={C} cy={C} r={3} fill={t.pin} />\n    </svg>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  },
+  {
+    "id": "weather-demo",
+    "name": "Weather demo",
+    "settings": {
+      "category": "Demos & examples",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#082f49",
+      "windowSize": "800x480",
+      "icon": "M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Weather demo",
+        "category": "data",
+        "description": "A week of made-up weather. Tap a day for its details.",
+        "version": "1.1.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Weather demo\",\n  \"category\": \"data\",\n  \"description\": \"A week of made-up weather. Tap a day for its details.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Weather demo\n// @background #082f49\n// @refresh 3600\n// A week of (made up) weather: tap a day for its details. The icons are SVG\n// inside the UI, colored by the text color (currentColor).\nconst Sun = ({ size, tone }) => (\n  <svg className={`${size} ${tone || 'text-amber-400'}`} viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\">\n    <circle cx={12} cy={12} r={4} fill=\"currentColor\" />\n    <path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\" />\n  </svg>\n)\nconst Cloud = ({ size, tone }) => (\n  <svg className={`${size} ${tone || 'text-slate-300'}`} viewBox=\"0 0 24 24\">\n    <path fill=\"currentColor\" d=\"M7 18a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 9a4.5 4.5 0 0 1-.5 9z\" />\n  </svg>\n)\nconst Rain = ({ size, tone }) => (\n  <svg className={`${size} ${tone || 'text-sky-400'}`} viewBox=\"0 0 24 24\">\n    <path fill={tone ? 'currentColor' : '#cbd5e1'} d=\"M7 14a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 5a4.5 4.5 0 0 1-.5 9z\" />\n    <path stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\" d=\"M8 17l-1 3M12 17l-1 3M16 17l-1 3\" />\n  </svg>\n)\nconst days = [\n  { day: 'Mon', Icon: Sun, hi: 18, lo: 7, text: 'Sunny and still', wind: 6 },\n  { day: 'Tue', Icon: Cloud, hi: 15, lo: 8, text: 'Grey, dry', wind: 12 },\n  { day: 'Wed', Icon: Rain, hi: 11, lo: 6, rain: 12, text: 'Rain from noon', wind: 22 },\n  { day: 'Thu', Icon: Rain, hi: 9, lo: 4, rain: 5, text: 'Showers', wind: 18 },\n  { day: 'Fri', Icon: Cloud, hi: 12, lo: 3, text: 'Clouds clearing', wind: 9 },\n  { day: 'Sat', Icon: Sun, hi: 16, lo: 5, text: 'Bright, cold start', wind: 7 },\n  { day: 'Sun', Icon: Sun, hi: 19, lo: 9, text: 'Warm afternoon', wind: 5 },\n]\nlet pick = 0\n\n// The picked day outlives the render: a board may start each render with a\n// fresh module, and a frame rendered on its server does, at every tap.\nconst choose = (i) => {\n  pick = i\n  frameos.remember('day', pick)\n}\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\n// The icons keep their own colors in the color look (tone null) and take\n// black, or white on the picked day, in high contrast.\nconst THEMES = {\n  color: {\n    page: 'bg-sky-950 text-white',\n    card: 'bg-white/10 p-5',\n    label: 'text-sky-200',\n    muted: 'text-slate-300',\n    tile: 'bg-white/5 active:bg-white/15',\n    tileOn: 'bg-white/25',\n    dayText: 'text-slate-300',\n    lowText: 'text-slate-400',\n    icon: null,\n    iconOn: null,\n  },\n  high: {\n    page: 'bg-white text-black',\n    card: 'bg-white border-2 border-black p-[18px]',\n    label: 'text-black',\n    muted: 'text-black',\n    tile: 'bg-white border-2 border-black',\n    tileOn: 'bg-black text-white border-2 border-black',\n    dayText: '',\n    lowText: '',\n    icon: 'text-black',\n    iconOn: 'text-white',\n  },\n}\n\nexport function get(app) {\n  pick = frameos.recall('day') ?? pick\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  const d = days[pick]\n  return (\n    <div className={`flex flex-col gap-4 p-5 ${t.page}`}>\n      <div className={`flex items-center gap-5 rounded-3xl ${t.card}`}>\n        {d.Icon({ size: 'w-24 h-24', tone: t.icon })}\n        <div className=\"flex flex-col flex-1\">\n          <span className={`text-lg ${t.label}`}>{pick === 0 ? 'Today' : d.day}</span>\n          <span className=\"text-6xl font-bold\">{`${d.hi}°`}</span>\n          <span className={t.muted}>{d.text}</span>\n        </div>\n        <div className={`flex flex-col items-end gap-1 text-sm ${t.muted}`}>\n          <span>{`Low ${d.lo}°`}</span>\n          <span>{`Wind ${d.wind} km/h`}</span>\n          <span>{d.rain ? `Rain ${d.rain} mm` : 'No rain'}</span>\n        </div>\n      </div>\n      <div className=\"flex-1 grid grid-cols-7 gap-2\">\n        {days.map((x, i) => (\n          <div className={`flex flex-col items-center justify-center gap-2 rounded-2xl ${i === pick ? t.tileOn : t.tile}`}\n            onClick={() => choose(i)}>\n            <span className={`text-sm ${i === pick ? 'font-bold' : t.dayText}`}>{x.day}</span>\n            {x.Icon({ size: 'w-9 h-9', tone: i === pick ? t.iconOn : t.icon })}\n            <span className=\"text-lg font-semibold\">{`${x.hi}°`}</span>\n            <span className={`text-sm ${t.lowText}`}>{`${x.lo}°`}</span>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -126
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "customEvents": []
+  },
+  {
+    "id": "calculator",
+    "name": "Calculator",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "windowSize": "480x640",
+      "icon": "M7,2H17A2,2 0 0,1 19,4V20A2,2 0 0,1 17,22H7A2,2 0 0,1 5,20V4A2,2 0 0,1 7,2M7,4V8H17V4H7M7,10V12H9V10H7M11,10V12H13V10H11M15,10V12H17V10H15M7,14V16H9V14H7M11,14V16H13V14H11M15,14V16H17V14H15M7,18V20H9V18H7M11,18V20H13V18H11M15,18V20H17V18H15Z"
+    },
+    "fields": [
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "apps": {
+      "jsxUi": {
+        "origin": "jsxUi",
+        "name": "Calculator",
+        "category": "data",
+        "description": "A pocket calculator for touch screens.",
+        "version": "1.3.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Calculator\",\n  \"category\": \"data\",\n  \"description\": \"A pocket calculator for touch screens.\",\n  \"version\": \"1.3.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Calculator\n// @background #000000\n// @refresh 3600\n// A calculator: five rows of keys share the height under the display, active:\n// lights the key under the finger, and the operator waiting for its second\n// number stays lit. = again repeats the last operation (2 + 3 = 5, = 8, = 11),\n// as a pocket one does.\nconst rows = [\n  ['C', '±', '%', '÷'],\n  ['7', '8', '9', '×'],\n  ['4', '5', '6', '−'],\n  ['1', '2', '3', '+'],\n]\nconst ops = {\n  '+': (a, b) => a + b,\n  '−': (a, b) => a - b,\n  '×': (a, b) => a * b,\n  '÷': (a, b) => a / b,\n}\n\nlet display = '0'\nlet acc = null\nlet op = null\nlet fresh = true\nlet lastOp = null // what = repeats: the operator and its second number\nlet lastArg = null\n\n// The sum in progress outlives the render: a board may start each render with\n// a fresh module, and a frame rendered on its server does, at every tap.\nconst recallSum = () => {\n  const kept = frameos.recall('sum')\n  if (!kept) return\n  display = kept.display\n  acc = kept.acc\n  op = kept.op\n  fresh = kept.fresh\n  lastOp = kept.lastOp\n  lastArg = kept.lastArg\n}\nconst rememberSum = () => frameos.remember('sum', { display, acc, op, fresh, lastOp, lastArg })\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\nconst THEMES = {\n  color: {\n    page: 'bg-black',\n    sum: 'text-neutral-500',\n    display: 'text-white',\n    lit: 'bg-white text-orange-500',\n    op: 'bg-orange-500 text-white active:bg-orange-300',\n    fn: 'bg-neutral-400 text-black active:bg-neutral-200',\n    digit: 'bg-neutral-800 text-white active:bg-neutral-600',\n  },\n  high: {\n    page: 'bg-white',\n    sum: 'text-black',\n    display: 'text-black',\n    lit: 'bg-white text-black border-4 border-black',\n    op: 'bg-black text-white',\n    fn: 'bg-white text-black border-2 border-black font-bold',\n    digit: 'bg-white text-black border-2 border-black',\n  },\n}\n\n// The keys take whatever height the screen has, so their labels and the\n// display grow with them: a tall screen should not show pocket-sized digits.\n// 156 px is the padding, the smallest display, its gap and the row gaps.\nconst sizes = (height) => {\n  const keyHeight = (height - 156) / 5\n  if (keyHeight >= 180) return { key: 'text-7xl', display: 'text-8xl', sum: 'text-3xl h-10', top: 'h-36' }\n  if (keyHeight >= 120) return { key: 'text-5xl', display: 'text-7xl', sum: 'text-2xl h-8', top: 'h-28' }\n  if (keyHeight >= 90) return { key: 'text-4xl', display: 'text-6xl', sum: 'text-xl h-7', top: 'h-24' }\n  return { key: 'text-3xl', display: 'text-5xl', sum: 'text-lg h-6', top: 'h-20' }\n}\n\nconst formatNumber = (n) => {\n  if (!isFinite(n)) return 'Error'\n  const s = String(parseFloat(n.toPrecision(9)))\n  return s.length > 10 ? n.toExponential(3) : s\n}\n\nconst press = (key) => {\n  if (key >= '0' && key <= '9') {\n    display = fresh || display === '0' ? key : display.length < 9 ? display + key : display\n    fresh = false\n  } else if (key === '.') {\n    if (fresh) display = '0.'\n    else if (!display.includes('.')) display += '.'\n    fresh = false\n  } else if (key === 'C') {\n    display = '0'; acc = null; op = null; fresh = true; lastOp = null; lastArg = null\n  } else if (key === '±') {\n    if (display !== '0') display = display.startsWith('-') ? display.slice(1) : '-' + display\n  } else if (key === '%') {\n    display = formatNumber(parseFloat(display) / 100); fresh = true\n  } else if (key === '=') {\n    if (op && acc !== null) {\n      lastOp = op; lastArg = parseFloat(display)\n      display = formatNumber(ops[op](acc, lastArg))\n    } else if (lastOp) {\n      display = formatNumber(ops[lastOp](parseFloat(display), lastArg))\n    }\n    acc = null; op = null; fresh = true\n  } else {\n    if (op && acc !== null && !fresh) display = formatNumber(ops[op](acc, parseFloat(display)))\n    acc = parseFloat(display); op = key; fresh = true\n  }\n  rememberSum()\n}\n\nconst tone = (t, key) => {\n  if (key in ops || key === '=') return key === op && fresh ? t.lit : t.op\n  if (key === 'C' || key === '±' || key === '%') return t.fn\n  return t.digit\n}\n\nconst button = (t, s, key) => (\n  <div className={`flex-1 rounded-2xl flex items-center justify-center ${s.key} ${tone(t, key)}`}\n    onClick={() => press(key)}>{key}</div>\n)\n\nexport function get(app, context) {\n  recallSum()\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  // The canvas's height, already turned with the frame (app.frame is the\n  // panel's size before the turn).\n  const turned = (app.frame.rotate || 0) % 180 !== 0\n  const H = context?.imageHeight ?? (turned ? app.frame.width : app.frame.height)\n  const s = sizes(H)\n  // The last row is two halves with the rows' gap between them: a half is\n  // exactly two keys and a gap, so 0 spans two columns and . and = line up.\n  return (\n    <div className={`flex flex-col gap-3 p-4 ${t.page}`}>\n      <div className={`flex flex-col items-end justify-end px-3 ${s.top}`}>\n        <span className={`${s.sum} ${t.sum}`}>{op && acc !== null ? `${formatNumber(acc)} ${op}` : ''}</span>\n        <span className={`${s.display} truncate ${t.display}`}>{display}</span>\n      </div>\n      <div className=\"flex-1 flex flex-col gap-2\">\n        {rows.map((row) => (\n          <div className=\"flex-1 flex gap-2\">{row.map((key) => button(t, s, key))}</div>\n        ))}\n        <div className=\"flex-1 flex gap-2\">\n          <div className=\"flex-1 flex\">{button(t, s, '0')}</div>\n          <div className=\"flex-1 flex gap-2\">{button(t, s, '.')}{button(t, s, '=')}</div>\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "jsxUi",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+] as unknown as FrameScene[]

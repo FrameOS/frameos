@@ -106,7 +106,13 @@ export const urls = {
    * store front at /store is all there is, and its links stay on it. */
   scenesHome: (
     page?: string | null,
-    filters?: { category?: string | null; visibility?: string | null; frame?: string | number | null }
+    filters?: {
+      category?: string | null
+      /** The store's Layouts side (`layouts`); scenes are the default. A category names its own kind. */
+      kind?: string | null
+      visibility?: string | null
+      frame?: string | number | null
+    }
   ) => {
     const params = new URLSearchParams()
     if (page && page !== 'store') {
@@ -114,6 +120,8 @@ export const urls = {
     }
     if (filters?.category) {
       params.set('category', filters.category)
+    } else if (filters?.kind === 'layouts') {
+      params.set('kind', 'layouts')
     }
     if (filters?.visibility) {
       params.set('visibility', filters.visibility)

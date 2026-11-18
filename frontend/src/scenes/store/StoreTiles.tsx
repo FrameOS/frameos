@@ -7,7 +7,16 @@ import { A } from 'kea-router'
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
 import { sceneAccessFlagDescription, sceneAccessFlagLabel, templateAccessFlags } from '../../utils/sceneAccess'
-import type { StoreShelfGroup } from './storeCatalog'
+import { knownSceneNeeds, sceneNeedDescription, sceneNeedLabel } from '../../utils/sceneNeeds'
+import type { StoreKind } from '../../utils/storeCategories'
+import {
+  STORE_FIT_OPTIONS,
+  STORE_SHELF_PREVIEW_COUNT,
+  storeFitOf,
+  type StoreFit,
+  type StoreKindCounts,
+  type StoreShelfGroup,
+} from './storeShelves'
 import { templateSceneIcon } from '../../utils/sceneIcon'
 import { SceneIcon } from '../../components/SceneIcon'
 
@@ -89,6 +98,11 @@ export function SceneTile({
   const href = typeof template.url === 'string' && template.url ? template.url : null
   const icon = templateSceneIcon(template)
   const flags = templateAccessFlags(template)
+  // What it needs of a frame (utils/sceneNeeds.ts): a fast screen, touch, keys,
+  // a Pi. Keys only where it is not a touch scene too: most of those take both.
+  const needs = knownSceneNeeds(template.needs).filter(
+    (need) => need !== 'keys' || !knownSceneNeeds(template.needs).includes('touch')
+  )
   const installs = typeof template.downloads === 'number' && template.downloads > 0 ? template.downloads : null
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
@@ -114,6 +128,19 @@ export function SceneTile({
         </h3>
         {template.description ? (
           <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>
+        ) : null}
+        {needs.length > 0 ? (
+          <div className="flex flex-wrap gap-1" data-scene-needs>
+            {needs.map((need) => (
+              <span
+                key={need}
+                className="frameos-inset whitespace-nowrap rounded border px-1 text-[10px] font-medium"
+                title={sceneNeedDescription(need)}
+              >
+                {sceneNeedLabel(need)}
+              </span>
+            ))}
+          </div>
         ) : null}
       </div>
     </>
@@ -162,6 +189,72 @@ export function StoreSortSelect({
   )
 }
 
+/** Which screens a store page lists scenes for, beside the sort. */
+export function StoreFitSelect({
+  value,
+  onChange,
+}: {
+  value: StoreFit
+  onChange: (fit: StoreFit) => void
+}): JSX.Element {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(storeFitOf(event.target.value))}
+      aria-label="Screens"
+      title="Show the scenes for a kind of screen"
+      className="frameos-form-control h-10 rounded-xl border px-3 text-sm font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      {STORE_FIT_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+/** The store's first split: scenes, and the layouts that go around them. */
+export function StoreKindTabs({
+  kind,
+  counts,
+  href,
+  onPick,
+}: {
+  kind: StoreKind
+  counts: StoreKindCounts
+  href: (kind: StoreKind) => string
+  onPick: (kind: StoreKind) => void
+}): JSX.Element {
+  const tabs: { kind: StoreKind; title: string }[] = [
+    { kind: 'scene', title: 'Scenes' },
+    { kind: 'layout', title: 'Layouts' },
+  ]
+  return (
+    <nav aria-label="Scenes or layouts" className="frameos-inset inline-flex rounded-xl border p-1" data-store-kind>
+      {tabs.map((tab) => (
+        <a
+          key={tab.kind}
+          href={href(tab.kind)}
+          onClick={(event) => {
+            if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+              event.preventDefault()
+              onPick(tab.kind)
+            }
+          }}
+          aria-current={tab.kind === kind ? 'page' : undefined}
+          className={clsx(
+            'rounded-lg px-3 py-1 text-sm font-semibold transition',
+            tab.kind === kind ? 'frameos-primary-active text-white' : 'hover:bg-slate-500/10'
+          )}
+        >
+          {tab.title} <span className="font-medium opacity-60">{counts[tab.kind]}</span>
+        </a>
+      ))}
+    </nav>
+  )
+}
+
 export function TileGrid({ children }: { children: ReactNode }): JSX.Element {
   return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">{children}</div>
 }
@@ -186,6 +279,8 @@ export function StoreShelves({
   /** What a tile ends with (an Install button on the signed-in library). */
   tileActions?: (template: TemplateType) => ReactNode
 }): JSX.Element {
+  // Every shelf listed: each shows its first tiles and links to the rest.
+  const limit = activeCategory ? null : STORE_SHELF_PREVIEW_COUNT
   if (shelves.length === 0) {
     return <Note>{emptyMessage}</Note>
   }
@@ -206,7 +301,7 @@ export function StoreShelves({
             </h2>
           ) : null}
           <TileGrid>
-            {templates.map((template) => (
+            {(limit === null ? templates : templates.slice(0, limit)).map((template) => (
               <SceneTile
                 key={template.sceneId ?? template.id ?? template.name}
                 template={template}
@@ -214,6 +309,15 @@ export function StoreShelves({
               />
             ))}
           </TileGrid>
+          {limit !== null && templates.length > limit && shelfHref ? (
+            <a
+              href={shelfHref(shelf.slug)}
+              className="frameos-inset inline-flex rounded-xl border px-3 py-1.5 text-sm font-semibold hover:border-blue-400"
+              data-shelf-more
+            >
+              See all {templates.length} in {shelf.title}
+            </a>
+          ) : null}
         </section>
       ))}
     </>

@@ -40,12 +40,12 @@ warns. The rule is written twice, `frameos/src/frameos/scene_icon.nim`
 ## Category
 
 `settings.category` is the scene's category by its name, as people read it:
-`"Photos"`, `"Art & galleries"`, `"Real time"`. People pick it from the store's
+`"Photos"`, `"Art & galleries"`, `"Clocks & time"`. People pick it from the store's
 category titles (the Category select in the scene's settings, the store's
 `categories.ts` / the SPA's `storeCategories.ts`): Photos, Art & galleries,
-Calendars & agendas, Weather, AI & generative, Data & dashboards, Fun &
-comics, Real time, Tools & utilities, Demos & examples, and Desktop layouts /
-Full screen layouts for a layout. The scene keeps the name as text and nothing
+Clocks & time, Calendars & agendas, Weather, Home & dashboards, Games, Fun &
+animations, Notes & tools, AI & generative, Demos & examples, and Desktop
+layouts / Full screen layouts for a layout. The scene keeps the name as text and nothing
 maps it to anything: a name of the owner's own is kept, shown as it is in the
 select, and is a category like any other.
 
@@ -65,13 +65,19 @@ select, and is a category like any other.
   "On the frame").
 - **The store**: when a version of a scene is written (published, saved from
   the store's editor, forked) and its main scene's `settings.category` is one
-  of the store's titles, the listing's category becomes that one
+  of the store's titles for a scene, the listing's category becomes that one
   (`validateSceneZip`'s `sceneCategory`, `writeSceneVersion`), so the shelf and
   the scene agree; otherwise the listing's category stands. A store category
   set by hand is replaced at the next version only when the scene names
-  another of the store's.
-- **No clock category**: the store files its clocks under Tools & utilities,
-  and so do the samples.
+  another of the store's. A layout is always on its kind's shelf (Desktop
+  layouts for `settings.desktop`, else Full screen layouts), whatever it
+  names, and a scene never on a layout's. A title the store had before
+  (`formerTitles` in `categories.ts`: "Data & dashboards", "Fun & comics",
+  "Tools & utilities", "Real time") still files a scene under the shelf that
+  took its place.
+- **Not a screen**: the Real time shelf went on 2026-11-18. Which screen a
+  scene is for is what it needs (docs/scene-store.md "What a scene needs"),
+  read from the scene, never a category.
 
 ## On the frame
 

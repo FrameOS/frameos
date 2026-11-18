@@ -263,7 +263,8 @@ proc applyStorePreviewChange() =
       addInterpretedSceneToCache(scene)
       if scene.settings.isNil or not scene.settings.isLayout:
         loadedSceneOrder.add(scene.id)
-    discard selectSceneById(change.scenes[0].id.string)
+    if change.show:
+      discard selectSceneById(change.scenes[0].id.string)
   elif change.back.len > 0:
     discard selectSceneById(change.back)
   host.renderRequested = true

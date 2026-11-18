@@ -7,7 +7,7 @@
       "refreshInterval": 0.03,
       "backgroundColor": "#070a18",
       "windowSize": "800x600",
-      "category": "Fun & comics",
+      "category": "Games",
       "icon": "M12 2a4 4 0 0 0-4 4v2h8V6a4 4 0 0 0-4-4zM6 9v4h12V9zm1 5-3 6H2v2h5v-2H6l2.2-4.4zm10 0-1.2 1.6L18 20h-1v2h5v-2h-2zm-7 1v2h4v-2z"
     },
     "fields": [

@@ -1,5 +1,6 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { sceneNeeds } from "../../../../../frontend/src/utils/sceneNeeds";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { isDesktopLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
 import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
@@ -7,7 +8,12 @@ import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
-import { categorySlugForTitle, normalizeCategory } from "./categories";
+import {
+  categorySlugForTitle,
+  isLayoutCategory,
+  layoutCategorySlug,
+  normalizeCategory,
+} from "./categories";
 import { hasPhotoShareLink } from "./photos/share-links-in-scenes";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
@@ -178,6 +184,19 @@ export function listingIconOf(scenes: unknown): string | null {
 
 export function detectRiskFlags(scenes: unknown): string[] {
   return sceneAccessFlags(scenes);
+}
+
+// The topic a scene names itself by title, never a layout's shelf: a scene
+// that says "Desktop layouts" is no desktop.
+function sceneTopicCategory(title: unknown): string | undefined {
+  const slug = categorySlugForTitle(title);
+  return slug && !isLayoutCategory(slug) ? slug : undefined;
+}
+
+// What the scene needs of a frame: a fast screen, touch, keys, a Linux frame
+// (docs/scene-store.md "What a scene needs"; frontend/src/utils/sceneNeeds.ts).
+export function detectSceneNeeds(scenes: unknown, riskFlags: readonly string[]): string[] {
+  return sceneNeeds(scenes, riskFlags);
 }
 
 // The app keywords configured in a scene's node graph (e.g. "data/openWeather",
@@ -467,9 +486,12 @@ export type ValidatedSceneZip = {
   isLayout: boolean;
   isDesktop: boolean;
   // The store category the scene names itself: its settings.category, when
-  // that is one of the store's titles (a version written files the scene
-  // under it, store-version-write.ts). Undefined otherwise.
+  // that is one of the store's titles for its kind (a version written files
+  // the scene under it, store-version-write.ts). A layout's is always its
+  // kind's shelf, whatever it says (categories.ts). Undefined otherwise.
   sceneCategory: string | undefined;
+  // What it needs of a frame (sceneNeeds.ts): `fast`, `touch`, `keys`, `linux`.
+  needs: string[];
   // The listing's icon (docs/scene-icons.md): the main scene's
   // `settings.icon` (the scene a pack starts on, as for `isLayout`), through
   // the SPA's and the runtime's rule; null when it has none or it is no icon.
@@ -567,9 +589,12 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
       imageWidth: dimension(record.imageWidth),
       isLayout: isLayoutScene(main),
       isDesktop: isDesktopLayout(main),
-      sceneCategory: categorySlugForTitle(main?.settings?.category),
+      sceneCategory: isLayoutScene(main)
+        ? layoutCategorySlug(isDesktopLayout(main))
+        : sceneTopicCategory(main?.settings?.category),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),
+      needs: detectSceneNeeds(scenes, detectRiskFlags(scenes)),
       manifestDescription:
         typeof record.description === "string" && record.description.trim()
           ? record.description.trim().slice(0, 2000)

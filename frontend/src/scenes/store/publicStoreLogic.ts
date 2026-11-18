@@ -6,21 +6,27 @@ import { repositoriesModel } from '../../models/repositoriesModel'
 import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import {
+  storeFitOf,
+  storeKindCountsOf,
+  storeKindFromRoute,
   storeOriginOf,
   storeShelfCountsOf,
   storeShelvesOf,
   storeTemplatesOf,
+  type StoreFit,
+  type StoreKindCounts,
   type StoreShelfCount,
   type StoreShelfGroup,
 } from './storeCatalog'
 import { storeSortOf, type StoreSort } from '../../utils/storeSort'
+import type { StoreKind } from '../../utils/storeCategories'
 
 // The signed-out store front (the cloud's /store and the scenes host's
 // root). Deliberately lean: it reads the public store index through
 // repositoriesModel and nothing else — the workspace's own logics load
 // account-scoped routes, which apiFetch turns into a trip to /login for a
 // visitor without a session. Search is its own field here (there is no
-// shell search box), the category comes from the URL.
+// shell search box), the category and the Scenes | Layouts side come from the URL.
 
 const STALE_AFTER_MS = 60_000
 
@@ -29,7 +35,11 @@ export interface publicStoreLogicValues {
   repositories: RepositoryType[] // repositoriesModel
   repositoriesLoading: boolean // repositoriesModel
   category: string | null
+  routeKind: string | null
   search: string
+  storeFit: StoreFit
+  storeKind: StoreKind
+  storeKindCounts: StoreKindCounts
   storeOrigin: string
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
@@ -45,11 +55,18 @@ export interface publicStoreLogicActions {
   loadRepositoriesIfStale: (maxAgeMs: number) => {
     maxAgeMs: number
   } // repositoriesModel
-  setRoute: (category: string | null) => {
+  setRoute: (
+    category: string | null,
+    kind: string | null
+  ) => {
     category: string | null
+    kind: string | null
   }
   setSearch: (search: string) => {
     search: string
+  }
+  setStoreFit: (fit: StoreFit) => {
+    fit: StoreFit
   }
   setStoreSort: (sort: StoreSort) => {
     sort: StoreSort
@@ -65,12 +82,16 @@ export interface publicStoreLogicMeta {
     storeTemplates: (repositories: RepositoryType[]) => TemplateType[]
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
-    storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
+    storeKind: (category: string | null, routeKind: string | null) => StoreKind
+    storeKindCounts: (storeTemplates: TemplateType[]) => StoreKindCounts
+    storeShelfCounts: (storeTemplates: TemplateType[], storeKind: StoreKind) => StoreShelfCount[]
     storeShelves: (
       storeTemplates: TemplateType[],
       search: string,
       category: string | null,
-      storeSort: StoreSort
+      storeSort: StoreSort,
+      storeKind: StoreKind,
+      storeFit: StoreFit
     ) => StoreShelfGroup[]
   }
 }
@@ -87,13 +108,16 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
   actions({
     setSearch: (search: string) => ({ search }),
     setStoreSort: (sort: StoreSort) => ({ sort }),
-    setRoute: (category: string | null) => ({ category }),
+    setStoreFit: (fit: StoreFit) => ({ fit }),
+    setRoute: (category: string | null, kind: string | null) => ({ category, kind }),
     setVisibleShelf: (slug: string | null) => ({ slug }),
   }),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
-    storeSort: ['popular' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
+    storeSort: ['newest' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
+    storeFit: ['any' as StoreFit, { setStoreFit: (_, { fit }) => storeFitOf(fit) }],
     category: [null as string | null, { setRoute: (_, { category }) => category || null }],
+    routeKind: [null as string | null, { setRoute: (_, { kind }) => kind || null }],
     visibleShelf: [
       null as string | null,
       {
@@ -109,19 +133,37 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
     ],
     storeOrigin: [(s) => [s.storeTemplates], (storeTemplates: TemplateType[]): string => storeOriginOf(storeTemplates)],
     storeScenesCount: [(s) => [s.storeTemplates], (storeTemplates: TemplateType[]): number => storeTemplates.length],
-    storeShelfCounts: [
+    storeKind: [
+      (s) => [s.category, s.routeKind],
+      (category: string | null, routeKind: string | null): StoreKind => storeKindFromRoute(routeKind, category),
+    ],
+    storeKindCounts: [
       (s) => [s.storeTemplates],
-      (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
+      (storeTemplates: TemplateType[]): StoreKindCounts => storeKindCountsOf(storeTemplates),
+    ],
+    storeShelfCounts: [
+      (s) => [s.storeTemplates, s.storeKind],
+      (storeTemplates: TemplateType[], storeKind: StoreKind): StoreShelfCount[] =>
+        storeShelfCountsOf(storeTemplates, storeKind),
     ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category, s.storeSort],
-      (storeTemplates: TemplateType[], search: string, category: string | null, sort: StoreSort): StoreShelfGroup[] =>
-        storeShelvesOf(storeTemplates, { search, category, sort }),
+      (s) => [s.storeTemplates, s.search, s.category, s.storeSort, s.storeKind, s.storeFit],
+      (
+        storeTemplates: TemplateType[],
+        search: string,
+        category: string | null,
+        sort: StoreSort,
+        kind: StoreKind,
+        fit: StoreFit
+      ): StoreShelfGroup[] => storeShelvesOf(storeTemplates, { search, category, sort, kind, fit }),
     ],
   }),
   urlToAction(({ actions }) => {
     const read = (_: unknown, search: Record<string, unknown>) =>
-      actions.setRoute(typeof search.category === 'string' ? search.category : null)
+      actions.setRoute(
+        typeof search.category === 'string' ? search.category : null,
+        typeof search.kind === 'string' ? search.kind : null
+      )
     return { [urls.scenes()]: read, [urls.store()]: read, '/': read }
   }),
   afterMount(({ actions }) => {

@@ -1,6 +1,6 @@
 {
   "name": "Chart",
-  "description": "Render a line, bar or area chart from JSON data.",
+  "description": "A line, bar or area chart from JSON data.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

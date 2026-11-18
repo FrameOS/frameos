@@ -30,6 +30,7 @@ type
     ## has and show the first (spcShow), or drop `dropIds` and go back to
     ## `back` (spcDiscard; a new preview also drops the old one first).
     kind*: StorePreviewChangeKind
+    show*: bool ## spcShow: switch to the first; false keeps the scene showing (a layout tried)
     scenes*: seq[FrameSceneInput]
     dropIds*: seq[string]
     back*: string
@@ -71,7 +72,7 @@ proc storePreviewRead*(asker: string): string {.nimcall, gcsafe, raises: [].} =
     except CatchableError:
       result = ""
 
-proc preview(asker, store, name: string) =
+proc preview(asker, store, name: string, show: bool) =
   if not isStoreId(store):
     lastError = "invalid_scene"
     return
@@ -88,7 +89,7 @@ proc preview(asker, store, name: string) =
     return
   # Going back from a preview of a preview is going back to the store.
   let back = if previewIds.len > 0 and previewBack.len > 0: previewBack else: asker
-  pending = StorePreviewChange(kind: spcShow, scenes: scenes, dropIds: previewIds, back: back)
+  pending = StorePreviewChange(kind: spcShow, show: show, scenes: scenes, dropIds: previewIds, back: back)
   previewIds = @[]
   for scene in scenes:
     previewIds.add(scene.id.string)
@@ -115,7 +116,7 @@ proc storePreviewAction*(asker, action, args: string) {.nimcall, gcsafe, raises:
     try:
       let given = parseJson(if args.len > 0: args else: "{}")
       case action
-      of "preview": preview(asker, given{"store"}.getStr(), given{"name"}.getStr())
+      of "preview": preview(asker, given{"store"}.getStr(), given{"name"}.getStr(), given{"show"}.getBool(true))
       of "discard": discardPreview()
       of "install", "update", "remove": lastError = "preview_only"
       else: discard

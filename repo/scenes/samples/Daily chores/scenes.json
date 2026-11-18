@@ -3,7 +3,7 @@
     "id": "daily-chores",
     "name": "Daily chores",
     "settings": {
-      "category": "Tools & utilities",
+      "category": "Notes & tools",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f4f1ea",

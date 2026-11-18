@@ -107,7 +107,8 @@ describe("scene categories", () => {
     const scene = sceneCategoryOptions(undefined, false).map((option) => option.value);
     expect(scene[0]).toBe("");
     expect(scene).toContain("Photos");
-    expect(scene).toContain("Real time");
+    expect(scene).toContain("Clocks & time");
+    expect(scene).toContain("Games");
     expect(scene).not.toContain("Desktop layouts");
     expect(sceneCategoryOptions(undefined, true).map((option) => option.value)).toEqual([
       "",

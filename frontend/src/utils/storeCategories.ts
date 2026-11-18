@@ -11,25 +11,39 @@
 export interface StoreCategoryShelf {
   slug: string
   title: string
+  /** What the shelf holds: scenes, or layouts (which the store front shows apart, under Layouts). */
+  kind: StoreKind
 }
 
+/** The store front's first split: scenes, and the layouts that go around them. */
+export type StoreKind = 'scene' | 'layout'
+
 export const storeCategoryShelves: StoreCategoryShelf[] = [
-  { slug: 'photos', title: 'Photos' },
-  { slug: 'art', title: 'Art & galleries' },
-  { slug: 'calendar', title: 'Calendars & agendas' },
-  { slug: 'weather', title: 'Weather' },
-  { slug: 'ai', title: 'AI & generative' },
-  { slug: 'dashboards', title: 'Data & dashboards' },
-  { slug: 'fun', title: 'Fun & comics' },
-  { slug: 'realtime', title: 'Real time' },
-  { slug: 'desktops', title: 'Desktop layouts' },
-  { slug: 'layouts', title: 'Full screen layouts' },
-  { slug: 'utilities', title: 'Tools & utilities' },
-  { slug: 'demos', title: 'Demos & examples' },
+  { slug: 'photos', title: 'Photos', kind: 'scene' },
+  { slug: 'art', title: 'Art & galleries', kind: 'scene' },
+  { slug: 'clocks', title: 'Clocks & time', kind: 'scene' },
+  { slug: 'calendar', title: 'Calendars & agendas', kind: 'scene' },
+  { slug: 'weather', title: 'Weather', kind: 'scene' },
+  { slug: 'dashboards', title: 'Home & dashboards', kind: 'scene' },
+  { slug: 'games', title: 'Games', kind: 'scene' },
+  { slug: 'fun', title: 'Fun & animations', kind: 'scene' },
+  { slug: 'utilities', title: 'Notes & tools', kind: 'scene' },
+  { slug: 'ai', title: 'AI & generative', kind: 'scene' },
+  { slug: 'demos', title: 'Demos & examples', kind: 'scene' },
+  { slug: 'desktops', title: 'Desktop layouts', kind: 'layout' },
+  { slug: 'layouts', title: 'Full screen layouts', kind: 'layout' },
 ]
 
+/** The store's kind of a template: a layout's shelf says so, and so does the template itself. */
+export function storeKindOf(template: { category?: string | null; isLayout?: boolean | null }): StoreKind {
+  if (template.isLayout === true) {
+    return 'layout'
+  }
+  return storeShelfForCategory(template.category).kind
+}
+
 /** Scenes without a (known) category land on this shelf, after the others. */
-export const OTHER_STORE_CATEGORY: StoreCategoryShelf = { slug: 'other', title: 'Other scenes' }
+export const OTHER_STORE_CATEGORY: StoreCategoryShelf = { slug: 'other', title: 'Other scenes', kind: 'scene' }
 
 const shelfBySlug = new Map(storeCategoryShelves.map((shelf) => [shelf.slug, shelf]))
 

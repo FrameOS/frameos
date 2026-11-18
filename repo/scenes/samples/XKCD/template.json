@@ -1,6 +1,6 @@
 {
   "name": "XKCD",
-  "description": "Everyone's favorite webcomic",
+  "description": "The newest strip of everyone's favorite webcomic, from its feed.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 1304,

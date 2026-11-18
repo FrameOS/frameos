@@ -1,6 +1,6 @@
 {
   "name": "MiniGPT",
-  "description": "Ask GPT a question, see the answer.",
+  "description": "Ask GPT a question and see the answer on the frame.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 480,

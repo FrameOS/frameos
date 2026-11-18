@@ -8,16 +8,17 @@ public enum StoreCategories {
     public static let shelves: [(slug: String, title: String)] = [
         ("photos", "Photos"),
         ("art", "Art & galleries"),
+        ("clocks", "Clocks & time"),
         ("calendar", "Calendars & agendas"),
         ("weather", "Weather"),
+        ("dashboards", "Home & dashboards"),
+        ("games", "Games"),
+        ("fun", "Fun & animations"),
+        ("utilities", "Notes & tools"),
         ("ai", "AI & generative"),
-        ("dashboards", "Data & dashboards"),
-        ("fun", "Fun & comics"),
-        ("realtime", "Real time"),
+        ("demos", "Demos & examples"),
         ("desktops", "Desktop layouts"),
         ("layouts", "Full screen layouts"),
-        ("utilities", "Tools & utilities"),
-        ("demos", "Demos & examples"),
     ]
 
     /// Scenes without a (known) category land here, after the others.

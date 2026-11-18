@@ -14,16 +14,22 @@ import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { workspaceLogic } from '../workspace/workspaceLogic'
 import { scenesLibraryPageIsAvailable, type ScenesLibraryPage } from '../workspace/workspaceSurfaces'
 import {
+  storeFitOf,
+  storeKindCountsOf,
+  storeKindFromRoute,
   storeOriginOf,
   storeShelfCountsOf,
   storeShelvesOf,
   storeTemplatesOf,
   templateMatchesSearch,
   trackedStoreRepositoryIds,
+  type StoreFit,
+  type StoreKindCounts,
   type StoreShelfCount,
   type StoreShelfGroup,
 } from './storeCatalog'
 import { storeSortOf, type StoreSort } from '../../utils/storeSort'
+import type { StoreKind } from '../../utils/storeCategories'
 
 // The scenes library behind the Scenes rail button: the public store, the
 // account's private cloud scenes and (on a backend) its local saved scenes.
@@ -56,6 +62,10 @@ export interface scenesLibraryLogicValues {
   frame: string | null
   localPageTemplates: TemplateType[]
   page: ScenesLibraryPage
+  routeKind: string | null
+  storeFit: StoreFit
+  storeKind: StoreKind
+  storeKindCounts: StoreKindCounts
   storeOrigin: string
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
@@ -103,12 +113,17 @@ export interface scenesLibraryLogicActions {
     page: string | null,
     category: string | null,
     visibility: string | null,
-    frame: string | null
+    frame: string | null,
+    kind?: string | null
   ) => {
     category: string | null
     frame: string | null
+    kind: string | null
     page: string | null
     visibility: string | null
+  }
+  setStoreFit: (fit: StoreFit) => {
+    fit: StoreFit
   }
   setStoreSort: (sort: StoreSort) => {
     sort: StoreSort
@@ -130,12 +145,16 @@ export interface scenesLibraryLogicMeta {
     storeTemplates: (repositories: RepositoryType[]) => TemplateType[]
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
-    storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
+    storeKind: (category: string | null, routeKind: string | null) => StoreKind
+    storeKindCounts: (storeTemplates: TemplateType[]) => StoreKindCounts
+    storeShelfCounts: (storeTemplates: TemplateType[], storeKind: StoreKind) => StoreShelfCount[]
     storeShelves: (
       storeTemplates: TemplateType[],
       search: string,
       category: string | null,
-      storeSort: StoreSort
+      storeSort: StoreSort,
+      storeKind: StoreKind,
+      storeFit: StoreFit
     ) => StoreShelfGroup[]
     drivePageTemplates: (driveTemplates: TemplateType[], search: string) => TemplateType[]
     localPageTemplates: (templates: TemplateType[], search: string) => TemplateType[]
@@ -183,13 +202,22 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
   })),
   actions({
     setStoreSort: (sort: StoreSort) => ({ sort }),
+    /** Which screens the store page lists scenes for. */
+    setStoreFit: (fit: StoreFit) => ({ fit }),
     /** The store page's Refresh: the catalog as the store has it now. */
     refreshStore: true,
-    setRoute: (page: string | null, category: string | null, visibility: string | null, frame: string | null) => ({
+    setRoute: (
+      page: string | null,
+      category: string | null,
+      visibility: string | null,
+      frame: string | null,
+      kind: string | null = null
+    ) => ({
       page,
       category,
       visibility,
       frame,
+      kind,
     }),
     /** A scene zip: to the account's private scenes on the cloud, to the
      * local saved scenes on a backend. */
@@ -201,7 +229,10 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
   }),
   reducers({
     // The order of the store's shelves, kept for the session.
-    storeSort: ['popular' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
+    storeSort: ['newest' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
+    storeFit: ['any' as StoreFit, { setStoreFit: (_, { fit }) => storeFitOf(fit) }],
+    // The store's Layouts side (?kind=layouts); a category names its own.
+    routeKind: [null as string | null, { setRoute: (_, { kind }) => kind || null }],
     page: [
       'store' as ScenesLibraryPage,
       {
@@ -261,14 +292,29 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     // page there): a self-hosted provider's host, or scenes.frameos.net.
     storeOrigin: [(s) => [s.storeTemplates], (storeTemplates: TemplateType[]): string => storeOriginOf(storeTemplates)],
     storeScenesCount: [(s) => [s.storeTemplates], (storeTemplates: TemplateType[]): number => storeTemplates.length],
-    storeShelfCounts: [
+    storeKind: [
+      (s) => [s.category, s.routeKind],
+      (category: string | null, routeKind: string | null): StoreKind => storeKindFromRoute(routeKind, category),
+    ],
+    storeKindCounts: [
       (s) => [s.storeTemplates],
-      (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
+      (storeTemplates: TemplateType[]): StoreKindCounts => storeKindCountsOf(storeTemplates),
+    ],
+    storeShelfCounts: [
+      (s) => [s.storeTemplates, s.storeKind],
+      (storeTemplates: TemplateType[], storeKind: StoreKind): StoreShelfCount[] =>
+        storeShelfCountsOf(storeTemplates, storeKind),
     ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category, s.storeSort],
-      (storeTemplates: TemplateType[], search: string, category: string | null, sort: StoreSort): StoreShelfGroup[] =>
-        storeShelvesOf(storeTemplates, { search, category, sort }),
+      (s) => [s.storeTemplates, s.search, s.category, s.storeSort, s.storeKind, s.storeFit],
+      (
+        storeTemplates: TemplateType[],
+        search: string,
+        category: string | null,
+        sort: StoreSort,
+        kind: StoreKind,
+        fit: StoreFit
+      ): StoreShelfGroup[] => storeShelvesOf(storeTemplates, { search, category, sort, kind, fit }),
     ],
     drivePageTemplates: [
       (s) => [s.driveTemplates, s.search],
@@ -336,7 +382,8 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
         typeof search.visibility === 'string' ? search.visibility : null,
         // kea-router turns a numeric query value into a number: a backend
         // frame id arrives as 16, not '16'.
-        typeof search.frame === 'string' || typeof search.frame === 'number' ? String(search.frame) : null
+        typeof search.frame === 'string' || typeof search.frame === 'number' ? String(search.frame) : null,
+        typeof search.kind === 'string' ? search.kind : null
       )
     },
   })),

@@ -1,9 +1,12 @@
-import { storeCategories } from "./categories";
+import { sceneCategories } from "./categories";
 import { sanitizeTagCandidates } from "./store";
 
 // Automatic categorization of published scenes: one taxonomy category plus a
-// few browse tags, picked by an LLM from the scene's listing text and the app
-// keywords in its node graph. Reuses the OPENAI_API_KEY that already powers
+// few browse tags. Rules first (ruleCategory / ruleTags below: what the node
+// graph and the name say for sure, free and the same every time), then an
+// LLM for what the rules cannot tell, from the scene's listing text and the
+// app keywords in its node graph. A layout never gets here: its shelf is its
+// kind (categories.ts). Reuses the OPENAI_API_KEY that already powers
 // moderation (moderation.ts). Unlike moderation this never gates anything —
 // no key, a timeout, or garbage output all just mean "no suggestion"
 // (undefined), and the scene publishes uncategorized.
@@ -60,7 +63,7 @@ const systemPrompt = [
   "on a schedule.",
   "",
   "Pick exactly one category slug that best describes what the scene shows:",
-  ...storeCategories.map(
+  ...sceneCategories.map(
     (category) => `- ${category.slug}: ${category.hint}`,
   ),
   "",
@@ -107,7 +110,7 @@ export async function classifyStoreScene(input: {
           additionalProperties: false,
           properties: {
             category: {
-              enum: storeCategories.map((category) => category.slug),
+              enum: sceneCategories.map((category) => category.slug),
               type: "string",
             },
             tags: {
@@ -155,7 +158,7 @@ export async function classifyStoreScene(input: {
       };
       const category =
         typeof parsed.category === "string" &&
-        storeCategories.some((entry) => entry.slug === parsed.category)
+        sceneCategories.some((entry) => entry.slug === parsed.category)
           ? parsed.category
           : undefined;
       if (!category) {
@@ -175,4 +178,109 @@ export async function classifyStoreScene(input: {
   }
 
   return undefined;
+}
+
+// What the rules read: the scene's name and description, the app keywords in
+// its node graph (extractAppKeywords) and what it needs of a frame
+// (sceneNeeds.ts).
+export type SceneFacts = {
+  name: string;
+  description?: string | null | undefined;
+  appKeywords?: readonly string[] | undefined;
+  needs?: readonly string[] | undefined;
+};
+
+const gameWords =
+  /\b(game|games|puzzle|solitaire|sudoku|chess|checkers|draughts|reversi|othello|gomoku|minesweeper|mahjong|blackjack|poker|tetris|snake|breakout|pong|2048|connect four|crossword|wordle|word guess|arcade|shoot-?em-?up|racer|lander)\b/i;
+const clockWords = /\b(clock|clocks|time|timer|pomodoro|countdown|stopwatch|year progress|memento mori)\b/i;
+const demoWords = /\b(demo|made-up|made up|test pattern|test chart|calibration|sample data|example)\b/i;
+
+function keywordMatches(keywords: readonly string[], pattern: RegExp): boolean {
+  return keywords.some((keyword) => pattern.test(keyword));
+}
+
+/**
+ * The category the rules are sure of, or undefined to ask the model. Kept
+ * narrow on purpose: a wrong rule files every scene like it wrongly, where
+ * the model is wrong one scene at a time.
+ */
+export function ruleCategory(facts: SceneFacts): string | undefined {
+  const keywords = (facts.appKeywords ?? []).map((keyword) => keyword.toLowerCase());
+  const name = facts.name.trim();
+  const text = `${name} ${facts.description ?? ""}`;
+  if (keywordMatches(keywords, /openai|anthropic|gemini|\bllm\b|dall-?e/)) {
+    return "ai";
+  }
+  if (demoWords.test(text)) {
+    return "demos";
+  }
+  if (gameWords.test(name)) {
+    return "games";
+  }
+  if (keywordMatches(keywords, /googlephotos|immich|unsplash|localimage|photoalbum|wikimedia/)) {
+    return "photos";
+  }
+  if (keywordMatches(keywords, /ical|calendar|agenda/)) {
+    return "calendar";
+  }
+  if (keywordMatches(keywords, /weather|openmeteo|open-meteo/) && /weather|forecast/i.test(text)) {
+    return "weather";
+  }
+  if (clockWords.test(name)) {
+    return "clocks";
+  }
+  return undefined;
+}
+
+// Services and hardware an app keyword names, as a browse tag.
+const keywordTags: [RegExp, string][] = [
+  [/openai/, "openai"],
+  [/immich/, "immich"],
+  [/unsplash/, "unsplash"],
+  [/googlephotos/, "google-photos"],
+  [/homeassistant|haremote/, "home-assistant"],
+  [/homey/, "homey"],
+  [/ical/, "ical"],
+  [/weather|openmeteo/, "weather"],
+  [/chromium/, "chromium"],
+  [/rstp|rtsp/, "rtsp"],
+  [/map|osm/, "map"],
+  [/chart/, "charts"],
+  [/localimage/, "sd-card"],
+];
+
+/**
+ * Tags from what the scene is and does, for a scene published without any:
+ * the store never lists a scene its search can only find by name. What it
+ * needs comes first (touchscreen, lcd, keyboard), then the services its apps
+ * use, then its category; at most five, never none.
+ */
+export function ruleTags(facts: SceneFacts & { category?: string | null | undefined }): string[] {
+  const needs = facts.needs ?? [];
+  const keywords = (facts.appKeywords ?? []).map((keyword) => keyword.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  const tags: string[] = [];
+  if (needs.includes("touch")) {
+    tags.push("touchscreen");
+  }
+  if (needs.includes("fast")) {
+    tags.push("lcd");
+  } else if (!needs.includes("linux")) {
+    tags.push("e-ink");
+  }
+  if (needs.includes("keys") && !needs.includes("touch")) {
+    tags.push("buttons");
+  }
+  if (needs.includes("linux")) {
+    tags.push("raspberry-pi");
+  }
+  for (const [pattern, tag] of keywordTags) {
+    if (keywords.some((keyword) => pattern.test(keyword))) {
+      tags.push(tag);
+    }
+  }
+  if (facts.category) {
+    tags.push(facts.category);
+  }
+  const sanitized = sanitizeTagCandidates(tags);
+  return sanitized.length > 0 ? sanitized : ["scene"];
 }

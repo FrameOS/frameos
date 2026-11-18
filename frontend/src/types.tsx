@@ -817,6 +817,8 @@ export interface TemplateType {
   icon?: string
   /** Store category slug (FrameOS Cloud store scenes); see utils/storeCategories. */
   category?: string
+  /** What the scene needs of a frame, worked out by the cloud store at publish (utils/sceneNeeds.ts). */
+  needs?: string[]
   /** Free-form tags (FrameOS Cloud store scenes). */
   tags?: string[]
   /** Store scene uuid ("Private cloud scenes" entries). */
@@ -1329,7 +1331,7 @@ export interface FrameSceneSettings {
   /** Its icon: one SVG path in a 0 0 24 24 box, filled with the color around it
    * (utils/sceneIcon.ts, docs/scene-icons.md); unset = each list's own placeholder. */
   icon?: string
-  /** Its category by its name, "Photos" or "Real time", picked from the store's titles
+  /** Its category by its name, "Photos" or "Clocks & time", picked from the store's titles
    * (utils/sceneCategory.ts): a desktop layout groups its list of scenes by it. */
   category?: string
 }

@@ -257,7 +257,9 @@ proc work(job: var Job, error, done: var string) =
       # This frame's own: a frame with no plane, or a backend's preview.
       case job.action
       of "install", "preview", "update":
-        (error, previewId) = installHere(job.store, job.action == "preview" or (job.action == "install" and job.show))
+        # Shown unless the store asks to stay (`show: false`: an install
+        # from the shelf, a layout tried, docs/scene-store.md).
+        (error, previewId) = installHere(job.store, job.show and job.action in ["preview", "install"])
       of "remove":
         error = removeHere(job.store, job.id, "")
       of "discard":

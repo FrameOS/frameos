@@ -10,14 +10,14 @@ import Testing
         let start = try #require(source.range(of: "export const storeCategoryShelves: StoreCategoryShelf[] = ["))
         let end = try #require(source.range(of: "\n]", range: start.upperBound..<source.endIndex))
         let text = String(source[start.upperBound..<end.lowerBound])
-        let pattern = try NSRegularExpression(pattern: #"\{\s*slug:\s*'([^']+)',\s*title:\s*'([^']+)'\s*\}"#)
+        let pattern = try NSRegularExpression(pattern: #"\{\s*slug:\s*'([^']+)',\s*title:\s*'([^']+)'(?:,\s*kind:\s*'[^']+')?\s*\}"#)
         let spa = pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)).map { match in
             (String(text[Range(match.range(at: 1), in: text)!]), String(text[Range(match.range(at: 2), in: text)!]))
         }
         #expect(spa.count >= 10)
         #expect(spa.map(\.0) == StoreCategories.shelves.map(\.slug))
         #expect(spa.map(\.1) == StoreCategories.shelves.map(\.title))
-        #expect(source.contains("{ slug: '\(StoreCategories.other.slug)', title: '\(StoreCategories.other.title)' }"))
+        #expect(source.contains("{ slug: '\(StoreCategories.other.slug)', title: '\(StoreCategories.other.title)', kind: 'scene' }"))
     }
 
     @Test func unknownCategoriesGoToOther() {

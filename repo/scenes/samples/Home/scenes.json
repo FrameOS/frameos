@@ -3,7 +3,7 @@
     "id": "home",
     "name": "Home",
     "settings": {
-      "category": "Real time",
+      "category": "Demos & examples",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#0f172a",

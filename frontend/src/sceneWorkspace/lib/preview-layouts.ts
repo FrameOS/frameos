@@ -8,6 +8,7 @@
 // the preview, over what each scene gives the layout it wears; this browser
 // remembers them per layout.
 import type { LayoutStarter } from "../../generated/layoutStarters";
+import type { FrameScene as RuntimeScene } from "../../types";
 import type { FrameScene } from "../../types";
 import {
   currentSceneLayout,
@@ -47,6 +48,63 @@ export function loadLayoutStarters(): Promise<readonly LayoutStarter[]> {
     },
   );
   return startersLoad;
+}
+
+let samplesLoad: Promise<readonly RuntimeScene[]> | null = null;
+
+/** The sample scenes a layout is previewed around (a clock first), from the same chunk. */
+export function loadLayoutPreviewScenes(): Promise<readonly RuntimeScene[]> {
+  samplesLoad ??= import("../../generated/layoutStarters").then(
+    (module) => module.LAYOUT_PREVIEW_SCENES,
+    () => {
+      samplesLoad = null;
+      return [];
+    },
+  );
+  return samplesLoad;
+}
+
+/**
+ * What the preview runs when the scene being edited is a layout (docs/
+ * scene-layouts.md "In the preview"): the layout around the scenes beside
+ * it, every one of them wearing it with the settings tried here, or around
+ * the samples when it has none (a layout's store page, a starter on its own).
+ * A layout run on its own has nothing in its `<yield />`. `start` is the
+ * scene to open on: the first that wears it. A desktop opens it in a window.
+ */
+export function scenesAroundEditedLayout<T extends PreviewLayoutScene>(
+  scenes: readonly T[],
+  layoutId: string,
+  samples: readonly PreviewLayoutScene[],
+  settings: PreviewLayoutSettings = {},
+): { scenes: T[]; start: string | null } {
+  const own = scenes.filter((scene) => !isPreviewLayout(scene));
+  const held = new Set(scenes.map((scene) => scene.id));
+  const added = own.length > 0 ? [] : (samples.filter((sample) => !held.has(sample.id)) as unknown as T[]);
+  const all = [...scenes, ...added];
+  const worn = withPreviewLayoutSettings(
+    withLayoutOnEveryScene(asFrameScenes(all), layoutId) as unknown as T[],
+    settings,
+  );
+  const start = worn.find((scene) => !isPreviewLayout(scene))?.id ?? null;
+  return { scenes: worn, start };
+}
+
+/** Whether the layout with this id among `layouts` (or the scenes) runs scenes in windows. */
+export function previewLayoutIsDesktop(
+  scenes: readonly PreviewLayoutScene[],
+  layouts: readonly PreviewLayout[],
+  layoutId: string | null | undefined,
+): boolean {
+  if (!layoutId) {
+    return false;
+  }
+  const offered = layouts.find((layout) => layout.id === layoutId);
+  if (offered) {
+    return offered.desktop;
+  }
+  const scene = scenes.find((candidate) => candidate.id === layoutId);
+  return isDesktopLayout(scene as unknown as FrameScene | undefined);
 }
 
 function asFrameScenes(scenes: readonly PreviewLayoutScene[]): FrameScene[] {

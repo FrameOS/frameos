@@ -3,7 +3,7 @@
     "id": "game-2048",
     "name": "2048",
     "settings": {
-      "category": "Fun & comics",
+      "category": "Games",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#f6f1e9",

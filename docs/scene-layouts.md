@@ -51,22 +51,37 @@ layout", the layouts among the scenes it runs, then every starter not already
 among them (by id or name). Picking one makes every scene wear it, as a frame's
 active layout does, and runs a starter's scene beside them
 (`sceneWorkspace/lib/preview-layouts.ts`); nothing the editor holds changes. It
-starts on the layout the shown scene wears (a frame's scene keeps its own), is
-not offered while the scene shown is a layout itself, and the starters load with
-the panel rather than the page. While a layout is shown, Settings beside the
+starts on the layout the shown scene wears (a frame's scene keeps its own), and
+the starters load with the panel rather than the page. A desktop chosen, worn or
+edited runs the preview windowed (`windowed`, as the playground and a Pi do), so
+its scenes open side by side; anything else runs one scene at a time.
+
+**Editing a layout.** A layout run on its own has nothing in its `<yield />`.
+When the scene being edited is a layout, the preview runs it around the scenes
+beside it, each wearing it with the Settings tried here, and opens on the first
+of them; a layout with no scenes beside it (its store page, a starter on its
+own) is run around samples (`LAYOUT_PREVIEW_SCENES` in the generated
+`layoutStarters.ts`: Clock, Weather demo, Calculator). The Layout select shows
+the layout and is not changed there; its Settings open its fields. A frame's
+Settings list each of its layouts under "Edit a layout", a link to the layout's
+own scene page (every way into editing a scene opens one of the workspace's
+pages). While a layout is shown, Settings beside the
 select opens its public fields (the preview's own form rows): each value goes
 over the `layout.state` the scenes give that layout, and the runtime boots again
 with it (a checkbox or a menu at once, typing after a pause). The values are the
 viewer's, kept in this browser by layout id (`frameos.preview.layoutSettings`,
 unless the workspace is told not to remember), never on a scene or a frame.
 
-**In the store.** Layouts have two shelves of their own
+**In the store.** Layouts are the store front's second side (Scenes |
+Layouts), with two shelves of their own
 (`cloud/apps/auth-web/src/lib/categories.ts`): Desktop layouts (`desktops`) and
-Full screen layouts (`layouts`). A scene published with a layout as the one it
-starts on goes on one of them without asking the classifier, Desktop layouts when
-it says `settings.desktop`, and an owner can still move it. A scene already on
-the store keeps the shelf it has: a layout that becomes a desktop later is moved
-by its owner.
+Full screen layouts (`layouts`). A layout is always on its kind's, whatever it
+or its owner states (`validateSceneZip`'s `sceneCategory`: Desktop layouts when
+it says `settings.desktop`), and a scene is never on one; the classifier never
+sees a layout. A layout's page previews it around the samples, windowed for a
+desktop (above). A frame's own Scene store lists them under a Layouts heading
+and tries one on the frame before it is kept (docs/scene-store.md "Trying a
+layout").
 
 **Safe mode.** A layout can leave a frame unusable, and the settings that would
 take it off are drawn inside it. Ten pulls down from the top edge of a touch
@@ -327,7 +342,7 @@ arrangement, so it has nothing to choose; `Commander` has its two panels.
 Be menu, `OS/2 Warp`'s Desktop menu and LaunchPad drawer, `Omarchy`'s menu, `Tiling`'s +) scrolls where it is longer than the screen, under a
 finger as under a wheel, and so does `BeOS`'s Deskbar with many windows open.
 The lists go by category: a scene's `settings.category`, its category by name
-("Photos", "Real time"; docs/scene-icons.md "Category"), reaches a layout as
+("Photos", "Clocks & time"; docs/scene-icons.md "Category"), reaches a layout as
 `category` on its entry of `app.frame.scenes`, and each list has a heading over
 each category, under that name, the categories by name whatever the case, and
 the scenes with none last as Other. Nothing maps a category: a name of the

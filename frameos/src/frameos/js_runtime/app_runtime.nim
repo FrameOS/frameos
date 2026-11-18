@@ -13,6 +13,7 @@ import frameos/utils/line_reader
 import frameos/utils/zip_entry
 import frameos/utils/base64_field
 import frameos/spool
+import frameos/layout_choice
 import lib/tz
 from chrono import findTimeZone, findDstChanges, valid
 import frameos/utils/app_images
@@ -549,21 +550,59 @@ proc jsDispatch(ctx: ptr JSContext, event: JSValue, payloadJson: JSValue): JSVal
 proc storeAsker(e: JsAppEvalEnv): string =
   if e == nil or e.owner.scene.isNil: "" else: e.owner.scene.id.string
 
+proc storeFacts(asker: string): string =
+  ## The host's facts, with the layout chosen on the frame (`layout`: "" for
+  ## each scene's own, "none", or a layout's id; layout_choice.nim) put in
+  ## front: the host's text is handed on as it is, never parsed here.
+  let read = sceneStoreRead
+  if read.isNil:
+    return ""
+  result = read(asker)
+  if result.len > 1 and result[0] == '{':
+    let rest = if result[1] == '}': "}" else: "," & result[1 .. ^1]
+    result = "{\"layout\":" & escapeJson(chosenLayout()) & rest
+
+when defined(testing):
+  proc sceneStoreFactsForTests*(asker: string): string = storeFacts(asker)
+
 proc jsStore(ctx: ptr JSContext): JSValue {.nimcall.} =
   ## `frameos.store()`: the scene store's facts as the host knows them now
   ## (scene_store_hooks.nim), as JSON text; "" (null in JS) with no host.
   let e = env(ctx)
-  let read = sceneStoreRead
-  nimStringToJS(ctx, if read.isNil or e == nil: "" else: read(storeAsker(e)))
+  nimStringToJS(ctx, if e == nil: "" else: storeFacts(storeAsker(e)))
+
+proc storeChooseLayout(asker, argsJson: string) =
+  ## The store's `layout {id}` (docs/scene-store.md "Trying a layout"): the
+  ## layout the frame's scenes wear, chosen on the frame as its settings page
+  ## chooses it ("" each scene's own). The frame's own to keep, so no host is
+  ## asked; the scene asking is shown again, wearing it, the way the page's
+  ## Back shows the scene it came from.
+  var id = ""
+  try:
+    id = parseJson(argsJson){"id"}.getStr()
+  except CatchableError:
+    return
+  if id == chosenLayout():
+    return
+  chooseLayout(id)
+  if asker.len > 0:
+    sendEvent("setCurrentScene", %*{"sceneId": asker}, eoScene)
 
 proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSValue {.nimcall.} =
   ## `frameos.storeAction(action, args)`: the host starts it and redraws the
-  ## scene when it is done; false with no host to ask.
+  ## scene when it is done; false with no host to ask. `layout` is no host's:
+  ## it is the frame's choice, made here while the store is offered at all.
   let e = env(ctx)
   let act = sceneStoreAction
   if act.isNil or e == nil:
     return nimBoolToJS(ctx, false)
-  act(storeAsker(e), toNimString(ctx, action), toNimString(ctx, argsJson))
+  let what = toNimString(ctx, action)
+  if what == "layout":
+    if storeFacts(storeAsker(e)).len == 0:
+      return nimBoolToJS(ctx, false)
+    storeChooseLayout(storeAsker(e), toNimString(ctx, argsJson))
+    return nimBoolToJS(ctx, true)
+  act(storeAsker(e), what, toNimString(ctx, argsJson))
   nimBoolToJS(ctx, true)
 
 proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.} =
