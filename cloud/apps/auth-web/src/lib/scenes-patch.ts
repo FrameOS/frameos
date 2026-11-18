@@ -30,8 +30,8 @@ export const esp32SceneStoreSlotsBefore = 32;
 export const esp32SceneStoreSlotsVersion = "2026.11.12";
 
 function versionParts(version: string | null | undefined): number[] | null {
-  const match = typeof version === "string" ? /^v?(\d+(?:\.\d+)*)/.exec(version.trim()) : null;
-  return match ? match[1].split(".").map(Number) : null;
+  const numbers = typeof version === "string" ? /^v?(\d+(?:\.\d+)*)/.exec(version.trim())?.[1] : undefined;
+  return numbers ? numbers.split(".").map(Number) : null;
 }
 
 /** The slot files of the scene store on a board running `frameosVersion`. */
