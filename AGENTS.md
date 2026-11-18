@@ -112,7 +112,12 @@
   of PSRAM: one scene running out of memory takes no other with it), and in a
   realm of its own in one shared runtime on an 8 MB board
   (`js_runtime/runtime.nim` `ensureSceneJs`); scenes without code share that
-  runtime's first context. The JS apps keep their own runtimes. What every
+  runtime's first context. A scene's JS apps run in that same context,
+  beside its program and each other (one QuickJS a scene, never one an app
+  node: 155 KB of PSRAM each on an ESP32), so a scene with JS apps counts as
+  one with code; each app is a module under its own prefix and an entry in
+  the app prelude's `__frameosApps` (`app_runtime.ensureReady`), and its
+  interpreter going is its scene's context going. What every
   program has in common is not in the program: it is the kit
   (`ProgramKit`), evaluated once per context (`programKit`; bytecode in the
   ESP32 image via `tools/prelude_bytecode.nim`) and handed to each program.

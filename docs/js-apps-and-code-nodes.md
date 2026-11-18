@@ -237,6 +237,14 @@ when its memory limit is set to one of the ESP32 boards or when it previews
 an ESP32 frame, and as a Pi otherwise. Try a new app both ways: one that keeps
 a counter in a module variable shows its first photo forever as an ESP32.
 
+That interpreter is the scene's, not the app's: a scene's JS apps run in one,
+beside its code nodes (one QuickJS a scene, where an app node used to cost an
+ESP32 about 155 KB of memory for its own). Each app's module scope is its own
+(its imports, its module-level variables; two nodes of the same app are two
+modules), but `globalThis` and the built-ins are shared: never keep a value on
+`globalThis` or change a built-in (`Array.prototype`, `JSON`, `Date`), or
+another app in the scene or a code node sees it. FrameOS 2026.11.12 and later.
+
 `remember` values are JSON, at most 512 KB per node on an ESP32. `remember`
 answers `false` when a value would not fit, and `null` forgets the key. The
 Google Photos app keeps its album's photo list and its position this way.
@@ -558,4 +566,5 @@ render allocates — not terse code:
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
 - A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.
+- A JS app keeps nothing on `globalThis` and changes no built-in: the scene's other apps and its code nodes share them.
 - An app's tests live in `app.test.ts` next to it (see "Testing an app") and run from the editor; they are not sent to an ESP32.

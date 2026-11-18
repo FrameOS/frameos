@@ -47,6 +47,27 @@ template onSceneJsStack*(scene: InterpretedFrameScene, body: untyped) =
     if sceneJsStack.len > 0 and sceneJsStack[^1] == scene:
       discard sceneJsStack.pop()
 
+proc sceneJsRunning*(scene: InterpretedFrameScene): bool =
+  ## The scene's program is running (its context can not be closed now).
+  scene in sceneJsStack
+
+proc noteSceneJsMidCall*(scene: InterpretedFrameScene) =
+  ## After an out-of-memory abort: a JS app of `scene` was mid-call in the
+  ## scene's context (app_runtime.abandonMidCallJsAppRuntimes), so that
+  ## context goes as a program's would (abandonMidCallSceneJs).
+  if scene notin sceneJsStack:
+    sceneJsStack.add(scene)
+
+var sceneJsClosing*: proc(rt: ptr JSRuntime, ctx: ptr JSContext) {.nimcall, raises: [].}
+  ## Set by app_runtime.nim: a scene's context is about to be freed or
+  ## abandoned (`ctx`), or a whole runtime with every context in it (`ctx`
+  ## nil), so the JS apps that ran there let go of what they held in it.
+  ## Nim state only: nothing may run in the context any more.
+
+proc closingSceneJs(rt: ptr JSRuntime, ctx: ptr JSContext) {.inline.} =
+  if not sceneJsClosing.isNil:
+    sceneJsClosing(rt, ctx)
+
 # Where a scene's program runs (scene_compiler.nim). A scene with code of its
 # own (a code node, an inline input, a cache expression) is kept apart from
 # every other scene:
@@ -62,6 +83,10 @@ template onSceneJsStack*(scene: InterpretedFrameScene, body: untyped) =
 #   runtime the programs share: what its code does to `globalThis` or
 #   `Array.prototype` no other scene sees, but the heap, the budget and an
 #   abort are shared. 40 KB.
+#
+# A scene's JS apps run in its context too, beside its program (one QuickJS
+# a scene, not one an app node: 155 KB of PSRAM each, docs/scene-compiler.md),
+# so a scene with JS apps counts as one with code.
 #
 # A scene without code runs its program, which the compiler wrote and nothing
 # untrusted is in, in one context of the shared runtime that all of them
@@ -93,7 +118,8 @@ var programKits: seq[tuple[runtime: ptr JSRuntime, context: ptr JSContext, kit: 
   ## Each program context's kit (scene_compiler.ProgramKit evaluated there
   ## once, `programKit`): what every program evaluated in it is handed.
 const ProgramsBudgetId = "frameos:scene-programs"
-  ## The heap budget the programs share (the JS apps keep their scene's).
+  ## The heap budget the programs share, the JS apps of a scene in a realm
+  ## included (a scene with a runtime of its own keeps its own budget).
 initLock(sceneJsLock)
 
 const sceneJsPrelude* = compactJs("""
@@ -315,11 +341,15 @@ proc jsChronoNow(ctx: ptr JSContext): JSValue {.nimcall.} =
   except CatchableError as e:
     raise newException(ValueError, "now failed: " & e.msg)
 
-proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst): string =
+proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst,
+    stringify: cstring = "__frameosStringify"): string =
+  ## `stringify`: the scene's (undefined is null) or the JS apps' own
+  ## `__frameosAppStringify` (undefined leaves the key out), which share a
+  ## context now.
   let globalObj = JS_GetGlobalObject(ctx)
   defer: JS_FreeValue(ctx, globalObj)
 
-  let stringifyFn = JS_GetPropertyStr(ctx, globalObj, "__frameosStringify")
+  let stringifyFn = JS_GetPropertyStr(ctx, globalObj, stringify)
   defer: JS_FreeValue(ctx, stringifyFn)
 
   if JS_IsFunction(ctx, stringifyFn) != 0:
@@ -336,7 +366,8 @@ proc stringifyJsValue*(ctx: ptr JSContext, val: JSValueConst): string =
     return toNimString(ctx, fallback)
   return "null"
 
-proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst): JsonNode =
+proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst,
+    stringify: cstring = "__frameosStringify"): JsonNode =
   if jsIsUndefined(val) or jsIsNull(val):
     return newJNull()
   if jsIsBool(val):
@@ -356,7 +387,7 @@ proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst): JsonNode =
   if jsIsString(val):
     return %*toNimString(ctx, val)
 
-  let jsonText = stringifyJsValue(ctx, val)
+  let jsonText = stringifyJsValue(ctx, val, stringify)
   try:
     return parseJson(jsonText)
   except CatchableError:
@@ -561,6 +592,7 @@ proc closeSceneJsLocked(scene: InterpretedFrameScene) =
   let live = scene.programJsLive
   dropProgram(scene)
   if live and scene.jsKind != sjShared:
+    closingSceneJs(scene.js.runtime, scene.js.context)
     clearJsSourceMaps(scene.js.context)
     freeProgramKit(scene.js.context)
     if scene.jsKind == sjRuntime:
@@ -672,7 +704,7 @@ proc programKit*(js: QuickJS): JSValue =
     result = loadProgramKit(js.context)
     programKits.add((js.runtime, js.context, result))
 
-proc setUpSceneContext(js: var QuickJS) =
+proc setUpSceneContext*(js: var QuickJS) =
   ## What every program's context has: the time helpers scene code calls by
   ## name, the prelude, the JSX factory in C (jsx_native.nim).
   js.registerFunction("parseTs", jsChronoParseTs)
@@ -710,7 +742,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     # What it had was in a runtime that is gone.
     scene.programReady = false
     reset(scene.programEntries)
-    let hasCode = not scene.program.isNil and scene.program.snippets.len > 0
+    let hasCode = scene.hasJsApps or (not scene.program.isNil and scene.program.snippets.len > 0)
     if hasCode and isolatedSceneRuntimes():
       scene.js = newQuickJS(sceneJsConfig(scene.frameConfig, scene.id.string))
       setUpSceneContext(scene.js)
@@ -743,6 +775,18 @@ proc cleanupSceneJs*(scene: InterpretedFrameScene) =
   withLock sceneJsLock:
     closeSceneJsLocked(scene)
 
+proc tryCleanupSceneJs*(scene: InterpretedFrameScene): bool =
+  ## cleanupSceneJs for a release of memory, which can be asked for from
+  ## inside a scene's set-up (the lock is not recursive): nothing then.
+  ## Whether a context went.
+  if not tryAcquire(sceneJsLock):
+    return false
+  try:
+    result = scene.programJsLive and scene.jsKind != sjShared
+    closeSceneJsLocked(scene)
+  finally:
+    release(sceneJsLock)
+
 proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
   ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
   ## where the programs the abort jumped out of were running, as
@@ -759,6 +803,7 @@ proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
     if scene.isNil or not scene.programJsLive:
       continue
     if scene.jsKind == sjRuntime:
+      closingSceneJs(scene.js.runtime, scene.js.context)
       clearJsSourceMaps(scene.js.context)
       forgetProgramKits(scene.js.runtime)
       result.bytes += scene.js.abandon()
@@ -773,6 +818,7 @@ proc abandonMidCallSceneJs*(): tuple[count, bytes: int] =
     scene.jsReady = false
     scene.jsKind = sjShared
   if shared and programJsReady:
+    closingSceneJs(programJs.runtime, nil)
     clearJsSourceMaps(programJs.context)
     if glueReady:
       clearJsSourceMaps(glueJs.context)
