@@ -98,7 +98,9 @@ def test_cloud_session_scopes_are_logged_through_the_hook():
     at all, so the answer must be visible even when it is 'no' (which is
     exactly when it cannot travel over the cloud socket)."""
     source = CLOUD_C.read_text()
-    ready_index = source.index('"scopes"')
+    # The ready handler reads the hub's grant (`cJSON_GetObjectItem(root,
+    # "scopes")`); the device flow's start body also says "scopes", earlier.
+    ready_index = source.index('cJSON_GetObjectItem(root, "scopes")')
     window = source[ready_index : ready_index + 3000]
     assert "cloud:session_ready" in window, (
         "the cloud ready handler must emit its granted scopes; without it, "
