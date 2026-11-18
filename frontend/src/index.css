@@ -2771,33 +2771,6 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   color: var(--tool-muted);
 }
 
-.frame-header-icon-button {
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(148, 163, 184, 0.38);
-  color: #475569;
-  box-shadow: 0 8px 18px rgba(100, 116, 139, 0.14);
-}
-
-.frame-header-icon-button:hover {
-  background: #ffffff;
-  border-color: var(--frameos-primary-border-strong);
-  color: #0f172a;
-  box-shadow: 0 10px 22px rgba(100, 116, 139, 0.2);
-}
-
-.frameos-theme-dark .frame-header-icon-button {
-  background: rgba(38, 40, 47, 0.9);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: #cbd5e1;
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
-}
-
-.frameos-theme-dark .frame-header-icon-button:hover {
-  background: rgba(52, 55, 64, 0.96);
-  border-color: var(--frameos-primary-border-strong);
-  color: #f8fafc;
-}
-
 .frame-header-metrics {
   scrollbar-width: none;
 }

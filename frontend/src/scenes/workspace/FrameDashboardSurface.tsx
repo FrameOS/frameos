@@ -313,22 +313,11 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
   )
 }
 
+// The header's right side: the metric chips alone, flush right.
 function FrameHeaderActions({ frame }: { frame: FrameType }): JSX.Element {
-  const { openChatDrawer } = useActions(workspaceLogic)
-
   return (
-    <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
+    <div className="frame-header-actions ml-auto flex min-w-0 max-w-full items-center justify-end">
       <HeaderMetrics frameId={frame.id} />
-      <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          title="Open AI chat"
-          onClick={() => openChatDrawer(frame.id, null)}
-          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          <SparklesIcon className="h-5 w-5" />
-        </button>
-      </div>
     </div>
   )
 }
@@ -812,7 +801,7 @@ function FrameScenesBlock({
   archived?: boolean
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
-  const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
+  const { openChatDrawer, openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // `frameLogic.scenes` is `frameForm.scenes ?? frame.scenes ?? []` — unsaved
   // edits first, then the saved frame (which is what cloud mode hydrates), so
   // an empty/absent form never blanks the list.
@@ -950,6 +939,15 @@ function FrameScenesBlock({
             </A>
           )
         )}
+        <button
+          type="button"
+          title="Open AI chat"
+          aria-label="Open AI chat"
+          onClick={() => openChatDrawer(frame.id, null)}
+          className={sceneRowIconButtonClassName}
+        >
+          <SparklesIcon className="h-4 w-4" />
+        </button>
         <button
           type="button"
           role="switch"
