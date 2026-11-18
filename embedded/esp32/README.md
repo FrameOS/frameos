@@ -278,7 +278,7 @@ for the two Spectra boards most of the bench work runs on:
   detaches the PHY (`usb_serial_jtag_ll_phy_enable_pad(false)`) when a bus
   uses 19 or 20, and the console then skips its USB-Serial/JTAG channel —
   the E-series' USB is a CH340 on UART0 anyway.
-| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
+| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); BQ25616 charger enabled through GPIO39 (low); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
 | `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
@@ -313,7 +313,21 @@ for the two Spectra boards most of the bench work runs on:
   answers `fos_battery_read` with its own voltage and state of charge, and
   its discharge flag is the power decision's "on battery" (`fos_gauge.c`),
   so the frame deep-sleeps on the cell and stays awake on USB like the
-  E-series with their charger. The LSM6DS3TR-C IMU (0x6a) and the SHT40 are
+  E-series with their charger. The charger is a BQ25616 with no bus, strapped
+  for 4.2 V and 555 mA, and it charges only while EN_BAT_CHGn (GPIO39) is
+  low. Left alone the pin reads high (it is the S3's MTCK, with a pull-up out
+  of reset per the datasheet, against the board's 100 kΩ to ground) and the
+  cell is never charged: `fos_charger_enable` drives it low at boot and holds
+  it through a deep sleep (`fos_board_charge_enable_pin`). The red LED beside
+  the port is the charger's STAT (CHARGE_STATE, GPIO40, not read): lit while
+  it charges, blinking when it holds off (the cell too warm or cold, its
+  safety timer). On the bench
+  (2026-11-18) the pin read 1 and the cell sat at 3397 mV and 0 mA for two
+  days on USB; driven low, STAT went low at once and the cell rose to
+  3768 mV and 32% in twenty minutes. Seeed set the gauge up in tenths (a
+  100 mΩ sense resistor, `design=7500mAh` for the 750 mAh cell), so its
+  `current` reads ten times the milliamps: 5860 while charging at 586 mA.
+  The LSM6DS3TR-C IMU (0x6a) and the SHT40 are
   found and reported, not read. The sensor bus's SCL is GPIO0, a strapping
   pin: the bus's pull-ups keep it high across a reset. Seeed notes the SD
   card brings up most reliably when mounted before the shared e-paper SPI

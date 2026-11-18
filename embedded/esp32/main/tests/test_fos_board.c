@@ -247,6 +247,21 @@ static void test_mic_pins(void)
     CHECK(fos_board_buzzer_tone_hz(NULL) == 0, "NULL preset, no tone");
 }
 
+static void test_charge_enable_pin(void)
+{
+    /* The Sticky's BQ25616 charges while GPIO39 is low, and the S3 pulls
+     * that pin up out of every reset: a board file without it leaves the
+     * cell uncharged (3397 mV and 0 mA for two days on USB). */
+    CHECK(fos_board_charge_enable_pin("seeed_reterminal_sticky") == 39, "sticky: charge enable on GPIO39");
+    /* The E-series' SY6974B charges by its own defaults; their GPIO39 is a
+     * second I2C bus (E1001/E1002) or the TF power switch (E1003). */
+    CHECK(fos_board_charge_enable_pin("seeed_reterminal_e1001") == -1, "e1001: no charge enable pin");
+    CHECK(fos_board_charge_enable_pin("seeed_reterminal_e1003") == -1, "e1003: no charge enable pin");
+    CHECK(fos_board_charge_enable_pin("seeed_sensecap_indicator_d1") == -1, "indicator: GPIO39 is its touch bus");
+    CHECK(fos_board_charge_enable_pin("") == -1, "no preset, no pin");
+    CHECK(fos_board_charge_enable_pin(NULL) == -1, "NULL preset, no pin");
+}
+
 static void test_leds(void)
 {
     /* The E-series' green LED: GPIO6 on the E1001/E1002, lit low (Seeed's
@@ -384,6 +399,7 @@ int main(void)
     test_buzzer_pins();
     test_event_maps();
     test_mic_pins();
+    test_charge_enable_pin();
     test_leds();
     test_i2c_buses();
     test_rtc_chip();

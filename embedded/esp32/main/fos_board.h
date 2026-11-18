@@ -57,6 +57,13 @@ void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
  * board has one. */
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr);
 
+/* The GPIO that lets the board's charger charge while it is driven low, -1
+ * for a board whose charger needs no pin (the E-series' SY6974B charges by
+ * its own defaults) or has none. The reTerminal Sticky's BQ25616: GPIO39.
+ * Nothing provisions it and no setting overrides it: fos_charger_enable
+ * drives it at boot. */
+int fos_board_charge_enable_pin(const char *hardware_preset);
+
 /* The board's status LED for a hardware preset key: its GPIO and how it is
  * lit (fos_led_type_t: 0 high, 1 low, 2 a WS2812 pixel), -1 / 0 for a board
  * without one. The reTerminal E1001/E1002 have a green LED on GPIO6, the

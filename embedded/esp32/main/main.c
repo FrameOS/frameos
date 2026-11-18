@@ -38,6 +38,7 @@
 #include "fos_events.h"
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
+#include "fos_charger.h"
 #include "fos_climate.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
@@ -401,6 +402,8 @@ void app_main(void)
      * about USB, the clock that knows the time before Wi-Fi (not after a deep
      * sleep: the chip kept it), the climate sensor. A few milliseconds. */
     fos_i2c_init();
+    /* A charger that waits for a pin before it charges (the Sticky's). */
+    fos_charger_enable(config->hardware_preset);
     if (esp_reset_reason() != ESP_RST_DEEPSLEEP) fos_rtc_load_time();
     /* The audio codec of the Waveshare boards (fos_codec.c), once the chips
      * have answered on the bus: the speaker the buzzer's notes play on and
