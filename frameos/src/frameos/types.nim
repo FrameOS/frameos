@@ -672,7 +672,7 @@ type
 
   SceneJsKind* = enum
     ## Where a scene's program runs (js_runtime/runtime.nim, ensureSceneJs).
-    sjShared,   ## the programs' runtime's first context: a scene without code
+    sjShared,   ## the programs' runtime's first context: a scene without code or JS apps
     sjRealm,    ## a context of its own in that runtime (a board with 8 MB or less)
     sjRuntime   ## a QuickJS runtime of its own
 
@@ -709,6 +709,7 @@ type
     jsReady*: bool
     jsKind*: SceneJsKind ## the shared context, a realm of its own, or a runtime of its own
     jsGeneration*: int ## which programs' runtime `js` and the program's entries are in
+    hasJsApps*: bool ## JS app nodes, which run in `js` too: never the context code-less scenes share
     ## The scene's program (scene_compiler.nim), evaluated into `js` when
     ## `programReady`: its three ways in, `ev`, `flow` and `data`.
     source*: ExportedInterpretedScene ## what it was started from

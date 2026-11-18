@@ -24,6 +24,8 @@ export const excludedTemplates = new Set([
   "Chromium Screenshot",
   "Google Photos",
   "Haiku of the hour",
+  "Home Assistant remote",
+  "Homey remote",
   "Immich",
   "MiniGPT",
   "OpenAI image",

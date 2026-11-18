@@ -66,7 +66,9 @@ uses QuickJS only to execute the resulting JavaScript.
 
 `runtime.nim` handles interpreted scene JavaScript:
 
-- Creates one QuickJS context per interpreted scene.
+- Creates one QuickJS context per interpreted scene with code or JS apps:
+  the scene's JS apps run in it beside its program
+  (`docs/scene-compiler.md`, "JS apps run in the scene's context").
 - Registers Nim bridge functions exposed to JS: `getState`, `getArg`,
   `getContext`, `jsLog`, `parseTs`, `format`, and `now`.
 - Installs global JS proxies for `state`, `args`, and `context`.
@@ -85,6 +87,12 @@ uses QuickJS only to execute the resulting JavaScript.
   treated as thread-safe.
 
 `app_runtime.nim` handles repo JavaScript apps:
+
+- Runs each app in its scene's context (`ensureReady`): its modules under
+  the prefix `#<key>/`, its module namespace and `app` object in the
+  prelude's `__frameosApps`, the calling app known from the call's env
+  (`withAppEnv`). Without an interpreted scene (the app tests) an app gets a
+  QuickJS of its own, with the scene prelude and the app prelude in it.
 
 - Evaluates the app's main file as a real ES module, TypeScript and JSX
   included, and publishes its namespace to the prelude.
@@ -146,7 +154,7 @@ uses QuickJS only to execute the resulting JavaScript.
 
 ## App tests
 
-`app_tests.nim` runs an app's `<name>.test.ts` in the app's own interpreter:
+`app_tests.nim` runs an app's `<name>.test.ts` in an interpreter of its own:
 the prelude, then `app_test_harness.js` (describe / it / expect / mock /
 makeApp, as a script that wraps the prelude's `frameos` and `console`), then
 the test file as the main module, and `__frameosRunAppTests()` returns the
@@ -160,8 +168,10 @@ from what an ESP32 receives.
 
 An app's `sources` map is the whole module graph. `app_runtime.nim` evaluates
 the main file (`app.ts`, `.tsx`, `.js` or `.jsx`) as a real ES module under
-its own file name and registers a normalize/loader pair on the QuickJS
-runtime (`burrito.setModuleLoader`):
+its own file name (behind the app's prefix, `#<key>/app.ts`, in a scene's
+context, where other apps' files are too: `moduleOwner` reads the app back
+off a name) and registers a normalize/loader pair on the QuickJS runtime
+(`burrito.setModuleLoader`):
 
 - `jsAppModuleNormalize` joins `./` and `../` specifiers against the importing
   module's folder (`joinModulePath`, QuickJS's own rule) and canonicalises
