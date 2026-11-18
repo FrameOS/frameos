@@ -914,14 +914,13 @@ wake connects, applies whatever is queued (`set_scenes`, `set_settings`,
 schedules, OTA nudges — each arriving cloud verb holds the device awake for
 15 s so a burst completes) and goes back to sleep **without** refreshing the
 panel; an explicit `render` command still repaints immediately. It sleeps
-until the render that was scheduled, not an interval from now
-(`fos_checkin_sleep_seconds`): a pass that renders nothing builds no scene, so
-the interval it could work out is the scene's declared one, not the "Refresh
-interval" saved on the frame nor a sleep the scene asked for itself, and
-sleeping the shorter of the two redrew a photo scene set to one day minutes
-after every check-in, with the next render announced a day away (a
-reTerminal E1004, a user's report, 2026-11-18). Only the frame's own interval,
-changed since the render was scheduled on a scene that has none, moves it.
+until the render that was scheduled, not an interval from now: a pass that
+renders nothing builds no scene, so the interval it could work out is the
+frame's own or the scene's declared one, not the "Refresh interval" saved on
+the frame nor a sleep the scene asked for itself, and sleeping the shorter of
+the two moved a render a day away to five minutes after the first check-in
+(a reTerminal E1002, 2026-11-18). Only a cell too low to render keeps its own
+long sleep.
 The due time is kept on a frame whose clock was never set too (a network
 that answers no SNTP): it and "now" come off the same counter, which runs
 through a deep sleep either way. Until 2026.11.12 such a frame kept none, so

@@ -371,40 +371,6 @@ static void test_a_layouts_second_is_a_second(void)
     CHECK(fos_pass_interval_seconds(30.0 * 86400.0, 300) == 7 * 86400, "a month: a week");
 }
 
-static void test_a_checkin_keeps_the_render_it_was_scheduled(void)
-{
-    /* A photo scene set to one day on the frame, on a reTerminal E1004 that
-     * wakes every 15 minutes for commands. The render scheduled the next one
-     * a day on. The check-in pass builds no scene, so its own interval is the
-     * scene's declared one (60 s, 300 s, 900 s: whatever the scene shipped
-     * with), and sleeping that redrew the picture minutes after every
-     * check-in while the frame said its next render was 23 h 45 min away. */
-    int64_t until_due = 86400 - 900;
-    CHECK(fos_checkin_sleep_seconds(until_due, 60, false, false) == (uint32_t)until_due,
-          "the scheduled render, not the declared 60 s");
-    CHECK(fos_checkin_sleep_seconds(until_due, 900, false, false) == (uint32_t)until_due, "nor 900 s");
-    CHECK(fos_checkin_sleep_seconds(until_due, 86400, false, false) == (uint32_t)until_due,
-          "nor a whole interval from now: the render was due before that");
-    /* A sleep the scene asked for itself (nextSleepDuration: until 7 am) is
-     * kept the same way against the scene's five-minute interval. */
-    CHECK(fos_checkin_sleep_seconds(30000, 300, false, false) == 30000, "the scene's own sleep stands");
-    /* The owner made the frame's interval shorter and the check-in pulled it
-     * (a scene with none of its own): the new one counts from now. */
-    CHECK(fos_checkin_sleep_seconds(until_due, 300, true, false) == 300, "a changed frame interval is taken");
-    CHECK(fos_checkin_sleep_seconds(200, 300, true, false) == 200, "but never past the scheduled render");
-    CHECK(fos_checkin_sleep_seconds(until_due, 172800, true, false) == (uint32_t)until_due,
-          "a longer one waits for the render that is scheduled");
-    /* A cell too low to render keeps its own long sleep when that is the
-     * shorter, as before. */
-    CHECK(fos_checkin_sleep_seconds(until_due, 21600, false, true) == 21600, "the critical sleep");
-    CHECK(fos_checkin_sleep_seconds(3600, 21600, false, true) == 3600, "or the render, when sooner");
-    /* Due now or past (the timer woke late): a second, and the next pass renders. */
-    CHECK(fos_checkin_sleep_seconds(0, 300, false, false) == 1, "due now: one second");
-    CHECK(fos_checkin_sleep_seconds(-50, 300, false, false) == 1, "overdue: one second");
-    CHECK(fos_checkin_sleep_seconds(30 * 86400, 300, false, false) == 7 * 86400, "never more than a week");
-    CHECK(fos_checkin_sleep_seconds(until_due, 0, true, false) == (uint32_t)until_due, "no interval is no opinion");
-}
-
 static void test_an_animation_is_pictured_once(void)
 {
     /* Each push on an LCD hashes, copies and uploads 460 KB: the frames
@@ -432,7 +398,6 @@ int main(void)
     test_the_backend_link();
     test_a_timed_render_waits_for_the_glass();
     test_a_layouts_second_is_a_second();
-    test_a_checkin_keeps_the_render_it_was_scheduled();
     test_an_animation_is_pictured_once();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

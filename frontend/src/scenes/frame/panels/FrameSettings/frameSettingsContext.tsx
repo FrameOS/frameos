@@ -35,6 +35,7 @@ import {
   renderScaleCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameSettings'
 import { frameRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
+import { presetWakeCheckSeconds } from '../../../../utils/presetSleep'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -1043,12 +1044,13 @@ export function FrameSettingsProvider({
       batteryDivider: frameForm.battery_divider,
       batteryEnablePin: frameForm.battery_enable_pin,
       batteryPin: frameForm.battery_pin,
-      // The owner's setting, else what the frame says it sleeps by: a board
-      // preset turns deep sleep on battery and a 15 minute wake check on by
-      // itself, and this panel said "Only wake to render" over such a frame.
-      deepSleep: (frameForm.deep_sleep ?? frame.hardware?.deepSleep) === true,
-      deepSleepOnBattery: (frameForm.deep_sleep_on_battery ?? frame.hardware?.deepSleepOnBattery) === true,
-      wakeCheckSeconds: frameForm.wake_check_seconds ?? frame.hardware?.wakeCheckSeconds ?? undefined,
+      deepSleep: frameForm.deep_sleep === true,
+      // The owner's setting, else what the board's preset turned on by itself
+      // on the device (utils/presetSleep.ts): this panel said "Only wake to
+      // render" over a frame that woke every 15 minutes.
+      deepSleepOnBattery:
+        frameForm.deep_sleep_on_battery ?? presetWakeCheckSeconds(frame.hardware?.hardwarePreset) !== undefined,
+      wakeCheckSeconds: frameForm.wake_check_seconds ?? presetWakeCheckSeconds(frame.hardware?.hardwarePreset),
       awakeAfterInputSeconds: frameForm.awake_after_input_seconds,
       // What the frame runs with until the owner picks one here.
       cpuMode: frameForm.cpu_mode ?? frame.hardware?.cpuMode ?? undefined,

@@ -55,23 +55,20 @@ def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
 
 def test_a_checkin_pass_sleeps_until_the_render_that_was_scheduled():
     """A deep-sleeping frame that wakes for commands (wake_check_seconds, 900 s
-    on the reTerminal presets) skips its render and went back to sleep for
+    on three reTerminal presets) skips its render and went back to sleep for
     the shorter of "until the scheduled render" and "this pass's interval".
-    The pass's interval is the scene's declared one (no scene is built on a
-    pass that renders nothing), not the saved "Refresh interval" the render
-    was scheduled by: a photo scene set to one day redrew minutes after every
-    check-in, around the clock, on a reTerminal E1004 (a user's report,
-    2026-11-18). The rule is fos_checkin_sleep_seconds, host-tested."""
+    A pass that renders nothing builds no scene, so that interval is the
+    frame's own or the scene's declared one, not the one the render was
+    scheduled by. On a reTerminal E1002 (2026-11-18) a scene set to one day
+    announced `nextRenderAt` 86,394 s on, and its first check-in rewrote that
+    to 298 s on; with the scheduled render kept, five check-ins in a row left
+    the date alone. Only a cell too low to render keeps its own long sleep."""
     client = (MAIN_DIR / "fos_client.c").read_text()
     checkin = client[client.index("        if (checkin_pass) {\n            /* This pass skipped the render"):]
     checkin = checkin[: checkin.index("s_next_render_due = time(NULL) + (time_t)sleep_s;")]
-    assert "fos_checkin_sleep_seconds((int64_t)(s_next_render_due - time(NULL)), sleep_s," in checkin
-    assert "if ((uint64_t)until_due < sleep_s)" not in client, "the shorter of the two moved the render up"
-    # The frame's own interval counts only when it changed, on a scene with none.
-    assert "!(scene_interval > 0.0) && config->interval_sec != s_due_frame_interval" in checkin
-    assert "RTC_DATA_ATTR static uint32_t s_due_frame_interval;" in client
-    after = client[client.index("s_next_render_due = time(NULL) + (time_t)sleep_s;"):]
-    assert after.index("s_due_frame_interval = config->interval_sec;") < 200
+    assert "int64_t until_due = (int64_t)(s_next_render_due - time(NULL));" in checkin
+    assert "if (!battery_critical || (uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;" in checkin
+    assert "\n            if ((uint64_t)until_due < sleep_s) sleep_s" not in client, "the shorter of the two moved the render up"
 
 
 def test_the_scheduled_render_is_kept_without_a_set_clock():
@@ -82,7 +79,8 @@ def test_the_scheduled_render_is_kept_without_a_set_clock():
     minutes, and its sleep line said `nextRenderAt=0` (a user's log,
     2026-11-18). The date and "now" come off the same counter, which runs
     through a deep sleep set or not; only what a plane is told needs a real
-    clock."""
+    clock. On an E1002 with a test image whose clock says "never set", six
+    check-in wakes in a row skipped the render."""
     client = (MAIN_DIR / "fos_client.c").read_text()
     assert "clock_ok" not in client, "the render schedule depends on a set clock again"
     decision = client[client.index("bool checkin_pass = deep_sleep_now && !force_render &&"):]
@@ -96,22 +94,26 @@ def test_the_scheduled_render_is_kept_without_a_set_clock():
     assert re.search(r"esp_reset_reason\(\) != ESP_RST_DEEPSLEEP\) \{\s*s_next_render_due = 0;", client)
 
 
-def test_the_frame_tells_the_cloud_what_it_sleeps_by():
-    """The console's `preset` turns deep sleep on battery and a 900 s wake
-    check on for a reTerminal, on the device alone. The cloud keeps only what
-    its owner set, so its Power panel said "Only wake to render" over a frame
-    that woke every 15 minutes, and choosing what it already showed changed
-    nothing (2026-11-18). The hello's hardware report carries the three, and
-    the panel falls back to them (frameSettingsContext.tsx `cloudPowerSettings`)."""
-    cloud = (MAIN_DIR / "fos_cloud.c").read_text()
-    for line in (
-        'cJSON_AddBoolToObject(hw, "deepSleep", config->deep_sleep);',
-        'cJSON_AddBoolToObject(hw, "deepSleepOnBattery", config->deep_sleep_on_battery);',
-        'cJSON_AddNumberToObject(hw, "wakeCheckSeconds", config->wake_check_sec);',
-    ):
-        assert line in cloud
+def test_the_workspace_knows_what_a_preset_sleeps_by():
+    """The console's `preset` turns deep sleep on battery and a wake check on
+    for three reTerminals, on the device alone. The cloud keeps only what its
+    owner set, so its Power panel said "Only wake to render" over a frame
+    that woke every 15 minutes (2026-11-18). The panel reads the defaults off
+    the preset the device names in its hello (utils/presetSleep.ts), which
+    costs the firmware nothing and is right for frames already out there: so
+    that list is the firmware's."""
     console = (MAIN_DIR / "fos_console.c").read_text()
-    assert "config->wake_check_sec = presets[i].wake_check_sec;" in console
+    presets = console[console.index("} presets[] = {"):]
+    presets = presets[: presets.index("};")]
+    firmware = {}
+    for name, body in re.findall(r'\{ "([a-z0-9_]+)",(.*?)\},', presets, re.S):
+        numbers = re.findall(r"(\d+), (\d+) $", body.strip() + " ")
+        if numbers and numbers[-1][0] == "1":
+            firmware[name] = int(numbers[-1][1])
+    assert firmware, "no preset turns deep sleep on battery on any more: is the table still read right?"
+    spa = (REPO_ROOT / "frontend" / "src" / "utils" / "presetSleep.ts").read_text()
+    listed = {name: int(seconds) for name, seconds in re.findall(r"^  ([a-z0-9_]+): (\d+),$", spa, re.M)}
+    assert listed == firmware
 
 
 def test_an_animation_goes_to_the_backend_once():

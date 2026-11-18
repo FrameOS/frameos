@@ -99,26 +99,6 @@ double fos_scene_interval_snap(double seconds);
  * Sticky (2026-11-10). At most a week. */
 uint32_t fos_pass_interval_seconds(double scene_interval_s, uint32_t frame_interval_s);
 
-/* How long a deep-sleeping frame sleeps after a check-in pass (one that woke
- * for commands and skipped its render): until the render that was scheduled,
- * `until_due_s` from now, and no sooner.
- *
- * `interval_s` is what the pass would sleep by its own count. It is not the
- * interval the render was scheduled by: a pass that renders nothing builds no
- * scene, so the runtime answers with the scene's declared interval, not the
- * one in its saved state ("Refresh interval" set on the frame), and a sleep
- * the scene asked for itself (logic/nextSleepDuration) is the render's alone.
- * Taken when it was the shorter, it moved the render up: a photo scene set to
- * one day redrew a quarter of an hour after every check-in on a reTerminal
- * E1004, around the clock, while saying its next render was a day away (a
- * user's report, 2026-11-18). It counts only when the frame's own interval
- * was changed since the render was scheduled (`frame_interval_changed`: a
- * setting the check-in pulled, on a scene with no interval of its own), and
- * on a cell too low to render (`battery_critical`, whose long sleep it is).
- * At least a second. */
-uint32_t fos_checkin_sleep_seconds(int64_t until_due_s, uint32_t interval_s, bool frame_interval_changed,
-                                   bool battery_critical);
-
 /* Once per pass, before the render: start, retime or stop. True when the
  * mode changed (the caller logs the start or the stop). Stopping leaves the
  * window's stats for fos_animation_take_stats. */
