@@ -200,6 +200,13 @@ static int pick_slot(fos_scene_store_slots_t *used)
     return slot;
 }
 
+/* From the caller's big blocks (PSRAM) where it has them, else the heap. */
+static void *big_alloc(size_t size)
+{
+    void *block = s_hooks.big_alloc ? s_hooks.big_alloc(size) : NULL;
+    return block ? block : malloc(size);
+}
+
 char *fos_scene_store_read_file(const char *path, size_t *out_len)
 {
     FILE *f = fopen(path, "rb");
@@ -208,10 +215,7 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     char *buf = NULL;
-    if (size > 0 && size <= FOS_SCENE_STORE_MAX_BYTES) {
-        buf = s_hooks.big_alloc ? s_hooks.big_alloc((size_t)size + 1) : NULL;
-        if (buf == NULL) buf = malloc((size_t)size + 1);
-    }
+    if (size > 0 && size <= FOS_SCENE_STORE_MAX_BYTES) buf = big_alloc((size_t)size + 1);
     if (buf != NULL) {
         size_t got = fread(buf, 1, (size_t)size, f);
         buf[got] = '\0';
@@ -229,8 +233,7 @@ char *fos_scene_store_read_file(const char *path, size_t *out_len)
 
 static char *write_buffer_new(void)
 {
-    char *buffer = s_hooks.big_alloc ? s_hooks.big_alloc(WRITE_BUFFER_BYTES) : NULL;
-    return buffer ? buffer : malloc(WRITE_BUFFER_BYTES);
+    return big_alloc(WRITE_BUFFER_BYTES);
 }
 
 /* `path` written whole, or not there at all (removed on any failure, errno
@@ -551,15 +554,11 @@ typedef struct {
 static stage_t s_stage;
 static unsigned int s_stage_ids;
 
-static bool staging(unsigned int id)
+bool fos_scene_store_staging(unsigned int id)
 {
     return s_stage.id != 0 && s_stage.id == id;
 }
-
-bool fos_scene_store_staging(unsigned int id)
-{
-    return staging(id);
-}
+#define staging fos_scene_store_staging
 
 /* The staging's memory, not its files. */
 static void stage_free(void)
@@ -601,8 +600,7 @@ void fos_scene_store_stage_drop(unsigned int id)
 unsigned int fos_scene_store_stage_open(void)
 {
     fos_scene_store_stage_drop(0);
-    s_stage.meta = s_hooks.big_alloc ? s_hooks.big_alloc(sizeof(*s_stage.meta)) : NULL;
-    if (s_stage.meta == NULL) s_stage.meta = malloc(sizeof(*s_stage.meta));
+    s_stage.meta = big_alloc(sizeof(*s_stage.meta));
     s_stage.buffer = write_buffer_new();
     s_stage.old = fos_scene_store_read_index(); /* NULL: none yet */
     s_stage.entries = cJSON_CreateArray();
@@ -716,10 +714,10 @@ fos_scene_store_err_t fos_scene_store_stage_end(unsigned int id, bool *kept)
         cJSON_Delete(scene);
         return stage_abort_scene(FOS_SCENE_STORE_ERR_INVALID);
     }
+    /* Stored already when its hash says so, as a set held in memory is told
+     * (fos_scene_store_apply_set). */
     const cJSON *stored = find_entry(cJSON_GetObjectItem(s_stage.old, "scenes"), scene_id);
-    const cJSON *stored_bytes = cJSON_GetObjectItem(stored, "bytes");
-    bool same = stored != NULL && fos_scene_store_entry_slot(stored) >= 0 && entry_hash_is(stored, s_stage.hash) &&
-                cJSON_IsNumber(stored_bytes) && stored_bytes->valuedouble == (double)s_stage.bytes;
+    bool same = stored != NULL && fos_scene_store_entry_slot(stored) >= 0 && entry_hash_is(stored, s_stage.hash);
     cJSON *order_id = cJSON_CreateString(scene_id);
     cJSON *entry = same ? cJSON_CreateNumber((double)s_stage.hash)
                         : make_entry(scene, s_stage.slot, s_stage.bytes, s_stage.hash);
