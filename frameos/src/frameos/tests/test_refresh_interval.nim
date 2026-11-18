@@ -54,6 +54,14 @@ let scenesJson = "[" & [
     "",
     nodes = """,{"id": "s1", "type": "app", "data": {"keyword": "logic/nextSleepDuration", "config": {"duration": 77}}}""",
     edges = """{"id": "x1", "source": "e1", "sourceHandle": "next", "target": "s1", "targetHandle": "prev"}"""),
+  sceneJson("tests/photos",
+    """{"name": "seconds", "type": "float", "value": "900", "label": "Seconds to show one photo",
+        "access": "public", "persist": "disk", "role": "refreshInterval"}""",
+    refreshInterval = "60",
+    nodes = """,{"id": "s1", "type": "app", "data": {"keyword": "logic/nextSleepDuration", "config": {}}},
+      {"id": "st1", "type": "state", "data": {"keyword": "seconds"}}""",
+    edges = """{"id": "x1", "source": "e1", "sourceHandle": "next", "target": "s1", "targetHandle": "prev"},
+      {"id": "x2", "source": "st1", "sourceHandle": "fieldOutput", "target": "s1", "targetHandle": "fieldInput/duration"}"""),
   sceneJson("tests/code",
     "",
     nodes = """,{"id": "c1", "type": "app", "data": {"keyword": "logic/setAsState",
@@ -62,7 +70,7 @@ let scenesJson = "[" & [
 ].join(",") & "]"
 
 let inputs = parseInterpretedSceneInputs(scenesJson)
-doAssert inputs.len == 8
+doAssert inputs.len == 9
 let exports = buildInterpretedScenes(inputs)
 
 proc initScene(id: string, persisted: JsonNode = %*{}): InterpretedFrameScene =
@@ -188,6 +196,45 @@ block test_next_sleep_duration_is_a_one_time_override:
   doAssert context.nextSleep == 77.0
   doAssert scene.state{"refreshInterval"}.getFloat() == 300.0
   doAssert scene.refreshInterval == 300.0
+  setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+block test_an_interval_that_is_none_is_the_scenes_default:
+  # A photo scene the way the samples build it: "Seconds to show one photo"
+  # carries the interval and feeds logic/nextSleepDuration. Someone types 0
+  # into it (in a schedule entry, to turn the 15 minutes off: a reTerminal
+  # E1004's owner, 2026-11-18). The interval read that as the default, but
+  # the state kept the 0 and the sleep node handed it on: the firmware's
+  # shortest sleep, a second, after every picture.
+  setUploadedInterpretedScenes(exports)
+  resetInterpretedScenes()
+  let scene = initScene("tests/photos")
+  proc sleepAfterRender(scene: InterpretedFrameScene): float =
+    var context = ExecutionContext(scene: scene, event: "render", payload: %*{},
+      hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    discard render(scene, context)
+    context.nextSleep
+  doAssert sleepAfterRender(scene) == 900.0
+  setState(scene, %*{"seconds": 86400})
+  doAssert scene.refreshInterval == 86400.0
+  doAssert sleepAfterRender(scene) == 86400.0, "a day is a day"
+  for none in [%0, %"0", %"", %(-5), %"never", newJNull()]:
+    setState(scene, %*{"seconds": 86400})
+    setState(scene, %*{"seconds": none})
+    doAssert scene.state{"seconds"}.getFloat() == 900.0, "kept in state: " & $none
+    doAssert scene.refreshInterval == 900.0
+    doAssert sleepAfterRender(scene) == 900.0, "slept after: " & $none
+  # A schedule's entry says it with the scene change.
+  var context = ExecutionContext(scene: scene, event: "setCurrentScene",
+    payload: %*{"sceneId": "tests/photos", "state": {"seconds": "0"}},
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+  runEvent(scene, context)
+  doAssert sleepAfterRender(scene) == 900.0
+  # And a 0 an older runtime saved is not loaded back.
+  let reloaded = initScene("tests/photos", %*{"seconds": 0})
+  doAssert reloaded.state{"seconds"}.getFloat() == 900.0
+  doAssert sleepAfterRender(reloaded) == 900.0
+  let kept = initScene("tests/photos", %*{"seconds": 86400})
+  doAssert sleepAfterRender(kept) == 86400.0
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
 block test_scene_sets_its_own_interval:
