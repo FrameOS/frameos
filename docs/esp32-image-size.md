@@ -864,7 +864,7 @@ one more flag, `esptool elf2image` after it, which gives back the build's own
 image byte for byte when nothing is added.*
 
 **3,264,288 → 3,125,904 bytes (−138,384, −4.2%). OTA slot 90.6% → 86.7%
-full, 478 KB free.** No source of the runtime changed for the first three
+full, 467 KB free.** No source of the runtime changed for the first three
 rows: the same objects, placed and assembled differently, and on a board the
 image is a little faster, not slower.
 
