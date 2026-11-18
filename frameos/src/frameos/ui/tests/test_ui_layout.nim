@@ -765,6 +765,15 @@ suite "fields, clipping and scrolling":
     check heard.len == 0
     discard at("pointerUp", 40)
     check heard == @[(4, 122.0 + 40.0)]
+    # A scroll the layout made (a caret brought into sight) is heard with
+    # the next event, once.
+    target.input.scrollTo(target.regions[0].key, 0, 250)
+    discard dispatchUiEvent("scrolled", "uiTimer", newJObject())
+    check heard.len == 1
+    discard at("pointerDown", 10)
+    check heard[^1] == (4, 250.0) and heard.len == 2
+    discard at("pointerUp", 10)
+    check heard.len == 2
 
   test "scrollTop scrolls a box when the app changes it":
     proc page(top: string): SvgNode =

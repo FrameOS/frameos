@@ -53,6 +53,7 @@ type
                                 ## render needs no new tree (app_runtime.get)
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
+    heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
     # A press on a box that scrolls: the pointer, the box, where the press
     # began and how far the box was scrolled then; `dragging` once it moved
     # far enough to be a scroll rather than a tap.
@@ -572,11 +573,22 @@ proc fieldCall(target: UiTarget, kind: UiEvent, name: string, payload: JsonNode)
       [0'f32, 0, target.regions[i].w, target.regions[i].h])
     target.inputOnly = false # whatever the handler changed, get() shows it
 
-proc scrolledBy(target: UiTarget, r: UiRegion) =
+proc scrolledBy(target: UiTarget, r: UiRegion, unheard = false) =
   ## A finger or the wheel scrolled the box: its onScroll hears where to, as
-  ## `scrollTop` and `scrollLeft` (a code editor's lines that show).
+  ## `scrollTop` and `scrollLeft` (a code editor's lines that show). With
+  ## `unheard`, only when it is not where it last heard: a scroll the layout
+  ## made (the caret brought into sight) is heard with the next event.
   if r.handlers[ueScroll] > 0 and not target.call.isNil:
     let (x, y) = target.input.scrolled(r.key)
+    var at = target.heard.len
+    for i in 0 ..< target.heard.len:
+      if target.heard[i][0] == r.key: at = i
+    if at == target.heard.len:
+      target.heard.add((r.key, x, y))
+      if unheard: return # first seen: where the app put it
+    elif unheard and target.heard[at][1] == x and target.heard[at][2] == y:
+      return
+    target.heard[at] = (r.key, x, y)
     let payload = newJObject()
     payload["scrollTop"] = newJFloat(y)
     payload["scrollLeft"] = newJFloat(x)
@@ -1178,6 +1190,9 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   for target in targets:
     if target.sceneId != sceneId:
       continue
+    if not target.dragging:
+      for r in target.regions:
+        target.scrolledBy(r, unheard = true)
     when not defined(frameosEmbedded):
       if event in ["keyDown", "textInput"]:
         if (target.input.open > 0 or target.input.link.len > 0) and payload{"key"}.getStr() == "Escape":

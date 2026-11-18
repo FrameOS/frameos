@@ -351,6 +351,12 @@
   for an app whose `permissions` has `"code"` (red tag, detected from
   `frameos.code(`) and only while the frame offers its page. The scene
   settings' Code button opens it on a scene (its public field `open`).
+  A file is a virtualized list built from the JSX layer alone (doc section
+  "The file open"): a box that scrolls, as tall as the file, holding only the
+  lines around `scrollTop` as one `<textarea>` colored by its `<span>`s,
+  slid by `onScroll` one end at a time so the field keeps its caret. A
+  feature it needs from the runtime is a JSX feature for every app
+  (`docs/jsx-ui.md`), never an editor native.
 - The plane's half is `POST …/panel/code` (backend `panel_code.py`, cloud
   `panel-code.ts`): `ask` is the voice chat's scene builder asked `typed`
   and saves nothing; `save` never widens what the scene may do (`needs_owner`:
