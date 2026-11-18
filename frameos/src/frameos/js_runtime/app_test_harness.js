@@ -397,7 +397,9 @@
   };
 
   // ------------------------------------------------------------ running
-  const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
+  // The clock as it was when the harness loaded: a test may stand in for Date.now.
+  const realDateNow = Date.now;
+  const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : realDateNow());
   function errorInfo(error) {
     if (error && typeof error === "object") {
       return {

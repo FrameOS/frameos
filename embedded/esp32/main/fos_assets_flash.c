@@ -458,3 +458,15 @@ int64_t fos_assets_flash_free_bytes(void)
     if (free_bytes < 0) return -1;
     return free_bytes > FLASH_RESERVE ? free_bytes - FLASH_RESERVE : 0;
 }
+
+int64_t fos_assets_flash_free_bytes_at(const char *path)
+{
+    if (path == NULL) return -1;
+    for (int i = 0; i < s_mount_count; i++) {
+        size_t n = strlen(s_mounts[i]);
+        if (strncmp(path, s_mounts[i], n) == 0 && (path[n] == '\0' || path[n] == '/')) {
+            return fos_assets_flash_free_bytes();
+        }
+    }
+    return -1;
+}

@@ -1465,6 +1465,123 @@ suite "js app runtime":
     check missing["found"].len == 0
     check missing["body"].getStr().len == 1024
 
+  test "httpRequest saveBase64Field writes an inline picture to an asset, and bodyAsset sends one":
+    # OpenAI's image generation answers with the picture as base64 inside
+    # its JSON; on an ESP32 that text as a JS string is several copies of
+    # 0.5-1 MB. The picture goes to the file, the app gets the rest.
+    let assetsDir = getTempDir() / "frameos-js-save-field-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+    var picture = newString(70_000)
+    for i in 0 ..< picture.len:
+      picture[i] = chr((i * 7 + i div 251) mod 256)
+    # A JSON writer may escape "/" as "\/".
+    let inline = encode(picture).replace("/", "\\/")
+    let reply = """{"id": "resp_1", "output": [{"type": "image_generation_call", "revised_prompt": "a \"result\": \"x\"", "result": """" &
+      inline & """"}, {"type": "message"}]}"""
+    var uploaded = ""
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      if url.endsWith("/upload"):
+        uploaded = body
+        (200, """{"ok": true}""")
+      else:
+        (200, reply)
+    defer: jsHttpRequestHook = nil
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-save-field".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsSaveField", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      assetGrant = agReadWrite,
+      outputType = "json",
+      source = """export function get(app) {
+          const saved = frameos.httpRequest('https://api.example/v1/responses/resp_1', {
+            saveBase64Field: { field: 'result', path: 'plates/one.jpg' } })
+          const missing = frameos.httpRequest('https://api.example/v1/responses/resp_1', {
+            saveBase64Field: { field: 'nope', path: 'plates/two.jpg' } })
+          const outside = frameos.httpRequest('https://api.example/v1/responses/resp_1', {
+            saveBase64Field: { field: 'result', path: '../escape.jpg' } })
+          const sent = frameos.httpRequest('https://api.example/upload', { method: 'POST',
+            body: JSON.stringify({ image_url: 'data:image/jpeg;base64,@@PLATE@@' }),
+            bodyAsset: { marker: '@@PLATE@@', path: 'plates/one.jpg' } })
+          const noAsset = frameos.httpRequest('https://api.example/upload', { method: 'POST',
+            body: '@@PLATE@@', bodyAsset: { marker: '@@PLATE@@', path: 'plates/none.jpg' } })
+          return { saved, parsed: JSON.parse(saved.body), missingSaved: missing.saved || null,
+            missingError: missing.saveError, missingBodyLength: missing.body.length,
+            outsideError: outside.saveError, sent, noAsset }
+        }"""
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+
+    check payload["saved"]["saved"]["path"].getStr() == "plates/one.jpg"
+    check payload["saved"]["saved"]["bytes"].getInt() == picture.len
+    check readFile(assetsDir / "plates" / "one.jpg") == picture
+    # The rest of the reply, the field emptied; the quoted "result" inside
+    # another string was not the field.
+    check payload["parsed"]["output"][0]["result"].getStr() == ""
+    check payload["parsed"]["output"][0]["revised_prompt"].getStr() == "a \"result\": \"x\""
+    check payload["parsed"]["id"].getStr() == "resp_1"
+    check payload["missingSaved"].kind == JNull
+    check payload["missingError"].getStr() == "no such field in the reply"
+    check payload["missingBodyLength"].getInt() == reply.len
+    check not fileExists(assetsDir / "plates" / "two.jpg")
+    check payload["outsideError"].getStr() == "could not write the asset"
+    check not fileExists(assetsDir.parentDir() / "escape.jpg")
+
+    check payload["sent"]["status"].getInt() == 200
+    check parseJson(uploaded)["image_url"].getStr() == "data:image/jpeg;base64," & encode(picture)
+    check payload["noAsset"]["status"].getInt() == 0
+    check payload["noAsset"]["error"].getStr().contains("bodyAsset")
+
+  test "loadAssetImage decodes into the consumer's target when the interpreter offers one":
+    # A full-screen photo from the assets folder, as data/localImage draws
+    # one: into the canvas itself. A picture of its own beside a 13.3"
+    # panel's canvas is 3.8 MB an 8 MB ESP32 does not have.
+    let assetsDir = getTempDir() / "frameos-js-asset-target-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+    copyFile(currentSourcePath().parentDir / ".." / ".." / "tests" / "fixtures" / "progressive-480x720.jpg",
+      assetsDir / "plate.jpg")
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-asset-target".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 31.NodeId, nodeName: "jsAssetTarget", scene: scene, frameConfig: config)
+    let canvas = newImage(32, 24)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: true,
+      image: canvas, loopIndex: 0, loopKey: ".", nextSleep: -1,
+      decodeTargetImage: canvas, decodeTargetScalingMode: "cover", decodeTargetNodeId: 31.NodeId)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      assetGrant = agReadWrite,
+      outputType = "image",
+      source = """export function get(app) { return frameos.loadAssetImage('plate.jpg') }"""
+    )
+    let drawn = runtime.get(owner, %*{}, context).asImage()
+    check drawn == canvas
+    check context.decodeTargetImage.isNil
+    # The photo is in it: not the blank canvas it was.
+    var painted = 0
+    for y in 0 ..< canvas.height:
+      for x in 0 ..< canvas.width:
+        if canvas[x, y].a > 0: inc painted
+    check painted == canvas.width * canvas.height
+
+    # No target offered: a picture of its own, as before.
+    let plain = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+      loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let own = runtime.get(owner, %*{}, plain).asImage()
+    check own != canvas
+    check own.width == 480 and own.height == 720
+
   test "getSetting honors declared settings namespaces":
     let config = testConfig()
     config.settings = %*{"openAI": {"apiKey": "sk-test"}, "unsplash": {"accessKey": "u-test"}}

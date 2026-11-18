@@ -1388,8 +1388,24 @@ declare const frameos: {
       find?: string;
       findLength?: number;
       findLimit?: number;
+      /** Writes a JSON reply's first string field of this name, base64, decoded into an asset (the app's "assets-write"
+       * rules) and leaves that field empty in body: a picture an API returns inline (OpenAI's image generation
+       * result) never becomes a JS string, which on an ESP32 it would not fit as. The reply says saved, or
+       * saveError; a runtime before FrameOS 2026.11.12 ignores the option and returns the body whole. */
+      saveBase64Field?: { field: string; path: string };
+      /** Puts an asset's bytes, base64, into the body where marker is (a picture uploaded from its file, the same
+       * way). With no such asset or marker the request is not sent (FrameOS 2026.11.12+; ignored before). */
+      bodyAsset?: { marker: string; path: string };
     }
-  ): { status: number; body?: string; bodyBase64?: string; found?: string[]; error?: string };
+  ): {
+    status: number;
+    body?: string;
+    bodyBase64?: string;
+    found?: string[];
+    error?: string;
+    saved?: { path: string; bytes: number };
+    saveError?: string;
+  };
   fetchImage(
     url: string,
     options?: {
@@ -1477,7 +1493,9 @@ declare const frameos: {
    * (a name starting with a dot, one the listing hides, an app without "assets-write") (FrameOS 2026.11.10+). */
   makeAssetFolder(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   /** An image file of the assets folder. With width and height it is decoded at that size (a JPEG scaled as it
-   * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). */
+   * decodes) and keep holds it for later renders, as fetchImage's options do (FrameOS 2026.11.8+). With neither,
+   * the picture an app returns is decoded straight into the canvas it is drawn on where the runtime offers one,
+   * as fetchImage's is: a full-screen photo never costs a second canvas (FrameOS 2026.11.12+). */
   loadAssetImage(
     path: string,
     options?: {

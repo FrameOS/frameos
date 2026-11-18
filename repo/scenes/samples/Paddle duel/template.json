@@ -1,0 +1,10 @@
+{
+  "name": "Paddle duel",
+  "description": "A paddle-and-ball game for a fast touch screen (LCD or HDMI) on a table: two people each drag their own paddle in their half at the same time, or one plays the computer (easy, normal or hard). The ball comes off a paddle at an angle from where it hits and gets faster with every return; first to 5, 7, 11 or 15 points wins. Paddles are left and right on a wide screen and top and bottom on a tall one, where the top player's score is drawn upside down for them. Twists: posts in the middle, two balls. Keyboard: W / S or A / D for one paddle, the arrows for the other, Space or Enter to start, P to pause. GPIO buttons follow the Buttons setting (a key the frame's own Button actions bind to a long press still does that when held). Keeps your record against the computer. High contrast mode in black and white. On e-paper it shows its title card and sleeps.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
