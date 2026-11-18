@@ -886,6 +886,9 @@ export async function startFrameHub(
             await failUnsentCommand(session.frame.id, command.id, outgoing.fail);
             continue;
           }
+          if ("skip" in outgoing) {
+            continue;
+          }
           const message = JSON.stringify(outgoing.message);
           const messageBytes = Buffer.byteLength(message, "utf8");
           if (messageBytes > maxPayloadBytes) {
@@ -914,28 +917,23 @@ export async function startFrameHub(
           // and marking it sent would strand it: the pass handleAck queued
           // finds nothing pending, and the whole list waits for a reconnect.
           // Only that refusal sets no_patch on a row that went out as a patch
-          // a refusal sends again. A part of a set sent in parts can be live
-          // before this write too: its scene_ack left the row pending for the
-          // next part, and the frame reports the part's checksum by then.
-          await db
-            .update(frameCommands)
-            .set({ sentAt: new Date(), status: "sent" })
-            .where(
-              and(
-                eq(frameCommands.id, command.id),
-                eq(frameCommands.status, "pending"),
-                outgoing.refusalRequeues
-                  ? sql`coalesce(${frameCommands.payload} ->> 'no_patch', '') <> 'true'`
-                  : undefined,
-                outgoing.partChecksum !== undefined
-                  ? sql`not exists (
-                      select 1 from ${frames}
-                      where ${frames.id} = ${frameCommands.frameId}
-                        and ${frames.scenesChecksum} = ${outgoing.partChecksum}
-                    )`
-                  : undefined,
-              ),
-            );
+          // a refusal sends again. A part of a set sent in parts was written
+          // `sent` before it went (scenesPartMessage): by now its scene_ack
+          // may have put the row back for the next part, and stays so.
+          if (!outgoing.writtenSent) {
+            await db
+              .update(frameCommands)
+              .set({ sentAt: new Date(), status: "sent" })
+              .where(
+                and(
+                  eq(frameCommands.id, command.id),
+                  eq(frameCommands.status, "pending"),
+                  outgoing.refusalRequeues
+                    ? sql`coalesce(${frameCommands.payload} ->> 'no_patch', '') <> 'true'`
+                    : undefined,
+                ),
+              );
+          }
           await moveDeployProgress(session.frame.id, (record) =>
             foldDeployProgressCommand(record, command.type, "sent", { now: new Date() }),
           );
@@ -953,12 +951,12 @@ export async function startFrameHub(
 
   interface OutgoingCommand {
     message: Record<string, unknown>;
-    // A part of a set sent in parts that is not the last: the checksum the
-    // frame reports once it is live.
-    partChecksum?: string;
     // A refusal of this message puts the row back to go again another way
     // (handleAck sets no_patch), instead of failing it.
     refusalRequeues?: boolean;
+    // The row is written `sent` already (a part of a set sent in parts that
+    // is not the last): the drain leaves its status alone.
+    writtenSent?: boolean;
   }
 
   // A command the hub gives up on instead of sending (again) fails here, and
@@ -1030,7 +1028,7 @@ export async function startFrameHub(
     command: { id: string; payload: unknown },
     base: HeldScenes | null,
     input: { part: ScenesPartRecord | null; retry: boolean; showing: unknown },
-  ): Promise<OutgoingCommand | { fail: string }> {
+  ): Promise<OutgoingCommand | { fail: string } | { skip: true }> {
     const partId = randomUUID();
     const step = nextScenesPart(command, base, { partId, showing: input.showing });
     if (!step.ok) {
@@ -1069,18 +1067,30 @@ export async function startFrameHub(
       ...(accepted > 0 ? { accepted } : {}),
       ...(base ? { from: base } : {}),
     };
-    // Before the part is sent: its ack and its scene_ack read this.
-    await db
+    // Before the part is sent, and `sent` with it: its ack and its scene_ack
+    // read this, and a frame quicker than the drain's next write must find
+    // the row waiting (the scene_ack puts it back for the next part; written
+    // `sent` after that, it waited out a redelivery). A row that is no longer
+    // pending (cancelled, superseded since the drain read it) sends nothing.
+    const [written] = await db
       .update(frameCommands)
-      .set({ payload: sql`jsonb_set(${frameCommands.payload}, '{part}', ${JSON.stringify(record)}::jsonb)` })
-      .where(eq(frameCommands.id, command.id));
+      .set({
+        payload: sql`jsonb_set(${frameCommands.payload}, '{part}', ${JSON.stringify(record)}::jsonb)`,
+        sentAt: new Date(),
+        status: "sent",
+      })
+      .where(and(eq(frameCommands.id, command.id), eq(frameCommands.status, "pending")))
+      .returning({ id: frameCommands.id });
+    if (!written) {
+      return { skip: true };
+    }
     session.scenesParts.set(partId, {
       acked: false,
       checksum: step.holds.checksum,
       commandId: command.id,
       retry: refusalRequeues,
     });
-    return { message: step.message, partChecksum: step.holds.checksum, refusalRequeues };
+    return { message: step.message, refusalRequeues, writtenSent: true };
   }
 
   // What a queued command goes out as: the row's own message, except that a
@@ -1091,7 +1101,7 @@ export async function startFrameHub(
   async function outgoingCommandMessage(
     session: DeviceSession,
     command: { id: string; type: string; payload: unknown },
-  ): Promise<OutgoingCommand | { fail: string }> {
+  ): Promise<OutgoingCommand | { fail: string } | { skip: true }> {
     // A board the cloud renders for is sent nothing of its scenes
     // (docs/server-rendering.md "Nothing to keep on the board"), decided
     // when the command goes, so a push queued before the switch is covered.
@@ -1933,8 +1943,7 @@ export async function startFrameHub(
 
   // The frame reports a set live. When it is the one a part of a set sent in
   // parts leaves, the row that sent it is due again: its next part goes out
-  // against this checksum. Also a row the drain has not written `sent` yet
-  // (the frame was quicker): that write then leaves it pending.
+  // against this checksum.
   async function continueScenesInParts(session: DeviceSession, checksum: string) {
     for (const [id, part] of session.scenesParts) {
       if (part.checksum === checksum) {

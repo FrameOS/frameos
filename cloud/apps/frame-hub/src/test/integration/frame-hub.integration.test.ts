@@ -1296,10 +1296,11 @@ describe("a set in parts", () => {
     device.ws.close();
   });
 
-  it("sends the next part when the frame reports one live before it is written sent", async () => {
-    // The drain writes `sent` after the socket write; a quick frame's ack and
-    // scene_ack were handled first, and that write then stranded the row for
-    // the three minutes a redelivery takes.
+  it("sends the next part when the frame reports one live before the drain is done with it", async () => {
+    // The drain writes a command `sent` after the socket write. A quick
+    // frame's scene_ack is handled first: written `sent` after it, the row
+    // would wait out the three minutes of a redelivery. A part is written
+    // `sent` before it goes, and the drain leaves it as the scene_ack put it.
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -1323,7 +1324,12 @@ describe("a set in parts", () => {
       async () => ((await frameRow(frame.id))?.scenesChecksum === one.checksum ? true : undefined),
       "the part reported live",
     );
-    expect((await commandRow(push?.id))?.status).toBe("pending");
+    // The scene_ack put the row back for its next part while the drain's
+    // pass was still on this one.
+    await waitFor(
+      async () => ((await commandRow(push?.id))?.status === "pending" ? true : undefined),
+      "the row due again",
+    );
     release();
     let message = await board.take("part 2");
     expect(message.base_checksum).toBe(one.checksum);
