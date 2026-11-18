@@ -2200,9 +2200,22 @@ static int cmd_mic(int argc, char **argv)
     return total > 0 ? 0 : 1;
 }
 
-static esp_err_t register_frameos_console_commands(void)
-{
-    const esp_console_cmd_t commands[] = {
+static int cmd_help(int argc, char **argv);
+
+/* The commands, found by name in this table. ESP-IDF's registry
+ * (esp_console_cmd_register / esp_console_run and its `help`) is not used:
+ * `help` parses its two options with argtable3 and getopt_long, and
+ * registering a command draws argtable3 in for the hints none of these
+ * has, 8 KB of flash for a list of names. Its splitter stays
+ * (esp_console_split_argv: quotes and backslashes, as before). */
+typedef struct {
+    const char *command;
+    const char *help;
+    int (*func)(int argc, char **argv);
+} fos_console_cmd_t;
+
+static const fos_console_cmd_t s_commands[] = {
+        {.command = "help", .help = "help [command] — the commands, or one of them", .func = cmd_help},
         {.command = "status", .help = "Show device status", .func = cmd_status},
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
@@ -2226,11 +2239,39 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "usb_api", .help = "USB API bridge for the browser", .func = cmd_usb_api},
         {.command = "restart", .help = "Reboot", .func = cmd_restart},
         {.command = "factory-reset", .help = "Erase config and the /state partition (scenes, schedule, cached payloads), then reboot; the SD card stays", .func = cmd_factory_reset},
-    };
-    for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
-        ESP_ERROR_CHECK(esp_console_cmd_register(&commands[i]));
+};
+#define FOS_CONSOLE_COMMANDS (sizeof(s_commands) / sizeof(s_commands[0]))
+
+static int cmd_help(int argc, char **argv)
+{
+    bool found = false;
+    for (size_t i = 0; i < FOS_CONSOLE_COMMANDS; i++) {
+        if (argc > 1 && strcmp(argv[1], s_commands[i].command) != 0) continue;
+        printf("%-14s %s\n", s_commands[i].command, s_commands[i].help);
+        found = true;
     }
-    return ESP_OK;
+    if (!found) printf("unknown command: %s\n", argv[1]);
+    return found ? 0 : 1;
+}
+
+/* As many words as esp_console's default took (31 and the NULL after them). */
+#define FOS_CONSOLE_MAX_ARGS 32
+
+/* Splits `line` in place and runs its command. ESP_ERR_INVALID_ARG for a
+ * line with no word in it, ESP_ERR_NOT_FOUND for a name not in the table:
+ * what esp_console_run answered. */
+static esp_err_t run_command(char *line, int *cmd_ret)
+{
+    char *argv[FOS_CONSOLE_MAX_ARGS];
+    size_t argc = esp_console_split_argv(line, argv, FOS_CONSOLE_MAX_ARGS);
+    if (argc == 0) return ESP_ERR_INVALID_ARG;
+    for (size_t i = 0; i < FOS_CONSOLE_COMMANDS; i++) {
+        if (strcmp(argv[0], s_commands[i].command) == 0) {
+            *cmd_ret = s_commands[i].func((int)argc, argv);
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
 }
 
 static void console_prompt(void)
@@ -2256,14 +2297,12 @@ static void run_console_line(char *line)
     fos_client_keep_awake_ms(FOS_CONSOLE_KEEP_AWAKE_MS);
 
     int cmd_ret = 0;
-    esp_err_t err = esp_console_run(start, &cmd_ret);
+    esp_err_t err = run_command(start, &cmd_ret);
     if (err == ESP_ERR_NOT_FOUND) {
         printf("unknown command: %s\n", start);
     } else if (err == ESP_ERR_INVALID_ARG) {
         /* Empty/whitespace lines are filtered above; treat the rest as parse errors. */
         printf("invalid command: %s\n", start);
-    } else if (err != ESP_OK) {
-        printf("command failed: %s\n", esp_err_to_name(err));
     } else if (cmd_ret != 0 && strncmp(start, "usb_api", 7) != 0) {
         printf("command returned %d\n", cmd_ret);
     }
@@ -2432,16 +2471,6 @@ esp_err_t fos_console_start(void)
         return err;
     }
 #endif
-
-    esp_console_config_t console_config = ESP_CONSOLE_CONFIG_DEFAULT();
-    console_config.max_cmdline_length = FOS_CONSOLE_MAX_CMDLINE_LENGTH;
-    err = esp_console_init(&console_config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "console init failed: %s", esp_err_to_name(err));
-        return err;
-    }
-    ESP_ERROR_CHECK(esp_console_register_help_command());
-    ESP_ERROR_CHECK(register_frameos_console_commands());
 
     if (xTaskCreate(fos_console_task, "console", FOS_CONSOLE_TASK_STACK_SIZE, NULL,
                     FOS_CONSOLE_TASK_PRIORITY, NULL) != pdTRUE) {

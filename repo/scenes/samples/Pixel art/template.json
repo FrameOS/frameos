@@ -1,0 +1,10 @@
+{
+  "name": "Pixel art",
+  "description": "A pixel art editor for a touch screen: a 16x16, 24x24 or 32x32 grid, a 16-color palette (Sweetie 16, PICO-8 or Calm), a pen, a fill bucket, an eraser, a color picker, mirror drawing, undo and redo (also back and forward). Tap or drag to paint. Pictures are saved and opened as SVG files in the assets folder (\"Pixel art\" by default) that open anywhere, and simple pixel SVGs made elsewhere open too. High contrast on black-and-white and grey panels: black, white and a dither of the two. Reads and writes the assets folder.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

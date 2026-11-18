@@ -620,12 +620,15 @@ proc resolveSceneExport(sceneId: SceneId): ExportedScene =
     result = loadedScenes.getOrDefault(sceneId, nil)
 
 proc dropLayout(layout: FrameScene) =
-  ## A layout the frame stopped wearing: its interpreters go with it.
+  ## A layout the frame stopped wearing: its interpreters go with it, its
+  ## context with its JS apps in it (evaluated again if it is worn again).
   if layout of InterpretedFrameScene:
     for child in InterpretedFrameScene(layout).sceneNodes.values:
       dropLayout(child)
     for app in InterpretedFrameScene(layout).appsByNodeId.values:
       releaseJsAppRuntime(app)
+    if not sceneJsRunning(InterpretedFrameScene(layout)):
+      cleanupSceneJs(InterpretedFrameScene(layout))
 
 var takeParkedLayout*: proc(layoutId: string): FrameScene {.nimcall.}
   ## A host that drops one scene for the next (single_scene_host.nim) keeps the

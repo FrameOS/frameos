@@ -295,22 +295,21 @@ when jsAsyncOn:
     let runtime = wait.runtime
     let ctx = wait.ctx
     runtime.midCall:
-      jsAppEnvByCtx[ctx] = asyncEnv(wait)
       let armedHere = runtime.js.armDeadline(sliceMs())
       try:
-        let value = callGlobalFunction(ctx, fnName, args)
-        if JS_IsException(value) != 0:
-          frameos_apps.logError(wait.owner, "async code failed: " & mappedJsExceptionDetails(ctx).message)
-        JS_FreeValue(ctx, value)
-        runtime.js.runPendingJobs()
+        withAppEnv(ctx, asyncEnv(wait)):
+          let value = callGlobalFunction(ctx, fnName, args)
+          if JS_IsException(value) != 0:
+            frameos_apps.logError(wait.owner, "async code failed: " &
+              runtime.appText(mappedJsExceptionDetails(ctx).message))
+          JS_FreeValue(ctx, value)
+          runtime.js.runPendingJobs()
         if runtime.js.deadlineTripped():
           frameos_apps.logError(wait.owner, "async code ran for " & $sliceMs() &
             " ms without an await and was stopped")
       finally:
         if armedHere:
           runtime.js.disarmDeadline()
-        if jsAppEnvByCtx.hasKey(ctx):
-          jsAppEnvByCtx.del(ctx)
         runtime.closeLineStreams()
     true
 

@@ -112,7 +112,12 @@
   of PSRAM: one scene running out of memory takes no other with it), and in a
   realm of its own in one shared runtime on an 8 MB board
   (`js_runtime/runtime.nim` `ensureSceneJs`); scenes without code share that
-  runtime's first context. The JS apps keep their own runtimes. What every
+  runtime's first context. A scene's JS apps run in that same context,
+  beside its program and each other (one QuickJS a scene, never one an app
+  node: 155 KB of PSRAM each on an ESP32), so a scene with JS apps counts as
+  one with code; each app is a module under its own prefix and an entry in
+  the app prelude's `__frameosApps` (`app_runtime.ensureReady`), and its
+  interpreter going is its scene's context going. What every
   program has in common is not in the program: it is the kit
   (`ProgramKit`), evaluated once per context (`programKit`; bytecode in the
   ESP32 image via `tools/prelude_bytecode.nim`) and handed to each program.
@@ -364,6 +369,31 @@
   and saves nothing; `save` never widens what the scene may do (`needs_owner`:
   the permissions and settings its apps declare against the saved scene's).
   Keep the two routes and their codes alike.
+
+## The ESP32 image's size: `docs/esp32-image-size.md`
+
+- Flash is the budget (the 8 MB layout's 3520 KB OTA slot), and every cut is
+  in that doc with what it measured: read it before proposing one, and add
+  to it. Two decisions stand: QuickJS keeps its Unicode tables, and a Defect
+  stays catchable (no `--panics:on`): with the desktops a failed node must
+  not take the other windows with it.
+- **Where an object stands is `embedded/esp32/link_order.txt`** (S3): callers
+  near what they call, because a `CALL8` is 3 bytes and reaches 512 KB and a
+  longer call is 6. A new module needs no line (the file's `*` stands for
+  it). `ci_build_image.sh` prints how many calls a build left long
+  (`link_order: ...`); when that climbs, or before a release, run
+  `tools/link_order.py optimize --build-dir <build> --out link_order.txt`
+  on a finished build and commit the file. Stale costs bytes, never
+  correctness.
+- The image is assembled and linked without branch-target alignment
+  (`-mno-target-align`, `--size-opt`); the modules at -O2 because their loops
+  are the frame rate keep the assembler's (`FRAMEOS_NIM_HOT_MODULES`,
+  `quickjs_hot.c`). A module that becomes hot goes on that list, and the PR
+  says what it cost.
+- `build_nim.sh` folds what Nim writes once per C file: inline helpers
+  (`fold_nim_inlines.py`) and string literals (`fold_nim_strings.py`). The
+  same shape of waste elsewhere (a hook or a generic that is byte for byte
+  another's) is counted in the doc and not folded yet.
 
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 

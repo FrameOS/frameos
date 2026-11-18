@@ -1,0 +1,10 @@
+{
+  "name": "Word guess",
+  "description": "Guess the five-letter word in six tries. After each guess its letters are marked: in the right spot, in the word but elsewhere, or not in it, and the keyboard on the screen keeps track. Play the daily word (the same for everyone that day, a new one at midnight) or endless words, and keep your stats: games played, wins, streaks and how many guesses each win took. Type on the keys on the screen, or on a keyboard plugged into a Pi. By default any five letters count as a guess; the Guesses setting can hold them to a list of about 2,600 words. On black-and-white panels it plays in high contrast and never relies on color: a filled square is the right spot, a double frame is in the word elsewhere, a bare letter is not in it. The Contrast setting picks it anywhere.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

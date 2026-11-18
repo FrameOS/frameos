@@ -93,7 +93,16 @@ partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M st
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/, then
                           tools/fold_nim_inlines.py: one copy of each Nim inline helper
-                          instead of one per C file (~30 KB; docs/esp32-image-size.md)
+                          instead of one per C file (~30 KB; docs/esp32-image-size.md),
+                          and tools/fold_nim_strings.py: one copy of each string literal
+                          several modules hold (~28 KB)
+link_order.txt            the order FrameOS's objects stand in inside the S3 image's code,
+                          callers near what they call (a CALL8 is 3 bytes and reaches
+                          512 KB, a longer call is 6): ~54 KB. CMakeLists.txt hands it to
+                          the linker (tools/link_order.py emit); ci_build_image.sh prints
+                          how many calls a build left long; `tools/link_order.py optimize`
+                          writes the file again from a finished build
+                          (docs/esp32-image-size.md, "Calls, alignment and strings")
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,

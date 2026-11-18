@@ -1,0 +1,10 @@
+{
+  "name": "Gomoku",
+  "description": "Gomoku, five in a row, against the computer or a second player. Tap a point of the grid to put your stone there; on a fine grid the first tap shows where it would go and a second tap places it. Get five in a row across, down or diagonally to win: the winning line is drawn through the stones. Pick a 13x13, 15x15 or 19x19 board, three levels for the computer, black or white, and five-or-more or exactly-five in the settings. Undo takes back your last stone (and the computer's answer), and the game in progress is kept. Arrow keys and Enter play it from a keyboard. High contrast on black-and-white panels.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

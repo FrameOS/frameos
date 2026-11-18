@@ -1,0 +1,10 @@
+{
+  "name": "Mahjong solitaire",
+  "description": "Mahjong solitaire for a touch screen: tap two matching tiles to take them away, until the board is empty. A tile can be taken when nothing lies on it and its left or right side is open; any flower matches any flower and any season any season. Every deal can be won. Hint shows a free pair, Shuffle deals the tiles left again (so they can still all be taken), Undo takes back a pair, and the game in progress is kept. Pick the layout in the settings: the 144-tile turtle, a 72-tile pyramid or a 36-tile small one (Auto picks the biggest whose tiles are a finger wide on the screen), and whether tiles that are not free are shaded. On a keyboard: H hint, S shuffle, U undo, N new game; the frame's forward is a hint and back an undo. High contrast on black-and-white panels.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}

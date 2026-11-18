@@ -343,6 +343,14 @@ limit is set to an ESP32 board or it previews an ESP32 frame, and as a Pi
 otherwise, so an app can be tried both ways. An animation works out each frame
 from the clock (`Date.now()`), not from the frame before.
 
+**One interpreter a scene.** A scene's JS apps run in one interpreter, with
+its code nodes. Each app's module scope is its own (its imports, its
+module-level variables; two nodes of the same app are two modules), but
+`globalThis` and the built-ins belong to the scene: never keep a value on
+`globalThis` or change a built-in (`Array.prototype`, `JSON`, `Date`), or
+another app in the scene or a code node sees it. FrameOS 2026.11.12 and
+later; before, each app had an interpreter of its own.
+
 **Errors.** Throw. An error thrown from `get()` fails the node: it is logged
 with its source line, an image field gets the message painted, and the next
 render tries again. `frameos.fetchImage` never throws; it answers
@@ -1551,6 +1559,8 @@ declare const console: {
   node sits in a flow, after any event node, is a `logic` app exporting `run`.
 - A JS app keeps what must outlast a render with `frameos.remember` (private)
   or `frameos.setState` (shared), never in a module variable.
+- A JS app keeps nothing on `globalThis` and changes no built-in: the scene's
+  other apps and its code nodes share them.
 - A drawing is JSX from an `app.tsx` app, never SVG markup built as a
   string; its `<svg>` uses only the supported tags, and gradients use
   `userSpaceOnUse`.

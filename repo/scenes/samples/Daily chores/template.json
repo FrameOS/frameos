@@ -1,0 +1,10 @@
+{
+  "name": "Daily chores",
+  "description": "A checklist of the household's chores that starts again every morning. Tap a chore to tick it off; a bar shows how far the day got and the last days' bars sit at the bottom. Write the chores in the scene's settings or tap Edit on the frame, one a line: \"Water the plants @mon,thu\" for the days a chore is due (@weekdays and @weekends work too) and \"Dishes #Sam\" for who does it, shown as a tag or, with Group by person on, as Sam's own list. Set the hour the day starts (4 = 04:00), and whether tomorrow's chores show once today's are done. On a frame with buttons, forward ticks the next chore and back takes the last tick back. High contrast on black-and-white and grey panels, or always with the Contrast setting.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.11"
+}
