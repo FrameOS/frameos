@@ -220,15 +220,18 @@ describe("GET /api/account/security", () => {
     expect((await readSecurity(get("/api/account/security"))).status).toBe(401);
   });
 
-  it("says what the forms need: password, superadmin, email", async () => {
+  it("says what the forms need: password, superadmin, email, the saved-keys window", async () => {
     await signIn();
     const payload = await readJson(await readSecurity(get("/api/account/security")));
     // A Google-only account: no password, so deletion confirms with the email.
+    // The saved-keys window is the default two hours until the owner picks.
     expect(payload).toEqual({
       email: `account-pages-${userCounter}@example.com`,
       has_password: false,
       is_superadmin: false,
       name: `Account Pages Tester ${userCounter}`,
+      saved_keys_reauth_choices: [7200, 86400, 604800, 0],
+      saved_keys_reauth_seconds: 7200,
     });
   });
 });
