@@ -1,5 +1,6 @@
-import std/[json, options, os, sequtils]
+import std/[json, options, os, sequtils, strutils]
 import pixie
+import pixie/fileformats/svg
 import frameos/channels
 import frameos/types
 import frameos/events_gen
@@ -635,8 +636,12 @@ block the_frame_page:
   scene.tap(regionWith(1))
   doAssert applied.len == 2 and applied[1] == %*{"renderScale": 0.0}, $applied
   discard scene.draw()
-  # Render again at once; Restart and Reboot only on a second tap.
-  scene.scrollToEnd()
+  # Render again at once; Restart and Reboot only on a second tap. The
+  # buttons sit right under the card, above the fields.
+  scene.scrollTo(0)
+  block buttons_under_the_card:
+    let network = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0]
+    doAssert regionWith(20000 + 3).y < network.y, $regionWith(20000 + 3) & " " & $network
   scene.tap(regionWith(20000 + 1))
   doAssert panelSent == @[evRender], $panelSent
   discard scene.draw()
@@ -700,6 +705,58 @@ block the_frame_page:
   scene.send("close", %*{})
   frameSettingsRead = nil
   frameSettingsApply = nil
+  frameSettingsAction = nil
+
+proc texts(node: SvgNode): string =
+  ## Every word the page's tree holds, one after the other.
+  if node.isNil: return
+  result.add node.text & "\n"
+  for child in node.children:
+    result.add texts(child)
+
+block the_frame_page_links_a_control_plane:
+  # "Link to FrameOS Cloud" and "Adopt by a backend" where the host offers
+  # them; while one is under way, the cloud's code and where to enter it, the
+  # address to adopt at (never the adoption code: the host draws that over the
+  # panel), and Cancel.
+  var
+    actions: seq[string]
+    facts = %*{"rotate": 0, "renderScale": 0, "version": "2026.11.5", "actions": ["linkCloud", "adopt"]}
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: copy(facts)
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "", "opened": "frame"}})
+  doAssert scene.state["page"].getStr() == "frame"
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-link.png")
+  let page = SceneSettingsScene(scene)
+  doAssert "Link to FrameOS Cloud" in texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Adopt by a backend" in texts(page.tree(480, 480, false, "", info = facts))
+  scene.tap(regionWith(20000 + 7))
+  doAssert actions[^1] == "linkCloud", $actions
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 8))
+  doAssert actions[^1] == "adopt", $actions
+  # A cloud code on its way: the code, where it goes, and Cancel alone.
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [],
+    "cloudLink": {"code": "ABCD-1234", "uri": "https://cloud.frameos.net/device"}}
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-cloud-code.png")
+  var words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "ABCD-1234" in words and " at cloud.frameos.net/device " in words, words
+  doAssert "Link to FrameOS Cloud" notin words
+  scene.tap(regionWith(20000 + 9))
+  doAssert actions[^1] == "cancelLink", $actions
+  # An adoption: the address, and the code is on the screen.
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "adopt": {"address": "192.168.1.20:8787", "seconds": 290}}
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-adopt.png")
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "192.168.1.20:8787" in words and "Cancel link" in words, words
+  scene.send("close", %*{})
+  frameSettingsRead = nil
   frameSettingsAction = nil
 
 echo "scene settings: ok"
@@ -844,20 +901,21 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
   scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
-  # Installing restarts the frame: it asks twice, like Reboot.
+  # Installing restarts the frame: it asks twice, like Reboot. The buttons
+  # are at the top, under the card.
   scene.tap(regionWith(20006))
   doAssert "installUpdate" notin actions, $actions
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
   scene.tap(regionWith(20006))
   doAssert "installUpdate" in actions, $actions
   # With nothing to install it offers to look again, and not while it looks.
   updateState = 2
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
   scene.tap(regionWith(20005))
   doAssert "checkUpdate" in actions, $actions

@@ -5,6 +5,8 @@ import frameos/types
 import frameos/events_gen
 import frameos/frame_settings_lock
 import frameos/frame_settings_linux
+import frameos/local_access
+import frameos/cloud/link_state
 
 # The settings panel's frame page on a Linux frame (docs/scene-settings.md
 # "The frame page"): what the host hands the page, the plane's switch and the
@@ -18,6 +20,11 @@ createDir(dir)
 let configPath = dir / "frame.json"
 let unlockPath = dir / "frameos-settings-unlock"
 putEnv("FRAMEOS_CONFIG", configPath)
+# The cloud link's files (./state/cloud_link.json and its siblings) land here,
+# not in the checkout.
+putEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH", dir / "state" / "cloud_link_code_pending.json")
+putEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH", dir / "state" / "cloud_enroll_pending.json")
+setCurrentDir(dir)
 setSettingsUnlockPathsForTest(@[unlockPath])
 
 var sent: seq[(string, EventOrigin)]
@@ -25,10 +32,14 @@ localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode,
   {.cast(gcsafe).}:
     sent.add((event, origin))
 
-proc writeConfig(onScreen: bool) =
-  writeFile(configPath, $(%*{"name": "Test", "mode": "rpios", "device": "web_only", "width": 800,
-    "height": 480, "rotate": 0, "renderScale": 0, "frameSettingsOnScreen": onScreen}))
+proc writeConfig(onScreen: bool, device = "web_only", serverHost = "", serverApiKey = "") =
+  writeFile(configPath, $(%*{"name": "Test", "mode": "rpios", "device": device, "width": 800,
+    "height": 480, "rotate": 0, "renderScale": 0, "frameSettingsOnScreen": onScreen,
+    "serverHost": serverHost, "serverApiKey": serverApiKey, "framePort": 8787}))
   noteFrameConfigChanged()
+
+proc actions(): JsonNode =
+  linuxFrameSettingsRead()["actions"]
 
 proc logged(event: string): seq[JsonNode] =
   while true:
@@ -45,7 +56,9 @@ suite "the frame page on a Linux frame":
     check not facts.isNil
     check facts["rotate"].getInt(-1) == 0
     check facts["renderScale"].getFloat(-1) == 0
-    check facts["actions"] == %*["restart"]
+    # No control plane holds it and it has no panel to show a code on: a cloud
+    # link code, no adoption.
+    check facts["actions"] == %*["restart", "linkCloud"]
     check facts["version"].getStr().len > 0
     # Before the worker has read anything there is a Wi-Fi block to fill.
     check facts["wifi"]["password"].getBool(true) == false
@@ -104,5 +117,60 @@ suite "the frame page on a Linux frame":
     let saved = parseFile(configPath)
     check saved["rotate"].getInt() == 90
     check saved["renderScale"].getFloat() == 1.5
+
+  test "a frame no plane holds offers both links, with a panel to show the code":
+    writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    check actions() == %*["restart", "linkCloud", "adopt"]
+    # Waiting for a backend (the portal's "backend" mode): the cloud refuses
+    # to enroll it, a backend's adoption still takes it.
+    writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5")
+    check actions() == %*["restart", "adopt"]
+    # A backend holds it: neither.
+    writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5", serverApiKey = "k")
+    check actions() == %*["restart"]
+
+  test "Adopt by a backend: the code goes on the panel, never into the page's facts":
+    writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    sent.setLen(0)
+    linuxFrameSettingsAction("adopt")
+    check pendingLocalAccessScope() == LocalAccessScopeAdopt
+    let code = activeLocalAccessCode()
+    check code.len == 6
+    check localAccessPanelText() == "Adoption code\n" & code
+    let facts = linuxFrameSettingsRead()
+    check facts["adopt"]["address"].getStr().endsWith(":8787")
+    check facts["adopt"]["seconds"].getInt() > 0
+    check code notin $facts
+    # While it shows, nothing else to start; Cancel takes it off.
+    check facts["actions"] == %*["restart"]
+    check sent.len == 1 and sent[0][0] == evRender
+    linuxFrameSettingsAction("cancelLink")
+    check pendingLocalAccessScope() == ""
+    check linuxFrameSettingsRead(){"adopt"}.isNil
+
+  test "Cancel never ends a local network access code":
+    writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    discard startLocalAccessChallenge(LocalAccessScopeLocalNetwork)
+    linuxFrameSettingsAction("cancelLink")
+    check pendingLocalAccessScope() == LocalAccessScopeLocalNetwork
+    clearLocalAccessChallenge()
+
+  test "Link to FrameOS Cloud queues a link code for the hub thread, and Cancel drops it":
+    writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    linuxFrameSettingsAction("linkCloud")
+    let pending = parseFile(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    check pending["provider_url"].getStr() == DEFAULT_CLOUD_PROVIDER_URL
+    let facts = linuxFrameSettingsRead()
+    # No code until the provider gave one; the page says a link is under way.
+    check not facts{"cloudLink"}.isNil
+    check facts["actions"] == %*["restart"]
+    linuxFrameSettingsAction("cancelLink")
+    check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
+    check linuxFrameSettingsRead(){"cloudLink"}.isNil
+
+  test "a frame waiting for a backend is never offered to the cloud":
+    writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5")
+    linuxFrameSettingsAction("linkCloud")
+    check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
 
 removeDir(dir)

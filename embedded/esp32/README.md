@@ -63,7 +63,7 @@ main/                     boot orchestration + platform modules
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
                           aware: the status screen and the local network access code box (host-tested)
-  fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
+  fos_lan_access.c        the local network access and adoption codes: mint, scope, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
@@ -538,7 +538,17 @@ gets an address. The network is set on the screen: a swipe down from the top
 opens the settings panel, whose gear opens the frame page with the Wi-Fi
 status, the networks in range by name and a password field, the rotation, the
 scale, and Render again and Reboot (`fos_frame_settings.c`,
-docs/scene-settings.md "The frame page"). The frame's control plane can turn
+docs/scene-settings.md "The frame page"). A frame no plane holds, online,
+also offers "Link to FrameOS Cloud" (a link code, flow B below) and, with a
+panel, "Adopt by a backend": an adoption code, the local network access
+ceremony's six digits in the `adopt` scope, drawn over the panel as "Adoption
+code" and never in the page's facts or any image. The backend reads
+`GET /api/adopt` (whether a code shows, then the platform, panel, preset and
+size) and posts `{code, backend, apiKey, frameId}` to `POST /api/adopt`: no
+login (the code is the credential; a malformed body costs no attempt, a
+frame with a backend or a cloud link answers `409 managed`), and on the right
+code the three keys are saved and the board restarts as that backend's
+frame. The frame's control plane can turn
 the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
 console turns it back on whatever the plane says. The status screen of a frame
 with no scene says to swipe. Every other board keeps the 45 s wait and the
@@ -754,6 +764,17 @@ or already-used token) also erases the claim token — it is dead after one
 use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
 until a fresh token is set. Transient failures retry with exponential backoff
 (10 s → 15 min).
+
+Flow B, the link code, is the frame page's "Link to FrameOS Cloud": the
+cloud task POSTs `{provider}/api/device/start` (`cloud_url`, else
+`https://cloud.frameos.net`; `client_kind: "frame"`, scopes `frame:link` and
+`frame:managed`), the page shows the code and where to enter it, the task
+polls `/api/device/poll` at the given interval, and on approval enrolls at
+`/api/frames/enroll` with the device-flow token as its Bearer in place of a
+claim token. That token is the frame's access token from then on, and a
+default provider is written to `cloud_url`. Nothing of a pending link
+outlives a reboot; a window that lapses unclaimed just ends, and a pending
+one holds the deep sleep.
 
 Expected `status` line while waiting for enrollment:
 

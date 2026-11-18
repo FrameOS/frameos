@@ -158,6 +158,11 @@ The Pi's own admin API, with an admin session: `GET /api/network/local-access`,
 `POST /api/network/local-access/challenge` `{scope?}`,
 `POST /api/network/local-access` `{enabled, code?, scope?}`. `scope:
 "shellApps"` is the same ceremony for running Chromium unsandboxed as root.
+The frame page's **Adopt by a backend** shows the same kind of code with the
+scope `adopt` ("Adoption code" on the panel), which only the frame page starts
+and only `POST /api/adopt` takes (`docs/scene-settings.md` "Linking the
+frame"); neither the admin API's challenge nor a control plane's verb can ask
+for one.
 
 `set_settings` never carries local network access
 (`docs/cloud-frames-fixtures.json` pins it), and the bulk settings save on the

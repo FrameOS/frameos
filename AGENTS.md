@@ -274,7 +274,12 @@
   and its two copies, `device_event_map.nim`): keep the presets alike. Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
 - A gear left of Save opens the **frame page** (doc section "The frame page"):
-  Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot. The page is
+  Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot (under the
+  card), and on a frame no plane holds Link to FrameOS Cloud (the device
+  flow) and Adopt by a backend (a presence code, scope `adopt`, that the
+  backend's Adopt form exchanges at the frame's `POST /api/adopt`; doc section
+  "Linking the frame": keep the Pi's `adopt_routes.nim` and the ESP32's
+  `fos_http.c` alike). The page is
   built in the scene from FACTS a host hands over through three hooks
   (`frameSettingsRead` / `Apply` / `Action`): the ESP32's
   `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's

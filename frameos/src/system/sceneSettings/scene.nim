@@ -77,6 +77,9 @@ const
   ALayout = 4
   ACheckUpdate = 5
   AInstallUpdate = 6
+  ALinkCloud = 7 ## a FrameOS Cloud link code (the host's `linkCloud`)
+  AAdopt = 8 ## an adoption code for a backend (the host's `adopt`)
+  ACancelLink = 9 ## either one, while it is pending
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -490,6 +493,12 @@ proc press(self: SceneSettingsScene, action: int) =
     frameAction("scan")
   elif action == ACheckUpdate:
     frameAction("checkUpdate")
+  elif action == ALinkCloud:
+    frameAction("linkCloud")
+  elif action == AAdopt:
+    frameAction("adopt")
+  elif action == ACancelLink:
+    frameAction("cancelLink")
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
@@ -807,12 +816,58 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
+  # A control plane being linked: the cloud's code is the page's to show, an
+  # adoption's never is (a presence code, drawn over the panel by the host
+  # and kept out of every image), so its line says where to look.
+  let
+    cloudCode = info{"cloudLink", "code"}.getStr()
+    adoptAt = info{"adopt", "address"}.getStr()
+  card.line(look, "FrameOS Cloud", cloudCode)
+  card.line(look, "Adopt at", adoptAt)
   result.children.add card.role("card")
+  proc note(list: SvgNode, look: Look, text: string) =
+    var c = look.grey
+    c.px("text", look.size * 3 div 4)
+    list.children.add el("div", move c, SvgNode(text: text)).role("muted")
+  let
+    actions = arrayOf(info{"actions"}).elems
+    asking = self.state{"confirm"}.getInt(-1)
+  # What the frame can do, right under how it is doing: the fields below can
+  # run longer than the panel.
+  c = "flex flex-wrap"
+  c.px("gap", look.gap div 2)
+  let buttons = el("div", move c)
+  buttons.children.add look.pressButton("Render again", ARender)
+  if update == UpdateAvailable:
+    buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
+  elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
+    buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
+  if %"restart" in actions:
+    buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
+  buttons.children.add look.pressButton("Reboot", AReboot, asking)
+  if cloudCode.len > 0 or adoptAt.len > 0:
+    buttons.children.add look.pressButton("Cancel link", ACancelLink)
+  else:
+    if %"linkCloud" in actions:
+      buttons.children.add look.pressButton("Link to FrameOS Cloud", ALinkCloud)
+    if %"adopt" in actions:
+      buttons.children.add look.pressButton("Adopt by a backend", AAdopt)
+  result.children.add buttons
+  if cloudCode.len > 0:
+    # The page to type the code in, as a person types it: no scheme.
+    var uri = info{"cloudLink", "uri"}.getStr()
+    for scheme in ["https://", "http://"]:
+      if uri.startsWith(scheme): uri = uri[scheme.len .. ^1]
+    result.note(look, "Enter the code " & cloudCode &
+      (if uri.len > 0: " at " & uri else: " in your FrameOS Cloud account") &
+      " to link this frame to your account.")
+  elif adoptAt.len > 0:
+    result.note(look, "In your FrameOS backend, add a frame with Adopt frame: enter " & adoptAt &
+      " and the code on this screen.")
   let
     fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
     typing = edits{"typing"}.getBool()
-    asking = self.state{"confirm"}.getInt(-1)
   for i in 0 ..< fields.elems.len:
     let field = fields.elems[i]
     let name = field{"name"}.getStr()
@@ -824,21 +879,7 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
       elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
       else: ""
     if note.len > 0:
-      var c = look.grey
-      c.px("text", look.size * 3 div 4)
-      result.children.add el("div", move c, SvgNode(text: note)).role("muted")
-  c = "flex flex-wrap"
-  c.px("gap", look.gap div 2)
-  let buttons = el("div", move c)
-  buttons.children.add look.pressButton("Render again", ARender)
-  if update == UpdateAvailable:
-    buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
-  elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
-    buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
-  if %"restart" in arrayOf(info{"actions"}).elems:
-    buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
-  buttons.children.add look.pressButton("Reboot", AReboot, asking)
-  result.children.add buttons
+      result.note(look, note)
 
 when not defined(frameosEmbedded):
   proc box(c: var string, x, y, w, h: int) =
