@@ -417,6 +417,19 @@
   `set_scenes`), a backend's `/embedded/scenes?patch=1` (what it last served
   per frame, in Redis). A device refuses a patch that is not against the set it
   holds (`base_mismatch`), and the plane sends the whole list.
+- One cloud message to an ESP32 is 512 KiB at most (`FOS_CLOUD_WS_MAX_MSG`,
+  `esp32MaxMessageBytes`); a set is not. A `set_scenes` row whose message
+  would be over it goes out in parts (`nextScenesPart` in
+  `lib/scenes-patch.ts`, the hub's `scenesPartMessage`; docs/cloud-frames.md
+  "A set in parts"): patches of about 256 KiB, each against a checksum of its
+  own that the part before left, sent on that part's `scene_ack` (the
+  firmware moves the checksum a patch must name when the set is live, not at
+  the ack), a `set_scenes` of the scenes that fit first when the frame's set
+  is not known. The row is acked once, at the last part, which alone has the
+  row's id, checksum, `scene_id` and `state`; the scene on the panel stays
+  until then. No firmware side: a change to how the board checks
+  `base_checksum` or acks a patch is a change to this. A backend has no such
+  cap: the board reads its answer straight into the store.
 - "Push & activate" and "Install & activate" are ONE push of that scene: the
   SPA reads back only the assignments that own it (`only` in
   `cloudFrameScenesSave.ts`) and posts `scene_id` + `state` with the list (the

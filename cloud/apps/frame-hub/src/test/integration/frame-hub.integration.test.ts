@@ -45,8 +45,14 @@ import { cachedAssetFile } from "../../../../auth-web/src/lib/frame-asset-cache"
 import { frameOwningBackend } from "../../../../auth-web/src/lib/frame-backend-owner";
 import { serverRenderedBoardScene } from "../../../../auth-web/src/lib/cloud-rendered";
 import {
+  esp32MaxMessageBytes,
+  esp32SceneStoreScenes,
+  esp32SceneStoreSlotsVersion,
+} from "../../../../auth-web/src/lib/scenes-patch";
+import {
   maxAssetStreamsPerSession,
   maxPayloadBytes,
+  maxScenesPartAccepts,
   startFrameHub,
   type FrameHub,
   type FrameHubOptions,
@@ -935,6 +941,501 @@ describe("scenes_patch", () => {
       });
       const message = await device.next((msg) => msg.id === second?.id, "the second push");
       expect(message.type).toBe("set_scenes");
+      device.ws.close();
+    }
+  });
+});
+
+// docs/cloud-frames.md "A set in parts": a set_scenes row whose one message
+// would be over an ESP32's cap on a message (512 KiB) goes out as several.
+describe("a set in parts", () => {
+  const esp32 = { frameos_version: esp32SceneStoreSlotsVersion, hardware: { platform: "esp32-s3" } };
+  type Scene = { id: string; name: string; nodes: never[]; pad?: string; v?: number };
+  const scene = (id: string, kb: number, v?: number): Scene => ({
+    id,
+    name: id,
+    nodes: [],
+    pad: "x".repeat(kb * 1024),
+    ...(v === undefined ? {} : { v }),
+  });
+  const bytesOf = (message: Record<string, unknown>) => Buffer.byteLength(JSON.stringify(message), "utf8");
+  const isSceneMessage = (msg: Record<string, unknown>) => msg.type === "set_scenes" || msg.type === "scenes_patch";
+
+  // The firmware's side of a scene message (embedded/esp32/main/fos_cloud.c):
+  // a message over the cap is refused, a patch is taken only against the
+  // checksum last applied (one whose own checksum is held is acked and
+  // changes nothing), `order` names scenes held or put, at most 128. Taken,
+  // it is acked, and `scene_ack`ed once live: only then does the checksum the
+  // next patch must name move.
+  class Board {
+    scenes: Scene[] = [];
+    applied = "";
+    sizes: number[] = [];
+    constructor(readonly device: TestSocket) {}
+
+    async take(label: string, answer: { live?: boolean; refuse?: string; silent?: boolean } = {}) {
+      const message = await this.device.next(isSceneMessage, label);
+      this.sizes.push(bytesOf(message));
+      if (answer.silent) {
+        return message;
+      }
+      const refused = answer.refuse ?? this.refusal(message);
+      if (refused) {
+        this.device.send({ error: refused, id: message.id, ok: false, type: "ack" });
+        return message;
+      }
+      this.device.send({ id: message.id, ok: true, type: "ack" });
+      // A patch whose checksum the board holds is one it applied already.
+      if (answer.live === false || (message.type === "scenes_patch" && message.checksum === this.applied)) {
+        return message;
+      }
+      this.apply(message);
+      this.device.send({ checksum: this.applied, type: "scene_ack" });
+      return message;
+    }
+
+    refusal(message: Record<string, unknown>): string | undefined {
+      if (bytesOf(message) > esp32MaxMessageBytes) {
+        return "message_too_large";
+      }
+      if (message.type === "set_scenes") {
+        return (message.scenes as Scene[]).length > esp32SceneStoreScenes ? "scene_store_failed" : undefined;
+      }
+      if (message.checksum === this.applied) {
+        return undefined;
+      }
+      if (message.base_checksum !== this.applied) {
+        return "base_mismatch";
+      }
+      const put = message.put as Scene[];
+      const order = message.order as string[];
+      const known = new Set([...this.scenes, ...put].map((entry) => entry.id));
+      if (order.length === 0 || !order.every((id) => known.has(id))) {
+        return "patch_refused";
+      }
+      return order.length > esp32SceneStoreScenes ? "no_room" : undefined;
+    }
+
+    apply(message: Record<string, unknown>) {
+      if (message.type === "set_scenes") {
+        this.scenes = message.scenes as Scene[];
+      } else {
+        const put = message.put as Scene[];
+        this.scenes = (message.order as string[]).map(
+          (id) => put.find((entry) => entry.id === id) ?? (this.scenes.find((entry) => entry.id === id) as Scene),
+        );
+      }
+      this.applied = String(message.checksum);
+    }
+  }
+
+  async function commandRow(id: string | undefined) {
+    const [row] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(id)));
+    return row;
+  }
+
+  async function frameRow(frameId: string) {
+    const [row] = await db.select().from(frames).where(eq(frames.id, frameId));
+    return row;
+  }
+
+  async function settled(frameId: string, commandId: string | undefined, checksum: string) {
+    await waitFor(async () => ((await commandRow(commandId))?.status === "acked" ? true : undefined), "the row acked");
+    await waitFor(
+      async () => ((await frameRow(frameId))?.scenesChecksum === checksum ? true : undefined),
+      `the frame holds ${checksum}`,
+    );
+  }
+
+  // A board holding set-1 (two small scenes, `a` on the panel), all known to the hub.
+  async function boardWithSetOne(port?: number) {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, port);
+    await handshake(device, privateKey, { ...esp32, states: { active_scene: "a" } });
+    const board = new Board(device);
+    const first = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scenes: [scene("a", 1), scene("b", 1)] },
+      type: "set_scenes",
+    });
+    const whole = await board.take("the first push, whole");
+    expect(whole.type).toBe("set_scenes");
+    await settled(frame.id, first?.id, "set-1");
+    return { board, device, frame, privateKey, token };
+  }
+
+  // 900 KB of scenes beside set-1's: `a` changed, `b` kept, five new.
+  const big = [scene("a", 150, 2), scene("b", 1), ...["n1", "n2", "n3", "n4", "n5"].map((id) => scene(id, 150))];
+
+  it("sends a set over the board's cap as patches, and acks the row once, at the last", async () => {
+    const { board, device, frame } = await boardWithSetOne();
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scene_id: "n1", scenes: big, state: { city: "Brussels" } },
+      type: "set_scenes",
+    });
+
+    const parts: Record<string, unknown>[] = [];
+    for (;;) {
+      const message = await board.take(`part ${parts.length + 1}`, { silent: true });
+      parts.push(message);
+      // Until the last part is answered the row is not: it waits, and so does its bar.
+      const row = await commandRow(push?.id);
+      expect(row?.status).not.toBe("acked");
+      expect(row?.ackedAt).toBeNull();
+      expect((await frameRow(frame.id))?.deployProgress).toMatchObject({ id: push?.id, status: "running" });
+      if (message.id === push?.id) {
+        break;
+      }
+      expect((row?.payload as Record<string, unknown>).part).toMatchObject({ checksum: message.checksum });
+      expect(board.refusal(message)).toBeUndefined();
+      device.send({ id: message.id, ok: true, type: "ack" });
+      board.apply(message);
+      device.send({ checksum: board.applied, type: "scene_ack" });
+    }
+    expect(parts.length).toBeGreaterThan(2);
+    for (const size of board.sizes) {
+      expect(size).toBeLessThanOrEqual(esp32MaxMessageBytes);
+    }
+    // Each part against the checksum the one before left; the row's own
+    // id, checksum, scene to show and values with the last alone.
+    expect(parts[0]?.base_checksum).toBe("set-1");
+    parts.forEach((message, index) => {
+      expect(message.type).toBe("scenes_patch");
+      if (index > 0) {
+        expect(message.base_checksum).toBe(parts[index - 1]?.checksum);
+      }
+      if (index < parts.length - 1) {
+        expect(message.id).not.toBe(push?.id);
+        expect(message.checksum).not.toBe("set-2");
+        expect(message.scene_id).toBeUndefined();
+        expect(message.state).toBeUndefined();
+        // The scene on the panel changes with the last part.
+        expect((message.put as Scene[]).map((entry) => entry.id)).not.toContain("a");
+      }
+      // The scene the frame holds as it is pushed is never sent.
+      expect((message.put as Scene[]).map((entry) => entry.id)).not.toContain("b");
+      expect(message.part).toBeUndefined();
+      expect(message.scene_hashes).toBeUndefined();
+    });
+    const last = parts.at(-1) as Record<string, unknown>;
+    expect(last).toMatchObject({ checksum: "set-2", scene_id: "n1", state: { city: "Brussels" } });
+    expect(last.order).toEqual(big.map((entry) => entry.id));
+
+    expect(board.refusal(last)).toBeUndefined();
+    device.send({ id: last.id, ok: true, type: "ack" });
+    board.apply(last);
+    device.send({ checksum: "set-2", type: "scene_ack" });
+    await settled(frame.id, push?.id, "set-2");
+    expect(board.scenes).toEqual(big);
+    const done = await commandRow(push?.id);
+    const kept = done?.payload as Record<string, unknown>;
+    expect(kept.part).toBeUndefined();
+    expect(kept.scenes).toBeUndefined();
+    expect(Object.keys(kept.scene_hashes as object).sort()).toEqual(big.map((entry) => entry.id).sort());
+    // It named a scene to show: the bar waits for that render.
+    await waitFor(
+      async () =>
+        ((await frameRow(frame.id))?.deployProgress as Record<string, unknown> | null)?.stage === "rendering"
+          ? true
+          : undefined,
+      "the bar at the first render",
+    );
+
+    // The set is the base of the next push, as any acked set is.
+    const edit = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-3", scenes: [...big.slice(0, -1), scene("n5", 1, 2)] },
+      type: "set_scenes",
+    });
+    const patch = await device.next((msg) => msg.id === edit?.id, "the next push, one patch");
+    expect(patch).toMatchObject({ base_checksum: "set-2", type: "scenes_patch" });
+    expect((patch.put as Scene[]).map((entry) => entry.id)).toEqual(["n5"]);
+    device.ws.close();
+  });
+
+  it("starts with a set_scenes of the scenes that fit when it does not know what the frame holds", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    // Showing n3, holding scenes the hub never sent.
+    await handshake(device, privateKey, { ...esp32, scenes_checksum: "local", states: { active_scene: "n3" } });
+    const board = new Board(device);
+    const scenes = ["n1", "n2", "n3", "n4", "n5", "n6"].map((id) => scene(id, 150));
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-1", scenes },
+      type: "set_scenes",
+    });
+
+    const first = await board.take("the scenes that fit");
+    expect(first.type).toBe("set_scenes");
+    expect(first.id).not.toBe(push?.id);
+    expect(first.checksum).not.toBe("set-1");
+    const firstIds = (first.scenes as Scene[]).map((entry) => entry.id);
+    expect(firstIds).toContain("n3");
+    expect(firstIds.length).toBeLessThan(scenes.length);
+    const parts = [first];
+    while (parts.at(-1)?.id !== push?.id) {
+      const message = await board.take(`part ${parts.length + 1}`);
+      expect(message).toMatchObject({ base_checksum: parts.at(-1)?.checksum, type: "scenes_patch" });
+      parts.push(message);
+    }
+    expect(parts.length).toBeGreaterThan(2);
+    for (const size of board.sizes) {
+      expect(size).toBeLessThanOrEqual(esp32MaxMessageBytes);
+    }
+    await settled(frame.id, push?.id, "set-1");
+    expect(board.scenes).toEqual(scenes);
+    // The last part left the scene on the panel as it was: nothing renders
+    // for it, so the frame holding the set is the end of the bar.
+    await waitFor(
+      async () =>
+        ((await frameRow(frame.id))?.deployProgress as Record<string, unknown> | null)?.status === "done"
+          ? true
+          : undefined,
+      "the bar done",
+    );
+    device.ws.close();
+  });
+
+  it("goes on from the part the frame holds after a reconnect", async () => {
+    const { board, device, frame, privateKey, token } = await boardWithSetOne();
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: big },
+      type: "set_scenes",
+    });
+    const one = await board.take("part 1");
+    // Part 2 goes out and the socket dies: the frame never took it.
+    const two = await board.take("part 2", { silent: true });
+    expect(two.base_checksum).toBe(one.checksum);
+    device.ws.terminate();
+    await waitFor(async () => ((await frameRow(frame.id))?.connected === false ? true : undefined), "disconnected");
+
+    const again = await openDevice(token);
+    const back = new Board(again);
+    back.scenes = board.scenes;
+    back.applied = board.applied;
+    await handshake(again, privateKey, { ...esp32, scenes_checksum: back.applied, states: { active_scene: "a" } });
+    // The same part again, not the set from its start.
+    const twoAgain = await back.take("part 2 again", { silent: true });
+    expect(twoAgain).toMatchObject({ base_checksum: one.checksum, checksum: two.checksum, type: "scenes_patch" });
+    expect(twoAgain.put).toEqual(two.put);
+    expect(twoAgain.id).not.toBe(two.id);
+    // This time it is stored, and the socket dies before the frame says so.
+    back.apply(twoAgain);
+    again.ws.terminate();
+    await waitFor(async () => ((await frameRow(frame.id))?.connected === false ? true : undefined), "disconnected");
+
+    const third = await openDevice(token);
+    const last = new Board(third);
+    last.scenes = back.scenes;
+    last.applied = back.applied;
+    await handshake(third, privateKey, { ...esp32, scenes_checksum: last.applied, states: { active_scene: "a" } });
+    // The hello carried the part's checksum: the next part is against it.
+    let message = await last.take("part 3");
+    expect(message.base_checksum).toBe(two.checksum);
+    while (message.id !== push?.id) {
+      message = await last.take("the next part");
+    }
+    await settled(frame.id, push?.id, "set-2");
+    expect(last.scenes).toEqual(big);
+    third.ws.close();
+  });
+
+  it("starts a refused part again from nothing, once, then fails the row with the frame's reason", async () => {
+    const { board, device, frame } = await boardWithSetOne();
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: big },
+      type: "set_scenes",
+    });
+    await board.take("part 1");
+    // No room beside the set it holds: the row again, without a base.
+    await board.take("part 2", { refuse: "no_room" });
+    const scratch = await board.take("the scenes that fit");
+    expect(scratch.type).toBe("set_scenes");
+    expect(scratch.id).not.toBe(push?.id);
+    // The scene on the panel is among them.
+    expect((scratch.scenes as Scene[]).map((entry) => entry.id)).toContain("a");
+    const row = await commandRow(push?.id);
+    expect((row?.payload as Record<string, unknown>).no_patch).toBe(true);
+    const next = await board.take("the patch after it", { refuse: "no_room" });
+    expect(next).toMatchObject({ base_checksum: scratch.checksum, type: "scenes_patch" });
+
+    const failed = await waitFor(async () => {
+      const current = await commandRow(push?.id);
+      return current?.status === "failed" ? current : undefined;
+    }, "the row failed");
+    expect(failed.error).toBe("no_room");
+    expect((failed.payload as Record<string, unknown>).part).toBeUndefined();
+    expect((failed.payload as Record<string, unknown>).scenes).toBeUndefined();
+    // The frame holds a smaller set, each scene whole, under that part's
+    // checksum: out of sync with the push, which is the truth.
+    const frameNow = await frameRow(frame.id);
+    expect(frameNow?.scenesChecksum).toBe(scratch.checksum);
+    expect(frameNow?.deployProgress).toMatchObject({ error: "no_room", id: push?.id, status: "error" });
+    expect(board.scenes).toEqual(scratch.scenes);
+    expect(board.scenes.every((entry) => big.some((wanted) => wanted.id === entry.id))).toBe(true);
+
+    // The next push does not know that set: it starts from the scenes that
+    // fit. (And nothing more went out for the failed row: this is the next
+    // scene message the board sees.)
+    const retry = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-3", scenes: big },
+      type: "set_scenes",
+    });
+    let message = await board.take("the next push");
+    expect(message.type).toBe("set_scenes");
+    while (message.id !== retry?.id) {
+      message = await board.take("the next part");
+    }
+    await settled(frame.id, retry?.id, "set-3");
+    expect(board.scenes).toEqual(big);
+    device.ws.close();
+  });
+
+  it("sends the next part when the frame reports one live before it is written sent", async () => {
+    // The drain writes `sent` after the socket write; a quick frame's ack and
+    // scene_ack were handled first, and that write then stranded the row for
+    // the three minutes a redelivery takes.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const extra = await startExtraHub({
+      beforeMarkSent: async (_id, messageType) => {
+        if (messageType !== "scenes_patch" || held) return;
+        held = true;
+        await gate;
+      },
+    });
+    const { board, device, frame } = await boardWithSetOne(extra.port);
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: big },
+      type: "set_scenes",
+    });
+    const one = await board.take("part 1");
+    await waitFor(
+      async () => ((await frameRow(frame.id))?.scenesChecksum === one.checksum ? true : undefined),
+      "the part reported live",
+    );
+    expect((await commandRow(push?.id))?.status).toBe("pending");
+    release();
+    let message = await board.take("part 2");
+    expect(message.base_checksum).toBe(one.checksum);
+    while (message.id !== push?.id) {
+      message = await board.take("the next part");
+    }
+    await settled(frame.id, push?.id, "set-2");
+    expect(board.scenes).toEqual(big);
+    device.ws.close();
+  });
+
+  it("goes on when a state names the part's checksum and its scene_ack never came", async () => {
+    // The firmware acks a patch it holds already without a scene_ack, and a
+    // scene_ack over the frame's rate is dropped; its `state` names the set too.
+    const { board, device, frame } = await boardWithSetOne();
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: big },
+      type: "set_scenes",
+    });
+    const one = await board.take("part 1", { live: false });
+    board.apply(one);
+    device.send({ active_scene: "a", id: randomUUID(), scenes_checksum: board.applied, states: {}, type: "state" });
+    let message = await board.take("part 2");
+    expect(message.base_checksum).toBe(one.checksum);
+    while (message.id !== push?.id) {
+      message = await board.take("the next part");
+    }
+    await settled(frame.id, push?.id, "set-2");
+    expect(board.scenes).toEqual(big);
+    device.ws.close();
+  });
+
+  it("fails the row when the frame takes a part and never reports it live", async () => {
+    const { board, device, frame } = await boardWithSetOne();
+    const push = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "set-2", scenes: big },
+      type: "set_scenes",
+    });
+    // Acked, never scene_acked: the row is due again, and the same part goes.
+    const ids = new Set<unknown>();
+    for (let attempt = 1; attempt <= maxScenesPartAccepts; attempt += 1) {
+      const part = await board.take(`part 1, time ${attempt}`, { live: false });
+      expect(part).toMatchObject({ base_checksum: "set-1", type: "scenes_patch" });
+      ids.add(part.id);
+      await waitFor(async () => {
+        const row = await commandRow(push?.id);
+        const kept = (row?.payload as Record<string, unknown>).part as Record<string, unknown> | undefined;
+        return row?.status === "sent" && kept?.accepted === attempt ? true : undefined;
+      }, `taken ${attempt} times`);
+      // Three minutes on (commandRedeliverAfterMs), the sweep finds it due.
+      await db
+        .update(frameCommands)
+        .set({ sentAt: new Date(Date.now() - 3_600_000) })
+        .where(eq(frameCommands.id, String(push?.id)));
+      await hub.sweep();
+    }
+    expect(ids.size).toBe(maxScenesPartAccepts);
+    const failed = await waitFor(async () => {
+      const row = await commandRow(push?.id);
+      return row?.status === "failed" ? row : undefined;
+    }, "the row failed");
+    expect(failed.error).toBe("scenes_not_applied");
+    expect((await frameRow(frame.id))?.deployProgress).toMatchObject({ error: "scenes_not_applied", status: "error" });
+    await expect(device.next(isSceneMessage, "another part", 300)).rejects.toThrow();
+    device.ws.close();
+  });
+
+  it("fails a set the board can never be sent, before a byte goes out", async () => {
+    const { device, frame } = await boardWithSetOne();
+    for (const [scenes, error] of [
+      // More scenes than a board's set holds.
+      [Array.from({ length: esp32SceneStoreScenes + 1 }, (_, i) => scene(`s-${i}`, 5)), "too_many_scenes"],
+      // One scene no message holds.
+      [[scene("a", 1), scene("huge", 520)], "payload_too_large"],
+    ] as const) {
+      const push = await enqueueFrameCommand(db, {
+        frameId: frame.id,
+        payload: { checksum: `set-${error}`, scenes },
+        type: "set_scenes",
+      });
+      const failed = await waitFor(async () => {
+        const row = await commandRow(push?.id);
+        return row?.status === "failed" ? row : undefined;
+      }, `the row failed: ${error}`);
+      expect(failed.error).toBe(error);
+      expect((await frameRow(frame.id))?.deployProgress).toMatchObject({ error, id: push?.id, status: "error" });
+    }
+    await expect(device.next(isSceneMessage, "a scene message", 300)).rejects.toThrow();
+    expect((await frameRow(frame.id))?.scenesChecksum).toBe("set-1");
+    device.ws.close();
+  });
+
+  it("leaves a Linux frame and firmware before the bigger store on one message", async () => {
+    for (const hello of [
+      { frameos_version: esp32SceneStoreSlotsVersion, hardware: { platform: "pi-zero2w" } },
+      // Its store holds 512 KB: the set would not fit however it came.
+      { frameos_version: "2026.11.11", hardware: { platform: "esp32-s3" } },
+    ]) {
+      const { frame, privateKey, token } = await createFrameFixture();
+      const device = await openDevice(token);
+      await handshake(device, privateKey, hello);
+      const push = await enqueueFrameCommand(db, {
+        frameId: frame.id,
+        payload: { checksum: "set-1", scenes: big },
+        type: "set_scenes",
+      });
+      const message = await device.next(isSceneMessage, "the push");
+      expect(message).toMatchObject({ checksum: "set-1", id: push?.id, type: "set_scenes" });
+      expect(message.scenes).toEqual(big);
+      expect(bytesOf(message)).toBeGreaterThan(esp32MaxMessageBytes);
       device.ws.close();
     }
   });
