@@ -265,6 +265,58 @@ static void test_flush_outside_the_lock(const char *dir)
 /* A scene without state asked for it on every switch, and opening a file that
  * is not there walks all of SPIFFS: what the store saw missing stays missing
  * until it writes it. */
+/* A scene without state says "{}" every time it is shown. With no file and
+ * nothing waiting that is no work at all: a remove of a name that is not
+ * there walks the whole partition on the device. Seen from here by a file
+ * put there behind the store's back, which a remove would take. */
+static void test_nothing_to_keep_is_no_work(const char *dir)
+{
+    fos_scene_state_set_dir(dir);
+    fos_scene_state_set_write_behind(NULL);
+    fos_scene_state_forget("plain");
+    CHECK(fos_scene_state_load("plain") == NULL);
+    char path[128];
+    CHECK(fos_scene_state_path("plain", path, sizeof(path)));
+    FILE *f = fopen(path, "wb");
+    fputs("{\"x\":1}", f);
+    fclose(f);
+    CHECK(fos_scene_state_save("plain", "{}"));
+    CHECK(file_exists("plain"));
+    fos_scene_state_forget("plain");
+    CHECK(file_exists("plain"));
+    remove(path);
+
+    /* Written behind: nothing is queued either, so the writer task has no
+     * walk to make a minute later. */
+    s_clock_ms = 9000;
+    fos_scene_state_write_behind_t behind = {.delay_ms = 1000, .now_ms = fake_now_ms};
+    fos_scene_state_set_write_behind(&behind);
+    CHECK(fos_scene_state_save("plain", "{}"));
+    CHECK(!fos_scene_state_pending());
+    /* State, then none: the file is written, then removed, once each. */
+    CHECK(fos_scene_state_save("plain", "{\"x\":2}"));
+    CHECK(fos_scene_state_pending());
+    fos_scene_state_flush(true);
+    CHECK(file_exists("plain"));
+    CHECK(fos_scene_state_save("plain", "{}"));
+    CHECK(fos_scene_state_pending());
+    fos_scene_state_flush(true);
+    CHECK(!file_exists("plain"));
+    CHECK(fos_scene_state_save("plain", "{}"));
+    CHECK(!fos_scene_state_pending());
+    /* State that waited and was taken back before its write: no file was
+     * ever there, and none is looked for. */
+    CHECK(fos_scene_state_save("plain", "{\"x\":3}"));
+    CHECK(fos_scene_state_save("plain", "{}"));
+    f = fopen(path, "wb");
+    fputs("{\"x\":4}", f);
+    fclose(f);
+    fos_scene_state_flush(true);
+    CHECK(file_exists("plain"));
+    remove(path);
+    fos_scene_state_set_write_behind(NULL);
+}
+
 static void test_a_missing_file_is_remembered(const char *dir)
 {
     fos_scene_state_set_dir(dir);
@@ -306,6 +358,7 @@ int main(void)
     test_round_trip(dir);
     test_write_behind(dir);
     test_flush_outside_the_lock(dir);
+    test_nothing_to_keep_is_no_work(dir);
     test_a_missing_file_is_remembered(dir);
     rmdir(dir);
     printf("%d checks, %d failures\n", checks, failures);
