@@ -193,8 +193,10 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(const char *method, const
                                                        const char *headers, size_t headers_len,
                                                        int timeout_ms, size_t max_bytes,
                                                        int *out_status, size_t *out_chunk_count,
-                                                       char **out_spill_path, size_t *out_spill_len)
+                                                       char **out_spill_path, size_t *out_spill_len,
+                                                       char *out_headers)
 {
+    (void)out_headers;
     if (out_spill_path) *out_spill_path = NULL;
     if (out_spill_len) *out_spill_len = 0;
     return fos_nim_http_request_chunked(method, url, body, body_len, headers, headers_len,

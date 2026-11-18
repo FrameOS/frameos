@@ -438,6 +438,14 @@ and no more.
 using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
 ignore the lists.)
 
+**Files and text.** `writeAsset(path, data)` and `appendAsset` take base64;
+with `{ text: true }` they write the string itself as UTF-8, so text needs no
+encoding: `frameos.writeAsset("notes/today.md", text, { text: true })`, and
+`readAsset(path, { text: true })` reads it back. `deleteAsset` deletes a file,
+or a folder once it is empty (false while anything is in it; never
+recursive). For bytes, `btoa` / `atob` and a UTF-8 `TextEncoder` /
+`TextDecoder` are there as on the web.
+
 **Local network.** On a cloud-managed frame, scenes reach addresses on the
 frame's own network (a Home Assistant at `homeassistant.local`, a NAS,
 anything at `192.168.x.x`) only while its local network access is on. That is
@@ -450,11 +458,16 @@ owner knows to turn it on. Standalone and self-hosted frames are not limited.
 only what follows some marker in a large page, pass
 `httpRequest(url, { find: "marker", findLength: 400 })`: the body stays native
 and the answer is `{ status, found }`, the text at each occurrence.
+Every answer has the response's `headers`, names in lower case: a request
+with `headers: { Range: "bytes=0-65535" }` learns the file's whole size from
+`headers["content-range"]` (`bytes 0-65535/8388608`).
 
 **Newer than some frames.** `frameos.remember` / `recall`, `httpRequest`'s
 `find`, `fetchImage`'s `exif`, `app.frame.embedded` / `debug`, and a throw
 painting its message all need FrameOS 2026.10.13; a frame on an older release
-lacks them. A scene meant for such frames keeps to the rest.
+lacks them. A scene meant for such frames keeps to the rest. `httpRequest`'s
+`headers`, `{ text: true }` writes, deleting a folder, and `btoa` / `atob` /
+`TextEncoder` / `TextDecoder` need FrameOS 2026.11.12.
 
 **Code style.** Normal formatting, one statement per line, descriptive names,
 short comments where the logic is not obvious. People open and edit this code
@@ -1399,6 +1412,9 @@ declare const frameos: {
     }
   ): {
     status: number;
+    /** The response's headers, names in lower case, a repeated one joined with ", " (headers["content-range"]:
+     * "bytes 0-65535/8388608"). As many as fit 2 KB on an ESP32 (FrameOS 2026.11.12+; undefined before). */
+    headers?: Record<string, string>;
     body?: string;
     bodyBase64?: string;
     found?: string[];
@@ -1486,8 +1502,13 @@ declare const frameos: {
     path: string,
     options?: { offset?: number; length?: number; text?: boolean; entry?: string; storage?: "assets" | "internal" }
   ): string | null;
-  writeAsset(path: string, base64: string): boolean;
-  appendAsset(path: string, base64: string): boolean;
+  /** Writes the file: data is base64, or with text the string itself, written as UTF-8 (text: FrameOS 2026.11.12+;
+   * before, the string is read as base64). */
+  writeAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  /** Adds to the end of the file, as writeAsset writes it. */
+  appendAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  /** Deletes a file, or a folder when it is empty: false for a folder with anything in it, and never the storage's
+   * own folder (folders: FrameOS 2026.11.12+; false before). */
   deleteAsset(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   /** One folder, inside a folder that is there: true when it was made, false when it was there already or refused
    * (a name starting with a dot, one the listing hides, an app without "assets-write") (FrameOS 2026.11.10+). */
@@ -1551,6 +1572,29 @@ declare const frameos: {
   remember(key: string, value: FrameOSJson): boolean;
   recall(key: string): FrameOSJson | undefined;
 };
+
+/** A binary string (each char a byte, 0-255) as base64; throws for a char above 255 (FrameOS 2026.11.12+). */
+declare function btoa(data: string): string;
+/** base64 as a binary string, whitespace ignored, the padding optional; throws for anything else (FrameOS 2026.11.12+). */
+declare function atob(data: string): string;
+/** A string's UTF-8 bytes: new TextEncoder().encode("ü") (FrameOS 2026.11.12+). */
+interface TextEncoder {
+  readonly encoding: string;
+  encode(input?: string): Uint8Array;
+}
+declare var TextEncoder: { prototype: TextEncoder; new (): TextEncoder };
+/** UTF-8 bytes as a string, U+FFFD for what is not UTF-8, a leading BOM dropped; UTF-8 only: another label
+ * ("latin1") throws a RangeError (FrameOS 2026.11.12+). */
+interface TextDecoder {
+  readonly encoding: string;
+  decode(input?: ArrayBuffer | ArrayBufferView | null): string;
+}
+/** Ignored: a frame's TextDecoder is never fatal and always drops a BOM. */
+interface TextDecoderOptions {
+  fatal?: boolean;
+  ignoreBOM?: boolean;
+}
+declare var TextDecoder: { prototype: TextDecoder; new (label?: string, options?: TextDecoderOptions): TextDecoder };
 
 /** console.log and friends log like frameos.log; warn says so; error goes to the error log (FrameOS 2026.10.16+). */
 declare const console: {

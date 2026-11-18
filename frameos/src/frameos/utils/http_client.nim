@@ -131,6 +131,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       code*: int
       status*: string
       body*: string
+      headers*: string ## with `wantHeaders`: the "name: value\n" lines
 
     HttpBodyChunk* = object
       ## One piece of a response body. Embedded targets download into
@@ -149,6 +150,9 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                          # (SD/SPIFFS) because PSRAM could not buffer it; the
                          # chunks are then empty and bodyLen is the file size.
                          # freeHttpBufferResponse deletes the file.
+      headers*: string # With `wantHeaders`: the final response's headers as
+                       # "name: value\n" lines, as many as fit the glue's
+                       # FOS_NIM_HTTP_HEADERS_BYTES.
       when defined(frameosEmbedded):
         rawChunks: pointer
         rawChunkCount: csize_t
@@ -157,12 +161,19 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       contentLength*: int
       etag*: string
 
+  const HttpResponseHeadersBytes = 2048
+    ## The glue's FOS_NIM_HTTP_HEADERS_BYTES (frameos_nim.h), and the wasm
+    ## library's limit for the same block.
+
   proc fos_nim_http_request(httpMethod: cstring, url: cstring,
                             body: pointer, bodyLen: csize_t,
                             headers: pointer, headersLen: csize_t,
                             timeoutMs: cint, maxBytes: csize_t,
-                            outStatus: ptr cint, outLen: ptr csize_t):
+                            outStatus: ptr cint, outLen: ptr csize_t,
+                            outHeaders: pointer):
                             pointer {.importc: "fos_nim_http_request", cdecl.}
+    ## The wasm library's (tools/wasm/frameos_library.js). The ESP32 glue's
+    ## one of that name takes no `outHeaders` and is never called from here.
   proc fos_nim_http_free(p: pointer) {.importc: "fos_nim_http_free", cdecl.}
 
   when defined(frameosEmbedded):
@@ -175,7 +186,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                             headers: pointer, headersLen: csize_t,
                             timeoutMs: cint, maxBytes: csize_t,
                             outStatus: ptr cint, outChunkCount: ptr csize_t,
-                            outSpillPath: ptr cstring, outSpillLen: ptr csize_t):
+                            outSpillPath: ptr cstring, outSpillLen: ptr csize_t,
+                            outHeaders: pointer):
                             ptr UncheckedArray[FosNimHttpChunk]
                             {.importc: "fos_nim_http_request_chunked_spill", cdecl.}
     proc fos_nim_http_free_chunks(chunks: pointer, count: csize_t)
@@ -458,11 +470,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
       maxSeconds = DefaultFetchMaxSeconds,
-      headers: seq[SimpleHttpHeader] = @[]
+      headers: seq[SimpleHttpHeader] = @[],
+      wantHeaders = false
     ): BoundedHttpBufferResponse =
     ## Returns the C-owned response buffer directly on embedded targets.
     ## Callers must release it with freeHttpBufferResponse once they have
-    ## decoded or copied the bytes they need.
+    ## decoded or copied the bytes they need. `wantHeaders` fills `headers`.
     validateHttpRequestUrl(url)
     # The run's wall-clock deadline (js_runtime/run_budget.nim) bounds every
     # request made while a scene renders — built-in apps and scene JS alike —
@@ -475,6 +488,9 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
     let headerBlock = encodeSimpleHeaders(headers)
     let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
+    if wantHeaders:
+      result.headers = newString(HttpResponseHeadersBytes)
+    let outHeaders = if wantHeaders: addr result.headers[0] else: nil
     let startedAt = getMonoTime()
     when defined(frameosEmbedded):
       var chunkCount: csize_t = 0
@@ -485,8 +501,10 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                                      headerPtr, headerBlock.len.csize_t,
                                      effectiveTimeoutMs.cint, maxBytes.csize_t,
                                      addr status, addr chunkCount,
-                                     addr spillPath, addr spillLen)
+                                     addr spillPath, addr spillLen, outHeaders)
       noteHttpWait("a reply from", url, startedAt)
+      if wantHeaders:
+        result.headers.setLen(cstring(result.headers).len)
       if status == 0:
         # No HTTP response at all: the glue's one chunk is the reason
         # ("Could not connect to example.com"), raised like the Pi's client
@@ -531,8 +549,10 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                                      bodyPtr, body.len.csize_t,
                                      headerPtr, headerBlock.len.csize_t,
                                      effectiveTimeoutMs.cint, maxBytes.csize_t,
-                                     addr status, addr outLen)
+                                     addr status, addr outLen, outHeaders)
       noteHttpWait("a reply from", url, startedAt)
+      if wantHeaders:
+        result.headers.setLen(cstring(result.headers).len)
       if status == 0:
         var reason = ""
         if buf != nil:
@@ -555,7 +575,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
       maxSeconds = DefaultFetchMaxSeconds,
-      headers: seq[SimpleHttpHeader] = @[]
+      headers: seq[SimpleHttpHeader] = @[],
+      wantHeaders = false
     ): BoundedHttpResponse =
     ## The C glue follows up to 5 redirects itself (the manual open/read flow
     ## bypasses esp_http_client_perform's redirect handling) and bounds every
@@ -568,7 +589,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       timeoutMs = timeoutMs,
       maxBytes = maxBytes,
       maxSeconds = maxSeconds,
-      headers = headers
+      headers = headers,
+      wantHeaders = wantHeaders
     )
     try:
       if response.spillPath.len > 0:
@@ -580,6 +602,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
           "it is too large to load into memory")
       result.code = response.code
       result.status = response.status
+      result.headers = move response.headers
       if response.bodyLen > 0:
         result.body = newString(response.bodyLen)
         var pos = 0
@@ -737,13 +760,16 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
       maxSeconds = DefaultFetchMaxSeconds,
-      maxRedirects = DefaultFetchMaxRedirects
+      maxRedirects = DefaultFetchMaxRedirects,
+      wantHeaders = false
     ): BoundedHttpResponse =
     ## maxRedirects is accepted for signature parity with the native build; the
-    ## C glue caps redirects itself.
+    ## C glue caps redirects itself. `wantHeaders` fills `headers` with the
+    ## response's header lines (a Pi's response always has its own).
     discard maxRedirects
     boundedRequest(url, httpMethod = httpMethod, body = body, timeoutMs = timeoutMs,
-                   maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers)
+                   maxBytes = maxBytes, maxSeconds = maxSeconds, headers = headers,
+                   wantHeaders = wantHeaders)
 
 else:
   import std/[httpclient, locks, nativesockets, net, os, posix, strformat,
@@ -1351,8 +1377,10 @@ else:
       timeoutMs = DefaultFetchTimeoutMs,
       maxBytes = DefaultFetchMaxBytes,
       maxSeconds = DefaultFetchMaxSeconds,
-      maxRedirects = DefaultFetchMaxRedirects
+      maxRedirects = DefaultFetchMaxRedirects,
+      wantHeaders = false
     ): BoundedHttpResponse =
+    discard wantHeaders # the response always carries its headers here
     boundedRequest(
       url,
       httpMethod = simpleMethod(httpMethod),

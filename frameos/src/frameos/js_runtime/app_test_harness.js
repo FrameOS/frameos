@@ -295,13 +295,14 @@
       return f;
     },
     restore: installDefaults,
-    /** A `{status, body}` reply for mock.httpRequest; `body` an object is sent as JSON. */
+    /** A `{status, headers, body}` reply for mock.httpRequest; `body` an object is sent as JSON. */
     response: (status, body, extra) => ({
       status,
+      headers: {},
       body: body === undefined ? "" : typeof body === "string" ? body : JSON.stringify(body),
       ...(extra || {}),
     }),
-    json: (body, status) => ({ status: status === undefined ? 200 : status, body: JSON.stringify(body) }),
+    json: (body, status) => ({ status: status === undefined ? 200 : status, headers: {}, body: JSON.stringify(body) }),
     /** A `frameos.fetchImage` reply: an image reference the app can return. */
     image: (spec) => {
       const width = (spec && spec.width) || 100;

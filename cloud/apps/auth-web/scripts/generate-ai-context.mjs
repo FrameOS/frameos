@@ -306,7 +306,7 @@ declare const frameos: {
       findLength?: number;
       findLimit?: number;
     }
-  ): { status: number; body?: string; bodyBase64?: string; found?: string[]; error?: string };
+  ): { status: number; headers?: Record<string, string>; body?: string; bodyBase64?: string; found?: string[]; error?: string };
   fetchImage(
     url: string,
     options?: {
@@ -329,8 +329,10 @@ declare const frameos: {
   assetExists(path: string): boolean;
   assetSize(path: string): number;
   readAsset(path: string, options?: { offset?: number; length?: number }): string | null;
-  writeAsset(path: string, base64: string): boolean;
-  appendAsset(path: string, base64: string): boolean;
+  /** data is base64, or with text the string itself, written as UTF-8 (text: FrameOS 2026.11.12+). */
+  writeAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  appendAsset(path: string, data: string, options?: { text?: boolean }): boolean;
+  /** A file, or a folder once it is empty (folders: FrameOS 2026.11.12+). */
   deleteAsset(path: string): boolean;
   loadAssetImage(path: string): FrameOSImageRef | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;

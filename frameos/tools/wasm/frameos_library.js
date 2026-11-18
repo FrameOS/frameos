@@ -152,7 +152,8 @@ addToLibrary({
     timeoutMs,
     maxBytes,
     outStatusPtr,
-    outLenPtr
+    outLenPtr,
+    outHeadersPtr
   ) {
     {{{ makeSetValue('outStatusPtr', 0, 0, 'i32') }}}
     {{{ makeSetValue('outLenPtr', 0, 0, 'i32') }}}
@@ -303,6 +304,18 @@ addToLibrary({
       var ptr = _malloc(bytes.length > 0 ? bytes.length : 1)
       if (!ptr) return 0
       HEAPU8.set(bytes, ptr)
+      if (outHeadersPtr) {
+        // frameos.httpRequest's `headers`: "name: value" lines into the
+        // caller's 2048-byte block (FOS_NIM_HTTP_HEADERS_BYTES, as the ESP32
+        // glue writes it), whole lines only. Through the proxy they are the
+        // proxy's answer's.
+        // A Node renderer's XHR shim may have no getAllResponseHeaders.
+        var head = new TextEncoder().encode((xhr.getAllResponseHeaders && xhr.getAllResponseHeaders()) || '')
+        var fit = head.length
+        if (fit > 2047) fit = head.lastIndexOf(10, 2046) + 1
+        HEAPU8.set(head.subarray(0, fit), outHeadersPtr)
+        HEAPU8[outHeadersPtr + fit] = 0
+      }
       {{{ makeSetValue('outStatusPtr', 0, 'xhr.status', 'i32') }}}
       {{{ makeSetValue('outLenPtr', 0, 'bytes.length', 'i32') }}}
       return ptr

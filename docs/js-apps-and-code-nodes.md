@@ -90,7 +90,9 @@ type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,
 `frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
-timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameos.fetchImage(url, {headers, saveAsset, colors})` (see
+timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages);
+from 2026.11.12 its answer carries the response's `headers`, names in lower
+case and a repeated one joined with ", ", as many as fit 2 KB on an ESP32), `frameos.fetchImage(url, {headers, saveAsset, colors})` (see
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
@@ -103,7 +105,15 @@ calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
 `streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out; see "Big
 text" below for text a line at a time). `readAsset(path, {text: true})` gives
-the bytes as a string instead of base64, and `{entry: "OEBPS/ch1.xhtml"}`
+the bytes as a string instead of base64, and from 2026.11.12
+`writeAsset(path, text, {text: true})` / `appendAsset` write a string as
+UTF-8 instead of decoding base64, and `deleteAsset` removes a folder once it
+is empty (false while anything is in it, never the storage's own folder,
+never recursive; on an ESP32's flash storage a folder is a name prefix with
+a marker, `main/fos_assets_flash.c`). The globals `btoa` / `atob` (the web's:
+a char above 255, or text that is not base64, throws) and a UTF-8
+`TextEncoder` / `TextDecoder` (U+FFFD for bytes that are not UTF-8; another
+label throws) are native (`jsText`) from 2026.11.12 too. And `{entry: "OEBPS/ch1.xhtml"}`
 reads one member of a ZIP file (an EPUB, an .odt), inflated by the frame a
 window at a time so only the slice asked for is held
 (`frameos/src/frameos/utils/zip_entry.nim`; the Books sample reads its
