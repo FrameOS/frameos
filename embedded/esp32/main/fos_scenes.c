@@ -1362,12 +1362,12 @@ bool fos_scenes_apply_pending(void)
         int slots_before = s_slot_count;
         s_slot_count = 0;
         /* More scenes than a store holds is refused, not cut. */
-        const char **starts = fos_big_malloc(sizeof(*starts) * (SCENES_SET_MAX + 1));
-        size_t *lens = fos_big_malloc(sizeof(*lens) * (SCENES_SET_MAX + 1));
-        int count = starts && lens ? fos_store_split_scenes(json, len, starts, lens, SCENES_SET_MAX + 1) : 0;
+        /* Where each scene starts and how long it is: one block for both. */
+        const char **starts = fos_big_malloc((sizeof(*starts) + sizeof(size_t)) * (SCENES_SET_MAX + 1));
+        size_t *lens = (size_t *)(starts + SCENES_SET_MAX + 1);
+        int count = starts ? fos_store_split_scenes(json, len, starts, lens, SCENES_SET_MAX + 1) : 0;
         ok = load_into_nim(starts, lens, count > SCENES_SET_MAX ? 0 : count, len, "stored");
         free(starts);
-        free(lens);
         free(json);
         json = NULL;
         if (ok) {
@@ -2268,11 +2268,7 @@ typedef struct {
     fos_scene_store_err_t err; /* why the store refused, when it did */
     bool busy;                 /* another payload is being stored or waits for its apply */
     bool updating;             /* "Updating" is on the glass */
-    /* Where the time went, for the `scenes:toStore` line: opening each
-     * scene's file, writing its bytes (the pace's waits included), closing
-     * it and reading what the index keeps. */
-    int scenes;
-    int64_t open_us, write_us, close_us;
+    int scenes;                /* written or found stored, for the `scenes:toStore` line */
 } spool_t;
 
 /* Under the store lock. */
@@ -2336,9 +2332,7 @@ static fos_http_body_err_t spool_begin(void *ctx)
         spool->updating = true;
         fos_display_updating_begin();
     }
-    int64_t started = esp_timer_get_time();
     if (err == FOS_SCENE_STORE_OK) err = fos_scene_store_stage_begin(spool->id);
-    spool->open_us += esp_timer_get_time() - started;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
@@ -2348,9 +2342,7 @@ static fos_http_body_err_t spool_bytes(void *ctx, const char *bytes, size_t len)
 {
     spool_t *spool = ctx;
     store_lock();
-    int64_t started = esp_timer_get_time();
     fos_scene_store_err_t err = fos_scene_store_stage_write(spool->id, bytes, len);
-    spool->write_us += esp_timer_get_time() - started;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
@@ -2360,40 +2352,29 @@ static fos_http_body_err_t spool_end(void *ctx)
 {
     spool_t *spool = ctx;
     store_lock();
-    int64_t started = esp_timer_get_time();
     fos_scene_store_err_t err = fos_scene_store_stage_end(spool->id, NULL);
-    spool->close_us += esp_timer_get_time() - started;
     if (err == FOS_SCENE_STORE_OK) spool->scenes++;
     fos_http_body_err_t answer = spool_answer(spool, err);
     store_unlock();
     return answer;
 }
 
-/* One line for an answer read into the store: how much, how long, and where
- * the time went. */
+/* One line for an answer read into the store: how much and how long, in the
+ * words of every scene line (`detail` is the time). Where the time went
+ * (opening, writing and closing each file) was a line of its own with three
+ * timers behind it, 400 bytes of flash for a number read once: a slot file
+ * that does not exist yet is a second to make on a 24 MB /state, and the
+ * rest is the bytes. */
 static void log_spool(const spool_t *spool, size_t bytes, int64_t took_us, bool ok)
 {
-    char line[320];
-    snprintf(line, sizeof(line),
-             "{\"event\":\"scenes:toStore\",\"source\":\"esp32\",\"status\":\"%s\",\"scenes\":%d,"
-             "\"bytes\":%u,\"ms\":%d,\"openMs\":%d,\"writeMs\":%d,\"closeMs\":%d,\"freePsram\":%u}",
-             ok ? "ok" : "error", spool->scenes, (unsigned)bytes, (int)(took_us / 1000), (int)(spool->open_us / 1000),
-             (int)(spool->write_us / 1000), (int)(spool->close_us / 1000),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    frameos_nim_log_hook(line);
+    char took[16];
+    snprintf(took, sizeof(took), "%d ms", (int)(took_us / 1000));
+    log_scene_event("scenes:toStore", ok ? "ok" : "error", "backend", "", took, bytes, spool->scenes, 200, ESP_OK);
 }
 
 /* What /state takes beside what it holds, less the index written twice and
- * a margin: the most a set read into the store may be. */
+ * a margin, is the most a set read into the store may be. */
 #define SPOOL_ROOM_MARGIN (128 * 1024)
-
-static size_t state_room(void)
-{
-    size_t total = 0, used = 0;
-    state_usage(&total, &used);
-    size_t room = total > used ? total - used : 0;
-    return room > SPOOL_ROOM_MARGIN ? room - SPOOL_ROOM_MARGIN : 0;
-}
 
 /* The ETag of an answer the store could not take (no room on /state, more
  * scenes than an index holds, a scene that is not one): said once, and not
@@ -2700,11 +2681,11 @@ static bool store_task_ready(void)
 
 /* The stored payload to the store task for its split; false when there is no
  * task (the caller splits). */
-static bool store_split_behind(void)
+static bool store_wanted_behind(bool *wanted)
 {
     if (!store_task_ready()) return false;
     portENTER_CRITICAL(&s_store_mux);
-    s_store_split_wanted = true;
+    *wanted = true;
     bool start = !s_store_busy;
     s_store_busy = true;
     portEXIT_CRITICAL(&s_store_mux);
@@ -2712,18 +2693,16 @@ static bool store_split_behind(void)
     return true;
 }
 
+static bool store_split_behind(void)
+{
+    return store_wanted_behind(&s_store_split_wanted);
+}
+
 /* The sweep to the store task; false when there is no task (the caller
  * sweeps). */
 static bool store_sweep_behind(void)
 {
-    if (!store_task_ready()) return false;
-    portENTER_CRITICAL(&s_store_mux);
-    s_store_sweep_wanted = true;
-    bool start = !s_store_busy;
-    s_store_busy = true;
-    portEXIT_CRITICAL(&s_store_mux);
-    if (start) xTaskNotifyGive(s_store_task);
-    return true;
+    return store_wanted_behind(&s_store_sweep_wanted);
 }
 
 /* `set` to the store task, which frees it; false (and `set` still the
@@ -2806,7 +2785,9 @@ fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t eta
          * download, parse and write. Not when the frame holds no set: then it
          * wants all of it whatever its ETag says. */
         bool holds_set = s_slot_count > 0 || s_loaded > 0;
-        size_t room = state_room();
+        size_t state_total = 0, state_used = 0;
+        state_usage(&state_total, &state_used);
+        size_t room = state_total > state_used + SPOOL_ROOM_MARGIN ? state_total - state_used - SPOOL_ROOM_MARGIN : 0;
         char refused[ETAG_LEN];
         portENTER_CRITICAL(&s_etag_mux);
         /* Refused for want of room, and the room is there now: read again. */
@@ -2829,6 +2810,7 @@ fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t eta
          * when it could not be. */
         enum { READ_EITHER, READ_TO_STORE, READ_HELD } how = READ_EITHER;
         size_t held_whole = 0;
+        size_t declared = 0; /* the answer's length as it said it; 0: it did not */
         for (int attempt = 0; attempt < 2; attempt++) {
             fos_http_request_t request = {
                 .url = url,
@@ -2853,38 +2835,36 @@ fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t eta
                 log_spool(&spool, pieces->bytes, esp_timer_get_time() - started,
                           !response.too_large && response.body_err == ESP_OK);
             }
+            declared = response.content_length > 0 ? (size_t)response.content_length : 0;
             if (err != ESP_OK || response.status != 200 || response.skipped || attempt > 0) break;
-            size_t said = (size_t)(response.content_length > 0 ? response.content_length : 0);
             /* Held in memory, there was no block for one of its scenes, or
              * (its length not declared) it came to more than is held: once
              * more, into the store, which needs neither. */
             bool no_block = !response.spooled && !response.too_large && response.body_err == ESP_ERR_NO_MEM;
-            bool undeclared = !response.spooled && response.too_large && said == 0;
+            bool undeclared = !response.spooled && response.too_large && declared == 0;
             /* More than /state has room for beside the set it holds, though
              * not more than /state: a small partition's set that replaces
              * most of the one before (a 1 MB /state holding 680 KB has room
              * for 120 KB more). Held in memory where there is twice that
              * much, it is stored a scene at a time, the scenes it drops
              * first (fos_scene_store_apply_set). */
-            size_t state_total = 0;
-            state_usage(&state_total, NULL);
-            bool beside = response.too_large && said > 0 && said + SPOOL_ROOM_MARGIN < state_total &&
-                          heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= 2 * said;
+            bool beside = response.too_large && declared > 0 && declared + SPOOL_ROOM_MARGIN < state_total &&
+                          heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= 2 * declared;
             if (no_block || undeclared) {
                 how = READ_TO_STORE;
             } else if (beside) {
                 how = READ_HELD;
-                held_whole = said;
+                held_whole = declared;
             } else {
                 break;
             }
+            /* Why it is read again: held in memory whole (no room for it
+             * beside the set on /state), or into the store (no block for a
+             * scene of it, or its length not said). */
             log_scene_event("scenes:sync", "retry", "backend", "",
-                            how == READ_HELD ? "no room beside the set, held in memory"
-                            : no_block       ? "no-memory, into the store"
-                                             : "into the store",
-                            said, 0, response.status, ESP_ERR_NO_MEM);
+                            how == READ_HELD ? "held" : no_block ? "no-memory" : "to-store", declared, 0,
+                            response.status, ESP_ERR_NO_MEM);
         }
-        size_t declared = (size_t)(response.content_length > 0 ? response.content_length : 0);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "scenes sync: connect failed: %s", esp_err_to_name(err));
             log_scene_event("scenes:sync", "error", "backend", "", "connect-failed", 0, 0, 0, err);
@@ -2900,10 +2880,9 @@ fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t eta
             /* The answer the store refused, unchanged: said once, then. */
             err = ESP_ERR_NO_MEM;
         } else if (response.too_large) {
-            /* More than /state has room for: nothing of it was read. */
-            ESP_LOGE(TAG, "scenes sync: %lld bytes of scenes, /state has room for %u", response.content_length,
-                     (unsigned)room);
-            set_scene_simple_error("no room on /state for the scenes", declared);
+            /* More than /state has room for: nothing of it was read. The
+             * line says how much it was, or (its length not said) the room. */
+            set_scene_simple_error(fos_scene_store_err_str(FOS_SCENE_STORE_ERR_NO_SPACE), declared);
             log_scene_event("scenes:sync", "error", "backend", "", "payload-too-large",
                             declared ? declared : room, 0, response.status, ESP_ERR_NO_MEM);
             refused_set(response.etag, declared);
@@ -2924,17 +2903,13 @@ fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t eta
                 store_unlock();
                 if (spool.busy) {
                     detail = "busy";
-                } else if (spool.err == FOS_SCENE_STORE_ERR_NO_SPACE) {
-                    detail = "no-room";
-                    err = ESP_ERR_NO_MEM;
-                } else if (spool.err == FOS_SCENE_STORE_ERR_NO_SLOTS) {
-                    detail = "too-many-scenes";
-                    err = ESP_ERR_NO_MEM;
                 } else if (spool.err != FOS_SCENE_STORE_OK && spool.err != FOS_SCENE_STORE_ERR_NO_MEMORY) {
-                    detail = "invalid";
-                }
-                /* The same answer would be refused the same way. */
-                if (!spool.busy && spool.err != FOS_SCENE_STORE_OK && spool.err != FOS_SCENE_STORE_ERR_NO_MEMORY) {
+                    /* The store's own words for it ("no room on /state",
+                     * "no free scene slot", "not one scene object with an
+                     * id"), and the same answer would be refused the same
+                     * way. */
+                    detail = fos_scene_store_err_str(spool.err);
+                    err = STORE_ERR_TO_ESP[spool.err];
                     refused_set(response.etag, spool.err == FOS_SCENE_STORE_ERR_NO_SPACE ? declared : 0);
                 }
             }
@@ -2985,32 +2960,28 @@ static esp_err_t take_backend_payload(fos_scene_set_t *set, const char *etag)
     }
     /* An object, not the array a whole payload is: only the scenes that
      * changed since the set this frame holds (`?patch=1`). Written here,
-     * scene by scene through the store. */
-    if (set->rest[0] == '{') {
-        err = apply_backend_patch(set, etag);
+     * scene by scene through the store.
+     *
+     * Or a whole set read straight into the store (backend_spool): its
+     * scenes are in their files, and this is the one change that makes them
+     * the set, as a patch that names every scene. The scenes stored already
+     * stayed as they were, so the scene showing reloads only if it changed.
+     * How many were written and how many found stored is in the `scenes:set`
+     * line's bytes (those written) and count. */
+    bool patch = set->rest[0] == '{';
+    if (patch || set->staged != 0) {
+        if (patch) {
+            err = apply_backend_patch(set, etag);
+        } else {
+            fos_scene_store_change_t change = {.staged = set->staged};
+            fos_scene_store_result_t result;
+            err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:set", false, &result);
+            if (err != ESP_OK) s_sync_requested = true;
+        }
         scene_set_free(set);
         log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
-                        err == ESP_OK ? "patched" : "patch-refused", len, 0, 200, err);
-        return err;
-    }
-    /* A whole set read straight into the store (backend_spool): its scenes
-     * are in their files, and this is the one change that makes them the
-     * set, as a patch that names every scene. The scenes stored already
-     * stayed as they were, so the scene showing reloads only if it changed. */
-    if (set->staged != 0) {
-        int written = 0, kept = 0;
-        store_lock();
-        fos_scene_store_stage_counts(set->staged, &written, &kept, NULL);
-        store_unlock();
-        fos_scene_store_change_t change = {.staged = set->staged};
-        fos_scene_store_result_t result;
-        err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:set", false, &result);
-        if (err != ESP_OK) s_sync_requested = true;
-        scene_set_free(set);
-        char detail[64];
-        snprintf(detail, sizeof(detail), "to-store: %d written, %d kept", written, kept);
-        log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
-                        err == ESP_OK ? detail : "set-refused", len, err == ESP_OK ? result.scene_count : 0, 200, err);
+                        err != ESP_OK ? (patch ? "patch-refused" : "set-refused") : patch ? "patched" : "to-store",
+                        len, 0, 200, err);
         return err;
     }
     /* What the next conditional GET sends, now: the link task polls on while

@@ -53,6 +53,69 @@ def test_the_pass_loop_reads_the_scene_interval_through_the_tested_rules():
     assert "scene_interval >= 1.0" not in client
 
 
+def test_a_checkin_pass_sleeps_until_the_render_that_was_scheduled():
+    """A deep-sleeping frame that wakes for commands (wake_check_seconds, 900 s
+    on three reTerminal presets) skips its render and went back to sleep for
+    the shorter of "until the scheduled render" and "this pass's interval".
+    A pass that renders nothing builds no scene, so that interval is the
+    frame's own or the scene's declared one, not the one the render was
+    scheduled by. On a reTerminal E1002 (2026-11-18) a scene set to one day
+    announced `nextRenderAt` 86,394 s on, and its first check-in rewrote that
+    to 298 s on; with the scheduled render kept, five check-ins in a row left
+    the date alone. Only a cell too low to render keeps its own long sleep."""
+    client = (MAIN_DIR / "fos_client.c").read_text()
+    checkin = client[client.index("        if (checkin_pass) {\n            /* This pass skipped the render"):]
+    checkin = checkin[: checkin.index("s_next_render_due = time(NULL) + (time_t)sleep_s;")]
+    assert "int64_t until_due = (int64_t)(s_next_render_due - time(NULL));" in checkin
+    assert "if (!battery_critical || (uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;" in checkin
+    assert "\n            if ((uint64_t)until_due < sleep_s) sleep_s" not in client, "the shorter of the two moved the render up"
+
+
+def test_the_scheduled_render_is_kept_without_a_set_clock():
+    """A frame whose network answers no SNTP never has a wall clock. Its due
+    date was stored as 0 ("clock_ok ? ... : 0"), so no wake was ever a
+    check-in pass and each one rendered: a reTerminal E1004 set to one day,
+    woken every 900 s by its preset's wake check, drew a new photo every 15
+    minutes, and its sleep line said `nextRenderAt=0` (a user's log,
+    2026-11-18). The date and "now" come off the same counter, which runs
+    through a deep sleep set or not; only what a plane is told needs a real
+    clock. On an E1002 with a test image whose clock says "never set", six
+    check-in wakes in a row skipped the render."""
+    client = (MAIN_DIR / "fos_client.c").read_text()
+    assert "clock_ok" not in client, "the render schedule depends on a set clock again"
+    decision = client[client.index("bool checkin_pass = deep_sleep_now && !force_render &&"):]
+    decision = decision[: decision.index(";")]
+    assert "fos_wifi_time_synced" not in decision
+    assert "s_next_render_due > wall_now + FOS_SLEEP_EARLY_WAKE_SEC" in decision
+    # The date a plane shows is a real one or none.
+    assert "fos_wifi_time_synced() && s_next_render_due > 1000000000 ? s_next_render_due : 0" in client
+    assert client.count("announced_due") == 3
+    # A boot that is not a wake from deep sleep still starts without a date.
+    assert re.search(r"esp_reset_reason\(\) != ESP_RST_DEEPSLEEP\) \{\s*s_next_render_due = 0;", client)
+
+
+def test_the_workspace_knows_what_a_preset_sleeps_by():
+    """The console's `preset` turns deep sleep on battery and a wake check on
+    for three reTerminals, on the device alone. The cloud keeps only what its
+    owner set, so its Power panel said "Only wake to render" over a frame
+    that woke every 15 minutes (2026-11-18). The panel reads the defaults off
+    the preset the device names in its hello (utils/presetSleep.ts), which
+    costs the firmware nothing and is right for frames already out there: so
+    that list is the firmware's."""
+    console = (MAIN_DIR / "fos_console.c").read_text()
+    presets = console[console.index("} presets[] = {"):]
+    presets = presets[: presets.index("};")]
+    firmware = {}
+    for name, body in re.findall(r'\{ "([a-z0-9_]+)",(.*?)\},', presets, re.S):
+        numbers = re.findall(r"(\d+), (\d+) $", body.strip() + " ")
+        if numbers and numbers[-1][0] == "1":
+            firmware[name] = int(numbers[-1][1])
+    assert firmware, "no preset turns deep sleep on battery on any more: is the table still read right?"
+    spa = (REPO_ROOT / "frontend" / "src" / "utils" / "presetSleep.ts").read_text()
+    listed = {name: int(seconds) for name, seconds in re.findall(r"^  ([a-z0-9_]+): (\d+),$", spa, re.M)}
+    assert listed == firmware
+
+
 def test_an_animation_goes_to_the_backend_once():
     """Both places a frame's picture is handed to the backend ask
     fos_animation_push_wanted first, and a push that reached the backend

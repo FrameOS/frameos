@@ -3661,7 +3661,6 @@ static void client_task(void *arg)
          * scheduled render is not due yet, so skip the costly refresh. An
          * explicit render signal always wins. */
         time_t wall_now = time(NULL);
-        bool clock_ok = fos_wifi_time_synced() && wall_now > 1000000000;
         /* Not gated on wake_check_seconds: a keep-awake hold (a verb that
          * arrived as the pass ended) also lands here with the due date still
          * ahead, and used to render the same scene a second time. */
@@ -3682,7 +3681,9 @@ static void client_task(void *arg)
          * fast (about 1%: a two-hour sleep lands 60-90 s early), and the
          * check-in pass that skipped it cost a second boot and Wi-Fi join
          * every cycle. */
-        bool checkin_pass = deep_sleep_now && !force_render && clock_ok &&
+        /* Whether or not the clock was ever set: the due date and "now" are
+         * read off the same counter either way (see where it is stored). */
+        bool checkin_pass = deep_sleep_now && !force_render &&
                             s_next_render_due > wall_now + FOS_SLEEP_EARLY_WAKE_SEC &&
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
@@ -3886,10 +3887,15 @@ static void client_task(void *arg)
         }
         if (checkin_pass) {
             /* This pass skipped the render, so sleep until the scheduled one,
-             * not a fresh interval from now. */
+             * not an interval from now. Never the shorter of the two: this
+             * pass's interval is not the one the render was scheduled by (no
+             * scene was built: it is the frame's own, or the scene's declared
+             * one), and taken when shorter it moved a render a day away to
+             * five minutes after the first check-in (the E1002, 2026-11-18).
+             * Only a cell too low to render keeps its own long sleep. */
             int64_t until_due = (int64_t)(s_next_render_due - time(NULL));
             if (until_due < 1) until_due = 1;
-            if ((uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;
+            if (!battery_critical || (uint64_t)until_due < sleep_s) sleep_s = (uint32_t)until_due;
         }
         ESP_LOGI(TAG, "next render in %lu s (interval %lu s)",
                  (unsigned long)sleep_s, (unsigned long)interval);
@@ -3897,7 +3903,15 @@ static void client_task(void *arg)
          * wait is a deep sleep (the RTC keeps it) or an awake hold cut short
          * by a keep-awake, whose follow-up pass must then check in, not
          * render again. */
-        s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
+        /* Kept on a frame whose clock was never set too: the chip counts
+         * through a deep sleep from wherever it stands, on the oscillator
+         * that times the sleep. Such a frame (its network answers no SNTP)
+         * used to keep no due date at all, so every check-in wake rendered:
+         * a reTerminal E1004 set to one day drew a new photo each 15 minutes,
+         * its sleep line saying `nextRenderAt=0` (a user's log, 2026-11-18).
+         * A clock set between two passes puts "now" past the date: one
+         * render, and the next date is in the new time. */
+        s_next_render_due = time(NULL) + (time_t)sleep_s;
         /* A key still down, or a tap inside its double-press window: the
          * dispatcher has a `longPress`, `press` or `doublePress` still to
          * deliver, and only a tick delivers it. A battery frame that slept
@@ -4042,6 +4056,10 @@ static void client_task(void *arg)
              * back early (fos_buttons.h); the timer below stays armed too. */
             uint64_t wake_buttons = 0;
             fos_buttons_arm_wake(&wake_buttons);
+            /* A plane is told a date only off a clock that was set: one
+             * counted from 1970 would read as a render long overdue. */
+            time_t announced_due =
+                fos_wifi_time_synced() && s_next_render_due > 1000000000 ? s_next_render_due : 0;
             {
                 char pins[96] = "";
                 size_t used = 0;
@@ -4055,7 +4073,7 @@ static void client_task(void *arg)
                          "{\"event\":\"sleep\",\"source\":\"esp32\",\"wakeInSeconds\":%lu,"
                          "\"nextRenderAt\":%lld,\"reason\":\"%s\",\"wakeCheck\":%s,"
                          "\"wakeButtons\":[%s]}",
-                         (unsigned long)chunk, (long long)s_next_render_due, sleep_reason,
+                         (unsigned long)chunk, (long long)announced_due, sleep_reason,
                          wake_check ? "true" : "false", pins);
                 frameos_nim_log_hook(line);
                 frameos_nim_flush_logs();
@@ -4064,7 +4082,7 @@ static void client_task(void *arg)
              * the sleep line above) on the wire BEFORE the sleep announce:
              * the hub terminates the socket the moment it sees `sleep`. */
             fos_cloud_flush_logs(FOS_SLEEP_LOG_DRAIN_MS);
-            if (fos_cloud_announce_sleep(chunk, (int64_t)s_next_render_due, sleep_reason,
+            if (fos_cloud_announce_sleep(chunk, (int64_t)announced_due, sleep_reason,
                                          wake_check)) {
                 /* The send returned once the bytes were handed to lwIP; give
                  * the stack a moment to actually put them on the air. */

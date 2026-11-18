@@ -7,9 +7,14 @@
  * on its own — so a frame on a desk with USB in no longer counts as "on
  * battery" and deep-sleeps between renders (fos_power.c takes `usb_power`).
  *
- * The decode is pure (main/tests/test_fos_charger.c argues with it); the
+ * The decode is pure (main/tests/test_fos_i2c_devices.c argues with it); the
  * read goes through fos_i2c.c. Read-only: the chip's own defaults charge the
  * cell, and FrameOS does not touch them.
+ *
+ * A charger with no bus is strapped by resistors and has nothing to read;
+ * where its charge-enable input is a GPIO (fos_board_charge_enable_pin: the
+ * reTerminal Sticky's BQ25616), fos_charger_enable drives it, and the fuel
+ * gauge says what the cell then does (fos_gauge.c).
  */
 #pragma once
 
@@ -38,4 +43,9 @@ void fos_charger_decode(uint8_t reg08, uint8_t reg0a, fos_charger_status_t *out)
 bool fos_charger_present(void);
 /* Read and decode. ESP_ERR_NOT_FOUND without a charger. */
 esp_err_t fos_charger_read(fos_charger_status_t *out);
+/* Lets the board's charger charge, where that takes a pin held low
+ * (fos_board_charge_enable_pin), and keeps it so through a deep sleep: a
+ * cable plugged into a sleeping frame charges it. Once at boot; nothing to
+ * do on any other board. */
+void fos_charger_enable(const char *hardware_preset);
 #endif

@@ -985,9 +985,18 @@ a small change cost what it should:
   in 0.2-0.35 s instead of 6-18 s, and the render task is free 6 s after it
   began instead of 35-53 s.
 - **Slow chores leave the render task.** The scene state that waited its delay is
-  written by a task of its own (`scene_state_writer_task` in `main.c`): a SPIFFS
-  write is 0.7 s on the E1003 and 3 s on the Sticky, and the file write runs
-  outside the store's lock, a load meanwhile getting the state being written.
+  written by a task of its own (`scene_state_writer_task` in `main.c`), and the
+  file write runs outside the store's lock, a load meanwhile getting the state
+  being written. Off the render task is not out of its way: every name a SPIFFS
+  call takes is a walk of the partition's lookup pages (0.5 s on a 24 MB
+  `/state`), flash reads with the cache off on both cores, and a render going
+  on meanwhile ran at half its speed. So a write names its file once, in place
+  (through a temporary file it was six names, 3.2 s on the Sticky), and a scene
+  without state, which says "nothing to keep" every time it is shown, is no
+  flash work at all (it was the remove of a file that is not there, 0.6 s, a
+  minute after every such scene). Measured on the Sticky (2026-11-18), ten
+  scenes walked and one drawn as their state came due: 4.9 s of writes and the
+  3.7 s render in 8.1 s before, 0.7 s of writes and 3.9 s after.
   More than half the store's sixteen slots waiting writes them all
   (`fos_scene_state_crowded`), so a walk through the scenes never writes on the
   render task. The picture pushed to the backend after a render (1.3 MB on the

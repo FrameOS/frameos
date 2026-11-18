@@ -34,11 +34,8 @@ typedef struct {
     int max_depth;
     int level;          /* the depth whose members are read: 1 the scene's, 2 its settings' */
     uint8_t phase;
-    uint8_t key_len;    /* of the scene-level key being read; 255: not a plain short one */
-    char key[12];
     bool in_string, escaped;
     bool keeping;       /* the member being read is copied to `text` */
-    bool kept[3];       /* by level: a member was kept (the next takes a comma) */
     bool whole;         /* the closing brace was read */
     bool failed;        /* not one object */
 } fos_scene_meta_t;

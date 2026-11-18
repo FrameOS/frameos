@@ -31,9 +31,11 @@
  * before a deep sleep and before a restart (main.c, fos_client.c). Losing
  * power loses at most one delay of changes. The delayed writes run on a task
  * of their own (main.c `scene_state_writer_task`), not the render task: a
- * write is seconds on a full partition, and the render task also drains the
- * touch queue. The file write runs outside the lock; a load meanwhile gets
- * the state being written.
+ * write is a walk of the partition for the file's name, and the render task
+ * also drains the touch queue. The file write runs outside the lock; a load
+ * meanwhile gets the state being written. One name a write and none for a
+ * scene that keeps no state (fos_scene_state.c `write_file`): the walks hold
+ * the flash cache off, and the whole frame slows while one runs.
  *
  * IDF-free on purpose (stdio only), so it has a host test:
  * main/tests/test_fos_scene_state.c, run by

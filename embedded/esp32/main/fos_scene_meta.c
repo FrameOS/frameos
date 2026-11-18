@@ -24,9 +24,7 @@ void fos_scene_meta_begin(fos_scene_meta_t *meta)
     meta->max_depth = 0;
     meta->level = 0;
     meta->phase = PH_KEY;
-    meta->key_len = 0;
     meta->in_string = meta->escaped = meta->keeping = meta->whole = meta->failed = false;
-    meta->kept[0] = meta->kept[1] = meta->kept[2] = false;
 }
 
 /* The member being read is not kept after all: what was copied of it goes. */
@@ -61,9 +59,17 @@ static bool is_space(char c)
 
 static void member_done(fos_scene_meta_t *m)
 {
-    if (m->keeping && (m->phase == PH_AFTER || m->phase == PH_LITERAL)) m->kept[m->level] = true;
-    else drop(m);
+    if (m->phase != PH_AFTER && m->phase != PH_LITERAL) drop(m);
     m->keeping = false;
+}
+
+/* The member being kept is, so far, the key `"settings"` and its colon as
+ * they are written: an escaped key is not it. Read off the text kept, which
+ * holds the member from `mark` (after the comma, if it took one). */
+static bool is_settings(const fos_scene_meta_t *m)
+{
+    size_t at = m->mark + (m->text[m->mark] == ',');
+    return m->keeping && m->len - at == 11 && memcmp(m->text + at, "\"settings\":", 11) == 0;
 }
 
 static void feed(fos_scene_meta_t *m, char c)
@@ -89,14 +95,10 @@ static void feed(fos_scene_meta_t *m, char c)
             m->escaped = false;
         } else if (c == '\\') {
             m->escaped = true;
-            if (m->phase == PH_KEY_STR) m->key_len = 255; /* an escaped key is not the plain "settings" */
         } else if (c == '"') {
             m->in_string = false;
             if (m->phase == PH_KEY_STR) m->phase = PH_COLON;
             else if (m->phase == PH_STRING) m->phase = PH_AFTER;
-        } else if (m->phase == PH_KEY_STR && m->level == 1 && m->key_len != 255) {
-            if (m->key_len < sizeof(m->key) - 1) m->key[m->key_len++] = c;
-            else m->key_len = 255;
         }
         return;
     }
@@ -117,13 +119,14 @@ static void feed(fos_scene_meta_t *m, char c)
     switch (c) {
     case '"':
         if (m->phase == PH_KEY) {
+            /* A comma unless it is the first kept of its object: the text
+             * ends in that object's `{` then, and in nothing else's. */
             m->mark = m->len;
             m->keeping = true;
-            if (m->kept[m->level]) keep(m, ',');
+            if (m->text[m->len - 1] != '{') keep(m, ',');
             keep(m, '"');
             m->phase = PH_KEY_STR;
             m->in_string = true;
-            if (m->level == 1) m->key_len = 0;
         } else if (m->phase == PH_VALUE) {
             keep(m, '"');
             m->phase = PH_STRING;
@@ -165,14 +168,11 @@ static void feed(fos_scene_meta_t *m, char c)
             return;
         }
         if (++m->depth > m->max_depth) m->max_depth = m->depth;
-        if (c == '{' && m->level == 1 && m->keeping && m->key_len == 8 && memcmp(m->key, "settings", 8) == 0 &&
-            m->len + FOS_SCENE_META_MEMBER_MAX / 4 < FOS_SCENE_META_MAX) {
+        if (c == '{' && m->level == 1 && is_settings(m) && m->len + FOS_SCENE_META_MEMBER_MAX / 4 < FOS_SCENE_META_MAX) {
             /* The settings' own members, each kept or passed over by itself:
              * the mark is theirs from here, and the member of the scene that
              * holds them stays. */
             put(m, '{');
-            m->kept[1] = true;
-            m->kept[2] = false;
             m->level = 2;
             m->keeping = false;
             m->phase = PH_KEY;
