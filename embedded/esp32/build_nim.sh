@@ -114,4 +114,8 @@ rm -f "$NIMCACHE"/*.json
 # (~30 KB of flash; see the script).
 python3 "$SCRIPT_DIR/tools/fold_nim_inlines.py" "$NIMCACHE"
 
+# One copy of each string literal that several modules hold, instead of one
+# per C file (~28 KB of flash; see the script).
+python3 "$SCRIPT_DIR/tools/fold_nim_strings.py" "$NIMCACHE"
+
 echo "nimcache ready: $(ls "$NIMCACHE" | wc -l | tr -d ' ') files in $NIMCACHE"

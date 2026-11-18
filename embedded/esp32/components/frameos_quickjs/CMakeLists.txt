@@ -89,6 +89,12 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -funsigned-char -fwrapv -fno-strict-aliasing -fno-lto -w
     -Wno-error=incompatible-pointer-types)
 
+# The image is built without the assembler's branch-target alignment (the
+# project's CMakeLists.txt); the file with the interpreter loop keeps it.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    set_source_files_properties("${FOS_QJS_HOT_SOURCE}" PROPERTIES COMPILE_OPTIONS "-mtarget-align")
+endif()
+
 # Nim's unicode.toUpper / toLower (Rune) go through fos_unicode_case.c, onto
 # QuickJS's case tables: std/unicode's own (~11 KB) are never linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=nuctoUpper" "-Wl,--wrap=nuctoLower")

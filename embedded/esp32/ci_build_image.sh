@@ -358,6 +358,15 @@ if ! python "$SCRIPT_DIR/tools/firmware_size.py" measure \
     echo "warning: firmware size report failed; continuing without $SIZE_JSON" >&2
 fi
 
+# How many calls the link left in their long form (tools/link_order.py, the
+# header says what that is), and what link_order.txt no longer matches: the
+# sign that the order wants writing again. Best effort, like the size report.
+if [[ "$CHIP" == "esp32-s3" ]]; then
+    python "$SCRIPT_DIR/tools/link_order.py" measure \
+        --build-dir "$BUILD_DIR" --order "$SCRIPT_DIR/link_order.txt" ||
+        echo "warning: link order report failed" >&2
+fi
+
 if [[ "$QEMU_SMOKE" != "1" ]]; then
     exit 0
 fi
