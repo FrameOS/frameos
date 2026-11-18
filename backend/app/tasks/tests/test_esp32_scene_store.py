@@ -353,7 +353,7 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
     # its files back.
     take = fns["take_backend_payload"]
     assert "fos_scene_store_change_t change = {.staged = set->staged};" in take
-    assert take.index("if (set->staged != 0)") < take.index("runtime_room_for_whole(len)")
+    assert take.index("if (patch || set->staged != 0)") < take.index("runtime_room_for_whole(len)")
     assert "fos_scene_store_change_t change = {.order = order, .staged = set->staged};" in fns["apply_backend_patch"]
     free_set = fns["scene_set_free"]
     assert free_set.index("store_lock()") < free_set.index("fos_scene_store_stage_drop(set->staged)")

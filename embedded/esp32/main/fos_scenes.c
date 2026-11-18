@@ -2974,32 +2974,28 @@ static esp_err_t take_backend_payload(fos_scene_set_t *set, const char *etag)
     }
     /* An object, not the array a whole payload is: only the scenes that
      * changed since the set this frame holds (`?patch=1`). Written here,
-     * scene by scene through the store. */
-    if (set->rest[0] == '{') {
-        err = apply_backend_patch(set, etag);
+     * scene by scene through the store.
+     *
+     * Or a whole set read straight into the store (backend_spool): its
+     * scenes are in their files, and this is the one change that makes them
+     * the set, as a patch that names every scene. The scenes stored already
+     * stayed as they were, so the scene showing reloads only if it changed.
+     * How many were written and how many found stored is in the `scenes:set`
+     * line's bytes (those written) and count. */
+    bool patch = set->rest[0] == '{';
+    if (patch || set->staged != 0) {
+        if (patch) {
+            err = apply_backend_patch(set, etag);
+        } else {
+            fos_scene_store_change_t change = {.staged = set->staged};
+            fos_scene_store_result_t result;
+            err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:set", false, &result);
+            if (err != ESP_OK) s_sync_requested = true;
+        }
         scene_set_free(set);
         log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
-                        err == ESP_OK ? "patched" : "patch-refused", len, 0, 200, err);
-        return err;
-    }
-    /* A whole set read straight into the store (backend_spool): its scenes
-     * are in their files, and this is the one change that makes them the
-     * set, as a patch that names every scene. The scenes stored already
-     * stayed as they were, so the scene showing reloads only if it changed. */
-    if (set->staged != 0) {
-        int written = 0, kept = 0;
-        store_lock();
-        fos_scene_store_stage_counts(set->staged, &written, &kept, NULL);
-        store_unlock();
-        fos_scene_store_change_t change = {.staged = set->staged};
-        fos_scene_store_result_t result;
-        err = apply_store_change(&change, FOS_SCENES_SOURCE_BACKEND, etag, "scenes:set", false, &result);
-        if (err != ESP_OK) s_sync_requested = true;
-        scene_set_free(set);
-        char detail[64];
-        snprintf(detail, sizeof(detail), "to-store: %d written, %d kept", written, kept);
-        log_scene_event("scenes:sync", err == ESP_OK ? "updated" : "error", "backend", "",
-                        err == ESP_OK ? detail : "set-refused", len, err == ESP_OK ? result.scene_count : 0, 200, err);
+                        err != ESP_OK ? (patch ? "patch-refused" : "set-refused") : patch ? "patched" : "to-store",
+                        len, 0, 200, err);
         return err;
     }
     /* What the next conditional GET sends, now: the link task polls on while
