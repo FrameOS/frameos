@@ -145,7 +145,7 @@ def test_a_scene_payload_is_written_off_the_render_task():
     assert "if (s_hooks.pace) s_hooks.pace();" in store_module
     for after in ("save_etag_file(", "persist_scene_source(", "fos_scene_store_remove_index()"):
         assert write < store.index(after), f"fos_scenes.c: {after} comes before the payload is on flash"
-    take = scenes["fos_scenes_take_backend_payload"]
+    take = scenes["take_backend_payload"]
     assert take.index("load_into_nim(") < take.index("store_behind("), "the write is queued before the parse"
     assert "etag_set(etag)" in take, "the next poll would fetch the payload being written again"
     assert "store_task_ready()" in scenes["store_behind"]
@@ -175,8 +175,11 @@ def test_one_scenes_fetch_at_a_time_and_a_fetched_set_is_named():
     assert "fetched ||" in fetch, "a fetched set is named even by a forced sync"
     assert fetch.index("fetched_set(response.etag)") < fetch.index("xSemaphoreGive(s_fetch_lock)")
     assert fetch.count("return") == 2, "every way out of the fetch after the lock gives it back"
+    # Cleared once the set is taken, on every way out: before it, a set read
+    # into the store was asked for again while its index was switched.
     take = scenes["fos_scenes_take_backend_payload"]
-    assert take.strip("{ \n").startswith('fetched_set("")'), "the take clears the fetched ETag on every path"
+    assert take.index("take_backend_payload(set, etag)") < take.index('fetched_set("")') < take.index("return err;")
+    assert "fetched_set(" not in scenes["take_backend_payload"]
     commands = _functions(_strip_comments(COMMANDS_C.read_text()))["run_answer"]
     sync = commands.index("fos_scenes_sync(true)")
     assert commands.rfind("fos_client_take_link_payload()", 0, sync) != -1

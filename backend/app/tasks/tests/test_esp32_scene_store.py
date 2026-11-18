@@ -238,7 +238,7 @@ def test_a_backend_set_renders_at_once():
     renders hourly (the E1003's deploy sat at "first render", 2026-11-10).
     Both ways go through fos_scenes_take_backend_payload, which asks."""
     fns = _functions(_source("fos_scenes.c"))
-    take = fns["fos_scenes_take_backend_payload"]
+    take = fns["take_backend_payload"]
     assert take.index(LOAD_BACKEND_SET) < take.index(
         "fos_client_render_now();") < take.index("store_behind(set, etag, !whole)")
     # A set the runtime has no room for whole (or refuses) goes store-first:
@@ -260,7 +260,7 @@ def test_a_set_the_runtime_refuses_is_loaded_from_flash_after_its_write():
     reTerminal E1004, the hardware bench, 2026-11-16). The write now leaves an
     apply pending, which loads what flash holds one scene at a time."""
     functions = _functions(_source("fos_scenes.c"))
-    take = functions["fos_scenes_take_backend_payload"]
+    take = functions["take_backend_payload"]
     assert LOAD_BACKEND_SET in take
     assert ".reload = !whole" in take
     # A refused set dropped for a newer one leaves its reload to that one.
@@ -351,7 +351,7 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
 
     # Committed on the render task as one change; a set never committed gives
     # its files back.
-    take = fns["fos_scenes_take_backend_payload"]
+    take = fns["take_backend_payload"]
     assert "fos_scene_store_change_t change = {.staged = set->staged};" in take
     assert take.index("if (set->staged != 0)") < take.index("runtime_room_for_whole(len)")
     assert "fos_scene_store_change_t change = {.order = order, .staged = set->staged};" in fns["apply_backend_patch"]

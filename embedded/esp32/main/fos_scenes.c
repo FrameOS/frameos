@@ -2971,9 +2971,8 @@ static bool runtime_room_for_whole(size_t len)
            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) >= WHOLE_LOAD_FREE_FACTOR * len;
 }
 
-esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag)
+static esp_err_t take_backend_payload(fos_scene_set_t *set, const char *etag)
 {
-    fetched_set("");
     if (set == NULL || set->rest == NULL) {
         scene_set_free(set);
         return ESP_ERR_INVALID_ARG;
@@ -3065,6 +3064,20 @@ esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag
     store_backend_payload(&job);
     scene_set_free(set);
     return ESP_OK;
+}
+
+esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag)
+{
+    /* The fetched set is what a conditional GET names until it is taken, on
+     * every way out. Cleared before the take, a patch or a set read into the
+     * store had a second or two with neither ETag in place (its own is saved
+     * once the index is switched): the link task's poll asked with the one
+     * before and the backend sent the set again, 529 KB into the store a
+     * second time, with a deploy's sync waiting for it on the render task
+     * (the reTerminal Sticky, the hardware bench, 2026-11-18). */
+    esp_err_t err = take_backend_payload(set, etag);
+    fetched_set("");
+    return err;
 }
 
 esp_err_t fos_scenes_sync(bool force)
