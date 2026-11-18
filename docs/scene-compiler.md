@@ -143,8 +143,8 @@ translator in the kit.
 ## Where a program runs
 
 A scene with code of its own (a code node, an inline input, a cache
-expression) is kept apart from every other scene (`js_runtime/runtime.nim`,
-`ensureSceneJs`):
+expression, a JS app) is kept apart from every other scene
+(`js_runtime/runtime.nim`, `ensureSceneJs`):
 
 - **Where there is room** (a Pi, an ESP32 with more than 8 MB of PSRAM, an
   ordinary browser preview): in a QuickJS runtime of its own, with its own
@@ -176,8 +176,40 @@ simulated ceiling in the preview, 0 (plenty) on a Pi.
 
 A scene's runtime or context closes with the scene, and the garbage
 collector runs right after, so the next scene gets the memory.
-frame.json's `js` ceilings are applied to a live runtime in place. The JS
-apps keep their own runtimes.
+frame.json's `js` ceilings are applied to a live runtime in place.
+
+## JS apps run in the scene's context
+
+A scene's JS apps run in the context its program runs in, all of them
+together (`app_runtime.ensureReady`): one QuickJS a scene, where each JS
+app node used to build a runtime of its own (155 KB of PSRAM, plus the app
+prelude and its start, on an ESP32; the bundled Weather scene had four).
+The app prelude is evaluated once in the context, after the scene's, and
+each app is two things in it:
+
+- its modules, named `#<key>/app.ts` (`modulePrefix`), so two apps'
+  `app.ts` and `./util` are different modules; error text has the prefix
+  taken off (`appText`), so it still reads `app.ts:12:3`;
+- an entry in the prelude's `__frameosApps` (`__frameosAddApp`): its module
+  namespace, the `app` object its functions are called with, the handlers
+  of its last UI (`jsx.nim` writes them there, not on a global).
+
+The bridge knows which app is calling from the env of the call
+(`withAppEnv`, which puts the caller's back: an app's `get()` can run a node
+that is another app), never from the context.
+
+What the apps no longer have is a realm each: `globalThis`, `Array.prototype`
+and the timers' and `useFetch`'s tables are the scene's, shared with its
+other apps and its code nodes; module scope stays the app's. An app's
+interpreter going (the release after a render on a frame that sleeps, a
+decode short of memory, an out-of-memory abort) is its scene's context
+going, program included, and only while none of its apps is mid-call and
+the program is not running; nothing is evicted app by app any more. A
+module stays in the context until the context goes (QuickJS does not unload
+one), so an app released alone (`releaseJsAppRuntime`) leaves only its
+entry. A layout the frame stops wearing closes its context
+(`interpreter.dropLayout`). An interpreted scene that is not one (the app
+tests, a bare runtime in a test) still gives the app a QuickJS of its own.
 
 ## The first load
 
@@ -226,8 +258,6 @@ of each program, or a plan the kit turns into closures, would give.
   type the producer declares): passing the JavaScript value along where the
   conversion is the identity would make a scene that hands big JSON between
   code nodes much faster (as it is, about as fast as before).
-- JS apps could run inside the program's context instead of a runtime each
-  (~150 KB of PSRAM per JS app node on an ESP32).
 - The first load still parses the scene's own nodes (above): a bytecode
   cache of each program (in memory for a scene switched back to; on flash,
   authenticated, for a frame that sleeps between renders), or a plan of the

@@ -249,9 +249,9 @@ doAssert renderDeadlineArmedNow(), "the jump left the aborted render's deadline 
 let fromApp = abortHost.recoverAbortedRun()
 doAssert not renderDeadlineArmedNow()
 doAssert dispatchBudgetTotalNow() == 0
-# The app's interpreter was mid-call, and so was the scene's own program,
-# which ran the app: both go.
-doAssert fromApp.jsDropped == 2, "the app's and the scene's interpreters were mid-call: " & $fromApp
+# The app was mid-call in the scene's context, as was the scene's own
+# program, which ran the app: the one interpreter they share goes.
+doAssert fromApp.jsDropped == 1, "the scene's interpreter, its app's too, was mid-call: " & $fromApp
 doAssert fromApp.jsBytes > 0
 abortIn = ""
 logLines.setLen(0)

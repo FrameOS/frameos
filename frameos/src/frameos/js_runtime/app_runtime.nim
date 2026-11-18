@@ -98,6 +98,14 @@ type
     images*: Table[int, Image]
     jsxMemo*: JsxMemo ## the nodes of memo()'s elements (js_runtime/jsx.nim)
     sceneId: string ## the scene it draws for, to say so when it is discarded
+    appKey: int ## its entry in the prelude's `__frameosApps`
+    modulePrefix: string
+      ## "#<appKey>/" before its files' module names in its scene's context,
+      ## where other apps' `app.ts` are too; "" in a QuickJS of its own
+    host: InterpretedFrameScene
+      ## The scene whose context it runs in, beside the scene's program and
+      ## its other JS apps (runtime.ensureSceneJs); nil: a QuickJS of its own
+      ## (no interpreted scene: the app tests, a test's bare runtime).
     # The last tree get() returned, for a render only the pointer asked for
     # (hover:, active:): laid out again with the new pointer, get() not run,
     # as a browser restyles :hover without React rendering again.
@@ -134,16 +142,45 @@ type
     liveConfig: JsonNode
 
   JsAppEvalEnv = ref object
+    ctx: ptr JSContext ## where the call runs
     runtime: JsAppRuntime
     owner: AppRoot
     configJson: JsonNode
     context: ExecutionContext
     contextImageJson: JsonNode
 
-var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
-## The runtime behind each live interpreter, for the module loader: QuickJS
-## hands the loader a context, and the app's files live on the runtime.
-var jsAppRuntimeByCtx = initTable[ptr JSContext, JsAppRuntime]()
+var currentEnv: JsAppEvalEnv
+  ## The app call in progress, the innermost: whose bridge the natives are.
+  ## Every interpreter is entered from one thread, and a scene's apps share
+  ## its context, so the call says which app is talking, never the context.
+var nextJsAppKey = 0
+var appContexts: seq[tuple[runtime: ptr JSRuntime, context: ptr JSContext]]
+  ## The scenes' contexts the app prelude and natives are in.
+
+template withAppEnv(jsCtx: ptr JSContext, e: JsAppEvalEnv, body: untyped) =
+  ## The bridge's env for one entry into an app. One app can run another
+  ## (a node's get() runs a node), so the caller's env comes back after.
+  let previousEnv = currentEnv
+  currentEnv = e
+  currentEnv.ctx = jsCtx
+  try:
+    body
+  finally:
+    currentEnv = previousEnv
+
+proc appEntry(runtime: JsAppRuntime): JSValue =
+  ## The app's entry in the prelude's `__frameosApps` (undefined when gone).
+  let ctx = runtime.js.context
+  let global = JS_GetGlobalObject(ctx)
+  let apps = JS_GetPropertyStr(ctx, global, "__frameosApps")
+  JS_FreeValue(ctx, global)
+  result = if jsIsObject(apps): JS_GetPropertyUint32(ctx, apps, runtime.appKey.uint32) else: jsUndefined(ctx)
+  JS_FreeValue(ctx, apps)
+
+proc appText(runtime: JsAppRuntime, text: string): string =
+  ## An error's text with the app's own file names (`app.ts:12:3`), not the
+  ## module names of its scene's context.
+  if runtime.modulePrefix.len == 0: text else: text.replace(runtime.modulePrefix, "")
 ## The runtimes with a call in progress, outermost first: a JS app can run
 ## another node, which can be another JS app. A call lasts until the caller
 ## has freed the last value it got back (`get` reads its payload after JS
@@ -181,19 +218,12 @@ proc noteInterpreterDiscard(runtime: JsAppRuntime, reason: string) =
   if runtime.jsxMemo.handlers > 0:
     pendingDiscard.heldHandlers = true
 
-proc teardownJsRuntime(runtime: JsAppRuntime) =
-  ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
-  ## no destructor, so a runtime that merely goes out of scope leaks its whole
-  ## QuickJS on every platform.
-  if runtime.isNil or not runtime.ready:
-    return
-  if not runtime.js.context.isNil:
-    if jsAppEnvByCtx.hasKey(runtime.js.context):
-      jsAppEnvByCtx.del(runtime.js.context)
-    if jsAppRuntimeByCtx.hasKey(runtime.js.context):
-      jsAppRuntimeByCtx.del(runtime.js.context)
-    clearJsSourceMaps(runtime.js.context)
-  runtime.js.close()
+proc forgetJsApp(runtime: JsAppRuntime) =
+  ## What an app held for its interpreter, let go on the Nim side: the
+  ## interpreter is gone (closed already), going, or not its own.
+  runtime.js = QuickJS()
+  runtime.host = nil
+  runtime.modulePrefix = ""
   runtime.ready = false
   runtime.initialized = false
   runtime.urlImages.setLen(0)
@@ -204,11 +234,46 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.keptImageIds.setLen(0)
   runtime.canvases.setLen(0)
 
+proc teardownJsRuntime(runtime: JsAppRuntime) =
+  ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
+  ## no destructor, so a runtime that merely goes out of scope leaks its whole
+  ## QuickJS on every platform. One in its scene's context only takes its
+  ## entry out of it: the context stays with the scene (and the app's
+  ## modules in it, which QuickJS keeps until the context goes).
+  if runtime.isNil or not runtime.ready:
+    return
+  if runtime.host.isNil:
+    clearJsSourceMaps(runtime.js.context)
+    runtime.js.close()
+    forgetJsApp(runtime)
+  else:
+    let ctx = runtime.js.context
+    let key = JS_NewInt32(ctx, runtime.appKey.int32)
+    JS_FreeValue(ctx, callGlobalFunction(ctx, "__frameosDropApp", [key]))
+    JS_FreeValue(ctx, key)
+    forgetJsApp(runtime)
+
 var liveJsRuntimes: seq[JsAppRuntime] = @[]
-  ## Every interpreter built and not yet released, on every platform: the
+  ## Every JS app made ready and not yet released, on every platform: the
   ## single-scene host (an ESP32, the editor's preview) drops the idle ones
   ## after each render unless the frame keeps them (settleIdleJsAppRuntimes),
   ## and an ESP32 also evicts them under memory pressure.
+
+proc jsAppsClosing(rt: ptr JSRuntime, ctx: ptr JSContext) {.nimcall, raises: [].} =
+  ## runtime.sceneJsClosing: a scene's context (or a whole runtime) goes, and
+  ## the apps in it with it.
+  try:
+    for runtime in liveJsRuntimes:
+      if runtime.ready and not runtime.host.isNil and
+          (runtime.js.context == ctx or (ctx.isNil and runtime.js.runtime == rt)):
+        forgetJsApp(runtime)
+    for i in countdown(appContexts.high, 0):
+      if appContexts[i].context == ctx or (ctx.isNil and appContexts[i].runtime == rt):
+        appContexts.del(i)
+  except CatchableError:
+    discard
+
+sceneJsClosing = jsAppsClosing
 
 when defined(frameosEmbedded):
   # Every JS app node builds its own QuickJS runtime, and each one costs about
@@ -232,8 +297,8 @@ when defined(frameosEmbedded):
     for other in liveJsRuntimes:
       # Not one holding a UI's handlers: they live nowhere else, and the
       # picture on the screen would stop answering (keepIdleInterpreters).
-      if other != keep and other.ready and not jsRuntimeStack.contains(other) and
-          other.jsxMemo.handlers == 0:
+      if other != keep and other.ready and other.host.isNil and
+          not jsRuntimeStack.contains(other) and other.jsxMemo.handlers == 0:
         noteInterpreterDiscard(other, "other app")
         teardownJsRuntime(other)
 
@@ -259,12 +324,29 @@ proc releaseIdleJsAppRuntimes*(reason = "", keepAnswering = false): bool {.disca
   ## `reason`: why, on a frame that would rather have kept them; the host
   ## reports it. Empty for a release nobody loses by (a frame about to sleep).
   ## `keepAnswering`: not the ones holding a UI's handlers. Whether any went.
+  ##
+  ## Apps in their scene's context go with the whole of it, the scene's
+  ## program included (evaluated again on its next run), and only when none
+  ## of them is held and the program is not running.
   for runtime in liveJsRuntimes:
-    if runtime.ready and not jsRuntimeStack.contains(runtime) and
-        not (keepAnswering and runtime.jsxMemo.handlers > 0):
-      if reason.len > 0:
-        noteInterpreterDiscard(runtime, reason)
+    if not runtime.ready:
+      continue
+    let scene = runtime.host
+    var held = jsRuntimeStack.contains(runtime) or (keepAnswering and runtime.jsxMemo.handlers > 0)
+    if not scene.isNil and not held:
+      held = sceneJsRunning(scene)
+      for other in liveJsRuntimes:
+        if other.host == scene and (jsRuntimeStack.contains(other) or
+            (keepAnswering and other.jsxMemo.handlers > 0)):
+          held = true
+    if held:
+      continue
+    if reason.len > 0:
+      noteInterpreterDiscard(runtime, reason)
+    if scene.isNil:
       teardownJsRuntime(runtime)
+      result = true
+    elif tryCleanupSceneJs(scene): # its other apps with it: one interpreter
       result = true
 
 proc hasIdleJsAppRuntimes(): bool =
@@ -311,8 +393,11 @@ proc liveJsAppRuntimeBytes*(): int =
   ## What the live JS app interpreters hold, for the memory a kept scene
   ## costs (the ESP32's `render:animation` line). Walks every interpreter's
   ## heap: for a once-in-a-while log line, not per frame.
+  ## A runtime the apps of a scene share (and its program) counts once.
+  var counted: seq[ptr JSRuntime]
   for runtime in liveJsRuntimes:
-    if runtime.ready:
+    if runtime.ready and runtime.js.runtime notin counted:
+      counted.add runtime.js.runtime
       result += runtime.js.heapBytes()
 
 when defined(frameosEmbedded) or defined(frameosWasm) or defined(testing):
@@ -339,14 +424,18 @@ proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   ## never ran, so left alone they stayed "mid-call" for good and were never
   ## released. The next render builds the app a new one and runs its init()
   ## again; `frameos.remember` values are Nim data and carry over.
+  currentEnv = nil # the abort skipped the `finally` that puts the caller's back
   for runtime in jsRuntimeStack:
     if runtime.isNil or not runtime.ready:
       continue  # already dropped: a runtime re-entered further up the chain
     noteInterpreterDiscard(runtime, "out of memory")
+    if not runtime.host.isNil:
+      # Its scene's context goes as the scene's program's would
+      # (runtime.abandonMidCallSceneJs, right after), and the app with it.
+      noteSceneJsMidCall(runtime.host)
+      continue
     let ctx = runtime.js.context
     if not ctx.isNil:
-      jsAppEnvByCtx.del(ctx)
-      jsAppRuntimeByCtx.del(ctx)
       clearJsSourceMaps(ctx)
     result.bytes += runtime.js.abandon()
     inc result.count
@@ -363,7 +452,9 @@ proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
     DefaultMaxHttpResponseBytes
 
 proc env(ctx: ptr JSContext): JsAppEvalEnv =
-  if jsAppEnvByCtx.hasKey(ctx): jsAppEnvByCtx[ctx] else: nil
+  ## The call in progress, when it is in `ctx` (a promise job of another
+  ## scene's realm, run at this call's checkpoint, gets nothing).
+  if not currentEnv.isNil and currentEnv.ctx == ctx: currentEnv else: nil
 
 proc jsUndefSentinel(ctx: ptr JSContext): JSValue {.inline.} =
   let obj = JS_NewObject(ctx)
@@ -2178,18 +2269,28 @@ proc joinModulePath*(baseName, name: string): string =
       parts.add(segment)
   parts.join("/")
 
+proc moduleOwner(ctx: ptr JSContext, moduleName: string): tuple[runtime: JsAppRuntime, file: string] =
+  ## The app a module name belongs to, and its file: `#<appKey>/lib/a.ts` in
+  ## a scene's context (each app's files apart from the others'), the bare
+  ## file name in an interpreter of the app's own (prefix "").
+  for runtime in liveJsRuntimes:
+    if runtime.js.context == ctx and moduleName.startsWith(runtime.modulePrefix):
+      return (runtime, moduleName.substr(runtime.modulePrefix.len))
+  (nil, moduleName)
+
 proc jsAppModuleNormalize(ctx: ptr JSContext, baseName: cstring, name: cstring,
                           opaque: pointer): cstring {.cdecl.} =
   ## Canonicalise every specifier to the file it names, so `./counter` and
   ## `./counter.ts` from two importers are one module, evaluated once.
   var canonical = ""
   try:
-    canonical = joinModulePath($baseName, $name)
-    let runtime = jsAppRuntimeByCtx.getOrDefault(ctx)
+    let (runtime, base) = moduleOwner(ctx, $baseName)
+    canonical = joinModulePath(base, $name)
     if not runtime.isNil:
       let resolved = runtime.resolveModuleName(canonical)
       if resolved.len > 0:
         canonical = resolved
+      canonical = runtime.modulePrefix & canonical
   except CatchableError:
     canonical = $name
   js_strdup(ctx, canonical.cstring)
@@ -2240,20 +2341,22 @@ proc loadAppScriptModule(ctx: ptr JSContext, runtime: JsAppRuntime, name: string
   # Straight from the scene JSON: no transpile, no copy, no source map. Error
   # locations are already in this file's own lines. QuickJS keeps the compiled
   # module in its loaded-modules list, so nothing is tracked here either.
-  result = compileModule(ctx, runtime.appFile(name), name, quicktsFlagsFor(name))
+  let moduleName = runtime.modulePrefix & name
+  result = compileModule(ctx, runtime.appFile(name), moduleName, quicktsFlagsFor(name))
   if result == nil:
-    rethrowNamingModule(ctx, name)
+    rethrowNamingModule(ctx, moduleName)
 
 proc jsAppModuleLoader(ctx: ptr JSContext, moduleName: cstring, opaque: pointer): ptr JSModuleDef {.cdecl.} =
   ## QuickJS calls this for every `import` the app's modules make. Modules are
   ## the app's own files and nothing else: there is no package registry on a
   ## frame, so a bare specifier fails the same way a missing file does.
-  let name = $moduleName
+  var name = $moduleName
   try:
-    let runtime = jsAppRuntimeByCtx.getOrDefault(ctx)
+    let (runtime, file) = moduleOwner(ctx, name)
     if runtime.isNil:
       discard JS_ThrowReferenceError(ctx, "could not load module '%s'", name.cstring)
       return nil
+    name = file
     let resolved = resolveAppModule(runtime.sources, name)
     if resolved.len == 0:
       discard JS_ThrowReferenceError(ctx, "%s",
@@ -2261,7 +2364,7 @@ proc jsAppModuleLoader(ctx: ptr JSContext, moduleName: cstring, opaque: pointer)
          "files with a relative path (./helper, ./data.json); npm packages are not available.").cstring)
       return nil
     if resolved.endsWith(".json"):
-      return loadAppJsonModule(ctx, resolved, runtime.appFile(resolved))
+      return loadAppJsonModule(ctx, runtime.modulePrefix & resolved, runtime.appFile(resolved))
     return loadAppScriptModule(ctx, runtime, resolved)
   except CatchableError as error:
     discard JS_ThrowInternalError(ctx, "%s", ("Could not load module '" & name & "': " & error.msg).cstring)
@@ -2415,7 +2518,9 @@ proc jsCanvasDraw(ctx: ptr JSContext, id: JSValue, content: JSValue): JSValue {.
         else: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & $image.width &
           "\" height=\"" & $image.height & "\">" & markup & "</svg>")
     else:
-      node = jsxNode(ctx, content, addr e.runtime.images, drawing = true)
+      let entry = e.runtime.appEntry()
+      node = jsxNode(ctx, content, addr e.runtime.images, entry, drawing = true)
+      JS_FreeValue(ctx, entry)
       if node.tag != "svg":
         node = SvgNode(tag: "svg", attrs: @size, children: @[node])
     if node.attr("viewBox").len == 0 and node.attr("width").len == 0:
@@ -2728,6 +2833,10 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
     events: config{"events"},
     byteIterFields: byteIterFields
   )
+  if scene of InterpretedFrameScene:
+    # Its scene's context is where it runs: one of the scene's own, whether
+    # or not the scene has code (runtime.ensureSceneJs).
+    InterpretedFrameScene(scene).hasJsApps = true
   when not defined(frameosEmbedded):
     app.trackDynamicJsApp()
   return app
@@ -2782,16 +2891,22 @@ proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
     dynamicApp.runtime.releaseReplacedImageRef(dynamicApp.configJson[field], nextValue)
   dynamicApp.configJson[field] = nextValue
 
-# The app prelude: the frameos.* API glue, the JSX factory and memo() of
-# sceneJsPrelude, the Proxy views of app.config / state / frame / context.
-# Compiled on the device at every interpreter start (~102 ms of a SenseCAP
-# frame for 6.4 KB, docs/realtime-rendering.md), or loaded as the bytecode
+# The app prelude: the frameos.* API glue, the Proxy views of app.config /
+# state / frame / context, and the scene's apps by key. Evaluated once in a
+# context that has the scene prelude already (runtime.setUpSceneContext: the
+# JSX factory and memo()), the scene's own, which its JS apps share. Compiled
+# on the device (~102 ms of a SenseCAP frame for 6.4 KB of both preludes,
+# docs/realtime-rendering.md), or loaded as the bytecode
 # tools/prelude_bytecode.nim wrote into the firmware image (evalAppPrelude).
+const AppStringify: cstring = "__frameosAppStringify"
+  ## What an app's values are read through (runtime.jsValueToJson): the
+  ## scene's own keeps no undefined.
+
 const appJsPrelude* = compactJs("""
   "use strict";
-  const __jsReplacer = (k, v) =>
+  const __appReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
-  globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+  globalThis.__frameosAppStringify = (v) => JSON.stringify(v, __appReplacer);
   globalThis.__frameosSpecRest = (s) => { const r = { ...s }; delete r.svg; return r; };
   const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
   const __frameosProxy = (scope, getter) => new Proxy({}, {
@@ -2815,7 +2930,7 @@ const appJsPrelude* = compactJs("""
   // frameos.frame and frameos.code: arg as JSON text when json is true, else the
   // plain string; JSON text back, "" is null and "!" a reason to throw.
   const __frameosOp = (fn, name, op, arg, json) => {
-    const r = fn(String(op), json ? JSON.stringify(arg || {}, __jsReplacer) : String(arg ?? ""));
+    const r = fn(String(op), json ? JSON.stringify(arg || {}, __appReplacer) : String(arg ?? ""));
     if (r[0] === "!") throw new Error("frameos." + name + ": " + r.slice(1));
     return JSON.parse(r || "null");
   };
@@ -2825,21 +2940,21 @@ const appJsPrelude* = compactJs("""
     node: (nodeId) => ({ __frameosType: "node", nodeId }),
     scene: (sceneId) => ({ __frameosType: "scene", sceneId }),
     color: (color) => ({ __frameosType: "color", color }),
-    log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
-    error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
+    log: (...args) => jsAppLog("log", JSON.stringify(args, __appReplacer)),
+    error: (...args) => jsAppLog("error", JSON.stringify(args, __appReplacer)),
     setNextSleep: (seconds) => jsSetNextSleep(Number(seconds || 0)),
-    dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __jsReplacer)),
+    dispatch: (event, payload) => jsDispatch(String(event || ""), JSON.stringify(payload || {}, __appReplacer)),
     store: () => JSON.parse(jsStore() || "null"),
-    storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __jsReplacer)) === true,
+    storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __appReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
     fetchText: (url) => jsFetchText(String(url || "")),
     fetchJson: (url) => JSON.parse(jsFetchText(String(url || "")) || "null"),
     httpRequest: (url, options) => JSON.parse(
-      jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || "{}"
+      jsHttpRequest(String(url || ""), JSON.stringify(options || {}, __appReplacer)) || "{}"
     ),
     fetchImage: (url, options) => JSON.parse(
-      jsFetchImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || '{"image":null}'
+      jsFetchImage(String(url || ""), JSON.stringify(options || {}, __appReplacer)) || '{"image":null}'
     ),
     releaseImage: (ref) => jsReleaseImage(Number(((ref && ref.image) || ref || {}).id || 0)) === true,
     canvas: (key, width, height, color) => JSON.parse(jsCanvas(String(key || "canvas"),
@@ -2884,11 +2999,11 @@ const appJsPrelude* = compactJs("""
     )),
     setState: (key, value) => jsSetState(
       String(key || ""),
-      JSON.stringify(value === undefined ? null : value, __jsReplacer)
+      JSON.stringify(value === undefined ? null : value, __appReplacer)
     ),
     remember: (key, value) => jsRemember(
       String(key || ""),
-      JSON.stringify(value === undefined ? null : value, __jsReplacer)
+      JSON.stringify(value === undefined ? null : value, __appReplacer)
     ) === true,
     recall: (key) => {
       const kept = jsRecall(String(key || ""));
@@ -2900,7 +3015,7 @@ const appJsPrelude* = compactJs("""
   // per call. warn is a log line that says so; error goes to the error log.
   const console = {
     log: frameos.log, info: frameos.log, debug: frameos.log, error: frameos.error,
-    warn: (...args) => jsAppLog("warn", JSON.stringify(args, __jsReplacer)),
+    warn: (...args) => jsAppLog("warn", JSON.stringify(args, __appReplacer)),
   };
   // Async (docs/async-js.md, js_async.nim): promises the host settles by id
   // between renders. Where nothing pumps them (jsAsyncMode() false: the
@@ -2921,7 +3036,7 @@ const appJsPrelude* = compactJs("""
     else w[0](text ? JSON.parse(text) : undefined);
   };
   const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
-    body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __jsReplacer);
+    body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __appReplacer);
   const __response = (url, a) => {
     if (!a.status) throw new TypeError("fetch failed: " + (a.error || url));
     const body = a.body ?? "", h = a.headers || {};
@@ -3003,7 +3118,7 @@ const appJsPrelude* = compactJs("""
   const __fetched = new Map();
   frameos.useFetch = (url, init = {}) => {
     url = String(url || "");
-    const key = url + " " + JSON.stringify(init, __jsReplacer);
+    const key = url + " " + JSON.stringify(init, __appReplacer);
     let s = __fetched.get(key);
     if (s && (s.loading || !(init.maxAge > 0) || Date.now() - s.at < init.maxAge * 1000)) return s;
     if (!s) {
@@ -3029,50 +3144,49 @@ const appJsPrelude* = compactJs("""
     }
     return s;
   };
-  globalThis.__frameosModule = {};
-  const exports = globalThis.__frameosModule;
-  function __frameosWrapApp(app) {
-    return Object.assign(app || {}, { log: frameos.log, logError: frameos.error });
-  }
-  globalThis.__frameosAppInstance = __frameosWrapApp({
-    get nodeId() { return __frameosUnwrap(jsGetAppMeta("nodeId")); },
-    get nodeName() { return __frameosUnwrap(jsGetAppMeta("nodeName")); },
-    get category() { return __frameosUnwrap(jsGetAppMeta("category")); },
-    config: __frameosAppConfig,
-    state: __frameosAppState,
-    frame: __frameosAppFrame,
-  });
-  function __frameosExports() {
-    if (globalThis.__frameosModule && globalThis.__frameosModule.default) {
-      return globalThis.__frameosModule.default;
-    }
-    return globalThis.__frameosModule || {};
-  }
-  // A node in a flow calls run(), a node feeding a field calls get(). An app
-  // without the one its node needs does nothing, so say so, once.
-  const __frameosMissing = {};
+  // The scene's JS apps, by key (app_runtime.nim appKey): they share its
+  // context, each with its module, the app object its functions get
+  // and the handlers of its last UI (js_runtime/jsx.nim).
+  const __frameosApps = globalThis.__frameosApps = Object.create(null);
+  globalThis.__frameosAddApp = (key, module) => {
+    __frameosApps[key] = { module, missing: {}, handlers: [], app: {
+      get nodeId() { return __frameosUnwrap(jsGetAppMeta("nodeId")); },
+      get nodeName() { return __frameosUnwrap(jsGetAppMeta("nodeName")); },
+      get category() { return __frameosUnwrap(jsGetAppMeta("category")); },
+      config: __frameosAppConfig,
+      state: __frameosAppState,
+      frame: __frameosAppFrame,
+      log: frameos.log,
+      logError: frameos.error,
+    } };
+  };
+  globalThis.__frameosDropApp = (key) => { delete __frameosApps[key]; };
   // A JSX UI's onClick (and friends), numbered by the walker (js_runtime/jsx.nim).
-  globalThis.__frameosHandle = (id, event, type, localX, localY, width, height) => {
-    const handler = (globalThis.__frameosHandlers || [])[id];
+  globalThis.__frameosHandle = (key, id, event, type, localX, localY, width, height) => {
+    const handler = ((__frameosApps[key] || {}).handlers || [])[id];
     if (typeof handler !== "function") return;
     const e = { ...JSON.parse(event), type, localX, localY, width, height };
     if (type === "change") e.target = { value: e.value }; // React's e.target.value
     handler(e);
   };
-  function __frameosInvoke(name) {
-    const mod = __frameosExports();
-    const fn = mod && mod[name];
+  // A node in a flow calls run(), a node feeding a field calls get(). An app
+  // without the one its node needs does nothing, so say so, once.
+  globalThis.__frameosInvoke = (key, name) => {
+    const a = __frameosApps[key];
+    if (!a) return undefined;
+    const mod = (a.module && a.module.default) || a.module || {};
+    const fn = mod[name];
     if (name === "get") globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
     if (typeof fn === "function") {
-      const r = fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
+      const r = fn(a.app, globalThis.__frameosContext);
       // An async init() goes on between renders (docs/async-js.md): a throw
       // in it, or a rejection nobody caught, is the app's log line.
       if (name === "init" && r && typeof r.then === "function")
         r.then(undefined, (e) => frameos.error("init() failed: " + ((e && e.message) || String(e))));
       return r;
     }
-    if (name !== "init" && !__frameosMissing[name]) {
-      __frameosMissing[name] = true;
+    if (name !== "init" && !a.missing[name]) {
+      a.missing[name] = true;
       jsAppLog("error", JSON.stringify([name === "run"
         ? "This app has no run(), so it does nothing in a flow: a node after an event calls run(app, context), and get() only when its output feeds a field."
         : name === "onEvent"
@@ -3080,8 +3194,8 @@ const appJsPrelude* = compactJs("""
         : "This app has no get(), so its output is empty: a node feeding a field calls get(app, context), and run() only in a flow."]));
     }
     return undefined;
-  }
-  """ & sceneJsPrelude)
+  };
+  """)
 
 
 when defined(frameosPreludeBytecode):
@@ -3116,89 +3230,115 @@ proc evalAppPrelude(js: QuickJS) =
     if pinned > 0:
       discard js.eval("Date.now=()=>" & $(pinned * 1000) & ";")
 
-proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: string = "") =
-  ## `sceneId` joins this runtime to the owning scene's shared heap budget
-  ## (runtime.sceneHeapBudgetFor): every JS app node of a scene draws on one
-  ## ceiling instead of each getting the full per-runtime limit.
+proc registerAppNatives(js: var QuickJS) =
+  ## The bridge the app prelude calls, into a context. Tables, not a call
+  ## each: 35 inline registrations were 875 bytes of the ESP32 image.
+  const
+    natives1 = [("jsSetNextSleep", NimFunction1(jsSetNextSleep)), ("jsRecall", jsRecall),
+      ("jsFetchText", jsFetchText), ("jsReleaseImage", jsReleaseImage), ("jsNextLine", jsNextLine),
+      ("jsTimeZoneInfo", jsTimeZoneInfo), ("jsGetSetting", jsGetSetting), ("jsGetAppMeta", jsGetAppMeta),
+      ("jsGetAppConfig", jsGetAppConfig), ("jsGetAppState", jsGetAppState), ("jsGetAppFrame", jsGetAppFrame),
+      ("jsGetAppContext", jsGetAppContext), ("jsGetAppKeys", jsGetAppKeys), ("jsAsyncCancel", jsAsyncCancel)]
+    natives2 = [("jsAppLog", NimFunction2(jsAppLog)), ("jsDispatch", jsDispatch),
+      ("jsStoreAction", jsStoreAction), ("jsFrame", jsFrame), ("jsCode", jsCode), ("jsSetState", jsSetState),
+      ("jsRemember", jsRemember), ("jsHttpRequest", jsHttpRequest), ("jsFetchImage", jsFetchImage),
+      ("jsCanvas", jsCanvas), ("jsCanvasDraw", jsCanvasDraw), ("jsCanvasClear", jsCanvasClear),
+      ("jsStreams", jsStreams), ("jsOpenLines", jsOpenLines), ("jsNextBlock", jsNextBlock)]
+  js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
+  for (name, fn) in natives1:
+    js.registerFunction(name, fn)
+  for (name, fn) in natives2:
+    js.registerFunction(name, fn)
+  js.registerFunction("jsStore", jsStore)
+  js.registerFunction("jsAsyncMode", jsAsyncMode)
+  js.registerFunction("jsAssets", jsAssets)
+  js.registerFunction("jsAsyncStart", jsAsyncStart)
+  js.registerFunction("jsTypedOps", jsTypedOps)
+  probe(phPrelude):
+    evalAppPrelude(js)
+
+proc sceneContextFor(scene: FrameScene): InterpretedFrameScene =
+  ## The scene whose context an app of `scene` runs in, set up: the scene's
+  ## own, beside its program (runtime.ensureSceneJs). nil when there is none
+  ## to share: no interpreted scene, or one whose JavaScript started in the
+  ## context of the scenes without code before it knew of its apps.
+  if scene.isNil or not (scene of InterpretedFrameScene):
+    return nil
+  let host = InterpretedFrameScene(scene)
+  host.hasJsApps = true
+  ensureSceneJs(host)
+  if host.jsKind == sjShared:
+    return nil
+  let ctx = host.js.context
+  for known in appContexts:
+    if known.context == ctx:
+      return host
+  registerAppNatives(host.js)
+  appContexts.add((host.js.runtime, ctx))
+  host
+
+proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, scene: FrameScene) =
+  ## The app's module evaluated where it runs: its scene's context, which the
+  ## scene's program and other JS apps share (one QuickJS a scene, not one
+  ## an app node), or, with no interpreted scene, a QuickJS of its own that
+  ## joins the scene's heap budget (runtime.sceneHeapBudgetFor).
   if runtime.ready:
     return
+  let sceneId = if scene.isNil: "" else: scene.id.string
   runtime.sceneId = sceneId
-
-  when defined(frameosEmbedded):
-    # Reclaim the other nodes' interpreters before building this one.
-    evictIdleJsRuntimes(runtime)
+  let host = sceneContextFor(scene)
+  inc nextJsAppKey
+  runtime.appKey = nextJsAppKey
+  if host.isNil:
+    when defined(frameosEmbedded):
+      # Reclaim the other nodes' interpreters before building this one.
+      evictIdleJsRuntimes(runtime)
+    when defined(memProbe): memProbe("    newQuickJS BEFORE")
+    runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
+    when defined(memProbe): memProbe("    newQuickJS AFTER")
+    setUpSceneContext(runtime.js)
+    registerAppNatives(runtime.js)
+    runtime.modulePrefix = ""
+  else:
+    runtime.js = host.js
+    runtime.host = host
+    runtime.modulePrefix = "#" & $runtime.appKey & "/"
   if not liveJsRuntimes.contains(runtime):
     liveJsRuntimes.add(runtime)
-
-  when defined(memProbe): memProbe("    newQuickJS BEFORE")
-  runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
-  when defined(memProbe): memProbe("    newQuickJS AFTER")
-  jsAppRuntimeByCtx[runtime.js.context] = runtime
-  runtime.js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
-  runtime.js.registerFunction("jsAppLog", jsAppLog)
-  runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
-  runtime.js.registerFunction("jsDispatch", jsDispatch)
-  runtime.js.registerFunction("jsStore", jsStore)
-  runtime.js.registerFunction("jsStoreAction", jsStoreAction)
-  runtime.js.registerFunction("jsFrame", jsFrame)
-  runtime.js.registerFunction("jsCode", jsCode)
-  runtime.js.registerFunction("jsSetState", jsSetState)
-  runtime.js.registerFunction("jsRemember", jsRemember)
-  runtime.js.registerFunction("jsRecall", jsRecall)
-  runtime.js.registerFunction("jsFetchText", jsFetchText)
-  runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
-  runtime.js.registerFunction("jsFetchImage", jsFetchImage)
-  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
-  runtime.js.registerFunction("jsCanvas", jsCanvas)
-  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
-  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
-  runtime.js.registerFunction("jsTypedOps", jsTypedOps)
-  runtime.js.registerFunction("jsAssets", jsAssets)
-  runtime.js.registerFunction("jsStreams", jsStreams)
-  runtime.js.registerFunction("jsOpenLines", jsOpenLines)
-  runtime.js.registerFunction("jsNextLine", jsNextLine)
-  runtime.js.registerFunction("jsNextBlock", jsNextBlock)
-  runtime.js.registerFunction("jsTimeZoneInfo", jsTimeZoneInfo)
-  runtime.js.registerFunction("jsGetSetting", jsGetSetting)
-  runtime.js.registerFunction("jsGetAppMeta", jsGetAppMeta)
-  runtime.js.registerFunction("jsGetAppConfig", jsGetAppConfig)
-  runtime.js.registerFunction("jsGetAppState", jsGetAppState)
-  runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
-  runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
-  runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  runtime.js.registerFunction("jsAsyncStart", jsAsyncStart)
-  runtime.js.registerFunction("jsAsyncCancel", jsAsyncCancel)
-  runtime.js.registerFunction("jsAsyncMode", jsAsyncMode)
-  probe(phPrelude):
-    evalAppPrelude(runtime.js)
-    # The JSX factory in C (jsx_native.nim): every element of a UI's get().
-    discard runtime.js.installNativeJsx()
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.
   if runtime.extraPrelude.len > 0:
     discard runtime.js.eval(runtime.extraPrelude, "frameos-test-harness.js")
   # Named after the real file so `./helper` resolves beside it and error
-  # locations read `app.ts:12:3`.
-  let filename = runtime.sourceName
+  # locations read `app.ts:12:3` (appText takes the prefix off).
+  let filename = runtime.modulePrefix & runtime.sourceName
   when defined(memProbe): memProbe("      prelude done, module src=" & $runtime.source.len & "B BEFORE")
 
   # Evaluate the source as a real ES module — TypeScript and JSX included,
-  # the bundled QuickJS parses both — and publish its namespace where the
-  # prelude's __frameosExports() looks for it. Nothing is generated, so error
-  # locations are the app's own lines and no line map is kept.
+  # the bundled QuickJS parses both — and hand its namespace to the
+  # prelude's registry. Nothing is generated, so error locations are the
+  # app's own lines and no line map is kept.
   let ctx = runtime.js.context
   var namespace: JSValue
   try:
     probe(phCompile):
-      namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(filename))
+      namespace = runtime.js.evalModuleNamespace(runtime.source, filename, quicktsFlagsFor(runtime.sourceName))
   except CatchableError as error:
-    raise newException(JSException, mapJsErrorText(ctx, error.msg))
-  let globalObj = JS_GetGlobalObject(ctx)
-  let installed = JS_SetPropertyStr(ctx, globalObj, "__frameosModule", namespace)
-  JS_FreeValue(ctx, globalObj)
-  if installed < 0:
-    raise newException(JSException, "Could not install the app module: " & filename)
+    let message = runtime.appText(mapJsErrorText(ctx, error.msg))
+    if runtime.host.isNil:
+      clearJsSourceMaps(ctx)
+      runtime.js.close()
+    forgetJsApp(runtime)
+    raise newException(JSException, message)
+  let key = JS_NewInt32(ctx, runtime.appKey.int32)
+  let added = callGlobalFunction(ctx, "__frameosAddApp", [key, namespace])
+  JS_FreeValue(ctx, key)
+  JS_FreeValue(ctx, namespace)
+  if JS_IsException(added) != 0:
+    JS_FreeValue(ctx, added)
+    raise newException(JSException, "Could not install the app module: " & runtime.sourceName)
+  JS_FreeValue(ctx, added)
   when defined(memProbe): memProbe("      module eval AFTER")
   runtime.ready = true
 
@@ -3452,22 +3592,24 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     ctx = runtime.js.context
     configJson = if owner of DynamicJsApp: DynamicJsApp(owner).configJson else: newJObject()
   runtime.midCall:
-    jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
-      context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))
-    var args {.noinit.}: array[7, JSValue]
-    args[0] = JS_NewInt32(ctx, handler.int32)
-    args[1] = nimStringToJS(ctx, $event)
-    args[2] = nimStringToJS(ctx, name)
+    var args {.noinit.}: array[8, JSValue]
+    args[0] = JS_NewInt32(ctx, runtime.appKey.int32)
+    args[1] = JS_NewInt32(ctx, handler.int32)
+    args[2] = nimStringToJS(ctx, $event)
+    args[3] = nimStringToJS(ctx, name)
     # localX, localY, width, height: one call for the four, where each
     # JS_NewFloat64 inlined is over 100 bytes of soft-float double on an ESP32.
     for i in 0 .. 3:
-      args[3 + i] = nimFloatToJS(ctx, hit[i])
-    let returned = callGlobalFunction(ctx, "__frameosHandle", args)
+      args[4 + i] = nimFloatToJS(ctx, hit[i])
+    var returned: JSValue
+    withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
+        context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))):
+      returned = callGlobalFunction(ctx, "__frameosHandle", args)
     for arg in args:
       JS_FreeValue(ctx, arg)
-    jsAppEnvByCtx.del(ctx)
     if JS_IsException(returned) != 0:
-      frameos_apps.logError(owner, "JS app handler failed: " & mappedJsExceptionDetails(ctx).message)
+      frameos_apps.logError(owner, "JS app handler failed: " &
+        runtime.appText(mappedJsExceptionDetails(ctx).message))
     JS_FreeValue(ctx, returned)
 
 proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
@@ -3795,7 +3937,7 @@ proc plainSpecRestFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
         discard
       elif jsIsNumber(value):
         let f = toNimFloat(ctx, value)
-        result[key] = if f.isNaN or f == Inf or f == NegInf: newJNull() else: jsValueToJson(ctx, value)
+        result[key] = if f.isNaN or f == Inf or f == NegInf: newJNull() else: jsValueToJson(ctx, value, AppStringify)
       else:
         return nil
     finally:
@@ -3825,7 +3967,7 @@ proc svgImageSpecFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
   if JS_IsException(rest) != 0:
     JS_FreeValue(ctx, JS_GetException(ctx))
     return nil
-  result = jsValueToJson(ctx, rest)
+  result = jsValueToJson(ctx, rest, AppStringify)
   if result.kind != JObject:
     return nil
   result["svg"] = %toNimString(ctx, svg)
@@ -3983,7 +4125,9 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
       probe(phWalk):
-        runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
+        let entry = runtime.appEntry()
+        runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, entry, addr runtime.jsxMemo)
+        JS_FreeValue(ctx, entry)
       return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
     let pixels = runtime.imageFromPixels(owner, context, payload)
     if pixels.isPixels:
@@ -3995,12 +4139,12 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     let svgSpec = svgImageSpecFromJs(ctx, payload)
     if not svgSpec.isNil:
       return runtime.toValue(owner, context, svgSpec, expectedType)
-    return runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
+    return runtime.toValue(owner, context, jsValueToJson(ctx, payload, AppStringify), expectedType)
 
   if expectedType.len > 0:
     if expectedType in ["string", "text"]:
       return VString(toNimString(ctx, payload))
-    return valueFromJsonByType(jsValueToJson(ctx, payload), expectedType)
+    return valueFromJsonByType(jsValueToJson(ctx, payload, AppStringify), expectedType)
 
   if jsIsString(payload):
     return VString(toNimString(ctx, payload))
@@ -4019,7 +4163,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     except CatchableError:
       return VString(toNimString(ctx, payload))
 
-  runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
+  runtime.toValue(owner, context, jsValueToJson(ctx, payload, AppStringify), expectedType)
 
 type JsAppError* = object of CatchableError
   ## A JS app's get() threw. The message is the JS error's; the mapped stack
@@ -4027,46 +4171,44 @@ type JsAppError* = object of CatchableError
 
 proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string,
     raiseOnError = false): JSValue =
-  ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
+  ensureReady(runtime, owner.frameConfig, owner.scene)
   let ctx = runtime.js.context
-  let fnNameValue = nimStringToJS(ctx, fnName)
-  defer: JS_FreeValue(ctx, fnNameValue)
+  var args {.noinit.}: array[2, JSValue]
+  args[0] = JS_NewInt32(ctx, runtime.appKey.int32)
+  args[1] = nimStringToJS(ctx, fnName)
+  defer: JS_FreeValue(ctx, args[1])
 
-  jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
   runtime.liveConfig = configJson
   # Callers hold the runtime on jsRuntimeStack (midCall) for as long as they
   # hold the value this returns.
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
-  result =
+  withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)):
     try:
-      var invoked: JSValue
       probe(phGet):
-        invoked = callGlobalFunction(ctx, "__frameosInvoke", [fnNameValue])
+        result = callGlobalFunction(ctx, "__frameosInvoke", args)
         # The microtask checkpoint at the end of a call, as a browser has at
         # the end of a task: the callbacks of promises the call settled run
         # now, while the bridge still knows whose call it is (a `fetch` that
         # blocked where nothing pumps, docs/async-js.md, settles at once).
         runtime.js.runPendingJobs()
-      invoked
     finally:
-      if jsAppEnvByCtx.hasKey(ctx):
-        jsAppEnvByCtx.del(ctx)
       runtime.closeLineStreams()
       when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:
     let details = mappedJsExceptionDetails(ctx)
-    frameos_apps.logError(owner, &"JS app {fnName} failed: " & details.message)
+    let message = runtime.appText(details.message)
+    frameos_apps.logError(owner, &"JS app {fnName} failed: " & message)
     if details.stack.len > 0:
       frameos_apps.log(owner, %*{
         "event": "jsApp:error",
         "nodeId": owner.nodeId.int,
         "nodeName": owner.nodeName,
-        "stack": details.stack
+        "stack": runtime.appText(details.stack)
       })
     JS_FreeValue(ctx, result)
     if raiseOnError:
-      raise newException(JsAppError, details.message)
+      raise newException(JsAppError, message)
     return jsNull(ctx)
 
 proc callAppGlobalForText*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode,
@@ -4076,22 +4218,18 @@ proc callAppGlobalForText*(runtime: JsAppRuntime, owner: AppRoot, configJson: Js
   ## as text. The test harness returns its report this way (app_tests.nim). A
   ## throw, or a module that does not load, is a JsAppError.
   try:
-    ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
+    ensureReady(runtime, owner.frameConfig, owner.scene)
   except CatchableError as error:
     raise newException(JsAppError, error.msg)
   let ctx = runtime.js.context
   runtime.midCall:
-    jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
-    let payload =
-      try:
-        callGlobalFunction(ctx, fnName, [])
-      finally:
-        if jsAppEnvByCtx.hasKey(ctx):
-          jsAppEnvByCtx.del(ctx)
+    var payload: JSValue
+    withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)):
+      payload = callGlobalFunction(ctx, fnName, [])
     defer: JS_FreeValue(ctx, payload)
     if JS_IsException(payload) != 0:
       let details = mappedJsExceptionDetails(ctx)
-      raise newException(JsAppError, details.message)
+      raise newException(JsAppError, runtime.appText(details.message))
     return toNimString(ctx, payload)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
