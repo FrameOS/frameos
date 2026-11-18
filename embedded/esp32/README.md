@@ -1289,6 +1289,27 @@ quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set_settings`, firmware 2026.11.6+). `fos_touch.c`, host-tested in
 `test_fos_touch.c`.
 
+### Bluetooth keyboards and mice
+
+An S3 frame takes Bluetooth LE keyboards and mice (HID over GATT;
+`fos_bt.c`, NimBLE as a central only). Off by default: `set bluetooth 1`
+and a restart start it (off, the controller's static RAM is released at
+boot). `bt pair [seconds]` opens a pairing window (60 s by default; `bt stop`
+closes it): the frame connects to the first device advertising the HID
+service and pairs "Just Works", and the bond stays in NVS, so the device
+reconnects by itself when it wakes. `bt` lists every bond with its name
+(read from the device's GAP Device Name and kept in NVS `fos_bt`), what it is
+and whether it is connected; `bt forget <address>` forgets one, `bt forget`
+every one. The frame page on the screen has the same: a switch, the list
+with Forget, and Pair (docs/scene-settings.md). Two at once (a keyboard and a mouse). The report map is read by
+`fos_hid_report.c` (pure, host-tested in `main/tests/test_fos_hid_report.c`),
+with the boot protocol as the fallback. Keys reach the dispatcher as
+`keyDown` / `keyUp` with their Linux number, repeated while held (500 ms, then
+every 40 ms), read under `set keyboard_layout <us|gb|de|fr|es|it|sv|da|nb>`;
+the mouse is pointer 0 (`movementX` / `movementY`, buttons, wheel), and its
+cursor is drawn on the RGB LCD (docs/events.md "The cursor"). No C3: its
+overlay leaves `CONFIG_BT_ENABLED` off.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds

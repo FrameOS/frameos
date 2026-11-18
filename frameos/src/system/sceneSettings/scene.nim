@@ -77,6 +77,9 @@ const
   ALayout = 4
   ACheckUpdate = 5
   AInstallUpdate = 6
+  ABtPair = 7
+  ABtStop = 8
+  ABtForget = 100 ## + the device's place in the host's `bluetooth.devices`
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -200,7 +203,9 @@ proc current(edits, info: JsonNode, name: string): JsonNode =
   ## A frame field's value: as changed on the page, else as the host has it.
   result = edits{name}
   if result.isNil:
-    result = if name == "wifiSsid": info{"wifi", "ssid"} else: info{name}
+    result = if name == "wifiSsid": info{"wifi", "ssid"}
+      elif name == "bluetooth": info{"bluetooth", "on"}
+      else: info{name}
 
 proc text(value: JsonNode): string =
   ## A value as the text a field shows: a string as it is, a whole number
@@ -374,6 +379,10 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
+  if not info{"bluetooth"}.isNil:
+    # Keyboards and mice (an ESP32's, main/fos_bt.c): the switch; its
+    # devices are the Bluetooth card's (frameList).
+    result.elems.add field("bluetooth", "Bluetooth keyboards and mice", "boolean")
   if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")
@@ -494,8 +503,18 @@ proc press(self: SceneSettingsScene, action: int) =
     self.openLayoutPage()
   elif action == ARender:
     sendEvent(evRender, newJObject(), eoPanel)
+  elif action == ABtPair:
+    frameAction("btPair")
+  elif action == ABtStop:
+    frameAction("btStop")
   elif self.state{"confirm"}.getInt(-1) == action:
-    if action == AInstallUpdate:
+    if action >= ABtForget:
+      # The device where the page listed it when the second tap came.
+      let devices = arrayOf(frameInfo(){"bluetooth", "devices"})
+      let index = action - ABtForget
+      if index < devices.elems.len:
+        frameAction("btForget " & devices.elems[index]{"address"}.getStr())
+    elif action == AInstallUpdate:
       frameAction("installUpdate")
     else:
       sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
@@ -564,7 +583,9 @@ proc acting(self: SceneSettingsScene) =
       let field = fields.elems[index]
       let name = field{"name"}.getStr()
       if handler >= HToggle:
-        values.put(name, newJBool(not values{name}.isOn))
+        # From what it shows: on the frame page, the host's until edited.
+        let shown = if frame: current(values, info, name) else: values{name}
+        values.put(name, newJBool(not shown.isOn))
       else:
         values.put(name, newJString(actedText))
       if not frame:
@@ -773,6 +794,44 @@ proc pressButton(look: Look, label: string, action: int, asking = -1): SvgNode =
   if asking == action:
     result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
+proc bluetoothCard(self: SceneSettingsScene, look: Look, bluetooth: JsonNode, asking: int): SvgNode =
+  ## The keyboards and mice the frame knows (the host's `bluetooth`): each
+  ## by its name, else its address, what it is and whether it is connected,
+  ## with Forget (asked twice); then Pair, or Stop while the frame looks.
+  result = el("div", if look.paper: "flex flex-col gap-2 p-3 rounded-lg border-2 border-black"
+    else: "flex flex-col gap-2 p-3 rounded-lg bg-zinc-900").role("card")
+  result.children.add el("span", "font-bold", SvgNode(text: "Bluetooth"))
+  let devices = arrayOf(bluetooth{"devices"})
+  if devices.elems.len == 0:
+    result.children.add el("span", look.grey, SvgNode(text: "No keyboard or mouse paired yet.")).role("muted")
+  for i in 0 ..< devices.elems.len:
+    let device = devices.elems[i]
+    var name = device{"name"}.getStr()
+    if name.len == 0:
+      name = device{"address"}.getStr()
+    let
+      keyboard = device{"keyboard"}.getBool()
+      mouse = device{"mouse"}.getBool()
+      what = if keyboard and mouse: "Keyboard and mouse" elif keyboard: "Keyboard"
+        elif mouse: "Mouse" else: "Device"
+      state = if device{"connected"}.getBool(): "connected" else: "not connected"
+      words = el("div", "grow min-w-0 flex flex-col", el("span", "truncate", SvgNode(text: name)))
+    words.children.add el("span", look.grey, SvgNode(text: what & ", " & state)).role("muted")
+    let line = el("div", "flex items-center gap-3", words)
+    line.children.add look.pressButton("Forget", ABtForget + i, asking)
+    result.children.add line
+  if bluetooth{"pairing"}.getBool():
+    let line = el("div", "flex items-center gap-3",
+      el("span", "grow min-w-0", SvgNode(text: "Looking for a keyboard or mouse: put it in pairing mode.")))
+    line.children.add look.pressButton("Stop", ABtStop)
+    result.children.add line
+  elif not bluetooth{"ready"}.getBool():
+    result.children.add el("span", look.grey, SvgNode(text: "Starting\xe2\x80\xa6")).role("muted")
+  else:
+    let line = el("div", "flex")
+    line.children.add look.pressButton("Pair a keyboard or mouse", ABtPair)
+    result.children.add line
+
 proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit: int): SvgNode =
   ## The frame page: how it is doing (a card of label and text rows), what
   ## can be changed (the same rows as a scene's fields), and its buttons.
@@ -822,11 +881,15 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     let note =
       if name == "rotate" and not look.paper: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
       elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
+      elif name == "bluetooth": "Saving a change restarts the frame."
       else: ""
     if note.len > 0:
       var c = look.grey
       c.px("text", look.size * 3 div 4)
       result.children.add el("div", move c, SvgNode(text: note)).role("muted")
+  let bluetooth = info{"bluetooth"}
+  if bluetooth{"on"}.getBool() and not bluetooth{"devices"}.isNil:
+    result.children.add self.bluetoothCard(look, bluetooth, asking)
   c = "flex flex-wrap"
   c.px("gap", look.gap div 2)
   let buttons = el("div", move c)

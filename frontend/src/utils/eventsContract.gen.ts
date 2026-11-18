@@ -193,7 +193,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "name-only",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     }
   },
@@ -216,7 +216,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "name-only",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     }
   },
@@ -240,7 +240,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "name-only",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -600,7 +600,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.21"
@@ -1150,7 +1150,7 @@ interface FrameOSEventPayloads {
   /** Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from \`keyDown\`; a preview forwards the browser's \`beforeinput\`. */
   textInput: { text: string };
   /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
-  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
+  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number; movementX?: number; movementY?: number };
   /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds \`shift\`, \`ctrl\`, \`alt\` or \`meta\` as true. */
   pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** When a pointer button is released or a finger lifts (not logged) */

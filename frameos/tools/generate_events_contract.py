@@ -556,7 +556,7 @@ def gen_nim_keyboard(doc):
            "# The keyboard tables: a Linux key number to its W3C `code`, a code to the `key`",
            "# it means when it is not printable, and per layout what a printable code",
            "# means as (unshifted, shifted, altGr). Only the hosts with a keyboard compile",
-           "# this (frameos/input_state.nim); the ESP32 does not.", ""]
+           "# this (frameos/input_state.nim): the ESP32 too, for its Bluetooth keyboard.", ""]
     out.append("const")
     out.append(f"  DefaultKeyboardLayout* = \"us\"")
     out.append(f"  KeyboardLayoutIds*: array[{len(layouts)}, string] = [{', '.join(nim_str(l) for l in layouts)}]")

@@ -461,24 +461,23 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     if acted:
       self.touch()
 
-when not defined(frameosEmbedded):
-  proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
-    ## A keyboard (Linux, the preview): the arrows walk the grid, Enter shows,
-    ## Escape goes back.
-    if self.entries.len == 0:
-      self.entries = listEntries()
-    let cols = self.grid().cols
-    case payload{"code"}.getStr()
-    of "ArrowRight": self.highlight(self.highlighted() + 1)
-    of "ArrowLeft": self.highlight(self.highlighted() - 1)
-    of "ArrowDown": self.highlight(self.highlighted() + cols)
-    of "ArrowUp": self.highlight(self.highlighted() - cols)
-    of "PageDown": self.turnPage(1)
-    of "PageUp": self.turnPage(-1)
-    of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
-    of "Escape", "Backspace": leave()
-    else: return
-    self.touch()
+proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
+  ## A keyboard (Linux, the preview): the arrows walk the grid, Enter shows,
+  ## Escape goes back.
+  if self.entries.len == 0:
+    self.entries = listEntries()
+  let cols = self.grid().cols
+  case payload{"code"}.getStr()
+  of "ArrowRight": self.highlight(self.highlighted() + 1)
+  of "ArrowLeft": self.highlight(self.highlighted() - 1)
+  of "ArrowDown": self.highlight(self.highlighted() + cols)
+  of "ArrowUp": self.highlight(self.highlighted() - cols)
+  of "PageDown": self.turnPage(1)
+  of "PageUp": self.turnPage(-1)
+  of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
+  of "Escape", "Backspace": leave()
+  else: return
+  self.touch()
 
 # --------------------------------------------------------------- the picture
 #
@@ -980,10 +979,9 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       if self.turnPage(if direction == "left": 1 else: -1): showTurnedPage()
       self.touch()
   else:
-    when not defined(frameosEmbedded):
-      if context.event == "keyDown":
-        self.keyed(payload)
-        return
+    if context.event == "keyDown":
+      self.keyed(payload)
+      return
     # A pointer event (and what is not one, which the hit test makes
     # nothing of: it has no position).
     self.pointer(context.event, payload)

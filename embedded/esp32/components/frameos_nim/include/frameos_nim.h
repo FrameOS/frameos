@@ -215,6 +215,9 @@ void frameos_nim_set_palette(const char *json);
  * "Event map"): what the frame's buttons do whatever scene shows. Live, one
  * string per pass like colors; the dispatcher applies it to the next press. */
 void frameos_nim_set_event_map(const char *json);
+/* The keyboard layout a Bluetooth keyboard's keys are read under (the
+ * contract's keyboard.layouts id; "" = us). Live, like the zone. */
+void frameos_nim_set_keyboard_layout(const char *layout);
 /* Facts for the built-in status screen (drawn when no scene is loaded):
  * a JSON object with name, panel, ip, portal, portal_ssid, portal_ip,
  * cloud_url, cloud_state, cloud_connected, backend_url, version. Push it

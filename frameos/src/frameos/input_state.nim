@@ -17,12 +17,12 @@
 ## form (docs/events.md) is converted at the door. That makes the cursor of a
 ## relative mouse move along the picture's axes on a rotated frame.
 ##
-## The ESP32 has buttons and a touch panel (the reTerminal Sticky's GT911,
-## `embedded/esp32/main/fos_touch.c`) and no keyboard (the contract's
-## `hosts.esp32` says so for every keyboard event), so the keyboard half — the
-## layout tables above all — is not compiled there; the pointer and gesture
-## half is, since 2026.10.21 (before it, 17 KB of an image at 90% of its OTA
-## slot bought nothing: no board had a glass).
+## The ESP32 has buttons, a touch panel (the reTerminal Sticky's GT911,
+## `embedded/esp32/main/fos_touch.c`) and, over Bluetooth LE, a keyboard and a
+## mouse (`embedded/esp32/main/fos_bt.c`): it compiles all of this but the
+## struct entry (`applyDriverInput`, Linux's input drivers) and round panels.
+## Its mouse is relative and says so in JSON (`movementX` / `movementY` on a
+## `pointerMove` of pointer 0).
 
 import std/[json, math, monotimes, strutils, tables, times]
 import ./driver_abi
@@ -31,9 +31,8 @@ import ./types
 when not defined(frameosEmbedded):
   import ./panel_shape
 import ./utils/image
-when not defined(frameosEmbedded):
-  import std/unicode
-  import ./keyboard_gen
+import std/unicode
+import ./keyboard_gen
 
 const
   ## A relative pointer's cursor is drawn (by the Linux runner) for this long
@@ -111,19 +110,19 @@ type
       ## finger rolled, as long as it lifts on the keyboard.
     when not defined(frameosEmbedded):
       round: bool                    ## only the inscribed circle shows and takes touches (panel_shape.nim)
-      # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
-      # and the preview have them, no ESP32 board does.
-      cursorMovedAt: MonoTime
-      cursorEverMoved: bool
-      cursorShown: bool
-      cursorDirty*: bool             ## the host should draw (or clear) the cursor
-      keyboardLayout: string
-      shift, ctrl, altLeft, altRight, meta, capsLock: bool
+    # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux and
+    # the preview have them, and an ESP32 has them over Bluetooth
+    # (embedded/esp32/main/fos_bt.c).
+    cursorMovedAt: MonoTime
+    cursorEverMoved: bool
+    cursorShown: bool
+    cursorDirty*: bool             ## the host should draw (or clear) the cursor
+    keyboardLayout: string
+    shift, ctrl, altLeft, altRight, meta, capsLock: bool
 
 proc initInputState*(config: FrameConfig): InputState =
   result = InputState(buttonRoles: @[], buttons: @[])
-  when not defined(frameosEmbedded):
-    result.keyboardLayout = "us"
+  result.keyboardLayout = "us"
   if config.isNil:
     return
   for button in config.gpioButtons:
@@ -141,9 +140,8 @@ proc initInputState*(config: FrameConfig): InputState =
   else:
     result.width = config.width
     result.height = config.height
-  when not defined(frameosEmbedded):
-    if not config.inputSettings.isNil and config.inputSettings.keyboardLayout.len > 0:
-      result.keyboardLayout = config.inputSettings.keyboardLayout
+  if not config.inputSettings.isNil and config.inputSettings.keyboardLayout.len > 0:
+    result.keyboardLayout = config.inputSettings.keyboardLayout
   # A cursor parked in a corner needs a full sweep of the desk before it is
   # anywhere useful: start at the centre.
   result.cursorX = max(0, result.width div 2)
@@ -384,12 +382,11 @@ proc pressEvent(rec: PointerRecord, name: string, origin: EventOrigin, button: i
   result = pointerEvent(rec, name, origin, buttons = true)
   result.payload["button"] = %button
 
-when not defined(frameosEmbedded):
-  proc moveCursorTo(state: var InputState, x, y: int, now: MonoTime) =
-    state.cursorX = state.clampX(x)
-    state.cursorY = state.clampY(y)
-    state.cursorMovedAt = now
-    state.cursorEverMoved = true
+proc moveCursorTo(state: var InputState, x, y: int, now: MonoTime) =
+  state.cursorX = state.clampX(x)
+  state.cursorY = state.clampY(y)
+  state.cursorMovedAt = now
+  state.cursorEverMoved = true
 
 proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
   ## The pointer is here now — from a move, or the position a press or a
@@ -406,10 +403,9 @@ proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
   # a finger or a pen puts it away, as on a laptop with a touch screen.
   state.cursorX = rec.x
   state.cursorY = rec.y
-  when not defined(frameosEmbedded):
-    if rec.id != 0 and state.cursorShown:
-      state.cursorShown = false
-      state.cursorDirty = true
+  if rec.id != 0 and state.cursorShown:
+    state.cursorShown = false
+    state.cursorDirty = true
 
 proc edgeAt(state: InputState, x, y: int): string =
   ## The edge of the screen within `GestureEdgePx` of (x, y), the nearest
@@ -480,15 +476,14 @@ proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int
     releaseEdge(rec, output) # along the edge: a drag that happens to start there
   output.add(pointerEvent(rec[], evPointerMove, origin, buttons = true))
 
-when not defined(frameosEmbedded):
-  proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
-                     output: var seq[InputDelivery]) =
-    ## A relative mouse: the host owns the position. One count is one scene pixel.
-    state.moveCursorTo(state.cursorX + dx, state.cursorY + dy, now)
-    if not state.cursorShown:
-      state.cursorShown = true
-    state.cursorDirty = true
-    state.pointerMoved(0, "mouse", state.cursorX, state.cursorY, origin, now, output)
+proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
+                   output: var seq[InputDelivery]) =
+  ## A relative mouse: the host owns the position. One count is one scene pixel.
+  state.moveCursorTo(state.cursorX + dx, state.cursorY + dy, now)
+  if not state.cursorShown:
+    state.cursorShown = true
+  state.cursorDirty = true
+  state.pointerMoved(0, "mouse", state.cursorX, state.cursorY, origin, now, output)
 
 proc pair(state: var InputState, id: int) =
   ## A finger that went down while another (the scene's, unpaired) is held:
@@ -519,15 +514,14 @@ proc unpair(state: var InputState, rec: ptr PointerRecord): int =
       result = -1
     rec.pairedWith = -1
 
-when not defined(frameosEmbedded):
-  proc addModifiers(state: InputState, payload: JsonNode) =
-    ## The modifier keys held, on a press and a tap: `shift` and the rest, each
-    ## only while it is down (shift+click extends a selection in a JSX field,
-    ## docs/jsx-ui.md). No keyboard on an ESP32: never called there.
-    if state.shift: payload["shift"] = %true
-    if state.ctrl: payload["ctrl"] = %true
-    if state.altLeft or state.altRight: payload["alt"] = %true
-    if state.meta: payload["meta"] = %true
+proc addModifiers(state: InputState, payload: JsonNode) =
+  ## The modifier keys held, on a press and a tap: `shift` and the rest, each
+  ## only while it is down (shift+click extends a selection in a JSX field,
+  ## docs/jsx-ui.md).
+  if state.shift: payload["shift"] = %true
+  if state.ctrl: payload["ctrl"] = %true
+  if state.altLeft or state.altRight: payload["alt"] = %true
+  if state.meta: payload["meta"] = %true
 
 proc pointerDown(state: var InputState, id: int, pointerType: string, button: int,
                  origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
@@ -550,8 +544,7 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
-  when not defined(frameosEmbedded):
-    state.addModifiers(down.payload)
+  state.addModifiers(down.payload)
   if rec.edgeTaken:
     return
   if pressed and rec.edge.len > 0 or rec.edgeHeld.len > 0:
@@ -621,12 +614,9 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
       rec.hasLastTap = false
       return
     if held <= GestureTapMs:
-      when defined(frameosEmbedded):
-        output.add(pointerEvent(rec[], evTap, origin))
-      else:
-        let tap = pointerEvent(rec[], evTap, origin)
-        state.addModifiers(tap.payload)
-        output.add(tap)
+      let tap = pointerEvent(rec[], evTap, origin)
+      state.addModifiers(tap.payload)
+      output.add(tap)
       if rec.hasLastTap and msSince(now, rec.lastTapAt) <= GestureDoubleTapMs and
           abs(rec.x - rec.lastTapX) <= GestureTapSlopPx and abs(rec.y - rec.lastTapY) <= GestureTapSlopPx:
         output.add(pointerEvent(rec[], evDoubleTap, origin))
@@ -684,120 +674,123 @@ proc cancelPointers*(state: var InputState, origin: EventOrigin, output: var seq
     state.pointerCancel(id, origin, output)
   if deviceId < 0:
     state.pointerInputLost = false
-  when not defined(frameosEmbedded):
-    # A mouse that went away (or lost input) takes its cursor along; the
-    # next move of any mouse brings it back.
-    if deviceId >= 0 and mouseToo and state.cursorShown:
-      state.cursorShown = false
-      state.cursorDirty = true
+  # A mouse that went away (or lost input) takes its cursor along; the
+  # next move of any mouse brings it back.
+  if deviceId >= 0 and mouseToo and state.cursorShown:
+    state.cursorShown = false
+    state.cursorDirty = true
 
-when not defined(frameosEmbedded):
-  proc wheel(state: var InputState, deltaX, deltaY: float, origin: EventOrigin, output: var seq[InputDelivery]) =
-    ## Notches, and a trackpad's fractions of one.
-    let rec = state.pointer(0, "", origin)
-    output.add(InputDelivery(name: evWheel, origin: origin,
-      payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
+proc wheel(state: var InputState, deltaX, deltaY: float, origin: EventOrigin, output: var seq[InputDelivery]) =
+  ## Notches, and a trackpad's fractions of one.
+  let rec = state.pointer(0, "", origin)
+  output.add(InputDelivery(name: evWheel, origin: origin,
+    payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
 
-when not defined(frameosEmbedded):
-  # ------------------------------------------------------------------ keyboard
+proc setKeyboardLayout*(state: var InputState, layout: string) =
+  ## The layout a key's `key` is read under (the contract's `keyboard.layouts`):
+  ## for a host whose config is not a FrameConfig (the ESP32's NVS key).
+  if isKeyboardLayout(layout):
+    state.keyboardLayout = layout
 
-  proc isLetterKey(code: string): bool =
-    code.len == 4 and code.startsWith("Key")
+# ------------------------------------------------------------------ keyboard
 
-  proc keyValue(state: InputState, code: string, shift, altGr: bool): string =
-    ## What `code` means right now: a named key, or the layout's character under
-    ## the modifiers held. "Unidentified" is the W3C's word for a key it has no
-    ## name for (a gamepad button, a code the tables do not know).
-    let named = keyNamedValue(code)
-    if named.len > 0:
-      return named
-    let (base, shifted, third) = keyboardLayoutKey(state.keyboardLayout, code)
-    if altGr and third.len > 0:
-      return third
-    let upper = if isLetterKey(code): shift != state.capsLock else: shift
-    if upper and shifted.len > 0:
-      return shifted
-    if base.len > 0:
-      return base
-    "Unidentified"
+proc isLetterKey(code: string): bool =
+  code.len == 4 and code.startsWith("Key")
 
-  proc isPrintable(key: string): bool =
-    key.runeLen == 1
+proc keyValue(state: InputState, code: string, shift, altGr: bool): string =
+  ## What `code` means right now: a named key, or the layout's character under
+  ## the modifiers held. "Unidentified" is the W3C's word for a key it has no
+  ## name for (a gamepad button, a code the tables do not know).
+  let named = keyNamedValue(code)
+  if named.len > 0:
+    return named
+  let (base, shifted, third) = keyboardLayoutKey(state.keyboardLayout, code)
+  if altGr and third.len > 0:
+    return third
+  let upper = if isLetterKey(code): shift != state.capsLock else: shift
+  if upper and shifted.len > 0:
+    return shifted
+  if base.len > 0:
+    return base
+  "Unidentified"
 
-  proc trackModifier(state: var InputState, code: string, down: bool) =
-    case code
-    of "ShiftLeft", "ShiftRight": state.shift = down
-    of "ControlLeft", "ControlRight": state.ctrl = down
-    of "AltLeft": state.altLeft = down
-    of "AltRight": state.altRight = down
-    of "MetaLeft", "MetaRight": state.meta = down
-    of "CapsLock":
-      if down: state.capsLock = not state.capsLock
-    else: discard
+proc isPrintable(key: string): bool =
+  key.runeLen == 1
 
-  proc keyPayload(state: InputState, code, key: string, down, repeat: bool, linuxCode: int): JsonNode =
-    result = %*{"code": code, "key": key, "shift": state.shift, "ctrl": state.ctrl,
-      "alt": state.altLeft or state.altRight, "meta": state.meta}
-    if down:
-      result["repeat"] = %repeat
-    if linuxCode >= 0:
-      result["linuxCode"] = %linuxCode
+proc trackModifier(state: var InputState, code: string, down: bool) =
+  case code
+  of "ShiftLeft", "ShiftRight": state.shift = down
+  of "ControlLeft", "ControlRight": state.ctrl = down
+  of "AltLeft": state.altLeft = down
+  of "AltRight": state.altRight = down
+  of "MetaLeft", "MetaRight": state.meta = down
+  of "CapsLock":
+    if down: state.capsLock = not state.capsLock
+  else: discard
 
-  proc keyFromLinux(state: var InputState, linuxCode: int, down, repeat: bool,
+proc keyPayload(state: InputState, code, key: string, down, repeat: bool, linuxCode: int): JsonNode =
+  result = %*{"code": code, "key": key, "shift": state.shift, "ctrl": state.ctrl,
+    "alt": state.altLeft or state.altRight, "meta": state.meta}
+  if down:
+    result["repeat"] = %repeat
+  if linuxCode >= 0:
+    result["linuxCode"] = %linuxCode
+
+proc keyFromLinux(state: var InputState, linuxCode: int, down, repeat: bool,
+                  origin: EventOrigin, output: var seq[InputDelivery]) =
+  ## A key as the evdev driver reports it: a number, and whether it went down.
+  var code = linuxKeyCode(linuxCode)
+  if code.len == 0:
+    code = "Unidentified"
+  if not repeat:
+    state.trackModifier(code, down)
+  let key = state.keyValue(code, state.shift, state.altRight)
+  output.add(InputDelivery(name: (if down: evKeyDown else: evKeyUp), origin: origin,
+    payload: state.keyPayload(code, key, down, repeat and down, linuxCode)))
+  if down and isPrintable(key) and not (state.ctrl or state.meta or state.altLeft):
+    output.add(InputDelivery(name: evTextInput, origin: origin, payload: %*{"text": key}))
+
+proc keyFromPayload(state: var InputState, name: string, payload: JsonNode,
                     origin: EventOrigin, output: var seq[InputDelivery]) =
-    ## A key as the evdev driver reports it: a number, and whether it went down.
-    var code = linuxKeyCode(linuxCode)
+  ## A key as a preview, an HTTP request or a scene says it: W3C `code` and
+  ## `key` when it knows them, the flags it knows. What it leaves out is
+  ## filled in here; a `key` it did not give is mapped through the layout, and
+  ## only then is a `textInput` made — a browser sends its own.
+  let down = name == evKeyDown
+  var linuxCode = -1
+  var code = payload{"code"}.getStr()
+  if payload.isInt("code"):
+    # The 2026.9.21 payload: `key` was the Linux name, `code` its number.
+    linuxCode = payload["code"].getInt()
+    code = linuxKeyCode(linuxCode)
+  elif payload.isInt("linuxCode"):
+    linuxCode = payload["linuxCode"].getInt()
     if code.len == 0:
-      code = "Unidentified"
-    if not repeat:
-      state.trackModifier(code, down)
-    let key = state.keyValue(code, state.shift, state.altRight)
-    output.add(InputDelivery(name: (if down: evKeyDown else: evKeyUp), origin: origin,
-      payload: state.keyPayload(code, key, down, repeat and down, linuxCode)))
-    if down and isPrintable(key) and not (state.ctrl or state.meta or state.altLeft):
-      output.add(InputDelivery(name: evTextInput, origin: origin, payload: %*{"text": key}))
-
-  proc keyFromPayload(state: var InputState, name: string, payload: JsonNode,
-                      origin: EventOrigin, output: var seq[InputDelivery]) =
-    ## A key as a preview, an HTTP request or a scene says it: W3C `code` and
-    ## `key` when it knows them, the flags it knows. What it leaves out is
-    ## filled in here; a `key` it did not give is mapped through the layout, and
-    ## only then is a `textInput` made — a browser sends its own.
-    let down = name == evKeyDown
-    var linuxCode = -1
-    var code = payload{"code"}.getStr()
-    if payload.isInt("code"):
-      # The 2026.9.21 payload: `key` was the Linux name, `code` its number.
-      linuxCode = payload["code"].getInt()
       code = linuxKeyCode(linuxCode)
-    elif payload.isInt("linuxCode"):
-      linuxCode = payload["linuxCode"].getInt()
-      if code.len == 0:
-        code = linuxKeyCode(linuxCode)
-    if code.len == 0:
-      code = "Unidentified"
-    let repeat = down and payload{"repeat"}.getBool()
-    let ownFlags = payload.hasKey("shift") or payload.hasKey("ctrl") or payload.hasKey("alt") or payload.hasKey("meta")
-    if not repeat and (not ownFlags or code != "CapsLock"):
-      # A modifier key itself goes down and up whoever says so: a preview,
-      # which sends its own flags with every key, holds shift for the
-      # pointer's presses too (shift+click). Caps lock is its own word then.
-      state.trackModifier(code, down)
-    let shift = if payload.hasKey("shift"): payload["shift"].getBool() else: state.shift
-    let ctrl = if payload.hasKey("ctrl"): payload["ctrl"].getBool() else: state.ctrl
-    let alt = if payload.hasKey("alt"): payload["alt"].getBool() else: state.altLeft or state.altRight
-    let meta = if payload.hasKey("meta"): payload["meta"].getBool() else: state.meta
-    let gaveKey = payload.isStr("key") and payload["key"].getStr().len > 0 and
-      not payload["key"].getStr().startsWith("KEY_")
-    let key = if gaveKey: payload["key"].getStr() else: state.keyValue(code, shift, state.altRight)
-    var delivered = %*{"code": code, "key": key, "shift": shift, "ctrl": ctrl, "alt": alt, "meta": meta}
-    if down:
-      delivered["repeat"] = %repeat
-    if linuxCode >= 0:
-      delivered["linuxCode"] = %linuxCode
-    output.add(InputDelivery(name: name, origin: origin, payload: delivered))
-    if down and not gaveKey and isPrintable(key) and not (ctrl or meta or (alt and not state.altRight)):
-      output.add(InputDelivery(name: evTextInput, origin: origin, payload: %*{"text": key}))
+  if code.len == 0:
+    code = "Unidentified"
+  let repeat = down and payload{"repeat"}.getBool()
+  let ownFlags = payload.hasKey("shift") or payload.hasKey("ctrl") or payload.hasKey("alt") or payload.hasKey("meta")
+  if not repeat and (not ownFlags or code != "CapsLock"):
+    # A modifier key itself goes down and up whoever says so: a preview,
+    # which sends its own flags with every key, holds shift for the
+    # pointer's presses too (shift+click). Caps lock is its own word then.
+    state.trackModifier(code, down)
+  let shift = if payload.hasKey("shift"): payload["shift"].getBool() else: state.shift
+  let ctrl = if payload.hasKey("ctrl"): payload["ctrl"].getBool() else: state.ctrl
+  let alt = if payload.hasKey("alt"): payload["alt"].getBool() else: state.altLeft or state.altRight
+  let meta = if payload.hasKey("meta"): payload["meta"].getBool() else: state.meta
+  let gaveKey = payload.isStr("key") and payload["key"].getStr().len > 0 and
+    not payload["key"].getStr().startsWith("KEY_")
+  let key = if gaveKey: payload["key"].getStr() else: state.keyValue(code, shift, state.altRight)
+  var delivered = %*{"code": code, "key": key, "shift": shift, "ctrl": ctrl, "alt": alt, "meta": meta}
+  if down:
+    delivered["repeat"] = %repeat
+  if linuxCode >= 0:
+    delivered["linuxCode"] = %linuxCode
+  output.add(InputDelivery(name: name, origin: origin, payload: delivered))
+  if down and not gaveKey and isPrintable(key) and not (ctrl or meta or (alt and not state.altRight)):
+    output.add(InputDelivery(name: evTextInput, origin: origin, payload: %*{"text": key}))
 
 # ------------------------------------------------------------------- entries
 
@@ -852,7 +845,11 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
   of evPointerMove, evMouseMove:
     let id = payload{"pointerId"}.getInt(0)
     let pointerType = payload{"pointerType"}.getStr()
-    if payload.isInt("x") and payload.isInt("y"):
+    if id == 0 and (payload.isInt("movementX") or payload.isInt("movementY")):
+      # A relative mouse that says how far it went, not where it is (the
+      # ESP32's Bluetooth mouse, docs/events.md "Pointer"): the cursor's.
+      state.cursorMovedBy(payload{"movementX"}.getInt(0), payload{"movementY"}.getInt(0), origin, now, output)
+    elif payload.isInt("x") and payload.isInt("y"):
       let (x, y) = state.wireToScene(payload["x"].getInt(), payload["y"].getInt())
       state.pointerMoved(id, pointerType, x, y, origin, now, output)
     else:
@@ -872,12 +869,9 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     discard state.pointer(id, payload{"pointerType"}.getStr(), origin)
     state.pointerCancel(id, origin, output)
   of evWheel:
-    when defined(frameosEmbedded):
-      return false
-    else:
-      if payload.isInt("x") and payload.isInt("y"):
-        discard state.pointerFromPayload(payload, origin)
-      state.wheel(payload{"deltaX"}.getFloat(), payload{"deltaY"}.getFloat(), origin, output)
+    if payload.isInt("x") and payload.isInt("y"):
+      discard state.pointerFromPayload(payload, origin)
+    state.wheel(payload{"deltaX"}.getFloat(), payload{"deltaY"}.getFloat(), origin, output)
   of evTap, evDoubleTap, evLongPress, evSwipe, evEdgeSwipe, evPinch:
     # Injected, not made here: the position is converted, the rest passes.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
@@ -889,17 +883,9 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     delivered["pointerType"] = %pointerType
     output.add(InputDelivery(name: name, origin: origin, payload: delivered))
   of evKeyDown, evKeyUp:
-    when defined(frameosEmbedded):
-      return false
-    else:
-      state.keyFromPayload(name, payload, origin, output)
+    state.keyFromPayload(name, payload, origin, output)
   of evTextInput:
-    # No keyboard on an ESP32 (docs/events.md "Input"): one sent anyway is
-    # delivered as it came.
-    when defined(frameosEmbedded):
-      return false
-    else:
-      output.add(InputDelivery(name: name, origin: origin, payload: %*{"text": payload{"text"}.getStr()}))
+    output.add(InputDelivery(name: name, origin: origin, payload: %*{"text": payload{"text"}.getStr()}))
   else:
     return false
   true
@@ -915,22 +901,17 @@ proc tickPointers(state: var InputState, now: MonoTime, output: var seq[InputDel
       var press = pointerEvent(rec, evLongPress, rec.origin)
       press.payload["durationMs"] = %msSince(now, rec.downAt)
       output.add(press)
-  when not defined(frameosEmbedded):
-    if state.cursorShown and msSince(now, state.cursorMovedAt) >= CursorHideMs:
-      state.cursorShown = false
-      state.cursorDirty = true
+  if state.cursorShown and msSince(now, state.cursorMovedAt) >= CursorHideMs:
+    state.cursorShown = false
+    state.cursorDirty = true
 
-when defined(frameosEmbedded):
-  proc cursorVisible*(state: InputState): bool = false
-  proc takeCursorDirty*(state: var InputState): bool = false
-else:
-  proc cursorVisible*(state: InputState): bool =
-    ## Whether the host should draw the cursor: a relative mouse moved it lately.
-    state.cursorShown
+proc cursorVisible*(state: InputState): bool =
+  ## Whether the host should draw the cursor: a relative mouse moved it lately.
+  state.cursorShown
 
-  proc takeCursorDirty*(state: var InputState): bool =
-    result = state.cursorDirty
-    state.cursorDirty = false
+proc takeCursorDirty*(state: var InputState): bool =
+  result = state.cursorDirty
+  state.cursorDirty = false
 
 proc cursorSpace*(state: InputState): (int, int) =
   ## The scene's size in pixels: what `cursorX` / `cursorY` are positions in.

@@ -102,6 +102,20 @@ void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark);
 void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation);
 void fos_lcd_st7701s_loading_end(void);
 
+/* The mouse cursor (a Bluetooth mouse, main/fos_bt.c): drawn by the loading
+ * mark's task into the buffer being scanned, over the mark, put away before
+ * a picture is presented and drawn again over it, so no render, snapshot or
+ * damage record ever holds it (docs/events.md "The cursor"). `sprite` is the
+ * runtime's (frameos/cursor_sprite.nim): with no `src` it gives the panel
+ * rectangle the cursor covers, else one frame of it. Positions are in the
+ * scene's pixels (`scene_w` x `scene_h`), `shape` a cursor_shape.nim
+ * CursorShape. */
+typedef void (*fos_cursor_sprite_fn)(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t x, int32_t y,
+                                     int32_t scene_w, int32_t scene_h, int32_t shape, int32_t *rect,
+                                     const void *src, int32_t src_stride, void *dst, int32_t dst_stride);
+void fos_lcd_st7701s_set_cursor_sprite(fos_cursor_sprite_fn sprite);
+void fos_lcd_st7701s_cursor(bool visible, int x, int y, int scene_w, int scene_h, int shape, int rotation);
+
 /* What the boot splash says it is waiting for (lcd_splash.h), from whichever
  * task is booting. It shows once it has lasted FOS_LCD_SPLASH_STATUS_DELAY_MS,
  * and not at all once a picture has replaced the splash. */

@@ -16,17 +16,21 @@ type
     ## control plane turned it off). Else {wifi: {state, ssid, hotspot,
     ## rssi, ip, networks: [name…], scanning, password}, rotate,
     ## renderScale, battery: {percent}, managedBy, version,
-    ## actions: ["restart"…], note}: `battery` absent without one; `wifi`
+    ## actions: ["restart"…], note, bluetooth: {on, ready, pairing,
+    ## devices: [{address, name, keyboard, mouse, connected}]}}: `bluetooth`
+    ## absent on a host without it (only an ESP32 S3 has it); `battery` absent without one; `wifi`
     ## absent, no network to set here; `state` one of connected, connecting,
     ## notFound, auth, hotspot, unset, off; `password` a password is saved;
     ## `actions` the device commands this host runs besides render and
     ## reboot; `note` what the last Save could not do.
   FrameSettingsApply* = proc(changes: JsonNode) {.nimcall, gcsafe, raises: [].}
     ## What Save changed: wifiSsid with wifiPassword (empty: the saved one
-    ## for the same network, none for another), rotate, renderScale.
+    ## for the same network, none for another), rotate, renderScale,
+    ## bluetooth (a restart, as rotate).
   FrameSettingsAction* = proc(action: string) {.nimcall, gcsafe, raises: [].}
     ## "open" when the page comes up, "close" when it goes, "scan" for the
-    ## networks in range.
+    ## networks in range; "btPair" / "btStop" open and close a minute of
+    ## Bluetooth pairing, "btForget <address>" forgets one device.
 
 var
   frameSettingsRead*: FrameSettingsRead

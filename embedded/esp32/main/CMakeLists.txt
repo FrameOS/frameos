@@ -12,6 +12,8 @@ idf_component_register(
         "fos_climate.c"
         "fos_gauge.c"
         "fos_touch.c"
+        "fos_hid_report.c"
+        "fos_bt.c"
         "fos_codec.c"
         "fos_rtc.c"
         "fos_voice_binding.c"
@@ -98,6 +100,7 @@ idf_component_register(
         frameos_display
         frameos_nim
         monocypher
+        bt
 )
 
 # The setup page (fos_http.c's GET /) is setup_page.html gzipped here and

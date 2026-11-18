@@ -107,9 +107,9 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock` |
-| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion`, and on an S3 `bluetooth` (`on`, `ready`, `pairing`, `devices`: each bond's `address`, `name`, `keyboard`, `mouse`, `connected`; absent: no Bluetooth in the image) |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock`, `bluetooth` |
+| `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate`, `btPair` / `btStop` (a minute of pairing), `btForget <address>` |
 
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
 |---|---|---|---|---|
@@ -146,6 +146,18 @@ What the page holds, top to bottom:
   where it has one. A frame that reaches the internet goes back to network time
   at its next sync, which the page says. One field and no `strftime`, which
   alone brings 12 KB of libc into the image.
+- **Bluetooth keyboards and mice** (an ESP32 S3, `main/fos_bt.c`): a switch,
+  with "Saving a change restarts the frame" under it (the stack starts at
+  boot, and its RAM is given back there when it is off). While it is on, a
+  **Bluetooth** card lists every bonded device by the name it serves (GAP
+  Device Name, kept in NVS beside the bond; a bond without one by its
+  address), what it is, connected or not, each with **Forget** (a second
+  tap: the bond, the name and the link go). Under them **Pair a keyboard or
+  mouse** opens a minute in which the frame connects to the first HID device
+  advertising and pairs ("Just Works"), and **Stop** closes it early. The
+  page is drawn again when a device comes or goes and when the minute ends
+  (`fos_bt_set_change_hook`). No plane is told: the console's `bt` is the
+  same list.
 - **Update** (an ESP32 with a control plane): the page asks the plane whether a
   release exists when it opens on Wi-Fi, at most hourly, and on **Check for
   updates** (`fos_ota_check_start`: the same manifest and signature checks as

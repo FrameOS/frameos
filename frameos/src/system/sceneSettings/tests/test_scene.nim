@@ -874,6 +874,69 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsAction = nil
   echo "clock and update ok"
 
+block the_frame_page_pairs_and_forgets_bluetooth_devices:
+  # An ESP32 with Bluetooth (main/fos_bt.c): the switch among the fields, the
+  # devices on a card of their own, Pair and Stop at once, Forget asked twice.
+  var
+    actions: seq[string]
+    applied: seq[JsonNode]
+    pairing = false
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.12",
+        "bluetooth": {"on": true, "ready": true, "pairing": pairing, "devices": [
+          {"address": "aa:bb:cc:dd:ee:01", "name": "MX Keys", "keyboard": true, "mouse": false, "connected": true},
+          {"address": "aa:bb:cc:dd:ee:02", "name": "", "keyboard": false, "mouse": true, "connected": false}]}}
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  discard scene.draw()
+  scene.scrollTo(2000)
+  let image = scene.draw()
+  if previews.len > 0:
+    image.writeFile(previews / "bluetooth.png")
+  # Pair, then Stop while it looks.
+  scene.tap(regionWith(20007))
+  doAssert actions[^1] == "btPair", $actions
+  pairing = true
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20008))
+  doAssert actions[^1] == "btStop", $actions
+  pairing = false
+  # Forget the mouse (listed by its address): the first tap only asks.
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20101))
+  doAssert actions[^1] == "btStop", $actions
+  discard scene.draw()
+  scene.scrollTo(2000)
+  discard scene.draw()
+  scene.tap(regionWith(20101))
+  doAssert actions[^1] == "btForget aa:bb:cc:dd:ee:02", $actions
+  # The switch shows the host's "on", and a tap turns it off for Save.
+  discard scene.draw()
+  var toggle = -1
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    let h = r.handlers[ueClick] - 1
+    if h >= 2000 and h < 3000: toggle = h
+  doAssert toggle >= 0, "the Bluetooth switch"
+  scene.tap(regionWith(toggle))
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0]{"bluetooth"} == %false, $applied
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+  echo "bluetooth ok"
+
 block a_layout_theme:
   # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its
   # colors, Cancel as boxes inside each other that take its press as a whole.

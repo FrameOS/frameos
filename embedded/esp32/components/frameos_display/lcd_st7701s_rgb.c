@@ -618,6 +618,10 @@ static uint8_t *writable_back(void)
  * the glass (the driver switches to the newest it was given, so handing two
  * over within one frame would skip the first): the refill starts reading it
  * at the next frame boundary, and it is the front buffer from then on. */
+/* The mouse cursor's, below (fos_lcd_st7701s_cursor). */
+static void cursor_away_for_present(void);
+static bool cursor_wanted(void);
+
 static void present_back(void)
 {
     int back = s_drawing;
@@ -631,6 +635,7 @@ static void present_back(void)
         s_drawing = -1;
         return;
     }
+    cursor_away_for_present();
     settle_front();
     /* A picture after a switch began is that switch's: the loading mark
      * goes, from whichever buffer holds it, before this one is on the way. */
@@ -643,6 +648,7 @@ static void present_back(void)
     s_pending_front = back;
     s_last_drawn = back;
     s_drawing = -1;
+    if (cursor_wanted() && s_mark_task) xTaskNotifyGive(s_mark_task);
 }
 
 static void fill_buffer(uint8_t *fb, uint16_t color)
@@ -763,15 +769,82 @@ static void count_mark_move(const uint16_t *before)
     if (s_mark_index >= 0) s_mark_generation = ++s_generation[s_mark_index];
 }
 
+/* The mouse cursor (lcd_st7701s_rgb.h): where the runtime says it is, and
+ * the pixels under it in the buffer that holds it. Under s_mark_lock. It is
+ * only ever in the front or the pending buffer, never in one a render may
+ * write (writable_back), and present_back puts it away before either moves:
+ * the rest of the time it may stay where it is. */
+#define LCD_CURSOR_SAVED_WORDS 2048u
+static fos_cursor_sprite_fn s_cursor_sprite = NULL;
+static struct {
+    bool visible;
+    int32_t x, y, scene_w, scene_h, shape, rotation;
+    fos_lcd_loading_rect_t rect;  /* where it is drawn, in panel pixels */
+    uint16_t *saved;
+    uint16_t *drawn_in;
+    int index;                    /* drawn_in's buffer, and the write count it gave it */
+    uint32_t generation;
+} s_cursor = {.index = -1};
+
+static void cursor_copy(uint16_t *fb, bool to_panel)
+{
+    uint16_t *panel = fb + (size_t)s_cursor.rect.y * FOS_LCD_ST7701S_WIDTH + (size_t)s_cursor.rect.x;
+    uint16_t *saved = s_cursor.saved;
+    size_t row_bytes = (size_t)s_cursor.rect.w * sizeof(uint16_t);
+    for (int32_t y = 0; y < s_cursor.rect.h; y++) {
+        if (to_panel) memcpy(panel, saved, row_bytes);
+        else memcpy(saved, panel, row_bytes);
+        panel += FOS_LCD_ST7701S_WIDTH;
+        saved += s_cursor.rect.w;
+    }
+}
+
+/* The cursor off the panel's buffer, its write count back with it (the
+ * mark's rule, count_mark_move). */
+static void cursor_away(void)
+{
+    if (!s_cursor.drawn_in) return;
+    cursor_copy(s_cursor.drawn_in, true);
+    if (s_cursor.index >= 0 && s_generation[s_cursor.index] == s_cursor.generation) s_generation[s_cursor.index]--;
+    s_cursor.drawn_in = NULL;
+    s_cursor.index = -1;
+}
+
+/* The cursor into the buffer on the glass, over the mark. A buffer handed
+ * over and not yet certainly scanned waits: the cursor would go into the one
+ * the glass is leaving. */
+static void cursor_draw(void)
+{
+    if (!s_cursor.visible || !s_cursor_sprite || !s_cursor.saved || s_splash_on || s_updating) return;
+    if (s_pending_front >= 0 && (uint32_t)(s_frames - s_presented_at) < 2u) return;
+    uint16_t *fb = scanned_buffer();
+    s_cursor_sprite(FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_cursor.rotation, s_cursor.x, s_cursor.y,
+                    s_cursor.scene_w, s_cursor.scene_h, s_cursor.shape, (int32_t *)&s_cursor.rect, NULL, 0, NULL, 0);
+    if (s_cursor.rect.w <= 0 || (size_t)s_cursor.rect.w * (size_t)s_cursor.rect.h > LCD_CURSOR_SAVED_WORDS) return;
+    cursor_copy(fb, false);
+    uint16_t *at = fb + (size_t)s_cursor.rect.y * FOS_LCD_ST7701S_WIDTH + (size_t)s_cursor.rect.x;
+    s_cursor_sprite(FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_cursor.rotation, s_cursor.x, s_cursor.y,
+                    s_cursor.scene_w, s_cursor.scene_h, s_cursor.shape, (int32_t *)&s_cursor.rect, s_cursor.saved,
+                    s_cursor.rect.w * (int32_t)sizeof(uint16_t), at, FOS_LCD_ST7701S_WIDTH * (int32_t)sizeof(uint16_t));
+    s_cursor.drawn_in = fb;
+    s_cursor.index = buffer_index((const uint8_t *)fb);
+    if (s_cursor.index >= 0) s_cursor.generation = ++s_generation[s_cursor.index];
+}
+
 static void mark_task(void *arg)
 {
     (void)arg;
     while (true) {
         xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+        /* The cursor sits over the mark: off first, on again last. */
+        cursor_away();
         uint16_t *before = s_mark.drawn_in;
         uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         int32_t wait_ms = fos_lcd_loading_step(&s_mark, scanned_buffer(), now_ms);
         count_mark_move(before);
+        cursor_draw();
+        /* A cursor that waits for the glass to take a picture comes back for it. */
+        if (s_cursor.visible && !s_cursor.drawn_in && (wait_ms < 0 || wait_ms > 20)) wait_ms = 20;
         xSemaphoreGive(s_mark_lock);
         /* Rounded up: a wait of at least 1 ms is at least a tick, never the
          * 0-tick wait that spins. */
@@ -785,25 +858,74 @@ void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark)
     s_mark.draw = mark;
 }
 
+/* The mark's task, its lock and its room, the first time either the mark or
+ * the cursor needs them. */
+static bool mark_task_ready(void)
+{
+    if (s_mark_task) return true;
+    if (!s_mark.saved) {
+        s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_cursor.saved) {
+        s_cursor.saved = heap_caps_malloc(LCD_CURSOR_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
+    if (!s_mark.saved || !s_cursor.saved || !s_mark_lock ||
+        xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task, LCD_MARK_CORE) !=
+            pdPASS) {
+        s_mark_task = NULL;
+        return false;
+    }
+    s_mark.saved_words = LCD_MARK_SAVED_WORDS;
+    s_mark.width = FOS_LCD_ST7701S_WIDTH;
+    s_mark.height = FOS_LCD_ST7701S_HEIGHT;
+    return true;
+}
+
+void fos_lcd_st7701s_set_cursor_sprite(fos_cursor_sprite_fn sprite)
+{
+    s_cursor_sprite = sprite;
+}
+
+/* The render task, after the dispatcher moved the cursor or hid it. */
+void fos_lcd_st7701s_cursor(bool visible, int x, int y, int scene_w, int scene_h, int shape, int rotation)
+{
+    if (!s_ready || !s_cursor_sprite) return;
+    if (!visible && !s_cursor.visible) return;
+    if (!mark_task_ready()) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    s_cursor.visible = visible;
+    s_cursor.x = x;
+    s_cursor.y = y;
+    s_cursor.scene_w = scene_w;
+    s_cursor.scene_h = scene_h;
+    s_cursor.shape = shape;
+    s_cursor.rotation = rotation;
+    xSemaphoreGive(s_mark_lock);
+    xTaskNotifyGive(s_mark_task);
+}
+
+/* present_back: the cursor leaves the buffers it may be in before either
+ * moves; the mark's task draws it over the new picture once that is on the
+ * glass. */
+static bool cursor_wanted(void)
+{
+    return s_cursor.visible;
+}
+
+static void cursor_away_for_present(void)
+{
+    if (!s_mark_lock || !s_cursor.drawn_in) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    cursor_away();
+    xSemaphoreGive(s_mark_lock);
+}
+
 void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
 {
     if (!s_ready || s_splash_on || !s_mark.draw) return;
-    if (!s_mark_task) {
-        /* The first switch: room for the pixels, the lock and the task. */
-        if (!s_mark.saved) {
-            s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
-        if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
-        if (!s_mark.saved || !s_mark_lock ||
-            xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
-                                    LCD_MARK_CORE) != pdPASS) {
-            s_mark_task = NULL;
-            return;
-        }
-        s_mark.saved_words = LCD_MARK_SAVED_WORDS;
-        s_mark.width = FOS_LCD_ST7701S_WIDTH;
-        s_mark.height = FOS_LCD_ST7701S_HEIGHT;
-    }
+    /* The first switch: room for the pixels, the lock and the task. */
+    if (!mark_task_ready()) return;
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
     uint16_t *before = s_mark.drawn_in;
     bool begun = fos_lcd_loading_begin(&s_mark, rotation, since_tick * portTICK_PERIOD_MS);
@@ -1111,6 +1233,17 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
 }
 void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status) { (void)status; }
 void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark) { (void)mark; }
+void fos_lcd_st7701s_set_cursor_sprite(fos_cursor_sprite_fn sprite) { (void)sprite; }
+void fos_lcd_st7701s_cursor(bool visible, int x, int y, int scene_w, int scene_h, int shape, int rotation)
+{
+    (void)visible;
+    (void)x;
+    (void)y;
+    (void)scene_w;
+    (void)scene_h;
+    (void)shape;
+    (void)rotation;
+}
 void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
 {
     (void)since_tick;

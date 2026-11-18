@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "fos_bt.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -64,7 +65,9 @@ static const char *manager(void)
  * the frame says (a network's name) is escaped on its way in. A buffer of
  * JSON_CAP holds the worst case: every name in range and the saved one, 32
  * bytes each, every byte escaped to \u00XX. */
-#define JSON_CAP (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4))
+#define JSON_CAP (768 + (FOS_WIFI_SCAN_MAX + 1) * (32 * 6 + 4) + BT_FACTS_CAP)
+/* The Bluetooth section (fos_bt_facts_json): four bonds, each name escaped. */
+#define BT_FACTS_CAP 1280
 
 typedef struct {
     char *buf;
@@ -177,6 +180,7 @@ char *fos_frame_settings_json(void)
         if (version[0]) put_pair(&out, "updateVersion", version);
     }
     if (s_refused[0]) put_pair(&out, "note", s_refused);
+    out.len += fos_bt_facts_json(out.buf + out.len, JSON_CAP - out.len);
     /* Restart is a reboot here: the page shows Reboot alone. */
     put(&out, ",\"actions\":[]}");
     return out.buf;
@@ -216,7 +220,7 @@ void fos_frame_settings_apply(const char *json)
         return;
     }
     fos_config_t *config = fos_config();
-    bool wifi = false, restart = false, scale = false;
+    bool wifi = false, restart = false, rotated = false, scale = false;
     char changes[64] = "";
     s_refused[0] = '\0';
 
@@ -254,7 +258,7 @@ void fos_frame_settings_apply(const char *json)
     uint16_t value = 0;
     if (cJSON_IsNumber(rotate) && fos_config_normalize_rotate(rotate->valuedouble, &value) && value != config->rotate) {
         config->rotate = value;
-        restart = true;
+        restart = rotated = true;
     }
     const cJSON *render_scale = cJSON_GetObjectItem(root, "renderScale");
     if (cJSON_IsNumber(render_scale) && fos_config_normalize_render_scale(render_scale->valuedouble, &value) &&
@@ -277,11 +281,21 @@ void fos_frame_settings_apply(const char *json)
             clock_changed = true;
         }
     }
+    /* Bluetooth on or off: the stack starts at boot (or its RAM is given
+     * back there), so the frame restarts, as for a rotation. */
+    const cJSON *bluetooth = cJSON_GetObjectItem(root, "bluetooth");
+    bool bluetooth_changed = false;
+    if (cJSON_IsBool(bluetooth) && cJSON_IsTrue(bluetooth) != config->bluetooth) {
+        config->bluetooth = cJSON_IsTrue(bluetooth);
+        bluetooth_changed = true;
+        restart = true;
+    }
     cJSON_Delete(root);
 
+    if (bluetooth_changed) strlcat(changes, "bluetooth,", sizeof(changes));
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
-    if (restart) strlcat(changes, "rotate,", sizeof(changes));
+    if (rotated) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
     if (!changes[0]) return;
     changes[strlen(changes) - 1] = '\0';
@@ -290,7 +304,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale);
+    log_applied(changes, rotated, scale);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -327,6 +341,13 @@ static void on_wifi_change(void)
     }
 }
 
+/* A Bluetooth device came or went, or pairing opened or closed: drawn again
+ * if the page is up. From the Bluetooth host's task or a timer's. */
+static void on_bt_change(void)
+{
+    if (fos_scenes_settings_shown()) fos_client_render_now();
+}
+
 /* The update check moved on. From its own task: bits set, no more. */
 static void on_update_check(void)
 {
@@ -337,6 +358,7 @@ void fos_frame_settings_init(void)
 {
     fos_wifi_set_change_hook(on_wifi_change);
     fos_ota_set_check_hook(on_update_check);
+    fos_bt_set_change_hook(on_bt_change);
 }
 
 void fos_frame_settings_action(const char *action)
@@ -344,6 +366,12 @@ void fos_frame_settings_action(const char *action)
     if (action == NULL) return;
     if (strcmp(action, "scan") == 0) {
         fos_wifi_scan_start();
+    } else if (strcmp(action, "btPair") == 0) {
+        fos_bt_pair(FOS_BT_PAIR_SECONDS);
+    } else if (strcmp(action, "btStop") == 0) {
+        fos_bt_pair(0);
+    } else if (strncmp(action, "btForget ", 9) == 0) {
+        fos_bt_forget_one(action + 9);
     } else if (strcmp(action, "checkUpdate") == 0) {
         fos_ota_check_start(0);
     } else if (strcmp(action, "installUpdate") == 0) {

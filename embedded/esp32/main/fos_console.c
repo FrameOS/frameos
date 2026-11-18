@@ -33,6 +33,7 @@
 #include "fos_codec.h"
 #include "fos_gauge.h"
 #include "fos_touch.h"
+#include "fos_bt.h"
 #include "lcd_st7701s_rgb.h"
 #include "esp_private/esp_clk.h"
 #include "fos_client.h"
@@ -544,7 +545,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|bluetooth|keyboard_layout|mic_pins|voice_chat|"
                "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
@@ -1126,6 +1127,18 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
     else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
+    else if (strcmp(key, "bluetooth") == 0) {
+        config->bluetooth = atoi(value) != 0;
+        printf("bluetooth saved; takes effect at the next boot\n");
+    }
+    else if (strcmp(key, "keyboard_layout") == 0) {
+        if (strlen(value) >= sizeof(config->keyboard_layout)) {
+            printf("a layout id: us, gb, de, fr, es, it, sv, da, nb\n");
+            return 1;
+        }
+        strlcpy(config->keyboard_layout, value, sizeof(config->keyboard_layout));
+        frameos_nim_set_keyboard_layout(config->keyboard_layout);
+    }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
@@ -1987,6 +2000,30 @@ static int cmd_factory_reset(int argc, char **argv)
 
 /* `beep [hz] [ms]`: the buzzer on its own, to check the pin without
  * pressing a button. */
+/* `bt [pair [seconds]|stop|forget [address]]`: the Bluetooth keyboards and
+ * mice (fos_bt.c); `forget` alone forgets every one. */
+static int cmd_bt(int argc, char **argv)
+{
+    if (argc > 1 && strcmp(argv[1], "pair") == 0) {
+        long seconds = argc > 2 ? strtol(argv[2], NULL, 10) : 60;
+        if (seconds < 1 || seconds > 600) seconds = 60;
+        fos_bt_pair((uint32_t)seconds);
+        printf("pairing for %ld s: put the keyboard or mouse in pairing mode\n", seconds);
+    } else if (argc > 1 && strcmp(argv[1], "stop") == 0) {
+        fos_bt_pair(0);
+    } else if (argc > 2 && strcmp(argv[1], "forget") == 0) {
+        printf(fos_bt_forget_one(argv[2]) ? "%s forgotten\n" : "nothing known as %s\n", argv[2]);
+    } else if (argc > 1 && strcmp(argv[1], "forget") == 0) {
+        fos_bt_forget();
+        printf("every bonded device forgotten\n");
+    } else if (argc > 1) {
+        printf("usage: bt [pair [seconds]|stop|forget [address]]\n");
+        return 1;
+    }
+    fos_bt_print_status();
+    return 0;
+}
+
 static int cmd_beep(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -2220,6 +2257,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
+        {.command = "bt", .help = "bt [pair [seconds]|stop|forget [address]] — Bluetooth keyboards and mice", .func = cmd_bt},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
         {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
