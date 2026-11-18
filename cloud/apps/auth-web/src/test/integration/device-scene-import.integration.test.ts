@@ -23,6 +23,7 @@ import {
   dismissDeviceScenes,
   importDeviceScenes,
 } from "../../lib/device-scene-import";
+import { maxNewScenesPerDay } from "../../lib/store";
 import {
   shouldRequestDeviceScenes,
   storeFrameDeviceScenes,
@@ -291,7 +292,7 @@ describe("importing a frame's own scenes", () => {
   it("an account at its daily limit is refused before anything is minted", async () => {
     const accountId = await account();
     await db.insert(storeScenes).values(
-      Array.from({ length: 19 }, (_, index) => ({
+      Array.from({ length: maxNewScenesPerDay - 1 }, (_, index) => ({
         accountId,
         latestVersion: 1,
         name: `Filler ${index}`,
@@ -314,7 +315,7 @@ describe("importing a frame's own scenes", () => {
       { device_scene_id: "photos", name: "Photos", reason: "daily_scene_limit_exceeded" },
     ]);
     const mine = await db.select().from(storeScenes).where(eq(storeScenes.accountId, accountId));
-    expect(mine).toHaveLength(20);
+    expect(mine).toHaveLength(maxNewScenesPerDay);
     // The report keeps waiting, so "Import the rest" works tomorrow.
     const [snapshot] = await db
       .select()

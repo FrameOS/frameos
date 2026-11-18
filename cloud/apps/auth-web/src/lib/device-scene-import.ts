@@ -52,7 +52,8 @@ import { declaredServiceSettingGroups, pinnedSceneVersion } from "./frames";
 import { reportError } from "./log";
 import { restoreAppsInScenes, retireAppsInScenes } from "./retired-apps";
 import { extractScenesFromZip } from "./scene-title";
-import { maxNewScenesPerDay, maxScenesPerAccount } from "./store";
+import { maxScenesPerAccount } from "./store";
+import { newSceneDailyLimit } from "./store-publish-limit";
 import type { PublishActor } from "./store-publish";
 
 type Database = ReturnType<typeof createDb>;
@@ -406,7 +407,9 @@ export async function importDeviceScenes(
       })
       .from(storeScenes)
       .where(eq(storeScenes.accountId, accountId));
-    const dailyLeft = maxNewScenesPerDay - (counts?.recent ?? 0);
+    const dailyLimit = await newSceneDailyLimit(accountId);
+    const dailyLeft =
+      dailyLimit === null ? Infinity : dailyLimit - (counts?.recent ?? 0);
     const accountLeft = maxScenesPerAccount - (counts?.total ?? 0);
     let budget = Math.max(0, Math.min(dailyLeft, accountLeft));
     const overBudget =

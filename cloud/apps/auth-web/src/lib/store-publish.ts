@@ -13,9 +13,9 @@ import { getScenesBaseUrl } from "./env";
 import { moderateStoreContent } from "./moderation";
 import { meterAiUsage } from "./billing";
 import { classifyStoreScene } from "./store-classify";
+import { newSceneDailyLimit } from "./store-publish-limit";
 import {
   detectImageContentType,
-  maxNewScenesPerDay,
   maxScenesPerAccount,
   maxSceneZipBytes,
   sceneSummary,
@@ -347,7 +347,8 @@ export async function publishStoreScene(
       });
     }
   }
-  if (!existing) {
+  const dailyLimit = existing ? null : await newSceneDailyLimit(accountId);
+  if (dailyLimit !== null) {
     const [recent] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(storeScenes)
@@ -357,9 +358,9 @@ export async function publishStoreScene(
           gt(storeScenes.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
         ),
       );
-    if ((recent?.count ?? 0) >= maxNewScenesPerDay) {
+    if ((recent?.count ?? 0) >= dailyLimit) {
       return jsonError("daily_scene_limit_exceeded", 429, {
-        max_new_scenes_per_day: maxNewScenesPerDay,
+        max_new_scenes_per_day: dailyLimit,
       });
     }
   }

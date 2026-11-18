@@ -36,7 +36,10 @@ export const maxPublishesPerHour = 30;
 // own buckets so active editing cannot exhaust the stricter publish limit.
 export const maxSceneEditsPer15Minutes = 120;
 export const maxSceneEditsPerHour = 200;
-export const maxNewScenesPerDay = 20;
+// New scenes an account may create in 24 hours (versions of a scene it
+// already has are not new). A superadmin has no such cap
+// (newSceneDailyLimit in store-publish-limit.ts).
+export const maxNewScenesPerDay = 50;
 export const maxReportsPerDay = 10;
 export const maxReportReasonLength = 1000;
 

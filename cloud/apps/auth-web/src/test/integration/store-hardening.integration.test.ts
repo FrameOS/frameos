@@ -35,6 +35,7 @@ import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { maxNewScenesPerDay } from "../../lib/store";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -787,21 +788,38 @@ describe("my cloud drive", () => {
 });
 
 describe("publish limits", () => {
-  it("caps new scene creation per day", async () => {
-    const { accessToken } = await linkClient(publishScopes);
-    for (let index = 0; index < 20; index += 1) {
-      const response = await publish(accessToken, { name: `Scene ${index}` });
-      expect(response.status).toBe(200);
-    }
+  it("caps new scene creation per day, except for a superadmin", async () => {
+    const { accessToken, accountId } = await linkClient(publishScopes);
+    // The day's scenes but one, made today (publishing them all would spend
+    // the hourly publish budget first).
+    await db.insert(storeScenes).values(
+      Array.from({ length: maxNewScenesPerDay - 1 }, (_, index) => ({
+        accountId,
+        latestVersion: 1,
+        name: `Filler ${index}`,
+        slug: `daily-filler-${accountId}-${index}`,
+        status: "active",
+      })),
+    );
+    const last = await publish(accessToken, { name: "Scene 0" });
+    expect(last.status).toBe(200);
     const overflow = await publish(accessToken, { name: "One too many" });
     expect(overflow.status).toBe(429);
-    expect((await readJson(overflow)).error).toBe(
-      "daily_scene_limit_exceeded",
-    );
+    expect(await readJson(overflow)).toMatchObject({
+      error: "daily_scene_limit_exceeded",
+      max_new_scenes_per_day: maxNewScenesPerDay,
+    });
 
     // Re-publishing an existing scene is not throttled by the daily cap.
     const republish = await publish(accessToken, { name: "Scene 0" });
     expect(republish.status).toBe(200);
+
+    await db
+      .update(accounts)
+      .set({ isSuperadmin: true })
+      .where(eq(accounts.id, accountId));
+    const superadmin = await publish(accessToken, { name: "One more" });
+    expect(superadmin.status).toBe(200);
   });
 
   it("caps versions per hour, except for a superadmin", async () => {

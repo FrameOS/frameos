@@ -27,10 +27,10 @@ import { readBlob } from "./blobs";
 import { jsonError } from "./device-flow";
 import { moderateStoreContent } from "./moderation";
 import { identityRateLimitResponse } from "./rate-limit";
+import { newSceneDailyLimit } from "./store-publish-limit";
 import {
   compiledSceneHint,
   compiledSceneNames,
-  maxNewScenesPerDay,
   maxSceneZipBytes,
   maxScenesPerAccount,
   rebuildZip,
@@ -125,10 +125,14 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
     });
   }
   const privateBytes = await privateSceneBytesForAccount(db, accountId);
-  const dailyLimited = await identityRateLimitResponse(accountId, "store:fork", {
-    limit: maxNewScenesPerDay,
-    windowMs: 24 * 60 * 60 * 1000,
-  });
+  const dailyLimit = await newSceneDailyLimit(accountId);
+  const dailyLimited =
+    dailyLimit === null
+      ? undefined
+      : await identityRateLimitResponse(accountId, "store:fork", {
+          limit: dailyLimit,
+          windowMs: 24 * 60 * 60 * 1000,
+        });
   if (dailyLimited) {
     return dailyLimited;
   }
