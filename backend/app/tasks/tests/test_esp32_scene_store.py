@@ -337,6 +337,10 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
     # task's own staging first.
     begin = fns["spool_begin"]
     assert begin.index("fos_scenes_store_wait(SPOOL_STORE_WAIT_MS)") < begin.index("store_lock()")
+    # Waited for by the render task, the store task's pace does not wait for
+    # an input hold that task alone releases.
+    assert begin.index("s_render_waits_for_store = true") < begin.index("fos_scenes_store_wait(") < begin.index(
+        "s_render_waits_for_store = false")
     assert begin.index("fos_scene_store_stage_open()") < begin.index("fos_scene_store_stage_begin(spool->id)")
     for name, call in (("spool_begin", "fos_scene_store_stage_begin("), ("spool_bytes", "fos_scene_store_stage_write("),
                        ("spool_end", "fos_scene_store_stage_end(")):
@@ -357,6 +361,23 @@ def test_a_set_over_what_memory_holds_is_read_straight_into_the_store():
     store = fns["store_backend_payload"]
     assert store.index("set->bytes > FOS_SCENE_STORE_MAX_BYTES") < store.index("fos_scene_store_write_set(SCENES_PATH")
     assert "(512 * 1024)" in scenes and "SCENES_MAX_BYTES" not in scenes.replace("FOS_SCENE_STORE_MAX_BYTES", "")
+
+
+def test_a_set_taken_whole_is_the_list_not_the_catalog_from_before():
+    """A backend set taken whole into the runtime (fos_scenes_take_backend_payload,
+    load_into_nim) replaces the scenes the runtime holds, but the catalog it
+    read off flash for the set before stayed: the scene list, the switcher's
+    tiles and next / previous read the catalog first, so a reTerminal E1002
+    given 4 scenes in place of 17 said "4 loaded, 16 available" and listed
+    scenes it no longer had until its next boot (2026-11-18)."""
+    runtime = (REPO_ROOT / "frameos" / "src" / "embedded" / "embedded_runtime.nim").read_text()
+    whole = runtime[runtime.index("proc loadSceneInputs(inputs: seq[FrameSceneInput]): int ="):]
+    whole = whole[: whole.index("\nproc ", 10)]
+    order = [whole.index(s) for s in (
+        "replaceInterpretedScenesCache(newScenes)", "sceneCatalog.setLen(0)", "catalogRefresh.setLen(0)")]
+    assert order == sorted(order)
+    # The readers that take the catalog first.
+    assert runtime.count("if sceneCatalog.len == 0:") >= 2 and "if sceneCatalog.len > 0:" in runtime
 
 
 def test_old_scene_files_are_emptied_off_the_render_task():

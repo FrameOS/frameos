@@ -2299,8 +2299,16 @@ static fos_http_body_err_t spool_begin(void *ctx)
     spool_t *spool = ctx;
     fos_scene_store_err_t err = FOS_SCENE_STORE_OK;
     /* The store task's own staging first: begun now, this one would end it
-     * and that set would never reach flash. */
-    if (spool->id == 0) fos_scenes_store_wait(SPOOL_STORE_WAIT_MS);
+     * and that set would never reach flash. On the render task (a sync
+     * somebody asked for) the store task is told it is waited for, as when
+     * that task waits for the lock: its pace waits out an input hold only
+     * the render task releases. */
+    if (spool->id == 0) {
+        bool render = fos_client_on_render_task();
+        if (render) s_render_waits_for_store = true;
+        fos_scenes_store_wait(SPOOL_STORE_WAIT_MS);
+        if (render) s_render_waits_for_store = false;
+    }
     store_lock();
     if (spool->id == 0) {
         /* The first scene. Not beside a whole payload a producer is storing
