@@ -35,7 +35,7 @@ import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
-import { maxNewScenesPerDay } from "../../lib/store";
+import { maxNewScenesPerDay, maxPublishesPerHour } from "../../lib/store";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -824,7 +824,7 @@ describe("publish limits", () => {
 
   it("caps versions per hour, except for a superadmin", async () => {
     const { accessToken, accountId } = await linkClient(publishScopes);
-    for (let index = 0; index < 30; index += 1) {
+    for (let index = 0; index < maxPublishesPerHour; index += 1) {
       const response = await publish(accessToken);
       expect(response.status, `publish ${index + 1}`).toBe(200);
     }
