@@ -779,20 +779,21 @@ proc categorized(): seq[LayoutEntry] {.nimcall, gcsafe.} =
   ## As a Pi lists them, in its tables' order: categories as the scenes have
   ## them, and two layouts without one.
   @[LayoutEntry(id: "tiling", name: "Tiling", desktop: true, category: " Desktop layouts "),
-    LayoutEntry(id: "bar", name: "Bottom bar", category: "Full screen layouts"),
+    LayoutEntry(id: "bar", name: "Bottom bar", category: "Single app layouts"),
     LayoutEntry(id: "wall", name: "Gallery wall", category: "Photos"),
     LayoutEntry(id: "w98", name: "Windows 98", desktop: true),
     LayoutEntry(id: "polaroid", name: "Polaroid"),
-    LayoutEntry(id: "mac", name: "macOS", desktop: true, category: "Desktop layouts")]
+    LayoutEntry(id: "mac", name: "macOS", desktop: true, category: "Multi app layouts")]
 
 block the_layouts_go_by_category_each_by_name:
   # The page groups the layouts by category, the groups by name and each by
   # name, under a heading each; a heading picks nothing. A layout without a
-  # category joins the store's shelf for its kind (Desktop layouts, Full
-  # screen layouts).
-  doAssert layoutsInOrder(categorized()).mapIt(it.id) == @["mac", "tiling", "w98", "bar", "polaroid", "wall"]
-  doAssert layoutsInOrder(categorized()).mapIt(it.layoutGroup) == @["Desktop layouts", "Desktop layouts",
-    "Desktop layouts", "Full screen layouts", "Full screen layouts", "Photos"]
+  # category joins the store's shelf for its kind (Multi app layouts, Single
+  # app layouts), and one that names a shelf's former title ("Desktop
+  # layouts", Tiling's) joins the shelf of today.
+  doAssert layoutsInOrder(categorized()).mapIt(it.id) == @["mac", "tiling", "w98", "wall", "bar", "polaroid"]
+  doAssert layoutsInOrder(categorized()).mapIt(it.layoutGroup) == @["Multi app layouts", "Multi app layouts",
+    "Multi app layouts", "Photos", "Single app layouts", "Single app layouts"]
   layoutListing = categorized
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     {.cast(gcsafe).}:
@@ -807,16 +808,16 @@ block the_layouts_go_by_category_each_by_name:
     if previews.len > 0 and row == 1: image.writeFile(previews / "settings-layouts.png")
     scene.tap(regionWith(OptionBase + row))
     scene.state{"frameValues"}{"layout"}.getStr()
-  # No layout, Desktop layouts, macOS, Tiling, Windows 98, Full screen
-  # layouts, Bottom bar, Polaroid, Photos, Gallery wall
+  # No layout, Multi app layouts, macOS, Tiling, Windows 98, Photos, Gallery
+  # wall, Single app layouts, Bottom bar, Polaroid
   doAssert pick(1) == "", "a heading picks nothing"
   doAssert pick(2) == "mac"
   doAssert pick(4) == "w98"
   doAssert pick(5) == "w98", "a heading picks nothing"
-  doAssert pick(6) == "bar"
-  doAssert pick(7) == "polaroid"
-  doAssert pick(8) == "polaroid", "a heading picks nothing"
-  doAssert pick(9) == "wall"
+  doAssert pick(6) == "wall"
+  doAssert pick(7) == "wall", "a heading picks nothing"
+  doAssert pick(8) == "bar"
+  doAssert pick(9) == "polaroid"
   scene.send("close", %*{})
   frameSettingsRead = nil
   layoutListing = nil

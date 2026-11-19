@@ -327,7 +327,7 @@ describe("validateSceneZip transparency rejection", () => {
     const former = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Tools & utilities" } }]);
     expect(former.ok && former.value.sceneCategory).toBe("utilities");
     // A scene is never on a layouts' shelf, and a layout always on its kind's.
-    const posing = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Desktop layouts" } }]);
+    const posing = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Multi app layouts" } }]);
     expect(posing.ok && posing.value.sceneCategory).toBeUndefined();
     expect(desktop.ok && desktop.value.sceneCategory).toBe("desktops");
     // What it needs of a frame is read from it.

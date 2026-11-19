@@ -3,7 +3,7 @@
     "id": "layout-polaroid",
     "name": "Polaroid",
     "settings": {
-      "category": "Full screen layouts",
+      "category": "Single app layouts",
       "execution": "interpreted",
       "refreshInterval": 3600,
       "backgroundColor": "#faf7ef",

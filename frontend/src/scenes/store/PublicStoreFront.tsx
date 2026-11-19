@@ -7,7 +7,7 @@ import { MagnifyingGlassIcon, MoonIcon, SunIcon } from '@heroicons/react/24/outl
 import { Spinner } from '../../components/Spinner'
 import { urls } from '../../urls'
 import { authThemeLogic } from '../auth/authThemeLogic'
-import { storeShelfForCategory } from '../../utils/storeCategories'
+import { storeShelfDescriptions, storeShelfForCategory } from '../../utils/storeCategories'
 import { publicStoreLogic } from './publicStoreLogic'
 import {
   StoreFitSelect,
@@ -119,7 +119,9 @@ export function PublicStoreFront(): JSX.Element {
               {activeShelf ? activeShelf.title : 'Public scene store'}
             </h1>
             <p className="frameos-muted mt-1 max-w-3xl text-sm leading-relaxed">
-              {storeKind === 'layout'
+              {activeShelf && storeShelfDescriptions[activeShelf.slug]
+                ? storeShelfDescriptions[activeShelf.slug]
+                : storeKind === 'layout'
                 ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
                 : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own and install them on your frames.'}
             </p>
@@ -177,9 +179,8 @@ export function PublicStoreFront(): JSX.Element {
                   storeScenesCount === 0
                     ? 'The scene store is not available right now.'
                     : search
-                      ? `No store scenes match "${search}".`
-                      : 'No store scenes fit this screen.'
-
+                    ? `No store scenes match "${search}".`
+                    : 'No store scenes fit this screen.'
                 }
               />
             )}

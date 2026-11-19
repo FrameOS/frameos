@@ -241,7 +241,7 @@ struct LayoutStartersView: View {
                         .buttonStyle(.plain)
                     }
                 } header: {
-                    Text(group.kind == "desktops" ? "Desktop layouts" : "Full screen layouts")
+                    Text(group.kind == "desktops" ? "Multi app layouts" : "Single app layouts")
                 } footer: {
                     if group.id == LayoutStarters.groups.last?.id {
                         Text("Added to this frame. You can change its settings, or which scenes wear it, afterwards.")

@@ -3,7 +3,7 @@
     "id": "layout-nextstep",
     "name": "NeXTSTEP",
     "settings": {
-      "category": "Desktop layouts",
+      "category": "Multi app layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#555555",

@@ -822,7 +822,7 @@ function NewLayoutStarters({ frame }: { frame: FrameType }): JSX.Element {
       {LAYOUT_STARTER_GROUPS.map((group) => (
         <section key={group.kind} className="space-y-3" data-layout-starter-group={group.kind}>
           <div>
-            <H6>{group.kind === 'desktops' ? 'Desktop layouts' : 'Full screen layouts'}</H6>
+            <H6>{group.kind === 'desktops' ? 'Multi app layouts' : 'Single app layouts'}</H6>
             <div className="frameos-muted text-xs">
               {group.kind === 'desktops'
                 ? "Run the frame's scenes side by side, in windows or tiles."

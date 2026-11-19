@@ -188,7 +188,7 @@ export function detectRiskFlags(scenes: unknown): string[] {
 }
 
 // The topic a scene names itself by title, never a layout's shelf: a scene
-// that says "Desktop layouts" is no desktop.
+// that says "Multi app layouts" is no desktop.
 function sceneTopicCategory(title: unknown): string | undefined {
   const slug = categorySlugForTitle(title);
   return slug && !isLayoutCategory(slug) ? slug : undefined;
@@ -482,8 +482,8 @@ export type ValidatedSceneZip = {
   // became part of the version). Malformed values read as absent.
   manifestCategory: string | null | undefined;
   // The scene a pack starts on is a layout (docs/scene-layouts.md): it goes on
-  // a layouts shelf without asking the classifier, Desktop layouts for a
-  // desktop (`settings.desktop`), else Full screen layouts.
+  // a layouts shelf without asking the classifier, Multi app layouts for a
+  // desktop (`settings.desktop`), else Single app layouts.
   isLayout: boolean;
   isDesktop: boolean;
   // The store category the scene names itself: its settings.category, when

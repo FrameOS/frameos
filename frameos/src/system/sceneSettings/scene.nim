@@ -293,8 +293,8 @@ proc heldLayout*(self: SceneSettingsScene, layouts: seq[LayoutEntry]): string =
 proc layoutField(self: SceneSettingsScene, info: JsonNode): JsonNode =
   ## The layout the frame shows its scenes in, its gear beside it for one with
   ## settings. nil for a frame with no layouts on it. Grouped as the store
-  ## shelves them (`layoutGroup`: the category, else Desktop layouts or Full
-  ## screen layouts by kind), the groups by name and each by name, under a
+  ## shelves them (`layoutGroup`: the category, else Multi app layouts or
+  ## Single app layouts by kind), the groups by name and each by name, under a
   ## heading each when there is more than one group.
   let layouts = layoutsInOrder(if layoutListing.isNil: @[] else: layoutListing())
   if layouts.len == 0:

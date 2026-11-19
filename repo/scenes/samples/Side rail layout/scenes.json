@@ -3,7 +3,7 @@
     "id": "layout-side-rail",
     "name": "Side rail",
     "settings": {
-      "category": "Full screen layouts",
+      "category": "Single app layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0f172a",

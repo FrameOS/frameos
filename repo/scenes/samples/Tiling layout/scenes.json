@@ -3,7 +3,7 @@
     "id": "layout-tiling",
     "name": "Tiling",
     "settings": {
-      "category": "Desktop layouts",
+      "category": "Multi app layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#0f172a",

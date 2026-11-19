@@ -30,9 +30,30 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'utilities', title: 'Notes & tools', kind: 'scene' },
   { slug: 'ai', title: 'AI & generative', kind: 'scene' },
   { slug: 'demos', title: 'Demos & examples', kind: 'scene' },
-  { slug: 'desktops', title: 'Desktop layouts', kind: 'layout' },
-  { slug: 'layouts', title: 'Full screen layouts', kind: 'layout' },
+  { slug: 'desktops', title: 'Multi app layouts', kind: 'layout' },
+  { slug: 'layouts', title: 'Single app layouts', kind: 'layout' },
 ]
+
+/**
+ * The line under each shelf's title on the store front, by slug: the cloud's
+ * `description` (categories.test.ts keeps them equal).
+ */
+export const storeShelfDescriptions: Record<string, string> = {
+  photos: 'Your own pictures on the frame: albums, slideshows, and photo services like Google Photos or Immich.',
+  art: 'Curated image collections that rotate on a schedule, no configuration needed.',
+  clocks: 'Clocks of every kind, timers and the year at a glance.',
+  calendar: 'Upcoming events and schedules, straight from your calendar.',
+  weather: 'Current conditions and forecasts at a glance.',
+  dashboards: 'Smart home remotes, maps, charts and stats from the services you care about.',
+  games: 'Puzzles, card and board games for a touch screen, and arcade games for a fast one.',
+  fun: 'Comics, toys and animations that make you smile.',
+  utilities: 'To-dos, notes, drawing, and practical helpers like webcams and web page screenshots.',
+  ai: 'Scenes that generate fresh images or words with AI on every refresh.',
+  demos: 'Small demos, made-up data and test patterns to learn from or remix.',
+  desktops: "Desktops that run the frame's scenes side by side, in windows or tiles.",
+  layouts: 'Title bars, status lines and picture frames drawn around the one scene that is showing.',
+  other: 'Scenes not filed on any shelf yet.',
+}
 
 /** The store's kind of a template: a layout's shelf says so, and so does the template itself. */
 export function storeKindOf(template: { category?: string | null; isLayout?: boolean | null }): StoreKind {

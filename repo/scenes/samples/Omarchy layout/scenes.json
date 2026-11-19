@@ -3,7 +3,7 @@
     "id": "layout-omarchy",
     "name": "Omarchy",
     "settings": {
-      "category": "Desktop layouts",
+      "category": "Multi app layouts",
       "execution": "interpreted",
       "refreshInterval": 1,
       "backgroundColor": "#1a1b26",

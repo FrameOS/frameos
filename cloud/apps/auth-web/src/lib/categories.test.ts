@@ -8,7 +8,7 @@ import {
   sceneCategories,
   storeCategories,
 } from './categories'
-import { storeCategoryShelves } from '../../../../../frontend/src/utils/storeCategories'
+import { storeCategoryShelves, storeShelfDescriptions } from '../../../../../frontend/src/utils/storeCategories'
 
 describe('storeCategories', () => {
   it('uses unique, tag-shaped slugs (they double as URL filters)', () => {
@@ -24,6 +24,13 @@ describe('storeCategories', () => {
     // drawer uses (it cannot import this package); keep slugs, titles and
     // order identical so the picker's shelves are the store front's.
     expect(storeCategoryShelves).toEqual(storeCategories.map(({ slug, title, kind }) => ({ slug, title, kind })))
+  })
+
+  it('gives the store front each shelf\'s description', () => {
+    for (const category of storeCategories) {
+      expect(storeShelfDescriptions[category.slug]).toBe(category.description)
+    }
+    expect(storeShelfDescriptions.other).toBeTruthy()
   })
 
   it('lists the scenes\' shelves first and the layouts\' after, a layout\'s shelf by its kind', () => {

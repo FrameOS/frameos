@@ -17,8 +17,8 @@ public enum StoreCategories {
         ("utilities", "Notes & tools"),
         ("ai", "AI & generative"),
         ("demos", "Demos & examples"),
-        ("desktops", "Desktop layouts"),
-        ("layouts", "Full screen layouts"),
+        ("desktops", "Multi app layouts"),
+        ("layouts", "Single app layouts"),
     ]
 
     /// Scenes without a (known) category land here, after the others.

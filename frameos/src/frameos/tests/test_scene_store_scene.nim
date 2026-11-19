@@ -70,7 +70,7 @@ proc listing(names: openArray[string], more = false, categories = true): JsonNod
                 else: coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#a855f7", "#14b8a6"][i mod 6]))}
   if categories:
     result["categories"] = %*[{"slug": "photos", "title": "Photos"}, {"slug": "weather", "title": "Weather"},
-      {"slug": "fun", "title": "Fun & animations"}, {"slug": "layouts", "title": "Full screen layouts", "layout": true}]
+      {"slug": "fun", "title": "Fun & animations"}, {"slug": "layouts", "title": "Single app layouts", "layout": true}]
 
 let sixScenes = ["Bouncing logo", "Rain radar", "Forecast", "Moon", "Tides", "Sunrise"]
 page = $listing(sixScenes, more = true)

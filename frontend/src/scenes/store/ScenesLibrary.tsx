@@ -27,7 +27,7 @@ import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { isCloudMode } from '../../utils/cloudMode'
 import type { CloudStoreTemplate } from '../../utils/cloudStoreRepository'
-import { storeShelfForCategory } from '../../utils/storeCategories'
+import { storeShelfDescriptions, storeShelfForCategory } from '../../utils/storeCategories'
 import {
   Note,
   SceneTile,
@@ -522,7 +522,9 @@ function StorePage(): JSX.Element {
       <PageHeader
         title={activeShelf ? activeShelf.title : 'Public scene store'}
         description={
-          storeKind === 'layout'
+          activeShelf && storeShelfDescriptions[activeShelf.slug]
+            ? storeShelfDescriptions[activeShelf.slug]
+            : storeKind === 'layout'
             ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
             : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame.'
         }
@@ -539,7 +541,9 @@ function StorePage(): JSX.Element {
           kind={storeKind}
           counts={storeKindCounts}
           href={(kind) => urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null })}
-          onPick={(kind) => router.actions.push(urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null }))}
+          onPick={(kind) =>
+            router.actions.push(urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null }))
+          }
         />
       </div>
       <div className="space-y-8" ref={shelvesRef}>
@@ -562,8 +566,8 @@ function StorePage(): JSX.Element {
                   ? "The scene store could not be reached. Check the frame's connection and try again."
                   : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
                 : search
-                  ? `No store scenes match "${search}".`
-                  : 'No store scenes fit this screen.'
+                ? `No store scenes match "${search}".`
+                : 'No store scenes fit this screen.'
             }
           />
         )}

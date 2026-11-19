@@ -18,8 +18,11 @@ const
   ChoiceStateId = "frame-layout"
   # The store's two shelves for layouts (docs/scene-layouts.md "In the
   # store"): a layout without a category goes on the one its kind is on.
-  DesktopLayouts = "Desktop layouts"
-  FullScreenLayouts = "Full screen layouts"
+  DesktopLayouts = "Multi app layouts"
+  FullScreenLayouts = "Single app layouts"
+  # What the two were called before 2026-11-19: a layout installed then
+  # still says it, and goes under the shelf's name of today.
+  FormerTitles = [("Desktop layouts", DesktopLayouts), ("Full screen layouts", FullScreenLayouts)]
 
 var
   layoutListing*: proc(): seq[LayoutEntry] {.nimcall, gcsafe.}
@@ -42,7 +45,10 @@ proc layoutGroup*(entry: LayoutEntry): string =
   ## shelf for its kind, so a layout without one joins those that name it.
   result = entry.category.strip()
   if result.len == 0:
-    result = if entry.desktop: DesktopLayouts else: FullScreenLayouts
+    return if entry.desktop: DesktopLayouts else: FullScreenLayouts
+  for (former, title) in FormerTitles:
+    if cmpIgnoreCase(result, former) == 0:
+      return title
 
 proc layoutsInOrder*(layouts: seq[LayoutEntry]): seq[LayoutEntry] =
   ## The frame page's order: by group (`layoutGroup`), the groups by name, and

@@ -74,9 +74,10 @@ unless the workspace is told not to remember), never on a scene or a frame.
 
 **In the store.** Layouts are the store front's second side (Scenes |
 Layouts), with two shelves of their own
-(`cloud/apps/auth-web/src/lib/categories.ts`): Desktop layouts (`desktops`) and
-Full screen layouts (`layouts`). A layout is always on its kind's, whatever it
-or its owner states (`validateSceneZip`'s `sceneCategory`: Desktop layouts when
+(`cloud/apps/auth-web/src/lib/categories.ts`): Multi app layouts (`desktops`, the
+desktops) and Single app layouts (`layouts`; "Desktop layouts" and "Full screen
+layouts" before 2026-11-19). A layout is always on its kind's, whatever it
+or its owner states (`validateSceneZip`'s `sceneCategory`: Multi app layouts when
 it says `settings.desktop`), and a scene is never on one; the classifier never
 sees a layout. A layout's page previews it around the samples, windowed for a
 desktop (above). A frame's own Scene store lists them under a Layouts heading
@@ -108,8 +109,8 @@ scene's button.
 
 **On the frame.** Frame settings has a Layout select, with a gear for that
 layout's fields. It lists the layouts by category, a heading over each: a
-layout's `settings.category` ("Desktop layouts", "Full screen layouts", the
-store's two layout shelves, or a name of the owner's own), else the shelf for
+layout's `settings.category` ("Multi app layouts", "Single app layouts", the
+store's two layout shelves, their former titles going under them, or a name of the owner's own), else the shelf for
 its kind (`settings.desktop`); the groups by name, and in each the layouts by
 name, whatever the case (`layoutsInOrder`, `layoutGroup`; one group alone has
 no heading). A host lists its layouts in no order of its own (a Pi's tables),

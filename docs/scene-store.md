@@ -132,7 +132,7 @@ copy `frontend/src/utils/storeCategories.ts`, the iOS app's
 never a category it states. The scenes' shelves say what a scene is about:
 Photos, Art & galleries, Clocks & time, Calendars & agendas, Weather, Home &
 dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
-examples. The layouts' are Desktop layouts and Full screen layouts, and a
+examples. The layouts' are Multi app layouts and Single app layouts, and a
 layout is always on its kind's (`validateSceneZip`), a scene never.
 
 A version's category is the one the scene names (`settings.category`, a

@@ -116,19 +116,21 @@ export const storeCategories: StoreCategory[] = [
   },
   {
     slug: "desktops",
-    title: "Desktop layouts",
+    title: "Multi app layouts",
     description:
       "Desktops that run the frame's scenes side by side, in windows or tiles.",
     hint: "a desktop layout (settings.desktop): a layout that runs the frame's other scenes side by side in windows, tiles or panels, rather than showing anything of its own",
     kind: "layout",
+    formerTitles: ["Desktop layouts"],
   },
   {
     slug: "layouts",
-    title: "Full screen layouts",
+    title: "Single app layouts",
     description:
       "Title bars, status lines and picture frames drawn around the one scene that is showing.",
     hint: "a full screen layout: a scene that draws chrome around the one scene showing through a yield, rather than showing anything of its own",
     kind: "layout",
+    formerTitles: ["Full screen layouts"],
   },
 ];
 

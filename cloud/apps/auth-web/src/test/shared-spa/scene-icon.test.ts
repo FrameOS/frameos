@@ -109,11 +109,11 @@ describe("scene categories", () => {
     expect(scene).toContain("Photos");
     expect(scene).toContain("Clocks & time");
     expect(scene).toContain("Games");
-    expect(scene).not.toContain("Desktop layouts");
+    expect(scene).not.toContain("Multi app layouts");
     expect(sceneCategoryOptions(undefined, true).map((option) => option.value)).toEqual([
       "",
-      "Desktop layouts",
-      "Full screen layouts",
+      "Multi app layouts",
+      "Single app layouts",
     ]);
     const own = sceneCategoryOptions("Clocks", false);
     expect(own[own.length - 1]).toEqual({ value: "Clocks", label: "Clocks" });

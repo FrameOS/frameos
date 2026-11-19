@@ -9,7 +9,7 @@ import { imageElementIsBlank } from '../../utils/blankImage'
 import { templateAccessFlags } from '../../utils/sceneAccess'
 import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { knownSceneNeeds, sceneNeedDescription, sceneNeedLabel } from '../../utils/sceneNeeds'
-import type { StoreKind } from '../../utils/storeCategories'
+import { storeShelfDescriptions, type StoreKind } from '../../utils/storeCategories'
 import {
   STORE_FIT_OPTIONS,
   STORE_SHELF_PREVIEW_COUNT,
@@ -291,6 +291,9 @@ export function StoreShelves({
               )}
               <span className="frameos-muted text-sm font-medium">{templates.length}</span>
             </h2>
+          ) : null}
+          {!activeCategory && storeShelfDescriptions[shelf.slug] ? (
+            <p className="frameos-muted -mt-2 text-sm leading-relaxed">{storeShelfDescriptions[shelf.slug]}</p>
           ) : null}
           <TileGrid>
             {(limit === null ? templates : templates.slice(0, limit)).map((template) => (

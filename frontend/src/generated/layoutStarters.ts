@@ -18,7 +18,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-beos",
       "name": "BeOS",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#336698",
@@ -172,7 +172,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-classic-mac",
       "name": "Classic Mac",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#808080",
@@ -310,7 +310,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-commander",
       "name": "Commander",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#000000",
@@ -448,7 +448,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-macos",
       "name": "macOS",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#3b4cc0",
@@ -606,7 +606,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-nextstep",
       "name": "NeXTSTEP",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#555555",
@@ -752,7 +752,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-omarchy",
       "name": "Omarchy",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#1a1b26",
@@ -970,7 +970,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-os2-warp",
       "name": "OS/2 Warp",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#3b7090",
@@ -1124,7 +1124,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-tiling",
       "name": "Tiling",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
@@ -1264,7 +1264,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-windows-98",
       "name": "Windows 98",
       "settings": {
-        "category": "Desktop layouts",
+        "category": "Multi app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#008080",
@@ -1412,7 +1412,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-bottom-bar",
       "name": "Bottom bar",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
@@ -1533,7 +1533,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-e-reader",
       "name": "E-reader",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#ffffff",
@@ -1697,7 +1697,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-front-page",
       "name": "Front page",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#f5f0e1",
@@ -1818,7 +1818,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-gallery-wall",
       "name": "Gallery wall",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#d8d2c4",
@@ -1955,7 +1955,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-polaroid",
       "name": "Polaroid",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 3600,
         "backgroundColor": "#faf7ef",
@@ -2084,7 +2084,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-side-rail",
       "name": "Side rail",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
@@ -2209,7 +2209,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-teletext",
       "name": "Teletext",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#000000",
@@ -2355,7 +2355,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-terminal",
       "name": "Terminal",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0b0f0c",
@@ -2471,7 +2471,7 @@ export const LAYOUT_STARTERS: LayoutStarter[] = [
       "id": "layout-top-bar",
       "name": "Top bar",
       "settings": {
-        "category": "Full screen layouts",
+        "category": "Single app layouts",
         "execution": "interpreted",
         "refreshInterval": 1,
         "backgroundColor": "#0f172a",
