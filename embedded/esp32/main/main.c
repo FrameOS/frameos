@@ -331,7 +331,6 @@ static void on_wifi_online(void)
 {
     if (__atomic_exchange_n(&s_online_steps_done, true, __ATOMIC_SEQ_CST)) return;
     ESP_LOGI(TAG, "Wi-Fi up after boot (%s)", fos_wifi_ip());
-    if (fos_ota_boot_request_pending()) fos_ota_request_check();
     /* An LCD renders without the clock and again when it comes. */
     fos_wifi_set_late_time_hook(action_render_now);
     online_steps(0);
@@ -565,6 +564,25 @@ void app_main(void)
         if (fos_config_wifi_ready()) {
             esp_err_t err = fos_wifi_start_background();
             if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi failed to start: %s", esp_err_to_name(err));
+            /* An update was asked for (console `ota`, the backend's action):
+             * the early updater runs here, as on every other board, so this
+             * boot waits for the join it otherwise leaves to the background.
+             * on_wifi_online answered the request with another reboot into
+             * an updater this path never ran, and the SenseCAP rebooted
+             * every six seconds (2026-11-19). A join that does not come
+             * still spends the request (the updater clears it first). */
+            if (err == ESP_OK && fos_ota_boot_request_pending()) {
+                fos_display_boot_status(FOS_LCD_SPLASH_WIFI);
+                int64_t deadline = esp_timer_get_time() + (int64_t)WIFI_CONNECT_TIMEOUT_MS * 1000;
+                while (fos_wifi_state() != FOS_WIFI_CONNECTED && esp_timer_get_time() < deadline) {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                }
+                fos_display_boot_status(FOS_LCD_SPLASH_UPDATE);
+                esp_err_t ota_err = fos_ota_run_boot_request();
+                if (ota_err != ESP_OK) {
+                    ESP_LOGW(TAG, "boot OTA request failed: %s", esp_err_to_name(ota_err));
+                }
+            }
         } else {
             ESP_LOGI(TAG, "no Wi-Fi configured; set it up from the screen (swipe down from the top)");
         }
