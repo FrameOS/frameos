@@ -215,11 +215,13 @@ def suite_scenes(ctx, frame, scene_filter=None):
             if x.startswith('render #') and ' started: scene ' in x and (sid in x or (name and f'"{name}"' in x)):
                 started['n'] = x.split()[1]
                 return False
-            # The scene's own `render:done`, when its start line went out
-            # without the scene (`started: scene ""`, firmware up to
+            # The scene's own `render:done` ends it too: when its start line
+            # went out without the scene (`started: scene ""`, firmware up to
             # 2026.11.12 reading the shared scene info buffer: the E1004's
-            # Unsplash image read as "no render within timeout").
-            if started['n'] is None and x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x:
+            # Unsplash image), or when the console lost the `done in` line
+            # (bytes dropped on the E1004's CH340, 2026-11-19: Low Poly
+            # Animals rendered in 39.7 s and read as "no render").
+            if x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x and '"status":"ok"' in x:
                 return True
             return started['n'] is not None and (x.startswith(f"render {started['n']} done") or x.startswith(f"render {started['n']} failed"))
 
