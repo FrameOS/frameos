@@ -47,7 +47,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // GET /api/store/scenes/{id}/scenes.json?version=N.
 export async function GET(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "account:scene-detail", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

@@ -45,7 +45,7 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   }
 
   const limited = await rateLimitResponse(request, "store:report", {
-    limit: 30,
+    limit: 60,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

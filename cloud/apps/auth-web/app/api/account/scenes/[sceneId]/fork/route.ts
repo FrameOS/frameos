@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
 
   const limited = await rateLimitResponse(request, "account:scenes", {
-    limit: 60,
+    limit: 120,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

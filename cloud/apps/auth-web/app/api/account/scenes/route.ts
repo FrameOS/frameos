@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 // filters do. Newest change first, capped at 500 like the drive index.
 export async function GET(request: NextRequest) {
   const limited = await rateLimitResponse(request, "account:scenes-list", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
   }
   const session = await readSession();
   const limited = await storeWriteRateLimitResponse(request, session?.accountId, "account:scene-create", {
-    limit: 60,
+    limit: 120,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

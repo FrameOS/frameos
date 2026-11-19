@@ -27,7 +27,7 @@ async function handleGet(
   { params }: { params: Promise<{ frameosVersion: string }> },
 ) {
   const limited = await rateLimitResponse(request, "store:index", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

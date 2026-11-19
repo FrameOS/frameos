@@ -42,7 +42,7 @@ export const runtime = "nodejs";
 // same-deployment URLs the browser can fetch with its session cookie.
 async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:drive", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

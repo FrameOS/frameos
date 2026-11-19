@@ -14,7 +14,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // Only scenes the frame's store lists; anything else is 404.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:device", {
-    limit: 600,
+    limit: 1200,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

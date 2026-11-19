@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const session = await readSession();
   const limited = await storeWriteRateLimitResponse(request, session?.accountId, "account:scene-upload", {
-    limit: 60,
+    limit: 120,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

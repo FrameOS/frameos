@@ -21,7 +21,7 @@ const maxTimeoutMs = 30_000;
 // the upstream status and bytes.
 async function handlePost(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:preview-proxy", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

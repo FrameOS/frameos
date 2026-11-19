@@ -20,7 +20,7 @@ export const runtime = "nodejs";
 // filtered index use /api/store/{frameosVersion}/repository.json.
 async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:index", {
-    limit: 240,
+    limit: 480,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

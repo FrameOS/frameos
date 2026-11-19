@@ -27,7 +27,7 @@ export async function loadOwnedScene(
     request,
     session?.accountId,
     options.rateLimit?.action ?? "account:scenes",
-    options.rateLimit ?? { limit: 60, windowMs: 15 * 60 * 1000 },
+    options.rateLimit ?? { limit: 120, windowMs: 15 * 60 * 1000 },
   );
   if (limited) {
     return { errorResponse: limited };

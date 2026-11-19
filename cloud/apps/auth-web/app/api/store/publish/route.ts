@@ -30,7 +30,7 @@ export const runtime = "nodejs";
 // name creates a new scene with a globally unique slug. Private by default.
 async function handlePost(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:publish", {
-    limit: 60,
+    limit: 120,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

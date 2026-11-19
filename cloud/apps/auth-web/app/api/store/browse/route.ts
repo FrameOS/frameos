@@ -21,7 +21,7 @@ export const runtime = "nodejs";
 // re-shuffling it.
 async function handleGet(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:browse", {
-    limit: 600,
+    limit: 1200,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

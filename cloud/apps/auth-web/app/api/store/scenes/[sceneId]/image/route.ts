@@ -25,7 +25,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // image content type, never the uploader's choosing.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:image", {
-    limit: 1200,
+    limit: 2400,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {

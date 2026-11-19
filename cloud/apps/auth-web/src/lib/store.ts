@@ -35,18 +35,19 @@ export const maxScenesPerAccount = 200;
 export const maxVersionsPerScene = 20;
 
 // Abuse limits for a public registry: per-account, on
-// top of the per-IP limits in rate-limit.ts.
-export const maxPublishesPerHour = 30;
+// top of the per-IP limits in rate-limit.ts. Doubled on 2026-11-19 (the
+// owner's call), as were the store routes' per-address limits.
+export const maxPublishesPerHour = 60;
 // Editor saves are expected to be much more frequent than uploads or linked
 // backend publishes while someone experiments with a scene. They use their
 // own buckets so active editing cannot exhaust the stricter publish limit.
-export const maxSceneEditsPer15Minutes = 120;
-export const maxSceneEditsPerHour = 200;
+export const maxSceneEditsPer15Minutes = 240;
+export const maxSceneEditsPerHour = 400;
 // New scenes an account may create in 24 hours (versions of a scene it
 // already has are not new). A superadmin has no such cap
 // (newSceneDailyLimit in store-publish-limit.ts).
-export const maxNewScenesPerDay = 50;
-export const maxReportsPerDay = 10;
+export const maxNewScenesPerDay = 100;
+export const maxReportsPerDay = 20;
 export const maxReportReasonLength = 1000;
 
 export const sceneVisibilities = new Set(["private", "public"]);

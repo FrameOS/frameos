@@ -33,7 +33,7 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 // their own zip back from it.
 async function handleGet(request: NextRequest, context: RouteContext) {
   const limited = await rateLimitResponse(request, "store:download", {
-    limit: 600,
+    limit: 1200,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {
