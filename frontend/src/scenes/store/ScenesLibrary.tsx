@@ -534,12 +534,14 @@ function StorePage(): JSX.Element {
           </div>
         }
       />
-      <StoreKindTabs
-        kind={storeKind}
-        counts={storeKindCounts}
-        href={(kind) => urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null })}
-        onPick={(kind) => router.actions.push(urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null }))}
-      />
+      <div className="mb-6">
+        <StoreKindTabs
+          kind={storeKind}
+          counts={storeKindCounts}
+          href={(kind) => urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null })}
+          onPick={(kind) => router.actions.push(urls.scenesHome('store', { kind: kind === 'layout' ? 'layouts' : null }))}
+        />
+      </div>
       <div className="space-y-8" ref={shelvesRef}>
         {repositoriesLoading && storeScenesCount === 0 ? (
           <div className="frameos-muted flex items-center gap-2 text-sm">
