@@ -119,6 +119,11 @@ function createNextConfig(phase: string): NextConfig {
         "../../../node_modules/.pnpm/@img+sharp-libvips-*/node_modules/@img/sharp-libvips-*/lib/**/*",
       ],
     },
+    // Store pages whose slug was corrected by hand: the old link (on frames'
+    // installed copies too, their `origin.href`) keeps working.
+    async redirects() {
+      return [{ source: "/s/webcam-rstp", destination: "/s/webcam-rtsp", permanent: true }];
+    },
     async rewrites() {
       return {
         // The playground host's root, on the mark proxy.ts gives it
