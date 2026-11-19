@@ -104,6 +104,7 @@ import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
 import { useDragHeight } from "./useDragHeight";
 import { sceneWorkspaceHost } from "./lib/host";
+import { lanAccessOption } from "./lib/scene-render-check";
 import { previewWorkerUrl } from "./lib/preview-worker";
 
 type SceneLivePreviewPanelProps = {
@@ -936,9 +937,16 @@ export function SceneLivePreviewPanel({
         // ignores it, and gets them in onReady instead).
         sceneState: replay,
         settings: previewSettings,
-        // Fallback only: the runtime fetches URLs client-side first and
-        // routes just CORS-blocked hosts through this endpoint.
-        ...(sceneWorkspaceHost().previewProxyUrl ? { proxyUrl: sceneWorkspaceHost().previewProxyUrl! } : {}),
+        // The cloud's is the fallback: the runtime fetches URLs client-side
+        // first and routes just CORS-blocked origins through it. A backend's
+        // frame proxy goes first (host.ts `previewProxyFirst`).
+        ...(sceneWorkspaceHost().previewProxyUrl
+          ? {
+              proxyUrl: sceneWorkspaceHost().previewProxyUrl!,
+              proxyFirst: sceneWorkspaceHost().previewProxyFirst,
+            }
+          : {}),
+        ...lanAccessOption(sceneWorkspaceHost().previewLanAccess()),
         fastMode,
         drawnCursor,
         windowed,

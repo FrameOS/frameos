@@ -155,7 +155,11 @@ Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePub
 
 - Scenes that fetch external URLs are subject to browser CORS unless you pass `proxyUrl` (a
   same-origin endpoint that forwards `{method, url, headers, bodyBase64, timeoutMs}` — see
-  FrameOS's `/api/frames/{id}/scene_preview_proxy`).
+  FrameOS's `/api/frames/{id}/scene_preview_proxy`). Requests go from the browser first and
+  through the proxy for an origin that failed there; `proxyFirst: true` sends them all through
+  the proxy, and `lanAccess: false` refuses private hosts the way a frame with local network
+  access off would. A proxy refusal with an `X-FrameOS-Proxy-Refused` header reaches the scene
+  as words (docs/lan-access.md).
 - Apps that need host processes are not in the wasm build: `data/chromiumScreenshot`,
   `data/rstpSnapshot`. `data/localImage` reads the browser asset folder (see above).
 - `index.html` in the package root is a standalone demo page:

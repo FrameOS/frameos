@@ -2127,6 +2127,7 @@ describe("store publish and distribution", () => {
     ]) {
       const response = await proxied({ url });
       expect(response.status, url).toBe(403);
+      expect(response.headers.get("x-frameos-proxy-refused"), url).toBe("public-only");
       expect((await readJson(response)).error).toBe("host_not_allowed");
     }
 

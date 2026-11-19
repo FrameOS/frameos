@@ -6,8 +6,11 @@
 // XHR) is allowed and long renders never block the page.
 //
 // Messages in:
-//   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
+//   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl, proxyFirst?,
 //    fastMode?, saveAssets?, browserAssets?, lanAccess?, sceneState?, renderScale?, windowed?, framePage?}
+//        proxyFirst: send the scene's requests through `proxyUrl` without trying the browser first (a
+//        self-hosted backend's proxy, which reaches what the frame reaches). Otherwise the browser goes
+//        first and an origin it fails on goes through the proxy from then on.
 //        windowed: run the scenes side by side, as a Pi does (docs/scene-layouts.md "Windows").
 //        framePage: offer the frame's own page in the scene settings (docs/scene-settings.md); its
 //        Restart and Reboot come out as `sceneEvent`s `restart` / `reboot`, a new scale as `frameSettings`.
@@ -840,6 +843,9 @@ async function init(msg) {
     // no CORS) so data apps that fetch external URLs work like on the device.
     if (msg.proxyUrl) {
       Module['frameosProxyUrl'] = msg.proxyUrl
+      if (msg.proxyFirst === true) {
+        Module['frameosProxyFirst'] = true
+      }
     }
     if (msg.lanAccess === false) {
       Module['frameosLanAccess'] = false

@@ -28,6 +28,17 @@ never reaches the backend host's own loopback or link-local addresses
 cloud's preview proxy stays public-only: the cloud is not on the frame's
 network.
 
+Which way a preview's request goes first is the page's call
+(`frameos/tools/wasm/frameos_library.js`): a backend's pages send every
+request through the frame's proxy without a direct try (`proxyFirst`), since
+it reaches what the frame reaches and a try from the browser only adds a CORS
+error to the console; the cloud's go from the browser first and through its
+proxy only for an origin that failed there, once per origin. A proxy that
+refuses a host names the rule in `X-FrameOS-Proxy-Refused` (`local-network`:
+the frame's switch would let it through; `public-only`: the cloud's; `host`:
+nothing would), and the scene gets the words instead of a bare 403: for
+`local-network` the same sentence as a frame's own refusal below.
+
 The switch is one extra layer, not the security boundary. Devices the frame
 should never reach belong on a different network or VLAN.
 

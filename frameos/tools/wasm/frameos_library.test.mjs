@@ -116,7 +116,10 @@ test('malformed IPv6 fails closed', () => {
 
 // Runs the request hook as the preview worker would, returning which URLs
 // were opened directly and whether the proxy was used.
-function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = null, responseHeaders = '', headersPtr = 0 } = {}) {
+function request(
+  url,
+  { page, proxyUrl = '/api/proxy', lanAccess, proxyFirst, module, sendError = null, proxyAnswer = null, responseHeaders = '', headersPtr = 0 } = {}
+) {
   const library = loadLibrary()
   const opened = []
   const logs = []
@@ -127,9 +130,21 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
     }
     setRequestHeader() {}
     send() {
-      if (sendError) throw new Error(sendError)
+      if (this.target === proxyUrl && proxyAnswer) {
+        this.status = proxyAnswer.status
+        this.answerHeaders = proxyAnswer.headers ?? {}
+        this.response = new TextEncoder().encode(proxyAnswer.body ?? '').buffer
+        return
+      }
+      if (sendError && this.target !== proxyUrl) throw new Error(sendError)
       this.status = 200
       this.response = new TextEncoder().encode('ok').buffer
+    }
+    getResponseHeader(name) {
+      for (const [key, value] of Object.entries(this.answerHeaders ?? {})) {
+        if (key.toLowerCase() === name.toLowerCase()) return value
+      }
+      return null
     }
     getAllResponseHeaders() {
       return responseHeaders
@@ -145,11 +160,14 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
     HEAPU8: heap,
     _malloc: () => 512,
     makeSetValue: () => {},
-    Module: {
+    // One Module across calls is one runtime: what it learned (the origins
+    // that failed directly) carries over.
+    Module: Object.assign(module ?? {}, {
       frameosProxyUrl: proxyUrl,
       frameosLanAccess: lanAccess,
+      frameosProxyFirst: proxyFirst,
       onFrameosLog: (message) => logs.push(message),
-    },
+    }),
     XMLHttpRequest: FakeXHR,
     TextEncoder,
     URL,
@@ -160,14 +178,17 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
     self: page ? { location: new URL(page) } : undefined,
     frameosIsPrivateHost: library.$frameosIsPrivateHost,
     frameosLogUrl: library.$frameosLogUrl,
+    frameosProxyRefusal: library.$frameosProxyRefusal,
   }
   // The hook's `{{{ makeSetValue(...) }}}` lines are Emscripten macros; as
   // plain JS they are nested blocks calling the stub above.
   const hook = vm.runInNewContext(`(${library.fos_nim_http_request.toString()})`, context)
-  hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0, headersPtr)
+  const ptr = hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0, headersPtr)
   const end = headersPtr ? heap.indexOf(0, headersPtr) : 0
   const headers = new TextDecoder().decode(heap.subarray(headersPtr, end))
-  return { opened, logs, headers, direct: opened.filter((u) => u !== proxyUrl), viaProxy: opened.includes(proxyUrl) }
+  // What the scene is handed: the body at the pointer (the stub malloc's 512).
+  const said = ptr ? new TextDecoder().decode(heap.subarray(ptr, heap.indexOf(0, ptr))) : null
+  return { opened, logs, headers, said, direct: opened.filter((u) => u !== proxyUrl), viaProxy: opened.includes(proxyUrl) }
 }
 
 test("the response's headers go into the caller's block as whole lines, 2047 bytes at most", () => {
@@ -229,6 +250,8 @@ test('a frame with local network access off: private hosts refused, direct and p
       const line = result.logs.join('\n')
       assert.match(line, LAN_OFF, `${url} from ${page}`)
       assert.equal(line.match(LAN_OFF)[1], new URL(url).hostname)
+      // The scene gets the same words as the request's error.
+      assert.match(result.said, LAN_OFF, `${url} from ${page}`)
     }
   }
 })
@@ -265,6 +288,68 @@ test('a failed request is logged by its origin, the error text included', () => 
   const logged = result.logs.join('\n')
   assert.match(logged, /GET https:\/\/cloud\.frameos\.net failed: Error: Failed to load 'https:\/\/cloud\.frameos\.net'/)
   assert.doesNotMatch(logged, /pk_secret|index=3/)
+})
+
+test('proxy first: no request leaves the browser directly while a proxy is set', () => {
+  for (const url of ['http://192.168.1.20:2283/api/albums', 'https://api.open-meteo.com/v1/forecast']) {
+    const result = request(url, { page: 'http://192.168.1.5:8989/frames/1', proxyFirst: true })
+    assert.deepEqual(result.direct, [], url)
+    assert.equal(result.viaProxy, true, url)
+  }
+  // Without a proxy there is nothing to go first: the browser it is.
+  const alone = request('https://api.open-meteo.com/v1/forecast', { page: 'http://192.168.1.5:8989/', proxyUrl: null, proxyFirst: true })
+  assert.deepEqual(alone.direct, ['https://api.open-meteo.com/v1/forecast'])
+})
+
+test('an origin that failed directly goes to the proxy alone from then on', () => {
+  const module = {}
+  const page = 'http://192.168.1.5:8989/frames/1'
+  const first = request('http://192.168.1.20:2283/api/albums', { page, module, sendError: 'NetworkError (CORS)' })
+  assert.deepEqual(first.direct, ['http://192.168.1.20:2283/api/albums'])
+  assert.equal(first.viaProxy, true)
+  const second = request('http://192.168.1.20:2283/api/assets/1/thumbnail', { page, module, sendError: 'NetworkError (CORS)' })
+  assert.deepEqual(second.direct, [])
+  assert.equal(second.viaProxy, true)
+  // Another origin still tries the browser first.
+  const other = request('https://api.open-meteo.com/v1/forecast', { page, module })
+  assert.deepEqual(other.direct, ['https://api.open-meteo.com/v1/forecast'])
+  // A runtime of its own learned nothing.
+  const fresh = request('http://192.168.1.20:2283/api/albums', { page })
+  assert.deepEqual(fresh.direct, ['http://192.168.1.20:2283/api/albums'])
+})
+
+test("the proxy's refusal reaches the scene in words, not as a bare 403", () => {
+  const page = 'http://192.168.1.5:8989/frames/1'
+  const refused = (reason) =>
+    request('http://192.168.1.20:2283/api/albums?key=secret', {
+      page,
+      proxyFirst: true,
+      proxyAnswer: { status: 403, headers: { 'X-FrameOS-Proxy-Refused': reason }, body: '{"detail":"Proxy target host is not allowed"}' },
+    })
+  const lan = refused('local-network')
+  assert.match(lan.said, LAN_OFF)
+  assert.equal(lan.said.match(LAN_OFF)[1], '192.168.1.20')
+  assert.match(lan.logs.join('\n'), LAN_OFF)
+  assert.match(refused('public-only').said, /^The preview cannot reach 192\.168\.1\.20: its server reaches public internet addresses only\./)
+  assert.match(refused('host').said, /^The preview cannot reach 192\.168\.1\.20: its server does not connect to that address\./)
+  for (const reason of ['local-network', 'public-only', 'host']) {
+    const result = refused(reason)
+    assert.doesNotMatch(result.said + result.logs.join('\n'), /secret|\/api\/albums/, reason)
+  }
+  // A 403 from the upstream itself (through the proxy, no header) is the
+  // upstream's answer, handed over as it is.
+  const upstream403 = request('http://192.168.1.20:2283/api/albums', {
+    page,
+    proxyFirst: true,
+    proxyAnswer: { status: 403, body: '{"message":"Invalid API key"}' },
+  })
+  assert.equal(upstream403.said, '{"message":"Invalid API key"}')
+  assert.deepEqual(upstream403.logs, [])
+})
+
+test('a plain failure still hands the scene nothing to show', () => {
+  const result = request('https://example.com/x', { proxyUrl: null, sendError: 'NetworkError' })
+  assert.equal(result.said, null)
 })
 
 test('a tapped link goes to the page when it takes links, else 0 (the QR code)', () => {

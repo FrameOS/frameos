@@ -19,6 +19,15 @@ export interface SceneWorkspaceHost {
   /** Where the browser preview sends the requests a scene makes that the
    * browser itself may not (CORS); null: none, they go direct. */
   previewProxyUrl: string | null
+  /** Whether the preview sends every request through that proxy without
+   * trying the browser first: a backend's frame proxy reaches what the frame
+   * reaches, so nothing is gained by a direct try but a CORS error in the
+   * console. The cloud's shared proxy is the fallback only. */
+  previewProxyFirst: boolean
+  /** The previewed frame's local network access (docs/lan-access.md), read
+   * when the preview starts: `false` refuses private hosts in the frame's
+   * words; undefined where there is no such switch to copy. */
+  previewLanAccess: () => boolean | undefined
   /** What else every AI turn sends (a backend's frame scene: its frameId). */
   aiChatContext: () => Record<string, unknown>
   /** Where the owner chooses how often the preview asks before it reads the
@@ -35,6 +44,8 @@ const cloudHost: SceneWorkspaceHost = {
   aiChatsUrl: '/api/ai/chats',
   settingsUrl: '/api/settings',
   previewProxyUrl: '/api/store/preview-proxy',
+  previewProxyFirst: false,
+  previewLanAccess: () => undefined,
   aiChatContext: () => ({}),
   savedKeysSettingsUrl: '/account/security#saved-keys',
   track: () => {},

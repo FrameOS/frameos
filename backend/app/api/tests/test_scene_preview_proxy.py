@@ -105,6 +105,9 @@ async def test_a_virtual_frame_previews_the_lan_only_with_local_network_access_o
     response = await proxy(async_client, virtual, 'http://192.168.1.20:2283/api/albums/abc')
     assert response.status_code == 403
     assert response.json()['detail'] == 'Proxy target host is not allowed'
+    # The rule that refused it, so the preview can say "turn on local network
+    # access" instead of handing the scene a bare 403.
+    assert response.headers['x-frameos-proxy-refused'] == 'local-network'
     assert upstream['requests'] == []
 
     set_lan_access(db, virtual, True)
@@ -149,6 +152,12 @@ async def test_the_backend_hosts_own_addresses_stay_refused_whatever_the_frame_s
     for frame in (virtual, pi):
         response = await proxy(async_client, frame, url)
         assert response.status_code == 403, (frame.id, url, response.text)
+        # No switch reaches these: not the frame's local network access.
+        assert response.headers['x-frameos-proxy-refused'] == 'host', (frame.id, url)
+    # Nor with the switch off: turning it on would not help.
+    set_lan_access(db, virtual, False)
+    response = await proxy(async_client, virtual, url)
+    assert response.headers['x-frameos-proxy-refused'] == 'host'
     assert upstream['requests'] == []
 
 
@@ -158,4 +167,5 @@ async def test_a_frame_with_local_network_access_off_previews_public_addresses_o
     set_lan_access(db, pi, False)
     response = await proxy(async_client, pi, 'http://10.0.0.5/')
     assert response.status_code == 403
+    assert response.headers['x-frameos-proxy-refused'] == 'local-network'
     assert upstream['requests'] == []

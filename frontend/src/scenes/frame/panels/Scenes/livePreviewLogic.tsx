@@ -833,6 +833,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       // An embedding page (the standalone editor bundle) can supply its own
       // proxy endpoint via FRAMEOS_APP_CONFIG.preview_proxy_url instead.
       let proxyUrl = ''
+      // A backend's frame proxy goes first: it reaches what the frame reaches
+      // (#868), and a direct try from the browser only adds a CORS error.
+      // The cloud's and an embedding page's are the fallback.
+      let proxyFirst = false
       const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
       if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
         proxyUrl = configuredProxyUrl
@@ -847,6 +851,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       } else {
         try {
           proxyUrl = getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))
+          proxyFirst = true
         } catch (error) {
           // preview still runs; external fetches will fail with CORS as before
         }
@@ -965,6 +970,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenesJson: JSON.stringify(payloadScenes),
         settingsJson,
         proxyUrl,
+        proxyFirst,
         sceneId,
         fastMode: values.fastMode,
         // Apps may save into the browser folder; it is the user's own

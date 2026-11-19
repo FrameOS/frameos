@@ -79,21 +79,34 @@ export function fetchSettingsJson(frameId: FrameId): Promise<string> {
   return promise
 }
 
-export async function previewProxyUrl(frameId: FrameId): Promise<string> {
+export interface PreviewProxy {
+  /** '' for none: the runtime fetches from the browser alone. */
+  proxyUrl: string
+  /** Through the proxy without a direct try first (preview-worker.js). */
+  proxyFirst: boolean
+}
+
+export async function previewProxy(frameId: FrameId): Promise<PreviewProxy> {
   // Same-origin proxy for the runtime's CORS-blocked HTTP fetches — the same
-  // per-mode endpoints livePreviewLogic resolves.
+  // per-mode endpoints livePreviewLogic resolves. A backend's frame proxy
+  // goes first: it reaches what the frame reaches (#868), and a direct try
+  // from the browser only adds a CORS error. The cloud's (and an embedding
+  // page's) is the fallback.
   const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
   if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
-    return configuredProxyUrl
+    return { proxyUrl: configuredProxyUrl, proxyFirst: false }
   }
   if (isCloudMode()) {
-    return getBasePath() + '/api/store/preview-proxy'
+    return { proxyUrl: getBasePath() + '/api/store/preview-proxy', proxyFirst: false }
   }
   try {
-    return getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`))
+    return {
+      proxyUrl: getBasePath() + (await projectApiPath(`/api/frames/${frameId}/scene_preview_proxy`)),
+      proxyFirst: true,
+    }
   } catch {
     // The render still runs; external fetches fail with CORS as before.
-    return ''
+    return { proxyUrl: '', proxyFirst: false }
   }
 }
 
@@ -129,7 +142,7 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
     throw new Error('preview cancelled')
   }
   const settingsJson = JSON.stringify(gated.settings)
-  const proxyUrl = await previewProxyUrl(frame.id)
+  const { proxyUrl, proxyFirst } = await previewProxy(frame.id)
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   return await new Promise<string>((resolve, reject) => {
@@ -189,6 +202,7 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl,
+      proxyFirst,
       sceneId: scene.id,
       lanAccess: frame.lan_access ?? undefined,
     })

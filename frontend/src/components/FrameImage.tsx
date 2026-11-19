@@ -7,6 +7,7 @@ import { frameCheckin, frameCheckinDescription } from '../decorators/frame'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 import { wasmPreviewModel } from '../models/wasmPreviewModel'
+import { frameImageRefreshRenders } from '../scenes/workspace/workspaceSurfaces'
 import { urls } from '../urls'
 import { isFrameControlMode } from '../utils/frameControlMode'
 import { sceneRequiresCompilation } from '../utils/sceneApps'
@@ -162,17 +163,27 @@ export function FrameImageRefreshButton({
   className?: string
 }) {
   const { updateEntityImage } = useActions(entityImagesModel)
+  const { renderFrame } = useActions(framesModel)
+  const { frames } = useValues(framesModel)
   const entityId = `frames/${frameId}`
   const subEntityId = sceneId ? `scene_images/${sceneId}` : 'image'
+  // A frame its plane draws (no hardware) shows its stored picture until
+  // something asks for a new one, so here the icon asks; the new picture
+  // arrives like any render's. Elsewhere it reloads what the frame stored.
+  const renders = frameImageRefreshRenders(frames[frameId])
+  const label = renders ? 'Render again' : 'Reload picture'
 
   return (
     <button
       type="button"
-      title="Refresh image"
-      aria-label="Refresh image"
+      title={label}
+      aria-label={label}
       onClick={(event) => {
         event.preventDefault()
         event.stopPropagation()
+        if (renders) {
+          renderFrame(frameId)
+        }
         updateEntityImage(entityId, subEntityId)
       }}
       className={clsx(

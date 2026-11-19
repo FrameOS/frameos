@@ -77,6 +77,15 @@ export interface FrameOSPreviewOptions {
   /** Same-origin proxy endpoint for the runtime's HTTP requests. Without it,
    * scenes fetching external data hit browser CORS limits. */
   proxyUrl?: string
+  /** Send every request through `proxyUrl` without trying the browser first
+   * (a self-hosted backend's proxy, which reaches what the frame reaches).
+   * Otherwise the browser goes first, and an origin that fails there (CORS)
+   * goes through the proxy from then on. */
+  proxyFirst?: boolean
+  /** The previewed frame's local network access (docs/lan-access.md):
+   * `false` refuses private hosts the way that frame would, in its words.
+   * Absent: nothing to copy, nothing refused. */
+  lanAccess?: boolean
   /** Canvas to paint frames onto; can also be attached later. */
   canvas?: HTMLCanvasElement | null
   /** Renders are throttled to one per second unless this is true (see
@@ -243,6 +252,8 @@ export class FrameOSPreview {
       scenesJson: JSON.stringify(options.scenes),
       settingsJson: JSON.stringify(options.settings ?? {}),
       proxyUrl: options.proxyUrl || '',
+      proxyFirst: options.proxyFirst === true,
+      ...(options.lanAccess === undefined ? {} : { lanAccess: options.lanAccess }),
       sceneId: options.sceneId || '',
       sceneState: options.sceneState ?? null,
       fastMode: this.fastMode,

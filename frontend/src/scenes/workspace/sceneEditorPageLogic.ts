@@ -7,7 +7,7 @@ import type { FrameId, FrameScene, FrameType } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { getBasePath } from '../../utils/getBasePath'
-import { projectApiPath } from '../../utils/projectApi'
+import { cachedProjectId, projectApiPath, projectApiPathForProject } from '../../utils/projectApi'
 import { sceneFileTreeLogic } from '../../embed/sceneFileTreeLogic'
 import { applyAiScenes, type AiScenesEvent, type SceneJson } from '../../sceneWorkspace/lib/ai-scenes-apply'
 import { setSceneWorkspaceHost } from '../../sceneWorkspace/lib/host'
@@ -260,25 +260,30 @@ export const sceneEditorPageLogic = kea<sceneEditorPageLogicType>([
     }
     // The workspace's panels call this plane's routes: the SPA's apiFetch
     // (project prefix, session) and the frame as the AI's context. On a
-    // backend the preview's proxy is the frame's own; the cloud keeps its
-    // store proxy and its turn resume.
+    // backend the preview's proxy is the frame's own, and it goes first: it
+    // reaches what the frame reaches (#868), where a direct try from the
+    // browser only adds a CORS error. The cloud keeps its store proxy (the
+    // fallback) and its turn resume. Either way the preview copies the
+    // frame's local network access.
     const cloud = isCloudMode()
-    setSceneWorkspaceHost({
-      fetch: (path, init) => apiFetch(path, init),
-      aiChatTurnsUrl: cloud ? '/api/ai/chat/turns' : null,
-      aiChatContext: () => ({ frameId: props.frameId }),
-      ...(cloud ? {} : { previewProxyUrl: null, savedKeysSettingsUrl: null }),
-    })
-    if (!cloud) {
-      void projectApiPath(`/api/frames/${props.frameId}/scene_preview_proxy`).then((path) =>
-        setSceneWorkspaceHost({
-          fetch: (url, init) => apiFetch(url, init),
-          aiChatTurnsUrl: null,
-          aiChatContext: () => ({ frameId: props.frameId }),
-          previewProxyUrl: getBasePath() + path,
-          savedKeysSettingsUrl: null,
-        })
-      )
+    const proxyPath = `/api/frames/${props.frameId}/scene_preview_proxy`
+    const hostFor = (proxyUrl: string | null) =>
+      setSceneWorkspaceHost({
+        fetch: (path, init) => apiFetch(path, init),
+        aiChatTurnsUrl: cloud ? '/api/ai/chat/turns' : null,
+        aiChatContext: () => ({ frameId: props.frameId }),
+        previewLanAccess: () => values.frame?.lan_access ?? undefined,
+        ...(cloud
+          ? {}
+          : { previewProxyUrl: proxyUrl, previewProxyFirst: proxyUrl !== null, savedKeysSettingsUrl: null }),
+      })
+    // The project is known by now on every way into this page; when it is
+    // not, the proxy is set as soon as it is (a preview started before that
+    // runs without one, as before).
+    const projectId = cloud ? null : cachedProjectId()
+    hostFor(cloud ? null : projectId ? getBasePath() + projectApiPathForProject(projectId, proxyPath) : null)
+    if (!cloud && !projectId) {
+      void projectApiPath(proxyPath).then((path) => hostFor(getBasePath() + path))
     }
   }),
 ])

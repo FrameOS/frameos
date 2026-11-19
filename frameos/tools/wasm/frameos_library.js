@@ -141,7 +141,24 @@ addToLibrary({
     return 0
   },
 
-  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl'],
+  // Why the preview's proxy would not fetch `host`, in words a scene can
+  // show: the proxy says which rule refused it (`X-FrameOS-Proxy-Refused`,
+  // set by the backend's scene_preview_proxy and the cloud's
+  // store/preview-proxy). `local-network` is the frame's own switch, in the
+  // words the frame uses (the SPA's logs panel matches their start).
+  $frameosProxyRefusal: function (reason, host) {
+    if (reason === 'local-network') {
+      return 'Local network access is off for this frame, so ' + host +
+        ' cannot be reached. Turn on local network access in the frame settings.'
+    }
+    if (reason === 'public-only') {
+      return 'The preview cannot reach ' + host + ': its server reaches public internet addresses only. ' +
+        'The frame itself can, with local network access on.'
+    }
+    return 'The preview cannot reach ' + host + ': its server does not connect to that address.'
+  },
+
+  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl', '$frameosProxyRefusal'],
   fos_nim_http_request: function (
     methodPtr,
     urlPtr,
@@ -159,11 +176,22 @@ addToLibrary({
     {{{ makeSetValue('outLenPtr', 0, 0, 'i32') }}}
     var method = UTF8ToString(methodPtr)
     var url = UTF8ToString(urlPtr)
-    // When a same-origin backend proxy is configured, it is the FALLBACK:
-    // requests go straight from the browser first (client-side, no server
-    // load), and only CORS/network failures are retried through the proxy,
-    // which fetches server-side like the device would.
+    // When a same-origin proxy is configured, which goes first is the host
+    // page's call (`frameosProxyFirst`): a self-hosted backend's proxy is the
+    // frame's own (it reaches what the frame reaches, on the owner's machine),
+    // so its pages go through it first and the browser never logs a CORS
+    // error. The cloud's is a shared escape hatch: requests go straight from
+    // the browser first, and only CORS/network failures are retried through
+    // it — once per origin (`frameosDirectBlocked`): an origin that failed
+    // directly goes to the proxy alone for the rest of this runtime.
     var proxyUrl = Module['frameosProxyUrl']
+    // A refusal a scene should see in words (status 0 with the reason as the
+    // body, as the ESP32's glue answers a failed connect), not as "failed".
+    var refusal = function (message) {
+      var error = new Error(message)
+      error.frameosRefusal = true
+      return error
+    }
     try {
       var body = null
       if (bodyLen > 0) {
@@ -198,16 +226,17 @@ addToLibrary({
       // the guard only applies inside a browser context.)
       var refusedDirect = null
       var inBrowser = typeof self !== 'undefined' && self && self.location && typeof self.location.href === 'string'
+      var target = null
+      try {
+        target = inBrowser ? new URL(url, self.location.href) : new URL(url)
+      } catch (e) {}
       if (inBrowser) {
-        try {
-          var resolved = new URL(url, self.location.href)
-          if (resolved.origin === self.location.origin || (resolved.protocol !== 'http:' && resolved.protocol !== 'https:')) {
-            refusedDirect = 'same-origin'
-          } else if (frameosIsPrivateHost(resolved.hostname) && !frameosIsPrivateHost(self.location.hostname)) {
-            refusedDirect = 'private-network'
-          }
-        } catch (e) {
+        if (!target) {
           refusedDirect = 'unparseable'
+        } else if (target.origin === self.location.origin || (target.protocol !== 'http:' && target.protocol !== 'https:')) {
+          refusedDirect = 'same-origin'
+        } else if (frameosIsPrivateHost(target.hostname) && !frameosIsPrivateHost(self.location.hostname)) {
+          refusedDirect = 'private-network'
         }
       }
 
@@ -218,16 +247,17 @@ addToLibrary({
       // the SPA's logs panel matches the start of them to link to the setting.
       // A same-origin target keeps its own path (the proxy only, above).
       if (Module['frameosLanAccess'] === false && refusedDirect !== 'same-origin') {
-        var lanTarget = null
-        try {
-          lanTarget = inBrowser ? new URL(url, self.location.href) : new URL(url)
-        } catch (e) {}
-        if (lanTarget && (lanTarget.protocol === 'http:' || lanTarget.protocol === 'https:') &&
-            frameosIsPrivateHost(lanTarget.hostname)) {
-          throw new Error('Local network access is off for this frame, so ' + lanTarget.hostname +
-            ' cannot be reached. Turn on local network access in the frame settings.')
+        if (target && (target.protocol === 'http:' || target.protocol === 'https:') &&
+            frameosIsPrivateHost(target.hostname)) {
+          throw refusal(frameosProxyRefusal('local-network', target.hostname))
         }
       }
+
+      // Which origins already failed directly (CORS, mostly), for this
+      // runtime's life: the next request to one goes to the proxy alone.
+      var directBlocked = Module['frameosDirectBlocked'] || (Module['frameosDirectBlocked'] = {})
+      var directKey = inBrowser && !refusedDirect ? target.origin : null
+      var skipDirect = !!proxyUrl && (Module['frameosProxyFirst'] === true || (directKey !== null && directBlocked[directKey] === true))
 
       // Synchronous XHR: the Nim/pixie pipeline is fully synchronous and this
       // module runs in a Web Worker, where sync XHR is permitted.
@@ -277,14 +307,23 @@ addToLibrary({
 
       var xhr = null
       var directError = null
-      try {
-        xhr = directRequest()
-      } catch (e) {
-        // A cross-origin host without CORS headers throws on sync send.
-        directError = e
+      if (!skipDirect) {
+        try {
+          xhr = directRequest()
+        } catch (e) {
+          // A cross-origin host without CORS headers throws on sync send.
+          directError = e
+        }
+        if ((xhr === null || xhr.status === 0) && directKey !== null) {
+          directBlocked[directKey] = true
+        }
       }
       if ((xhr === null || xhr.status === 0) && proxyUrl) {
         xhr = proxyRequest()
+        var refusedBy = xhr.status === 403 && xhr.getResponseHeader ? xhr.getResponseHeader('X-FrameOS-Proxy-Refused') : null
+        if (refusedBy) {
+          throw refusal(frameosProxyRefusal(refusedBy, target ? target.hostname : frameosLogUrl(url)))
+        }
       } else if (xhr === null) {
         throw directError
       }
@@ -325,6 +364,17 @@ addToLibrary({
         var origin = frameosLogUrl(url)
         var reason = url ? String(e).split(url).join(origin) : String(e)
         Module['onFrameosLog']('http: ' + method + ' ' + origin + ' failed: ' + reason)
+      }
+      if (e && e.frameosRefusal) {
+        // Its words go to the scene as the request's error: they name a host,
+        // never a path or a query.
+        var said = new TextEncoder().encode(e.message)
+        var saidPtr = _malloc(said.length > 0 ? said.length : 1)
+        if (saidPtr) {
+          HEAPU8.set(said, saidPtr)
+          {{{ makeSetValue('outLenPtr', 0, 'said.length', 'i32') }}}
+        }
+        return saidPtr
       }
       return 0
     }

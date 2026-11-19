@@ -115,7 +115,13 @@ async function handlePost(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "host_not_allowed") {
-      return jsonError("host_not_allowed", 403);
+      // Names the rule for the preview runtime (frameos_library.js), which
+      // says why in the scene instead of handing it a bare 403. The cloud is
+      // on no frame's network: public addresses only. (A self-hosted
+      // backend's scene_preview_proxy answers `local-network` or `host`.)
+      const refused = jsonError("host_not_allowed", 403);
+      refused.headers.set("x-frameos-proxy-refused", "public-only");
+      return refused;
     }
     return jsonError("proxy_fetch_failed", 502, {
       detail: message || (error instanceof Error ? error.name : "error"),
