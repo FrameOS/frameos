@@ -1,17 +1,24 @@
-import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { ArrowUturnLeftIcon, PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Button } from '../../../../../components/Button'
 import { H6 } from '../../../../../components/H6'
+import { Label } from '../../../../../components/Label'
 import { Select, type SelectOptionEntry } from '../../../../../components/Select'
 import { Tag } from '../../../../../components/Tag'
-import type { EventMapRule } from '../../../../../types'
-import { cloudFrameSupportsEventMap, eventMapCloudFrameSettingsMinVersion } from '../../../../../utils/cloudFrameSettings'
+import type { EventMapRule, FrameId, FrameScene } from '../../../../../types'
+import {
+  cloudFrameSupportsEventMap,
+  eventMapCloudFrameSettingsMinVersion,
+} from '../../../../../utils/cloudFrameSettings'
 import {
   type ButtonBinding,
+  type FrameAction,
   type FrameActionOffer,
   type FrameGesture,
   bindingConflicts,
   deviceEventMap,
   edgeGestures,
+  esp32EventMapMaxBytes,
+  eventMapBytes,
   frameActionKindsFor,
   frameActionTitle,
   frameActionUnavailableReason,
@@ -28,10 +35,118 @@ import {
   parseFrameActionValue,
   parseFrameGestureValue,
   reportedEventMapOf,
+  showSceneStaleSettings,
+  withShowSceneSetting,
 } from '../../../../../utils/frameEventMap'
+import { locatedValues, locationFieldPair } from '../../../../../utils/geolocation'
+import { REFRESH_INTERVAL_ROLE, sceneStateFields } from '../../../../../utils/refreshInterval'
 import { buttonGestures, frameButtons } from '../../../../../utils/sceneEventMap'
-import { deviceSwitchesDisplay, frameDisplayDevice } from '../../../../workspace/workspaceSurfaces'
+import { visiblePublicStateFields } from '../../../../../utils/showIf'
+import { deviceSwitchesDisplay, frameDisplayDevice, isEsp32Frame } from '../../../../workspace/workspaceSurfaces'
+import { StateFieldEdit } from '../../Scenes/StateFieldEdit'
 import { useFrameSettings } from '../frameSettingsContext'
+
+/**
+ * A Show scene row's settings: the public fields of the scene it shows,
+ * whose values the press shows it with (`setCurrentScene {sceneId, state}`,
+ * applied to the scene's public state like a schedule entry's). A field left
+ * alone keeps the scene's own value; a set one has a reset.
+ */
+function ShowSceneSettings({
+  action,
+  scene,
+  frameId,
+  disabled,
+  onChange,
+}: {
+  action: FrameAction
+  scene: FrameScene | undefined
+  frameId: FrameId
+  disabled: boolean
+  onChange: (action: FrameAction) => void
+}): JSX.Element | null {
+  const state = action.state ?? {}
+  const allFields = scene ? sceneStateFields(scene) : []
+  const fields = visiblePublicStateFields(allFields, state)
+  const stale = showSceneStaleSettings(
+    action,
+    allFields.filter((field) => field.access === 'public').map((field) => field.name)
+  )
+  if (!scene || (fields.length === 0 && stale.length === 0)) {
+    return null
+  }
+  const location = locationFieldPair(fields)
+  const clear = (names: readonly string[]): FrameAction =>
+    names.reduce((next, name) => withShowSceneSetting(next, { name, type: 'string' }, undefined), action)
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-500/20 p-3 @md:ml-4">
+      <p className="frameos-muted text-xs">
+        {scene.name || scene.id}&apos;s settings when this press shows it. A field left alone keeps the scene&apos;s own
+        value.
+      </p>
+      {fields.map((field) => {
+        const set = Object.prototype.hasOwnProperty.call(state, field.name)
+        return (
+          <div key={field.name} className="grid grid-cols-1 gap-1 @md:grid-cols-[minmax(8rem,1fr)_minmax(0,2fr)_auto]">
+            <Label className="flex-col !gap-0 @md:pt-2">
+              <span>{field.label || field.name}</span>
+              {set ? null : <span className="frameos-muted text-xs font-normal">the scene&apos;s own</span>}
+            </Label>
+            <div className={disabled ? 'pointer-events-none opacity-60' : undefined}>
+              <StateFieldEdit
+                field={field}
+                value={state[field.name] as any}
+                onChange={(value) => onChange(withShowSceneSetting(action, field, value))}
+                currentState={{}}
+                stateChanges={{}}
+                frameId={frameId}
+                onLocate={
+                  location && field.name === location.first
+                    ? (located) =>
+                        onChange(
+                          Object.entries(locatedValues(location, located)).reduce(
+                            (next, [name, value]) =>
+                              withShowSceneSetting(
+                                next,
+                                fields.find((candidate) => candidate.name === name) ?? { name, type: 'string' },
+                                value
+                              ),
+                            action
+                          )
+                        )
+                    : undefined
+                }
+              />
+              {field.role === REFRESH_INTERVAL_ROLE ? (
+                <p className="frameos-muted mt-1 text-xs">How often the scene renders from this press on.</p>
+              ) : null}
+            </div>
+            <Button
+              size="small"
+              color="secondary"
+              className="flex items-center gap-1 self-start"
+              disabled={disabled || !set}
+              title="Keep the scene's own value"
+              onClick={() => onChange(clear([field.name]))}
+            >
+              <ArrowUturnLeftIcon className="w-4 h-4" />
+              Reset
+            </Button>
+          </div>
+        )
+      })}
+      {stale.length > 0 ? (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          The scene has no public {stale.length === 1 ? 'field' : 'fields'} {stale.join(', ')} any more; the frame
+          ignores {stale.length === 1 ? 'it' : 'them'}.{' '}
+          <button type="button" className="underline" disabled={disabled} onClick={() => onChange(clear(stale))}>
+            Remove
+          </button>
+        </p>
+      ) : null}
+    </div>
+  )
+}
 
 /**
  * Button actions (frame.json `eventMap`, docs/events.md "Event map"): what a
@@ -42,12 +157,13 @@ import { useFrameSettings } from '../frameSettingsContext'
  * actions" seeding the editable list; everything else is the editable list.
  */
 export function ButtonActionsSection(): JSX.Element {
-  const { frame, frameForm, setFrameFormValues, surface, voiceChat } = useFrameSettings()
+  const { frame, frameId, frameForm, setFrameFormValues, surface, voiceChat } = useFrameSettings()
   const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
   const supported = !cloudProfile || cloudFrameSupportsEventMap(frame.frameos_version)
   const buttons = frameButtons(frame, frameForm)
   const device = frameForm.device ?? frameDisplayDevice(frame)
-  const scenes = (frameForm.scenes ?? frame.scenes ?? []).map((scene) => ({ id: scene.id, name: scene.name }))
+  const frameScenes: FrameScene[] = frameForm.scenes ?? frame.scenes ?? []
+  const scenes = frameScenes.map((scene) => ({ id: scene.id, name: scene.name }))
   const reported = cloudProfile ? reportedEventMapOf(frame.hardware?.eventMap) : null
   const showReported = frameForm.event_map === undefined && reported !== null
   // A frame never given a map runs its device's (a HyperPixel's edge swipes,
@@ -74,6 +190,10 @@ export function ButtonActionsSection(): JSX.Element {
     backForward: frameSupportsBackForward(frame.frameos_version, cloudProfile),
   }
   const conflicts = bindingConflicts(bindings, offer)
+  // An ESP32 keeps its map in a 1 KB slot; a Show scene's settings are what
+  // fills it.
+  const mapBytes = eventMapBytes(rules)
+  const tooBigForEsp32 = isEsp32Frame(frame) && mapBytes > esp32EventMapMaxBytes
 
   const write = (next: readonly ButtonBinding[]): void => {
     setFrameFormValues({ event_map: frameEventMapRules(next, others) })
@@ -133,10 +253,18 @@ export function ButtonActionsSection(): JSX.Element {
       : []),
   ]
   const describe = (rule: EventMapRule): string =>
-    `${rule.event}${rule.match ? ' ' + JSON.stringify(rule.match) : ''} ${rule.emit ? `emits ${rule.emit}` : 'rewritten'} ${JSON.stringify(rule.as)}`
+    `${rule.event}${rule.match ? ' ' + JSON.stringify(rule.match) : ''} ${
+      rule.emit ? `emits ${rule.emit}` : 'rewritten'
+    } ${JSON.stringify(rule.as)}`
 
   const addButton = (
-    <Button size="small" color="secondary" onClick={addBinding} className="flex items-center gap-1" disabled={!supported}>
+    <Button
+      size="small"
+      color="secondary"
+      onClick={addBinding}
+      className="flex items-center gap-1"
+      disabled={!supported}
+    >
       <PlusIcon className="w-4 h-4" />
       Add action
     </Button>
@@ -177,8 +305,8 @@ export function ButtonActionsSection(): JSX.Element {
           </p>
         ) : null}
         <p className="frameos-muted text-xs">
-          What a press does on this frame, whatever scene is showing. A press bound here never reaches the scene;
-          a scene&apos;s own buttons are mapped from its menu, under Map buttons.
+          What a press does on this frame, whatever scene is showing. A press bound here never reaches the scene; a
+          scene&apos;s own buttons are mapped from its menu, under Map buttons.
           {touch ? ' A swipe in from an edge of the screen is bound the same way.' : ''}
           {offer.voiceChat
             ? ' Voice chat goes on a long press: the frame listens while the key is held and stops when it is let go, so a press or a double press has no end to it.'
@@ -210,49 +338,63 @@ export function ButtonActionsSection(): JSX.Element {
         ) : (
           <>
             {bindings.map((binding, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-1 items-center gap-2 @md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]"
-              >
-                <Select
-                  name={`event_map.${index}.gesture`}
-                  value={frameGestureValue(binding.gesture)}
-                  options={gestureOptions(binding)}
-                  disabled={!supported}
-                  onChange={(value) => {
-                    const gesture = parseFrameGestureValue(value)
-                    if (gesture) {
-                      write(bindings.map((b, i) => (i === index ? { ...b, gesture } : b)))
-                    }
-                  }}
-                />
-                <span className="frameos-muted text-sm">does</span>
-                <Select
-                  name={`event_map.${index}.action`}
-                  value={frameActionValue(binding.action)}
-                  options={actionOptions(binding)}
-                  disabled={!supported}
-                  onChange={(value) => {
-                    const action = parseFrameActionValue(value)
-                    if (action) {
-                      write(bindings.map((b, i) => (i === index ? { ...b, action } : b)))
-                    }
-                  }}
-                />
-                <Button
-                  color="secondary"
-                  size="small"
-                  className="flex items-center gap-1"
-                  disabled={!supported}
-                  onClick={() => write(bindings.filter((_b, i) => i !== index))}
-                >
-                  <TrashIcon className="w-4 h-4" />
-                  Remove
-                </Button>
+              <div key={index} className="space-y-2">
+                <div className="grid grid-cols-1 items-center gap-2 @md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
+                  <Select
+                    name={`event_map.${index}.gesture`}
+                    value={frameGestureValue(binding.gesture)}
+                    options={gestureOptions(binding)}
+                    disabled={!supported}
+                    onChange={(value) => {
+                      const gesture = parseFrameGestureValue(value)
+                      if (gesture) {
+                        write(bindings.map((b, i) => (i === index ? { ...b, gesture } : b)))
+                      }
+                    }}
+                  />
+                  <span className="frameos-muted text-sm">does</span>
+                  <Select
+                    name={`event_map.${index}.action`}
+                    value={frameActionValue(binding.action)}
+                    options={actionOptions(binding)}
+                    disabled={!supported}
+                    onChange={(value) => {
+                      const action = parseFrameActionValue(value)
+                      if (action) {
+                        write(bindings.map((b, i) => (i === index ? { ...b, action } : b)))
+                      }
+                    }}
+                  />
+                  <Button
+                    color="secondary"
+                    size="small"
+                    className="flex items-center gap-1"
+                    disabled={!supported}
+                    onClick={() => write(bindings.filter((_b, i) => i !== index))}
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                    Remove
+                  </Button>
+                </div>
+                {binding.action.kind === 'showScene' ? (
+                  <ShowSceneSettings
+                    action={binding.action}
+                    scene={frameScenes.find((scene) => scene.id === binding.action.sceneId)}
+                    frameId={frameId}
+                    disabled={!supported}
+                    onChange={(action) => write(bindings.map((b, i) => (i === index ? { ...b, action } : b)))}
+                  />
+                ) : null}
               </div>
             ))}
             {bindings.length === 0 && others.length === 0 ? (
               <p className="frameos-muted text-xs">No button actions. Every press reaches the scene.</p>
+            ) : null}
+            {tooBigForEsp32 ? (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                These actions take {mapBytes} bytes and an ESP32 holds {esp32EventMapMaxBytes}: the frame would keep its
+                old actions. Set fewer settings on the Show scene actions, or bind fewer presses.
+              </p>
             ) : null}
             {conflicts.length > 0 ? (
               <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-300">

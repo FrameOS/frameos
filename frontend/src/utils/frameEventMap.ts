@@ -15,12 +15,13 @@
 // section did not write (hand-made, a rewrite, another event) are kept as
 // they are.
 //
-// Import-light on purpose (types, the contract tables, the scene map helpers):
+// Import-light on purpose (types, the contract tables, the scene map helpers, showIf's coercion):
 // the cloud's node test suite exercises it directly.
-import type { EventMapRule, FrameScene } from '../types'
+import type { EventMapRule, FrameScene, StateField } from '../types'
 import { cloudFrameSupportsSettingsFrom, isEventMapRule } from './cloudFrameSettings'
 import { contractEventSpecs, screenEdges } from './eventsContract.gen'
 import { type ButtonGesture, gestureTitle, gestureValue, parseGestureValue } from './sceneEventMap'
+import { coerceStateFieldValue } from './showIf'
 
 export type FrameActionKind =
   | 'nextScene'
@@ -36,10 +37,18 @@ export type FrameActionKind =
   | 'toggleScreen'
   | 'voiceChat'
 
-/** What a bound press does. `sceneId` for `showScene` alone. */
+/** A scene's settings a press shows it with: its public fields' values (`setCurrentScene`'s `state`). */
+export type ShowSceneState = Record<string, unknown>
+
+/**
+ * What a bound press does. `sceneId` for `showScene` alone, and with it
+ * `state`: the values of that scene's public fields the press shows it with
+ * (absent or empty: the scene as it is).
+ */
 export interface FrameAction {
   kind: FrameActionKind
   sceneId?: string
+  state?: ShowSceneState
 }
 
 /** A swipe in from one edge of a touch screen (the dispatcher's `edgeSwipe`). */
@@ -255,15 +264,45 @@ export function parseFrameActionValue(value: string): FrameAction | null {
     : null
 }
 
-export function frameActionTitle(
-  action: FrameAction,
-  scenes: readonly Pick<FrameScene, 'id' | 'name'>[] = []
-): string {
+export function frameActionTitle(action: FrameAction, scenes: readonly Pick<FrameScene, 'id' | 'name'>[] = []): string {
   if (action.kind !== 'showScene') {
     return ACTION_TITLES[action.kind]
   }
   const scene = scenes.find((candidate) => candidate.id === action.sceneId)
-  return `${ACTION_TITLES.showScene}: ${scene?.name || action.sceneId || '?'}`
+  const settings = Object.keys(action.state ?? {}).length
+  const suffix = settings === 0 ? '' : settings === 1 ? ' (1 setting)' : ` (${settings} settings)`
+  return `${ACTION_TITLES.showScene}: ${scene?.name || action.sceneId || '?'}${suffix}`
+}
+
+/**
+ * A Show scene action with one of its scene's settings set, or taken out
+ * (`value` undefined or null: the scene keeps its own). The value is stored
+ * as the field's type wants it (`coerceStateFieldValue`: a boolean as a
+ * boolean, a number as a number; a number that does not parse is taken out),
+ * as the scene's settings form saves it.
+ */
+export function withShowSceneSetting(
+  action: FrameAction,
+  field: Pick<StateField, 'name' | 'type'>,
+  value: unknown
+): FrameAction {
+  const { [field.name]: _previous, ...rest } = action.state ?? {}
+  const coerced =
+    (field.type === 'integer' || field.type === 'float') && value === ''
+      ? undefined
+      : coerceStateFieldValue(field, value)
+  const state = coerced === undefined || coerced === null ? rest : { ...rest, [field.name]: coerced }
+  const { state: _state, ...plain } = action
+  return Object.keys(state).length > 0 ? { ...plain, state } : plain
+}
+
+/**
+ * The settings of a Show scene action its scene no longer has as public
+ * fields (renamed, made private, removed): the frame ignores them, and the
+ * row names them so they can be cleared.
+ */
+export function showSceneStaleSettings(action: FrameAction, fieldNames: readonly string[]): string[] {
+  return Object.keys(action.state ?? {}).filter((name) => !fieldNames.includes(name))
 }
 
 /** The rule the section writes for one binding: the press (or the swipe) replaced by the action's event. */
@@ -279,7 +318,15 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
     case 'prevScene':
       return { event, match, emit: 'setCurrentScene', as: { direction: 'prev' } }
     case 'showScene':
-      return { event, match, emit: 'setCurrentScene', as: { sceneId: binding.action.sceneId ?? '' } }
+      return {
+        event,
+        match,
+        emit: 'setCurrentScene',
+        as:
+          binding.action.state && Object.keys(binding.action.state).length > 0
+            ? { sceneId: binding.action.sceneId ?? '', state: { ...binding.action.state } }
+            : { sceneId: binding.action.sceneId ?? '' },
+      }
     case 'back':
     case 'forward':
     case 'sceneSwitcher':
@@ -308,7 +355,8 @@ const SCENE_LESS_EMITS: readonly string[] = [
 /**
  * The binding a rule means, when it is one the section writes: a `button`
  * rule matching one label and one press, or an `edgeSwipe` rule matching
- * one edge, that emits a scene switch (by direction or by id), back or
+ * one edge, that emits a scene switch (by direction, or by id with the
+ * scene's settings to show it with), back or
  * forward, the scene switcher, a render or a display switch with nothing
  * else in `as`.
  * Anything else is the owner's own rule and null here.
@@ -342,8 +390,23 @@ export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
     if (keys.length === 1 && (as.direction === 'next' || as.direction === 'prev')) {
       return { gesture, action: { kind: as.direction === 'next' ? 'nextScene' : 'prevScene' } }
     }
-    if (keys.length === 1 && typeof as.sceneId === 'string' && as.sceneId) {
-      return { gesture, action: { kind: 'showScene', sceneId: as.sceneId } }
+    // A scene by id, and the values of its public fields the press shows it
+    // with (`state`, a plain object; an empty one is no settings).
+    const state: unknown = as.state
+    if (
+      typeof as.sceneId === 'string' &&
+      as.sceneId &&
+      keys.every((key) => key === 'sceneId' || key === 'state') &&
+      (state === undefined || (typeof state === 'object' && state !== null && !Array.isArray(state)))
+    ) {
+      const settings = (state ?? {}) as ShowSceneState
+      return {
+        gesture,
+        action:
+          Object.keys(settings).length > 0
+            ? { kind: 'showScene', sceneId: as.sceneId, state: { ...settings } }
+            : { kind: 'showScene', sceneId: as.sceneId },
+      }
     }
     return null
   }
@@ -408,11 +471,28 @@ export function bindingConflicts(bindings: readonly ButtonBinding[], offer?: Fra
       (binding.action.kind === 'turnOn' || binding.action.kind === 'turnOff' || binding.action.kind === 'toggleScreen')
     ) {
       conflicts.push(
-        `${title} is bound to ${ACTION_TITLES[binding.action.kind]}, but this display cannot be switched off and on; only the scene hears it`
+        `${title} is bound to ${
+          ACTION_TITLES[binding.action.kind]
+        }, but this display cannot be switched off and on; only the scene hears it`
       )
     }
   }
   return conflicts
+}
+
+/**
+ * The most an ESP32 holds of its frame's event map: the compact JSON in a
+ * 1 KB slot with its terminating NUL (`FOS_EVENT_MAP_LEN`,
+ * embedded/esp32/main/fos_config.h). A longer map is refused by the cloud's
+ * frame and ignored by a backend's (`settings: eventMap ignored`), so the
+ * section says so before it is saved. A Show scene's settings are what makes
+ * a map long.
+ */
+export const esp32EventMapMaxBytes = 1023
+
+/** The bytes the frame's map takes on an ESP32 (compact JSON, UTF-8). */
+export function eventMapBytes(rules: readonly EventMapRule[]): number {
+  return rules.length === 0 ? 0 : new TextEncoder().encode(JSON.stringify(rules)).length
 }
 
 /**

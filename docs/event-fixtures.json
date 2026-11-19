@@ -3194,7 +3194,7 @@
    },
    {
     "name": "the frame's event map binds a press to the frame, whatever scene is showing",
-    "why": "frame.json `eventMap` is the control plane's \"Button actions\" (a reTerminal's LEFT and RIGHT held are the previous and the next scene, on every preset). The dispatcher applies it first, scene or no scene: a matching rule with `emit` replaces the press with the event it names (origin `eventMap`, `as` its payload) and the scene never hears the press — not even a listener with no filter; a rule without `emit` rewrites the payload for every scene. `setCurrentScene {direction}` walks the host's scene order (the control plane's list) and wraps; a direction that is not `next` or `prev` is refused. An installed scene's own rule may emit too (a double press of REFRESH is this scene's page 2). What the map emits is never mapped again.",
+    "why": "frame.json `eventMap` is the control plane's \"Button actions\" (a reTerminal's LEFT and RIGHT held are the previous and the next scene, on every preset). The dispatcher applies it first, scene or no scene: a matching rule with `emit` replaces the press with the event it names (origin `eventMap`, `as` its payload) and the scene never hears the press — not even a listener with no filter; a rule without `emit` rewrites the payload for every scene. `setCurrentScene {direction}` walks the host's scene order (the control plane's list) and wraps; a direction that is not `next` or `prev` is refused. An installed scene's own rule may emit too (a double press of REFRESH is this scene's page 2). What the map emits is never mapped again. A rule may show one scene by id with its settings (`setCurrentScene {sceneId, state}`, \"Button actions\"' Show scene): the state goes to that scene's public fields as the switch's own.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/frameMapA",
@@ -3375,6 +3375,20 @@
       "as": {
        "label": "A"
       }
+     },
+     {
+      "event": "button",
+      "match": {
+       "label": "KEY1",
+       "action": "press"
+      },
+      "emit": "setCurrentScene",
+      "as": {
+       "sceneId": "fixtures/dispatcher/frameMapB",
+       "state": {
+        "page": 3
+       }
+      }
      }
     ],
     "scene": "fixtures/dispatcher/frameMapA",
@@ -3531,6 +3545,49 @@
        "page": 2,
        "heardButton": null
       }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "prev"
+        }
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/frameMapA",
+       "run frameMapB close",
+       "run frameMapA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/frameMapA"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "KEY1",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> setCurrentScene",
+       "select fixtures/dispatcher/frameMapB",
+       "run frameMapA close",
+       "run frameMapB setCurrentScene",
+       "run frameMapB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/frameMapB",
+      "state": {
+       "page": 3
+      },
+      "handled": 2
      }
     ]
    },

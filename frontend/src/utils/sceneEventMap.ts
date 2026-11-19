@@ -211,7 +211,7 @@ function listenerAs(listener: ButtonListener): Record<string, EventMapValue> {
   return as
 }
 
-function sameValues(a: Record<string, EventMapValue> | undefined, b: Record<string, EventMapValue>): boolean {
+function sameValues(a: Record<string, unknown> | undefined, b: Record<string, EventMapValue>): boolean {
   const left = a ?? {}
   const leftKeys = Object.keys(left).sort()
   const rightKeys = Object.keys(b).sort()
