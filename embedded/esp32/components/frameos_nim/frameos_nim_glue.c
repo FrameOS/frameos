@@ -66,6 +66,7 @@ extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
 extern const char *fos_nim_scene_info_json_impl(void);
 extern void fos_nim_current_scene_id_impl(char *out, size_t len);
+extern void fos_nim_current_scene_name_impl(char *out, size_t len);
 extern const char *fos_nim_scene_state_json_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern bool fos_nim_scene_running_impl(const char *scene_id);
@@ -958,6 +959,17 @@ void frameos_nim_current_scene_id(char *out, size_t len)
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_current_scene_id_impl(out, len);
+    nim_lock_give();
+}
+
+void frameos_nim_current_scene(char *id, size_t id_len, char *name, size_t name_len)
+{
+    if (id && id_len) id[0] = '\0';
+    if (name && name_len) name[0] = '\0';
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    if (id && id_len) fos_nim_current_scene_id_impl(id, id_len);
+    if (name && name_len) fos_nim_current_scene_name_impl(name, name_len);
     nim_lock_give();
 }
 

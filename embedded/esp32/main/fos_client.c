@@ -851,31 +851,6 @@ static uint32_t keep_awake_remaining_seconds(void)
     return lan_s > hold_s ? lan_s : hold_s;
 }
 
-static bool json_string_value(const char *json, const char *key, char *out, size_t out_len)
-{
-    if (!json || !key || !out || out_len == 0) return false;
-    out[0] = '\0';
-
-    char pattern[64];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return false;
-    p = strchr(p + strlen(pattern), ':');
-    if (!p) return false;
-    p++;
-    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-    if (*p != '"') return false;
-    p++;
-
-    size_t used = 0;
-    while (*p && *p != '"' && used + 1 < out_len) {
-        if (*p == '\\' && p[1]) p++;
-        out[used++] = *p++;
-    }
-    out[used] = '\0';
-    return used > 0;
-}
-
 RTC_NOINIT_ATTR static uint32_t s_render_recovery_restarts;
 RTC_NOINIT_ATTR static uint32_t s_render_recovery_magic;
 #define FOS_RENDER_RECOVERY_MAGIC 0x5245434fu /* "RECO" */
@@ -925,11 +900,9 @@ static void json_escape_value(const char *src, char *out, size_t out_len)
 static void current_scene_details(char *scene_id, size_t scene_id_len,
                                   char *scene_name, size_t scene_name_len)
 {
-    if (scene_id && scene_id_len > 0) scene_id[0] = '\0';
-    if (scene_name && scene_name_len > 0) scene_name[0] = '\0';
-    const char *info = frameos_nim_scene_info_json();
-    json_string_value(info, "currentSceneId", scene_id, scene_id_len);
-    json_string_value(info, "currentSceneName", scene_name, scene_name_len);
+    /* Copied under the runtime lock: the scene info JSON is one shared
+     * buffer another task can build again while this one reads it. */
+    frameos_nim_current_scene(scene_id, scene_id_len, scene_name, scene_name_len);
 }
 
 /* Defined below, next to the other render helpers. */

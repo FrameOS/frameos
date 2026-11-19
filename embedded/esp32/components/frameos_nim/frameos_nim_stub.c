@@ -73,6 +73,11 @@ void frameos_nim_set_storages(const char *internal_path, bool card) { (void)inte
 size_t frameos_nim_js_runtime_bytes(void) { return 0; }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
 void frameos_nim_current_scene_id(char *out, size_t len) { if (out && len) out[0] = '\0'; }
+void frameos_nim_current_scene(char *id, size_t id_len, char *name, size_t name_len)
+{
+    if (id && id_len) id[0] = '\0';
+    if (name && name_len) name[0] = '\0';
+}
 const char *frameos_nim_scene_info_json(void) { return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}"; }
 const char *frameos_nim_scene_state_json(void) { return "{}"; }
 /* No runtime, no lock to wait for: the _wait variants never time out here. */

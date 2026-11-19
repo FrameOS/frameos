@@ -1067,6 +1067,12 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
             const uint8_t *now = NULL;
             size_t now_len = 0;
             if (!fos_client_snapshot_acquire(lock_timeout_ms, &now, NULL, NULL, NULL, &now_len)) {
+                /* Let go (a render lent the panel buffer it was, as on a
+                 * 16-grey board: snapshot_before_lend) or held past the
+                 * timeout by a render: a newer picture is on its way either
+                 * way. It read as a failure, "UNKNOWN ERROR, HTTP 0", every
+                 * 10 s under the E1003's clock (523 in a bench run). */
+                superseded = true;
                 ok = false;
                 break;
             }

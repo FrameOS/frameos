@@ -1107,6 +1107,22 @@ proc fos_nim_current_scene_id_impl(buf: ptr UncheckedArray[char]; bufLen: csize_
     n = 0
   buf[n] = '\0'
 
+proc fos_nim_current_scene_name_impl(buf: ptr UncheckedArray[char]; bufLen: csize_t) {.exportc, cdecl.} =
+  ## The name of the scene showing into `buf`, as fos_nim_current_scene_id_impl
+  ## does the id: a render line's name without the shared scene info buffer,
+  ## which another task may build again while the render task reads it.
+  if bufLen == 0:
+    return
+  var n = 0
+  try:
+    let name = currentSceneName()
+    n = min(name.len, bufLen.int - 1)
+    if n > 0:
+      copyMem(buf, name[0].unsafeAddr, n)
+  except CatchableError, Defect:
+    n = 0
+  buf[n] = '\0'
+
 proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
   try:
     sceneInfoBuffer = sceneInfoJson()

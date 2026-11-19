@@ -128,6 +128,12 @@ const char *frameos_nim_scene_info_json(void);
  * list of every scene around it (5.7 ms a frame with 25 scenes on a SenseCAP
  * Indicator, asked by every render pass, 2026-11-18). */
 void frameos_nim_current_scene_id(char *out, size_t len);
+/* The id and the name of the scene showing, copied under the runtime lock.
+ * What frameos_nim_scene_info_json returns is the runtime's one buffer, read
+ * after the lock is given back: another task asking for it then (the HTTP
+ * server, the console) builds it again under the reader, and render lines
+ * went out with an empty scene (13 in a hardware bench run, 2026-11-19). */
+void frameos_nim_current_scene(char *id, size_t id_len, char *name, size_t name_len);
 /* Same, but gives up after timeout_ms (-1 = wait forever, 0 = try once).
  * NULL means exactly one thing: the wait timed out because the runtime is
  * busy (a render holds the runtime lock for its whole duration, over a
