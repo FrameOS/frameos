@@ -12,7 +12,7 @@ vi.mock("../../../../../../frontend/src/scenes/frame/panels/Scenes/scenesLogic",
 }));
 vi.mock("../../../../../../frontend/src/models/wasmPreviewModel", () => ({
   fetchSettingsJson: async () => "{}",
-  previewProxyUrl: async () => null,
+  previewProxy: async () => ({ proxyUrl: "", proxyFirst: false }),
 }));
 
 import { renderSceneCheck } from "../../../../../../frontend/src/utils/wasmSceneRenderCheck";

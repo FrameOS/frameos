@@ -18,6 +18,12 @@ export const RENDER_CHECK_TIMEOUT_MS = 30_000;
 const MAX_COLLECTED_LOGS = 100;
 const MAX_COLLECTED_ERRORS = 20;
 
+/** The previewed frame's local network access as a runtime option: none
+ * when the page has no switch to copy. */
+export function lanAccessOption(lanAccess: boolean | undefined): { lanAccess?: boolean } {
+  return lanAccess === undefined ? {} : { lanAccess };
+}
+
 /** The plane's preview proxy (the store's on the cloud). */
 export function renderCheckProxyUrl(): string | undefined {
   return sceneWorkspaceHost().previewProxyUrl ?? undefined;
@@ -366,6 +372,8 @@ export async function renderSceneCheck({
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl: renderCheckProxyUrl(),
+      proxyFirst: renderCheckProxyUrl() !== undefined && sceneWorkspaceHost().previewProxyFirst,
+      ...lanAccessOption(sceneWorkspaceHost().previewLanAccess()),
       sceneId: scene.id,
     });
   });

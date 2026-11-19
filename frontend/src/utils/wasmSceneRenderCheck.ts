@@ -1,5 +1,5 @@
 import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/scenesLogic'
-import { fetchSettingsJson, previewProxyUrl } from '../models/wasmPreviewModel'
+import { fetchSettingsJson, previewProxy } from '../models/wasmPreviewModel'
 import { assetUrl } from './assetUrl'
 import { wasmPreviewDimensions } from './wasmScenePreview'
 import { describeOutOfMemory } from './deviceLimits'
@@ -28,6 +28,8 @@ export interface SceneRenderCheckFrame {
   rotate?: number
   name?: string
   timezone?: string
+  /** The frame's local network access (a cloud frame's), copied by the run. */
+  lan_access?: boolean | null
   /** Render under this device's memory and run as it (frameRenderDevice);
    * null renders with the browser's memory. */
   device?: FrameRenderDevice | null
@@ -134,7 +136,7 @@ export async function renderSceneCheck(
     rotate: frame.rotate,
   })
   const settingsJson = await fetchSettingsJson(frame.id)
-  const proxyUrl = await previewProxyUrl(frame.id)
+  const { proxyUrl, proxyFirst } = await previewProxy(frame.id)
 
   const errors: string[] = []
   const logs: string[] = []
@@ -218,7 +220,9 @@ export async function renderSceneCheck(
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl,
+      proxyFirst,
       sceneId: scene.id,
+      lanAccess: frame.lan_access ?? undefined,
       deviceLimits: frame.device?.limits ?? null,
       embedded: Boolean(frame.device?.limits.embedded),
     })

@@ -2553,17 +2553,34 @@ def _preview_proxy_allows_private(frame: Frame) -> bool:
     return preview_network_policy(frame) != NETWORK_POLICY_PUBLIC
 
 
-async def _preview_proxy_host_is_blocked(host: str, *, allow_private: bool) -> bool:
+# `X-FrameOS-Proxy-Refused` on a 403 names the rule that refused the host, so
+# the preview runtime (frameos/tools/wasm/frameos_library.js) can say why in
+# the scene instead of handing it a bare 403: `local-network` is the frame's
+# own switch (a private address the frame would reach with local network
+# access on), `host` anything else (loopback, link-local, a name that does not
+# resolve). The cloud's store/preview-proxy answers `public-only`.
+PREVIEW_PROXY_REFUSED_HEADER = "X-FrameOS-Proxy-Refused"
+
+
+async def _preview_proxy_refusal(host: str, *, allow_private: bool) -> str | None:
     """SSRF guard for the live-preview HTTP proxy, on the shared resolver-based
-    check (app/utils/network.py). The connect is checked again with the same
-    settings (guarded_transport)."""
+    check (app/utils/network.py): None when the host may be fetched, else the
+    rule that refused it (``PREVIEW_PROXY_REFUSED_HEADER``). The connect is
+    checked again with the same settings (guarded_transport)."""
     if not host:
-        return True
+        return "host"
     try:
         await check_target_host(host, allow_private=allow_private, allow_loopback=False)
     except TargetBlocked:
-        return True
-    return False
+        if not allow_private:
+            try:
+                # Would it pass as the frame with its local network access on?
+                await check_target_host(host, allow_private=True, allow_loopback=False)
+                return "local-network"
+            except TargetBlocked:
+                pass
+        return "host"
+    return None
 
 
 @api_project.post("/frames/{id:int}/scene_preview_proxy")
@@ -2611,8 +2628,13 @@ async def api_frame_scene_preview_proxy(
     if parsed is None or parsed.scheme not in ("http", "https") or not parsed.host:
         _bad_request(f"Invalid proxy URL: {url}")
     allow_private = _preview_proxy_allows_private(frame)
-    if await _preview_proxy_host_is_blocked(parsed.host, allow_private=allow_private):
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Proxy target host is not allowed")
+    refused = await _preview_proxy_refusal(parsed.host, allow_private=allow_private)
+    if refused is not None:
+        raise HTTPException(
+            status_code=HTTPStatus.FORBIDDEN,
+            detail="Proxy target host is not allowed",
+            headers={PREVIEW_PROXY_REFUSED_HEADER: refused},
+        )
 
     body_bytes = base64.b64decode(body_b64) if body_b64 else None
     # Drop hop-by-hop / host-scoped headers; forward app-supplied ones (API keys etc.).
