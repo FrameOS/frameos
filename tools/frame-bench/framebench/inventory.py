@@ -12,7 +12,7 @@ import glob
 import json
 import os
 
-from .console import Console
+from .console import Console, parse_payload_json
 
 # Boards with a touch panel the bench can tap (module ids from fos_board.c).
 TOUCH_MODULES = {'seeed_sensecap_indicator_d1', 'seeed_reterminal_sticky', 'seeed_reterminal_e1003',
@@ -51,11 +51,9 @@ def probe_port_now(port: str, timeout: float = 25.0) -> dict | None:
         status = None
         for _ in range(2):
             ok, body = con.usb_api('status', timeout)
-            try:
-                status = json.loads(body)
+            status = parse_payload_json(body)
+            if status is not None:
                 break
-            except Exception:
-                continue
         return {'port': port, 'status': status} if status else None
     finally:
         con.close()

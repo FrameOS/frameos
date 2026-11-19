@@ -602,8 +602,14 @@ def _sample_layout(repo_root, layout_id):
     return None
 
 
-def _push_and_wait(ctx, frame, scenes, expect_layout=None, timeout=300):
-    """Save the frame's scenes on the backend, push, wait for the device to take them and render."""
+def _push_and_wait(ctx, frame, scenes, expect_layout=None, timeout=300, catalog_ok=False):
+    """Save the frame's scenes on the backend, push, wait for the device to take them and render.
+
+    `catalog_ok`: a push that adds or removes a scene the panel is not showing
+    (the Code editor) is applied without any `scenes:load`: the board patches
+    its store and prints its new `setSceneCatalog`, and nothing renders. Every
+    such push read as a 300 s timeout (the 2026.11.12 bench, four of five
+    boards); a desktop push changes the scene showing, so it keeps the load."""
     con = ctx.console(frame)
     be, fid = ctx.backend, frame['backend_frame']
     con.drain()
@@ -616,7 +622,10 @@ def _push_and_wait(ctx, frame, scenes, expect_layout=None, timeout=300):
     # wrote it (`"origin":"stored"`): that one never says backend, and every
     # such push read as a 300 s timeout (the hardware bench, 2026-11-16).
     _, line, got = con.wait_for(lambda x: ('"scenes:load"' in x and ('"origin":"backend"' in x or '"origin":"stored"' in x)) or
+                                (catalog_ok and 'setSceneCatalog:' in x) or
                                 ('"scenes:sync"' in x and '"status":"error"' in x and 'patch-refused' not in x and 'connect' not in x), timeout)
+    if catalog_ok and line and 'setSceneCatalog:' in line:
+        return round((time.time() - t) * 1000), line, []
     if line and '"status":"error"' in line:
         # A second fetch can fail while the first payload is applying (a board
         # short of memory): the push took if a backend load follows.
@@ -804,7 +813,7 @@ def suite_code(ctx, frame, opens=None):
     installed = original if any(s.get('id') == CODE_EDITOR_ID for s in original) else original + [editor]
     try:
         if installed is not original:
-            took, line, _ = _push_and_wait(ctx, frame, installed)
+            took, line, _ = _push_and_wait(ctx, frame, installed, catalog_ok=True)
             if took is None:
                 issues.append(issue('fail', 'code_push', 'code install', 'the device did not take the Code editor: ' + (line or 'timeout')[:200]))
                 return {'code': results, 'issues': issues}
@@ -814,16 +823,25 @@ def suite_code(ctx, frame, opens=None):
             con.drain()
             t0 = time.time()
             con.send('event setCurrentScene %s' % json.dumps({'sceneId': CODE_EDITOR_ID, 'state': state}, separators=(',', ':')))
-            t_done, line, got = wait_render(con, render_timeout(frame))
-            _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
-            w = summarize(got + tail)
+            # The editor's own render: a frame that renders often (the E1003's
+            # Clock, every second) finishes one more of the old scene before
+            # the switch lands, and that one is not the editor's.
+            mine = '"sceneId":"%s"' % CODE_EDITOR_ID
+            t_done, line, got = con.wait_for(lambda x: (x.startswith('{"event":"render:done"') and mine in x) or bool(RENDER_FAILED.match(x)),
+                                             render_timeout(frame))
+            if t_done and not RENDER_FAILED.match(line):
+                _, done_line, tail = con.wait_for(lambda x: bool(RENDER_DONE.match(x)), 3)
+                got += tail
+                line = done_line or line
+            w = summarize(got)
             ev = w['events_done'][-1] if w['events_done'] else {}
             entry = {'scene': target.get('name') if target else None, **(_scene_kinds(target) if target else {}),
                      'wall_ms': round((t_done - t0) * 1000) if t_done else None,
                      'done_ms': w['done'][-1]['ms'] if w['done'] else None,
                      'scene_shown': ev.get('sceneId'), 'freePsram': ev.get('freePsram')}
             if not t_done:
-                issues.append(issue('fail', 'code_open', where, 'opening the editor produced no render'))
+                shown = (w['events_done'][-1] if w['events_done'] else {}).get('sceneId')
+                issues.append(issue('fail', 'code_open', where, 'opening the editor produced no render of it' + (f' (the frame kept rendering {shown})' if shown else '')))
             elif line and RENDER_FAILED.match(line):
                 issues.append(issue('fail', 'code_render', where, line[:200]))
             elif ev.get('sceneId') and ev['sceneId'] != CODE_EDITOR_ID:
@@ -858,7 +876,7 @@ def suite_code(ctx, frame, opens=None):
         issues += incidents_since(con, t_suite, 'code')
     finally:
         if installed is not original:
-            _push_and_wait(ctx, frame, original)
+            _push_and_wait(ctx, frame, original, catalog_ok=True)
         elif original:
             first = next((s for s in plain), None)
             if first:

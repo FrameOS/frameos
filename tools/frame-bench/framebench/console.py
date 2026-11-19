@@ -42,6 +42,20 @@ class Incident:
     line: str
 
 
+def parse_payload_json(body: str):
+    """A usb_api JSON payload, read up to where its value ends: a log line the
+    firmware printed as the payload finished can be glued to its last line
+    with no newline between (the E1003's `it8951:` lines made discovery miss
+    the board, 2026-11-19). None when there is no JSON value."""
+    start = min((i for i in (body.find('{'), body.find('[')) if i >= 0), default=-1)
+    if start < 0:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(body[start:])[0]
+    except ValueError:
+        return None
+
+
 @dataclass
 class Console:
     port: str
@@ -154,7 +168,9 @@ class Console:
             if text.startswith(done):
                 break
             # A log line the firmware printed while the payload streamed.
-            if inside and not text.startswith(('{"event"', 'W (', 'E (', 'I (', 'render #')):
+            # The IT8951's driver prints its own lines with no log prefix
+            # (`it8951: partial fast ...`), one a second under a clock.
+            if inside and not text.startswith(('{"event"', 'W (', 'E (', 'I (', 'render #', 'it8951:')):
                 body.append(text)
         ok = bool(last) and not last.startswith('__FRAMEOS_USB_ERROR__')
         return ok, '\n'.join(body)
@@ -162,10 +178,9 @@ class Console:
     def usb_api_json(self, sub: str, timeout: float = 20.0):
         for _ in range(3):
             ok, body = self.usb_api(sub, timeout)
-            try:
-                return json.loads(body)
-            except Exception:
-                continue
+            value = parse_payload_json(body)
+            if value is not None:
+                return value
         return None
 
     def put_bytes(self, sub: str, payload: bytes, timeout: float = 120.0) -> tuple[bool, str]:
