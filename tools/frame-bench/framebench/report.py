@@ -150,6 +150,15 @@ def write(run: dict, out_dir: str, baseline: dict | None = None) -> str:
             md.append('Soak (memory after each round): ' + ', '.join(
                 f"r{s['round']}: psram {_ms(s.get('psramFree'))} / internal {_ms(s.get('internalFree'))}" for s in suites['soak'].get('soak', [])))
             md.append('')
+        code = (suites.get('code') or {}).get('code')
+        if code:
+            md.append('| Code editor on | kind | open ms | render ms | tap ms | JS errors | picture |')
+            md.append('|---|---|---|---|---|---|---|')
+            for c in code:
+                kind = ', '.join(k.replace('_', ' ') for k in ('js_app', 'code_node') if c.get(k)) or '-'
+                md.append(f"| {c.get('scene') or '(its list)'} | {kind} | {_ms(c.get('wall_ms'))} | {_ms(c.get('done_ms'))} | "
+                          f"{_ms(c.get('tap_ms'))} | {len(c.get('js_errors') or [])} | {c.get('image') or '-'} |")
+            md.append('')
         for key in ('builtin', 'input', 'storm', 'offline', 'thin', 'device'):
             src = suites.get(key) or (suites.get('thin') if key == 'device' else None)
             if not src:

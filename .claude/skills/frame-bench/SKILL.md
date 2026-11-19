@@ -65,6 +65,7 @@ Exit code 2 means a `crash` or `fail` issue.
 | `builtin` | scene switcher and scene settings open / close | local |
 | `input` | a drag across the panel, next / previous scene | touch |
 | `desktop` | every scene dressed in each desktop layout (Windows 98, Tiling, macOS, BeOS, Classic Mac, NeXTSTEP, OS/2 Warp, Omarchy, Commander samples), pushed through the backend, four scenes opened as windows, a tap in each, refocus; the window limit and memory; the frame's own scenes restored after | local + backend |
+| `code` | the Code editor (`docs/code-editor.md`) installed beside the frame's scenes and opened on its list and on a few scenes (one with a JS app, one with a code node): open time, render, JavaScript errors in the log (`is not a function`, …), a tap; on a native-USB console the panel after each open is saved as `<frame>.code-<n>.bmp`, since the editor shows a failed `frameos.code` on the screen; the frame's scenes restored after | local + backend |
 | `storm` | eight switches 300 ms apart: alive, showing the last | local |
 | `soak` | every scene each round (3): memory after each round; a steady fall is a leak | local |
 | `offline` | the backend hangs (a tarpit port): switches must stay prompt | local + backend |

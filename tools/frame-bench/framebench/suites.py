@@ -7,6 +7,7 @@ outside what this board should do), `note` (worth knowing).
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import time
@@ -746,8 +747,129 @@ def suite_desktop(ctx, frame, layouts=None):
     return {'desktop': results, 'issues': issues}
 
 
+CODE_EDITOR_ID = 'code-editor'
+# A thrown frameos.code (or a native the runtime does not have) reaches the
+# log as one of these when it escapes the app; what the editor catches it
+# writes on the screen instead, which is what the saved pictures are for.
+JS_ERROR = re.compile(r'is not a function|TypeError|ReferenceError|is not defined|frameos\.code:')
+
+
+def _scene_kinds(scene):
+    nodes = scene.get('nodes') or []
+    return {'js_app': bool(scene.get('apps')), 'code_node': any(n.get('type') == 'code' for n in nodes)}
+
+
+def suite_code(ctx, frame, opens=None):
+    """The Code editor (docs/code-editor.md): installed beside the frame's scenes,
+    opened on a few of them (one with a JS app, one with a code node when the
+    frame has them) and on its own list, each open timed, its render and log
+    checked for JavaScript errors, a tap on touch boards. On a native-USB
+    console the panel is saved after each open (`code-<n>.bmp` in the run
+    dir): the editor shows a failed frameos.code on the screen, not in a log."""
+    import base64
+    import os
+    if frame['kind'] != 'local':
+        return {'skipped': 'the Code editor runs on a board with its own runtime', 'issues': []}
+    if not ctx.backend or not frame.get('backend_frame'):
+        return {'skipped': 'needs the backend frame', 'issues': []}
+    con = ctx.console(frame)
+    be, fid = ctx.backend, frame['backend_frame']
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    editor = None
+    import glob
+    for path in glob.glob(os.path.join(repo_root, 'repo', 'scenes', 'samples', '*', 'scenes.json')):
+        with open(path) as fh:
+            data = json.load(fh)
+        for s in data if isinstance(data, list) else [data]:
+            if s.get('id') == CODE_EDITOR_ID:
+                editor = s
+    if not editor:
+        return {'skipped': 'no Code editor sample in repo/scenes/samples', 'issues': []}
+    row = be.frame(fid)
+    if row.get('frame_settings_on_screen') is False:
+        return {'skipped': "the frame's settings on its screen are off: the editor reads nothing", 'issues': []}
+    original = row.get('scenes') or []
+    plain = [s for s in original if not (s.get('settings') or {}).get('isLayout') and s.get('id') != CODE_EDITOR_ID]
+    count = opens or (1 if (ctx.quick or sampled(ctx, frame)) else 3)
+    targets = []
+    for want in ('js_app', 'code_node'):
+        hit = next((s for s in plain if _scene_kinds(s)[want] and s not in targets), None)
+        if hit:
+            targets.append(hit)
+    targets += [s for s in plain if s not in targets]
+    targets = targets[:count]
+    save_images = 'ACM' in frame['port']
+    results, issues = [], []
+    t_suite = time.time()
+    installed = original if any(s.get('id') == CODE_EDITOR_ID for s in original) else original + [editor]
+    try:
+        if installed is not original:
+            took, line, _ = _push_and_wait(ctx, frame, installed)
+            if took is None:
+                issues.append(issue('fail', 'code_push', 'code install', 'the device did not take the Code editor: ' + (line or 'timeout')[:200]))
+                return {'code': results, 'issues': issues}
+        for n, target in enumerate([None] + targets):
+            where = f"code {target.get('name') if target else '(list)'}"
+            state = {'open': target['id'] if target else ''}
+            con.drain()
+            t0 = time.time()
+            con.send('event setCurrentScene %s' % json.dumps({'sceneId': CODE_EDITOR_ID, 'state': state}, separators=(',', ':')))
+            t_done, line, got = wait_render(con, render_timeout(frame))
+            _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
+            w = summarize(got + tail)
+            ev = w['events_done'][-1] if w['events_done'] else {}
+            entry = {'scene': target.get('name') if target else None, **(_scene_kinds(target) if target else {}),
+                     'wall_ms': round((t_done - t0) * 1000) if t_done else None,
+                     'done_ms': w['done'][-1]['ms'] if w['done'] else None,
+                     'scene_shown': ev.get('sceneId'), 'freePsram': ev.get('freePsram')}
+            if not t_done:
+                issues.append(issue('fail', 'code_open', where, 'opening the editor produced no render'))
+            elif line and RENDER_FAILED.match(line):
+                issues.append(issue('fail', 'code_render', where, line[:200]))
+            elif ev.get('sceneId') and ev['sceneId'] != CODE_EDITOR_ID:
+                issues.append(issue('fail', 'code_not_shown', where, f"the frame shows {ev['sceneId']}, not the editor"))
+            if frame['touch'] and t_done:
+                con.drain()
+                tt = time.time()
+                tap(con, frame, 0.25, 0.35)
+                wt = summarize(con.idle(3 + frame.get('refresh_s', 0)))
+                first = min([d['t'] for d in wt['done']] + [b['t'] for b in wt['burst']], default=None)
+                entry['tap_ms'] = round((first - tt) * 1000) if first else None
+            errs = [x for x in con.history_since(t0) if JS_ERROR.search(x)]
+            if errs:
+                entry['js_errors'] = errs[:3]
+                issues.append(issue('fail', 'code_js_error', where, errs[0][:300]))
+            if save_images and t_done:
+                ok, body = con.usb_api('image', 60)
+                if ok and body:
+                    try:
+                        safe = ''.join(c if c.isalnum() else '_' for c in (frame.get('name') or frame['port']))
+                        path = os.path.join(ctx.out_dir, f'{safe}.code-{n}.bmp')
+                        with open(path, 'wb') as fh:
+                            fh.write(base64.b64decode(''.join(body.split())))
+                        entry['image'] = os.path.basename(path)
+                    except Exception as exc:  # a log line glued into the payload
+                        entry['image_error'] = str(exc)[:120]
+            if entry['wall_ms'] and entry['done_ms'] is not None and entry['wall_ms'] - entry['done_ms'] > SWITCH_SLOW_MS:
+                issues.append(issue('slow', 'code_open_wait', where, f"{entry['wall_ms']} ms for a {entry['done_ms']} ms render"))
+            if (entry['done_ms'] or 0) > WARM_SLOW_MS:
+                issues.append(issue('slow', 'code_render_slow', where, f"the editor rendered in {entry['done_ms']} ms"))
+            results.append(entry)
+        issues += incidents_since(con, t_suite, 'code')
+    finally:
+        if installed is not original:
+            _push_and_wait(ctx, frame, original)
+        elif original:
+            first = next((s for s in plain), None)
+            if first:
+                con.send('event setCurrentScene {"sceneId":"%s"}' % first['id'])
+                wait_render(con, render_timeout(frame))
+    return {'code': results, 'issues': issues}
+
+
 SUITES = {
     'status': suite_status,
+    'code': suite_code,
     'scenes': suite_scenes,
     'builtin': suite_builtin,
     'input': suite_input,
@@ -760,7 +882,7 @@ SUITES = {
 }
 # What `--suites default` runs per frame kind.
 DEFAULT = {
-    'local': ['status', 'reboot', 'scenes', 'builtin', 'input', 'desktop', 'storm', 'soak', 'offline'],
+    'local': ['status', 'reboot', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
     'thin': ['status', 'thin'],
     'pico': ['thin'],
 }
