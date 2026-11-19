@@ -7,6 +7,11 @@ import os
 SEVERITY_ORDER = {'crash': 0, 'fail': 1, 'slow': 2, 'note': 3}
 REGRESS_RATIO = 1.25   # a warm median 25 % slower than the baseline ...
 REGRESS_MIN_MS = 100   # ... and at least this many ms slower is a regression
+REGRESS_FAIL_RATIO = 3.0    # three times slower (and a visible amount) is a fail, not one more slow line
+REGRESS_FAIL_MIN_MS = 500
+FPS_REGRESS_RATIO = 1.25    # an animation 25 % below the baseline's frame rate ...
+FPS_REGRESS_MIN = 2.0       # ... and at least this many fps below it is a regression
+FPS_FAIL_RATIO = 2.0        # half the frame rate or worse is a fail
 
 
 def _ms(v):
@@ -54,6 +59,14 @@ def best_warm(scene: dict, drew_only: bool = False):
     return min(times) if times else None
 
 
+def animation_fps(scene: dict):
+    """The frame rate the scene's first watched animation reached, or None."""
+    for a in ((scene.get('passive') or {}).get('animation') or [])[:1]:
+        if a.get('fps') is not None:
+            return a['fps']
+    return None
+
+
 def compare(current: dict, baseline: dict) -> list[dict]:
     """Regressions against an earlier run of the same frames."""
     issues = []
@@ -63,11 +76,19 @@ def compare(current: dict, baseline: dict) -> list[dict]:
         if not b:
             continue
         cur = {r['name']: r for r in ((f.get('suites') or {}).get('scenes') or {}).get('scenes', [])}
-        old = {r['name']: r for r in ((b.get('suites') or {}).get('scenes') or {}).get('scenes', [])}
+        old_rows = ((b.get('suites') or {}).get('scenes') or {}).get('scenes', [])
+        # By name, whatever its case: a sample renamed "DVD Logo Bounce" -> "DVD
+        # logo bounce" went uncompared while it fell from 22.7 to 1.4 fps (2026-11-19).
+        old = {(r.get('name') or '').casefold(): r for r in old_rows}
         for name, r in cur.items():
-            o = old.get(name)
+            o = old.get((name or '').casefold())
             if not o:
                 continue
+            cf, of = animation_fps(r), animation_fps(o)
+            if cf is not None and of and cf * FPS_REGRESS_RATIO < of and of - cf >= FPS_REGRESS_MIN:
+                issues.append({'severity': 'fail' if cf * FPS_FAIL_RATIO <= of else 'slow', 'kind': 'fps_regression',
+                               'where': f"{f['name']}: scene {name}",
+                               'detail': f'animation {of} fps -> {cf} fps'})
             # The scene's own work, at its best: the render time where the line has
             # one (an e-paper `done` adds a partial or a full panel refresh, which
             # alternate), the fastest of the warm renders (the first after a
@@ -80,7 +101,8 @@ def compare(current: dict, baseline: dict) -> list[dict]:
             drew_only = ran_apps(r) and ran_apps(o)
             cm, om = best_warm(r, drew_only), best_warm(o, drew_only)
             if cm and om and cm > om * REGRESS_RATIO and cm - om >= REGRESS_MIN_MS:
-                issues.append({'severity': 'slow', 'kind': 'regression', 'where': f"{f['name']}: scene {name}",
+                bad = cm >= om * REGRESS_FAIL_RATIO and cm - om >= REGRESS_FAIL_MIN_MS
+                issues.append({'severity': 'fail' if bad else 'slow', 'kind': 'regression', 'where': f"{f['name']}: scene {name}",
                                'detail': f'fastest warm render {om} ms -> {cm} ms'})
             cp = [w.get('in_place') for w in r.get('warm') or []]
             op = [w.get('in_place') for w in o.get('warm') or []]

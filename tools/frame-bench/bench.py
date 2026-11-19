@@ -79,8 +79,19 @@ def run_frame(ctx, frame, suites, results):
 
 def cmd_run(args):
     be = Backend()
-    frames = inventory.discover(be if be.token else None) if args.rediscover or not os.path.exists(os.path.join(HOME, 'inventory.json')) \
-        else inventory.load(os.path.join(HOME, 'inventory.json'))
+    saved = os.path.join(HOME, 'inventory.json')
+    if args.rediscover or not os.path.exists(saved):
+        frames = inventory.discover(be if be.token else None)
+        inventory.save(saved, frames)
+    else:
+        frames = inventory.load(saved)
+        moved = inventory.still_there(pick(frames, args.frames))
+        if moved:
+            # Never bench a port off a stale list: the run would push to one board
+            # and read another's console.
+            print('the boards moved since inventory.json (' + '; '.join(moved) + '): discovering again')
+            frames = inventory.discover(be if be.token else None)
+            inventory.save(saved, frames)
     frames = pick(frames, args.frames)
     if not frames:
         print('no frames selected')

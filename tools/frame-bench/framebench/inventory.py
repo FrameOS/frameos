@@ -112,6 +112,24 @@ def discover(backend=None, ports=None) -> list[dict]:
     return frames
 
 
+def still_there(frames: list[dict]) -> list[str]:
+    """The ports among `frames` whose board is no longer the one saved there.
+
+    A VM's USB passthrough can hand the same boards out in another order after
+    a re-attach: on 2026-11-19 the E1004 and the SenseCAP swapped ttyUSB2/3, and
+    a run off the saved inventory pushed to one board and read the other's
+    console. A run checks before it trusts the file."""
+    moved = []
+    for f in frames:
+        found = probe_port(f['port'], timeout=15.0, deadline=30.0)
+        status = (found or {}).get('status') or {}
+        module = (status.get('board') or {}).get('module', '')
+        if module != f.get('module') or (status.get('config') or {}).get('frameId') != f.get('frame_id'):
+            moved.append(f"{f['port']}: saved {f.get('module')} #{f.get('frame_id')}, "
+                         f"found {module or 'nothing'} #{(status.get('config') or {}).get('frameId')}")
+    return moved
+
+
 def load(path: str) -> list[dict]:
     with open(path) as f:
         return json.load(f)
