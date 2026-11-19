@@ -439,10 +439,18 @@ class Tarpit:
     """A TCP port that accepts and never answers: a backend that hangs."""
 
     def __init__(self, port=8998):
-        self.port = port
-        self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(('0.0.0.0', port))
+        # Frames run in parallel: two in the offline suite at once each take
+        # their own port, the next free one from `port` up.
+        for self.port in range(port, port + 16):
+            self.sock = socket.socket()
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                self.sock.bind(('0.0.0.0', self.port))
+                break
+            except OSError:
+                self.sock.close()
+        else:
+            raise OSError(f'no free tarpit port in {port}..{port + 15}')
         self.sock.listen(64)
         self.conns = []
         self.alive = True
@@ -474,7 +482,7 @@ def suite_offline(ctx, frame, tarpit_port=8998):
     t0 = time.time()
     out, issues = [], []
     try:
-        con.command(f'set backend http://{ctx.host_ip}:{tarpit_port}', 1.5)
+        con.command(f'set backend http://{ctx.host_ip}:{pit.port}', 1.5)
         con.idle(20)  # let a round of pulls start hanging
         for s in scenes:
             con.drain()
