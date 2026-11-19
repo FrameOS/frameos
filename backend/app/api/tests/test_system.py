@@ -81,7 +81,11 @@ async def test_client_disconnect_is_not_a_server_error(async_client, monkeypatch
 
     captured = []
     monkeypatch.setattr(fastapi_module, "posthog_capture_exception", lambda exc, request=None: captured.append(exc))
-    app = fastapi_module.app
+    # The app the client serves: test_ingress.py reloads app.fastapi, and
+    # after that `fastapi_module.app` is another app than the one the
+    # async_client fixture was built on, so a route added there 404'd here
+    # whenever the two tests shared an xdist worker in that order.
+    app = async_client._transport.app
     assert ClientDisconnect in app.exception_handlers
 
     async def boom():
