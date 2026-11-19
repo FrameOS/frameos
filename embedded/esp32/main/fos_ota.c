@@ -919,7 +919,11 @@ static void ota_task(void *arg)
 {
     uint32_t interval_hours = (uint32_t)(uintptr_t)arg;
     if (interval_hours == 0) interval_hours = 24;
-    TickType_t interval_ticks = pdMS_TO_TICKS(interval_hours * 3600u * 1000u);
+    /* In ticks straight from seconds: pdMS_TO_TICKS(24 h in ms) multiplies
+     * 86,400,000 by the tick rate in 32 bits and wrapped to ~500 s, so every
+     * awake board checked (and stopped its HTTP server) every 8.3 minutes
+     * and a board on a dev build took the release mid-bench (2026-11-19). */
+    TickType_t interval_ticks = (TickType_t)interval_hours * 3600u * (TickType_t)configTICK_RATE_HZ;
     while (true) {
         uint32_t notifications = ulTaskNotifyTake(pdTRUE, interval_ticks);
         bool manual = notifications > 0;
