@@ -107,8 +107,32 @@ def incidents_since(con, t0, where):
             out.append(issue(sev, inc.kind, where, inc.line))
     for b in con.boots:
         if b >= t0:
-            out.append(issue('crash', 'reboot', where, f'board rebooted at +{b - con.t0:.1f}s'))
+            ota = ota_before_boot(con, b)
+            if ota:
+                out.append(issue('fail', 'ota_mid_run', where,
+                                 f'board installed {ota} over the air at +{b - con.t0:.1f}s: '
+                                 'what follows is not the firmware the run started on'))
+            else:
+                out.append(issue('crash', 'reboot', where, f'board rebooted at +{b - con.t0:.1f}s'))
     return out
+
+
+def ota_before_boot(con, t_boot):
+    """The version an OTA installed if the boot at t_boot was its reboot
+    (`ota:<plane>` "verified" / "rebooting" just before), else None. The
+    bench's backend offers its release to a board on another build: on
+    2026-11-19 every board took it ten minutes into a run."""
+    version, verified = None, False
+    for t, x in list(con.history):
+        if t < t_boot - 900 or t > t_boot:
+            continue
+        if '{"event":"ota:' in x:
+            m = re.search(r'"status":"downloading","detail":"([^"]+)"', x)
+            if m:
+                version = m.group(1)
+            if t >= t_boot - 15 and '"status":"verified","detail":"rebooting"' in x:
+                verified = True
+    return (version or 'an update') if verified else None
 
 
 def wait_render(con, timeout):
@@ -310,7 +334,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
         new = incidents_since(con, t_start, where)
         issues += new
         entry['incidents'] = len(new)
-        if any(i['kind'] == 'reboot' for i in new):
+        if any(i['kind'] in ('reboot', 'ota_mid_run') for i in new):
             recover_after_boot(con, frame)
         results.append(entry)
     if before:
@@ -757,8 +781,8 @@ def suite_desktop(ctx, frame, layouts=None):
     finally:
         _push_and_wait(ctx, frame, original)
     # A reboot during the restore push (each layout's own window already counted its own).
-    seen = {i['detail'] for i in issues if i['kind'] == 'reboot'}
-    issues += [i for i in incidents_since(con, t_suite, 'desktop restore') if i['kind'] == 'reboot' and i['detail'] not in seen]
+    seen = {i['detail'] for i in issues if i['kind'] in ('reboot', 'ota_mid_run')}
+    issues += [i for i in incidents_since(con, t_suite, 'desktop restore') if i['kind'] in ('reboot', 'ota_mid_run') and i['detail'] not in seen]
     return {'desktop': results, 'issues': issues}
 
 
