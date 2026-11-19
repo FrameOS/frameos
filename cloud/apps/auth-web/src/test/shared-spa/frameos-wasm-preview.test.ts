@@ -513,3 +513,28 @@ describe("FrameOSPreview mouse cursor", () => {
     expect(canvas.style.cursor).toBe("none");
   });
 });
+
+describe("FrameOSPreview after running out of the simulated memory", () => {
+  it("sends the abandoned runtime nothing more and passes on none of its errors", () => {
+    const onError = vi.fn();
+    const onOutOfMemory = vi.fn();
+    const { preview, worker } = makePreview({ onError, onOutOfMemory });
+    preview.sendEvent("pointerDown", { x: 1, y: 2 });
+    expect(worker.messages.at(-1)).toMatchObject({ type: "event", name: "pointerDown" });
+
+    worker.reply({ type: "outOfMemory", refusedBytes: 49_152, limitBytes: 7_130_000, usedBytes: 7_100_000, peakBytes: 7_120_000 });
+    expect(onOutOfMemory).toHaveBeenCalledWith(expect.objectContaining({ refusedBytes: 49_152 }));
+
+    // The OS/2 Warp desktop's third window, 2026-11-19: every click after
+    // the notice came back as "event failed: [object Object]".
+    const sent = worker.messages.length;
+    preview.sendEvent("pointerDown", { x: 1, y: 2 });
+    preview.render();
+    preview.selectScene("scene-1");
+    preview.chooseLayout("none");
+    preview.resize(640, 480);
+    expect(worker.messages).toHaveLength(sent);
+    worker.reply({ type: "error", message: "event failed: [object Object]" });
+    expect(onError).not.toHaveBeenCalled();
+  });
+});

@@ -219,6 +219,14 @@ function formatMegabytes(bytes: number): string {
   return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
 }
 
+/** A refused allocation is often a few kilobytes: "0 MB" said nothing. */
+function formatRefusedBytes(bytes: number): string {
+  if (bytes >= 100 * 1024) {
+    return formatMegabytes(bytes);
+  }
+  return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${Math.max(0, Math.round(bytes))} bytes`;
+}
+
 /** No layouts to choose among: one value, so the panel's scenes memo keeps its result. */
 const NO_LAYOUTS: readonly PreviewLayout[] = [];
 
@@ -2052,14 +2060,30 @@ export function SceneLivePreviewPanel({
       </div>
       {outOfMemory ? (
         <div className="preview-notice preview-notice--error" role="status">
-          <strong>Out of memory on the simulated device.</strong> The render
-          asked for {formatMegabytes(outOfMemory.refusedBytes)} with{" "}
+          <strong>Out of memory on the simulated device.</strong>{" "}
+          {outOfMemory.refusedBytes > 0
+            ? `The render asked for ${formatRefusedBytes(outOfMemory.refusedBytes)} more`
+            : "The render asked for more memory"}{" "}
+          with{" "}
           {formatMegabytes(
             outOfMemory.limitBytes - (deviceLimits?.previewOverheadBytes ?? 0)
           )}{" "}
-          usable and could not get it, so this scene would fail on that frame.
+          usable and could not get it, so this would fail on that frame.{" "}
+          {windowed
+            ? "On a desktop every open window runs its scene beside the others: close a window before opening another, or try the device with more memory. "
+            : null}
           The preview stops here and starts again when the scene or the size
-          changes, or with Restart.
+          changes.{" "}
+          <button
+            className="button button--subtle button--small"
+            onClick={() => {
+              setError(null);
+              setRestartCount((count) => count + 1);
+            }}
+            type="button"
+          >
+            Restart
+          </button>
         </div>
       ) : null}
       {assetsOpen ? (

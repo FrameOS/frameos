@@ -99,6 +99,28 @@ function call(name, ret, argTypes, args) {
   return Module.ccall(name, ret, argTypes, args)
 }
 
+// What a caught error says: a wasm trap or an emscripten exception is an
+// object whose `+ e` is "[object Object]", which told nobody anything.
+function errorText(e) {
+  if (e && typeof e === 'object') {
+    if (typeof e.message === 'string' && e.message) {
+      return e.message
+    }
+    if (e.name) {
+      return String(e.name)
+    }
+    try {
+      const json = JSON.stringify(e)
+      if (json && json !== '{}') {
+        return json
+      }
+    } catch (_) {
+      // a cycle: fall through
+    }
+  }
+  return String(e)
+}
+
 function lastError() {
   try {
     return call('frameos_wasm_last_error', 'string', [], [])
@@ -753,7 +775,7 @@ function renderNow() {
     postCursor()
     postMemory(0)
   } catch (e) {
-    post({ type: 'error', message: 'render crashed: ' + e })
+    post({ type: 'error', message: 'render crashed: ' + errorText(e) })
   } finally {
     rendering = false
     void persistAssetsIfChanged()
@@ -804,7 +826,7 @@ function renderSoonIfRequested() {
       postState()
     }
   } catch (e) {
-    post({ type: 'error', message: String(e) })
+    post({ type: 'error', message: errorText(e) })
   }
 }
 
@@ -1007,14 +1029,14 @@ function setClipboard(text) {
 }
 
 function dispatchEvent(name, payload) {
-  if (!Module) {
+  if (!Module || outOfMemory) {
     return
   }
   try {
     call('frameos_wasm_event', 'boolean', ['string', 'string'], [name, JSON.stringify(payload || {})])
     postClipboardIfChanged()
   } catch (e) {
-    post({ type: 'error', message: 'event failed: ' + e })
+    post({ type: 'error', message: 'event failed: ' + errorText(e) })
   }
   renderSoonIfRequested()
 }
@@ -1051,7 +1073,7 @@ function flushPendingMoves() {
 let tickTimer = null
 
 function tickWhileHeld() {
-  if (!Module || typeof Module._frameos_wasm_tick !== 'function') {
+  if (!Module || outOfMemory || typeof Module._frameos_wasm_tick !== 'function') {
     return
   }
   try {
@@ -1063,7 +1085,7 @@ function tickWhileHeld() {
       tickTimer = null
     }
   } catch (e) {
-    post({ type: 'error', message: 'tick failed: ' + e })
+    post({ type: 'error', message: 'tick failed: ' + errorText(e) })
     clearInterval(tickTimer)
     tickTimer = null
   }
@@ -1090,8 +1112,17 @@ function handleEvent(name, payload) {
   }
 }
 
+// What calls into the runtime. After a render ran out of the simulated
+// memory (renderNow) the runtime was left mid-render and nothing goes into it
+// again: the page makes a new worker to start over. Clicks went on into it
+// and each came back as "event failed".
+const RUNTIME_MESSAGES = new Set(['render', 'event', 'selectScene', 'resize', 'chooseLayout', 'setRenderScale', 'clipboard'])
+
 self.onmessage = (ev) => {
   const msg = ev.data || {}
+  if (outOfMemory && RUNTIME_MESSAGES.has(msg.type)) {
+    return
+  }
   switch (msg.type) {
     case 'init':
       init(msg)

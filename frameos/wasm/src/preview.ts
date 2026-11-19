@@ -188,6 +188,14 @@ export class FrameOSPreview {
   private canvas: HTMLCanvasElement | null = null
   private pendingFrame: PendingFrame | null = null
   private destroyed = false
+  /**
+   * A render ran out of the simulated device's memory: the worker's runtime
+   * was left mid-render (the longjmp out of it abandons the Nim stack), so
+   * nothing more is sent to it until the preview is made again (Restart, a
+   * new scene or size). Every click went on into it and came back as an
+   * "event failed" error, a screenful of them per click.
+   */
+  private outOfMemory = false
   private assetRequests = new Map<number, PendingAssetRequest>()
   private nextAssetRequestId = 1
   private appTestsRequests = new Map<number, PendingAppTestsRequest>()
@@ -341,6 +349,7 @@ export class FrameOSPreview {
         break
 
       case 'outOfMemory':
+        this.outOfMemory = true
         this.options.onOutOfMemory?.({
           limitBytes: Number(msg.limitBytes ?? 0),
           usedBytes: Number(msg.usedBytes ?? 0),
@@ -350,7 +359,11 @@ export class FrameOSPreview {
         break
 
       case 'error':
-        this.options.onError?.(String(msg.message ?? 'Unknown FrameOS preview error'))
+        // After running out of memory the page says so once; what the
+        // abandoned runtime throws after that says nothing more.
+        if (!this.outOfMemory) {
+          this.options.onError?.(String(msg.message ?? 'Unknown FrameOS preview error'))
+        }
         break
       case 'fastRenderRequest':
         this.options.onFastRenderRequest?.(Number(msg.intervalMs) || 0)
@@ -457,14 +470,21 @@ export class FrameOSPreview {
     this.cursor?.back()
   }
 
+  /** A message the worker answers by calling into the runtime. */
+  private toRuntime(msg: Record<string, unknown>): void {
+    if (!this.outOfMemory) {
+      this.worker?.postMessage(msg)
+    }
+  }
+
   /** Force a render now. */
   render(): void {
-    this.worker?.postMessage({ type: 'render' })
+    this.toRuntime({ type: 'render' })
   }
 
   /** Dispatch a scene event (a custom event node's keyword, "button", ...). */
   sendEvent(name: string, payload: Record<string, unknown> = {}): void {
-    this.worker?.postMessage({ type: 'event', name, payload })
+    this.toRuntime({ type: 'event', name, payload })
   }
 
   /**
@@ -538,7 +558,7 @@ export class FrameOSPreview {
    * the computer's clipboard, by themselves.
    */
   setClipboard(text: string): void {
-    this.worker?.postMessage({ type: 'clipboard', text })
+    this.toRuntime({ type: 'clipboard', text })
   }
 
   /** Update the current scene's state fields; renders by default. */
@@ -549,7 +569,7 @@ export class FrameOSPreview {
   /** Switch the runtime to another loaded scene. */
   selectScene(sceneId: string): void {
     this.currentSceneId = sceneId
-    this.worker?.postMessage({ type: 'selectScene', sceneId })
+    this.toRuntime({ type: 'selectScene', sceneId })
   }
 
   /**
@@ -558,7 +578,7 @@ export class FrameOSPreview {
    * (`runtimeInfo.resize`) can; for another, create the preview again.
    */
   resize(width: number, height: number): void {
-    this.worker?.postMessage({ type: 'resize', width, height })
+    this.toRuntime({ type: 'resize', width, height })
   }
 
   /**
@@ -567,12 +587,12 @@ export class FrameOSPreview {
    * On a desktop the one chosen opens what the one before had open.
    */
   chooseLayout(layoutId: string): void {
-    this.worker?.postMessage({ type: 'chooseLayout', layoutId })
+    this.toRuntime({ type: 'chooseLayout', layoutId })
   }
 
   /** The frame's render scale (0 = automatic), drawn again at once. */
   setRenderScale(scale: number): void {
-    this.worker?.postMessage({ type: 'setRenderScale', scale })
+    this.toRuntime({ type: 'setRenderScale', scale })
   }
 
   /** Let the scene render as often as it asks (true), or throttle it back

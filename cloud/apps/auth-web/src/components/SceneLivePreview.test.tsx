@@ -286,6 +286,31 @@ describe("SceneLivePreviewPanel memory limit", () => {
   });
 });
 
+describe("SceneLivePreviewPanel out of memory", () => {
+  it("says how much a small refused allocation was and restarts from the notice", async () => {
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    act(() => {
+      fireEvent.click(screen.getByLabelText("Memory limit"));
+    });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    act(() =>
+      previews[1]!.options.onOutOfMemory!({
+        limitBytes: 7_130_000,
+        peakBytes: 7_120_000,
+        refusedBytes: 49_152,
+        usedBytes: 7_100_000,
+      })
+    );
+    // It read "asked for 0 MB" (the OS/2 Warp desktop's third window, 2026-11-19).
+    expect(screen.getByText(/asked for 48 KB more/)).toBeTruthy();
+    const notice = screen.getByText(/Out of memory on the simulated device/).closest("[role=status]") as HTMLElement;
+    fireEvent.click(within(notice).getByRole("button", { name: "Restart" }));
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(screen.queryByText(/Out of memory on the simulated device/)).toBeNull();
+  });
+});
+
 describe("SceneLivePreviewPanel screenshot gating", () => {
   it("keeps the screenshot buttons disabled until the runtime paints a frame", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
