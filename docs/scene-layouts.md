@@ -472,6 +472,30 @@ composited, and tiles that do not overlap all stay holes. A window hanging off
 the desktop's edge, any edge, is a picture cut there, not a hole squeezed into
 what shows.
 
+A picture is part of the desktop's drawing, so a picture whose scene is due
+draws the desktop again (its JavaScript, its tree, its raster). One that is not
+due is the same picture as last time: a pass where only the holes are due
+leaves the chrome and its pictures as the canvas holds them, or copies them
+from the other frame buffer around the holes (`rhythmChromeCanStay`). Before,
+any picture at all ran the whole desktop on every pass of the window in front:
+1.9 fps for DVD logo bounce in Windows 98 on the SenseCAP Indicator, against
+24 without windows (the hardware bench, 2026-11-19). And a window wholly under
+another, the one in front or one above it, draws nothing of its scene
+(`hiddenUnder`, the same text in the six desktops that stack windows): its
+scene stays open and running, and draws again when it shows.
+
+**Windows or one scene** (`windowMode`, every desktop of windows): Automatic,
+On or Off. Off, the desktop shows the frame's scene alone in its look, one
+window around it and its bars. Automatic is windows where the frame runs its
+scenes side by side without a limit (a Pi, the browser) or four at once (16 MB
+of PSRAM), and one scene where it runs one or two (`app.frame.windows`: an 8 MB
+ESP32, where a desktop of two windows is mostly the one in front, and the one
+behind costs memory and frames). `Commander`, whose two panels never overlap,
+is two wherever two may run. An install from before 2026.11.13, whose boolean
+`windows` switch was turned off, stays off; the `true` every install kept from
+the old default does not count (`windowsOn`, the same text in the seven
+desktops of windows).
+
 Windows pace the frame as a split's panels do: the first one due wakes it,
 except on e-paper and a deep sleeper, where none wakes it sooner than the scene
 it wraps would (the floor). Their pictures count against the same copy budget,
@@ -505,7 +529,13 @@ first takes the place of one the desktop no longer has open (its `openScenes`)
 and was not drawn in that pass, and otherwise stays empty (said once in the
 log). After each pass the host lets go of a kept window the desktop does not
 have open, every one without a desktop, and a scene the frame leaves stays
-running only while the desktop has it open: an ESP32 without a desktop keeps
+running only while the desktop has it open and there is room beside the next
+(`keepsInWindow`): never where one runs at a time, and the window kept longest
+ago goes at the switch, before the next scene comes off flash beside them (a
+reTerminal E1004 ran the scene it left beside the one coming, and ran out of
+memory, 2026-11-19). A layout parked between two scenes goes when the next one
+starts a layout of its own, its open scenes handed to that one
+(`releaseParkedLayout`). An ESP32 without a desktop keeps
 one scene, as before (the scene under the switcher kept while there is room,
 `covered`), and its one settings scene (`builtInScenesStay` follows the
 desktop there, `followDesktop`). The firmware reads a scene off flash only to start it: one running

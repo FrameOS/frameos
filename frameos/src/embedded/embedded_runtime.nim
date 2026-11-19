@@ -647,8 +647,9 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
 
 proc desktopKeepsScenes(): bool =
   ## A desktop (docs/scene-layouts.md "Windows"): the scene in front stays
-  ## running in its window when another is read off flash.
-  host.windowed and (host.windows.len > 0 or
+  ## running in its window when another is read off flash. Not where one
+  ## scene runs at a time: the next one takes its place (keepsInWindow).
+  host.windowed and windowLimit() != 1 and (host.windows.len > 0 or
     not host.scene.isNil and host.keepsInWindow(host.scene.id))
 
 proc makeRoomForScenes*(whole: bool) =

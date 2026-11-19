@@ -1753,6 +1753,8 @@ suite "the Classic Mac desktop":
   test "where only two scenes run at once, a third opened closes the one that had the focus longest ago":
     deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
     check windowLimit() == 2
+    # Windows asked for: on two at once their automatic choice is one scene.
+    desk().state["windowMode"] = %"on"
     desk().state["wins"] = %*[]
     for id in ["tests/cm-red", "tests/cm-green", "tests/cm-blue"]:
       discard focusOn(id)
@@ -1767,6 +1769,7 @@ suite "the Classic Mac desktop":
     for w in wins(): open.add w{"id"}.getStr()
     check open.sorted() == @["tests/cm-blue", "tests/cm-red"]
     check problems.len == 0
+    desk().state.delete("windowMode")
     deviceMemoryBytesOverride = 0
 
   test "the window limit counts what the panel leaves the scenes, not all of the PSRAM":
@@ -3487,6 +3490,9 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)
       discard pass()
+      # Windows asked for: on two at once their automatic choice is one scene.
+      desk().state["windowMode"] = %"on"
+      discard pass()
       check desk().id.string == layoutId
       for id in ["tests/red", "tests/green", "tests/blue"]:
         discard focusOn(id)
@@ -3616,3 +3622,102 @@ suite "a new render scale on a desktop of windows":
     let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep, os2, omarchy])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
+
+suite "windows by the frame's room, and windows hidden under others":
+  # docs/scene-layouts.md "Windows": a desktop's `windowMode`, Automatic by
+  # default, is one scene at a time where the frame runs one or two (an 8 MB
+  # ESP32), and a window wholly under another is not drawn at all.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red", "windowSize": "200x120"},
+        {"id": "tests/green", "name": "Green", "windowSize": "200x120"}]
+
+  test "the windows hidden and the automatic choice are the same functions, word for word, in every desktop":
+    let hidden = copiesOf("// The windows wholly under a window above them", [layout, macos, beos, classicMac, nextstep, os2])
+    check hidden[0].len > 0
+    for text in hidden: check text == hidden[0]
+    let choice = copiesOf("// Windows, or one scene at a time in the desktop's look", [layout, macos, beos, classicMac, nextstep, os2, omarchy])
+    check choice[0].len > 0
+    for text in choice: check text == choice[0]
+    for scene in [layout, macos, beos, classicMac, nextstep, os2, omarchy, commander]:
+      var mode: JsonNode
+      for field in scene["fields"]:
+        check field["name"].getStr() != "windows"
+        if field["name"].getStr() == "windowMode": mode = field
+      check not mode.isNil and mode["value"].getStr() == "auto"
+
+  test "a window wholly under the one in front draws nothing of its scene, on every desktop that stacks them":
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2]:
+      checkpoint layoutId
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      discard focusOn("tests/green")
+      discard pass()
+      let red = hosted["tests/red"]
+      check isHole(red) # side by side: drawn straight into its window
+      # Green made as big as the desktop, over red.
+      var ws = wins()
+      for w in ws:
+        if w{"id"}.getStr() == "tests/green": w["max"] = %true
+      desk().state["wins"] = ws
+      discard pass()
+      var drawn = false
+      for slot in desk().slots:
+        drawn = drawn or slot.child == red
+      check not drawn
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "automatic is one scene where one or two run at once, windows where four or any do":
+    const MiB = 1024 * 1024
+    for (memory, windowed) in [(8 * MiB - 65536, false), (16 * MiB, true), (0, true)]:
+      deviceMemoryBytesOverride = memory
+      for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Omarchy]:
+        checkpoint layoutId & " " & $windowLimit()
+        desk().state["openScenes"] = %*[]
+        chooseLayout(layoutId)
+        discard pass()
+        desk().state["wins"] = %*[]
+        discard focusOn("tests/red")
+        discard pass()
+        discard focusOn("tests/green")
+        discard pass()
+        let open = desk().state{"openScenes"}
+        check (not open.isNil and open.len == 2) == windowed
+        if not windowed:
+          # Asked for, they are windows all the same.
+          desk().state["windowMode"] = %"on"
+          discard pass()
+          discard focusOn("tests/red")
+          discard pass()
+          discard focusOn("tests/green")
+          discard pass()
+          check desk().state{"openScenes"}.len == 2
+          desk().state.delete("windowMode")
+        check problems.len == 0
+    deviceMemoryBytesOverride = 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "an install whose Windows switch was turned off stays one scene":
+    desk().state["openScenes"] = %*[]
+    chooseLayout(Layout)
+    desk().state["windows"] = %false
+    discard focusOn("tests/red")
+    discard pass()
+    discard focusOn("tests/green")
+    discard pass()
+    let open = desk().state{"openScenes"}
+    check open.isNil or open.len == 0
+    desk().state.delete("windows")
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
