@@ -150,11 +150,13 @@ is what a scene needs, not what it is about.
 `frontend/src/utils/sceneNeeds.ts`, read from a version's scenes.json when it
 is published and kept on the version (`needs`, migration 0084; the row holds
 the latest's): `fast` (it redraws more than once a second: a
-`refreshInterval` under 1 s; never a layout), `touch` (JSX handlers, pointer
-events), `keys` (key events, the frame's buttons), `linux` (Chromium, FFmpeg,
-a shell command). The store front shows them on each tile ("Fast screen",
-"Touch", "Keys", "Pi only") and filters by screen (Any screen, Fits e-paper,
-Made for fast screens, Touch). A frame's own store leaves out what it cannot
+`refreshInterval` under 1 s; never a layout), `touch` (taps or a mouse, one
+thing to the runtime: JSX handlers, pointer events), `keys` (a keyboard: key
+events, text input), `buttons` (the frame's own GPIO buttons), `linux`
+(Chromium, FFmpeg, a shell command). The store front shows them on each tile
+("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only") and
+filters by them (Any screen, Fits e-paper, Made for fast screens, Touch &
+mouse, Keyboard). A frame's own store leaves out what it cannot
 run (`without=fast` on a slow panel, `linux` on an ESP32) and puts `fast`
 first on a fast one. Touch and keys rule nothing out: the frame's buttons and
 its pages reach any scene. Versions from before the column are read by
@@ -324,5 +326,5 @@ kept.
 - The spot (folder, page, picture open, playing, the view) is a private disk
   field, as the store's is. A folder that went away goes back to the top.
 - It asks for `"permissions": ["assets", "assets-write"]`: making a folder is
-  a write, so it shows as "writes assets folder" (until 2026-11-16 it read
+  a write, so it shows as "reads & writes files" (until 2026-11-16 it read
   only).

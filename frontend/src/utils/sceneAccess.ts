@@ -5,9 +5,10 @@
  * for, nothing more. Code nodes cannot touch files and ask for nothing. The
  * API keys an app reads (its config.json `"settings"`) show the same way.
  * Every surface shows the union as tags ("runs shell commands", "reads all
- * files", "reads assets folder", "writes assets folder", "changes frame
- * settings", "uses OpenAI key"), and installing a scene that shows them is
- * the approval.
+ * files", "reads files", "writes files" or the two as "reads & writes files",
+ * "changes frame settings", "uses OpenAI key": `sceneAccessTags`), and
+ * installing a scene that shows them is the approval. "Files" are the
+ * frame's assets folder; "all files" anything on the frame.
  *
  * A JavaScript app's list is set from its code whenever the scene is saved
  * (`withAppPermissions`), so it follows the code. The frame gives each JS app
@@ -44,8 +45,8 @@ export type SceneAccessFlag = ScenePermission | SceneKeyFlag
 const permissionLabels: Record<ScenePermission, string> = {
   shell: 'runs shell commands',
   files: 'reads all files',
-  assets: 'reads assets folder',
-  'assets-write': 'writes assets folder',
+  assets: 'reads files',
+  'assets-write': 'writes files',
   frame: 'changes frame settings',
   code: "reads and changes this frame's scenes",
 }
@@ -100,6 +101,54 @@ export function sceneAccessFlagDescription(flag: SceneAccessFlag): string {
   return namespace !== null
     ? `This scene's apps read your ${settingsKeyTitle(namespace)} key from the frame's settings.`
     : permissionDescriptions[flag as ScenePermission]
+}
+
+/** One tag a surface shows for a scene's access: a flag, or reading and writing files as one. */
+export interface SceneAccessTag {
+  key: string
+  label: string
+  description: string
+  /** Red: reaches past the scene's own reading of your photos (sceneAccessFlagIsRisky). */
+  risky: boolean
+  /** The flags the tag stands for. */
+  flags: SceneAccessFlag[]
+}
+
+/**
+ * The tags for a scene's flags, as every surface draws them: reading and
+ * writing the assets folder become one "reads & writes files", and reading it
+ * is left out where the scene reads all files anyway.
+ */
+export function sceneAccessTags(flags: readonly SceneAccessFlag[]): SceneAccessTag[] {
+  const has = new Set(flags)
+  const tags: SceneAccessTag[] = []
+  for (const flag of flags) {
+    if (flag === 'assets' && has.has('files')) {
+      continue
+    }
+    if (flag === 'assets' && has.has('assets-write')) {
+      continue
+    }
+    if (flag === 'assets-write' && has.has('assets') && !has.has('files')) {
+      tags.push({
+        key: 'assets+write',
+        label: 'reads & writes files',
+        description:
+          "This scene reads, writes and deletes files in the frame's assets folder, where your uploaded photos and other scenes' files are.",
+        risky: true,
+        flags: ['assets', 'assets-write'],
+      })
+      continue
+    }
+    tags.push({
+      key: flag,
+      label: sceneAccessFlagLabel(flag),
+      description: sceneAccessFlagDescription(flag),
+      risky: sceneAccessFlagIsRisky(flag),
+      flags: [flag],
+    })
+  }
+  return tags
 }
 
 /** The permissions that reach past the frame's own data: red tags, and a red button when an update gains one. */
@@ -574,11 +623,10 @@ export function accessChangesAreRisky(changes: SceneAccessChanges): boolean {
  * folder), uses OpenAI key". "" when nothing was gained.
  */
 export function describeGainedAccess(changes: SceneAccessChanges): string {
-  return changes.gained
-    .map((flag) =>
-      flag === 'files' && changes.before.includes('assets')
-        ? `${sceneAccessFlagLabel('files')} (was ${sceneAccessFlagLabel('assets')})`
-        : sceneAccessFlagLabel(flag)
+  // As the tags say it: reading and writing files gained together is one.
+  return sceneAccessTags(changes.gained)
+    .map((tag) =>
+      tag.key === 'files' && changes.before.includes('assets') ? `${tag.label} (was the assets folder only)` : tag.label
     )
     .join(', ')
 }

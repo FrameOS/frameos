@@ -3,8 +3,8 @@ import { storeScenes } from "@frameos-cloud/db";
 import type { NextRequest } from "next/server";
 import { csrfResponse } from "./csrf";
 import { jsonError, requireDatabase } from "./device-flow";
-import { rateLimitResponse } from "./rate-limit";
 import { readSession } from "./session";
+import { storeWriteRateLimitResponse } from "./store-publish-limit";
 
 // Shared guard for owner web-session management of a published scene
 // (PATCH/DELETE metadata, content edits): CSRF, rate limit, session, and
@@ -21,8 +21,11 @@ export async function loadOwnedScene(
     return { errorResponse: csrf };
   }
 
-  const limited = await rateLimitResponse(
+  // A superadmin's store writes have no per-address limit (store-publish-limit.ts).
+  const session = await readSession();
+  const limited = await storeWriteRateLimitResponse(
     request,
+    session?.accountId,
     options.rateLimit?.action ?? "account:scenes",
     options.rateLimit ?? { limit: 60, windowMs: 15 * 60 * 1000 },
   );
@@ -30,7 +33,6 @@ export async function loadOwnedScene(
     return { errorResponse: limited };
   }
 
-  const session = await readSession();
   if (!session?.accountId) {
     return { errorResponse: jsonError("login_required", 401) };
   }

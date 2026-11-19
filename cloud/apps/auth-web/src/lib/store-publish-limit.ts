@@ -1,6 +1,23 @@
-import { identityRateLimitResponse } from "./rate-limit";
+import type { NextRequest } from "next/server";
+import { identityRateLimitResponse, rateLimitResponse } from "./rate-limit";
 import { maxNewScenesPerDay, maxPublishesPerHour } from "./store";
 import { accountIsSuperadmin } from "./superadmin";
+
+// A store write's per-address limit (an upload, a new scene, a version saved,
+// an image added), which a superadmin does not have: republishing the whole
+// catalog (a new taxonomy on every scene, 2026-11-18) is a hundred uploads in
+// a row from one address. Everyone else, signed in or not, keeps it.
+export async function storeWriteRateLimitResponse(
+  request: NextRequest,
+  accountId: string | undefined,
+  action: string,
+  options: { limit: number; windowMs: number },
+) {
+  if (await accountIsSuperadmin(accountId)) {
+    return undefined;
+  }
+  return rateLimitResponse(request, action, options);
+}
 
 // The account's hourly publish budget (store:publish), which every way of
 // publishing a version spends. A superadmin has none: republishing the whole

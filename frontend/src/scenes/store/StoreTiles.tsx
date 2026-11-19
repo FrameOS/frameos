@@ -6,7 +6,8 @@ import { A } from 'kea-router'
 
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
-import { sceneAccessFlagDescription, sceneAccessFlagLabel, templateAccessFlags } from '../../utils/sceneAccess'
+import { templateAccessFlags } from '../../utils/sceneAccess'
+import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { knownSceneNeeds, sceneNeedDescription, sceneNeedLabel } from '../../utils/sceneNeeds'
 import type { StoreKind } from '../../utils/storeCategories'
 import {
@@ -98,11 +99,9 @@ export function SceneTile({
   const href = typeof template.url === 'string' && template.url ? template.url : null
   const icon = templateSceneIcon(template)
   const flags = templateAccessFlags(template)
-  // What it needs of a frame (utils/sceneNeeds.ts): a fast screen, touch, keys,
-  // a Pi. Keys only where it is not a touch scene too: most of those take both.
-  const needs = knownSceneNeeds(template.needs).filter(
-    (need) => need !== 'keys' || !knownSceneNeeds(template.needs).includes('touch')
-  )
+  // What it needs of a frame and how it is used (utils/sceneNeeds.ts): a fast
+  // screen, touch & mouse, a keyboard, the frame's buttons, a Pi.
+  const needs = knownSceneNeeds(template.needs)
   const installs = typeof template.downloads === 'number' && template.downloads > 0 ? template.downloads : null
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
@@ -116,15 +115,8 @@ export function SceneTile({
         <h3 className="frameos-strong text-base font-semibold leading-snug">
           {icon ? <SceneIcon path={icon} className="mr-1 inline-block h-4 w-4 align-[-2px]" /> : null}
           {template.name}
-          {flags.map((flag) => (
-            <span
-              key={flag}
-              className="ml-1 inline-block whitespace-nowrap rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
-              title={sceneAccessFlagDescription(flag)}
-            >
-              {sceneAccessFlagLabel(flag)}
-            </span>
-          ))}
+          {/* The theme's tags, which read on a dark page as on a light one. */}
+          <SceneAccessTags flags={flags} className="ml-1 align-middle" tagClassName="!text-[10px] !py-0" />
         </h3>
         {template.description ? (
           <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>

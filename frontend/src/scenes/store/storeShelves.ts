@@ -35,21 +35,23 @@ export interface StoreFilters {
 }
 
 /**
- * Which screens a store page lists scenes for (the template's `needs`,
+ * Which scenes a store page lists by what they need (the template's `needs`,
  * utils/sceneNeeds.ts): every scene, the ones e-paper can show (no fast
- * screen needed), the ones made for a fast screen, or the touch ones.
+ * screen needed), the ones made for a fast screen, the ones used with touch
+ * or a mouse, or the ones used with a keyboard.
  */
-export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch'
+export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch' | 'keys'
 
 export const STORE_FIT_OPTIONS: { value: StoreFit; label: string }[] = [
   { value: 'any', label: 'Any screen' },
   { value: 'epaper', label: 'Fits e-paper' },
   { value: 'fast', label: 'Made for fast screens' },
-  { value: 'touch', label: 'Touch' },
+  { value: 'touch', label: 'Touch & mouse' },
+  { value: 'keys', label: 'Keyboard' },
 ]
 
 export function storeFitOf(value: unknown): StoreFit {
-  return value === 'epaper' || value === 'fast' || value === 'touch' ? value : 'any'
+  return value === 'epaper' || value === 'fast' || value === 'touch' || value === 'keys' ? value : 'any'
 }
 
 /** The URL's `kind` (`layouts` for the Layouts side), or the kind of the shelf it names. */
@@ -70,6 +72,9 @@ export function templateFitsStoreFit(template: TemplateType, fit: StoreFit): boo
   }
   if (fit === 'touch') {
     return needs.includes('touch')
+  }
+  if (fit === 'keys') {
+    return needs.includes('keys')
   }
   return true
 }

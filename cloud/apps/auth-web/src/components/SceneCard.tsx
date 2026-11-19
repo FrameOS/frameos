@@ -2,11 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
 import { formatDate } from "../lib/format";
-import {
-  knownSceneAccessFlags,
-  sceneAccessFlagDescription,
-  sceneAccessFlagLabel,
-} from "../../../../../frontend/src/utils/sceneAccess";
+import { knownSceneAccessFlags, sceneAccessTags } from "../../../../../frontend/src/utils/sceneAccess";
 import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import { SceneIcon } from "../../../../../frontend/src/components/SceneIcon";
 
@@ -73,13 +69,9 @@ export function SceneCard({
       <h3>
         {icon ? <SceneIcon className="scene-icon scene-icon--inline" path={icon} /> : null}
         {scene.name}
-        {knownSceneAccessFlags(scene.riskFlags).map((flag) => (
-          <span
-            className="risk-badge"
-            key={flag}
-            title={sceneAccessFlagDescription(flag)}
-          >
-            {sceneAccessFlagLabel(flag)}
+        {sceneAccessTags(knownSceneAccessFlags(scene.riskFlags)).map((tag) => (
+          <span className="risk-badge" key={tag.key} title={tag.description}>
+            {tag.label}
           </span>
         ))}
       </h3>

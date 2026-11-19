@@ -148,7 +148,12 @@ describe("ruleCategory", () => {
 
 describe("ruleTags", () => {
   it("names what it needs, the services it uses and its category, never nothing", () => {
-    expect(ruleTags({ category: "games", name: "Snake", needs: ["fast", "keys"] })).toEqual(["lcd", "buttons", "games"]);
+    expect(ruleTags({ category: "games", name: "Snake", needs: ["fast", "keys", "buttons"] })).toEqual([
+      "lcd",
+      "keyboard",
+      "buttons",
+      "games",
+    ]);
     expect(ruleTags({ appKeywords: ["immich"], name: "Family", needs: [] })).toEqual(["e-ink", "immich"]);
     expect(ruleTags({ name: "Shell", needs: ["linux"] })).toEqual(["raspberry-pi"]);
     expect(ruleTags({ name: "x", needs: ["touch"] }).length).toBeGreaterThan(0);

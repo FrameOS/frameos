@@ -22,20 +22,25 @@ describe("scene needs", () => {
     expect(sceneNeeds([{ settings: { refreshInterval: 0.03, isLayout: true } }])).toEqual([]);
   });
 
-  it("reads touch and keys from handlers and events, and Linux from the apps that spawn", () => {
+  it("reads touch & mouse, a keyboard and the frame's buttons from handlers and events, and Linux from the apps that spawn", () => {
     const tap = { apps: { a: { sources: { "app.tsx": "<div onClick={() => go()} />" } } } };
     expect(sceneNeeds([tap])).toEqual(["touch"]);
     const keys = { nodes: [{ type: "event", data: { keyword: "keyDown" } }] };
     expect(sceneNeeds([keys])).toEqual(["keys"]);
+    const buttons = { nodes: [{ type: "event", data: { keyword: "button" } }] };
+    expect(sceneNeeds([buttons])).toEqual(["buttons"]);
     // A button the screen draws is no key.
     expect(sceneNeeds([{ apps: { a: { sources: { "app.tsx": '<div look="button" />' } } } }])).toEqual([]);
     const chromium = { nodes: [{ type: "app", data: { keyword: "data/chromiumScreenshot" } }] };
     expect(sceneNeeds([chromium])).toEqual(["linux"]);
+    expect(needsOf("Counter")).toEqual(["buttons"]);
     expect(sceneNeeds([{}], ["shell"])).toEqual(["linux"]);
   });
 
   it("files the samples as their descriptions say", () => {
-    expect(needsOf("Snake")).toContain("fast");
+    expect(needsOf("Star shooter")).toContain("fast");
+    // Snake turns into a slow puzzle on e-paper, and says so (settings.needs).
+    expect(needsOf("Snake")).toEqual(["touch", "keys", "buttons"]);
     expect(needsOf("Sudoku")).not.toContain("fast");
     expect(needsOf("Sudoku")).toContain("touch");
     expect(needsOf("Weather")).toEqual([]);
@@ -46,6 +51,12 @@ describe("scene needs", () => {
         expect(Array.isArray(needsOf(name))).toBe(true);
       }
     }
+  });
+
+  it("takes what a scene states over what it reads, and Linux from the risk flags whatever it says", () => {
+    const stated = { settings: { needs: ["touch", "nonsense"], refreshInterval: 0.03 } };
+    expect(sceneNeeds([stated])).toEqual(["touch"]);
+    expect(sceneNeeds([stated], ["shell"])).toEqual(["touch", "linux"]);
   });
 
   it("rules out only what a frame cannot run", () => {
@@ -80,13 +91,14 @@ describe("the store front's split and screen filter", () => {
     expect(storeShelfCountsOf(templates, "layout").map((count) => count.shelf.slug)).toEqual(["desktops", "layouts"]);
   });
 
-  it("filters by screen from what each scene needs", () => {
-    const names = (fit: "epaper" | "fast" | "touch") =>
+  it("filters by screen and input from what each scene needs", () => {
+    const names = (fit: "epaper" | "fast" | "touch" | "keys") =>
       storeShelvesOf(templates, { category: null, fit, kind: "scene", search: "", sort: "name" }).flatMap((group) =>
         group.templates.map((template) => template.name),
       );
     expect(names("epaper")).toEqual(["Weather", "Sudoku"]);
     expect(names("fast")).toEqual(["Snake"]);
     expect(names("touch")).toEqual(["Sudoku"]);
+    expect(names("keys")).toEqual(["Snake", "Sudoku"]);
   });
 });

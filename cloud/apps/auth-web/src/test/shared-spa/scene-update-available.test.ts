@@ -314,7 +314,7 @@ describe("cloud: several scenes with an update", () => {
     await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
     const fromOther = confirmMock.mock.calls[0]![0] as ConfirmRequest & { danger?: boolean };
     expect(fromOther.message).toContain(
-      'Updating all scenes also adds new permissions: "Clock" reads assets folder, writes assets folder.',
+      'Updating all scenes also adds new permissions: "Clock" reads & writes files.',
     );
     expect(fromOther.message).not.toContain("New permissions in this version");
     expect(fromOther.danger).toBe(false);
@@ -322,7 +322,7 @@ describe("cloud: several scenes with an update", () => {
     logic.actions.confirmSceneUpdate("rt-2");
     await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(2));
     const fromClock = confirmMock.mock.calls[1]![0] as ConfirmRequest & { danger?: boolean };
-    expect(fromClock.message).toContain("New permissions in this version: reads assets folder, writes assets folder.");
+    expect(fromClock.message).toContain("New permissions in this version: reads & writes files.");
     expect(fromClock.danger).toBe(true);
     expect(calls(/scenes\/update/)).toEqual([]);
   });

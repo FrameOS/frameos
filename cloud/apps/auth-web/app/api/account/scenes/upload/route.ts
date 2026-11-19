@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import { jsonError, requireDatabase } from "../../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 import { maxSceneZipBytes } from "../../../../../src/lib/store";
-import { publishRateLimitResponse } from "../../../../../src/lib/store-publish-limit";
+import { publishRateLimitResponse, storeWriteRateLimitResponse } from "../../../../../src/lib/store-publish-limit";
 import { publishStoreScene } from "../../../../../src/lib/store-publish";
 
 export const runtime = "nodejs";
@@ -20,15 +19,14 @@ export async function POST(request: NextRequest) {
     return csrf;
   }
 
-  const limited = await rateLimitResponse(request, "account:scene-upload", {
+  const session = await readSession();
+  const limited = await storeWriteRateLimitResponse(request, session?.accountId, "account:scene-upload", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {
     return limited;
   }
-
-  const session = await readSession();
   if (!session?.accountId) {
     return jsonError("login_required", 401);
   }

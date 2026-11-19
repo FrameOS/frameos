@@ -8,7 +8,12 @@
       "backgroundColor": "#0b1712",
       "windowSize": "640x640",
       "category": "Games",
-      "icon": "M3 3h13v4H3zM3 7h4v4H3zM3 10h18v4H3zM17 14h4v3h-4zM3 17h18v4H3zM15 2h7v6h-7zM18 4v2h2V4z"
+      "icon": "M3 3h13v4H3zM3 7h4v4H3zM3 10h18v4H3zM17 14h4v3h-4zM3 17h18v4H3zM15 2h7v6h-7zM18 4v2h2V4z",
+      "needs": [
+        "touch",
+        "keys",
+        "buttons"
+      ]
     },
     "fields": [
       {

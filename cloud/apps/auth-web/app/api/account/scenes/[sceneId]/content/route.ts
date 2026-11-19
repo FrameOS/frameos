@@ -14,6 +14,7 @@ import {
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
 import { hasPhotoShareLink } from "../../../../../../src/lib/photos/share-links-in-scenes";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { accountIsSuperadmin } from "../../../../../../src/lib/superadmin";
 import {
   extractManifestNameFromZip,
   extractScenesFromZip,
@@ -87,11 +88,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   // Interactive editor saves have a separate, higher allowance than uploads
   // and linked-backend publishing so experimentation does not exhaust either.
-  const accountLimited = await identityRateLimitResponse(
-    session.accountId!,
-    "store:scene-edit",
-    { limit: maxSceneEditsPerHour, windowMs: 60 * 60 * 1000 },
-  );
+  // A superadmin has none (a whole catalog saved again in one go).
+  const accountLimited = (await accountIsSuperadmin(session.accountId!))
+    ? undefined
+    : await identityRateLimitResponse(session.accountId!, "store:scene-edit", {
+        limit: maxSceneEditsPerHour,
+        windowMs: 60 * 60 * 1000,
+      });
   if (accountLimited) {
     return accountLimited;
   }

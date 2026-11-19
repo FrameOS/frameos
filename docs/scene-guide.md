@@ -46,6 +46,13 @@ A scenes file is a JSON array of scenes. Each scene is
   `"Full screen layouts"`. Write the name exactly. Which screen a scene is for
   is no category: the store reads that from the scene itself (a
   `refreshInterval` under a second needs a fast screen).
+- `settings.needs` (optional): what the scene needs of a frame, when the store
+  would read it wrong from the scene: a list of `"fast"` (a fast screen),
+  `"touch"` (taps or a mouse), `"keys"` (a keyboard), `"buttons"` (the frame's
+  buttons). Leave it out and the store works it out (a `refreshInterval`
+  under a second is `"fast"`). Set it when the scene adapts: a game that
+  animates on an LCD and turns into a slow puzzle on e-paper says
+  `["touch", "keys", "buttons"]`.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -431,7 +438,7 @@ nor `"assets-write"`, its asset calls live in a folder of its own,
 `scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
 with no list asks for nothing, and a list written by hand is replaced on the
 next save. A scene asks for what its apps ask for, nothing more, and every
-surface shows it as tags ("reads assets folder", "writes assets folder",
+surface shows it as tags ("reads files", "writes files", "reads & writes files",
 "reads all files", "runs shell commands", "changes frame settings", and
 "uses OpenAI key" for each
 settings namespace an app reads). Installing a scene is the approval of its

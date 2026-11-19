@@ -9,10 +9,17 @@
  *   second (`refreshInterval` under 1 s): animation, a game loop, smooth
  *   motion. E-paper cannot show it, and a frame's own store leaves it out
  *   there.
- * - `touch`: it is used with taps or a mouse (JSX handlers, pointer events).
- * - `keys`: it is used with a keyboard or the frame's buttons.
+ * - `touch`: it is used with taps or a mouse, one thing to the runtime (JSX
+ *   handlers, pointer events).
+ * - `keys`: it is used with a keyboard (key events, text input).
+ * - `buttons`: it is used with the frame's own buttons (GPIO `button` events).
  * - `linux`: it runs a program on a Linux frame (Chromium, FFmpeg, a shell
  *   command), which an ESP32 and a cloud-managed frame refuse.
+ *
+ * A scene that knows better says so: `settings.needs`, a list of these, is
+ * taken as it is for that scene (a game that turns into a slow puzzle on
+ * e-paper redraws many times a second on an LCD but needs no fast screen).
+ * `linux` is added from the risk flags whatever it says.
  *
  * The cloud store works them out at publish time and keeps them on the
  * version (`needs`, cloud/apps/auth-web/src/lib/store.ts), beside the risk
@@ -23,20 +30,22 @@
  * under its stricter tsconfig.
  */
 
-export type SceneNeed = 'fast' | 'touch' | 'keys' | 'linux'
-export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'linux']
+export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux'
+export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux']
 
 const needLabels: Record<SceneNeed, string> = {
   fast: 'Fast screen',
-  touch: 'Touch',
-  keys: 'Keys',
+  touch: 'Touch & mouse',
+  keys: 'Keyboard',
+  buttons: 'Buttons',
   linux: 'Pi only',
 }
 
 const needDescriptions: Record<SceneNeed, string> = {
   fast: 'Redraws many times a second: made for an LCD or HDMI screen. E-paper cannot keep up.',
-  touch: 'Used with taps, swipes or a mouse.',
-  keys: "Used with a keyboard or the frame's buttons.",
+  touch: 'Used with taps and swipes on a touch screen, or with a mouse.',
+  keys: 'Used with a keyboard.',
+  buttons: "Used with the frame's own buttons.",
   linux: 'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
 }
 
@@ -80,8 +89,10 @@ const POINTER_EVENTS = new Set([
   'touchEnd',
 ])
 
-/** Keys and the frame's own buttons. */
-const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput', 'button'])
+/** A keyboard. */
+const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput'])
+/** The frame's own buttons (GPIO). */
+const BUTTON_EVENTS = new Set(['button'])
 
 /** Built-in apps that start a program on the frame (sceneAccess.ts gives them `shell`). */
 const LINUX_APPS = new Set(['data/chromiumScreenshot', 'data/rstpSnapshot'])
@@ -92,6 +103,8 @@ const KEY_HANDLER = /\bon(?:KeyDown|KeyUp|KeyPress|TextInput)\s*[=:]/
 const POINTER_NAME = new RegExp(`['"\`](?:${[...POINTER_EVENTS].join('|')})['"\`]`)
 // Not 'button': JSX says look="button" and type="button" for what a tap presses.
 const KEY_NAME = /['"`](?:keyDown|keyUp|textInput)['"`]/
+// An app that subscribes to the frame's buttons by event name.
+const BUTTON_NAME = /['"`](?:button)['"`]\s*[,\])]/
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -173,6 +186,15 @@ function refreshIntervalOf(scene: Record<string, unknown>): number | null {
 export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] = []): SceneNeed[] {
   const needs = new Set<SceneNeed>()
   for (const entry of scenesOf(scene)) {
+    const stated = settingsOf(entry).needs
+    if (Array.isArray(stated)) {
+      for (const need of stated) {
+        if (isSceneNeed(need)) {
+          needs.add(need)
+        }
+      }
+      continue
+    }
     const interval = refreshIntervalOf(entry)
     if (!isLayout(entry) && interval !== null && interval < 1) {
       needs.add('fast')
@@ -193,6 +215,9 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
     }
     if ([...events].some((name) => KEY_EVENTS.has(name)) || code.some((text) => KEY_HANDLER.test(text) || KEY_NAME.test(text))) {
       needs.add('keys')
+    }
+    if ([...events].some((name) => BUTTON_EVENTS.has(name)) || code.some((text) => BUTTON_NAME.test(text))) {
+      needs.add('buttons')
     }
   }
   if (riskFlags.includes('shell')) {

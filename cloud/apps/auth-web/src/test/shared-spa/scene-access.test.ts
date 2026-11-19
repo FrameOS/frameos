@@ -193,14 +193,14 @@ describe("what an update changes", () => {
   it("reads a scene and its new version the same way", () => {
     const changes = sceneAccessChanges(reader, allFiles);
     expect(changes.gained).toEqual(["files"]);
-    expect(describeGainedAccess(changes)).toBe("reads all files (was reads assets folder)");
+    expect(describeGainedAccess(changes)).toBe("reads all files (was the assets folder only)");
     expect(accessChangesAreRisky(changes)).toBe(true);
   });
 
   it("compares sets of scenes as a whole", () => {
     const changes = sceneAccessChanges([reader], [reader, writer]);
     expect(changes.gained).toEqual(["assets-write"]);
-    expect(describeGainedAccess(changes)).toBe("writes assets folder");
+    expect(describeGainedAccess(changes)).toBe("writes files");
   });
 
   it("gaining a key says so without a red button", () => {
@@ -217,7 +217,7 @@ describe("what an update changes", () => {
 
   it("gaining only a read of the assets folder is not a red button", () => {
     const changes = sceneAccessChanges({ id: "a", nodes: [] }, reader);
-    expect(describeGainedAccess(changes)).toBe("reads assets folder");
+    expect(describeGainedAccess(changes)).toBe("reads files");
     expect(accessChangesAreRisky(changes)).toBe(false);
   });
 
@@ -227,7 +227,7 @@ describe("what an update changes", () => {
 
   it("says what the clicked scene gains, in red when it reaches past the assets folder", () => {
     expect(sceneUpdateAccessNotice("p2", [photos], false)).toEqual({
-      message: "New permissions in this version: reads all files (was reads assets folder).",
+      message: "New permissions in this version: reads all files (was the assets folder only).",
       danger: true,
     });
   });
@@ -235,8 +235,8 @@ describe("what an update changes", () => {
   it("adds what updating all scenes gains for the others", () => {
     expect(sceneUpdateAccessNotice("p1", [photos, notes, clock], true)).toEqual({
       message:
-        "New permissions in this version: reads all files (was reads assets folder).\n\n" +
-        'Updating all scenes also adds new permissions: "Notes" writes assets folder.',
+        "New permissions in this version: reads all files (was the assets folder only).\n\n" +
+        'Updating all scenes also adds new permissions: "Notes" writes files.',
       danger: true,
     });
   });
@@ -244,8 +244,8 @@ describe("what an update changes", () => {
   it("keeps the button plain when only the other scenes gain something", () => {
     expect(sceneUpdateAccessNotice("c", [photos, notes, clock], true)).toEqual({
       message:
-        'Updating all scenes also adds new permissions: "Photos" reads all files (was reads assets folder); ' +
-        '"Notes" writes assets folder.',
+        'Updating all scenes also adds new permissions: "Photos" reads all files (was the assets folder only); ' +
+        '"Notes" writes files.',
       danger: false,
     });
   });

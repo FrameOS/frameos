@@ -267,7 +267,10 @@ export function ruleTags(facts: SceneFacts & { category?: string | null | undefi
   } else if (!needs.includes("linux")) {
     tags.push("e-ink");
   }
-  if (needs.includes("keys") && !needs.includes("touch")) {
+  if (needs.includes("keys")) {
+    tags.push("keyboard");
+  }
+  if (needs.includes("buttons")) {
     tags.push("buttons");
   }
   if (needs.includes("linux")) {

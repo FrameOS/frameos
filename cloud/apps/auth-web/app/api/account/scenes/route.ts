@@ -16,7 +16,7 @@ import {
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
-import { publishRateLimitResponse } from "../../../../src/lib/store-publish-limit";
+import { publishRateLimitResponse, storeWriteRateLimitResponse } from "../../../../src/lib/store-publish-limit";
 import { framePreviewForNewScene } from "../../../../src/lib/scene-images";
 
 export const runtime = "nodejs";
@@ -111,14 +111,14 @@ export async function POST(request: NextRequest) {
   if (csrf) {
     return csrf;
   }
-  const limited = await rateLimitResponse(request, "account:scene-create", {
+  const session = await readSession();
+  const limited = await storeWriteRateLimitResponse(request, session?.accountId, "account:scene-create", {
     limit: 60,
     windowMs: 15 * 60 * 1000,
   });
   if (limited) {
     return limited;
   }
-  const session = await readSession();
   if (!session?.accountId) {
     return jsonError("login_required", 401);
   }

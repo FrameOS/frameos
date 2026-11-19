@@ -8,7 +8,12 @@
       "backgroundColor": "#161226",
       "windowSize": "640x640",
       "category": "Games",
-      "icon": "M3 13h4v4H3zm0 5h4v4H3zm5 0h4v4H8zm0-5h4v4H8zm5 5h4v4h-4zm5-5h4v4h-4zm0 5h4v4h-4zM10 2h4v4h-4zm-5 0h4v4H5zm5 5h4v4h-4z"
+      "icon": "M3 13h4v4H3zm0 5h4v4H3zm5 0h4v4H8zm0-5h4v4H8zm5 5h4v4h-4zm5-5h4v4h-4zm0 5h4v4h-4zM10 2h4v4h-4zm-5 0h4v4H5zm5 5h4v4h-4z",
+      "needs": [
+        "touch",
+        "keys",
+        "buttons"
+      ]
     },
     "fields": [
       {

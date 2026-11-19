@@ -1,11 +1,6 @@
 import clsx from 'clsx'
 import { Tag } from '../../../../components/Tag'
-import {
-  SceneAccessFlag,
-  sceneAccessFlagDescription,
-  sceneAccessFlagIsRisky,
-  sceneAccessFlagLabel,
-} from '../../../../utils/sceneAccess'
+import { SceneAccessFlag, sceneAccessTags, type SceneAccessTag } from '../../../../utils/sceneAccess'
 
 interface SceneAccessTagsProps {
   /** From sceneAccessFlags / templateAccessFlags (utils/sceneAccess.ts), in display order. */
@@ -16,18 +11,19 @@ interface SceneAccessTagsProps {
 }
 
 // Red for what reaches past the scene's own reading of your photos (shell
-// commands, any file on the frame, writing or deleting in the assets folder),
-// orange for reading the assets folder, gray for the API keys its apps read.
-function flagColor(flag: SceneAccessFlag): 'red' | 'orange' | 'gray' {
-  return sceneAccessFlagIsRisky(flag) ? 'red' : flag === 'assets' ? 'orange' : 'gray'
+// commands, any file on the frame, writing or deleting files), orange for
+// reading files, gray for the API keys its apps read. The theme's tag colors,
+// light and dark.
+function tagColor(tag: SceneAccessTag): 'red' | 'orange' | 'gray' {
+  return tag.risky ? 'red' : tag.flags.includes('assets') ? 'orange' : 'gray'
 }
 
 /**
  * The chips a scene shows for what its apps ask for on the frame: "runs shell
- * commands", "reads all files", "reads assets folder", "writes assets
- * folder", "uses OpenAI key". Read from the scene's own JSON (or the store's
- * flags for a catalog entry), so they say the same thing wherever the scene
- * shows up.
+ * commands", "reads all files", "reads files", "writes files", "reads &
+ * writes files", "uses OpenAI key" (`sceneAccessTags`). Read from the scene's
+ * own JSON (or the store's flags for a catalog entry), so they say the same
+ * thing wherever the scene shows up.
  */
 export function SceneAccessTags({ flags, className, tagClassName }: SceneAccessTagsProps): JSX.Element | null {
   if (flags.length === 0) {
@@ -35,14 +31,14 @@ export function SceneAccessTags({ flags, className, tagClassName }: SceneAccessT
   }
   return (
     <span className={clsx('inline-flex flex-wrap items-center gap-1', className)}>
-      {flags.map((flag) => (
+      {sceneAccessTags(flags).map((tag) => (
         <Tag
-          key={flag}
-          color={flagColor(flag)}
-          title={sceneAccessFlagDescription(flag)}
+          key={tag.key}
+          color={tagColor(tag)}
+          title={tag.description}
           className={clsx('whitespace-nowrap normal-case', tagClassName)}
         >
-          {sceneAccessFlagLabel(flag)}
+          {tag.label}
         </Tag>
       ))}
     </span>
