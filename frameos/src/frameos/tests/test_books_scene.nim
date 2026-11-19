@@ -225,11 +225,11 @@ suite "the Books scene":
     check problems.len == 0
     if problems.len > 0: echo problems
 
-  test "is the Books scene, a sample with an icon":
+  test "is the ePub reader scene, a sample with an icon":
     let scene = parseFile(Samples / "Books" / "scenes.json")[0]
     check scene["id"].getStr() == "books"
     check scene["settings"]["icon"].getStr().len > 0
-    check parseFile(Samples / "Books" / "template.json")["name"].getStr() == "Books"
+    check parseFile(Samples / "Books" / "template.json")["name"].getStr() == "ePub reader"
 
   test "the library lists the card's books by title, and says what is not one":
     problems = @[]
