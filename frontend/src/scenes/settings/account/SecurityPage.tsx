@@ -6,10 +6,11 @@ import { Box } from '../../../components/Box'
 import { Button } from '../../../components/Button'
 import { Field } from '../../../components/Field'
 import { Spinner } from '../../../components/Spinner'
+import { Select } from '../../../components/Select'
 import { TextInput } from '../../../components/TextInput'
 import { urls } from '../../../urls'
 import { AccountNotice, AccountPageHeader, AccountSection } from './AccountPageHeader'
-import { securityLogic } from './securityLogic'
+import { savedKeysReauthLabel, securityLogic } from './securityLogic'
 import { TwoFactorSettings } from './TwoFactorSettings'
 
 function PasswordCard(): JSX.Element {
@@ -69,6 +70,35 @@ function SessionsCard(): JSX.Element {
       >
         {signOutState === 'submitting' ? 'Signing out…' : 'Sign out everywhere else'}
       </Button>
+    </Box>
+  )
+}
+
+// How long a sign-in lets the scene preview read the saved service keys
+// before it asks "is it you?" again (GET /api/settings?reveal=1). The preview
+// banner that asks links here (SceneLivePreview, #saved-keys).
+function SavedKeysCard(): JSX.Element {
+  const { security, savedKeysReauthSaving, savedKeysReauthError } = useValues(securityLogic)
+  const { setSavedKeysReauth } = useActions(securityLogic)
+  const choices = security?.saved_keys_reauth_choices ?? [7200, 86400, 604800, 0]
+  const value = security?.saved_keys_reauth_seconds ?? 7200
+  return (
+    <Box className="max-w-md space-y-3 p-4">
+      {savedKeysReauthError ? <AccountNotice tone="error">{savedKeysReauthError}</AccountNotice> : null}
+      <label className="block space-y-1 text-sm">
+        <span className="frameos-strong font-semibold">Ask me to confirm it is me again</span>
+        <Select
+          value={String(value)}
+          disabled={savedKeysReauthSaving}
+          onChange={(next) => setSavedKeysReauth(Number(next))}
+          options={choices.map((seconds) => ({ value: String(seconds), label: savedKeysReauthLabel(seconds) }))}
+        />
+      </label>
+      <p className="frameos-muted text-xs leading-relaxed">
+        {value === 0
+          ? 'The preview uses your saved keys for as long as you stay signed in. Anyone using this browser while you are signed in can read them.'
+          : 'A longer time means fewer prompts while you build scenes, and longer that someone at a browser you left signed in could read your keys. Asking less often asks you to confirm it is you once more.'}
+      </p>
     </Box>
   )
 }
@@ -176,6 +206,13 @@ export function SecurityPage(): JSX.Element {
         <Box className="p-4">
           <TwoFactorSettings />
         </Box>
+      </AccountSection>
+      <AccountSection
+        id="saved-keys"
+        title="Saved keys in the scene preview"
+        description="The scene preview runs scenes in your browser, so it needs the service keys saved in your account. Because one request reads all of them, the preview asks you to confirm it is you when you signed in a while ago. Choose how often."
+      >
+        <SavedKeysCard />
       </AccountSection>
       {/* GDPR arts. 15/17/20 in two buttons. Both are deliberately here on the
           security page rather than buried in a support email: a right you have

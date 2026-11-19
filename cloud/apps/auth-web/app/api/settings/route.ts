@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import {
+  accounts,
   accountSettings,
   createDb,
   frames,
@@ -26,8 +27,8 @@ import {
 } from "../../../src/lib/frames";
 import { rateLimitResponse } from "../../../src/lib/rate-limit";
 import {
-  recentApprovalMaxAgeSeconds,
   requireRecentAuth,
+  savedKeysRevealMaxAge,
 } from "../../../src/lib/recent-auth";
 import { readSession } from "../../../src/lib/session";
 import { reportError } from "../../../src/lib/log";
@@ -53,7 +54,9 @@ export const runtime = "nodejs";
 //
 // The browser session does not get them for free either: `?reveal=1` is a
 // sudo-mode route (recent-auth.ts), on the two-hour approval window rather
-// than the fifteen-minute revoke one. Every stored third-party key in one
+// than the fifteen-minute revoke one by default, and on whatever window the
+// owner picked on the Security page (`savedKeysRevealMaxAge`: a day, a week,
+// or only at sign-in) when they would rather not be asked that often. Every stored third-party key in one
 // response is exactly what a cookie lifted from an unattended laptop should
 // not be able to fetch hours later — but the preview that needs the keys is
 // used all through an editing session, and re-proving credentials every
@@ -122,11 +125,18 @@ export async function GET(request: NextRequest) {
   const reveal =
     !session.apiToken && request.nextUrl.searchParams.get("reveal") === "1";
   if (reveal) {
-    const stale = await requireRecentAuth(
-      db,
-      session.accountId,
-      recentApprovalMaxAgeSeconds,
-    );
+    // The owner's window (Security page), two hours unless they chose
+    // otherwise; none at all when they chose "only when I sign in".
+    const [account] = await db
+      .select({ savedKeysReauthSeconds: accounts.savedKeysReauthSeconds })
+      .from(accounts)
+      .where(eq(accounts.id, session.accountId))
+      .limit(1);
+    const maxAge = savedKeysRevealMaxAge(account?.savedKeysReauthSeconds);
+    const stale =
+      maxAge === null
+        ? undefined
+        : await requireRecentAuth(db, session.accountId, maxAge);
     if (stale) {
       return stale;
     }

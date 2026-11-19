@@ -65,13 +65,11 @@ import {
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameSceneStorage, frameStorageLabel, sceneSizeLabel } from '../../utils/frameSceneStorage'
 import { SceneDependencyConnector } from './SceneDependencyConnector'
-import { SceneDependencyFormatMenu } from './SceneDependencyFormatMenu'
 import {
   LAYOUTS_GROUP_EXPANSION_PATH,
   layoutsGroupExpansionKey,
   sceneChildExpansionKey,
   sceneChildExpansionPath,
-  sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
 import { closeSplitGenerator } from './splitScreenLayoutLogic'
@@ -85,11 +83,7 @@ import {
   sceneToolPanelIsAllowed,
   workspaceMode,
 } from './workspaceSurfaces'
-import {
-  buildSceneDependencyEntries,
-  buildSceneDependencyGraph,
-  flatSceneDependencyEntries,
-} from './sceneDependencyGrouping'
+import { buildSceneDependencyEntries, buildSceneDependencyGraph } from './sceneDependencyGrouping'
 import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import { sceneIconOf } from '../../utils/sceneIcon'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
@@ -319,43 +313,60 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
   )
 }
 
-function FrameHeaderActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
-  const { openChatDrawer } = useActions(workspaceLogic)
+// The header's right side: the metric chips alone, flush right.
+function FrameHeaderActions({ frame }: { frame: FrameType }): JSX.Element {
+  return (
+    <div className="frame-header-actions ml-auto flex min-w-0 max-w-full items-center justify-end">
+      <HeaderMetrics frameId={frame.id} />
+    </div>
+  )
+}
+
+// The frame's own actions at the head of the scenes row, the size of the
+// panel shortcuts after them: re-render what shows, then the "…" menu.
+const sceneRowIconButtonClassName =
+  'frameos-secondary-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/80 !px-0 !py-0 text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+
+/** A checkbox drawn as an icon: an empty box, ticked while `checked`. */
+function CheckboxIcon({ checked, className }: { checked: boolean; className?: string }): JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="3.75" y="3.75" width="16.5" height="16.5" rx="3" />
+      {checked ? (
+        <path d="M7.5 12.25l3 3 6-6.5" strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} />
+      ) : null}
+    </svg>
+  )
+}
+
+function FrameSceneRowActions({ frame, archived }: { frame: FrameType; archived?: boolean }): JSX.Element {
   const { renderFrame } = useActions(framesModel)
   // Same gate as the "…" menu's Re-render entry (workspaceSurfaces): the
   // verb exists on every control plane but not for a virtual frame.
   const canRender = frameMenuActionIsAllowed(workspaceMode(), 'render', frame)
 
   return (
-    <div className="frame-header-actions flex min-w-0 shrink-0 items-center justify-start gap-1">
-      <HeaderMetrics frameId={frame.id} />
-      <div className="frame-header-action-buttons flex shrink-0 items-center gap-1">
-        {canRender ? (
-          <button
-            type="button"
-            title="Re-render the current scene"
-            onClick={() => renderFrame(frame.id)}
-            className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            <PlayIcon className="h-5 w-5" />
-          </button>
-        ) : null}
+    <>
+      {canRender ? (
         <button
           type="button"
-          title="Open AI chat"
-          onClick={() => openChatDrawer(frame.id, null)}
-          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          title="Re-render the current scene"
+          aria-label="Re-render the current scene"
+          onClick={() => renderFrame(frame.id)}
+          className={sceneRowIconButtonClassName}
         >
-          <SparklesIcon className="h-5 w-5" />
+          <PlayIcon className="h-4 w-4" />
         </button>
-        <FrameActionsMenu
-          frame={frame}
-          archived={archived}
-          buttonColor="none"
-          className="frame-header-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        />
-      </div>
-    </div>
+      ) : null}
+      <FrameActionsMenu frame={frame} archived={archived} buttonColor="none" className={sceneRowIconButtonClassName} />
+    </>
   )
 }
 
@@ -410,7 +421,7 @@ function FrameDashboardHeader({ frame, archived }: { frame: FrameType; archived?
           <FrameDashboardStatusLine frame={frame} />
         </div>
       </div>
-      <FrameHeaderActions frame={frame} archived={archived} />
+      <FrameHeaderActions frame={frame} />
     </div>
   )
 }
@@ -780,15 +791,17 @@ function FrameScenesBlock({
   totalScenes,
   frameMatchesSearch,
   showSceneMenus,
+  archived,
 }: {
   frame: FrameType
   scenes: FrameScene[]
   totalScenes: number
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
+  archived?: boolean
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
-  const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
+  const { openChatDrawer, openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // `frameLogic.scenes` is `frameForm.scenes ?? frame.scenes ?? []` — unsaved
   // edits first, then the saved frame (which is what cloud mode hydrates), so
   // an empty/absent form never blanks the list.
@@ -848,17 +861,15 @@ function FrameScenesBlock({
   const activeLayoutName = frameLayouts.find((layout) => layout.id === activeLayoutId)?.name
   const { childrenBySceneId, sceneById } = buildSceneDependencyGraph(allScenes)
   const matchingSceneIds = searchIsActive ? new Set(scenes.map((scene) => scene.id)) : null
-  const groupingEnabled = sceneDependencyGroupingIsEnabled(frameAssetFolderExpansion, frame.id, 'overview')
-  const sceneOverviewEntries = groupingEnabled
-    ? buildSceneDependencyEntries({
-        childrenBySceneId,
-        frameId: frame.id,
-        matchingSceneIds,
-        sceneById,
-        sceneChildExpansion: frameAssetFolderExpansion,
-        scenes: allScenes,
-      })
-    : flatSceneDependencyEntries(sortScenesAlphabetically(scenes))
+  // Dependent scenes are always grouped under the scene that shows them.
+  const sceneOverviewEntries = buildSceneDependencyEntries({
+    childrenBySceneId,
+    frameId: frame.id,
+    matchingSceneIds,
+    sceneById,
+    sceneChildExpansion: frameAssetFolderExpansion,
+    scenes: allScenes,
+  })
   // Allow-list per control plane — see workspaceSurfaces.ts. The frame's
   // device profile never removes a shortcut; it disables it with a tooltip
   // (an esp32 cloud frame keeps Logs — pushed to the cloud and read back —
@@ -905,6 +916,7 @@ function FrameScenesBlock({
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        <FrameSceneRowActions frame={frame} archived={archived} />
         {visibleSceneToolButtons.map(({ label, panel, icon: Icon, disabledReason }) =>
           disabledReason ? (
             <span
@@ -927,11 +939,26 @@ function FrameScenesBlock({
             </A>
           )
         )}
-        <SceneDependencyFormatMenu
-          frameId={frame.id}
-          surface="overview"
-          multiSelect={{ enabled: multiSelectEnabled, onToggle: setMultiSelect }}
-        />
+        <button
+          type="button"
+          title="Open AI chat"
+          aria-label="Open AI chat"
+          onClick={() => openChatDrawer(frame.id, null)}
+          className={sceneRowIconButtonClassName}
+        >
+          <SparklesIcon className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={multiSelectEnabled}
+          title={multiSelectEnabled ? 'Stop selecting scenes' : 'Select multiple scenes'}
+          aria-label="Select multiple scenes"
+          onClick={() => setMultiSelect(!multiSelectEnabled)}
+          className={sceneRowIconButtonClassName}
+        >
+          <CheckboxIcon checked={multiSelectEnabled} className="h-4 w-4" />
+        </button>
         {multiSelectEnabled ? (
           <>
             <button
@@ -963,7 +990,7 @@ function FrameScenesBlock({
               sceneControlSelection?.frameId === frame.id &&
               sceneControlSelection.sceneId === scene.id &&
               sceneControlSelection.source !== 'preview'
-            const childSceneCount = groupingEnabled ? childrenBySceneId.get(scene.id)?.length ?? 0 : 0
+            const childSceneCount = childrenBySceneId.get(scene.id)?.length ?? 0
             const childrenExpanded = !!frameAssetFolderExpansion[sceneChildExpansionKey(frame.id, scene.id)]
             return (
               <FrameSceneTile
@@ -1145,6 +1172,7 @@ export function FrameDashboardSurface({
           totalScenes={totalScenes}
           frameMatchesSearch={frameMatchesSearch}
           showSceneMenus={showSceneMenus}
+          archived={archived}
         />
       </div>
     </section>

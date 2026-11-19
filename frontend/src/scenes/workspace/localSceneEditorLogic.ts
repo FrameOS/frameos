@@ -371,6 +371,7 @@ export const localSceneEditorLogic = kea<localSceneEditorLogicType>([
       fetch: (path, init) => apiFetch(path, init),
       aiChatTurnsUrl: null,
       previewProxyUrl: null,
+      savedKeysSettingsUrl: null,
     })
   }),
 ])

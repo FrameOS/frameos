@@ -267,7 +267,7 @@ export const sceneEditorPageLogic = kea<sceneEditorPageLogicType>([
       fetch: (path, init) => apiFetch(path, init),
       aiChatTurnsUrl: cloud ? '/api/ai/chat/turns' : null,
       aiChatContext: () => ({ frameId: props.frameId }),
-      ...(cloud ? {} : { previewProxyUrl: null }),
+      ...(cloud ? {} : { previewProxyUrl: null, savedKeysSettingsUrl: null }),
     })
     if (!cloud) {
       void projectApiPath(`/api/frames/${props.frameId}/scene_preview_proxy`).then((path) =>
@@ -276,6 +276,7 @@ export const sceneEditorPageLogic = kea<sceneEditorPageLogicType>([
           aiChatTurnsUrl: null,
           aiChatContext: () => ({ frameId: props.frameId }),
           previewProxyUrl: getBasePath() + path,
+          savedKeysSettingsUrl: null,
         })
       )
     }

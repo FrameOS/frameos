@@ -1,4 +1,5 @@
 import { sceneWorkspaceHost } from "./host";
+import { previewWorkerUrl } from "./preview-worker";
 
 // Headless render check for AI-delivered scenes, in the browser: run the
 // scene once through the frameos-wasm preview worker (the same runtime the
@@ -17,7 +18,6 @@ export const RENDER_CHECK_TIMEOUT_MS = 30_000;
 const MAX_COLLECTED_LOGS = 100;
 const MAX_COLLECTED_ERRORS = 20;
 
-export const RENDER_CHECK_WORKER_URL = "/frameos-wasm/preview-worker.js";
 /** The plane's preview proxy (the store's on the cloud). */
 export function renderCheckProxyUrl(): string | undefined {
   return sceneWorkspaceHost().previewProxyUrl ?? undefined;
@@ -288,7 +288,7 @@ export async function renderSceneCheck({
 
   let worker: Worker;
   try {
-    worker = new Worker(RENDER_CHECK_WORKER_URL, { type: "module" });
+    worker = new Worker(previewWorkerUrl(), { type: "module" });
   } catch (error) {
     return failed(error instanceof Error ? error.message : String(error));
   }

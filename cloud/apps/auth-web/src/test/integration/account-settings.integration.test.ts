@@ -14,6 +14,10 @@ import {
   POST as postSettings,
 } from "../../../app/api/settings/route";
 import {
+  GET as getSecurity,
+  PUT as putSecurity,
+} from "../../../app/api/account/security/route";
+import {
   isSealedSettingValue,
   maxAccountSettingValueLength,
   resealLegacyAccountSettings,
@@ -334,6 +338,76 @@ describe("account settings API", () => {
     const revealed = await getSettings(getRequest("?reveal=1"));
     expect(revealed.status).toBe(200);
     expect(await revealed.json()).toEqual({ unsplash: { accessKey: "u-1234567890" } });
+  });
+
+  it("asks again on the owner's window, and only a recent proof may lengthen it", async () => {
+    const accountId = await signIn();
+    await postSettings(
+      postRequest({ unsplash: { accessKey: "u-1234567890" } }),
+    );
+    const putWindow = (seconds: unknown) =>
+      putSecurity(
+        new NextRequest(new URL("/api/account/security", baseUrl), {
+          body: JSON.stringify({ saved_keys_reauth_seconds: seconds }),
+          headers: { "content-type": "application/json", origin: baseUrl },
+          method: "PUT",
+        }),
+      );
+    const ageSession = (seconds: number) =>
+      db
+        .update(sessions)
+        .set({ authenticatedAt: new Date(Date.now() - seconds * 1000) })
+        .where(eq(sessions.accountId, accountId));
+    const readWindow = async () =>
+      (
+        (await (
+          await getSecurity(
+            new NextRequest(new URL("/api/account/security", baseUrl)),
+          )
+        ).json()) as { saved_keys_reauth_seconds: number }
+      ).saved_keys_reauth_seconds;
+
+    expect(await readWindow()).toBe(recentApprovalMaxAgeSeconds);
+    expect((await putWindow(12345)).status).toBe(400);
+
+    // A session that signed in three hours ago may not loosen the gate: it
+    // is exactly the cookie the gate is for.
+    await ageSession(3 * 60 * 60);
+    const refused = await putWindow(24 * 60 * 60);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toBe(
+      "reauth_required",
+    );
+    expect(await readWindow()).toBe(recentApprovalMaxAgeSeconds);
+
+    // After a fresh proof it may: a day, and then the keys come three hours
+    // after the proof without another one.
+    const token = cookieJar.get(sessionCookieName)!;
+    expect(await markSessionReauthenticated(db, token)).toBe(true);
+    expect((await putWindow(24 * 60 * 60)).status).toBe(200);
+    expect(await readWindow()).toBe(24 * 60 * 60);
+    await ageSession(3 * 60 * 60);
+    expect((await getSettings(getRequest("?reveal=1"))).status).toBe(200);
+    await ageSession(25 * 60 * 60);
+    expect((await getSettings(getRequest("?reveal=1"))).status).toBe(403);
+
+    // Asking more often never needs a proof.
+    expect((await putWindow(recentApprovalMaxAgeSeconds)).status).toBe(200);
+    expect(await readWindow()).toBe(recentApprovalMaxAgeSeconds);
+
+    // "Only when I sign in": no window at all.
+    expect(await markSessionReauthenticated(db, token)).toBe(true);
+    expect((await putWindow(0)).status).toBe(200);
+    await ageSession(30 * 24 * 60 * 60);
+    expect((await getSettings(getRequest("?reveal=1"))).status).toBe(200);
+    expect(
+      (
+        await db
+          .select({ eventType: auditEvents.eventType })
+          .from(auditEvents)
+          .where(eq(auditEvents.accountId, accountId))
+      ).filter((row) => row.eventType === "account.saved_keys_reauth_changed"),
+    ).toHaveLength(3);
   });
 
   it("never reveals a stored key to an API token, whatever it asks for", async () => {

@@ -1,3 +1,4 @@
+import { urls } from '../../../../urls'
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import { memo, useEffect, useRef, useState } from 'react'
@@ -365,6 +366,11 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
               >
                 Confirm it is you
               </a>
+              . Would rather not be asked this often?{' '}
+              <a className="font-semibold underline" href={urls.settings('security') + '#saved-keys'}>
+                Choose how often
+              </a>
+              .
             </div>
           ) : null}
 

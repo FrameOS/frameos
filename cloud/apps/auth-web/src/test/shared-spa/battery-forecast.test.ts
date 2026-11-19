@@ -16,6 +16,7 @@ import {
   formatCycle,
   formatRemaining,
   frameDeepSleeps,
+  frameWakeSettings,
   nearestCycleOption,
   samplesShowDeepSleep,
   scaledDrainPerHour,
@@ -24,7 +25,7 @@ import {
   serverRenderForecast,
   SLEEP_RATIO,
 } from "../../../../../../frontend/src/utils/batteryForecast";
-import type { MetricsType } from "../../../../../../frontend/src/types";
+import type { FrameType, MetricsType } from "../../../../../../frontend/src/types";
 
 const start = Date.parse("2026-09-01T00:00:00Z");
 const hour = 3_600_000;
@@ -574,5 +575,36 @@ describe("frameDeepSleeps", () => {
     // The cloud's own key wins over a stale device_config.
     expect(frameDeepSleeps({ deep_sleep: false, device_config: { deepSleep: true } }, null)).toBe(false);
     expect(frameDeepSleeps({}, null)).toBe(false);
+  });
+});
+
+describe("frameWakeSettings", () => {
+  const scene = (id: string, refreshInterval: number, fields: unknown[] = []) =>
+    ({ id, name: id, nodes: [], edges: [], fields, settings: { refreshInterval } }) as never;
+
+  it("reads the check-in from the cloud's key, a backend's device_config or the board's preset", () => {
+    expect(frameWakeSettings({ wake_check_seconds: 900 } as FrameType).checkInSeconds).toBe(900);
+    expect(frameWakeSettings({ device_config: { wakeCheckSeconds: 1800 } } as FrameType).checkInSeconds).toBe(1800);
+    expect(
+      frameWakeSettings({ hardware: { hardwarePreset: "seeed_reterminal_e1004" } } as FrameType).checkInSeconds,
+    ).toBe(900);
+    // "Only wake to render" is no check-in at all.
+    expect(frameWakeSettings({ wake_check_seconds: 0 } as FrameType).checkInSeconds).toBeNull();
+    expect(frameWakeSettings({} as FrameType).checkInSeconds).toBeNull();
+  });
+
+  it("reads the re-render interval off the scene showing", () => {
+    const frame = {
+      active_scene_id: "photos",
+      scenes: [scene("clock", 60), scene("photos", 3600)],
+    } as unknown as FrameType;
+    expect(frameWakeSettings(frame).renderSeconds).toBe(3600);
+    // A refresh-interval field's value is the scene's own interval.
+    const withField = {
+      active_scene_id: "photos",
+      scenes: [scene("photos", 300, [{ name: "refreshInterval", type: "float", value: "7200" }])],
+    } as unknown as FrameType;
+    expect(frameWakeSettings(withField).renderSeconds).toBe(7200);
+    expect(frameWakeSettings({ scenes: [scene("clock", 60)] } as unknown as FrameType).renderSeconds).toBeNull();
   });
 });

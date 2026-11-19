@@ -39,6 +39,50 @@ export const recentApprovalMaxAgeSeconds = 2 * 60 * 60;
 
 export const reauthPath = "/login/reauth";
 
+// How long a sign-in lets the in-browser preview read every saved service key
+// (GET /api/settings?reveal=1), the owner's pick on the Security page
+// (`accounts.saved_keys_reauth_seconds`). The default is the approval window;
+// the longer ones are for an owner who would rather not be asked while
+// building scenes. 0 = for as long as the session lasts (its own idle and
+// absolute deadlines still end it). Making it looser takes a recent
+// confirmation itself, or a lifted cookie could turn the gate off.
+export const savedKeysReauthChoices = [
+  recentApprovalMaxAgeSeconds,
+  24 * 60 * 60,
+  7 * 24 * 60 * 60,
+  0,
+] as const;
+
+export function isSavedKeysReauthChoice(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    (savedKeysReauthChoices as readonly number[]).includes(value)
+  );
+}
+
+// The account's window in seconds; null when the reveal is never gated.
+export function savedKeysRevealMaxAge(
+  stored: number | null | undefined,
+): number | null {
+  if (stored === 0) {
+    return null;
+  }
+  return isSavedKeysReauthChoice(stored) ? stored : recentApprovalMaxAgeSeconds;
+}
+
+// Whether `next` asks less often than `current`: a longer window, or none.
+export function savedKeysReauthIsLooser(
+  current: number | null | undefined,
+  next: number,
+): boolean {
+  const before = savedKeysRevealMaxAge(current);
+  const after = savedKeysRevealMaxAge(next);
+  if (before === null) {
+    return false;
+  }
+  return after === null || after > before;
+}
+
 // Which proofs /login/reauth can ask this account for. `code` when an
 // authenticator is confirmed or recovery codes remain; `passkey` when one is
 // registered; `password` when the account has one AND no second factor —

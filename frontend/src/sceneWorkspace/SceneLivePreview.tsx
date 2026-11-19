@@ -104,6 +104,7 @@ import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
 import { useDragHeight } from "./useDragHeight";
 import { sceneWorkspaceHost } from "./lib/host";
+import { previewWorkerUrl } from "./lib/preview-worker";
 
 type SceneLivePreviewPanelProps = {
   /** The store scene, or null for a scene that is not saved yet (then
@@ -926,7 +927,7 @@ export function SceneLivePreviewPanel({
     try {
       preview = new FrameOSPreview({
         canvas: canvasRef.current,
-        workerUrl: "/frameos-wasm/preview-worker.js",
+        workerUrl: previewWorkerUrl(),
         width: viewport.width,
         height: viewport.height,
         scenes,
@@ -1456,6 +1457,15 @@ export function SceneLivePreviewPanel({
             session signed in a while ago. <a href={reauthHref()}>Confirm it is you</a> to use the
             keys saved in your account here, or type keys for this tab in the box below the preview.
           </p>
+          {sceneWorkspaceHost().savedKeysSettingsUrl ? (
+            <p className="copy preview-settings__hint">
+              Would rather not be asked this often?{" "}
+              <a href={sceneWorkspaceHost().savedKeysSettingsUrl ?? undefined}>
+                Choose how often in your security settings
+              </a>
+              .
+            </p>
+          ) : null}
         </div>
       ) : null}
       <div className="live-preview-panel__header stack">

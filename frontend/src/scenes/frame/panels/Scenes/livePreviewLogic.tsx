@@ -781,9 +781,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
               .json()
               .catch(() => ({}))) as { error?: string }
             if (detail.error === 'reauth_required') {
-              actions.storedKeysUnavailable(
-                'Your saved API keys were not loaded: this session signed in a while ago. Confirm it is you to use them in the preview.'
-              )
+              actions.storedKeysUnavailable('Your saved API keys were not loaded: this session signed in a while ago.')
             }
           }
         } else {

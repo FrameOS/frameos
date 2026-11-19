@@ -124,7 +124,7 @@ export function HeaderMetrics({ frameId }: { frameId: FrameId }) {
   }
 
   return (
-    <div className="frame-header-metrics flex max-w-[calc(100%-5rem)] flex-none flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:overflow-visible @4xl:gap-1.5">
+    <div className="frame-header-metrics flex min-w-0 max-w-full flex-none flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden @4xl:overflow-visible @4xl:gap-1.5">
       {metricEntries.map(([key, series]) => {
         const chipClassName = clsx(
           'frame-header-metric-chip relative flex h-9 shrink-0 items-center gap-1 overflow-visible rounded-lg border px-2 shadow-sm backdrop-blur-sm transition-colors @4xl:gap-2 @4xl:px-2.5',

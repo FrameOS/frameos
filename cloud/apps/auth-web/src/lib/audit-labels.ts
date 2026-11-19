@@ -19,6 +19,7 @@ export const eventLabels: Record<string, string> = {
   "account.passkey_renamed": "Passkey renamed",
   "account.reauthenticated": "Credentials re-confirmed for a sensitive action",
   "account.reauthentication_failed": "Credential re-check failed",
+  "account.saved_keys_reauth_changed": "Changed how often the preview asks before using saved keys",
   "account.recovery_codes_regenerated": "Recovery codes regenerated",
   "account.second_factor_failed": "Second-factor check failed",
   "account.settings_updated": "Account settings updated",
