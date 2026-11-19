@@ -21,6 +21,15 @@ function assertRuntimeConfig(phase: string) {
   assertSharedSessionConfigured();
 }
 
+// Where the frameos-wasm runtime is served: public/frameos-wasm (the
+// playground, the store's previews), the frames SPA's copy of it (rewritten
+// there below) and the embedded editor's (scripts/copy-editor-assets.mjs).
+const wasmRuntimePrefixes = [
+  "/frameos-wasm",
+  "/frames-app/frameos-wasm",
+  "/frameos-editor/frameos-wasm",
+];
+
 function createNextConfig(phase: string): NextConfig {
   assertRuntimeConfig(phase);
 
@@ -277,6 +286,27 @@ function createNextConfig(phase: string): NextConfig {
           ],
           source: "/frames-app/static/:path*",
         },
+        // The frameos-wasm runtime, wherever it is served (the playground and
+        // the store's previews, the frames SPA, the embedded editor): the
+        // worker imports ./frameos.js and that loads ./frameos.wasm, three
+        // un-versioned names that must come from one release. Cloudflare
+        // rewrote the .js files' no-cache to max-age=14400 and left the
+        // .wasm at max-age=0, so for four hours after a release a browser
+        // that had run the playground paired the old glue with the new wasm
+        // ("LinkError: WebAssembly.instantiate(): Import #… __syscall_rmdir:
+        // function import requires a callable", 2026-11-19). no-store is the
+        // one value Cloudflare passes through on a .js; the wasm (5 MB, not a
+        // Cloudflare-cached type) keeps revalidating as a cheap 304.
+        ...wasmRuntimePrefixes.flatMap((prefix) => [
+          {
+            headers: [noStoreHeader],
+            source: `${prefix}/:file(.*\\.js)`,
+          },
+          {
+            headers: [{ key: "Cache-Control", value: "no-cache" }],
+            source: `${prefix}/:file(.*\\.wasm)`,
+          },
+        ]),
         {
           headers: [noStoreHeader],
           source: "/account/:path*",

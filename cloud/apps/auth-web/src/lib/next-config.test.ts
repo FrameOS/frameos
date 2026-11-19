@@ -207,3 +207,33 @@ describe("the store's embed mode", () => {
     expect(policy).toContain("frame-ancestors https://frameos.net https://www.frameos.net http://localhost:* http://127.0.0.1:*;");
   });
 });
+
+describe("the frameos-wasm runtime's cache headers", () => {
+  it("never lets a browser keep one release's glue beside another's wasm", async () => {
+    // The worker imports ./frameos.js, which loads ./frameos.wasm: three
+    // un-versioned names. Cloudflare rewrote the .js files' no-cache to
+    // max-age=14400 and left the .wasm at max-age=0, so after a release the
+    // playground paired the old glue with the new wasm (LinkError,
+    // __syscall_rmdir, 2026-11-19). no-store is what Cloudflare passes
+    // through on a .js. Next applies every matching rule and a later one
+    // wins, so the last Cache-Control that matches is the one served.
+    const config = createNextConfig(PHASE_PRODUCTION_SERVER);
+    const rules = (await config.headers?.()) ?? [];
+    // @ts-expect-error -- Next ships this vendored dependency without types.
+    const { pathToRegexp } = (await import("next/dist/compiled/path-to-regexp")) as {
+      pathToRegexp: (source: string) => RegExp;
+    };
+    const cacheControl = (path: string) =>
+      rules
+        .filter((rule) => pathToRegexp(rule.source).test(path))
+        .flatMap((rule) => rule.headers.filter((header) => header.key === "Cache-Control"))
+        .at(-1)?.value;
+    for (const prefix of ["/frameos-wasm", "/frames-app/frameos-wasm", "/frameos-editor/frameos-wasm"]) {
+      expect(cacheControl(`${prefix}/preview-worker.js`), prefix).toBe("no-store, max-age=0");
+      expect(cacheControl(`${prefix}/frameos.js`), prefix).toBe("no-store, max-age=0");
+      expect(cacheControl(`${prefix}/frameos.wasm`), prefix).toBe("no-cache");
+    }
+    // The frames SPA's hashed bundle stays immutable.
+    expect(cacheControl("/frames-app/static/main-abc123.js")).toBe("public, max-age=31536000, immutable");
+  });
+});
