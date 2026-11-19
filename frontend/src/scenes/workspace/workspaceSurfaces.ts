@@ -578,22 +578,6 @@ function isHardwarelessFrame(frame: FrameCapabilityInput | null | undefined, mod
 }
 
 /**
- * Whether the refresh icon on a frame's picture renders the frame again
- * (the `render` event, as the "…" menu's Re-render) rather than reloading
- * the picture it last stored. A frame without hardware is drawn by its plane
- * on a verb, so the stored picture stays what it was until something asks:
- * after a settings change (its local network access, say) a reload showed
- * the old picture again (#868). A frame with a panel draws on its own clock,
- * and a reload must not make an e-paper flash.
- */
-export function frameImageRefreshRenders(
-  frame?: FrameCapabilityInput | null,
-  mode: WorkspaceMode = workspaceMode()
-): boolean {
-  return isHardwarelessFrame(frame, mode) && frameMenuActionIsAllowed(mode, 'render', frame)
-}
-
-/**
  * Unlike the esp32 cloud profile above — which DISABLES controls, because the
  * verbs exist and the firmware merely doesn't answer them yet — a virtual
  * frame HIDES these surfaces: the concepts themselves don't exist. There is

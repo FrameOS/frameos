@@ -13,7 +13,6 @@ import {
   frameCapabilities,
   frameChangeDrawerKind,
   frameHasStoreScene,
-  frameImageRefreshRenders,
   isEsp32Frame,
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
@@ -992,29 +991,5 @@ describe("Scenes library", () => {
     expect(scenesLibraryPageLabel("cloud", "cloud")).toBe("My cloud scenes");
     expect(scenesLibraryPageLabel("cloud", "backend")).toBe("My cloud scenes");
     expect(scenesLibraryPageLabel("local", "backend")).toBe("Private local scenes");
-  });
-});
-
-// The refresh icon on a frame's picture (FrameImageRefreshButton): a frame its
-// plane draws keeps its stored picture until something asks, so there the
-// icon renders again; a reload showed the old picture after a settings
-// change (#868). A frame with a panel only reloads: no e-paper flash.
-describe("the refresh icon on a frame's picture", () => {
-  it("renders again a frame without hardware, on either plane", () => {
-    expect(frameImageRefreshRenders({ embedded: { platform: "virtual" } }, "backend")).toBe(true);
-    expect(frameImageRefreshRenders({ hardware: { device: "virtual", platform: "virtual" } }, "cloud")).toBe(true);
-  });
-
-  it("reloads the stored picture of a frame with a panel", () => {
-    for (const frame of [
-      { mode: "rpios" },
-      { mode: "embedded", embedded: { platform: "esp32-s3" } },
-      { hardware: { device: "framebuffer", platform: "rpios" } },
-      undefined,
-      null,
-    ]) {
-      expect(frameImageRefreshRenders(frame, "backend")).toBe(false);
-      expect(frameImageRefreshRenders(frame, "cloud")).toBe(false);
-    }
   });
 });
