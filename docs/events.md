@@ -750,7 +750,14 @@ came. A rule does one of two things:
   `turnOff` — offered only where the display's driver powers the panel, see
   the host table below — `setSceneState`; a touch screen's rows are its edges'
   swipes too, `edgeSwipe {edge}`), and an installed scene's rule may do the
-  same (a double press of REFRESH is this scene's page 2). The emitted event is a normal
+  same (a double press of REFRESH is this scene's page 2). "Show scene" is
+  `setCurrentScene {sceneId, state}`: the scene picked, and the values of its
+  public fields set under the row (`state`, left out when none is: a field
+  left alone keeps the scene's own), applied to that scene's public state as
+  a schedule entry's are. On an ESP32 the whole map is compact JSON in a 1 KB
+  slot (`FOS_EVENT_MAP_LEN`), and those settings are what fills it: the
+  section says so before a longer one is saved, which the cloud's frame
+  refuses and a backend's ignores. The emitted event is a normal
   envelope: the allow-list is asked of `eventMap` like any origin, and what the
   map emits is never mapped again, so a rule cannot feed itself.
 

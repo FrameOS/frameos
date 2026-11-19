@@ -16,6 +16,8 @@ import {
   bindingOfRule,
   bindingRule,
   edgeGestures,
+  esp32EventMapMaxBytes,
+  eventMapBytes,
   frameActionKinds,
   frameActionKindsFor,
   frameActionTitle,
@@ -35,6 +37,8 @@ import {
   reportedEventMapOf,
   sceneSettingsMinVersion,
   sceneSwitcherMinVersion,
+  showSceneStaleSettings,
+  withShowSceneSetting,
 } from "../../../../../../frontend/src/utils/frameEventMap";
 
 // The reTerminal preset: the arrows held walk the scenes.
@@ -238,6 +242,46 @@ describe("bindings and rules", () => {
       { event: "edgeSwipe", match: { edge: "bottom" }, emit: "render", as: {} },
     ]).bindings;
     expect(bindingConflicts(twice)).toEqual(["Swipe up from the bottom is bound twice; only the first binding counts"]);
+  });
+
+  it("shows a scene with its settings, each stored as its field's type and taken out when cleared", () => {
+    const press = { label: "KEY1", action: "press" };
+    let action = withShowSceneSetting({ kind: "showScene", sceneId: "weather" }, { name: "city", type: "string" }, "Tallinn");
+    action = withShowSceneSetting(action, { name: "celsius", type: "boolean" }, "true");
+    action = withShowSceneSetting(action, { name: "days", type: "integer" }, "5");
+    expect(action).toEqual({ kind: "showScene", sceneId: "weather", state: { city: "Tallinn", celsius: true, days: 5 } });
+    expect(bindingRule({ gesture: press, action })).toEqual({
+      event: "button",
+      match: press,
+      emit: "setCurrentScene",
+      as: { sceneId: "weather", state: { city: "Tallinn", celsius: true, days: 5 } },
+    });
+    expect(bindingOfRule(bindingRule({ gesture: press, action }))).toEqual({ gesture: press, action });
+    expect(frameActionTitle(action, [{ id: "weather", name: "Weather" }])).toBe("Show scene: Weather (3 settings)");
+    // An empty string is a text's value, a number's absence.
+    expect(withShowSceneSetting(action, { name: "city", type: "string" }, "").state?.city).toBe("");
+    expect(withShowSceneSetting(action, { name: "days", type: "integer" }, "").state).not.toHaveProperty("days");
+    expect(withShowSceneSetting(action, { name: "days", type: "integer" }, "many").state).not.toHaveProperty("days");
+    // The last one out leaves a plain scene switch.
+    let cleared = action;
+    for (const name of ["city", "celsius", "days"]) {
+      cleared = withShowSceneSetting(cleared, { name, type: "string" }, undefined);
+    }
+    expect(cleared).toEqual({ kind: "showScene", sceneId: "weather" });
+    expect(bindingRule({ gesture: press, action: cleared }).as).toEqual({ sceneId: "weather" });
+    // Another scene in the select starts without settings.
+    expect(parseFrameActionValue(frameActionValue({ kind: "showScene", sceneId: "clock" }))).toEqual({
+      kind: "showScene",
+      sceneId: "clock",
+    });
+    expect(showSceneStaleSettings(action, ["city", "days"])).toEqual(["celsius"]);
+  });
+
+  it("counts the bytes an ESP32 holds of the map", () => {
+    expect(eventMapBytes([])).toBe(0);
+    expect(eventMapBytes(presetRules)).toBe(JSON.stringify(presetRules).length);
+    const long = withShowSceneSetting({ kind: "showScene", sceneId: "weather" }, { name: "note", type: "text" }, "ä".repeat(600));
+    expect(eventMapBytes([bindingRule({ gesture: leftHeld, action: long })])).toBeGreaterThan(esp32EventMapMaxBytes);
   });
 
   it("names a press bound twice", () => {

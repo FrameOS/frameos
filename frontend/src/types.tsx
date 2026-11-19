@@ -1381,9 +1381,9 @@ export interface EventMapRule {
   event: string
   match?: Record<string, EventMapValue>
   /** The device also takes nested objects here (a `setSceneState` emit's
-   * `state`); the SPA writes flat values only and keeps such rules as it
-   * finds them. */
-  as: Record<string, EventMapValue>
+   * `state`, and "Button actions"' Show scene, `setCurrentScene {sceneId,
+   * state}`). Rules the SPA did not write are kept as it finds them. */
+  as: Record<string, EventMapValue | { [key: string]: any }>
   emit?: string
 }
 
