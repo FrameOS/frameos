@@ -1,7 +1,7 @@
 import sys
 
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.config import config
 
 is_sqlite = config.DATABASE_URL.startswith("sqlite")
@@ -57,7 +57,9 @@ SessionLocal = sessionmaker(
     bind=engine,
     expire_on_commit=False,
 )
-Base = declarative_base()
+class Base(DeclarativeBase):
+    pass
+
 
 def get_db():
     db = SessionLocal()
