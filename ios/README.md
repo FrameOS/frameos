@@ -71,15 +71,17 @@ FRAMEOS_UITEST_CLOUD=http://localhost:3000 FRAMEOS_UITEST_CLOUD_EMAIL=… FRAMEO
   ios/bin/ui-test
 ```
 
-CI's **iOS app** job (`.github/workflows/ios.yml`) runs FrameOSKit's tests,
-builds the app for the simulator and runs the UI tests without a backend
-(the sign-in screen), on every change under `ios/` and to the corpora and
-contracts it reads. It builds the app once, for testing (`bin/ui-test
---build-only`), and `bin/ui-test --without-building` runs the tests on that
-build. The simulator boots in that second step and not beside the build: on
-the three-core macOS VM a first boot is minutes of CPU, and overlapping it
-made the steps beside it slower by more than it saved. A local `bin/ui-test`
-does overlap them.
+CI's **iOS app** workflow (`.github/workflows/ios.yml`) runs FrameOSKit's
+tests, builds the app for the simulator and runs the UI tests without a
+backend (the sign-in screen), on every change under `ios/` and to the corpora
+and contracts it reads. Three macOS jobs side by side: FrameOSKit's tests;
+the build, once, for testing (`bin/ui-test --build-only`), uploaded as an
+artifact; and the UI tests, whose VM boots its simulator while the build job
+compiles and then runs `bin/ui-test --without-building` on that build (the
+`.xctestrun` in `DerivedData/Build/Products`, so no project is needed there).
+The boot gets a VM of its own because on the three-core macOS VM a first boot
+is minutes of CPU, and overlapping it with the build on one VM made both
+slower by more than it saved. A local `bin/ui-test` does overlap them.
 
 ## Signing in
 
