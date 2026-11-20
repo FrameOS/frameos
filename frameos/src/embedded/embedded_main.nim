@@ -614,15 +614,17 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     coverageCacheBudget = 256 * 1024
     # Text is drawn from pixie's glyph cache: each glyph's coverage at its
     # size and quarter-pixel offset, four bits a pixel, and nothing else of
-    # it (paths.nim, docs/jsx-ui.md "Text and fonts"). A UI's letters at two
-    # or three sizes are a few hundred small masks at 800x480; the letters
-    # grow with the panel (the E1003's layout and scene: 69-83 KB at
-    # 1872x1404), so the budget does too, up to 256 KB. Let go with the
-    # rest when render memory is short (utils/memory.nim).
-    # In floats: an int is 32 bits here, and 64 KB times the E1003's pixels
-    # overflowed it (the runtime's init failed on the first test build).
-    glyphCacheBudget = clamp(int(64.0 * 1024.0 * frameWidth.float * frameHeight.float / (800.0 * 480.0)),
-      64 * 1024, 256 * 1024)
+    # it (paths.nim, docs/jsx-ui.md "The glyph cache"). The budget is a
+    # ceiling, filled a glyph at a time and never let go of until render
+    # memory runs short, so it is a share of what the panel leaves the
+    # scenes (memory.sceneMemoryBytes), not of the panel's size: a glyph's
+    # mask follows its font size, and the boards with the biggest panels
+    # have the least to spare (the 13.3" E1004 2.54 MB: 78 KB; the
+    # E1003, whose layout and scene drew 69-83 KB of letters, 128 KB). A
+    # render that needs more keeps what fits and draws the rest from masks
+    # it lets go (the pass begun before each render). Let go with the rest
+    # when render memory is short (utils/memory.nim).
+    glyphCacheBudget = clamp(sceneMemoryBytes() div 32, 64 * 1024, 128 * 1024)
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &

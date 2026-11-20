@@ -1138,9 +1138,12 @@ LVGL draws its pre-rasterized fonts, with pixie's own rasterizer and blends
 - Keyed by the face's serial (never reused, as an address would be), the
   rune, the size under the scale (1/64 px) and the offset's quarter pixel
   each way. The least recently used glyph goes first when the budget is
-  full: on an ESP32 64 KB at 800x480 and more for a larger panel, by its
-  area, up to 256 KB (the E1003's 1872x1404 layout and scene needed 69-83
-  KB); 1 MB on a Pi's render thread, 512 KB in the browser preview,
+  full: on an ESP32 a 32nd of the memory the panel leaves the scenes
+  (`memory.sceneMemoryBytes`), 64 to 128 KB: the budget is a ceiling the
+  cache fills and keeps, so it is what a board can spare, not what its
+  panel's size suggests (a glyph's mask follows its font size; the 13.3"
+  E1004 gets 78 KB, the E1003, whose layout and scene drew 69-83 KB of
+  letters, 128 KB); 1 MB on a Pi's render thread, 512 KB in the browser preview,
   nothing in pixie's own tests unless they ask. It is emptied with pixie's
   coverage cache when render memory runs short. It is the render thread's
   own (`{.threadvar.}`): a value nobody else touches.
@@ -1149,7 +1152,7 @@ LVGL draws its pre-rasterized fonts, with pixie's own rasterizer and blends
   than the budget: a miss never puts out a glyph the same render drew, it
   draws from a mask made and let go. Plain LRU put out each glyph just
   before the render drew it again: 3 hits in 62 a render on the E1003 at
-  64 KB (v2026.11.13), 44 with passes, all of them at its 256 KB.
+  64 KB (v2026.11.13), 44 with passes, all of them with 128 KB.
 - A glyph lands at most an eighth of a pixel from where the typesetter put
   it, and its edge pixels may differ from a fresh fill by up to half a step
   of sixteen. What the cache cannot do exactly is filled from an outline
