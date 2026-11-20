@@ -20,6 +20,7 @@ import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
 import frameos/render_probe
+from frameos/utils/memory import waitingTextDrops
 import frameos/utils/qr
 when not defined(frameosEmbedded):
   import frameos/panel_shape
@@ -131,9 +132,11 @@ type
     ## unchanged label costs a repaint nothing.
     last, kept: seq[TextMemo]
     older: seq[TextMemo]
-      ## What the layout before the last used and the last did not: a toggle
-      ## goes back and forth between two texts ("0 of 2 on", "1 of 2 on"),
-      ## and each was typeset again on every tap (~5 ms on an ESP32).
+      ## What the layouts before the last used and the last did not, newest
+      ## first, TextMemoWaitingBytes at most: a toggle goes back and forth
+      ## between two texts ("0 of 2 on", "1 of 2 on"), and each was typeset
+      ## again on every tap (~10 ms of a Home sample's tap on an ESP32).
+    olderDropped: int    ## the utils/memory waitingTextDrops its `older` last went at
     gen: int             ## this layout's number: a node's `memo` holds for it only
     root: UiNode         ## the last layout's tree, taken back where it did not change
     rootW, rootH: float32
@@ -846,6 +849,19 @@ proc textKey(n: UiNode, width: float32, align: HorizontalAlignment): string =
     addBytes(n.styles[i])
   addBytes(width)
   addBytes(align)
+
+const TextMemoWaitingBytes = when defined(frameosEmbedded): 24 * 1024 else: 256 * 1024
+  ## What the texts may hold that wait longer than the one layout every text
+  ## always waited (the estimate below): on an ESP32 a few labels' worth,
+  ## enough for a switch's two states, some sixty glyphs; one long text (a
+  ## code editor's file, a store's grid of titles) waits no longer.
+
+proc waitingBytes(entry: TextMemo): int =
+  ## A kept text's memory, roughly: its key, its typeset runes (rune,
+  ## position, selection box) and its drawn glyphs (a node and its parse:
+  ## measured on a 64-bit host, about 730 bytes a glyph, so 90 pointers).
+  entry.key.len + 64 + (if entry.arrangement.isNil: 0 else: entry.arrangement.runes.len * 28) +
+    entry.drawn.len * 90 * sizeof(pointer)
 
 proc recall(key: string): int =
   ## The memo entry for `key`, moved to the entries this layout keeps; -1.
@@ -2454,6 +2470,10 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   var before: UiNode
   if not memo.isNil:
     inc memo.gen
+    if memo.olderDropped != waitingTextDrops:
+      # Memory short or a scene gone (utils/memory): the texts that wait go.
+      memo.olderDropped = waitingTextDrops
+      memo.older.setLen(0)
     if memo.rootW == w and memo.rootH == h:
       before = memo.root
   var top: UiNode
@@ -2554,10 +2574,23 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     input.focus = 0
     input.keyboard = false
   if not memo.isNil:
-    # What this layout did not use waits one more layout, then is let go.
-    memo.older = move(memo.last)
-    if memo.older.len > 64:
-      memo.older.setLen(64)
+    # What this layout did not use waits one more layout, 64 entries at
+    # most, as it always did; what waited before it stays behind it, newest
+    # first, TextMemoWaitingBytes of it at most. A text that comes back a
+    # few layouts later (a switch's "On" and "Off", a count going up and
+    # down) is not set in type again: waiting one layout only, it was set
+    # again at every toggle of the Home sample.
+    var waiting = move(memo.last)
+    if waiting.len > 64:
+      waiting.setLen(64)
+    var bytes = 0
+    for i in 0 ..< memo.older.len:
+      let cost = memo.older[i].waitingBytes
+      if waiting.len >= 64 or bytes + cost > TextMemoWaitingBytes:
+        break
+      bytes += cost
+      waiting.add move(memo.older[i])
+    memo.older = move(waiting)
     memo.last = move(memo.kept)
     memo.root = top
     memo.rootW = w

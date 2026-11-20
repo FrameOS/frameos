@@ -6,6 +6,7 @@ import frameos/ui/tailwind
 import frameos/ui/layout
 import frameos/ui/keyboard
 import frameos/ui/events
+from frameos/utils/memory import waitingTextDrops
 
 # The UI layout: Tailwind classes read, boxes placed the way a browser places
 # them for the subset it supports, and the SVG that comes out drawn by pixie.
@@ -400,6 +401,28 @@ suite "ui layout":
       for x in 0 ..< 200:
         if got[x, y] != want[x, y]: same = false
     check same
+
+  test "a text that comes back a few layouts later is the same nodes, until memory is short":
+    # A switch's status going "On", "Off", "Paused" and back: the text set
+    # three layouts ago waits in the memo, and comes back as the very nodes.
+    proc status(text: string): SvgNode =
+      el("div", "p-2 bg-slate-900 text-white", el("span", "", txt(text)))
+    proc glyphs(svg: SvgNode): seq[SvgNode] =
+      for node in svg.children:
+        if node.tag == "path": result.add node
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    let on = layoutUi(status("On"), 200, 60, UiInput(), regions, memo).glyphs
+    discard layoutUi(status("Off"), 200, 60, UiInput(), regions, memo)
+    discard layoutUi(status("Paused"), 200, 60, UiInput(), regions, memo)
+    let back = layoutUi(status("On"), 200, 60, UiInput(), regions, memo).glyphs
+    check on.len == 2 and back.len == 2 and back[0] == on[0] and back[1] == on[1]
+    # Memory short (or a scene gone, utils/memory): the waiting texts go.
+    discard layoutUi(status("Off"), 200, 60, UiInput(), regions, memo)
+    discard layoutUi(status("Paused"), 200, 60, UiInput(), regions, memo)
+    inc waitingTextDrops
+    let again = layoutUi(status("On"), 200, 60, UiInput(), regions, memo).glyphs
+    check again.len == 2 and again[0] != on[0]
 
   test "a tree that did not change comes back as the same nodes":
     # React's diff, without its API: the second layout of an equal tree (a
