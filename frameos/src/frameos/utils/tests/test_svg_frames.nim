@@ -272,6 +272,71 @@ block:
   doAssert grown < 64 * 1024, &"{grown} bytes kept over 200 switches back"
   panelBufferGeneration = nil
 
+block a_buffer_catching_up:
+  # Three buffers, one more card turned on at every render, so each buffer
+  # is three cards behind: what the newest frame of another buffer already
+  # shows is copied from it, and only what changed since that frame is
+  # drawn (the one card), not the three its own frame is behind by.
+  proc moving(i: int): string =
+    result = &"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}">""" &
+      &"""<rect x="0" y="0" width="{W}" height="{H}" fill="#0f172a"/>"""
+    for k in 0 ..< 6:
+      let
+        x = 8 + (k mod 3) * 78
+        y = 40 + (k div 3) * 58
+      result.add &"""<rect x="{x}" y="{y}" width="70" height="50" rx="10" fill="{(if k < i: "#fcd34d" else: "#334155")}"/>"""
+      result.add &"""<path d="M{x + 10} {y + 40}L{x + 35} {y + 12}L{x + 60} {y + 40}" stroke="#fff" stroke-width="3" fill="none"/>"""
+    result.add "</svg>"
+  var
+    store: array[3, seq[uint16]]
+    bufs: array[3, Image]
+    gens: array[3, uint32]
+    markIn = -1   # the buffer the loading mark is drawn into at the next look
+    markLooks = 0
+  forgetPanelFrames()
+  for b in 0 .. 2:
+    store[b] = newSeq[uint16](W * H)
+    bufs[b] = newImage565Over(W, H, addr store[b][0])
+    bufs[b].ditherStores = true
+  proc generationOf(buffer: pointer): int64 {.nimcall, raises: [].} =
+    for b in 0 .. 2:
+      if bufs[b].bufferPointer == buffer:
+        if b == markIn:
+          inc markLooks
+          if markLooks == 1:
+            # The mark goes into the buffer on the glass just as it is
+            # chosen to copy from; the firmware counts that write after.
+            bufs[b].fill(rgba(255, 0, 255, 255))
+            return gens[b].int64
+          return gens[b].int64 + 1
+        return gens[b].int64
+    -1
+  panelBufferGeneration = generationOf
+  proc into(i: int): int =
+    let b = i mod 3
+    beginPanelFrame(bufs[b].bufferPointer, gens[b])
+    var owed = some(color(0, 0, 0, 1))
+    svgFramePixelsForTest = -1
+    doAssert renderSvgFrame(moving(i), bufs[b], owed, true)
+    endPanelFrame()
+    doAssert closeTo(bufs[b], wholeRender(moving(i))), &"frame {i} differs from a whole render"
+    svgFramePixelsForTest
+  for i in 0 ..< 3:
+    discard into(i)
+  for i in 3 ..< 6:
+    let painted = into(i)
+    doAssert painted > 0 and painted < 2 * 72 * 52, &"frame {i} repainted {painted} pixels"
+  # The loading mark drawn into the newest frame while it is copied from:
+  # the copies are drawn over (all three cards of the buffer's own damage),
+  # so nothing of the mark is left, and no later frame copies from it.
+  markIn = 5 mod 3
+  doAssert into(6) > 2 * 72 * 52
+  gens[markIn] += 1
+  markIn = -1
+  for i in 7 ..< 10:
+    discard into(i)
+  panelBufferGeneration = nil
+
 echo "svg frames ok"
 
 block a_ui_laid_out_larger_than_the_panel:
