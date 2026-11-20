@@ -355,6 +355,11 @@ interface FrameOSApp {
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
      * (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+    /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
+     * window without their going back, so still open beside the scene showing, their page and edits as they were.
+     * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes
+     * side by side (FrameOS 2026.11.14+; undefined before, and where scenes run one at a time). */
+    keptOpen?: string[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 1 beside a 13.3-inch colour panel's canvas, 4 with more). A desktop opening
      * one more closes the one that had the focus longest ago. Undefined where there is no limit (a Raspberry

@@ -1029,6 +1029,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   of "open":
     self.touch()
     wentBack = false
+    builtInAway(self.id.string, false)
     if self.state{"away"}.getBool():
       # Brought forward from a window: the host's news for the frame page
       # again.
@@ -1036,10 +1037,16 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       if self.onFrame():
         frameAction("open")
   of "close":
-    if wentBack or not builtInScenesStay:
+    # Sent back by the dispatcher (its command again from anyone, a layout's
+    # close) is going back too.
+    let sentBack = self.state{"goneBack"}.getBool()
+    if self.state.hasKey("goneBack"):
+      self.state.delete("goneBack")
+    if wentBack or sentBack or not builtInScenesStay:
       # Done: opened again, it starts afresh: no field has the keyboard, the
       # list is at its top, and it knows no scene until the dispatcher says.
       wentBack = false
+      builtInAway(self.id.string, false)
       self.startAfresh()
     else:
       # The focus went to a window beside it (docs/scene-layouts.md
@@ -1048,6 +1055,7 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       if self.onFrame():
         frameAction("close")
       self.state.put("away", newJBool(true))
+      builtInAway(self.id.string, true)
   of "render":
     if context.hasImage and not context.image.isNil:
       self.drawForm(context.image)

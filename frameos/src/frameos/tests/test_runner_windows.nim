@@ -153,6 +153,7 @@ suite "windows on the Pi's runner":
       # Save in B (its Save is this switch, the values as state): B takes them,
       # B's window closes, A's stays with its edit, and A keeps its own value.
       forward(settingsB)
+      runnerThread.scenes[settingsB].state["goneBack"] = %true # done, as its own Save or pick marks it
       sendEvent("setCurrentScene", %*{"sceneId": sceneB.string, "state": {"message": "edited B"}}, eoScene)
       check waitUntil(proc(): bool = runnerThread.currentSceneId == sceneB and windowOf(settingsB).isNil)
       check runnerThread.scenes[sceneB].state{"message"}.getStr() == "edited B"
@@ -233,6 +234,7 @@ suite "windows on the Pi's runner":
       check layout.state{"open"}.len == 5
       # Save in B's: B takes it, its tile closes, the others stay where they are.
       ask(settingsB, "setCurrentScene", %*{"sceneId": settingsB.string})
+      runnerThread.scenes[settingsB].state["goneBack"] = %true # done, as its own Save or pick marks it
       sendEvent("setCurrentScene", %*{"sceneId": sceneB.string, "state": {"message": "saved"}}, eoScene)
       check waitUntil(proc(): bool = settled(sceneB))
       check runnerThread.scenes[sceneB].state{"message"}.getStr() == "saved"
@@ -361,6 +363,7 @@ suite "closing a window on a desktop opens nothing else":
       # The scene list again, and A picked in it (its tile is this switch): A opens.
       sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
       check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId))
+      runnerThread.scenes[SceneSwitcherId.SceneId].state["goneBack"] = %true # done, as its own Save or pick marks it
       sendEvent("setCurrentScene", %*{"sceneId": sceneA.string}, eoScene)
       check waitUntil(proc(): bool = settled(sceneA) and not windowOf(sceneA).isNil)
       check windowOf(SceneSwitcherId.SceneId).isNil
@@ -414,6 +417,7 @@ suite "closing a window on a desktop opens nothing else":
       # And B picked in the list: its window again.
       sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
       check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId))
+      runnerThread.scenes[SceneSwitcherId.SceneId].state["goneBack"] = %true # done, as its own Save or pick marks it
       sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoScene)
       check waitUntil(proc(): bool = settled(sceneB) and not layout.state{"closed"}.getBool())
       runnerThread.stopMessageLoop = true
@@ -450,6 +454,54 @@ suite "closing a window on a desktop opens nothing else":
       sendEvent("sceneSettings", %*{}, eoHttpAdmin)
       check waitUntil(proc(): bool = settled(sceneB))
       check layout.state{"open"} == %*[sceneB.string]
+      runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
+      waitFor renderLoop
+      waitFor messageLoop
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a scene's settings window keeps its edits when something else switches the scene, and closes once it goes back":
+    let sceneA = "tests/windows/a".SceneId
+    let sceneB = "tests/windows/b".SceneId
+    let settingsA = settingsWindowId(sceneA.string).SceneId
+    let runnerThread = desktopRunner("Windows 98 layout", "layout-windows-98", @[sceneA, sceneB])
+    try:
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 300)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 6000)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA) and
+        not runnerThread.scenes[sceneA].wornLayout.isNil)
+      let layout = runnerThread.scenes[sceneA].wornLayout
+      proc windowOf(id: SceneId): JsonNode =
+        for win in layout.state{"wins"}.getElems():
+          if win{"id"}.getStr() == id.string:
+            return win
+      proc settled(id: SceneId): bool =
+        runnerThread.currentSceneId == id and layout.state{"last"}.getStr() == id.string
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(settingsA) and not windowOf(settingsA).isNil)
+      let panelA = runnerThread.scenes[settingsA]
+      panelA.state{"values"}["message"] = %"edited A"
+      # B from outside the layout (the API, a key, a schedule): A's settings stay
+      # open in their window, the edit in them.
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneB))
+      check not windowOf(settingsA).isNil
+      check panelA.state{"away"}.getBool()
+      check builtInsAway.contains(settingsA.string)
+      # Brought forward again, as it was left.
+      layout.state["asked"] = %settingsA.string
+      sendEvent("setCurrentScene", %*{"sceneId": settingsA.string}, eoScene)
+      check waitUntil(proc(): bool = settled(settingsA))
+      check panelA.state{"values", "message"}.getStr() == "edited A"
+      check not builtInsAway.contains(settingsA.string)
+      # The same command again (a swipe, the API) sends it back: done, its window
+      # closes and nothing keeps it.
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneA))
+      check windowOf(settingsA).isNil
+      check not builtInsAway.contains(settingsA.string)
+      check not panelA.state{"away"}.getBool()
       runnerThread.stopMessageLoop = true
       runnerThread.stopRenderLoop = true
       waitFor renderLoop

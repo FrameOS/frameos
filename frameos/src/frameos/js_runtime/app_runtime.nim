@@ -2223,6 +2223,11 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not windowSceneListing.isNil:
       return jsonToJS(ctx, windowSceneListing())
     return jsUndefSentinel(ctx)
+  of "keptOpen":
+    # The built-in scenes open beside the scene showing (`builtInsAway`).
+    if not windowSceneListing.isNil:
+      return jsonToJS(ctx, %builtInsAway)
+    return jsUndefSentinel(ctx)
   of "windows":
     # How many of them may run at once, where there is a limit (windowLimit).
     let limit = windowLimit()
@@ -2313,6 +2318,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
+      keys.add("keptOpen")
       if windowLimit() > 0:
         keys.add("windows")
   of "context":

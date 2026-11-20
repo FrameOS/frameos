@@ -517,6 +517,8 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   else:
     next = loop.backFrom(current)
     sceneWentBackTo = next
+    # Gone back, done: not left open in a window (`builtInsAway`).
+    current.state.put("goneBack", newJBool(true))
   if safe and not current.isNil and current.id.string == sceneId:
     # Already up (the pull before this one opened it): no switch to make.
     loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
@@ -553,6 +555,7 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
   if current.isBuiltIn and isSceneSettings(current.id.string) and
       not (framePage and current.id.string != SceneSettingsId):
     sceneWentBackTo = loop.backFrom(current)
+    current.state.put("goneBack", newJBool(true))
     payload.put("sceneId", newJString(sceneWentBackTo))
     return loop.host.selectScene(payload)
   let state = newJObject()

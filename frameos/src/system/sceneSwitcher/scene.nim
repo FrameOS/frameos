@@ -1073,20 +1073,28 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
         self.state.put(key, value)
   of "open":
     wentBack = false
+    builtInAway(self.id.string, false)
     if self.state.hasKey("away"):
       self.state.delete("away")
     self.opened()
   of "close":
-    if wentBack or not builtInScenesStay:
+    # Sent back by the dispatcher (its command again from anyone, a layout's
+    # close) is going back too.
+    let sentBack = self.state{"goneBack"}.getBool()
+    if self.state.hasKey("goneBack"):
+      self.state.delete("goneBack")
+    if wentBack or sentBack or not builtInScenesStay:
       # Done: opened again by name (a `setCurrentScene` to it), it knows no
       # scene to go back to.
       wentBack = false
+      builtInAway(self.id.string, false)
       self.forget()
     else:
       # The focus went to a window beside it (docs/scene-layouts.md
       # "Windows"): it stays open there, Close still going back where it
       # was opened from, and does not go back by itself (drawUi).
       self.state.put("away", newJBool(true))
+      builtInAway(self.id.string, true)
   of "render":
     if context.hasImage and not context.image.isNil:
       self.draw(context.image)

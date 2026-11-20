@@ -958,6 +958,21 @@ var builtInScenesStay* {.threadvar.}: bool
   ## another, without going back by itself, stays open as it was, for a
   ## layout's window (docs/scene-layouts.md "Windows"). Unset, leaving it
   ## closes it.
+var builtInsAway* {.threadvar.}: seq[string]
+  ## The built-in scenes (the switcher, a scene's settings, the frame page)
+  ## the focus left for a window beside them without their going back: open
+  ## there as they were, their page and edits kept (`away` in their state).
+  ## The scene modules keep it, a layout reads it as `app.frame.keptOpen` and
+  ## closes a built-in scene's window only once it is gone from here.
+
+proc builtInAway*(id: string, away: bool) =
+  ## The scene modules' half of `builtInsAway`.
+  let at = builtInsAway.find(id)
+  if away and at < 0:
+    builtInsAway.add id
+  elif not away and at >= 0:
+    builtInsAway.delete(at)
+
 var sceneWentBackTo* {.threadvar.}: string
   ## The scene a built-in scene (the switcher, the settings) last went back
   ## to by itself (its Close or Cancel, its own command again, its timeout),

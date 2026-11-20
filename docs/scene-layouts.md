@@ -444,11 +444,18 @@ there with its page and its edits, and does not time out. A `<Scene id>` of one
 is that instance only while it is open so, never a new one: it has nothing to
 show until the dispatcher opens it from a scene, and opened so again it starts
 afresh. It goes back by itself as always (Save, Cancel, a scene picked, its
-timeout while it has the focus), and then it is done: a layout closes its window
-when the focus leaves a built-in scene for a scene without the layout having
-moved it (the samples remember what they brought forward, `asked`). Going back
-always lands on a scene, so one built-in scene leaving the focus to another (a
-scene's settings opening the frame page) stays open.
+timeout while it has the focus, or its command again from anyone, which the
+dispatcher marks as going back, `goneBack`), and then it is done. Whatever else
+takes the focus from it (another window, the API, a key, a schedule, the voice
+chat) leaves it open beside the scene showing, its page and edits as they were:
+the scene modules list those in `builtInsAway`, which a layout reads as
+**`app.frame.keptOpen`**, and the desktops close a built-in scene's window only
+once it is gone from there (`keptOpen`, the same text in each). Before
+2026.11.14 they guessed from what they had brought forward themselves
+(`asked`), so a switch from outside closed the window while the host kept the
+instance, and opening it again lost the edits; on an older runtime they still
+guess so. Going back always lands on a scene, so one built-in scene leaving the
+focus to another (a scene's settings opening the frame page) stays open.
 
 **Closing opens nothing else.** The desktops keep one set of rules for what a
 close, a minimize and a built-in scene going back do (2026-11-20; before, a
