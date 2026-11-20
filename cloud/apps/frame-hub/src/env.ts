@@ -70,6 +70,15 @@ export function getHubPort() {
     : 3100;
 }
 
+// The address the hub binds. Unset = every interface, which local
+// development needs (a board on the LAN reaches the hub at <lan-ip>:3100,
+// FRAME_HUB_PUBLIC_URL). Production sits behind nginx on the same host and
+// sets FRAME_HUB_HOST=127.0.0.1, so the hub is never reachable past the proxy
+// even if the firewall changes.
+export function getHubHost(): string | undefined {
+  return process.env.FRAME_HUB_HOST?.trim() || undefined;
+}
+
 // Origins a browser WebSocket upgrade may come from. WS handshakes are not
 // subject to CORS, so a cookie-authenticated socket is only safe as long as
 // the Origin is checked here: today the session cookie is SameSite=Lax, but a
