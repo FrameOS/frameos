@@ -81,9 +81,9 @@ static JSValue frameos_jsx_native(JSContext *ctx, JSValueConst this_val, int arg
    The JavaScript memo() was about 1.1 ms a call on the SenseCAP Indicator,
    hit or miss: a Map lookup, Object.keys twice and a loop, each a builtin
    fetched from flash. Six memo()'d cards were 6 to 7 ms of a home panel's
-   11 ms get(), and a hundred memo()'d cells made a tap 175 ms where the
-   same cells without memo() took 115 (docs/perf-todo.md). Here: 5 ms and
-   89 ms. */
+   11 ms get(), and a hundred memo()'d cells made a tap's render 165 ms where
+   the same cells without memo() took 115. Here: a get() of 6.7 ms, a render
+   of 87 (docs/perf-todo.md). */
 static int32_t frameos_memo_epoch = 0;
 static JSClassID frameos_memo_class_id = 0;
 

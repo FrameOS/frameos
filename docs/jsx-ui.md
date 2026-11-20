@@ -99,7 +99,7 @@ cheap is that the pictures are reconciled, not the code:
   (`__frameosNode`) and takes its nodes back without reading it, its
   handler functions copied into the render's list at the numbers they had.
   Pass values, not functions made anew each render, and make the handlers
-  inside the component. A call costs about 0.2 ms on the SenseCAP Indicator,
+  inside the component. A call costs about 0.25 ms on the SenseCAP Indicator,
   hit or miss (the JavaScript one was 1.1 ms), and an element made inline
   about 0.1: memo() pays off around a component of a few elements or more.
 - **The pointer alone does not run get().** A render asked for only because
