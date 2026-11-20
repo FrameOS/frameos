@@ -282,6 +282,30 @@ def test_no_apply_while_a_store_first_set_is_written():
     assert "if (!ok && !s_store_changing && before_slot >= 0" in fns["apply_index_change"]
 
 
+def test_a_change_waits_for_the_backend_set_being_written():
+    """A set the runtime took whole has its etag at once and is written by the
+    store task afterwards, as changes against the index on flash. A one-scene
+    patch read against that etag and applied before the write was undone by
+    it: the Code editor put on the reTerminal E1002 right after its own
+    scenes went back came out "4 written at once, 0 kept, 1 dropped", and
+    every sync after it was a 304 (the hardware bench, 2026-11-20). Every
+    one-scene change (a backend patch, a put, a delete, the cloud's patch)
+    waits for that write first, and is refused if it never ends."""
+    fns = _functions(_source("fos_scenes.c"))
+    change = fns["apply_store_change"]
+    assert change.index("backend_set_written(CHANGE_STORE_WAIT_MS)") < change.index("store_lock();")
+    task = fns["store_task"]
+    assert task.index("s_store_writing_set = job.set != NULL;") < task.index("store_backend_payload(&job);")
+    assert task.index("store_backend_payload(&job);") < task.index("s_store_writing_set = false;")
+    waiting = fns["backend_set_waiting"]
+    assert "s_store_next.set != NULL || s_store_writing_set" in waiting
+    written = fns["backend_set_written"]
+    order = [written.index(s) for s in (
+        "s_render_waits_for_store = true", "while (backend_set_waiting())", "s_render_waits_for_store = false")]
+    assert order == sorted(order), "the render task says it waits, so the write stops pacing around it"
+    assert "xTaskGetCurrentTaskHandle() == s_store_task" in written, "never the store task waiting for itself"
+
+
 def test_a_backend_set_is_read_in_pieces_and_its_patch_without_a_tree():
     """The desktop layouts' sets (365-465 KB) never reached two 8 MB boards
     (the hardware bench, 2026-11-16): a declared length was read and then
