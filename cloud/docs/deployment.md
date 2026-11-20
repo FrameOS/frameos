@@ -507,6 +507,7 @@ NODE_ENV=production
 DATABASE_URL=…           # same database as auth-web
 SESSION_SECRET=…         # MUST equal auth-web's, or browser sockets get 401
 FRAME_HUB_PORT=3100
+FRAME_HUB_HOST=127.0.0.1  # bind loopback only: nginx is the one way in
 ```
 
 Optional, all with working defaults:

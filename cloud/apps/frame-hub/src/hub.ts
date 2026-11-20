@@ -412,6 +412,8 @@ interface BrowserConnection {
 export interface FrameHubOptions {
   // 0 = pick an ephemeral port (tests).
   port: number;
+  // Unset = every interface (FRAME_HUB_HOST, src/env.ts).
+  host?: string | undefined;
   databaseUrl?: string;
   // Timer overrides. Production always uses the defaults; tests shorten them
   // (or drive the sweep by hand through FrameHub.sweep) so they do not have to
@@ -3763,7 +3765,7 @@ export async function startFrameHub(
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(options.port, () => {
+    server.listen(options.port, options.host, () => {
       server.removeListener("error", reject);
       resolve();
     });
