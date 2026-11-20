@@ -1443,12 +1443,16 @@ proc hex(c: ColorRGBA): string =
 
 proc paint(node: SvgNode, c: ColorRGBA, opacity: float32, attr = "fill") =
   ## `attr` is fill, stroke or stop-color, with its alpha as fill-opacity,
-  ## stroke-opacity or stop-opacity.
+  ## stroke-opacity or stop-opacity. A fill is a value (pixie's `filled`):
+  ## no "#rrggbb" written for the parse to read back, for every box and glyph.
+  if attr == "fill":
+    node.filled = true
+    node.fill = c
+    node.opacity = min(opacity, 1)
+    return
   node.attrs.add((attr, c.hex))
   if c.a < 255:
     node.attrs.add((attr.split('-')[0] & "-opacity", num(c.a.float32 / 255)))
-  if opacity < 1 and attr == "fill":
-    node.attrs.add(("opacity", num(opacity)))
 
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) {.raises: [].}
@@ -2037,7 +2041,8 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         for k in 1 ..< view.children.len:
           template glyph: untyped = view.children[k]
           if not glyph.path.isNil:
-            marks[m].children.add SvgNode(tag: "path", path: glyph.path, offset: glyph.offset, attrs: ink.attrs)
+            marks[m].children.add SvgNode(tag: "path", path: glyph.path, offset: glyph.offset,
+              filled: ink.filled, fill: ink.fill, opacity: ink.opacity)
         view.children.add marks[m]
     if clips:
       if caret[2] > 0:

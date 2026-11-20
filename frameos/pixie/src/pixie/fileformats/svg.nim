@@ -34,6 +34,12 @@ type
     offset*: Vec2 ## a translation after `transform`: what a caller would
                   ## otherwise write as a transform string for every glyph
                   ## of a text run (frameos/ui/layout.nim emitText)
+    filled*: bool ## `fill` and `opacity` below, not attributes, say how the
+                  ## node is filled: a caller that has the colour as a value
+                  ## (a UI's every box and glyph) writes no "#rrggbb" for the
+                  ## parse to read back.
+    fill*: ColorRGBA ## with `filled`: the colour, its alpha the fill-opacity
+    opacity*: float32 ## with `filled`: the node's opacity
     # What parseSvg made of this node as a child of the document, and under
     # which inherited properties: a caller that hands the same node over
     # again (a UI's unchanged card) gets the same elements back unparsed.
@@ -531,7 +537,21 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
       PixieError, "Invalid fill-rule value " & fillRule
     )
 
-  if fill == "" or fill == "currentColor":
+  if node.filled:
+    # The colour as a value (`filled`): the attributes are not read. The text
+    # only has to say "a colour" to everything that looks at it ("none",
+    # "url(" and empty are the others).
+    result.fill = "#"
+    result.fillColor = color(node.fill.r.float32 / 255, node.fill.g.float32 / 255,
+      node.fill.b.float32 / 255, 1)
+    result.fillSolid = true
+    # As the attributes were: an opaque colour or a whole opacity says
+    # nothing, and what is inherited stays.
+    if node.fill.a < 255:
+      result.fillOpacity = node.fill.a.float32 / 255
+    if node.opacity < 1:
+      result.opacity = max(node.opacity, 0)
+  elif fill == "" or fill == "currentColor":
     result.fill = inherited.fill
     result.fillColor = inherited.fillColor
     result.fillSolid = inherited.fillSolid

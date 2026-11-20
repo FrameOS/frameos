@@ -25,12 +25,22 @@ proc layoutUi(root: SvgNode, width, height: int, input: UiInput, regions: var se
   var copy = input
   layout.layoutUi(root, width, height, copy, regions, memo)
 
+proc fillOf(node: SvgNode): string =
+  ## A node's fill as "#rrggbb": the layout gives it as a value (`filled`).
+  if not node.filled:
+    return node.attr("fill")
+  const digits = "0123456789abcdef"
+  result = "#"
+  for v in [node.fill.r, node.fill.g, node.fill.b]:
+    result.add digits[int(v) shr 4]
+    result.add digits[int(v) and 15]
+
 proc rects(svg: SvgNode): seq[(int, int, int, int, string)] =
   ## Every background the layout drew: x, y, width, height, fill.
   for node in svg.children:
     if node.tag == "rect":
       result.add((parseInt(node.attr("x")), parseInt(node.attr("y")),
-        parseInt(node.attr("width")), parseInt(node.attr("height")), node.attr("fill")))
+        parseInt(node.attr("width")), parseInt(node.attr("height")), node.fillOf))
 
 proc geom(r: (int, int, int, int, string)): (int, int, int, int) = (r[0], r[1], r[2], r[3])
 
@@ -300,7 +310,7 @@ suite "ui layout":
     var last: SvgNode
     for node in svg.children:
       if node.tag == "path":
-        let fill = node.attr("fill")
+        let fill = node.fillOf
         if runs.len == 0 or runs[^1] != fill: runs.add fill
         if fill == "#ef4444": inc red
         # <b>: each glyph filled twice, the second a little to the right
@@ -316,8 +326,8 @@ suite "ui layout":
     let svg = layoutUi(ui, 200, 200)
     var fills, opacities: seq[string]
     for node in svg.children:
-      fills.add node.attr("fill")
-      opacities.add node.attr("fill-opacity")
+      fills.add node.fillOf
+      opacities.add (if node.fill.a < 255: $node.fill.a else: "")
     # The page, the in-flow card pre-blended (opaque), the absolute one as it was.
     check fills.len == 3
     check fills[1] != "#ffffff" and opacities[1] == ""
@@ -609,7 +619,7 @@ suite "fields, clipping and scrolling":
     svg = layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions)
     let view = svg.viewports[0]
     let caret = view.children[^1]
-    check caret.tag == "rect" and caret.attr("width") == "1" and caret.attr("fill") == "#000000"
+    check caret.tag == "rect" and caret.attr("width") == "1" and caret.fillOf == "#000000"
     check parseFloat(caret.attr("x")) > 40
     # A placeholder at half the color, dots for a password, both a line tall.
     let empty = input("input", "w-[200px] px-2 text-black", {"value": "", "placeholder": "Name"})
