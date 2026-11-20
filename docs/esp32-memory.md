@@ -425,7 +425,7 @@ render and the next button press work.
 What the aborted call allocated in Nim stays leaked; the restart rules above
 still decide when that is too much.
 
-## A 32 KB instruction cache (2026-11-20, proposed)
+## A 32 KB instruction cache (2026-11-20)
 
 The S3's instruction cache is 16 KB (`CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB`,
 IDF's default), and QuickJS's interpreter, the JSX factory, the walker and
@@ -493,10 +493,25 @@ Six buffers is IDF's own floor for them (no fewer than the block-ack window,
 Four gives 3 KB more but sits under that window. A 1 MB HTTPS download
 (`fetchText`) took 1.44-1.67 s and a 300 KB photo through `fetchImage` (its
 decode included) 4.96-5.14 s with 10, 6 or 4 buffers alike, six runs each;
-that path is held at about 5 Mbit/s by the internet, not the radio. What is
-not measured yet: a download on the LAN at full speed (a backend's scene set,
-a picture from a NAS) and an OTA download, where fewer buffers would show
-first as dropped frames and retransmits.
+that path is held at about 5 Mbit/s by the internet, not the radio.
+
+On the LAN at full speed, where fewer buffers would show first as dropped
+frames and retransmits, they did not: the board fetched its own scene set
+(453 KB, `GET /api/frames/4/embedded/scenes` from the bench backend, through
+`frameos.httpRequest` with `find` so the body never became a JS string),
+eight fetches a render, the backend's side captured with tcpdump:
+
+| Image | One fetch (median, range) | Retransmits | Zero-window ACKs |
+| --- | --- | --- | --- |
+| v2026.11.13 release (16 KB, 10) | 580 ms (567-698), 40 fetches | 0 | 227 |
+| 32 KB, 10 | 408 ms (399-426), 40 fetches | 0 | 4 |
+| 32 KB, 6 | 401 ms (391-588), 48 fetches | 0 | 11 |
+
+About 9 Mbit/s with the larger cache. Every image's limit is its own receive
+path, not the radio: the board's zero-window ACKs say it, and the release's
+227 of them are the 16 KB cache's slower lwIP and copy. The 6-buffer image's
+four slow fetches (466-588 ms) were each a render's first or second, with no
+retransmit among them. An OTA download was not measured.
 
 A console `restart` sometimes ends in an RTC watchdog reset (`rst:0x10`)
 instead of a software one, right after `fos_wifi: connection lost reason=8`:
