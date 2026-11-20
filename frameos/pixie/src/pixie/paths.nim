@@ -47,6 +47,7 @@ type
     fracNext: int8 # the slot a new fraction replaces when all are full
     fracMoves: int8 # fills at a fraction not among `fracs` once all four were taken
     moving: bool # filled at a new fraction again and again: drawn at quarter pixels from then on
+    seenId: uint32 # names it in the coverage cache's first-sight slots (0: not yet); never reused
     # A glyph path (`newGlyphPath`): no commands, only what names the glyph
     # and its bounds. A fill draws it from the glyph cache, or from the
     # outline made for that fill and let go (`glyphOutline`).
@@ -2985,6 +2986,10 @@ var
     ## was slower than filling it. A fixed array, not a table: an animation
     ## draws its shapes at a new subpixel offset every frame, a new key each,
     ## and a table of them grew, rehashed and was cleared under it.
+  coverageSeenIds {.threadvar.}: uint32
+    ## The last `Path.seenId` handed out. The slots above hash the key with
+    ## the path's id in place of its address: they hold no reference to it,
+    ## and a new path at a freed one's address was taken for seen.
 
 type PathProbeKind* = enum
   ppFill = "fill"          ## a fill rasterized
@@ -3226,16 +3231,23 @@ proc fillFromCoverageCache(
   if mask.isNil or mask.path != path:
     if coverageSeen.len == 0:
       coverageSeen = newSeq[uint32](1024)
+    if path.seenId == 0:
+      inc coverageSeenIds
+      if coverageSeenIds == 0: inc coverageSeenIds
+      path.seenId = coverageSeenIds
+    var named = key
+    named.path = path.seenId.uint
     let
-      slot = int(h and uint32(coverageSeen.high))
+      seen = uint32(hash(named)) or 1
+      slot = int(seen and uint32(coverageSeen.high))
       other = slot xor 1 # two slots a key: one collision does not forget it
-    if coverageSeen[slot] != h and coverageSeen[other] != h:
+    if coverageSeen[slot] != seen and coverageSeen[other] != seen:
       # The first sight: drawn as always, remembered.
-      if coverageSeen[slot] == 0: coverageSeen[slot] = h
-      elif coverageSeen[other] == 0: coverageSeen[other] = h
+      if coverageSeen[slot] == 0: coverageSeen[slot] = seen
+      elif coverageSeen[other] == 0: coverageSeen[other] = seen
       else:
         coverageSeen[other] = coverageSeen[slot]
-        coverageSeen[slot] = h
+        coverageSeen[slot] = seen
       skip(csFirstSight)
     if path.maskWaste >= MaskWasteLimit and coverageCacheTick < path.maskBanUntil:
       skip(csWasted)
