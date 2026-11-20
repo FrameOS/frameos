@@ -136,7 +136,8 @@ def booked_run(ctx, frame, suites, results, who, args, ports):
             say(f"free now, on {frame['port']}")
         run_frame(ctx, frame, suites, results, keep=lambda: bookings.book([key], who, what, args.book_hours))
     finally:
-        bookings.release([key], who)
+        if not args.keep_booked:
+            bookings.release([key], who)
 
 
 def cmd_run(args):
@@ -337,6 +338,8 @@ def main():
     r.add_argument('--who', help='who books the boards: your session name first ($FRAMEOS_BENCH_WHO)')
     r.add_argument('--skip-booked', action='store_true', help='leave out the boards someone else has booked, instead of waiting')
     r.add_argument('--wait-hours', type=float, default=6.0, help='give up on a booked board after so many hours (default 6)')
+    r.add_argument('--keep-booked', action='store_true',
+                   help='keep the boards booked after the run (a script that does more with them releases them itself)')
     r.add_argument('--book-hours', type=float, default=2.0,
                    help='each board is booked so far ahead, moved on at every suite (default 2)')
     p = sub.add_parser('report')

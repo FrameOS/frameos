@@ -44,6 +44,10 @@ tools/frame-bench/boards.py release sticky,e1003 --who ...
   console of a board someone else holds (nor a port another process has open),
   benches the free boards first and each held one when it is free
   (`--skip-booked` leaves those out, `--wait-hours` bounds the wait).
+  When you do more with a board after the bench (a check of your own, putting
+  the release back), keep the booking for the whole sequence: book it first,
+  run the bench with `--keep-booked`, and release it yourself at the end, or
+  an agent waiting for it takes it the moment the suites end.
   `bench.py discover` skips them too. The flashing scripts under
   `~/.frameos-bench/firmware/` (`flash_checked.sh`, `xversion.py`) refuse a
   board booked by anyone but `$FRAMEOS_BENCH_WHO`; `xversion.py` books what is
