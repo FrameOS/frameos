@@ -22,13 +22,18 @@ Layout (little-endian, every section 4-byte aligned):
     blocks      8 bytes a block, and one more at the end: u16 first glyph,
                 u16 raw length, u32 offset of its bytes
     block data  the TrueType glyf records of the glyphs, in glyph order,
+                without the record's own box (its 8 bytes after the contour
+                count, which nothing reads: the glyph table has the box),
                 deflated a block at a time (raw deflate), except a block that
                 holds a glyph of printable ASCII, which is stored as it is
                 and read in place: a block whose stored length is its raw
                 length is not deflated
     kerning     pixie's pair positioning in lookup order, read in place
-                (`getKerningAdjustment`): 24 bytes a subtable, its left
-                glyphs, its right classes or pairs, its rows and entries
+                (`getKerningAdjustment`): a 24-byte prelude naming the right
+                classes of every class subtable at once (runs of glyphs, u16
+                first glyph and u8 id, and per id one u8 class a class
+                subtable), then 24 bytes a subtable, its left glyphs, its
+                pairs or the column of its right class, its rows and entries
     values      the kerning values, i16, that entries name by index
 
 `--check` builds the file again and compares, then reads the committed file
@@ -56,10 +61,11 @@ SOURCE = FRAMEOS_ROOT / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf"
 OUTPUT = FRAMEOS_ROOT / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.fosf"
 
 MAGIC = b"FOSF"
-VERSION = 1
+VERSION = 2
 HEADER = 64
 BLOCK_BYTES = 2048
 KERN_TABLE = 24
+KERN_PRELUDE = 24
 
 
 def align(data: bytearray) -> None:
@@ -85,6 +91,12 @@ def cmap_runs(font: TTFont, gid: dict[str, int]) -> list[tuple[int, int, int]]:
         else:
             runs.append([codepoint, 1, glyph])
     return [tuple(run) for run in runs]
+
+
+def stored_records(records: list[bytes]) -> list[bytes]:
+    """The records as the blocks hold them: the contour count, then what
+    follows the record's box (the outline reader skips the box)."""
+    return [record[:2] + record[10:] if len(record) >= 10 else record for record in records]
 
 
 def box_unit(units_per_em: int) -> int:
@@ -173,7 +185,7 @@ def build(source: Path) -> bytes:
     blocks: list[tuple[int, bytes]] = []
     offsets = [0] * len(order)
     first, raw = 0, bytearray()
-    for glyph, record in enumerate(records):
+    for glyph, record in enumerate(stored_records(records)):
         if raw and len(raw) + len(record) > BLOCK_BYTES:
             blocks.append((first, bytes(raw)))
             first, raw = glyph, bytearray()
@@ -226,9 +238,44 @@ def build(source: Path) -> bytes:
         out += packed
     align(out)
 
+    # The right classes of every class subtable, at once: per glyph the tuple
+    # of its classes (one a class subtable), the distinct tuples numbered and
+    # the glyphs in runs of one tuple. One search finds a glyph's classes in
+    # all of them, and the tuples take half the bytes of a range table each.
+    class_tables = [t for t in tables if t[0] == "classes"]
+    right_maps = [dict(t[2]) for t in class_tables]
+    tuple_ids: dict[tuple, int] = {}
+    tuple_list: list[tuple] = []
+    starts: list[int] = []
+    ids: list[int] = []
+    for glyph in range(len(order)):
+        key = tuple(m.get(glyph, 0) for m in right_maps)
+        if any(c > 255 for c in key):
+            raise SystemExit("a right kerning class past 255")
+        if key not in tuple_ids:
+            tuple_ids[key] = len(tuple_list)
+            tuple_list.append(key)
+        if not ids or ids[-1] != tuple_ids[key]:
+            starts.append(glyph)
+            ids.append(tuple_ids[key])
+    if len(tuple_list) > 256:
+        raise SystemExit("more than 256 right class combinations: runs name them by a byte")
+
     kern_at = len(out)
-    headers_at = kern_at
+    out += bytes(KERN_PRELUDE)
+    headers_at = len(out)
     out += bytes(KERN_TABLE * len(tables))
+    starts_at = len(out)
+    for glyph in starts:
+        out += struct.pack("<H", glyph)
+    ids_at = len(out)
+    out += bytes(ids)
+    tuples_at = len(out)
+    for key in tuple_list:
+        out += bytes(key)
+    struct.pack_into("<HHHHIII", out, kern_at, len(starts), len(tuple_list), len(class_tables), 0,
+                     starts_at, ids_at, tuples_at)
+    column = 0
     for t, table in enumerate(tables):
         align(out)
         if table[0] == "pairs":
@@ -247,15 +294,10 @@ def build(source: Path) -> bytes:
         else:
             _, left, right, rows = table
             left_ranges = ranges(left)
-            right_ranges = ranges(right)
             if len(rows) > 0xFFFF or any(cls > 255 for row in rows for cls, _ in row):
                 raise SystemExit("a kerning class past 255")
             left_at = len(out)
             for r in left_ranges:
-                out += struct.pack("<HHH", *r)
-            align(out)
-            second_at = len(out)
-            for r in right_ranges:
                 out += struct.pack("<HHH", *r)
             align(out)
             rows_at = len(out)
@@ -268,7 +310,8 @@ def build(source: Path) -> bytes:
                 for cls, value in row:
                     out += struct.pack("<BB", cls, vindex(value))
             struct.pack_into("<BBHIHHIII", out, headers_at + t * KERN_TABLE, 2, 0, len(left_ranges), left_at,
-                             len(right_ranges), len(rows), second_at, rows_at, entries_at)
+                             column, len(rows), 0, rows_at, entries_at)
+            column += 1
     if len(values) > 256:
         raise SystemExit("more than 256 kerning values: entries name them by a byte")
     align(out)
@@ -321,13 +364,22 @@ class Indexed:
         end = self.record(glyph + 1)[1] if glyph + 1 < self.blocks[b + 1][0] else raw_len
         return raw[start:end]
 
+    def right_classes(self, glyph: int) -> bytes:
+        run_count, tuple_count, width, _, starts_at, ids_at, tuples_at = struct.unpack_from(
+            "<HHHHIII", self.data, self.kern_at)
+        if not hasattr(self, "_starts"):
+            self._starts = [struct.unpack_from("<H", self.data, starts_at + 2 * i)[0] for i in range(run_count)]
+        i = bisect.bisect_right(self._starts, glyph) - 1
+        tid = self.data[ids_at + i]
+        return self.data[tuples_at + tid * width : tuples_at + (tid + 1) * width]
+
     def tables(self):
         if hasattr(self, "_tables"):
             return self._tables
         self._tables = []
         for t in range(self.num_tables):
             (fmt, _, left_count, left_at, second_count, row_count, second_at, rows_at,
-             entries_at) = struct.unpack_from("<BBHIHHIII", self.data, self.kern_at + KERN_TABLE * t)
+             entries_at) = struct.unpack_from("<BBHIHHIII", self.data, self.kern_at + KERN_PRELUDE + KERN_TABLE * t)
             if fmt == 1:
                 lefts = {}
                 for i in range(left_count):
@@ -337,7 +389,7 @@ class Indexed:
                 self._tables.append((1, lefts))
             else:
                 left = [struct.unpack_from("<HHH", self.data, left_at + 6 * i) for i in range(left_count)]
-                right = [struct.unpack_from("<HHH", self.data, second_at + 6 * i) for i in range(second_count)]
+                right = second_count # the column of its class in right_classes
                 rows = []
                 for c in range(row_count):
                     first, count = struct.unpack_from("<HH", self.data, rows_at + 4 * c)
@@ -363,7 +415,7 @@ class Indexed:
                 cls1 = self.in_ranges(table[1], left)
                 if cls1 is None:
                     continue
-                cls2 = self.in_ranges(table[2], right) or 0
+                cls2 = self.right_classes(right)[table[2]]
                 if cls2 in table[3][cls1]:
                     return table[3][cls1][cls2]
         return 0
@@ -400,12 +452,13 @@ def check(source: Path, output: Path) -> list[str]:
             problems.append(f"U+{codepoint:04X} is mapped and should not be")
             break
     records = glyf_records(font, data)
+    stored = stored_records(records)
     metrics = font["hmtx"].metrics
     for glyph, name in enumerate(order):
         advance, _, box = indexed.record(glyph)
         if advance != metrics[name][0]:
             problems.append(f"{name}: advance differs")
-        if indexed.glyf(glyph) != records[glyph]:
+        if indexed.glyf(glyph) != stored[glyph]:
             problems.append(f"{name}: outline differs")
         if len(records[glyph]) >= 10 and box[0] != -128:
             x_min, y_min, x_max, y_max = struct.unpack(">hhhh", records[glyph][2:10])

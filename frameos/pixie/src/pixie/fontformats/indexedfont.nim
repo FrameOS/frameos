@@ -30,6 +30,7 @@ type
 const
   HeaderBytes = 64
   KernTableBytes = 24
+  KernPreludeBytes = 24
   BlockCacheSlots = 2
 
 var
@@ -65,7 +66,7 @@ proc readHeader(font: IndexedFont) =
   if font.len < HeaderBytes or font.data[0] != uint8('F') or font.data[1] != uint8('O') or
       font.data[2] != uint8('S') or font.data[3] != uint8('F'):
     fail("no FOSF header")
-  if font.u16(4) != 1:
+  if font.u16(4) != 2:
     fail("version " & $font.u16(4))
   font.unit = font.u16(6)
   font.unitsPerEm = font.u16(8)
@@ -92,7 +93,7 @@ proc readHeader(font: IndexedFont) =
       font.cmapAt + font.numRuns * 8 > font.len or
       font.glyphsAt + font.numGlyphs * 8 > font.len or
       font.blocksAt + (font.numBlocks + 1) * 8 > font.len or
-      font.kernAt + font.numTables * KernTableBytes > font.len or
+      font.kernAt + KernPreludeBytes + font.numTables * KernTableBytes > font.len or
       font.valuesAt + font.numValues * 2 > font.len:
     fail("sections out of bounds")
   font.id = uint32(atomicInc(indexedFontIds))
@@ -238,13 +239,15 @@ proc parseGlyfGlyph*(font: IndexedFont, glyphId: uint16, recursionDepth: int): P
   let record = font.glyfRecord(glyphId.int)
   if record.len == 0:
     return newPath()
-  if record.len < 10:
+  if record.len < 2:
     fail("glyph record")
+  # The contour count, then the record past its box (which the file leaves
+  # out: the glyph table has the box).
   let numberOfContours = cast[int16]((record[0].uint16 shl 8) or record[1].uint16).int
   if numberOfContours < 0:
-    font.parseCompositeGlyph(record, 10, recursionDepth)
+    font.parseCompositeGlyph(record, 2, recursionDepth)
   else:
-    parseGlyphPath(record, 10, numberOfContours)
+    parseGlyphPath(record, 2, numberOfContours)
 
 proc getGlyphPath*(font: IndexedFont, rune: int32): Path {.raises: [PixieError], gcsafe.} =
   ## The rune's outline in font units, y down (as opentype's): read and
@@ -271,15 +274,34 @@ proc rangeValue(font: IndexedFont, at, count, glyph: int): int =
       return font.u16(r + 4)
   -1
 
+proc rightClasses(font: IndexedFont, glyph: int): int =
+  ## Where the right glyph's classes are, one byte a class subtable: the
+  ## tuple of the run of glyphs it is in.
+  let
+    runs = font.u16(font.kernAt)
+    width = font.u16(font.kernAt + 4)
+    startsAt = font.u32(font.kernAt + 8)
+  var
+    lo = 0
+    hi = runs - 1
+  while lo < hi:
+    let mid = (lo + hi + 1) div 2
+    if font.u16(startsAt + mid * 2) <= glyph:
+      lo = mid
+    else:
+      hi = mid - 1
+  font.u32(font.kernAt + 16) + font.u8(font.u32(font.kernAt + 12) + lo) * width
+
 proc kerning*(font: IndexedFont, left, right: int): int {.raises: [].} =
   ## The x advance between two glyphs, in font units: the first subtable, in
   ## lookup order, that covers `left` and has a nonzero entry for the pair
   ## (opentype's `getKerningAdjustment`).
-  if left < 0 or right < 0:
+  if left < 0 or right < 0 or font.numTables == 0:
     return 0
+  var classes = -1 # rightClasses, found when a class subtable first asks
   for t in 0 ..< font.numTables:
     let
-      h = font.kernAt + t * KernTableBytes
+      h = font.kernAt + KernPreludeBytes + t * KernTableBytes
       leftCount = font.u16(h + 2)
       leftAt = font.u32(h + 4)
       secondCount = font.u16(h + 8)
@@ -317,7 +339,9 @@ proc kerning*(font: IndexedFont, left, right: int): int {.raises: [].} =
       let class1 = font.rangeValue(leftAt, leftCount, left)
       if class1 < 0 or class1 >= rowCount:
         continue
-      let class2 = max(font.rangeValue(secondAt, secondCount, right), 0)
+      if classes < 0:
+        classes = font.rightClasses(right)
+      let class2 = font.u8(classes + secondCount) # secondCount: its column
       let row = font.u32(h + 16) + class1 * 4
       first = font.u16(row)
       count = font.u16(row + 2)
