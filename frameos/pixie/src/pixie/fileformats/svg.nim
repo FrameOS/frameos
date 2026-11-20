@@ -1779,7 +1779,9 @@ proc hidesWindow(element: SvgElement, window: Rect): bool =
   ## drawn before it shows there: a solid square-cornered rect, or a 565
   ## picture (which has no alpha), at full opacity, axis-aligned, around the
   ## whole window. False whenever it cannot be sure.
-  let props = element.props
+  # Read in place: a copy of the properties is two strings and a seq
+  # allocated for every element looked at, at every render.
+  template props: untyped = element.props
   if not props.display or props.opacity < 1 or props.fillOpacity < 1:
     return false
   let m = props.transform
@@ -1856,8 +1858,10 @@ proc renderSvg(
           discard # unmeasured: drawn
         if not bounds.meets(window):
           continue
-      var props = elementProps
-      props.transform = offset * props.transform
+      # The properties are read in place (a copy is two strings and a seq
+      # allocated for every element drawn); only the transform changes here.
+      template props: untyped = elementProps
+      var transform = offset * elementProps.transform
       var target = target
       if props.clip.w >= 0:
         # Inside a nested viewport: drawn into the view of the target that
@@ -1871,10 +1875,12 @@ proc renderSvg(
         if x1 <= x0 or y1 <= y0:
           continue
         target = target.view(x0, y0, x1 - x0, y1 - y0)
-        props.transform = translate(vec2(-x0.float32, -y0.float32)) * props.transform
+        transform = translate(vec2(-x0.float32, -y0.float32)) * transform
       if not props.image.isNil:
         if props.display and props.opacity > 0:
-          target.drawSvgImage(props)
+          var imageProps = elementProps
+          imageProps.transform = transform
+          target.drawSvgImage(imageProps)
           blendMode = NormalBlend
         continue
       if props.display and props.opacity > 0:
@@ -1897,7 +1903,7 @@ proc renderSvg(
             if id in svg.gradients:
               let
                 gradient = svg.gradients[id]
-                transform = props.transform * gradient.transform
+                gradientTransform = transform * gradient.transform
               paint = newPaint(gradient.kind)
               case gradient.kind
               of RadialGradientPaint:
@@ -1905,14 +1911,14 @@ proc renderSvg(
                 # circle along each axis; the transform turns those into the
                 # ellipse the SVG asks for.
                 paint.gradientHandlePositions = @[
-                  transform * vec2(gradient.cx, gradient.cy),
-                  transform * vec2(gradient.cx + gradient.r, gradient.cy),
-                  transform * vec2(gradient.cx, gradient.cy + gradient.r)
+                  gradientTransform * vec2(gradient.cx, gradient.cy),
+                  gradientTransform * vec2(gradient.cx + gradient.r, gradient.cy),
+                  gradientTransform * vec2(gradient.cx, gradient.cy + gradient.r)
                 ]
               else:
                 paint.gradientHandlePositions = @[
-                  transform * vec2(gradient.x1, gradient.y1),
-                  transform * vec2(gradient.x2, gradient.y2)
+                  gradientTransform * vec2(gradient.x1, gradient.y1),
+                  gradientTransform * vec2(gradient.x2, gradient.y2)
                 ]
               paint.gradientStops = gradient.stops
             else:
@@ -1924,11 +1930,11 @@ proc renderSvg(
           paint.blendMode = blendMode
 
           if late and paint.kind == SolidPaint:
-            target.fillPath(element.lateData, paint, props.transform, props.fillRule)
+            target.fillPath(element.lateData, paint, transform, props.fillRule)
           else:
             if late and path.isNil:
               path = element.pathOf()
-            target.fillPath(path, paint, props.transform, props.fillRule)
+            target.fillPath(path, paint, transform, props.fillRule)
 
         blendMode = NormalBlend # Switch to normal when compositing multiple paths
 
@@ -1939,7 +1945,7 @@ proc renderSvg(
             target.strokePath(
               element.lateData,
               paint,
-              props.transform,
+              transform,
               props.strokeWidth,
               props.strokeLineCap,
               props.strokeLineJoin,
@@ -1952,7 +1958,7 @@ proc renderSvg(
             target.strokePath(
               path,
               paint,
-              props.transform,
+              transform,
               props.strokeWidth,
               props.strokeLineCap,
               props.strokeLineJoin,
@@ -1977,7 +1983,7 @@ iterator pictures*(svg: Svg): SvgPicture {.raises: [].} =
   ## its picture, by identity).
   if not svg.isNil:
     for element in svg.elements:
-      let props = element.props
+      template props: untyped = element.props # in place, not a copy
       if not props.image.isNil and props.display and props.opacity > 0:
         yield (props.image, props.imageBox,
           (if props.imageClip: rect(props.rectX, props.rectY, props.rectW, props.rectH)
@@ -1994,7 +2000,8 @@ proc coversOpaque*(svg: Svg, width, height: int): bool {.raises: [].} =
   ## opacity, rounded corners, a rotation, an edge short of the target's).
   if svg.isNil or svg.elements.len == 0 or width <= 0 or height <= 0:
     return false
-  let props = svg.elements[0].props
+  let first = svg.elements[0]
+  template props: untyped = first.props # in place, not a copy
   if not props.isRect or not props.display or props.clip.w >= 0:
     return false
   if props.opacity < 1 or props.fillOpacity < 1:
