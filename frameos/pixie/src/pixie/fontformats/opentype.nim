@@ -2584,9 +2584,11 @@ proc parseGlyfGlyph(
   opentype: OpenType, glyphId: uint16, recursionDepth = 0
 ): Path {.raises: [PixieError], gcsafe.}
 
-proc parseGlyphPath(
+proc parseGlyphPath*(
   buf: string, offset, numberOfContours: int
 ): Path =
+  ## A simple TrueType glyph's outline, its contours starting at `offset`
+  ## (past the glyph header), in font units, y up.
   if numberOfContours < 0:
     raise newException(PixieError, "Glyph numberOfContours must be >= 0")
 
@@ -2719,18 +2721,23 @@ proc parseGlyphPath(
 
     result.closePath()
 
-proc parseCompositeGlyph(
-  opentype: OpenType, offset, recursionDepth: int
+proc parseCompositeGlyph*[T](
+  source: T, buf: string, offset, recursionDepth: int
 ): Path =
+  ## A composite TrueType glyph's outline: its components (each read through
+  ## `source.parseGlyfGlyph`, the font that holds them) placed by their
+  ## transforms. `buf` holds the composite's record, its components' list
+  ## from `offset` on.
+  mixin parseGlyfGlyph
   result = newPath()
 
   var
     i = offset
     moreComponents = true
   while moreComponents:
-    opentype.buf.eofCheck(i + 4)
+    buf.eofCheck(i + 4)
 
-    let flags = opentype.buf.readUint16(i + 0).swap()
+    let flags = buf.readUint16(i + 0).swap()
 
     i += 2
 
@@ -2745,53 +2752,53 @@ proc parseCompositeGlyph(
       matchedPoints: array[2, int]
 
     var component = TtfComponent()
-    component.glyphId = opentype.buf.readUint16(i + 0).swap()
+    component.glyphId = buf.readUint16(i + 0).swap()
     component.xScale = 1
     component.yScale = 1
 
     i += 2
 
     if (flags and 1) != 0: # The arguments are uint16
-      opentype.buf.eofCheck(i + 4)
+      buf.eofCheck(i + 4)
       if (flags and 0b10) != 0: # The arguments are offets
-        component.dx = opentype.buf.readInt16(i + 0).swap().float32
-        component.dy = opentype.buf.readInt16(i + 2).swap().float32
+        component.dx = buf.readInt16(i + 0).swap().float32
+        component.dy = buf.readInt16(i + 2).swap().float32
       else: # The arguments are matched points
         component.matchedPoints = [
-          opentype.buf.readUint16(i + 0).swap().int,
-          opentype.buf.readUint16(i + 2).swap().int
+          buf.readUint16(i + 0).swap().int,
+          buf.readUint16(i + 2).swap().int
         ]
       i += 4
     else: # The arguments are uint8
-      opentype.buf.eofCheck(i + 2)
+      buf.eofCheck(i + 2)
       if (flags and 0b10) != 0: # Arguments are offsets
-        component.dx = opentype.buf.readInt8(i + 0).float32
-        component.dy = opentype.buf.readInt8(i + 1).float32
+        component.dx = buf.readInt8(i + 0).float32
+        component.dy = buf.readInt8(i + 1).float32
       else: # The arguments are matched points
         component.matchedPoints = [
-          opentype.buf.readInt8(i + 0).int,
-          opentype.buf.readInt8(i + 1).int
+          buf.readInt8(i + 0).int,
+          buf.readInt8(i + 1).int
         ]
       i += 2
 
     # TODO: ROUND_XY_TO_GRID
 
     if (flags and 0b1000) != 0: # WE_HAVE_A_SCALE
-      opentype.buf.eofCheck(i + 2)
-      component.xScale = opentype.buf.readFixed16(i + 0)
+      buf.eofCheck(i + 2)
+      component.xScale = buf.readFixed16(i + 0)
       component.yScale = component.xScale
       i += 2
     elif (flags and 0b1000000) != 0: # WE_HAVE_AN_X_AND_Y_SCALE
-      opentype.buf.eofCheck(i + 4)
-      component.xScale = opentype.buf.readFixed16(i + 0)
-      component.yScale = opentype.buf.readFixed16(i + 2)
+      buf.eofCheck(i + 4)
+      component.xScale = buf.readFixed16(i + 0)
+      component.yScale = buf.readFixed16(i + 2)
       i += 4
     elif (flags and 0b10000000) != 0: # WE_HAVE_A_TWO_BY_TWO
-      opentype.buf.eofCheck(i + 8)
-      component.xScale = opentype.buf.readFixed16(i + 0)
-      component.scale10 = opentype.buf.readFixed16(i + 2)
-      component.scale01 = opentype.buf.readFixed16(i + 4)
-      component.yScale = opentype.buf.readFixed16(i + 6)
+      buf.eofCheck(i + 8)
+      component.xScale = buf.readFixed16(i + 0)
+      component.scale10 = buf.readFixed16(i + 2)
+      component.scale01 = buf.readFixed16(i + 4)
+      component.yScale = buf.readFixed16(i + 6)
       i += 8
 
     # if (flags and 0b100000000) != 0: # WE_HAVE_INSTRUCTIONS
@@ -2805,7 +2812,7 @@ proc parseCompositeGlyph(
     # elif (flags and 0b1000000000000) != 0: # UNSCALED_COMPONENT_OFFSET
     #   discard
 
-    var subPath = opentype.parseGlyfGlyph(
+    var subPath = source.parseGlyfGlyph(
       component.glyphId,
       recursionDepth + 1
     )
@@ -2844,7 +2851,7 @@ proc parseGlyfGlyph(
   i += 10
 
   if numberOfContours < 0:
-    opentype.parseCompositeGlyph(i, recursionDepth)
+    opentype.parseCompositeGlyph(opentype.buf, i, recursionDepth)
   else:
     parseGlyphPath(opentype.buf, i, numberOfContours)
 

@@ -10,35 +10,23 @@ import frameos/channels
 import frameos/utils/memory
 import frameos/utils/paths
 import json
-when defined(frameosEmbedded) or defined(frameosWasm):
-  import zippy
-
-const defaultFont = "Ubuntu-Regular.ttf" # compiled into the binary by nimassets
+const defaultFont = "Ubuntu-Regular.ttf" # its name; compiled in as an indexed font
 const emojiFallbackFont = "NotoColorEmoji.ttf"
 var typefaces: Table[string, Typeface] = initTable[string, Typeface]()
 
 var typefaceLock: Lock
 
-proc readEmbeddedFont(path: string): string =
-  when defined(frameosEmbedded) or defined(frameosWasm):
-    # zippy's gzip path verifies the trailer with `dst.len mod (1 shl 32)`,
-    # and `1 shl 32` overflows a 32-bit int (Xtensa, wasm32) to 0 -> divide-by-zero.
-    # The compiled assets use a plain 10-byte gzip header (flags=0), so strip
-    # the header + 8-byte trailer and raw-inflate, skipping that check.
-    let gz = fontAssets.getCompressedAsset(path)
-    if gz.len >= 18 and gz[0] == '\x1f' and gz[1] == '\x8b' and gz[3] == '\0':
-      return uncompress(gz[10 ..< gz.len - 8], dfDeflate)
-    return fontAssets.getAsset(path)
-  elif compiles(fontAssets.getAssetToStr(path)):
-    fontAssets.getAssetToStr(path)
-  else:
-    fontAssets.getAsset(path)
-
 proc getDefaultTypeface*(): Typeface =
+  ## The built-in face, read where it lies: `assets/fonts.nim` holds it as an
+  ## indexed font (tools/generate_indexed_font.py) in the program's read-only
+  ## data, and pixie reads its tables in place and inflates a glyph's block
+  ## when the glyph cache does not have it (docs/esp32-memory.md). It used to
+  ## be inflated whole and parsed: 162 KB held for good, 424 KB at the first
+  ## text.
   if not typefaces.hasKey(defaultFont):
     withLock typefaceLock:
       if not typefaces.hasKey(defaultFont):
-        typefaces[defaultFont] = parseTtf(readEmbeddedFont("assets/compiled/fonts/" & defaultFont))
+        typefaces[defaultFont] = parseIndexedTypeface(fontAssets.defaultFontData)
   return typefaces[defaultFont]
 
 proc hasFallbackTypeface(typeface, fallback: Typeface): bool =
