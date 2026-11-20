@@ -643,6 +643,15 @@ DESKTOP_LAYOUTS = ['layout-windows-98', 'layout-tiling', 'layout-macos', 'layout
 LIGHT_SCENES = ['Clock', 'Counter', 'Calculator', 'Tap counter', 'Touch test', 'Colors', 'Steps', 'To-do', 'Now playing']
 
 
+def samples_root():
+    """The checkout whose repo/scenes/samples the desktop and code suites push:
+    this one, or $FRAMEOS_BENCH_SAMPLES (a branch under test, benched with the
+    tooling of another)."""
+    import os
+    return os.path.abspath(os.environ.get('FRAMEOS_BENCH_SAMPLES') or
+                           os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+
 def _sample_layout(repo_root, layout_id):
     import glob
     import os
@@ -701,7 +710,7 @@ def suite_desktop(ctx, frame, layouts=None):
         return {'skipped': 'needs the backend frame', 'issues': []}
     con = ctx.console(frame)
     be, fid = ctx.backend, frame['backend_frame']
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    repo_root = samples_root()
     original = be.frame(fid).get('scenes') or []
     plain = [s for s in original if not (s.get('settings') or {}).get('isLayout')]
     by_name = {s.get('name'): s for s in plain}
@@ -836,7 +845,7 @@ def suite_code(ctx, frame, opens=None):
         return {'skipped': 'needs the backend frame', 'issues': []}
     con = ctx.console(frame)
     be, fid = ctx.backend, frame['backend_frame']
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    repo_root = samples_root()
     editor = None
     import glob
     for path in glob.glob(os.path.join(repo_root, 'repo', 'scenes', 'samples', '*', 'scenes.json')):

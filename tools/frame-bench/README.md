@@ -14,6 +14,9 @@ frameos/.venv/bin/python3 tools/frame-bench/bench.py html     # ../frameos-bench
 
 - How to set it up, what each suite does and how to read a run's report:
   `.claude/skills/frame-bench/SKILL.md`.
+- The boards are shared between sessions: book one before touching it
+  (`boards.py`, `~/.frameos-bench/BOOKINGS.md`; the skill's "Booking a
+  board"). `bench.py run` books what it benches and waits for the rest.
 - The scores (categories, formula, noise, what is not measured): `SCORES.md`.
 - The results are their own repo, [FrameOS/frameos-benchmarks](https://github.com/FrameOS/frameos-benchmarks)
   (the page: <https://frameos.github.io/frameos-benchmarks/>): clone it beside

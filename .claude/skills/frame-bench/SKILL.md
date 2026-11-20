@@ -9,6 +9,48 @@ description: Bench every FrameOS frame attached to this machine (ESP32 boards an
 its serial console and the backend it is attached to, and writes a report of
 everything that crashed, failed, ran slow or took a slower path than before.
 
+## Booking a board
+
+The boards are shared by every Claude session on this machine, and one
+session's console, flash or push breaks another's work on the same board (a
+flash restarts it; on 2026-11-20 a session reflashed five boards two others
+were testing on). So **book a board before you touch it, in any way**: open
+its console (`usb_api`, `scene`, `event`), flash it, push to its backend frame,
+bench it. The bookings are one file, `~/.frameos-bench/BOOKINGS.md` (Markdown:
+read it as it is), written only through the helper, which locks it:
+
+```
+tools/frame-bench/boards.py                       # every board: free, booked (who, until, what for) or lapsed
+tools/frame-bench/boards.py book sticky,e1003 --who "frameos-16 (desktop-consistency, PR #920)" --for "flash + desktop suite" --hours 2
+tools/frame-bench/boards.py book all --who ... --for ... --partial   # the free ones; says who has the rest
+tools/frame-bench/boards.py book e1004 --who ... --for ... --wait   # until its holder releases it or it lapses
+tools/frame-bench/boards.py extend sticky --who ... --hours 1
+tools/frame-bench/boards.py release sticky,e1003 --who ...
+```
+
+- Boards by their short name (`boards.json` `key`): `sensecap`, `sticky`,
+  `e1002`, `e1003`, `e1004`, `pico`, or `all`.
+- `--who` starts with your session's name as `ListAgents` shows it, so whoever
+  finds the board taken can `SendMessage` you; set `FRAMEOS_BENCH_WHO` to it
+  once and the tools below read it.
+- A booking ends at its `until` (default two hours from booking). Past it the
+  board is free again, so a session that died holds nothing; `extend` while you
+  still need it, and `release` the moment you are done. Leave the board as you
+  promised the others (often: back on the release, on a still scene).
+- Never use a board someone else holds. Ask them; take it with `release
+  --force` only when they said so, or the owner did.
+- The tools keep to it: `bench.py run` books every board it benches, moves the
+  booking on at each suite and releases it at the end; it never opens the
+  console of a board someone else holds (nor a port another process has open),
+  benches the free boards first and each held one when it is free
+  (`--skip-booked` leaves those out, `--wait-hours` bounds the wait).
+  `bench.py discover` skips them too. The flashing scripts under
+  `~/.frameos-bench/firmware/` (`flash_checked.sh`, `xversion.py`) refuse a
+  board booked by anyone but `$FRAMEOS_BENCH_WHO`; `xversion.py` books what is
+  free, flashes and benches it, and takes the rest as they come free.
+- `FRAMEOS_BENCH_SAMPLES=<checkout>` makes the desktop and code suites push
+  that checkout's samples, to bench a branch's layouts with main's tooling.
+
 ## Before you run it
 
 1. **A backend the frames are attached to.** Every frame's `backend` points at
