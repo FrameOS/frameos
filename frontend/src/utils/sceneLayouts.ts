@@ -19,6 +19,26 @@ export function isDesktopLayout(scene: Pick<FrameScene, 'settings'> | null | und
   return isLayoutScene(scene) && scene?.settings?.desktop === true
 }
 
+const DEVICE_ID = /^[a-z0-9][a-z0-9_]{0,63}$/
+
+/**
+ * The devices a layout is made for (`settings.devices`: hardware ids as the
+ * frame settings name them, `seeed_reterminal_sticky`), none for a layout made
+ * for any frame. What is no such id is left out, and a scene has none.
+ */
+export function layoutDevices(scene: Pick<FrameScene, 'settings'> | null | undefined): string[] {
+  const devices = isLayoutScene(scene) ? (scene?.settings as { devices?: unknown } | undefined)?.devices : undefined
+  if (!Array.isArray(devices)) {
+    return []
+  }
+  return [...new Set(devices.filter((id): id is string => typeof id === 'string' && DEVICE_ID.test(id)))].slice(0, 16)
+}
+
+/** A layout made for one device, or a few (`settings.devices`): the store's Device layouts shelf. */
+export function isDeviceLayout(scene: Pick<FrameScene, 'settings'> | null | undefined): boolean {
+  return layoutDevices(scene).length > 0
+}
+
 export interface LayoutGroup<T> {
   kind: 'desktops' | 'fullScreen'
   /** As the frame's own settings page heads them. */

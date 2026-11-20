@@ -330,6 +330,27 @@ describe("validateSceneZip transparency rejection", () => {
     const posing = pack([{ id: "a", nodes: [], edges: [], settings: { category: "Multi app layouts" } }]);
     expect(posing.ok && posing.value.sceneCategory).toBeUndefined();
     expect(desktop.ok && desktop.value.sceneCategory).toBe("desktops");
+    expect(layout.ok && layout.value.sceneCategory).toBe("layouts");
+    // One made for a device is on Device layouts, whatever it says; a scene
+    // that says it is for a device is still a scene.
+    for (const sample of ["reTerminal layout", "reTerminal Sticky layout"]) {
+      const made = pack(
+        JSON.parse(readFileSync(join(__dirname, `../../../../../repo/scenes/samples/${sample}/scenes.json`), "utf8")),
+      );
+      expect(made.ok && made.value.sceneCategory).toBe("devices");
+    }
+    const withDevices = (devices: unknown) =>
+      pack(sample.map((scene: { settings?: object }) => ({
+        ...scene,
+        settings: { ...scene.settings, category: "Single app layouts", devices },
+      })));
+    const forDevice = withDevices(["seeed_reterminal_e1001"]);
+    expect(forDevice.ok && forDevice.value.sceneCategory).toBe("devices");
+    const noDevice = withDevices(["Not an id!"]);
+    expect(noDevice.ok && noDevice.value.sceneCategory).toBe("layouts");
+    const sceneForDevice = pack([{ id: "a", nodes: [], edges: [], settings: { devices: ["seeed_reterminal_e1001"] } }]);
+    expect(sceneForDevice.ok).toBe(true);
+    expect(sceneForDevice.ok && sceneForDevice.value.sceneCategory).toBeUndefined();
     // What it needs of a frame is read from it.
     const fast = pack([{ id: "a", nodes: [], edges: [], settings: { refreshInterval: 0.05 } }]);
     expect(fast.ok && fast.value.needs).toEqual(["fast"]);

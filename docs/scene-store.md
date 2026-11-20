@@ -128,12 +128,14 @@ itself above that.
 The store's shelves are `cloud/apps/auth-web/src/lib/categories.ts` (the SPA's
 copy `frontend/src/utils/storeCategories.ts`, the iOS app's
 `StoreCategories.swift`, kept equal by tests). The store front's first split is
-**Scenes | Layouts**: what a scene is (`settings.isLayout`, `settings.desktop`),
+**Scenes | Layouts**: what a scene is (`settings.isLayout`, `settings.desktop`,
+`settings.devices`),
 never a category it states. The scenes' shelves say what a scene is about:
 Photos, Art & galleries, Clocks & time, Calendars & agendas, Weather, Home &
 dashboards, Games, Fun & animations, Notes & tools, AI & generative, Demos &
-examples. The layouts' are Multi app layouts and Single app layouts, and a
-layout is always on its kind's (`validateSceneZip`), a scene never.
+examples. The layouts' are Multi app layouts, Single app layouts and Device
+layouts (one made for a device: `settings.devices` names it, docs/scene-layouts.md),
+and a layout is always on its kind's (`validateSceneZip`), a scene never.
 
 A version's category is the one the scene names (`settings.category`, a
 store title; docs/scene-icons.md), else the listing's, else the rules'

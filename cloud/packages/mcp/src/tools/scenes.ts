@@ -29,7 +29,7 @@ const sceneGuideTools =
 
 // The store's shelves (cloud/apps/auth-web/src/lib/categories.ts, which this
 // package cannot import; its test reads this list). A layout's shelf
-// (desktops, layouts) follows from what it is: setting one on a scene is
+// (desktops, layouts, devices) follows from what it is: setting one on a scene is
 // ignored.
 const storeCategories = [
   "photos",
@@ -45,6 +45,7 @@ const storeCategories = [
   "demos",
   "desktops",
   "layouts",
+  "devices",
 ] as const;
 const storeCategoryList = storeCategories.join("|");
 

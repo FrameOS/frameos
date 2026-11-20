@@ -2,7 +2,7 @@ import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
 import { sceneNeeds } from "../../../../../frontend/src/utils/sceneNeeds";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
-import { isDesktopLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
+import { isDesktopLayout, isDeviceLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
 import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
@@ -482,8 +482,9 @@ export type ValidatedSceneZip = {
   // became part of the version). Malformed values read as absent.
   manifestCategory: string | null | undefined;
   // The scene a pack starts on is a layout (docs/scene-layouts.md): it goes on
-  // a layouts shelf without asking the classifier, Multi app layouts for a
-  // desktop (`settings.desktop`), else Single app layouts.
+  // a layouts shelf without asking the classifier: Device layouts for one
+  // made for a device (`settings.devices`), Multi app layouts for a desktop
+  // (`settings.desktop`), else Single app layouts.
   isLayout: boolean;
   isDesktop: boolean;
   // The store category the scene names itself: its settings.category, when
@@ -591,7 +592,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
       isLayout: isLayoutScene(main),
       isDesktop: isDesktopLayout(main),
       sceneCategory: isLayoutScene(main)
-        ? layoutCategorySlug(isDesktopLayout(main))
+        ? layoutCategorySlug(isDesktopLayout(main), isDeviceLayout(main))
         : sceneTopicCategory(main?.settings?.category),
       manifestCategory:
         record.category === undefined ? undefined : normalizeCategory(record.category),

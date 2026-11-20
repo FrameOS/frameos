@@ -13,6 +13,12 @@ default is no layout (a scene is the whole frame).
 - `settings.desktop: true` says it is a desktop that runs the frame's scenes
   in windows ([Windows](#windows)): the frame page lists the desktops apart
   from the layouts around one scene.
+- `settings.devices` says it is made for one device, or a few: their hardware
+  ids as the frame settings name them (`["seeed_reterminal_sticky"]`;
+  `layoutDevices` in `utils/sceneLayouts.ts` reads it, and drops anything that
+  is no id). Such a layout goes on the store's Device layouts shelf. Nothing
+  on a frame reads it: a layout that knows its device reads the panel and the
+  event map, as the reTerminal ones do.
 
 ## What can be a layout
 
@@ -73,12 +79,14 @@ viewer's, kept in this browser by layout id (`frameos.preview.layoutSettings`,
 unless the workspace is told not to remember), never on a scene or a frame.
 
 **In the store.** Layouts are the store front's second side (Scenes |
-Layouts), with two shelves of their own
+Layouts), with three shelves of their own
 (`cloud/apps/auth-web/src/lib/categories.ts`): Multi app layouts (`desktops`, the
-desktops) and Single app layouts (`layouts`; "Desktop layouts" and "Full screen
-layouts" before 2026-11-19). A layout is always on its kind's, whatever it
-or its owner states (`validateSceneZip`'s `sceneCategory`: Multi app layouts when
-it says `settings.desktop`), and a scene is never on one; the classifier never
+desktops), Single app layouts (`layouts`; "Desktop layouts" and "Full screen
+layouts" before 2026-11-19) and Device layouts (`devices`, made for one device:
+2026-11-20). A layout is always on its kind's, whatever it
+or its owner states (`validateSceneZip`'s `sceneCategory`: Device layouts when it
+says `settings.devices`, else Multi app layouts when it says `settings.desktop`),
+and a scene is never on one; the classifier never
 sees a layout. A layout's page previews it around the samples, windowed for a
 desktop (above). A frame's own Scene store lists them under a Layouts heading
 and tries one on the frame before it is kept (docs/scene-store.md "Trying a
@@ -614,6 +622,17 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   wasm runtime draws the canvas already turned. The green key pressed twice opens the scene list, where the caps
   say what a press does there. On the touch E1003 the name, the gear and the
   status are buttons too.
+
+Both are on the store's Device layouts shelf (`settings.devices` names the
+boards), and both are set up through their fields, on the install or from the
+frame page's gear: whether the signal, the battery and the time show (24 or 12
+hours, or none), whether the small hold words and the help lines do (the
+E-series' hint under the name; the Sticky's date, swipe help and rail buttons),
+whether the green key or AI draws the picture again when pressed (off: the
+press is the scene's alone, and its cap says "To scene") and opens the scene
+list when pressed twice, white on black or black on white, and the text size
+(0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
+on until it is turned off, so an install from before keeps its look.
 
 The pictures in their pull request were made with
 `frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board

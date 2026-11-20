@@ -42,8 +42,9 @@ A scenes file is a JSON array of scenes. Each scene is
   from a service), `"Games"`, `"Fun & animations"` (comics, toys,
   animations), `"Notes & tools"` (to-dos, notes, drawing, practical tools),
   `"AI & generative"` (made by an AI service), `"Demos & examples"` (a demo,
-  made-up data or a building block); a layout's is `"Multi app layouts"` or
-  `"Single app layouts"`. Write the name exactly. Which screen a scene is for
+  made-up data or a building block); a layout's is `"Multi app layouts"`,
+  `"Single app layouts"` or `"Device layouts"` (one made for a device, which
+  `settings.devices` names: `["seeed_reterminal_sticky"]`). Write the name exactly. Which screen a scene is for
   is no category: the store reads that from the scene itself (a
   `refreshInterval` under a second needs a fast screen).
 - `settings.needs` (optional): what the scene needs of a frame, when the store

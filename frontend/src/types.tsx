@@ -1325,6 +1325,9 @@ export interface FrameSceneSettings {
   isLayout?: boolean
   /** A layout that is a desktop of windows: the frame's settings page lists it apart (docs/scene-layouts.md). */
   desktop?: boolean
+  /** A layout made for these devices (hardware ids, `seeed_reterminal_sticky`): the store's
+   * Device layouts shelf (utils/sceneLayouts.ts `layoutDevices`, docs/scene-layouts.md). */
+  devices?: string[]
   /** "WxH": the size this scene opens at in a desktop layout's window
    * (utils/sceneWindowSize.ts, docs/scene-layouts.md "Windows"); unset = 800x480. */
   windowSize?: string

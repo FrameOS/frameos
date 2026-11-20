@@ -32,6 +32,7 @@ export const storeCategoryShelves: StoreCategoryShelf[] = [
   { slug: 'demos', title: 'Demos & examples', kind: 'scene' },
   { slug: 'desktops', title: 'Multi app layouts', kind: 'layout' },
   { slug: 'layouts', title: 'Single app layouts', kind: 'layout' },
+  { slug: 'devices', title: 'Device layouts', kind: 'layout' },
 ]
 
 /**
@@ -52,6 +53,8 @@ export const storeShelfDescriptions: Record<string, string> = {
   demos: 'Small demos, made-up data and test patterns to learn from or remix.',
   desktops: "Desktops that run the frame's scenes side by side, in windows or tiles.",
   layouts: 'Title bars, status lines and picture frames drawn around the one scene that is showing.',
+  devices:
+    'Made for one device: what its keys do, written beside them, and its touch screen, battery and signal looked after.',
   other: 'Scenes not filed on any shelf yet.',
 }
 

@@ -19,6 +19,7 @@ public enum StoreCategories {
         ("demos", "Demos & examples"),
         ("desktops", "Multi app layouts"),
         ("layouts", "Single app layouts"),
+        ("devices", "Device layouts"),
     ]
 
     /// Scenes without a (known) category land here, after the others.
