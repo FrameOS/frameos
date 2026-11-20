@@ -3587,6 +3587,11 @@ suite "a new render scale on a desktop of windows":
       for scene in hosted.values: scene.wornLayout = nil
       for id in ["tests/red", "tests/green", "tests/blue", "tests/green"]:
         discard focusOn(id)
+        if id == "tests/red":
+          discard pass()
+          # Windows asked for: at render scale 2 the desktop is 400x240, too
+          # small for windows on Automatic.
+          desk().state["windowMode"] = %"on"
         discard pass()
       discard pass()
       let before = shown()
@@ -3675,7 +3680,7 @@ suite "windows by the frame's room, and windows hidden under others":
     chooseLayout("")
     discard pass()
 
-  test "automatic is one scene where one or two run at once, windows where four or any do":
+  test "automatic is one scene where one or two run at once or the screen is under 640x480, windows elsewhere":
     const MiB = 1024 * 1024
     for (memory, windowed) in [(8 * MiB - 65536, false), (16 * MiB, true), (0, true)]:
       deviceMemoryBytesOverride = memory
@@ -3703,6 +3708,25 @@ suite "windows by the frame's room, and windows hidden under others":
           desk().state.delete("windowMode")
         check problems.len == 0
     deviceMemoryBytesOverride = 0
+    # And a screen of 640x480 or more, either way up: a 480x480 panel has no
+    # room for a window beside another, whatever its memory.
+    for (w, h, windowed) in [(480, 480, false), (480, 640, true), (600, 480, false)]:
+      config.width = w
+      config.height = h
+      for layoutId in [Layout, Omarchy]:
+        checkpoint layoutId & " " & $w & "x" & $h
+        desk().state["openScenes"] = %*[]
+        chooseLayout(layoutId)
+        discard pass()
+        desk().state["wins"] = %*[]
+        discard focusOn("tests/red")
+        discard pass()
+        discard focusOn("tests/green")
+        discard pass()
+        let open = desk().state{"openScenes"}
+        check (not open.isNil and open.len == 2) == windowed
+    config.width = W
+    config.height = H
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()

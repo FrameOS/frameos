@@ -488,10 +488,13 @@ scene stays open and running, and draws again when it shows.
 On or Off. Off, the desktop shows the frame's scene alone in its look, one
 window around it and its bars. Automatic is windows where the frame runs its
 scenes side by side without a limit (a Pi, the browser) or four at once (16 MB
-of PSRAM), and one scene where it runs one or two (`app.frame.windows`: an 8 MB
-ESP32, where a desktop of two windows is mostly the one in front, and the one
-behind costs memory and frames). `Commander`, whose two panels never overlap,
-is two wherever two may run. An install from before 2026.11.13, whose boolean
+of PSRAM) on a screen of 640x480 or more either way up (`app.frame.width` and
+`height`, the panel over the render scale), and one scene where it runs one or
+two (`app.frame.windows`: an 8 MB ESP32, where a desktop of two windows is
+mostly the one in front, and the one behind costs memory and frames) or the
+screen is smaller (a 480x480 panel has no room for a window beside another).
+`Commander`, whose two panels never overlap, is two wherever two may run on a
+screen of that size. An install from before 2026.11.13, whose boolean
 `windows` switch was turned off, stays off; the `true` every install kept from
 the old default does not count (`windowsOn`, the same text in the seven
 desktops of windows).
