@@ -3778,8 +3778,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back; back, forward and a scene direction turn its page",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` turns its page instead (`forward` for `next`, `back` for `prev`): the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) turn its page, the one before and the next, wrapping around, and the frame stays on it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, and the same again goes back; back, forward and a scene direction move its highlight a screenful",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` is its `forward` (for `next`) or `back` (for `prev`) instead: the swipe or the key the frame walks its scenes with walks the tiles there, and the frame stays on the switcher. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) move its highlight a screenful of tiles back or on (here one tile: the frame is 4x3), its list scrolling with it, wrapping around at the ends, and the frame stays on it. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -3984,7 +3984,6 @@
       "current": "system/sceneSwitcher",
       "state": {
        "from": "fixtures/dispatcher/switcherA",
-       "page": 1,
        "highlight": "fixtures/dispatcher/switcherB"
       }
      },
@@ -4176,7 +4175,6 @@
       "current": "system/sceneSwitcher",
       "state": {
        "from": "fixtures/dispatcher/switcherB",
-       "page": 2,
        "highlight": "fixtures/dispatcher/switcherC"
       }
      },
@@ -4205,7 +4203,6 @@
       "current": "system/sceneSwitcher",
       "state": {
        "from": "fixtures/dispatcher/switcherB",
-       "page": 1,
        "highlight": "fixtures/dispatcher/switcherB"
       }
      }
@@ -5399,8 +5396,8 @@
     ]
    },
    {
-    "name": "on a desktop the frame page opens from the scene list too",
-    "why": "Where built-in scenes stay open as windows, the switcher's gear opens the frame page's one window over the scene the switcher was opened from (`settingsWindows`), not back to that scene; a plain `sceneSettings` while the switcher is in front still goes back.",
+    "name": "on a desktop the frame page opens from the scene list, and each built-in scene over the other",
+    "why": "Where built-in scenes stay open as windows, the switcher's gear opens the frame page's one window over the scene the switcher was opened from (`settingsWindows`), not back to that scene. The swipe down over the list opens the settings of that scene in their window, and the swipe up over those settings the list, each beside the other (they stay open in their windows); only the same command again goes back.",
     "windows": true,
     "scene": "fixtures/dispatcher/gearB",
     "scenes": [
@@ -5467,6 +5464,30 @@
        {
         "origin": "scene",
         "event": "sceneSettings"
+       }
+      ],
+      "current": "system/sceneSettings#fixtures/dispatcher/gearB",
+      "state": {
+       "from": "fixtures/dispatcher/gearB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/gearB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "sceneSwitcher"
        }
       ],
       "current": "fixtures/dispatcher/gearB"

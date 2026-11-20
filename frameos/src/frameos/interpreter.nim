@@ -636,6 +636,13 @@ var takeParkedLayout*: proc(layoutId: string): FrameScene {.nimcall.}
   ## it skips reading, parsing and starting it again, and keeps its warm caches
   ## (1.2 s of each scene switch on a reTerminal E1003, 2026-11-10).
 
+var releaseParkedLayout*: proc(layoutId: string, before: proc(layout: FrameScene) {.nimcall.}) {.nimcall.}
+  ## The same host's: the layout it keeps parked when it is NOT `layoutId`,
+  ## let go (after `before` has seen it). A scene that starts another layout
+  ## leaves the parked one to nobody, and it held its interpreters until the
+  ## next switch: NeXTSTEP's still ran beside OS/2 Warp on a reTerminal E1004
+  ## when an allocation of OS/2 Warp's failed (2026-11-19).
+
 var carried {.threadvar.}: tuple[layoutId: string, state: JsonNode]
   ## What a desktop kept (its windows, where they are) when its scenes were
   ## replaced (a push, a deploy, a reload): handed to the next instance of
@@ -691,6 +698,13 @@ proc startLayout(owner: FrameScene, layoutId: string, ownId: string, ownState: J
       parked.shownName = owner.shownName
       parked.systemScene = false
       return parked
+  if layoutId != owner.id.string and not releaseParkedLayout.isNil:
+    # Another layout is parked: nobody will wear it now. What it had open goes
+    # to this one (as a layout chosen in its place does), and its memory comes
+    # back before this one starts.
+    releaseParkedLayout(layoutId, proc(layout: FrameScene) {.nimcall.} =
+      if carriedOpen.isNil:
+        keepOpenScenes(layout))
   let exported = if layoutId != owner.id.string: resolveSceneExport(layoutId.SceneId) else: nil
   if exported of ExportedInterpretedScene:
     try:
@@ -940,6 +954,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   var
     child: FrameScene
     asItIs = yielded # the scene itself, not a copy: props do not set its state
+    hostWindow = false # one of the frame's own scenes, in a window
   if yielded:
     child = yieldScene
     if child.isNil or child == owner:
@@ -948,6 +963,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     if child.isNil:
       return nil
     asItIs = true
+    hostWindow = true
   else:
     if sceneId == owner.id.string:
       return nil
@@ -1028,7 +1044,10 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   rhythmLeaveChild(saved)
   child.repainting = false
   if due:
-    rhythmAfterRun(child, rdRun, nil, nil, inner.nextSleep)
+    # A window behind another, where only a few scenes run at once: at most
+    # every few seconds, as each of its runs draws the whole desktop again.
+    rhythmAfterRun(child, rdRun, nil, nil, inner.nextSleep,
+      floor = if hostWindow and windowLimit() > 0: WindowBehindSeconds else: 0.0)
   if not r.embedImage.isNil or embedBytesAllowed(image.byteSize):
     if r.embedImage.isNil:
       r.embedImage = image
@@ -2248,11 +2267,13 @@ proc renderChrome(host: FrameScene, context: ExecutionContext) =
       rhythmRestoreChrome(host, context.image)
     for i in 0 ..< host.slots.len:
       template s: untyped = host.slots[i]
-      drawIntoHole(host, s.child, context.image, s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y),
-        context, addSlot = false)
+      # A picture (not due, or the chrome would have run) is in the chrome's pixels.
+      if s.hole:
+        drawIntoHole(host, s.child, context.image, s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y),
+          context, addSlot = false)
     return
   runEventInner(host, context)
-  if rhythmChromeCanStay(host):
+  if rhythmChromeHasHoles(host):
     rhythmChromeRan(host, decision, context.nextSleep)
 
 {.pop.}

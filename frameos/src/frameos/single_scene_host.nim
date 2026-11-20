@@ -192,6 +192,13 @@ proc takeParked(layoutId: string): FrameScene {.nimcall.} =
 
 takeParkedLayout = takeParked
 
+proc releaseOtherParked(layoutId: string, before: proc(layout: FrameScene) {.nimcall.}) {.nimcall.} =
+  if not parkedLayout.isNil and parkedLayout.id.string != layoutId:
+    before(parkedLayout)
+    dropParkedLayout()
+
+releaseParkedLayout = releaseOtherParked
+
 proc cleanupScene*(scene: FrameScene) =
   ## Break ORC cycles and close the scene's QuickJS context before dropping
   ## the last reference (mirrors scenes.nim cleanupSceneRuntime, which lives
@@ -370,8 +377,12 @@ proc openInLayout(host: SingleSceneHost, sceneId: SceneId): bool =
 proc keepsInWindow*(host: SingleSceneHost, sceneId: SceneId): bool =
   ## Whether a scene the frame leaves stays running, for a window: always
   ## where there is no limit, as on a Pi; where only a few run at once
-  ## (app_runtime.windowLimit), while the desktop around it has it open.
-  windowLimit() <= 0 or host.openInLayout(sceneId)
+  ## (app_runtime.windowLimit), while the desktop around it has it open, and
+  ## never where only one does: the scene in front takes that place. Kept
+  ## there, a reTerminal E1004 (one at a time) ran the scene it left beside
+  ## the next one while that came off flash, and ran out of memory (2026-11-19).
+  let limit = windowLimit()
+  limit <= 0 or limit >= 2 and host.openInLayout(sceneId)
 
 proc desktopShown(host: SingleSceneHost): bool =
   ## The frame's scene wears a desktop: a layout with scenes open.
@@ -406,17 +417,18 @@ proc trimWindows(host: SingleSceneHost) =
   for id in gone:
     host.dropWindow(id)
 
-proc makeRoom(host: SingleSceneHost, forced: bool): bool =
+proc makeRoom(host: SingleSceneHost, forced: bool, coming = true): bool =
   ## Room for one more of the frame's scenes to run, where only so many may at
   ## once (app_runtime.windowLimit; the one in front counts, a built-in scene
   ## does not). A kept window goes for it: first one the desktop no longer
   ## has open and that was not drawn in this pass, the one kept longest ago
   ## first; `forced` (a scene brought to the front), else the one kept
   ## longest ago. False when nothing could go: the scene does not start.
+  ## `coming` false: the scene coming is a built-in one, which takes no place.
   let limit = windowLimit()
   if limit <= 0:
     return true
-  var over = host.windowOrder.len + 1 - limit
+  var over = host.windowOrder.len + ord(coming) - limit
   if not host.scene.isNil and host.sceneId.isSome and not isBuiltInScene(host.sceneId.get().string):
     inc over
   for anyOne in [false, forced]:
@@ -538,6 +550,10 @@ proc makeCurrent*(host: SingleSceneHost, sceneId: SceneId, drop = true) =
     clearGradedImages()
   if drop and host.windowed and (windowLimit() <= 0 or not host.scene.isNil and host.keepsInWindow(host.scene.id)):
     if host.sceneId != some(sceneId):
+      # Room for the scene left and the one coming, where only so many run at
+      # once: the window kept longest ago goes now, not once the next scene
+      # has started beside them all.
+      discard host.makeRoom(forced = true, coming = not isBuiltInScene(sceneId.string))
       host.keepAsWindow()
     host.sceneId = some(sceneId)
     host.renderRequested = true

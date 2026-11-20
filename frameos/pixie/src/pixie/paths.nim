@@ -21,6 +21,16 @@ type
     Move, Line, HLine, VLine, Cubic, SCubic, Quad, TQuad, Arc,
     RMove, RLine, RHLine, RVLine, RCubic, RSCubic, RQuad, RTQuad, RArc
 
+  GlyphSource* = ref object of RootObj
+    ## A face whose glyphs can be outlined: fonts.nim's Typeface. `serial`
+    ## names it in the glyph cache, as an address would not (a face let go
+    ## and another made at the same address would draw its masks).
+    serial*: uint32
+
+  GlyphOutliner* = proc(face: GlyphSource, rune: int32, size: float32): Path {.
+      nimcall, gcsafe, raises: [PixieError].}
+    ## The outline of `rune` in `face` at `size` px, at the origin.
+
   Path* = ref object
     ## Used to hold paths and create paths.
     commands: seq[float32]
@@ -37,6 +47,12 @@ type
     fracNext: int8 # the slot a new fraction replaces when all are full
     fracMoves: int8 # fills at a fraction not among `fracs` once all four were taken
     moving: bool # filled at a new fraction again and again: drawn at quarter pixels from then on
+    # A glyph path (`newGlyphPath`): no commands, only what names the glyph
+    # and its bounds. A fill draws it from the glyph cache, or from the
+    # outline made for that fill and let go (`glyphOutline`).
+    glyphFace: GlyphSource
+    glyphRune: int32
+    glyphSize: float32
 
   SomePath* = Path | string
 
@@ -1167,6 +1183,9 @@ proc sameCommands*(a, b: Path): bool {.raises: [].} =
     return true
   if a.isNil or b.isNil:
     return false
+  if not a.glyphFace.isNil or not b.glyphFace.isNil:
+    return a.glyphFace == b.glyphFace and a.glyphRune == b.glyphRune and
+      a.glyphSize == b.glyphSize
   a.commands == b.commands
 
 proc computeBounds*(
@@ -2972,6 +2991,7 @@ type PathProbeKind* = enum
   ppFillMask = "fillMask"  ## a fill blended from a kept mask
   ppStroke = "stroke"      ## a stroke outlined and rasterized
   ppStrokeMask = "strokeMask"
+  ppGlyph = "glyph"        ## a glyph path drawn from the glyph cache (made there when new)
   ppPaint = "paint"        ## a gradient or an image painted through its shape (`paintThroughMask`),
                            ## the shape's own fill into the mask included, which `fill` counts too
 
@@ -3264,6 +3284,349 @@ proc fillFromCoverageCache(
   image.blitMask(mask, ix, iy, color.asRgbx(), blendMode)
   true
 
+# -------- The glyph cache
+#
+# A glyph is drawn from its coverage at its size and quarter-pixel offset,
+# kept here: four bits a pixel over the glyph's own bounds, and nothing else
+# of it (no outline, no flattened shapes, no path). A text names its glyphs
+# with glyph paths (`newGlyphPath`, made by fonts.nim's `glyphPath`), which
+# carry the face, the rune, the size and the bounds a damage box needs; a
+# fill of one at an axis-aligned, uniform scale and a solid colour is a
+# lookup and a blit, and the outline is made only when the glyph is not kept
+# (and let go after its mask is made). Anything else (a rotation, a skew, a
+# gradient, a stroke, a mask blend, a glyph too large to keep) is filled
+# from an outline made for that fill, as before.
+#
+# Keyed by the face's serial, the rune, the size under the transform's scale
+# (1/64 px) and the offset's fraction in quarter pixels: a glyph lands at
+# most 1/8 px from where it was put. Least recently used out first, within
+# `glyphCacheBudget` bytes (data plus GlyphEntryBytes an entry); 0 = off,
+# which is pixie's default: the host sets it per render thread.
+
+type
+  GlyphKey = object
+    face: uint32
+    rune: int32
+    size: int32 # 1/64 px
+    frac: int32 # fx * GlyphSteps + fy
+
+  GlyphMask = object
+    key: GlyphKey
+    x0, y0: int32 # the mask's top left, relative to the glyph's whole-pixel origin
+    w, h: int32
+    newer, older: int32 # the LRU list, -1 at its ends
+    chain: int32 # the next entry in its bucket, or in the free list; -1: none
+    data: seq[uint8] # rows of (w + 1) div 2 bytes, the left pixel in the low nibble
+
+const
+  GlyphSteps = 4
+    ## Offsets kept per pixel, each way.
+  GlyphMaskMaxPixels = 48 * 1024
+    ## A glyph larger than this (a 220 px square) is filled from its outline,
+    ## as a coverage mask that large is not made either.
+  GlyphEntryBytes = 48
+    ## What an entry costs beside its data, counted against the budget.
+
+var
+  glyphCacheBudget* {.threadvar.}: int ## bytes of glyph masks kept on this thread; 0 = off
+  glyphCacheHits* {.threadvar.}: int
+  glyphCacheMisses* {.threadvar.}: int
+  glyphMasks {.threadvar.}: seq[GlyphMask]
+  glyphBuckets {.threadvar.}: seq[int32] # power of two, -1: empty
+  glyphFree {.threadvar.}: int32 # a slot of glyphMasks to reuse, through `chain`
+  glyphNewest {.threadvar.}: int32
+  glyphOldest {.threadvar.}: int32
+  glyphLive {.threadvar.}: int
+  glyphCacheBytes {.threadvar.}: int
+  glyphRow {.threadvar.}: seq[uint8] # one row's coverage, unpacked for the blit
+
+var glyphOutliner*: GlyphOutliner
+  ## Set once by fonts.nim: how a glyph path's outline is made.
+
+proc newGlyphPath*(face: GlyphSource, rune: int32, size: float32, bounds: Rect): Path {.raises: [].} =
+  ## A path that names a glyph of `face` at `size` px, at the origin, with the
+  ## bounds of its outline (`localBounds`); never changed (shared).
+  Path(glyphFace: face, glyphRune: rune, glyphSize: size, shared: true,
+    bounded: true, bounds: bounds)
+
+proc isGlyph*(path: Path): bool {.inline, raises: [].} =
+  not path.glyphFace.isNil
+
+proc glyphOutline*(path: Path): Path {.raises: [PixieError].} =
+  ## A glyph path's outline, made now and not kept; any other path itself.
+  if path.glyphFace.isNil:
+    return path
+  if glyphOutliner.isNil:
+    return newPath()
+  glyphOutliner(path.glyphFace, path.glyphRune, path.glyphSize)
+
+proc clearGlyphCache*() {.raises: [].} =
+  ## Lets every kept glyph go (render memory is short; the thread is done).
+  glyphMasks.setLen(0)
+  glyphBuckets.setLen(0)
+  glyphRow.setLen(0)
+  glyphLive = 0
+  glyphCacheBytes = 0
+
+proc glyphCacheUsedBytes*(): int {.raises: [].} =
+  glyphCacheBytes
+
+proc glyphCacheEntries*(): int {.raises: [].} =
+  glyphLive
+
+proc glyphHash(key: GlyphKey): uint32 {.inline.} =
+  var h = key.face * 0x9E3779B1'u32
+  h = (h xor cast[uint32](key.rune)) * 0x85EBCA77'u32
+  h = (h xor cast[uint32](key.size)) * 0xC2B2AE3D'u32
+  h = (h xor cast[uint32](key.frac)) * 0x27D4EB2F'u32
+  h xor (h shr 15)
+
+proc glyphBucket(key: GlyphKey): int {.inline.} =
+  int(glyphHash(key) and uint32(glyphBuckets.high))
+
+proc rehashGlyphs(size: int) =
+  glyphBuckets = newSeq[int32](size)
+  for i in 0 ..< size:
+    glyphBuckets[i] = -1
+  var i = glyphNewest
+  while i >= 0:
+    let b = glyphBucket(glyphMasks[i].key)
+    glyphMasks[i].chain = glyphBuckets[b]
+    glyphBuckets[b] = i
+    i = glyphMasks[i].older
+
+proc unlinkGlyph(i: int32) =
+  let
+    newer = glyphMasks[i].newer
+    older = glyphMasks[i].older
+  if newer >= 0: glyphMasks[newer].older = older else: glyphNewest = older
+  if older >= 0: glyphMasks[older].newer = newer else: glyphOldest = newer
+
+proc pushNewestGlyph(i: int32) =
+  glyphMasks[i].newer = -1
+  glyphMasks[i].older = glyphNewest
+  if glyphNewest >= 0: glyphMasks[glyphNewest].newer = i
+  glyphNewest = i
+  if glyphOldest < 0: glyphOldest = i
+
+proc dropOldestGlyph() =
+  let i = glyphOldest
+  if i < 0:
+    return
+  unlinkGlyph(i)
+  let b = glyphBucket(glyphMasks[i].key)
+  if glyphBuckets[b] == i:
+    glyphBuckets[b] = glyphMasks[i].chain
+  else:
+    var at = glyphBuckets[b]
+    while at >= 0 and glyphMasks[at].chain != i:
+      at = glyphMasks[at].chain
+    if at >= 0:
+      glyphMasks[at].chain = glyphMasks[i].chain
+  glyphCacheBytes -= glyphMasks[i].data.len + GlyphEntryBytes
+  glyphMasks[i].data = @[]
+  glyphMasks[i].chain = glyphFree
+  glyphFree = i
+  dec glyphLive
+
+proc findGlyph(key: GlyphKey): int32 =
+  if glyphBuckets.len == 0:
+    return -1
+  result = glyphBuckets[glyphBucket(key)]
+  while result >= 0 and glyphMasks[result].key != key:
+    result = glyphMasks[result].chain
+
+proc keepGlyph(mask: sink GlyphMask): int32 =
+  ## Takes `mask` in as the newest entry, letting the oldest go first while
+  ## it would not fit.
+  let bytes = mask.data.len + GlyphEntryBytes
+  if glyphBuckets.len == 0:
+    glyphMasks.setLen(0)
+    glyphNewest = -1
+    glyphOldest = -1
+    glyphFree = -1
+    glyphLive = 0
+    glyphCacheBytes = 0
+    rehashGlyphs(64)
+  while glyphOldest >= 0 and glyphCacheBytes + bytes > glyphCacheBudget:
+    dropOldestGlyph()
+  if glyphFree >= 0:
+    result = glyphFree
+    glyphFree = glyphMasks[result].chain
+    glyphMasks[result] = mask
+  else:
+    result = glyphMasks.len.int32
+    glyphMasks.add mask
+  inc glyphLive
+  glyphCacheBytes += bytes
+  pushNewestGlyph(result)
+  if glyphLive > glyphBuckets.len:
+    rehashGlyphs(glyphBuckets.len * 2)
+  else:
+    let b = glyphBucket(glyphMasks[result].key)
+    glyphMasks[result].chain = glyphBuckets[b]
+    glyphBuckets[b] = result
+
+proc rasterizeGlyph(path: Path, size: float32, key: GlyphKey, fx, fy: int): GlyphMask =
+  ## The glyph's coverage at `size` px and the offset's fraction, through the
+  ## filler a direct fill runs, packed to four bits a pixel. w = 0: it draws
+  ## nothing (kept like that too: a space is not outlined again); w = -1: too
+  ## large for a mask.
+  result = GlyphMask(key: key)
+  let outline = glyphOutliner(path.glyphFace, path.glyphRune, size)
+  var shapes = outline.commandsToShapes(true, 1)
+  var
+    minX = float32.high
+    minY = float32.high
+    maxX = float32.low
+    maxY = float32.low
+  for shape in shapes:
+    for p in shape:
+      minX = min(minX, p.x)
+      minY = min(minY, p.y)
+      maxX = max(maxX, p.x)
+      maxY = max(maxY, p.y)
+  if maxX <= minX or maxY <= minY:
+    return
+  let
+    dx = fx.float32 / GlyphSteps
+    dy = fy.float32 / GlyphSteps
+    x0 = floor(minX + dx).int - 1
+    y0 = floor(minY + dy).int - 1
+    w = ceil(maxX + dx).int - x0 + 1
+    h = ceil(maxY + dy).int - y0 + 1
+  if w * h > GlyphMaskMaxPixels:
+    result.w = -1
+    return
+  shapes.transform(translate(vec2(dx - x0.float32, dy - y0.float32)))
+  let mask = newImageGray8(w, h)
+  mask.fillShapes(shapes, color(1, 1, 1, 1), NonZero, OverwriteBlend)
+  # Trim the rows and columns nothing covers (the margin above, a flat
+  # glyph's empty ends).
+  var
+    top = h
+    bottom = -1
+    left = w
+    right = -1
+  for y in 0 ..< h:
+    for x in 0 ..< w:
+      if mask.data8[y * w + x] != 0:
+        top = min(top, y)
+        bottom = max(bottom, y)
+        left = min(left, x)
+        right = max(right, x)
+  if bottom < 0:
+    return
+  let
+    tw = right - left + 1
+    th = bottom - top + 1
+    rowBytes = (tw + 1) div 2
+  result.x0 = int32(x0 + left)
+  result.y0 = int32(y0 + top)
+  result.w = tw.int32
+  result.h = th.int32
+  result.data = newSeq[uint8](rowBytes * th)
+  for y in 0 ..< th:
+    for x in 0 ..< tw:
+      # 0 and 255 stay exact: an inside is stored as a span, an outside not at all.
+      let q = (mask.data8[(y + top) * w + x + left].int * 15 + 127) div 255
+      let at = y * rowBytes + x div 2
+      if (x and 1) == 0:
+        result.data[at] = result.data[at] or q.uint8
+      else:
+        result.data[at] = result.data[at] or uint8(q shl 4)
+
+proc blitGlyph(image: Image, i: int32, ix, iy: int, rgbx: ColorRGBX, blendMode: BlendMode) =
+  template m: untyped = glyphMasks[i]
+  if m.w <= 0:
+    return
+  let rowBytes = (m.w.int + 1) div 2
+  if glyphRow.len < m.w:
+    glyphRow.setLen(m.w)
+  for r in 0 ..< m.h.int:
+    let y = iy + m.y0 + r
+    if y < 0 or y >= image.height:
+      continue
+    let
+      x = ix + m.x0
+      xs = max(x, 0)
+      xe = min(x + m.w, image.width)
+    if xe <= xs:
+      continue
+    let
+      base = r * rowBytes
+      last = xe - x
+    var
+      px = xs - x
+      o = 0
+    if (px and 1) == 1:
+      glyphRow[0] = (m.data[base + px shr 1] shr 4) * 17
+      inc px
+      inc o
+    while px + 1 < last:
+      let b = m.data[base + px shr 1]
+      glyphRow[o] = (b and 15) * 17
+      glyphRow[o + 1] = (b shr 4) * 17
+      px += 2
+      o += 2
+    if px < last:
+      glyphRow[o] = (m.data[base + px shr 1] and 15) * 17
+    image.fillCoverage(rgbx, xs, y, glyphRow.toOpenArray(0, xe - xs - 1), blendMode)
+
+proc fillGlyph*(
+  image: Image, path: Path, color: Color, transform: Mat3, blendMode: BlendMode
+): bool {.raises: [PixieError].} =
+  ## Draws a glyph path from the glyph cache, keeping its mask first when it
+  ## is new. False when the cache does not apply (off, not a glyph, a
+  ## transform that is not a translation and a uniform scale, a blend it does
+  ## not do, a glyph too large): the caller fills its outline.
+  if glyphCacheBudget <= 0 or path.glyphFace.isNil or glyphOutliner.isNil:
+    return false
+  if blendMode notin {NormalBlend, OverwriteBlend} or not transform.isAxisAligned():
+    return false
+  let s = transform[0, 0]
+  if abs(transform[1, 1] - s) > 0.0001'f32 * s:
+    return false
+  let
+    b = path.bounds
+    size = path.glyphSize * s
+  if (b.w * s + 3) * (b.h * s + 3) > GlyphMaskMaxPixels.float32:
+    return false
+  template floorSteps(q: int): int =
+    (if q >= 0: q div GlyphSteps else: -((GlyphSteps - 1 - q) div GlyphSteps))
+  let
+    qx = round(transform[2, 0] * GlyphSteps).int
+    qy = round(transform[2, 1] * GlyphSteps).int
+    ix = floorSteps(qx)
+    iy = floorSteps(qy)
+    fx = qx - ix * GlyphSteps
+    fy = qy - iy * GlyphSteps
+    key = GlyphKey(face: path.glyphFace.serial, rune: path.glyphRune,
+      size: int32(round(size * 64)), frac: int32(fx * GlyphSteps + fy))
+  var i = findGlyph(key)
+  if i >= 0:
+    inc glyphCacheHits
+    if i != glyphNewest:
+      unlinkGlyph(i)
+      pushNewestGlyph(i)
+  else:
+    inc glyphCacheMisses
+    var mask = rasterizeGlyph(path, size, key, fx, fy)
+    if mask.w < 0:
+      return false
+    if (mask.data.len + GlyphEntryBytes) * 4 > glyphCacheBudget:
+      # More than a quarter of the budget: drawn from the mask made, not kept.
+      if mask.w == 0:
+        return true
+      let at = glyphMasks.len
+      glyphMasks.add move(mask)
+      image.blitGlyph(at.int32, ix, iy, color.asRgbx(), blendMode)
+      glyphMasks.setLen(at)
+      return true
+    i = keepGlyph(move(mask))
+  image.blitGlyph(i, ix, iy, color.asRgbx(), blendMode)
+  true
+
 proc fillPath*(
   image: Image,
   path: SomePath,
@@ -3276,6 +3639,23 @@ proc fillPath*(
 
   if paint.opacity == 0:
     return
+
+  when path is Path:
+    if path.isGlyph:
+      # From the glyph cache where it can be; from an outline made for this
+      # fill where it cannot.
+      if paint.kind == SolidPaint and (paint.color.a > 0 or paint.blendMode == OverwriteBlend):
+        var color = paint.color
+        color.a *= paint.opacity
+        var drawn: bool
+        pathProbe(ppGlyph):
+          drawn = image.fillGlyph(path, color, transform, paint.blendMode)
+        if drawn:
+          return
+      elif paint.kind == SolidPaint:
+        return
+      image.fillPath(path.glyphOutline(), paint, transform, windingRule)
+      return
 
   if paint.kind == SolidPaint:
     if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
@@ -3318,6 +3698,12 @@ proc strokePath*(
 
   if paint.opacity == 0:
     return
+
+  when path is Path:
+    if path.isGlyph:
+      image.strokePath(path.glyphOutline(), paint, transform, strokeWidth, lineCap,
+        lineJoin, miterLimit, dashes)
+      return
 
   if paint.kind == SolidPaint:
     if paint.color.a > 0 or paint.blendMode == OverwriteBlend:

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
+  getHubHost,
   getHubPort,
   getMaxConnections,
   isAllowedBrowserOrigin,
@@ -20,6 +21,7 @@ const touchedKeys = [
   "FRAMEOS_CLOUD_APP_URL",
   "FRAMEOS_SCENES_APP_URL",
   "FRAME_HUB_ALLOWED_ORIGINS",
+  "FRAME_HUB_HOST",
   "FRAME_HUB_MAX_CONNECTIONS",
   "FRAME_HUB_PORT",
   "HUB_TEST_ALREADY_SET",
@@ -87,6 +89,17 @@ describe("getHubPort", () => {
     expect(getHubPort()).toBe(3100);
     process.env.FRAME_HUB_PORT = "0";
     expect(getHubPort()).toBe(0);
+  });
+});
+
+describe("getHubHost", () => {
+  it("binds every interface unless FRAME_HUB_HOST names one", () => {
+    delete process.env.FRAME_HUB_HOST;
+    expect(getHubHost()).toBeUndefined();
+    process.env.FRAME_HUB_HOST = "  ";
+    expect(getHubHost()).toBeUndefined();
+    process.env.FRAME_HUB_HOST = " 127.0.0.1 ";
+    expect(getHubHost()).toBe("127.0.0.1");
   });
 });
 

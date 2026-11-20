@@ -75,9 +75,10 @@ proc probeSummary*(): string =
       if result.len > 0: result.add ' '
       result.add $phase & " " & ms1(accNs[phase])
 
-proc probeBegin*(): (int, int) =
+proc probeBegin*(): (int, int, int, int) =
   ## A render's probe begins: everything zeroed, pixie's path probe on with
-  ## it; the coverage cache's hit and miss counts so far, for probeLine.
+  ## it; the coverage and glyph caches' hit and miss counts so far, for
+  ## probeLine.
   probeReset()
   pathProbeOn = probeOn
   for kind in PathProbeKind:
@@ -85,17 +86,19 @@ proc probeBegin*(): (int, int) =
     pathProbeCount[kind] = 0
   for reason in CacheSkip:
     cacheSkips[reason] = 0
-  (coverageCacheHits, coverageCacheMisses)
+  (coverageCacheHits, coverageCacheMisses, glyphCacheHits, glyphCacheMisses)
 
-proc probeLine*(cacheAtStart: (int, int)): string =
+proc probeLine*(cacheAtStart: (int, int, int, int)): string =
   ## The render line's bracket: the phases, then pixie's coverage cache this
-  ## render (hits/misses, what it holds), the fills and strokes by kind, and
-  ## why fills skipped the cache. "" with the probe off.
+  ## render (hits/misses, what it holds) and its glyph cache's, the fills and
+  ## strokes by kind, and why fills skipped the cache. "" with the probe off.
   result = probeSummary()
   if not probeOn:
     return
   result.add " cache " & $(coverageCacheHits - cacheAtStart[0]) & "/" &
-    $(coverageCacheMisses - cacheAtStart[1]) & " " & $(coverageCacheUsedBytes() div 1024) & "K |"
+    $(coverageCacheMisses - cacheAtStart[1]) & " " & $(coverageCacheUsedBytes() div 1024) & "K" &
+    " glyphs " & $(glyphCacheHits - cacheAtStart[2]) & "/" & $(glyphCacheMisses - cacheAtStart[3]) &
+    " " & $(glyphCacheUsedBytes() div 1024) & "K |"
   for kind in PathProbeKind:
     if pathProbeCount[kind] > 0:
       result.add " " & $kind & " " & $pathProbeCount[kind] & "x" & ms1(pathProbeNs[kind])

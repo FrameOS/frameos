@@ -60,7 +60,8 @@ select, and is a category like any other.
   every host, as the icon goes (below). The desktop layouts group their lists
   of scenes by it: one heading per category, the groups by name, and the scenes
   without one last under Other (`grouped`, docs/scene-layouts.md "Long lists of
-  scenes"). The frame page's Layout select groups the layouts by theirs, a
+  scenes"), and so does the scene switcher (its own `grouped` in Nim, the same
+  rule, docs/scene-switcher.md "How it is drawn"). The frame page's Layout select groups the layouts by theirs, a
   layout without one under the store's shelf for its kind (docs/scene-layouts.md
   "On the frame").
 - **The store**: when a version of a scene is written (published, saved from

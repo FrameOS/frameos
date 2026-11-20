@@ -2,9 +2,10 @@
 """The default font every runtime compiles in, without the tables pixie never reads.
 
 `assets/copied/fonts/Ubuntu-Regular.ttf` is the original, the one frames get
-as an asset. `assets/compiled/fonts/Ubuntu-Regular.ttf` is made from it here
-and compiled into the Pi runtime, the wasm preview and the ESP32 firmware
-(`src/assets/fonts.nim`).
+as an asset. `assets/compiled/fonts/Ubuntu-Regular.ttf` is made from it here,
+and `tools/generate_indexed_font.py` makes the indexed font every runtime
+compiles in from it (`assets/compiled/fonts/Ubuntu-Regular.fosf`, read where
+it lies): run that one after this one.
 
 pixie draws outlines with its own rasterizer and reads `cmap`, `head`, `hhea`,
 `maxp`, `hmtx`, `name`, `OS/2`, `loca`, `glyf`, `kern`, the pair positioning

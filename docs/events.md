@@ -247,7 +247,8 @@ no filter on a field hears every value of it.
   that does not listen for them stays as it is. Every touch preset binds them
   to the swipes in from the left and the right edge, so changing the scene
   on a touch screen is the switcher's (up from the bottom). The switcher
-  turns its page on them (wrapping around); the scene settings take `back`
+  moves its highlight a screenful on or back on them, its list scrolling
+  with it (wrapping around at the ends); the scene settings take `back`
   as Cancel, a field's keyboard going away first.
 - The input payloads are under [Input](#input).
 

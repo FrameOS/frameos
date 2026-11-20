@@ -16,13 +16,13 @@
   },
   "dependencies": {
     "@frameos-cloud/db": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.4"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
-    "eslint": "^9.39.1",
+    "eslint": "^9.39.5",
     "postgres": "^3.4.9",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.12"
   }
 }

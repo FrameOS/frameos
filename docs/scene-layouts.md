@@ -368,7 +368,9 @@ each category, under that name, the categories by name whatever the case, and
 the scenes with none last as Other. Nothing maps a category: a name of the
 owner's own is a heading like the store's. Where no scene has a category (an
 older runtime lists none), the list is as it always was. That is `grouped`, one more function the same text in each of those
-eight layouts. A scene's own icon (`icon` on its entry, one path in a 24 box:
+eight layouts. The scene switcher groups its own list by the same rule in Nim
+(`grouped` in `system/sceneSwitcher/scene.nim`, docs/scene-switcher.md "What
+it lists"): change it with them. A scene's own icon (`icon` on its entry, one path in a 24 box:
 `docs/scene-icons.md`) is drawn, in the color of the text around it, wherever a
 desktop draws a scene's icon: `Windows 98`'s Start, taskbar and desktop icons,
 the `macOS` Dock and Scenes menu, `BeOS`'s Be menu, Deskbar and Tracker's icons,
@@ -461,11 +463,59 @@ there with its page and its edits, and does not time out. A `<Scene id>` of one
 is that instance only while it is open so, never a new one: it has nothing to
 show until the dispatcher opens it from a scene, and opened so again it starts
 afresh. It goes back by itself as always (Save, Cancel, a scene picked, its
-timeout while it has the focus), and then it is done: a layout closes its window
-when the focus leaves a built-in scene for a scene without the layout having
-moved it (the samples remember what they brought forward, `asked`). Going back
-always lands on a scene, so one built-in scene leaving the focus to another (a
-scene's settings opening the frame page) stays open.
+timeout while it has the focus, or its command again from anyone, which the
+dispatcher marks as going back, `goneBack`), and then it is done. Whatever else
+takes the focus from it (another window, the API, a key, a schedule, the voice
+chat) leaves it open beside the scene showing, its page and edits as they were:
+the scene modules list those in `builtInsAway`, which a layout reads as
+**`app.frame.keptOpen`**, and the desktops close a built-in scene's window only
+once it is gone from there (`keptOpen`, the same text in each). Before
+2026.11.14 they guessed from what they had brought forward themselves
+(`asked`), so a switch from outside closed the window while the host kept the
+instance, and opening it again lost the edits; on an older runtime they still
+guess so. Going back always lands on a scene, so one built-in scene leaving the
+focus to another (a scene's settings opening the frame page) stays open.
+
+**Closing opens nothing else.** The desktops keep one set of rules for what a
+close, a minimize and a built-in scene going back do (2026-11-20; before, a
+built-in window's close went back to the scene it was opened from, wherever that
+was, and opened that scene's window again if it had been closed):
+
+- A window closed takes its scene's settings window with it. The window in
+  front closed or put away hands the focus to the window that had it before (the
+  next one down; `Tiling`'s tile that had it last, `seen`), whatever scene it
+  was opened from, a built-in one's included. With nothing left the desktop is
+  bare: a scene stays the frame's scene with no window, and a built-in one goes
+  back as its own Cancel does.
+- **`app.frame.wentBack`** tells a layout that the scene it wraps is showing only
+  because a built-in scene went back to it on its own (its Close or Cancel, the
+  same command again, its timeout), not because anyone picked it: the dispatcher
+  keeps the scene it went back to (`sceneWentBackTo`, `event_loop.nim`), and
+  anything else that picks a scene clears it. Landing so, a desktop opens no
+  window for a scene whose window was closed and leaves one put away where it
+  is, and the window that had the focus before takes it. So closing the scene
+  list, the settings or the frame page over a bare desktop leaves it bare,
+  while the same scene picked in the list opens its window. The first scene a
+  desktop just made shows always opens (a stale `wentBack` after a reload is no
+  reason to show nothing).
+- A built-in scene opened over another with no scene window left sends the
+  first one back and closes its window, rather than leaving it drawn empty.
+- `Omarchy`'s keys act on the window with the focus where it shows (on the
+  workspace in view, out of the dock): on an empty workspace Super+W, Super+M
+  and Super+Shift+number have no window, rather than closing one out of sight
+  and taking the view there. A built-in scene opened there brings forward a
+  scene on that workspace only, and coming back quietly to a window on another
+  workspace leaves the view where it is.
+- `Commander`'s F4 over a built-in panel goes back as the command does
+  everywhere else (it did nothing), and F6 there shows the scene after the one
+  under it (it showed the list's first). The scene lists opened from the
+  one-scene layouts (`Terminal`, `E-reader`, `Teletext`) ask with `{swap:
+  true}`, so over a scene's settings they open the list their button names.
+- On a desktop, where both stay open in windows of their own, `sceneSwitcher`
+  over a scene's settings opens the list beside them and `sceneSettings` over
+  the list the settings of the scene it was opened from (the swipes up and down
+  of a touch screen); where one scene shows at a time the other edge still
+  closes either (docs/scene-settings.md).
 
 And the pointer: anything the layout draws over a scene that listens for an
 event takes that event there (`uiOverScene`, `UiRegion.scene` marks where each
@@ -490,6 +540,48 @@ that scene a picture while it is there, so windows behind the one in front are
 composited, and tiles that do not overlap all stay holes. A window hanging off
 the desktop's edge, any edge, is a picture cut there, not a hole squeezed into
 what shows.
+
+A picture is part of the desktop's drawing, so a picture whose scene is due
+draws the desktop again (its JavaScript, its tree, its raster). One that is not
+due is the same picture as last time: a pass where only the holes are due
+leaves the chrome and its pictures as the canvas holds them, or copies them
+from the other frame buffer around the holes (`rhythmChromeCanStay`). Before,
+any picture at all ran the whole desktop on every pass of the window in front:
+1.9 fps for DVD logo bounce in Windows 98 on the SenseCAP Indicator, against
+24 without windows (the hardware bench, 2026-11-19). And a window wholly under
+another, the one in front or one above it, draws nothing of its scene
+(`hiddenUnder`, the same text in the six desktops that stack windows): its
+scene stays open and running, and draws again when it shows. Where only a few
+scenes run at once (an ESP32, `app.frame.windows`), a window behind another runs
+at most every five seconds (`scene_rhythm.WindowBehindSeconds`), whatever its
+own interval: each of its runs is the whole desktop drawn again, and an
+animation behind took the window in front from 20 frames a second to 1 on the
+SenseCAP Indicator. Brought to the front, it runs at its own pace at once (the
+switch starts a fresh pass). A Pi and the browser keep every window's own pace.
+
+**Windows or one scene** (`windowMode`, every desktop of windows): Automatic,
+On or Off. Off, the desktop shows the frame's scene alone in its look, one
+window around it and its bars, and that window keeps the rules above: its close
+leaves the bare desktop (it used to open the scene list), its minimize or hide
+leaves a button that brings it back, and both stay so while the scene list or
+the settings show over it and when the focus comes back (`wentBack`). Any scene
+chosen, the same one picked in the list included, shows its window again, so a
+scene put away is never put away for the next (the one layout instance goes
+along from scene to scene, and the window's `minimized` used to go with it).
+That is `arrive`, with `reopen` for a frame that keeps no layout from scene to
+scene (a preview: its scene list opened from the desktop shows the window), the
+same text in the six desktops of overlapping windows. Automatic is windows where the frame runs its
+scenes side by side without a limit (a Pi, the browser) or four at once (16 MB
+of PSRAM) on a screen of 640x480 or more either way up (`app.frame.width` and
+`height`, the panel over the render scale), and one scene where it runs one or
+two (`app.frame.windows`: an 8 MB ESP32, where a desktop of two windows is
+mostly the one in front, and the one behind costs memory and frames) or the
+screen is smaller (a 480x480 panel has no room for a window beside another).
+`Commander`, whose two panels never overlap, is two wherever two may run on a
+screen of that size. An install from before 2026.11.13, whose boolean
+`windows` switch was turned off, stays off; the `true` every install kept from
+the old default does not count (`windowsOn`, the same text in the seven
+desktops of windows).
 
 Windows pace the frame as a split's panels do: the first one due wakes it,
 except on e-paper and a deep sleeper, where none wakes it sooner than the scene
@@ -524,7 +616,13 @@ first takes the place of one the desktop no longer has open (its `openScenes`)
 and was not drawn in that pass, and otherwise stays empty (said once in the
 log). After each pass the host lets go of a kept window the desktop does not
 have open, every one without a desktop, and a scene the frame leaves stays
-running only while the desktop has it open: an ESP32 without a desktop keeps
+running only while the desktop has it open and there is room beside the next
+(`keepsInWindow`): never where one runs at a time, and the window kept longest
+ago goes at the switch, before the next scene comes off flash beside them (a
+reTerminal E1004 ran the scene it left beside the one coming, and ran out of
+memory, 2026-11-19). A layout parked between two scenes goes when the next one
+starts a layout of its own, its open scenes handed to that one
+(`releaseParkedLayout`). An ESP32 without a desktop keeps
 one scene, as before (the scene under the switcher kept while there is room,
 `covered`), and its one settings scene (`builtInScenesStay` follows the
 desktop there, `followDesktop`). The firmware reads a scene off flash only to start it: one running

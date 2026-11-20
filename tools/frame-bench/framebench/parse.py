@@ -64,10 +64,29 @@ def event(text: str):
     return j if isinstance(j, dict) and 'event' in j else None
 
 
+def bench_line(ev):
+    """A benchmark scene's own line (tools/frame-bench/benchmarks):
+    `frameos.log({bench, w, ...})` arrives as `{"event":"log:<node>",
+    "message":"{...}"}`, and on firmware up to 2026.11.10 or so with the
+    arguments' array as the message (`[{...}]`). None for any other line."""
+    if not ev or not str(ev.get('event', '')).startswith('log:'):
+        return None
+    msg = ev.get('message')
+    if not isinstance(msg, str) or '"bench"' not in msg:
+        return None
+    try:
+        value = json.loads(msg)
+    except ValueError:
+        return None
+    if isinstance(value, list) and value:
+        value = value[0]
+    return value if isinstance(value, dict) and 'bench' in value else None
+
+
 def summarize(lines) -> dict:
     """Facts from a window of (t, text) console lines."""
     r = {'renders': [], 'done': [], 'failed': [], 'events_done': [], 'animation': [], 'burst': [],
-         'metrics': [], 'device': [], 'errors': [], 'panel': [], 'started': []}
+         'metrics': [], 'device': [], 'errors': [], 'panel': [], 'started': [], 'bench': []}
     for t, text in lines:
         m = RENDER_LINE.match(text)
         if m:
@@ -92,6 +111,10 @@ def summarize(lines) -> dict:
             r['panel'].append({'t': t, 'line': m.group(1)})
             continue
         ev = event(text)
+        b = bench_line(ev)
+        if b is not None:
+            r['bench'].append({'t': t, **b})
+            continue
         if ev:
             name = ev.get('event', '')
             if name == 'render:done':

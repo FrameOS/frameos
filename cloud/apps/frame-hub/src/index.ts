@@ -1,5 +1,6 @@
 // Entry point for the FrameOS Cloud frame hub service.
-// Env: DATABASE_URL (required), FRAME_HUB_PORT (default 3100),
+// Env: DATABASE_URL (required), FRAME_HUB_PORT (default 3100), FRAME_HUB_HOST
+// (default every interface; production sets 127.0.0.1),
 // SESSION_SECRET (browser-socket auth). Optional: FRAMEOS_WASM_DIR (where the
 // wasm runtime is, for rendering virtual frames; found next to auth-web by
 // default) and FRAMEOS_CLOUD_ENCRYPTION_KEY — the hub compares hashed tokens
@@ -8,7 +9,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { setWasmAssetsDir } from "../../auth-web/src/lib/scene-render";
-import { getHubPort, loadLocalEnv } from "./env";
+import { getHubHost, getHubPort, loadLocalEnv } from "./env";
 import { startFrameHub } from "./hub";
 import { errorField, logError, logInfo } from "./log";
 import { checkObjectStore } from "./object-store-check";
@@ -45,8 +46,9 @@ async function main() {
     process.exit(1);
   }
 
-  const hub = await startFrameHub({ port: getHubPort() });
-  logInfo("frame_hub.listening", { port: hub.port });
+  const host = getHubHost();
+  const hub = await startFrameHub({ port: getHubPort(), host });
+  logInfo("frame_hub.listening", { host: host ?? "*", port: hub.port });
 
   let shuttingDown = false;
   const shutdown = (signal: string) => {

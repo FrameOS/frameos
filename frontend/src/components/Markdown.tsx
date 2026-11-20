@@ -1,10 +1,48 @@
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/prism-light'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
+import diff from 'react-syntax-highlighter/dist/esm/languages/prism/diff'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import jsx from 'react-syntax-highlighter/dist/esm/languages/prism/jsx'
+import markdown from 'react-syntax-highlighter/dist/esm/languages/prism/markdown'
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup'
+import nim from 'react-syntax-highlighter/dist/esm/languages/prism/nim'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import toml from 'react-syntax-highlighter/dist/esm/languages/prism/toml'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
+import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import clsx from 'clsx'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import { router } from 'kea-router'
 import type { MouseEvent } from 'react'
+
+// The languages a scene, an app or the AI chat writes code in, each with its
+// own aliases (js, ts, sh, html, yml, ...); any other is plain text. The full
+// Prism build is every refractor language: ~300 chunks the frames home and
+// every editor fetched and parsed before drawing (6-8 s of a loaded CI
+// runner's CPU, the E2E shard's timeouts of 2026-11-20).
+for (const [name, language] of Object.entries({
+  bash,
+  css,
+  diff,
+  javascript,
+  json,
+  jsx,
+  markdown,
+  markup,
+  nim,
+  python,
+  toml,
+  tsx,
+  typescript,
+  yaml,
+})) {
+  SyntaxHighlighter.registerLanguage(name, language)
+}
 
 export interface MarkdownProps {
   /** Scene-supplied (store zips, imported JSON, AI output): not guaranteed a string. */

@@ -76,6 +76,16 @@
       ],
       "outputs": ["dist/**"]
     },
+    "@frameos/cloud-frontend#typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "../frontend/src/**",
+        "../frontend/schema/**",
+        "../repo/**",
+        "../frameos/wasm/src/**"
+      ]
+    },
     "@frameos-cloud/auth-web#build": {
       "dependsOn": ["^build"],
       "env": [

@@ -12,7 +12,7 @@ import socket
 import threading
 import time
 
-from .console import Console
+from .console import parse_payload_json, Console
 from .parse import RENDER_DONE, RENDER_FAILED, event, stats, summarize
 
 ANIMATION_MIN_FPS_RATIO = 0.8   # an animation below 80 % of its scene's target rate is `slow`
@@ -140,12 +140,51 @@ def wait_render(con, timeout):
     return con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)), timeout)
 
 
+def switch_scene(con, frame, sid, name=None):
+    """`scene <id>` and wait for a render of THAT scene that started after the
+    command. Returns (ok, t_cmd, t_done, last line, summary of the window)."""
+    con.drain()
+    t_cmd = time.time()
+    con.send(f'scene {sid}')
+    started = {'n': None}
+
+    def switched(x):
+        if x.startswith('scene select failed'):
+            return True
+        if x.startswith('render #') and ' started: scene ' in x and (sid in x or (name and f'"{name}"' in x)):
+            started['n'] = x.split()[1]
+            return False
+        # The scene's own `render:done` ends it too: when its start line
+        # went out without the scene (`started: scene ""`, firmware up to
+        # 2026.11.12 reading the shared scene info buffer: the E1004's
+        # Unsplash image), or when the console lost the `done in` line
+        # (bytes dropped on the E1004's CH340, 2026-11-19: Low Poly
+        # Animals rendered in 39.7 s and read as "no render").
+        if x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x and '"status":"ok"' in x:
+            return True
+        return started['n'] is not None and (x.startswith(f"render {started['n']} done") or x.startswith(f"render {started['n']} failed"))
+
+    t_done, line, got = con.wait_for(switched, render_timeout(frame))
+    _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
+    w = summarize(got + tail)
+    ok = bool(t_done) and not (line or '').startswith(('scene select failed', 'render #')) or bool(line and ' done in ' in line)
+    return ok, t_cmd, t_done, line, w
+
+
 def status(con):
     return con.usb_api_json('status', 20) or {}
 
 
 def scene_list(con):
-    lst = con.usb_api_json('scene-list', 30) or {}
+    # One try with a long wait first: a retry sends the command again and the
+    # payload starts over. An LCD that animates logs every frame on its
+    # 115200-baud console, and the SenseCAP Indicator's 12 KB list took 54 s
+    # behind DVD logo bounce (2026-11-19): three 30 s tries each cut it off, and
+    # the scenes suite benched nothing and reported no issues.
+    ok, body = con.usb_api('scene-list', 120)
+    lst = parse_payload_json(body) if body else None
+    if not isinstance(lst, dict):
+        lst = con.usb_api_json('scene-list', 30) or {}
     return lst.get('scenes') or []
 
 
@@ -191,7 +230,8 @@ def suite_scenes(ctx, frame, scene_filter=None):
     if debug_was == '0':
         con.command('set debug 1', 1.5)
     intervals = {s.get('id'): s.get('refreshInterval') for s in ((st.get('scenes') or {}).get('scenes') or [])}
-    scenes = [s for s in scene_list(con) if not s.get('isLayout')]
+    listed = scene_list(con)
+    scenes = [s for s in listed if not s.get('isLayout')]
     scene_filter = scene_filter or getattr(ctx, 'scene_filter', None)
     if scene_filter:
         scenes = [s for s in scenes if s['id'] in scene_filter or s.get('name') in scene_filter]
@@ -199,36 +239,17 @@ def suite_scenes(ctx, frame, scene_filter=None):
         scenes = scenes[:4]
     scenes, left_out = pick_scenes(ctx, frame, scenes)
     results, issues = [], []
+    if not listed:
+        # Never a quiet pass: nothing was benched.
+        issues.append(issue('fail', 'no_scenes', 'scenes',
+                            'the board listed no scenes, so none was benched (an empty set, or a console '
+                            'too busy to answer: an LCD animating when the suite began)'))
     for sc in scenes:
         where = f"scene {sc.get('name')}"
         t_start = time.time()
         entry = {'id': sc['id'], 'name': sc.get('name'), 'bytes': sc.get('bytes'), 'refreshInterval': intervals.get(sc['id'])}
         # 1. switch. Wait for a render that STARTED after the command for this scene.
-        con.drain()
-        t_cmd = time.time()
-        con.send(f"scene {sc['id']}")
-        started = {'n': None}
-
-        def switched(x, sid=sc['id'], name=sc.get('name')):
-            if x.startswith('scene select failed'):
-                return True
-            if x.startswith('render #') and ' started: scene ' in x and (sid in x or (name and f'"{name}"' in x)):
-                started['n'] = x.split()[1]
-                return False
-            # The scene's own `render:done` ends it too: when its start line
-            # went out without the scene (`started: scene ""`, firmware up to
-            # 2026.11.12 reading the shared scene info buffer: the E1004's
-            # Unsplash image), or when the console lost the `done in` line
-            # (bytes dropped on the E1004's CH340, 2026-11-19: Low Poly
-            # Animals rendered in 39.7 s and read as "no render").
-            if x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x and '"status":"ok"' in x:
-                return True
-            return started['n'] is not None and (x.startswith(f"render {started['n']} done") or x.startswith(f"render {started['n']} failed"))
-
-        t_done, line, got = con.wait_for(switched, render_timeout(frame))
-        _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
-        w = summarize(got + tail)
-        ok = bool(t_done) and not (line or '').startswith(('scene select failed', 'render #')) or bool(line and ' done in ' in line)
+        ok, t_cmd, t_done, line, w = switch_scene(con, frame, sc['id'], sc.get('name'))
         entry['switch'] = {
             'ok': ok,
             'wall_ms': round((t_done - t_cmd) * 1000) if t_done else None,
@@ -622,6 +643,15 @@ DESKTOP_LAYOUTS = ['layout-windows-98', 'layout-tiling', 'layout-macos', 'layout
 LIGHT_SCENES = ['Clock', 'Counter', 'Calculator', 'Tap counter', 'Touch test', 'Colors', 'Steps', 'To-do', 'Now playing']
 
 
+def samples_root():
+    """The checkout whose repo/scenes/samples the desktop and code suites push:
+    this one, or $FRAMEOS_BENCH_SAMPLES (a branch under test, benched with the
+    tooling of another)."""
+    import os
+    return os.path.abspath(os.environ.get('FRAMEOS_BENCH_SAMPLES') or
+                           os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+
 def _sample_layout(repo_root, layout_id):
     import glob
     import os
@@ -680,7 +710,7 @@ def suite_desktop(ctx, frame, layouts=None):
         return {'skipped': 'needs the backend frame', 'issues': []}
     con = ctx.console(frame)
     be, fid = ctx.backend, frame['backend_frame']
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    repo_root = samples_root()
     original = be.frame(fid).get('scenes') or []
     plain = [s for s in original if not (s.get('settings') or {}).get('isLayout')]
     by_name = {s.get('name'): s for s in plain}
@@ -710,7 +740,13 @@ def suite_desktop(ctx, frame, layouts=None):
             if not sample:
                 issues.append(issue('fail', 'desktop_missing_sample', where, 'no such sample layout in repo/scenes/samples'))
                 continue
-            scenes = [dict(s) for s in original if s.get('id') not in DESKTOP_LAYOUTS]
+            # The frame's own layouts stay off the set: one chosen on the frame
+            # (its frame page's Layout) wins over every install's while the frame
+            # holds it (layout_choice.layoutFor), and the Sticky's set held an
+            # install copy of Windows 98 under its own id, so its desktop runs
+            # benched that copy's code whatever sample was pushed (2026-11-20).
+            scenes = [dict(s) for s in original
+                      if s.get('id') not in DESKTOP_LAYOUTS and not (s.get('settings') or {}).get('isLayout')]
             for s in scenes:
                 if not (s.get('settings') or {}).get('isLayout'):
                     s['layout'] = {'sceneId': lid}
@@ -815,7 +851,7 @@ def suite_code(ctx, frame, opens=None):
         return {'skipped': 'needs the backend frame', 'issues': []}
     con = ctx.console(frame)
     be, fid = ctx.backend, frame['backend_frame']
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    repo_root = samples_root()
     editor = None
     import glob
     for path in glob.glob(os.path.join(repo_root, 'repo', 'scenes', 'samples', '*', 'scenes.json')):
@@ -917,8 +953,11 @@ def suite_code(ctx, frame, opens=None):
     return {'code': results, 'issues': issues}
 
 
+from .benchmarks import suite_benchmark  # noqa: E402  (it imports helpers from here)
+
 SUITES = {
     'status': suite_status,
+    'benchmark': suite_benchmark,
     'code': suite_code,
     'scenes': suite_scenes,
     'builtin': suite_builtin,
@@ -932,7 +971,9 @@ SUITES = {
 }
 # What `--suites default` runs per frame kind.
 DEFAULT = {
-    'local': ['status', 'reboot', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
+    # `benchmark` right after the restart: its memory reading (heapinfo's
+    # minimum since boot) then covers the boot and the benchmark alone.
+    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
     'thin': ['status', 'thin'],
     'pico': ['thin'],
 }

@@ -860,13 +860,26 @@ proc parseSvgText(
         of MiddleBaseline: (typeface.ascent + typeface.descent) / 2 * scale
         of HangingBaseline: typeface.ascent * scale
         of IdeographicBaseline: typeface.descent * scale
-      path = arrangements[i].computePath()
-    # `typeset` puts the first baseline at `baselineOffset` below the top of the
-    # block; SVG gives us the baseline itself, so shift the block up by that.
-    path.transform(translate(vec2(
-      origins[i].x,
-      origins[i].y + baselineShift - font.baselineOffset
-    )))
+      # `typeset` puts the first baseline at `baselineOffset` below the top of
+      # the block; SVG gives us the baseline itself, so shift the block up by that.
+      origin = vec2(origins[i].x, origins[i].y + baselineShift - font.baselineOffset)
+    if glyphCacheBudget > 0 and run.props.fillSolid and
+        not (run.props.stroke.a > 0 and run.props.strokeWidth > 0):
+      # One colour and no stroke: a glyph path an element, each drawn from
+      # the glyph cache (paths.nim) where its transform lets it be.
+      let arrangement = arrangements[i]
+      for j, rune in arrangement.runes:
+        if rune.isWhiteSpace:
+          continue
+        let glyph = typeface.glyphPath(rune, font.size)
+        if glyph.isNil:
+          continue
+        var props = run.props
+        props.transform = props.transform * translate(origin + arrangement.positions[j])
+        result.add (glyph, props)
+      continue
+    let path = arrangements[i].computePath()
+    path.transform(translate(origin))
     result.add (path, run.props)
 
 proc parseSvgLength(value: string, reference: float32): float32 =

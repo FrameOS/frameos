@@ -193,7 +193,7 @@
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
-  own, never a scene switch: the switcher pages on them), up from the bottom
+  own, never a scene switch: the switcher moves a screenful on them), up from the bottom
   the scene switcher and down from the top the settings (as the SenseCAP
   preset does)
   (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
@@ -216,12 +216,16 @@
   and the dispatcher resolves it (`event_loop.nim` hands it `state.from`;
   while it or the scene settings show, either command goes back there, but
   its header's gear, `sceneSettings {page: "frame"}`, opens the frame page,
-  shown only while the frame offers one), never a host. It is drawn
+  shown only while the frame offers one, `{swap: true}` the list over a
+  scene's settings, and on a desktop the other one always opens beside), never
+  a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
-  host's scene order through `sceneSwitcherListing`, and on Linux shows each
-  scene's last snapshot (`sceneSwitcherThumbnail`,
+  host's scene order through `sceneSwitcherListing`, grouped by category as
+  the desktops group theirs, in one list that scrolls (no pages), and on
+  Linux shows each scene's last snapshot (`sceneSwitcherThumbnail`,
   `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
-  black on white with the keys walking an inverted highlight.
+  black on white with the keys walking an inverted highlight that the list
+  scrolls to.
 - Both built-in scenes are drawn in the layout of the scene they were opened
   from (`state.layout` from the dispatcher, `ownRun` / `builtInRunner` into
   `interpreter.runEvent`; `docs/scene-layouts.md`). A new one goes the same way.
@@ -740,7 +744,8 @@
   `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
   `ownIcon`, each the same text in all eight with a list: change any of them in
   every copy
-  (`test_windowed_desktops.nim` checks they match).
+  (`test_windowed_desktops.nim` checks they match), and `grouped` in the scene
+  switcher (`sceneSwitcher/scene.nim`, the same rule in Nim) with them.
   Where memory is short only so many run at once (`app_runtime.windowLimit`, by
   the PSRAM the panel leaves (`memory.sceneMemoryBytes`): 2 on an 8 MB ESP32,
   1 on the 13.3" E1004, 4 on 16 MB, `app.frame.windows`): the layouts close the one
@@ -760,6 +765,18 @@
   never paint a UI some other way, or it loses the damage repaint and the
   background waiver (`utils/svg_frames.nim`). pixie's SVG input is the
   `SvgNode` tree, markup included (`parseSvgNodes`).
+- **Text is glyph paths, drawn from pixie's glyph cache** (`docs/jsx-ui.md`
+  "The glyph cache", `pixie/paths.nim`): a glyph is kept as its coverage at
+  its size and quarter pixel, four bits a pixel, and nothing of its outline
+  stays in memory (no per-glyph path tables, no outline cache on the
+  typeface). A new way to draw text goes through `fillText` or `glyphPath`,
+  never a run's outline made per render; the cache stays the render
+  thread's (`{.threadvar.}`), budgeted (64 KB on an ESP32) and emptied with
+  the coverage cache when render memory is short. The built-in face is an
+  indexed font read where it lies (`assets/compiled/fonts/Ubuntu-Regular.fosf`,
+  pixie's `fontformats/indexedfont.nim`): after `generate_embedded_font.py`
+  run `tools/generate_indexed_font.py` (its `--check` is in the backend
+  suite), and never inflate a face whole into RAM on a device again.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
@@ -1286,6 +1303,12 @@
   scenes, layouts or the backend link, on the frames attached.
 - It holds every serial port open with pyserial's defaults: a CH340 board
   resets when DTR and RTS flip one at a time, so never set them by hand.
+- **The boards are shared between sessions: book one before you touch it**
+  (its console, a flash, a push, a bench): `tools/frame-bench/boards.py book
+  <board> --who "<your session> (...)" --for "..."`, release it when done, and
+  never use one someone else holds (`~/.frameos-bench/BOOKINGS.md`; the
+  skill's "Booking a board"). `bench.py run` and the flashing scripts book,
+  wait and skip by it.
 
 ## End-to-end tooling
 - `e2e/README.md` is the map of every end-to-end suite: the scene-renderer snapshot harness (`e2e/run`, `makescenes.py`, `makesnapshots.py`, baselines in `e2e/snapshots`; `./run dataGradient` renders one scene), the Playwright frontend + cloud-workspace suite (`e2e/frontend-visual`), the opt-in real-SSH deploy test (`e2e/deploy`) and the Docker/ESP32 image jobs. It also carries the local-run recipes (port overrides, `FRONTEND_VISUAL_MAX_DIFF=1`, why a reused server drifts).

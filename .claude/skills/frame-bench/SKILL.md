@@ -9,6 +9,52 @@ description: Bench every FrameOS frame attached to this machine (ESP32 boards an
 its serial console and the backend it is attached to, and writes a report of
 everything that crashed, failed, ran slow or took a slower path than before.
 
+## Booking a board
+
+The boards are shared by every Claude session on this machine, and one
+session's console, flash or push breaks another's work on the same board (a
+flash restarts it; on 2026-11-20 a session reflashed five boards two others
+were testing on). So **book a board before you touch it, in any way**: open
+its console (`usb_api`, `scene`, `event`), flash it, push to its backend frame,
+bench it. The bookings are one file, `~/.frameos-bench/BOOKINGS.md` (Markdown:
+read it as it is), written only through the helper, which locks it:
+
+```
+tools/frame-bench/boards.py                       # every board: free, booked (who, until, what for) or lapsed
+tools/frame-bench/boards.py book sticky,e1003 --who "frameos-16 (desktop-consistency, PR #920)" --for "flash + desktop suite" --hours 2
+tools/frame-bench/boards.py book all --who ... --for ... --partial   # the free ones; says who has the rest
+tools/frame-bench/boards.py book e1004 --who ... --for ... --wait   # until its holder releases it or it lapses
+tools/frame-bench/boards.py extend sticky --who ... --hours 1
+tools/frame-bench/boards.py release sticky,e1003 --who ...
+```
+
+- Boards by their short name (`boards.json` `key`): `sensecap`, `sticky`,
+  `e1002`, `e1003`, `e1004`, `pico`, or `all`.
+- `--who` starts with your session's name as `ListAgents` shows it, so whoever
+  finds the board taken can `SendMessage` you; set `FRAMEOS_BENCH_WHO` to it
+  once and the tools below read it.
+- A booking ends at its `until` (default two hours from booking). Past it the
+  board is free again, so a session that died holds nothing; `extend` while you
+  still need it, and `release` the moment you are done. Leave the board as you
+  promised the others (often: back on the release, on a still scene).
+- Never use a board someone else holds. Ask them; take it with `release
+  --force` only when they said so, or the owner did.
+- The tools keep to it: `bench.py run` books every board it benches, moves the
+  booking on at each suite and releases it at the end; it never opens the
+  console of a board someone else holds (nor a port another process has open),
+  benches the free boards first and each held one when it is free
+  (`--skip-booked` leaves those out, `--wait-hours` bounds the wait).
+  When you do more with a board after the bench (a check of your own, putting
+  the release back), keep the booking for the whole sequence: book it first,
+  run the bench with `--keep-booked`, and release it yourself at the end, or
+  an agent waiting for it takes it the moment the suites end.
+  `bench.py discover` skips them too. The flashing scripts under
+  `~/.frameos-bench/firmware/` (`flash_checked.sh`, `xversion.py`) refuse a
+  board booked by anyone but `$FRAMEOS_BENCH_WHO`; `xversion.py` books what is
+  free, flashes and benches it, and takes the rest as they come free.
+- `FRAMEOS_BENCH_SAMPLES=<checkout>` makes the desktop and code suites push
+  that checkout's samples, to bench a branch's layouts with main's tooling.
+
 ## Before you run it
 
 1. **A backend the frames are attached to.** Every frame's `backend` points at
@@ -36,7 +82,48 @@ tools/frame-bench/bench.py run --full          # no sampling on the slow e-paper
 tools/frame-bench/bench.py run --frames sensecap,e1003 --suites scenes,desktop
 tools/frame-bench/bench.py run --baseline ~/.frameos-bench/<older-run>   # flag regressions
 tools/frame-bench/bench.py report <run-dir> --baseline <older-run-dir>
+tools/frame-bench/bench.py run --suites status,reboot,benchmark   # the scored benchmark alone (~5-15 min)
+tools/frame-bench/bench.py import            # backfill run dirs into ../frameos-benchmarks/data/*.jsonl
+tools/frame-bench/bench.py sizes --elf v2026.11.13   # a new release's image sizes (and ELF shas)
+tools/frame-bench/bench.py html              # ../frameos-benchmarks/index.html: scores, trends, image size, stability
+tools/frame-bench/bench.py restore           # undo a killed benchmark suite (backend address, scenes)
 ```
+
+## Scores and records
+
+The results are their own repo, `FrameOS/frameos-benchmarks`, cloned beside
+the main checkout (`../frameos-benchmarks`; `$FRAMEOS_BENCHMARKS` to put it
+elsewhere; a worktree finds it through git). Every finished `run` is imported
+into its `data/` (`boards`, `runs`, `metrics`, `images` as JSON Lines: its
+`SCHEMA.md`); run `bench.py html` (its `index.html`, the GitHub Pages site)
+and commit and push both there, saying in the message what the run was for
+(the build, the change). Nothing of a run goes into this repo.
+The scores (`tools/frame-bench/SCORES.md`) come from the **benchmark** suite:
+fixed scenes (`tools/frame-bench/benchmarks/`) put on the board over USB,
+timed by the lines every firmware prints, so a release from before the suite
+existed is benched exactly like main. While it runs, the board's backend points
+at a closed port on the board (no pulls, and no over-the-air update to the
+backend's release halfway: a board on 2026.11.10 checks every 8.3 minutes);
+`~/.frameos-bench/isolated.json` keeps the real address until it is back.
+
+A build is known by its image's ELF sha, never by the version it prints:
+`bench.py sizes --elf <tag>` records each release's sha, so a run on a bench
+build that prints `2026.11.11` lands as `2026.11.11+elf.<sha>`, not as the
+release. Run `sizes --elf` for every release you flash.
+
+**Benching an older release** (`~/.frameos-bench/releases/<v>/` holds the
+signed images): `~/.frameos-bench/firmware/xversion.py <worktree> <label>
+<generic-app.bin> <32mb-app.bin>` finds every ESP32 by `usb_api status`,
+flashes each through `flash_checked.sh` (module checked again, the board's
+own slot and baud), waits until each answers, and runs
+`--suites status,reboot,benchmark` (about 10 minutes for all five; the E1004
+is last). Flash the next version straight after: a board on an older release
+reconnected to the backend installs the latest release over the air within
+minutes (the Sticky on 2026.11.11 did, 2026-11-19). Never `ota` (the SenseCAP
+boot-loops on releases up to 2026.11.12), and put each board back on what it
+ran before. Its benchmark data then compares like for like across versions:
+`~/.frameos-bench/firmware/compare_builds.py <worktree> <build> ...` lists it
+per board, `bench.py scores --builds ...` as scores.
 
 **Slow panels are sampled.** A frame whose panel takes 20 s or more to
 refresh (the 7.3" and 13.3" Spectras: the E1002, the E1004) runs what has
@@ -61,6 +148,7 @@ Exit code 2 means a `crash` or `fail` issue.
 |---|---|---|
 | `status` | firmware, memory, storage, scene list, HTTPS state | all |
 | `reboot` | `restart`: time to the bootup event and the first picture; nothing crashes | local |
+| `benchmark` | the benchmark scenes (CPU, raster, UI, JPEG decode + dither, animation on an LCD, a tap on touch), each cold and five times warm, then `heapinfo`: the scores' input (`SCORES.md`) | local, console only |
 | `scenes` | every scene: switch (wall vs render time), an LCD's animation for `--passive` s (fps vs the scene's period, stalls), `--warm` renders with the per-phase probe (`set debug 1` for the run), the render path (`in place` on an LCD), a tap on touch boards | local |
 | `builtin` | scene switcher and scene settings open / close | local |
 | `input` | a drag across the panel, next / previous scene | touch |
@@ -77,6 +165,13 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
 
 ## Adding things
 
+- **A new board kind**: nothing is required; results are keyed by what
+  `usb_api status` says it is (module, panel, chip, PSRAM, flash). Add it to
+  `tools/frame-bench/boards.json` for its name and panel size (the per-megapixel
+  scores need the size: the status gives it from 2026.11.10 on).
+- **A new benchmark**: a folder in `tools/frame-bench/benchmarks/`, a line in
+  `framebench/benchmarks.py`, its metric in `records.frame_metrics` and, if
+  it scores, `scoring.CATEGORIES`; bump `WORKLOAD`.
 - **A new frame**: plug it in, attach it to the backend (copy its scenes into
   the backend frame FIRST — `usb_api scene-list` / `scene-get` on 2026.11.7 and
   later — then `set backend`, `set api_key`, `set frame_id`, `restart` on its

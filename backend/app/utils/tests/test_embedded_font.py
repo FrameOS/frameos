@@ -16,3 +16,15 @@ GENERATOR = REPO_ROOT / "frameos" / "tools" / "generate_embedded_font.py"
 def test_embedded_font_draws_like_the_original():
     result = subprocess.run([sys.executable, str(GENERATOR), "--check"], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+# Every runtime compiles that font in as an indexed font
+# (frameos/assets/compiled/fonts/Ubuntu-Regular.fosf) and reads it where it
+# lies; frameos/tools/generate_indexed_font.py makes it from the TTF above,
+# and its --check refuses a stale file or one that sets or draws differently.
+INDEXED = REPO_ROOT / "frameos" / "tools" / "generate_indexed_font.py"
+
+
+def test_indexed_font_matches_the_embedded_font():
+    result = subprocess.run([sys.executable, str(INDEXED), "--check"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

@@ -11,6 +11,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import subprocess
 
 from .console import Console, parse_payload_json
 
@@ -24,6 +25,15 @@ PANEL_REFRESH_S = {'EPD_7in3e': 32, 'EPD_13in3e': 35, 'EPD_10in3': 4, 'EPD_3in97
 def serial_ports():
     ports = sorted(glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*') + glob.glob('/dev/cu.usb*'))
     return ports
+
+
+def port_busy(port: str) -> bool:
+    """Whether another process has the port open (a session's console, an
+    esptool flash): never open one, since its lines are someone's."""
+    try:
+        return subprocess.run(['fuser', '-s', port], capture_output=True, timeout=10).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def probe_port(port: str, timeout: float = 25.0, deadline: float = 60.0) -> dict | None:
@@ -87,29 +97,78 @@ def describe(port: str, status: dict) -> dict:
     }
 
 
-def discover(backend=None, ports=None) -> list[dict]:
+def _with_backend(d: dict, by_id: dict, port: str) -> dict:
+    bf = by_id.get(d['frame_id'])
+    if bf:
+        d['name'] = bf.get('name')
+        d['backend_frame'] = bf['id']
+        d['api_key'] = bf.get('server_api_key')
+        d['host'] = bf.get('frame_host')
+    else:
+        d['name'] = d['module'] or port
+    return d
+
+
+def _backend_frames(backend) -> dict:
+    if backend is None:
+        return {}
+    try:
+        return {f['id']: f for f in backend.frames()}
+    except Exception as exc:
+        print(f'backend not reachable ({exc}); USB only')
+        return {}
+
+
+def discover(backend=None, ports=None, skip_ports=()) -> list[dict]:
+    """Every board that answers. A port another process has open, or in
+    `skip_ports` (where a board someone else booked was last seen), is not
+    opened: those lines are someone else's (bookings.py)."""
     frames = []
-    by_id = {}
-    if backend is not None:
-        try:
-            by_id = {f['id']: f for f in backend.frames()}
-        except Exception as exc:
-            print(f'backend not reachable ({exc}); USB only')
+    by_id = _backend_frames(backend)
     for port in ports or serial_ports():
+        if port in skip_ports:
+            print(f'{port}: a board booked by someone else was here last, skipped')
+            continue
+        if port_busy(port):
+            print(f'{port}: open in another process, skipped')
+            continue
         found = probe_port(port)
         if not found or not found.get('status'):
             continue
-        d = describe(port, found['status'])
-        bf = by_id.get(d['frame_id'])
-        if bf:
-            d['name'] = bf.get('name')
-            d['backend_frame'] = bf['id']
-            d['api_key'] = bf.get('server_api_key')
-            d['host'] = bf.get('frame_host')
-        else:
-            d['name'] = d['module'] or port
-        frames.append(d)
+        frames.append(_with_backend(describe(port, found['status']), by_id, port))
     return frames
+
+
+def find(module: str, backend=None, exclude=()) -> dict | None:
+    """The board with `module` (a booked one now free): the ports no one has
+    open and no frame of this run uses, asked in turn."""
+    by_id = _backend_frames(backend)
+    for port in serial_ports():
+        if port in exclude or port_busy(port):
+            continue
+        found = probe_port(port, timeout=15.0, deadline=30.0)
+        status = (found or {}).get('status')
+        if status and (status.get('board') or {}).get('module') == module:
+            return _with_backend(describe(port, status), by_id, port)
+    return None
+
+
+def still_there(frames: list[dict]) -> list[str]:
+    """The ports among `frames` whose board is no longer the one saved there.
+
+    A VM's USB passthrough can hand the same boards out in another order after
+    a re-attach: on 2026-11-19 the E1004 and the SenseCAP swapped ttyUSB2/3, and
+    a run off the saved inventory pushed to one board and read the other's
+    console. A run checks before it trusts the file."""
+    moved = []
+    for f in frames:
+        found = probe_port(f['port'], timeout=15.0, deadline=30.0)
+        status = (found or {}).get('status') or {}
+        module = (status.get('board') or {}).get('module', '')
+        if module != f.get('module') or (status.get('config') or {}).get('frameId') != f.get('frame_id'):
+            moved.append(f"{f['port']}: saved {f.get('module')} #{f.get('frame_id')}, "
+                         f"found {module or 'nothing'} #{(status.get('config') or {}).get('frameId')}")
+    return moved
 
 
 def load(path: str) -> list[dict]:

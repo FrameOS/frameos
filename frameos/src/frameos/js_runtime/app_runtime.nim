@@ -2223,10 +2223,23 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
       return nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
     return jsUndefSentinel(ctx)
+  of "wentBack":
+    # True while the scene a layout wraps is showing because a built-in scene
+    # went back to it by itself (its Close, its Cancel, its timeout), not
+    # because anyone picked it: a desktop opens no window again for it.
+    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil and sceneWentBackTo.len > 0 and
+        layoutWrappedSceneId(e.owner.scene) == sceneWentBackTo:
+      return nimBoolToJS(ctx, true)
+    return jsUndefSentinel(ctx)
   of "scenes":
     # The scenes a layout can open side by side: not on every host.
     if not windowSceneListing.isNil:
       return jsonToJS(ctx, windowSceneListing())
+    return jsUndefSentinel(ctx)
+  of "keptOpen":
+    # The built-in scenes open beside the scene showing (`builtInsAway`).
+    if not windowSceneListing.isNil:
+      return jsonToJS(ctx, %builtInsAway)
     return jsUndefSentinel(ctx)
   of "windows":
     # How many of them may run at once, where there is a limit (windowLimit).
@@ -2323,10 +2336,11 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "typing", "batteryPercent", "wifiRssi", "theme", "eventMap"]
+      "paper", "color", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
+      keys.add("keptOpen")
       if windowLimit() > 0:
         keys.add("windows")
   of "context":

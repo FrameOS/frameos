@@ -67,6 +67,13 @@ const
     ## A panel already overdue asks for the next pass now; 0 would mean "no
     ## opinion" to the hosts.
   MaxCanvasMarks = 4
+  WindowBehindSeconds* = 5.0
+    ## Where only a few scenes run at once (app.frame.windows: an ESP32), a
+    ## window behind another runs at most this often. It is a picture: each
+    ## of its runs draws the whole desktop again around it (its JavaScript, its
+    ## tree, its raster), which on a SenseCAP Indicator took the window in
+    ## front from 20 frames a second to 1 while an animation ran behind it
+    ## (2026-11-19). In front it runs at its own pace again.
 
 type CanvasMark = object
   canvas: Image
@@ -571,13 +578,14 @@ proc rhythmRestore*(scene: FrameScene, image: Image) =
     copyPixels(image, c.copy)
 
 proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: Image,
-    nextSleep: float) =
+    nextSleep: float, floor = 0.0) =
   ## After `scene` ran for a scene node: schedule it (a due run only), and
   ## keep what it drew if it will not be due again by the next pass and the
   ## canvas will not keep it for us. `nextSleep` is what its run set (-1:
   ## nothing), which means "this scene next renders in N seconds" and never
   ## reaches the scene drawing it. Nothing `given` (a `<Scene>`, a layout's
-  ## chrome): the schedule alone.
+  ## chrome): the schedule alone. `floor`: the soonest it may run again,
+  ## whatever it asks (a window behind another, WindowBehindSeconds).
   let r = scene.rhythm
   if r.isNil:
     return
@@ -585,7 +593,7 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
   if decision == rdRun and r.scheduledPass != passId:
     r.scheduledPass = passId
     let interval = if scene.layoutPaced: contentInterval(scene) else: scene.refreshInterval
-    let wait = max(if nextSleep >= 0: nextSleep else: interval, 0.0)
+    let wait = max(if nextSleep >= 0: nextSleep else: interval, floor)
     r.interval = wait
     r.dueAt = passStart + wait
   if given.isNil:
@@ -613,13 +621,28 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
 
 # --------------------------------------------------- around a layout's hole
 
-proc rhythmChromeCanStay*(host: FrameScene): bool =
-  ## Every embedded scene of this UI is a hole. A picture of one is part of the
-  ## UI's drawing, and a split's panels are no UI of its own.
+proc rhythmChromeHasHoles*(host: FrameScene): bool =
+  ## This UI draws around holes, so what it drew can be left on the canvas
+  ## (a split's panels are no UI of its own).
   for i in 0 ..< host.slots.len:
-    if not host.slots[i].hole:
+    if host.slots[i].hole:
+      return true
+
+proc rhythmChromeCanStay*(host: FrameScene): bool =
+  ## A UI with holes, whose every other embedded scene (a picture: a window
+  ## behind another) is not due this pass. A picture is part of the UI's
+  ## drawing, so one that is due draws the UI again; one that is not is the
+  ## same picture as last time. Before, any picture ran the whole UI on every
+  ## pass of its holes: a desktop with a window behind the one in front ran its
+  ## JavaScript and raster for each frame of an animation in front, 1.9 fps for
+  ## DVD logo bounce on the SenseCAP Indicator's Windows 98 (2026-11-19).
+  result = false
+  for i in 0 ..< host.slots.len:
+    template s: untyped = host.slots[i]
+    if s.hole:
+      result = true
+    elif passDepth == 0 or decided(s.child).runsThisPass:
       return false
-  host.slots.len > 0
 
 var chromeOwed {.threadvar.}: bool
 
@@ -658,14 +681,16 @@ proc rhythmVisitChrome*(host: FrameScene): RhythmDecision =
 
 proc rhythmRestoreChrome*(host: FrameScene, image: Image) =
   ## The chrome out of the frame buffer that holds it, around the holes: what
-  ## this buffer's holes hold is their scenes' business.
+  ## this buffer's holes hold is their scenes' business. A picture is the
+  ## chrome's and comes with it.
   let src = otherCanvasHolding(host.rhythm.chromePass)
   if src.isNil:
     return
   var holes: seq[PixelBox]
   for i in 0 ..< host.slots.len:
     template s: untyped = host.slots[i]
-    holes.add((s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y)))
+    if s.hole:
+      holes.add((s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y)))
   for r in aroundHoles(image.width, image.height, holes):
     if r.w > 0 and r.h > 0:
       copyPixels(image.view(r.x, r.y, r.w, r.h), src.view(host.canvasX.int + r.x, host.canvasY.int + r.y, r.w, r.h))

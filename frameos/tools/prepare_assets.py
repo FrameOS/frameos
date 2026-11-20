@@ -31,7 +31,7 @@ MODULE_OUTPUTS = (
 
 MODULE_SOURCE_FILES = (
     Path("assets/compiled/web/control.html"),
-    Path("assets/compiled/fonts/Ubuntu-Regular.ttf"),
+    Path("assets/compiled/fonts/Ubuntu-Regular.fosf"),
     Path("assets/compiled/tz/timezone_aliases.json"),
     Path("../repo/scenes"),
     Path("tools/generate_apps_asset_nim.py"),
@@ -353,7 +353,9 @@ def generate_asset_modules(project_root: Path) -> None:
             "--source-dir",
             ".",
             "--file",
-            "assets/compiled/fonts/Ubuntu-Regular.ttf",
+            "assets/compiled/fonts/Ubuntu-Regular.fosf",
+            "--raw-data",
+            "defaultFontData",
             "--output",
             "src/assets/fonts.nim",
         ],

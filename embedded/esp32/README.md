@@ -1559,7 +1559,13 @@ written by the store task when there is room for it (`runtime_room_for_whole`:
 a largest PSRAM block of twice the set and four times the set free); without
 it, or when the runtime refuses it, the set goes store-first like a push:
 written by the store task as fast as flash goes, then applied one scene at a
-time (the reTerminal E1004 could not copy a 378 KB set whole, 2026-11-16). A
+time (the reTerminal E1004 could not copy a 378 KB set whole, 2026-11-16).
+Its etag is the frame's from the moment it is taken, so a one-scene change
+(a backend's patch against that etag, a put, a delete, the cloud's patch)
+waits for the store task's write of it before it goes on the index
+(`backend_set_written`, 90 s, then refused): applied first, the write of the
+set undid it (the Code editor put on the reTerminal E1002 dropped by
+"4 written at once, 0 kept, 1 dropped", 2026-11-20). A
 backend's answer, a whole set or a `?patch=1` object, is read in pieces
 (`fos_scene_pieces.c`, host-tested): each scene in a block of its own and the
 rest (`[]`, or the patch with `"put":[]`, the one part parsed as a tree) in a

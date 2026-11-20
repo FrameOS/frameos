@@ -1,4 +1,4 @@
-import algorithm, chroma, flatty/binny, flatty/encode, math, ../common, ../paths,
+import algorithm, bumpy, chroma, flatty/binny, flatty/encode, math, ../common, ../paths,
     strutils, tables, unicode, vmath
 
 ## See https://docs.microsoft.com/en-us/typography/opentype/spec/
@@ -456,7 +456,6 @@ type
     cpal*: CpalTable
     cblc*: CblcTable
     sbix*: SbixTable
-    glyphPaths: Table[Rune, Path]
     colorGlyphLayers: Table[Rune, seq[ColorGlyphLayer]]
 
 when defined(release):
@@ -2585,9 +2584,11 @@ proc parseGlyfGlyph(
   opentype: OpenType, glyphId: uint16, recursionDepth = 0
 ): Path {.raises: [PixieError], gcsafe.}
 
-proc parseGlyphPath(
+proc parseGlyphPath*(
   buf: string, offset, numberOfContours: int
 ): Path =
+  ## A simple TrueType glyph's outline, its contours starting at `offset`
+  ## (past the glyph header), in font units, y up.
   if numberOfContours < 0:
     raise newException(PixieError, "Glyph numberOfContours must be >= 0")
 
@@ -2720,18 +2721,23 @@ proc parseGlyphPath(
 
     result.closePath()
 
-proc parseCompositeGlyph(
-  opentype: OpenType, offset, recursionDepth: int
+proc parseCompositeGlyph*[T](
+  source: T, buf: string, offset, recursionDepth: int
 ): Path =
+  ## A composite TrueType glyph's outline: its components (each read through
+  ## `source.parseGlyfGlyph`, the font that holds them) placed by their
+  ## transforms. `buf` holds the composite's record, its components' list
+  ## from `offset` on.
+  mixin parseGlyfGlyph
   result = newPath()
 
   var
     i = offset
     moreComponents = true
   while moreComponents:
-    opentype.buf.eofCheck(i + 4)
+    buf.eofCheck(i + 4)
 
-    let flags = opentype.buf.readUint16(i + 0).swap()
+    let flags = buf.readUint16(i + 0).swap()
 
     i += 2
 
@@ -2746,53 +2752,53 @@ proc parseCompositeGlyph(
       matchedPoints: array[2, int]
 
     var component = TtfComponent()
-    component.glyphId = opentype.buf.readUint16(i + 0).swap()
+    component.glyphId = buf.readUint16(i + 0).swap()
     component.xScale = 1
     component.yScale = 1
 
     i += 2
 
     if (flags and 1) != 0: # The arguments are uint16
-      opentype.buf.eofCheck(i + 4)
+      buf.eofCheck(i + 4)
       if (flags and 0b10) != 0: # The arguments are offets
-        component.dx = opentype.buf.readInt16(i + 0).swap().float32
-        component.dy = opentype.buf.readInt16(i + 2).swap().float32
+        component.dx = buf.readInt16(i + 0).swap().float32
+        component.dy = buf.readInt16(i + 2).swap().float32
       else: # The arguments are matched points
         component.matchedPoints = [
-          opentype.buf.readUint16(i + 0).swap().int,
-          opentype.buf.readUint16(i + 2).swap().int
+          buf.readUint16(i + 0).swap().int,
+          buf.readUint16(i + 2).swap().int
         ]
       i += 4
     else: # The arguments are uint8
-      opentype.buf.eofCheck(i + 2)
+      buf.eofCheck(i + 2)
       if (flags and 0b10) != 0: # Arguments are offsets
-        component.dx = opentype.buf.readInt8(i + 0).float32
-        component.dy = opentype.buf.readInt8(i + 1).float32
+        component.dx = buf.readInt8(i + 0).float32
+        component.dy = buf.readInt8(i + 1).float32
       else: # The arguments are matched points
         component.matchedPoints = [
-          opentype.buf.readInt8(i + 0).int,
-          opentype.buf.readInt8(i + 1).int
+          buf.readInt8(i + 0).int,
+          buf.readInt8(i + 1).int
         ]
       i += 2
 
     # TODO: ROUND_XY_TO_GRID
 
     if (flags and 0b1000) != 0: # WE_HAVE_A_SCALE
-      opentype.buf.eofCheck(i + 2)
-      component.xScale = opentype.buf.readFixed16(i + 0)
+      buf.eofCheck(i + 2)
+      component.xScale = buf.readFixed16(i + 0)
       component.yScale = component.xScale
       i += 2
     elif (flags and 0b1000000) != 0: # WE_HAVE_AN_X_AND_Y_SCALE
-      opentype.buf.eofCheck(i + 4)
-      component.xScale = opentype.buf.readFixed16(i + 0)
-      component.yScale = opentype.buf.readFixed16(i + 2)
+      buf.eofCheck(i + 4)
+      component.xScale = buf.readFixed16(i + 0)
+      component.yScale = buf.readFixed16(i + 2)
       i += 4
     elif (flags and 0b10000000) != 0: # WE_HAVE_A_TWO_BY_TWO
-      opentype.buf.eofCheck(i + 8)
-      component.xScale = opentype.buf.readFixed16(i + 0)
-      component.scale10 = opentype.buf.readFixed16(i + 2)
-      component.scale01 = opentype.buf.readFixed16(i + 4)
-      component.yScale = opentype.buf.readFixed16(i + 6)
+      buf.eofCheck(i + 8)
+      component.xScale = buf.readFixed16(i + 0)
+      component.scale10 = buf.readFixed16(i + 2)
+      component.scale01 = buf.readFixed16(i + 4)
+      component.yScale = buf.readFixed16(i + 6)
       i += 8
 
     # if (flags and 0b100000000) != 0: # WE_HAVE_INSTRUCTIONS
@@ -2806,7 +2812,7 @@ proc parseCompositeGlyph(
     # elif (flags and 0b1000000000000) != 0: # UNSCALED_COMPONENT_OFFSET
     #   discard
 
-    var subPath = opentype.parseGlyfGlyph(
+    var subPath = source.parseGlyfGlyph(
       component.glyphId,
       recursionDepth + 1
     )
@@ -2845,7 +2851,7 @@ proc parseGlyfGlyph(
   i += 10
 
   if numberOfContours < 0:
-    opentype.parseCompositeGlyph(i, recursionDepth)
+    opentype.parseCompositeGlyph(opentype.buf, i, recursionDepth)
   else:
     parseGlyphPath(opentype.buf, i, numberOfContours)
 
@@ -2873,11 +2879,41 @@ proc parseGlyph(opentype: OpenType, rune: Rune): Path {.inline.} =
 proc getGlyphPath*(
   opentype: OpenType, rune: Rune
 ): Path {.raises: [PixieError].} =
-  if rune notin opentype.glyphPaths:
-    let path = opentype.parseGlyph(rune)
-    path.transform(scale(vec2(1, -1)))
-    opentype.glyphPaths[rune] = path
-  opentype.glyphPaths.getOrDefault(rune, nil) # Never actually returns nil
+  ## The rune's outline in font units, y down: read from the font every time,
+  ## and the caller's to keep or change. It was kept per rune for good, a KB
+  ## or so a glyph and every glyph a frame ever drew; a text drawn again is
+  ## drawn from the glyph cache (paths.nim), which keeps coverage, not
+  ## outlines, and reading a glyph is a microsecond.
+  result = opentype.parseGlyph(rune)
+  result.transform(scale(vec2(1, -1)))
+
+proc glyphBox*(opentype: OpenType, rune: Rune, box: var Rect): bool {.raises: [].} =
+  ## The rune's bounding box as its glyf header states it, in font units, y
+  ## down like getGlyphPath: what a glyph path's bounds are made of without
+  ## reading its outline. False where there is none to read (a CFF or bitmap
+  ## font: outline it); true with an empty box for a glyph with no outline.
+  box = rect(0, 0, 0, 0)
+  if opentype.glyf == nil or opentype.cff != nil:
+    return false
+  let glyphId = opentype.getGlyphId(rune).int
+  if glyphId >= opentype.glyf.offsets.len:
+    return false
+  let glyphOffset = opentype.glyf.offsets[glyphId]
+  if glyphId + 1 < opentype.glyf.offsets.len and
+      glyphOffset == opentype.glyf.offsets[glyphId + 1]:
+    return true
+  let i = glyphOffset.int - opentype.bufBase
+  if i < 0 or i + 10 > opentype.buf.len:
+    return false
+  let
+    xMin = opentype.buf.readInt16(i + 2).swap().float32
+    yMin = opentype.buf.readInt16(i + 4).swap().float32
+    xMax = opentype.buf.readInt16(i + 6).swap().float32
+    yMax = opentype.buf.readInt16(i + 8).swap().float32
+  if xMax < xMin or yMax < yMin:
+    return false
+  box = rect(xMin, -yMax, xMax - xMin, yMax - yMin)
+  true
 
 proc getColorGlyphLayers*(
   opentype: OpenType, rune: Rune

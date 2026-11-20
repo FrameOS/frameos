@@ -1,5 +1,5 @@
 import bumpy, chroma, common, os, fileformats/png, fontformats/opentype,
-    fontformats/svgfont, images, paints, paths,
+    fontformats/indexedfont, fontformats/svgfont, images, paints, paths,
     strutils, unicode, vmath
 
 const
@@ -8,8 +8,9 @@ const
   SP = Rune(32)
 
 type
-  Typeface* = ref object
+  Typeface* = ref object of GlyphSource
     opentype: OpenType
+    indexed: IndexedFont ## read where it lies (fontformats/indexedfont.nim)
     svgFont: SvgFont
     filePath*: string
     fallbacks*: seq[Typeface]
@@ -59,6 +60,8 @@ proc scale*(typeface: Typeface): float32 {.inline, raises: [].} =
   ## The scale factor to transform font units into pixels.
   if typeface.opentype != nil:
     typeface.opentype.head.unitsPerEm.float32
+  elif typeface.indexed != nil:
+    typeface.indexed.unitsPerEm.float32
   else:
     typeface.svgFont.unitsPerEm
 
@@ -66,6 +69,8 @@ proc ascent*(typeface: Typeface): float32 {.raises: [].} =
   ## The font ascender value in font units.
   if typeface.opentype != nil:
     typeface.opentype.hhea.ascender.float32
+  elif typeface.indexed != nil:
+    typeface.indexed.ascender.float32
   else:
     typeface.svgFont.ascent
 
@@ -73,6 +78,8 @@ proc descent*(typeface: Typeface): float32 {.raises: [].} =
   ## The font descender value in font units.
   if typeface.opentype != nil:
     typeface.opentype.hhea.descender.float32
+  elif typeface.indexed != nil:
+    typeface.indexed.descender.float32
   else:
     typeface.svgFont.descent
 
@@ -80,6 +87,8 @@ proc lineGap*(typeface: Typeface): float32 {.raises: [].} =
   ## The font line gap value in font units.
   if typeface.opentype != nil:
     result = typeface.opentype.hhea.lineGap.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.lineGap.float32
 
 proc lineHeight*(typeface: Typeface): float32 {.inline, raises: [].} =
   ## The default line height in font units.
@@ -90,32 +99,46 @@ proc capHeight*(typeface: Typeface): float32 {.raises: [].} =
   ## The font cap height value in font units.
   if typeface.opentype != nil:
     result = typeface.opentype.os2.sCapHeight.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.capHeight.float32
 
 proc underlinePosition(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.post.underlinePosition.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.underlinePosition.float32
 
 proc underlineThickness(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.post.underlineThickness.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.underlineThickness.float32
 
 proc strikeoutPosition(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.os2.yStrikeoutPosition.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.strikeoutPosition.float32
 
 proc strikeoutThickness(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.os2.yStrikeoutSize.float32
+  elif typeface.indexed != nil:
+    result = typeface.indexed.strikeoutSize.float32
 
 proc isCCW(typeface: Typeface): bool {.inline.} =
   ## Returns the expected winding order of a font.
   if typeface.opentype != nil:
     return typeface.opentype.isCCW()
+  if typeface.indexed != nil:
+    return true # TrueType outlines
 
 proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
   ## Returns if there is a glyph for this rune.
   if typeface.opentype != nil:
     typeface.opentype.hasGlyph(rune)
+  elif typeface.indexed != nil:
+    typeface.indexed.hasGlyph(rune.int32)
   else:
     typeface.svgFont.hasGlyph(rune)
 
@@ -143,7 +166,9 @@ proc getGlyphPath*(
     return
 
   if typeface2.opentype != nil:
-    result.addPath(typeface2.opentype.getGlyphPath(rune))
+    result = typeface2.opentype.getGlyphPath(rune)
+  elif typeface2.indexed != nil:
+    result = typeface2.indexed.getGlyphPath(rune.int32)
   else:
     result.addPath(typeface2.svgFont.getGlyphPath(rune))
 
@@ -161,6 +186,8 @@ proc getAdvance*(typeface: Typeface, rune: Rune): float32 {.inline, raises: [].}
 
   if typeface2.opentype != nil:
     result = typeface2.opentype.getAdvance(rune)
+  elif typeface2.indexed != nil:
+    result = typeface2.indexed.advance(max(typeface2.indexed.glyphIdOf(rune.int32), 0)).float32
   else:
     result = typeface2.svgFont.getAdvance(rune)
 
@@ -181,6 +208,9 @@ proc getKerningAdjustment*(
   if typefaceRight == typefaceLeft:
     if typefaceRight.opentype != nil:
       result = typefaceRight.opentype.getKerningAdjustment(left, right)
+    elif typefaceRight.indexed != nil:
+      let font = typefaceRight.indexed
+      result = font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
     else:
       result = typefaceRight.svgfont.getKerningAdjustment(left, right)
 
@@ -525,16 +555,61 @@ proc layoutBounds*(spans: seq[Span]): Vec2 {.inline, raises: [].} =
   ## Computes the width and height of the spans in pixels.
   typeset(spans).layoutBounds()
 
-proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+var typefaceSerial: int
+  ## The last serial handed out (`GlyphSource.serial`, the glyph cache's name
+  ## for a face): never reused, so a face let go takes its masks' key with it.
+
+proc newTypeface(): Typeface =
   result = Typeface()
+  result.serial = uint32(atomicInc(typefaceSerial))
+
+proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+  result = newTypeface()
   result.opentype = parseOpenType(buf)
 
 proc parseTtf*(buf: string): Typeface {.raises: [PixieError].} =
   parseOtf(buf)
 
+proc parseIndexedTypeface*(data: sink string): Typeface {.raises: [PixieError].} =
+  ## A typeface read where it lies (fontformats/indexedfont.nim): a string
+  ## literal compiled into the program is kept where it is, not copied.
+  result = newTypeface()
+  result.indexed = parseIndexedFont(data)
+
 proc parseSvgFont*(buf: string): Typeface {.raises: [PixieError].} =
-  result = Typeface()
+  result = newTypeface()
   result.svgFont = svgfont.parseSvgFont(buf)
+
+proc outlineGlyph(face: GlyphSource, rune: int32, size: float32): Path {.
+    nimcall, gcsafe, raises: [PixieError].} =
+  ## paths.nim's GlyphOutliner: the rune's outline in `face` at `size` px.
+  let typeface = Typeface(face)
+  result = typeface.getGlyphPath(Rune(rune))
+  result.transform(scale(vec2(size / typeface.scale)))
+
+glyphOutliner = outlineGlyph
+
+proc glyphPath*(typeface: Typeface, rune: Rune, size: float32): Path {.raises: [PixieError].} =
+  ## The rune's glyph at `size` px, at the origin, as a glyph path: a fill
+  ## draws it from the glyph cache (paths.nim) and nothing of its outline is
+  ## kept. Its bounds are the glyph's box from the font where it states one,
+  ## else its outline's. nil for a glyph that draws nothing: a blank, a rune
+  ## no face has, a color glyph (drawn by `fillText`'s own path).
+  let face = typeface.fallbackTypeface(rune)
+  if face.isNil or face.hasColorGlyph(rune):
+    return nil
+  var
+    box: Rect
+    bounds: Rect
+  if (face.opentype != nil and face.opentype.glyphBox(rune, box)) or
+      (face.indexed != nil and face.indexed.glyphBox(face.indexed.glyphIdOf(rune.int32), box)):
+    let s = size / face.scale
+    bounds = rect(box.x * s, box.y * s, box.w * s, box.h * s)
+  else:
+    bounds = outlineGlyph(typeface, rune.int32, size).computeBounds()
+  if bounds.w <= 0 or bounds.h <= 0:
+    return nil
+  newGlyphPath(typeface, rune.int32, size, bounds)
 
 proc runesPath(
   arrangement: Arrangement, spanIndex, first, last: int, line: var int
@@ -688,6 +763,38 @@ proc drawColorGlyphs(
         image, transform * translate(offset) * scale(vec2(bitmapScale))
       )
 
+proc glyphRuns(target: Image, arrangement: Arrangement, transform: Mat3): bool =
+  ## Fills the arrangement a glyph at a time from the glyph cache (paths.nim);
+  ## false where that does not apply (the cache is off, a transform that is
+  ## not a translation and a uniform scale, an underline, a strikethrough, a
+  ## paint that is not one colour), for the outlines instead.
+  if glyphCacheBudget <= 0:
+    return false
+  if transform[0, 1] != 0 or transform[1, 0] != 0 or transform[0, 2] != 0 or
+      transform[1, 2] != 0 or transform[2, 2] != 1 or transform[0, 0] <= 0 or
+      abs(transform[1, 1] - transform[0, 0]) > 0.0001'f32 * transform[0, 0]:
+    return false
+  for font in arrangement.fonts:
+    if font.underline or font.strikethrough:
+      return false
+    for paint in font.paints:
+      if paint.kind != SolidPaint:
+        return false
+  for spanIndex, (start, stop) in arrangement.spans:
+    let font = arrangement.fonts[spanIndex]
+    for i in start .. stop:
+      let rune = arrangement.runes[i]
+      if rune.isWhiteSpace:
+        continue
+      let path = font.typeface.glyphPath(rune, font.size)
+      if path.isNil:
+        continue
+      let at = transform * translate(arrangement.positions[i])
+      for paint in font.paints:
+        target.fillPath(path, paint, at)
+    target.drawColorGlyphs(arrangement, spanIndex, transform)
+  true
+
 proc textUber(
   target: Image,
   arrangement: Arrangement,
@@ -699,6 +806,9 @@ proc textUber(
   dashes: seq[float32] = @[],
   stroke: static[bool] = false
 ) =
+  when not stroke:
+    if target.glyphRuns(arrangement, transform):
+      return
   var drawing = -1
   for (spanIndex, path) in arrangement.linePaths():
     let font = arrangement.fonts[spanIndex]
@@ -849,7 +959,7 @@ proc readTypefaces*(filePath: string): seq[Typeface] {.raises: [PixieError].} =
   ## Loads a OpenType Collection (.ttc).
   try:
     for opentype in parseOpenTypeCollection(readFile(filePath)):
-      let typeface = Typeface()
+      let typeface = newTypeface()
       typeface.opentype = opentype
       result.add(typeface)
   except IOError as e:

@@ -1,6 +1,7 @@
 ## The scene switcher, `system/sceneSwitcher` (docs/scene-switcher.md): every
 ## scene on the frame as a tile with its title, in the frame's scene list
-## order, to tap, or to walk with the buttons and pick.
+## order grouped by category, in one list that scrolls, to tap, or to walk
+## with the buttons and pick.
 ##
 ## Built into every runtime (the Linux runner registers it with the system
 ## scenes, frameos/single_scene_host builds it for the ESP32 and the preview)
@@ -11,16 +12,18 @@
 ## does `sceneSettings`.
 ##
 ## It is drawn with the JSX layout (ui/layout.nim): the tree is built here, in
-## Nim, so it needs no QuickJS, and its taps are hit-tested by ui/events.nim
-## like a JS app's UI. A fast panel gets a dark grid with each scene's last
-## picture where the host keeps one (`sceneSwitcherThumbnail`: the Linux
-## runner's scene snapshots); e-paper gets black on white with the
-## highlighted tile inverted, so it reads on a one-bit panel and follows the
-## keys. The scene list is the host's (`sceneSwitcherListing`): the order
-## `setCurrentScene {direction}` walks, with each scene's name. A gear in the
-## header opens the frame page (`sceneSettings {page: "frame"}`), where the
-## frame offers one: the way back to the layout's choice when the switcher is
-## all a layout left reachable.
+## Nim, so it needs no QuickJS, and its taps and the list's scrolling are
+## ui/events.nim's, as for a JS app's UI. A fast panel gets a dark grid with
+## each scene's last picture where the host keeps one
+## (`sceneSwitcherThumbnail`: the Linux runner's scene snapshots); e-paper
+## gets black on white with the highlighted tile inverted, so it reads on a
+## one-bit panel and follows the keys, and the list scrolls to the tile they
+## are on. The scene list is the host's (`sceneSwitcherListing`): the order
+## `setCurrentScene {direction}` walks, with each scene's name and category,
+## grouped as the desktops group them (`grouped`). A gear in the header opens
+## the frame page (`sceneSettings {page: "frame"}`), where the frame offers
+## one: the way back to the layout's choice when the switcher is all a layout
+## left reachable.
 ##
 ## Flash is the budget on an ESP32 (AGENTS.md): the firmware gets the names
 ## only layout, no keyboard, no pictures and no round panel (none of its
@@ -29,7 +32,7 @@
 
 import std/[json, options, tables, times]
 when not defined(frameosEmbedded):
-  import std/[math, strutils]
+  import std/math
 from frameos/events import isSceneSettings
 import pixie
 import pixie/fileformats/svg
@@ -69,12 +72,16 @@ type
     ## last, whether one was left out for time (and another render is due).
 
   SwitcherGrid* = object
-    ## Where the tiles go: `perPage` of them, `cols` across, from (x0, y0).
-    cols*, rows*, perPage*, pages*: int
-    tileW*, tileH*, gap*, x0*, y0*, pad*, headerH*: int
-    ## A round panel (frameos/panel_shape): the tiles fill the square inside
+    ## Where the tiles go: `cols` across, the first at (x0, y0) with the list
+    ## at its top, `rows` of them in sight at once. The list is the box
+    ## (listX, listY) `listW` x `listH`, which scrolls; a category's heading
+    ## is a row `headingH` tall above its tiles.
+    cols*, rows*: int
+    tileW*, tileH*, gap*, x0*, y0*, pad*, headerH*, headingH*: int
+    listX*, listY*, listW*, listH*: int
+    ## A round panel (frameos/panel_shape): the list is the square inside
     ## the circle `radius` px around (cx, cy) (`RoundInset` in from the rim),
-    ## and the title, the arrows and Close sit in the four arcs around it.
+    ## and the title and Close sit in the arcs above and below it.
     round*: bool
     cx*, cy*, radius*, side*: int
 
@@ -83,11 +90,14 @@ type
     paper*: bool ## drawn in e-paper's look last time (panelLook)
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
-    keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close, gear or page arrows to draw
+    keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
+  ListKey = 1
+    ## The list's place in the tree (ui/layout.nim keys a child `key * 31 + i
+    ## + 1`): the root's first child. Its scroll is kept by that key.
   IdleSecondsFast* = 60.0
   IdleSecondsSlow* = 300.0
   MaxCols = 12
@@ -96,23 +106,20 @@ const
     ## The most a grid's sizes are a share of: a tile is as large on a bigger
     ## screen as on a 480 px one, and the bigger screen shows more of them
     ## (the render scale is what makes them larger).
-  # The page arrows, drawn (no font has to have the glyph): one markup, its
-  # path's points either way.
-  ChevronHead = "<svg viewBox=\"0 0 24 24\"><path d=\"M"
-  ChevronTail = "\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>"
   # A gear, 48 units square: the teeth clockwise, the hole the other way.
   GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
     "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
     "M17 24a7 7 0 1 0 14 0a7 7 0 1 0 -14 0Z"
   GearMark = "\1" ## the highlight on the gear: no scene's id is this
+  Blank = {' ', '\t', '\v', '\r', '\l', '\f'} ## what a category is trimmed of
 
 var
   sceneSwitcherListing*: SwitcherListing
   sceneSwitcherThumbnail*: SwitcherThumbnail
   sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
-  # What the last hit test ran: a tile's index, Close (the tile count), an
-  # arrow (count + 1, + 2), the gear (count + 3), or -1. Read by runEvent
-  # once the hit test is done, so the handler holds nothing of the scene's.
+  # What the last hit test ran: a tile's index, Close (the tile count), the
+  # gear (count + 1), or -1. Read by runEvent once the hit test is done, so
+  # the handler holds nothing of the scene's.
   tapped {.threadvar.}: int
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
@@ -239,17 +246,17 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
-proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
-  ## The tile grid for `count` scenes on a `width` x `height` canvas: the
-  ## densest one whose tiles stay big enough to read, whatever the count, so
-  ## a tile is the same size with three scenes as with thirty and fewer
-  ## scenes fill fewer of its slots (the owner's rule, 2026-11-10: tiles that
-  ## grew to fill the page looked odd, and on an ESP32 each picture's pixels
-  ## are what the switcher's render costs). Among grids as dense, the one
-  ## whose pictures (at the canvas's own aspect) or name cards come out
-  ## largest. More scenes than a page holds page.
-  ## On a round panel the grid is the square inscribed in the circle that
-  ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
+proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
+  ## The tile grid on a `width` x `height` canvas: the densest one whose
+  ## tiles stay big enough to read, whatever the number of scenes, so a tile
+  ## is the same size with three scenes as with thirty (the owner's rule,
+  ## 2026-11-10: tiles that grew to fill the screen looked odd, and on an
+  ## ESP32 each picture's pixels are what the switcher's render costs). Among
+  ## grids as dense, the one whose pictures (at the canvas's own aspect) or
+  ## name cards come out largest. More rows than fit scroll.
+  ## On a round panel the list is the square inscribed in the circle that
+  ## stays `RoundInset` in from the rim, so no tile shows a corner off the
+  ## glass.
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
   ## UI laid out at its render scale); the canvas's shorter edge without it.
   ## Never more than `GridUnitMax`: past a 480 px screen the tiles, the
@@ -260,8 +267,14 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
   result.pad = clamp(permille(unit, 35), 4, 24)
   result.gap = clamp(permille(unit, 25), 3, 16)
   result.headerH = clamp(permille(unit, 110), 18, 64)
+  result.headingH = clamp(permille(unit, 70), 16, 48)
   result.x0 = result.pad
   result.y0 = result.headerH + result.gap
+  # Under the header to the bottom edge, the whole width, so a finger
+  # anywhere below the header scrolls it.
+  result.listY = result.headerH
+  result.listW = width
+  result.listH = max(height - result.headerH, 1)
   var
     gw = max(width - 2 * result.pad, 1)
     gh = max(height - result.y0 - result.pad, 1)
@@ -275,6 +288,10 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
       result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
       result.x0 = result.cx - result.side div 2
       result.y0 = result.cy - result.side div 2
+      result.listX = result.x0
+      result.listY = result.y0
+      result.listW = result.side
+      result.listH = result.side
       gw = result.side
       gh = result.side
   let
@@ -313,8 +330,6 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
     result.rows = 1
     result.tileW = gw
     result.tileH = gh
-  result.perPage = result.cols * result.rows
-  result.pages = max(1, (count + result.perPage - 1) div result.perPage)
 
 proc isRound*(frameConfig: FrameConfig): bool =
   ## Whether the frame's panel shows only the circle inside it
@@ -324,17 +339,16 @@ proc isRound*(frameConfig: FrameConfig): bool =
 
 proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(self.entries.len, width, height, false, unit = unit)
+    switcherGrid(width, height, false, unit = unit)
   else:
-    switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
-      round = isRound(self.frameConfig), unit = unit)
+    switcherGrid(width, height, not sceneSwitcherThumbnail.isNil, round = isRound(self.frameConfig), unit = unit)
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
   ## The grid the last render drew: at the UI's scale (uiRoom), in the room
   ## it had. Inside a layout that is the hole the layout left, not the panel:
-  ## measured on the whole panel, a page held more tiles than the drawn one,
-  ## so a page turn lit a tile of the page after and the last pages could not
-  ## be reached (the reTerminal E1003 in a Windows 98 window, 2026-11-10).
+  ## measured on the whole panel, a screen held more tiles than the drawn
+  ## one, and the keys scrolled the list by the wrong amount (the reTerminal
+  ## E1003 in a Windows 98 window, 2026-11-10, when the list had pages).
   if self.roomW > 0 and self.roomH > 0:
     return self.grid(self.roomW, self.roomH, self.unit)
   let (width, height) = canvasSize(self.frameConfig)
@@ -346,6 +360,111 @@ proc indexOf(self: SceneSwitcherScene, sceneId: string): int =
     if self.entries[i].id == sceneId:
       return i
   -1
+
+# ------------------------------------------------------------- the categories
+
+proc groupName(category: string): string =
+  ## A category as the desktops' `grouped` reads it: trimmed, and "Other" in
+  ## any case the same as none ("").
+  var a = 0
+  var z = category.len
+  while a < z and category[a] in Blank:
+    inc a
+  while z > a and category[z - 1] in Blank:
+    dec z
+  result = category.substr(a, z - 1)
+  if result.len == 5:
+    var other = true
+    for i in 0 ..< 5:
+      if (ord(result[i]) or 0x20) != ord("other"[i]):
+        other = false
+    if other:
+      result.setLen(0)
+
+proc folded(s: string, i: int): int =
+  ## The byte at `i` as `toLowerCase` leaves it, for comparing: A to Z and
+  ## the Latin-1 capitals (UTF-8 C3 80 to C3 9E, but for the sign C3 97)
+  ## lowered. What other scripts' capitals the desktops lower too only
+  ## changes the order of names that differ in nothing else.
+  let c = ord(s[i])
+  if c >= ord('A') and c <= ord('Z') or c >= 0x80 and c <= 0x9E and c != 0x97 and i > 0 and s[i - 1] == '\xC3':
+    c + 32
+  else:
+    c
+
+proc before(a, b: string): bool =
+  ## Whether the category `a` goes before `b`, as `grouped` sorts them: by
+  ## the names with case aside, and by the names themselves when that ties.
+  var i = 0
+  var decided = false
+  while not decided and i < min(a.len, b.len):
+    let x = folded(a, i)
+    let y = folded(b, i)
+    if x != y:
+      result = x < y
+      decided = true
+    inc i
+  if not decided:
+    result = if a.len != b.len: a.len < b.len else: a < b
+
+proc grouped*(entries: seq[SwitcherEntry]): seq[SwitcherEntry] =
+  ## `entries` in the order the switcher shows them, which is the desktops'
+  ## `grouped` (docs/scene-layouts.md "Long lists of scenes"): each category's scenes
+  ## under it, the categories by name with case aside, then the scenes with
+  ## none (or "Other"); in the list's order within each, and the list as it
+  ## is where no scene has one. Each one's `category` becomes its group's
+  ## name, "" for Other: the first one has a category when any does.
+  var names: seq[string]
+  result = entries
+  for i in 0 ..< result.len:
+    result[i].category = groupName(result[i].category)
+    if result[i].category.len > 0 and result[i].category notin names:
+      var at = names.len
+      while at > 0 and before(result[i].category, names[at - 1]):
+        dec at
+      names.insert(result[i].category, at)
+  if names.len > 0:
+    let all = move(result)
+    result = newSeqOfCap[SwitcherEntry](all.len)
+    for name in names:
+      for entry in all:
+        if entry.category == name:
+          result.add entry
+    for entry in all:
+      if entry.category.len == 0:
+        result.add entry
+
+proc list(self: SceneSwitcherScene) =
+  ## The host's scenes, in the order they are drawn and numbered.
+  self.entries = grouped(listEntries())
+
+proc heads*(self: SceneSwitcherScene, index: int): bool =
+  ## Whether the tile at `index` starts a category, a heading above it: never
+  ## where no scene has one.
+  self.entries.len > 0 and self.entries[0].category.len > 0 and
+    (index == 0 or self.entries[index].category != self.entries[index - 1].category)
+
+type Spot* = tuple[col, top: int]
+  ## Where a tile goes in the list: its column, and its top from the list's.
+
+proc spots*(self: SceneSwitcherScene, grid: SwitcherGrid): seq[Spot] =
+  ## Every tile's place in the list, row after row, a category's tiles from
+  ## a row of their own under its heading.
+  var col = 0
+  var top = grid.y0 - grid.listY
+  for i in 0 ..< self.entries.len:
+    if self.heads(i):
+      if col > 0:
+        top += grid.tileH + grid.gap
+        col = 0
+      top += grid.headingH
+    result.add (col, top)
+    inc col
+    if col == grid.cols:
+      col = 0
+      top += grid.tileH + grid.gap
+
+# ------------------------------------------------------------------ the model
 
 proc opener(self: SceneSwitcherScene): string =
   ## The scene it was opened from (event_loop.nim hands it over), or "".
@@ -371,37 +490,59 @@ proc touch*(self: FrameScene) =
   ## scene's `drawUi`).
   self.state.put("touchedAt", newJFloat(epochTime()))
 
+proc listScroll*(): float32 =
+  ## How far down the list is scrolled, in the UI's pixels: by a finger, the
+  ## wheel or the keys, kept with the UI's input like any box's.
+  uiTarget(SceneSwitcherId, SwitcherNode).input.scrolled(ListKey)[1]
+
+proc scrollList(y: float32) =
+  ## The list scrolled to `y` (the next layout keeps it in range).
+  uiTarget(SceneSwitcherId, SwitcherNode).input.scrollTo(ListKey, 0, max(y, 0))
+
+proc reveal(self: SceneSwitcherScene, index: int) =
+  ## The list scrolled as little as it takes for the tile at `index` to
+  ## show, with its heading where it starts a category: the keys walk a list
+  ## longer than the screen, and e-paper has nothing else to follow them by.
+  let grid = self.grid()
+  let spot = self.spots(grid)[index]
+  let margin = grid.y0 - grid.listY
+  var top = spot.top - margin
+  if self.heads(index):
+    top -= grid.headingH
+  let bottom = spot.top + grid.tileH + margin
+  let y = listScroll()
+  if top.float32 < y:
+    scrollList(top.float32)
+  elif bottom.float32 > y + grid.listH.float32:
+    scrollList(float32(bottom - grid.listH))
+
 proc highlight(self: SceneSwitcherScene, index: int) =
   ## The tile at `index` (wrapping around, through the gear where there is
-  ## one) highlighted, and its page shown. The gear is on every page: the
-  ## page stays.
+  ## one) highlighted, and scrolled into sight. The gear is in the header:
+  ## the list stays.
   let count = self.entries.len + ord(self.gear)
-  if count == 0:
-    return
-  let i = ((index mod count) + count) mod count
-  if i == self.entries.len:
-    self.state.put("highlight", newJString(GearMark))
-  else:
-    self.state.put("highlight", newJString(self.entries[i].id))
-    self.state.put("page", newJInt(i div max(self.grid().perPage, 1)))
+  if count > 0:
+    let i = ((index mod count) + count) mod count
+    if i == self.entries.len:
+      self.state.put("highlight", newJString(GearMark))
+    else:
+      self.state.put("highlight", newJString(self.entries[i].id))
+      self.reveal(i)
 
-proc turnPage(self: SceneSwitcherScene, delta: int): bool {.discardable.} =
-  ## Another page (wrapping around), its first tile highlighted. False when
-  ## there is only the one.
-  let grid = self.grid()
-  if grid.pages > 1:
-    let page = ((self.state{"page"}.getInt(0) + delta) mod grid.pages + grid.pages) mod grid.pages
-    self.highlight(page * grid.perPage)
-    result = true
-
-proc showTurnedPage() =
-  ## A tap or a swipe changes nothing the dispatcher watches for them (the
-  ## contract's `tap` and `swipe` render `never`, unlike a key's or `back`'s
-  ## `if-state-changed`), so the page they turned is asked for here. Without
-  ## it the next page showed only when something else rendered: on the
-  ## reTerminal E1003 a tap on the arrow did nothing until the panel happened
-  ## to refresh (2026-11-10).
-  sendEvent(evRender, newJObject(), eoScene)
+proc screenful(self: SceneSwitcherScene, delta: int) =
+  ## The highlight a screenful of tiles on (`delta` 1) or back (-1), and the
+  ## list with it: the frame's `forward` and `back`, which a scene direction
+  ## is here (event_loop.nim), and Page Down and Up. Past the last tile it
+  ## goes to the first, and back from the first to the last.
+  let n = self.entries.len
+  if n > 0:
+    let grid = self.grid()
+    let step = max(grid.cols * grid.rows, 1)
+    let lit = min(self.highlighted(), n) # n: the gear
+    if delta > 0:
+      self.highlight(if lit >= n - 1: 0 else: min(lit + step, n - 1))
+    else:
+      self.highlight(if lit == 0: n - 1 else: max(lit - step, 0))
 
 var wentBack {.threadvar.}: bool
   ## It went back by itself (a scene picked, Close, its timeout), not merely
@@ -450,13 +591,15 @@ proc takesNoTaps*(frameConfig: FrameConfig, paper: bool): bool =
 
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
-  ## first when there is none or it is gone (then Close goes to the first).
-  self.entries = listEntries()
+  ## first when there is none or it is gone (then Close goes to the first),
+  ## and the list scrolled from its top to it.
+  self.list()
   self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
   self.gear = framePageOffered() and not self.keysOnly
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
+  scrollList(0)
   self.highlight(max(index, 0))
   self.touch()
 
@@ -476,7 +619,7 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   let steps = if action == "press": 1 elif action == "doublePress": 2 else: 0
   if steps > 0:
     if self.entries.len == 0:
-      self.entries = listEntries()
+      self.list()
     var acted = true
     case payload{"role"}.getStr()
     of "next", "down": self.highlight(self.highlighted() + steps)
@@ -492,19 +635,40 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     else: discard
 
 when not defined(frameosEmbedded):
+  proc row(self: SceneSwitcherScene, down: bool): int =
+    ## The tile a row below (or above) the highlighted one, in its column or
+    ## the last of a shorter row: a category starts a row of its own, so the
+    ## rows are the tiles' places, not their numbers. Past the last row the
+    ## tile count (the gear, or around to the first), above the first -1
+    ## (the gear, or around to the last).
+    let n = self.entries.len
+    let lit = self.highlighted()
+    if lit < 0 or lit >= n:
+      return (if down: 0 else: -1)
+    let spots = self.spots(self.grid())
+    let (col, top) = spots[lit]
+    result = if down: n else: -1
+    var rowTop = -1
+    var i = if down: lit + 1 else: lit - 1
+    while i >= 0 and i < n and (rowTop < 0 or spots[i].top == rowTop or spots[i].top == top):
+      if spots[i].top != top:
+        rowTop = spots[i].top
+        if spots[i].col <= col and (down or result < 0):
+          result = i
+      i += (if down: 1 else: -1)
+
   proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
-    ## A keyboard (Linux, the preview): the arrows walk the grid, Enter shows,
-    ## Escape goes back.
+    ## A keyboard (Linux, the preview): the arrows walk the grid, Page Down
+    ## and Up a screenful, Enter shows, Escape goes back.
     if self.entries.len == 0:
-      self.entries = listEntries()
-    let cols = self.grid().cols
+      self.list()
     case payload{"code"}.getStr()
     of "ArrowRight": self.highlight(self.highlighted() + 1)
     of "ArrowLeft": self.highlight(self.highlighted() - 1)
-    of "ArrowDown": self.highlight(self.highlighted() + cols)
-    of "ArrowUp": self.highlight(self.highlighted() - cols)
-    of "PageDown": self.turnPage(1)
-    of "PageUp": self.turnPage(-1)
+    of "ArrowDown": self.highlight(self.row(true))
+    of "ArrowUp": self.highlight(self.row(false))
+    of "PageDown": self.screenful(1)
+    of "PageUp": self.screenful(-1)
     of "Enter", "NumpadEnter", "Space": self.choose(self.highlighted())
     of "Escape", "Backspace": leave()
     else: return
@@ -518,12 +682,6 @@ when not defined(frameosEmbedded):
 # call site. Nodes are handed on (`sink`), never copied.
 
 proc txt(text: sink string): SvgNode = SvgNode(text: text)
-
-proc pageText(page, pages: int): string =
-  ## "2 / 3".
-  result.addInt(page + 1)
-  result.add " / "
-  result.addInt pages
 
 proc at(c: var string, x, y, w, h: int) =
   c.add "absolute"
@@ -551,29 +709,9 @@ proc onClick(node: sink SvgNode, handler: int): SvgNode =
   node.attrs.add(("on-click", $handler))
   node
 
-proc arrowButton(size: int, left: bool, button: string): SvgNode =
-  ## A round page arrow, its chevron in the text color.
-  var c = "shrink-0 flex items-center justify-center rounded-full"
-  c.square(size)
-  c.add button
-  result = el("div", c)
-  var markup = ChevronHead
-  if left: markup.add "15 5l-7 7 7 7"
-  else: markup.add "9 5l7 7-7 7"
-  markup.add ChevronTail
-  # Markup with no text in it: read straight into nodes, nothing to raise.
-  let chevron = parseSvgNodesFast(markup)
-  if not chevron.isNil:
-    var s = "shrink-0"
-    s.square(size * 2 div 3)
-    chevron.attrs.add(("class", s))
-    result.children.add chevron
-  # The layout theme's look for a button (ui/theme.nim).
-  result = result.role("button")
-
 proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: string): SvgNode =
-  ## The frame page's gear, round like the arrows. Lit while the keys are on
-  ## it: inverted on e-paper as a tile is, ringed on an LCD.
+  ## The frame page's gear, round. Lit while the keys are on it: inverted on
+  ## e-paper as a tile is, ringed on an LCD.
   var c = "shrink-0 flex items-center justify-center rounded-full"
   c.square(size)
   if paper and lit: c.add " bg-black text-white"
@@ -581,10 +719,10 @@ proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: s
     c.add button
     if lit: c.add " border-2 border-sky-400"
   result = el("div", c, iconNode(GearPath, size * 2 div 3, "0 0 48 48"))
-  result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 3)
+  result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 1)
 
 type TileLook = object
-  ## What every tile on the page shares, and the one at hand.
+  ## What every tile in the list shares, and the one at hand.
   paper, lit, showing: bool
   unit, border, inner, radius: int
 
@@ -650,12 +788,11 @@ proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index:
   tile.children.add row
   true
 
-proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: SwitcherGrid,
+proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid: SwitcherGrid,
     button: string): SvgNode =
-  ## The scene at `index`, in the page's `slot`.
+  ## The scene at `index`, at its `spot` in the list.
   var c: string
-  c.at(grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap),
-    grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap), grid.tileW, grid.tileH)
+  c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
   c.px("border", look.border)
   c.px("rounded", look.radius)
   c.px("p", look.inner)
@@ -721,11 +858,10 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
     result.children.add el("div", name, txt(title))
   result = result.role(if look.lit: "tileLit" else: "tile")
 
-proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
+proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
     width, size, small: int, button: string) =
-  ## A rectangular panel's header: the title, the page and its arrows, the
-  ## frame page's gear, Close; on a frame that takes no taps the title and
-  ## the page alone.
+  ## A rectangular panel's header: the title, the frame page's gear, Close;
+  ## on a frame that takes no taps the title alone.
   var c: string
   c.at(0, 0, width, grid.headerH)
   c.add " flex items-center"
@@ -736,17 +872,9 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   c = "grow truncate font-bold"
   c.px("text", size)
   header.children.add el("span", c, txt("Scenes"))
-  let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
-  if grid.pages > 1:
-    if not self.keysOnly:
-      header.children.add arrowButton(arrow, true, button).onClick(self.entries.len + 1)
-    c = "shrink-0"
-    c.px("text", small)
-    header.children.add el("span", c, txt(pageText(page, grid.pages)))
-    if not self.keysOnly:
-      header.children.add arrowButton(arrow, false, button).onClick(self.entries.len + 2)
   if self.gear:
-    header.children.add self.gearButton(arrow, paper, self.highlighted() == self.entries.len, button)
+    header.children.add self.gearButton(clamp(grid.headerH * 6 div 10, 14, 40), paper,
+      self.highlighted() == self.entries.len, button)
   if self.keysOnly:
     root.children.add header.role("bar")
     return
@@ -761,12 +889,12 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
 when not defined(frameosEmbedded):
   # No ESP32 board is round (frameos/panel_shape.nim): the firmware
   # carries the rectangular header alone.
-  proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
+  proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
       size, small: int, button: string) =
-    ## A round panel's: the tiles fill the square inside the circle, and the
-    ## four arcs around it hold the title and the page (12 o'clock), the page
-    ## arrows (9 and 3) and Close (6). Every box is cut to the chord it sits
-    ## on, so no corner leaves the circle `RoundInset` in from the rim.
+    ## A round panel's: the list fills the square inside the circle, the
+    ## title is in the arc above it (12 o'clock) and Close in the one below
+    ## (6). Every box is cut to the chord it sits on, so no corner leaves the
+    ## circle `RoundInset` in from the rim.
     let
       arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
       rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - grid.gap), 8)
@@ -774,17 +902,9 @@ when not defined(frameosEmbedded):
       titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
     var c: string
     c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
-    c.add " flex items-center justify-center"
-    c.px("gap", max(4, small div 2))
-    let title = el("div", c)
-    c = "truncate font-bold"
+    c.add " flex items-center justify-center truncate font-bold"
     c.px("text", size)
-    title.children.add el("span", c, txt("Scenes"))
-    if grid.pages > 1:
-      c = if paper: "shrink-0" else: "shrink-0 text-zinc-400"
-      c.px("text", small)
-      title.children.add el("span", c, txt(pageText(page, grid.pages))).role("muted")
-    root.children.add title
+    root.children.add el("div", c, txt("Scenes"))
     let
       closeTop = grid.y0 + grid.side + grid.gap div 2
       closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
@@ -804,38 +924,30 @@ when not defined(frameosEmbedded):
       gear.attrs[0][1].px("left", left)
       gear.attrs[0][1].px("top", closeTop)
       root.children.add gear
-    if grid.pages > 1:
-      let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
-      var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
-      # Its far corners on the circle at most.
-      while a > 12 and (grid.side div 2 + grid.gap div 2 + a) ^ 2 + (a div 2 + 1) ^ 2 > grid.radius ^ 2:
-        dec a
-      let
-        y = grid.cy - a div 2
-        left = arrowButton(a, true, button).onClick(self.entries.len + 1)
-        right = arrowButton(a, false, button).onClick(self.entries.len + 2)
-      # Placed where the circle has room for them, beside the tiles.
-      left.attrs[0][1].add " absolute"
-      left.attrs[0][1].px("left", grid.x0 - grid.gap div 2 - a)
-      left.attrs[0][1].px("top", y)
-      right.attrs[0][1].add " absolute"
-      right.attrs[0][1].px("left", grid.x0 + grid.side + grid.gap div 2)
-      right.attrs[0][1].px("top", y)
-      root.children.add left
-      root.children.add right
+
+proc heading(grid: SwitcherGrid, top: int, title: string, paper: bool, small: int): SvgNode =
+  ## A category's name over its tiles, across the list.
+  var c: string
+  c.at(grid.x0 - grid.listX, top - grid.headingH, grid.cols * (grid.tileW + grid.gap) - grid.gap,
+    grid.headingH)
+  c.add " flex items-center"
+  c.px("text", small)
+  var t = "truncate font-bold"
+  if not paper: t.add " text-zinc-400"
+  result = el("div", c, el("span", t, txt(if title.len > 0: title else: "Other")).role("muted"))
 
 proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0): SvgNode =
-  ## The switcher as a UI tree: the header (its title, the page and its
-  ## arrows, Close), or on a round panel the same around the circle, and one
-  ## page of tiles, each where switcherGrid put it. The outermost element
-  ## fills the canvas by itself (ui/layout.nim), its children placed on it.
-  ## `unit`: what its sizes are a share of (uiRoom).
+  ## The switcher as a UI tree: the list of tiles that scrolls, each where
+  ## `spots` put it, under a heading per category where the scenes have
+  ## them, and the header (its title, the gear, Close), or on a round panel
+  ## the same around the circle. The outermost element fills the canvas by
+  ## itself (ui/layout.nim), its children placed on it. `unit`: what its
+  ## sizes are a share of (uiRoom).
   self.roomW = width
   self.roomH = height
   self.unit = unit
   let
     grid = self.grid(width, height, unit)
-    page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
     lit = self.highlighted()
     size = clamp(grid.headerH * 45 div 100, 12, 32)
     small = max(size * 3 div 4, 10)
@@ -844,15 +956,25 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   # the layout's text color); an LCD's dark page covers every pixel, so a
   # press repaints only what it changed (utils/svg_frames.nim).
   result = el("div", if paper: "" else: "bg-zinc-950 text-white").role("page")
+  # The list first: its place in the tree is what its scroll is kept by
+  # (ListKey). Its tiles are placed on it, and it scrolls as far as the last
+  # one and the padding under it.
+  var c: string
+  c.at(grid.listX, grid.listY, grid.listW, grid.listH)
+  c.add " overflow-y-auto"
+  if not grid.round:
+    c.px("pb", grid.pad)
+  let list = el("div", c)
+  result.children.add list
   when defined(frameosEmbedded):
-    self.header(result, grid, page, paper, width, size, small, button)
+    self.header(result, grid, paper, width, size, small, button)
   else:
     if grid.round:
-      self.roundChrome(result, grid, page, paper, size, small, button)
+      self.roundChrome(result, grid, paper, size, small, button)
     else:
-      self.header(result, grid, page, paper, width, size, small, button)
+      self.header(result, grid, paper, width, size, small, button)
   if self.entries.len == 0:
-    var c: string
+    c = ""
     if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)
     else: c.at(0, grid.y0, width, max(height - grid.y0, 1))
     c.add " flex items-center justify-center text-center"
@@ -865,13 +987,13 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   look.inner = max(3, look.unit div 22)
   look.radius = clamp(look.unit div 12, 3, 16)
   let opener = self.opener()
-  for slot in 0 ..< grid.perPage:
-    let index = page * grid.perPage + slot
-    if index >= self.entries.len:
-      break
+  let spots = self.spots(grid)
+  for index in 0 ..< self.entries.len:
+    if self.heads(index):
+      list.children.add heading(grid, spots[index].top, self.entries[index].category, paper, small)
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
-    result.children.add self.tile(look, index, slot, grid, button)
+    list.children.add self.tile(look, index, spots[index], grid, button)
 
 const
   PaperWhite = color(1, 1, 1, 1)
@@ -930,7 +1052,7 @@ proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: []
 proc draw*(self: SceneSwitcherScene, image: Image) =
   ## One render: the list read again, laid out, drawn into `image`, and the
   ## tiles left behind for the pointer.
-  self.entries = listEntries()
+  self.list()
   if self.indexOf(self.opener()) < 0:
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
@@ -965,25 +1087,25 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
 # ------------------------------------------------------------ the scene
 
 proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
-  ## A pointer event over the tiles (ui/events.nim hit-tests it). A slow
-  ## panel hears the tap alone: the rest only moves what is pressed.
+  ## A pointer event over the switcher: ui/events.nim hit-tests it, and
+  ## scrolls the list under a finger or the wheel. A slow panel shows no
+  ## press there, and a drag of the list only where it let go.
   let tap = event == "tap"
-  if not tap and self.slow:
-    return
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
   let count = self.entries.len
   if tapped >= 0:
-    # A tile, Close, an arrow or the gear: what it did is the next picture (a
-    # switch, or the page in the state). A tap on nothing is nothing.
+    # A tile, Close or the gear: what it did is the next picture (a switch).
+    # A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
     elif tapped == count: leave()
-    elif tapped == count + 3: self.choose(count)
-    elif self.turnPage(if tapped == count + 1: -1 else: 1): showTurnedPage()
+    else: self.choose(count)
     tapped = -1
     self.touch()
   elif changed and not tap:
-    # What is pressed moved: an LCD shows it.
+    # What is pressed moved, or the list scrolled: the contract renders
+    # nothing after a pointer event, so the picture is asked for here.
+    self.touch()
     sendEvent(evRender, newJObject(), eoScene)
 
 proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
@@ -1001,20 +1123,28 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
         self.state.put(key, value)
   of "open":
     wentBack = false
+    builtInAway(self.id.string, false)
     if self.state.hasKey("away"):
       self.state.delete("away")
     self.opened()
   of "close":
-    if wentBack or not builtInScenesStay:
+    # Sent back by the dispatcher (its command again from anyone, a layout's
+    # close) is going back too.
+    let sentBack = self.state{"goneBack"}.getBool()
+    if self.state.hasKey("goneBack"):
+      self.state.delete("goneBack")
+    if wentBack or sentBack or not builtInScenesStay:
       # Done: opened again by name (a `setCurrentScene` to it), it knows no
       # scene to go back to.
       wentBack = false
+      builtInAway(self.id.string, false)
       self.forget()
     else:
       # The focus went to a window beside it (docs/scene-layouts.md
       # "Windows"): it stays open there, Close still going back where it
       # was opened from, and does not go back by itself (drawUi).
       self.state.put("away", newJBool(true))
+      builtInAway(self.id.string, true)
   of "render":
     if context.hasImage and not context.image.isNil:
       self.draw(context.image)
@@ -1022,15 +1152,10 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     self.pressed(payload)
   of evBack, evForward:
     # The frame's back and forward (a swipe in from the left or the right
-    # edge): the page before or the next one, as a swipe across the tiles.
-    self.turnPage(if context.event == evForward: 1 else: -1)
+    # edge, and a scene direction while it shows, event_loop.nim): a
+    # screenful of tiles back or on, the list with it.
+    self.screenful(if context.event == evForward: 1 else: -1)
     self.touch()
-  of "swipe":
-    # Across the tiles, as on a phone: the next page or the one before.
-    let direction = payload{"direction"}.getStr()
-    if direction == "left" or direction == "right":
-      if self.turnPage(if direction == "left": 1 else: -1): showTurnedPage()
-      self.touch()
   else:
     when not defined(frameosEmbedded):
       if context.event == "keyDown":

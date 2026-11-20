@@ -68,6 +68,20 @@ export function get(app) {
     "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
       {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
 
+# A scene that animates (every 50 ms) and counts its runs.
+proc countingPanel(id, name: string, interval: float, layout = Layout): JsonNode =
+  %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": interval,
+      "backgroundColor": "#000000"},
+    "fields": [], "apps": {}, "layout": {"sceneId": layout},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": "#ff00ff"}}},
+      {"id": "3", "type": "app", "data": {"keyword": "logic/setAsState", "config": {"stateKey": "runs", "debugLog": "false"}}},
+      {"id": "4", "type": "code", "data": {"codeJS": "(state.runs || 0) + 1", "codeArgs": [],
+        "codeOutputs": [{"name": "valueJson", "type": "json"}]}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "3", "source": "4", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/valueJson"}]}
+
 # The "SD card image" sample, as it is built: a slideshow from a folder, every
 # due run of its scene the next photo.
 let photos = getTempDir() / "frameos-windows98-photos"
@@ -151,7 +165,8 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, omarc
   panel("tests/tt-blue", "Blue", "#0000ff", Teletext),
   panel("tests/er-red", "Red", "#ff0000", EReader), panel("tests/er-green", "Green", "#00ff00", EReader),
   panel("tests/er-blue", "Blue", "#0000ff", EReader),
-  panel("tests/tl-red", "Red", "#ff0000", TerminalLayout)]
+  panel("tests/tl-red", "Red", "#ff0000", TerminalLayout),
+  countingPanel("tests/fast", "Fast", 0.05)]
 # Enough BeOS scenes for a Deskbar longer than the panel.
 for i in 0 ..< 16: allScenes.add panel("tests/be-" & $i, "Scene " & $i, "#808080", BeOS)
 setUploadedInterpretedScenes(parseInterpretedScenes($allScenes))
@@ -1753,6 +1768,8 @@ suite "the Classic Mac desktop":
   test "where only two scenes run at once, a third opened closes the one that had the focus longest ago":
     deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
     check windowLimit() == 2
+    # Windows asked for: on two at once their automatic choice is one scene.
+    desk().state["windowMode"] = %"on"
     desk().state["wins"] = %*[]
     for id in ["tests/cm-red", "tests/cm-green", "tests/cm-blue"]:
       discard focusOn(id)
@@ -1767,6 +1784,7 @@ suite "the Classic Mac desktop":
     for w in wins(): open.add w{"id"}.getStr()
     check open.sorted() == @["tests/cm-blue", "tests/cm-red"]
     check problems.len == 0
+    desk().state.delete("windowMode")
     deviceMemoryBytesOverride = 0
 
   test "the window limit counts what the panel leaves the scenes, not all of the PSRAM":
@@ -3487,6 +3505,9 @@ suite "where only two scenes run at once (an ESP32 with 8 MB)":
       desk().state["openScenes"] = %*[]
       chooseLayout(layoutId)
       discard pass()
+      # Windows asked for: on two at once their automatic choice is one scene.
+      desk().state["windowMode"] = %"on"
+      discard pass()
       check desk().id.string == layoutId
       for id in ["tests/red", "tests/green", "tests/blue"]:
         discard focusOn(id)
@@ -3581,6 +3602,11 @@ suite "a new render scale on a desktop of windows":
       for scene in hosted.values: scene.wornLayout = nil
       for id in ["tests/red", "tests/green", "tests/blue", "tests/green"]:
         discard focusOn(id)
+        if id == "tests/red":
+          discard pass()
+          # Windows asked for: at render scale 2 the desktop is 400x240, too
+          # small for windows on Automatic.
+          desk().state["windowMode"] = %"on"
         discard pass()
       discard pass()
       let before = shown()
@@ -3616,3 +3642,203 @@ suite "a new render scale on a desktop of windows":
     let copies = copiesOf("// The windows' boxes are in the desktop's pixels", [layout, macos, beos, classicMac, nextstep, os2, omarchy])
     check copies[0].len > 0
     for text in copies: check text == copies[0]
+
+suite "windows by the frame's room, and windows hidden under others":
+  # docs/scene-layouts.md "Windows": a desktop's `windowMode`, Automatic by
+  # default, is one scene at a time where the frame runs one or two (an 8 MB
+  # ESP32), and a window wholly under another is not drawn at all.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/red", "name": "Red", "windowSize": "200x120"},
+        {"id": "tests/green", "name": "Green", "windowSize": "200x120"}]
+
+  test "the windows hidden and the automatic choice are the same functions, word for word, in every desktop":
+    let hidden = copiesOf("// The windows wholly under a window above them", [layout, macos, beos, classicMac, nextstep, os2])
+    check hidden[0].len > 0
+    for text in hidden: check text == hidden[0]
+    let choice = copiesOf("// Windows, or one scene at a time in the desktop's look", [layout, macos, beos, classicMac, nextstep, os2, omarchy])
+    check choice[0].len > 0
+    for text in choice: check text == choice[0]
+    for scene in [layout, macos, beos, classicMac, nextstep, os2, omarchy, commander]:
+      var mode: JsonNode
+      for field in scene["fields"]:
+        check field["name"].getStr() != "windows"
+        if field["name"].getStr() == "windowMode": mode = field
+      check not mode.isNil and mode["value"].getStr() == "auto"
+
+  test "a window wholly under the one in front draws nothing of its scene, on every desktop that stacks them":
+    for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2]:
+      checkpoint layoutId
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(layoutId)
+      discard pass()
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      discard focusOn("tests/green")
+      discard pass()
+      let red = hosted["tests/red"]
+      check isHole(red) # side by side: drawn straight into its window
+      # Green made as big as the desktop, over red.
+      var ws = wins()
+      for w in ws:
+        if w{"id"}.getStr() == "tests/green": w["max"] = %true
+      desk().state["wins"] = ws
+      discard pass()
+      var drawn = false
+      for slot in desk().slots:
+        drawn = drawn or slot.child == red
+      check not drawn
+      check problems.len == 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "automatic is one scene where one or two run at once or the screen is under 640x480, windows elsewhere":
+    const MiB = 1024 * 1024
+    for (memory, windowed) in [(8 * MiB - 65536, false), (16 * MiB, true), (0, true)]:
+      deviceMemoryBytesOverride = memory
+      for layoutId in [Layout, MacOS, BeOS, ClassicMac, NeXT, Os2, Omarchy]:
+        checkpoint layoutId & " " & $windowLimit()
+        desk().state["openScenes"] = %*[]
+        chooseLayout(layoutId)
+        discard pass()
+        desk().state["wins"] = %*[]
+        discard focusOn("tests/red")
+        discard pass()
+        discard focusOn("tests/green")
+        discard pass()
+        let open = desk().state{"openScenes"}
+        check (not open.isNil and open.len == 2) == windowed
+        if not windowed:
+          # Asked for, they are windows all the same.
+          desk().state["windowMode"] = %"on"
+          discard pass()
+          discard focusOn("tests/red")
+          discard pass()
+          discard focusOn("tests/green")
+          discard pass()
+          check desk().state{"openScenes"}.len == 2
+          desk().state.delete("windowMode")
+        check problems.len == 0
+    deviceMemoryBytesOverride = 0
+    # And a screen of 640x480 or more, either way up: a 480x480 panel has no
+    # room for a window beside another, whatever its memory.
+    for (w, h, windowed) in [(480, 480, false), (480, 640, true), (600, 480, false)]:
+      config.width = w
+      config.height = h
+      for layoutId in [Layout, Omarchy]:
+        checkpoint layoutId & " " & $w & "x" & $h
+        desk().state["openScenes"] = %*[]
+        chooseLayout(layoutId)
+        discard pass()
+        desk().state["wins"] = %*[]
+        discard focusOn("tests/red")
+        discard pass()
+        discard focusOn("tests/green")
+        discard pass()
+        let open = desk().state{"openScenes"}
+        check (not open.isNil and open.len == 2) == windowed
+    config.width = W
+    config.height = H
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+  test "an install whose Windows switch was turned off stays one scene":
+    desk().state["openScenes"] = %*[]
+    chooseLayout(Layout)
+    desk().state["windows"] = %false
+    discard focusOn("tests/red")
+    discard pass()
+    discard focusOn("tests/green")
+    discard pass()
+    let open = desk().state{"openScenes"}
+    check open.isNil or open.len == 0
+    desk().state.delete("windows")
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+suite "a window behind another where only a few scenes run at once":
+  # Each run of a window behind another draws the whole desktop again (it is a
+  # picture): where only a few scenes run at once it runs every few seconds
+  # (scene_rhythm.WindowBehindSeconds), and on a Pi at its own pace.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/fast", "name": "Fast", "windowSize": "300x200"},
+        {"id": "tests/red", "name": "Red", "windowSize": "300x200"}]
+
+  test "an animation behind runs every few seconds there, at its own pace elsewhere":
+    for (memory, few) in [(8 * 1024 * 1024 - 65536, true), (0, false)]:
+      checkpoint $few
+      deviceMemoryBytesOverride = memory
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(Layout)
+      discard pass()
+      desk().state["windowMode"] = %"on"
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      discard focusOn("tests/fast")
+      discard pass()
+      discard focusOn("tests/red")
+      discard pass()
+      # Red in front, over half of Fast.
+      var ws = wins()
+      for w in ws:
+        if w{"id"}.getStr() == "tests/fast":
+          w["x"] = %0; w["y"] = %0; w["w"] = %300; w["h"] = %200; w["max"] = %false
+        elif w{"id"}.getStr() == "tests/red":
+          w["x"] = %150; w["y"] = %100; w["w"] = %300; w["h"] = %200; w["max"] = %false
+      desk().state["wins"] = ws
+      discard pass()
+      let fast = hosted["tests/fast"]
+      check not isHole(fast) # something is over it: a picture
+      let before = fast.state{"runs"}.getInt()
+      for i in 1 .. 20:
+        clock += 0.1
+        discard pass()
+      let ran = fast.state{"runs"}.getInt() - before
+      checkpoint "ran " & $ran
+      if few: check ran <= 1
+      else: check ran >= 10
+      check problems.len == 0
+    deviceMemoryBytesOverride = 0
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+suite "one scene at a time, a window closed or put away (each desktop's arrive and reopen)":
+  test "are the same functions, word for word, in every desktop of windows with one scene at a time":
+    for start in ["// One scene at a time (windows off), the window around", "function reopen(app, keys) {"]:
+      let copies = copiesOf(start, [layout, macos, beos, classicMac, nextstep, os2])
+      check copies[0].len > 0
+      for text in copies: check text == copies[0]
+
+  test "a scene chosen shows its window again, and the focus come back or a built-in scene over it leave it be":
+    let fn = copiesOf("// One scene at a time (windows off), the window around", [layout])[0] & "\n}\n"
+    proc after(frame, state: string): JsonNode =
+      let scene = FrameScene(id: "tests/probe".SceneId, frameConfig: config, state: parseJson(state), logger: logger())
+      let owner = AppRoot(nodeId: 1.NodeId, nodeName: "probe", scene: scene, frameConfig: config)
+      let runtime = newJsAppRuntime(category = "data", outputType = "image",
+        source = fn & "export function get(app) {\n  arrive({ frame: " & frame & ", state: app.state }, ['minimized', 'closed'])\n  return null\n}\n",
+        sourceName = "app.tsx")
+      discard runtime.get(owner, %*{}, ExecutionContext(scene: scene, event: "render", payload: %*{}, loopIndex: 0,
+        loopKey: ".", nextSleep: -1))
+      scene.state
+    # Another scene chosen (the list, a key, the API): shown.
+    check after("{ sceneId: 'b' }", """{"last": "a", "minimized": true, "closed": true}""") ==
+      %*{"last": "b", "minimized": false, "closed": false}
+    # The same scene picked in the list: shown.
+    check after("{ sceneId: 'a' }", """{"last": "system/sceneSwitcher", "closed": true}""") ==
+      %*{"last": "a", "closed": false}
+    # The list itself over it, and the list gone back to it by itself: as it was.
+    check after("{ sceneId: 'system/sceneSwitcher', systemScene: true }", """{"last": "a", "closed": true}""") ==
+      %*{"last": "system/sceneSwitcher", "closed": true}
+    check after("{ sceneId: 'a', wentBack: true }", """{"last": "system/sceneSwitcher", "closed": true}""") ==
+      %*{"last": "a", "closed": true}
+    # No switch: nothing changes.
+    check after("{ sceneId: 'a' }", """{"last": "a", "minimized": true}""") == %*{"last": "a", "minimized": true}
