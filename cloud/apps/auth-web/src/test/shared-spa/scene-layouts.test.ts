@@ -108,6 +108,8 @@ describe("what can be a layout", () => {
       "Front page",
       "Gallery wall",
       "Polaroid",
+      "reTerminal",
+      "reTerminal Sticky",
       "Side rail",
       "Teletext",
       "Terminal",
@@ -126,7 +128,19 @@ describe("what can be a layout", () => {
       ["Desktops", ["BeOS", "Classic Mac", "Commander", "macOS", "NeXTSTEP", "Omarchy", "OS/2 Warp", "Tiling", "Windows 98"]],
       [
         "Full screen",
-        ["Bottom bar", "E-reader", "Front page", "Gallery wall", "Polaroid", "Side rail", "Teletext", "Terminal", "Top bar"],
+        [
+          "Bottom bar",
+          "E-reader",
+          "Front page",
+          "Gallery wall",
+          "Polaroid",
+          "reTerminal",
+          "reTerminal Sticky",
+          "Side rail",
+          "Teletext",
+          "Terminal",
+          "Top bar",
+        ],
       ],
     ]);
   });

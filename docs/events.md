@@ -540,7 +540,7 @@ no `action` meaning `press`. A `gpio` that names no edge is dropped. `role` is w
 `menu`, `refresh`. A store scene filters on `role: "next"` instead of a
 silkscreen label: a frame configures one per button (`gpioButtons[].role`,
 Linux frames), and `buttons.roleByLabel` is the default for a button without
-one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `KEY1` next,
+one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `AI` primary, `KEY1` next,
 `LEFT` prev, `RIGHT` next, `OK` primary, `HOME` menu, `EXIT` back, …). `wake:
 true` marks the `down` that booted an ESP32 out of deep sleep, and the
 `press`, `doublePress` or `longPress` it becomes: that press is a press like

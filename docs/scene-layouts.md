@@ -32,7 +32,7 @@ to the AI. The runtime does not check: a layout with no yield shows no content.
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
 `Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`, `OS/2 Warp`, `Omarchy`,
 `Commander`, `Teletext`, `E-reader`, `Polaroid`, `Front page`, `Terminal`,
-`Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
+`Gallery wall`, `reTerminal Sticky`, `reTerminal` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same
@@ -128,7 +128,9 @@ workspace keep showing what each scene was given.
 
 **What a layout can ask.** `app.frame.sceneName` is the name of the scene it
 wraps (its own, shown on its own), `app.frame.wifiRssi` and
-`app.frame.batteryPercent` are what the frame knows, and its handlers can open
+`app.frame.batteryPercent` are what the frame knows, `app.frame.eventMap` is
+what the frame's keys and swipes do whatever scene shows (the frame's event
+map, undefined in the preview of a scene: keep a default), and its handlers can open
 the built-in screens with `frameos.dispatch('sceneSwitcher')`,
 `frameos.dispatch('sceneSettings')` and `frameos.dispatch('sceneSettings', {page:
 'frame'})` for the frame's own page, which is all the Windows 98 taskbar's Start,
@@ -568,3 +570,42 @@ to every scene wearing that layout.
 where a render is free, a worn layout renders when its chrome or its scene is
 due; on e-paper or a deep-sleeping frame the scene's own interval stays the
 fastest it renders, whatever the chrome's clock says.
+
+## Made for a device: the reTerminal layouts
+
+Two samples are made for one family of frames, and know where its keys are
+on the case (Seeed's drawings), so what a key does is written beside the key.
+Each reads `app.frame.eventMap` for what the keys do, and falls back to the
+map the planes give that board. The keys' places are in one table at the top
+of each app (as a share of the glass, the panel unturned), and the side they
+are on follows `app.frame.rotate`; a "Keys are on the" field overrides it.
+Both give the settings the whole panel, and draw only when the scene draws:
+on e-paper the chrome never wakes the frame sooner than its scene would
+(`scene_rhythm.nim`).
+
+- **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
+  upright, its panel turned 270, with the AI, UP and DOWN keys on its right
+  edge. The scene gets the whole glass. When the scene list is open (a swipe up,
+  or AI pressed twice: the layout's own binding, while the frame's map leaves
+  that free), the layout turns it into a home screen. That screen has the time
+  and the date, the battery and the signal, the swipes and a tab beside each
+  key with what a press does in the list: UP and DOWN move, AI opens. AI's
+  `primary` role is the contract's (`buttons.roleByLabel`). "Around the
+  scene" also offers a rail beside the keys. The rail has a tab per key with
+  what holding it does (a tap on a tab does the same where the glass can),
+  plus Scenes, Settings, the time and the battery. The third choice is a
+  status bar.
+- **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
+  E1004, the model read off the panel (size and colour) or set. A bar along
+  the edge with the keys holds the scene's name, the signal, the battery and
+  the time it was drawn, with a cap under each key saying what holding it
+  does. On the E1001-E1003 the keys are on the top edge, right of centre, and
+  seen from the front the one labelled RIGHT is the leftmost. On the E1004 the
+  touch keys are under the picture. The green key pressed twice opens the
+  scene list, where the caps say what a press does there. On the touch E1003
+  the name, the gear and the status are buttons too.
+
+The pictures in their pull request were made with
+`frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board
+(size, canvas, pixel format, event map) and dithered to its panel.
+

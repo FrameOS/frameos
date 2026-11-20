@@ -558,6 +558,7 @@ proc buttonRoleForLabel*(upperLabel: string): string =
   of "KEY2": "prev"
   of "KEY3": "next"
   of "BUTTON": "primary"
+  of "AI": "primary"
   of "POWER": "primary"
   of "OK": "primary"
   of "ENTER": "primary"

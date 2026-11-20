@@ -359,6 +359,11 @@ interface FrameOSApp {
      * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
+    /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
+     * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
+     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * the frame has none (the preview of a scene) (FrameOS 2026.11.13+; undefined before). */
+    eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
   initialized?: boolean;
   log(...args: any[]): void;

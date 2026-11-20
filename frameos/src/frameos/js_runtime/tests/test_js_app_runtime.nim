@@ -534,6 +534,32 @@ suite "js app runtime":
     check payload["debug"].getBool() == true
     check payload["embedded"].getBool() == false
 
+  test "app.frame.eventMap is the frame's event map, undefined without one":
+    # A layout labels the keys beside the glass by what the frame's map does
+    # with them (the reTerminal layouts).
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-event-map".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 12.NodeId, nodeName: "jsEventMap", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app) {
+          const map = app.frame.eventMap
+          const held = Array.isArray(map) ? map.find((rule) => rule.match?.action === 'longPress') : null
+          return { listed: Object.keys(app.frame).includes('eventMap'), kind: typeof map, emit: held ? held.emit : null }
+        }"""
+    )
+    config.eventMap = nil
+    var payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["listed"].getBool()
+    check payload["kind"].getStr() == "undefined"
+    config.eventMap = %*[{"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}}]
+    payload = runtime.get(owner, %*{}, context).asJson()
+    check payload["kind"].getStr() == "object"
+    check payload["emit"].getStr() == "voiceChat"
+
   test "maps JS app runtime errors to original source lines":
     let config = testConfig()
     var logged: seq[JsonNode] = @[]

@@ -719,6 +719,11 @@ export function get(app) {
 - `app.frame.sceneName` is the name of the scene it wraps. `app.frame.wifiRssi`
   and `app.frame.batteryPercent` are undefined on a frame that cannot tell: check
   first and draw nothing then.
+- `app.frame.eventMap` is what the frame's keys and swipes do whatever scene
+  shows (`{event, match, emit, as}` rules: a `button` rule's `match` names the
+  key's `label` and its `action`, `longPress` for a hold). A layout that labels
+  the keys beside the glass reads it, and keeps a default for a frame that has
+  none (the preview).
 - Handlers open the frame's own screens: `frameos.dispatch('sceneSwitcher')` the
   scene list, `frameos.dispatch('sceneSettings')` the settings of the scene
   showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
@@ -1222,6 +1227,11 @@ interface FrameOSApp {
      * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
+    /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
+     * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
+     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * the frame has none (the preview of a scene) (FrameOS 2026.11.13+; undefined before). */
+    eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
   initialized?: boolean;
   log(...args: any[]): void;

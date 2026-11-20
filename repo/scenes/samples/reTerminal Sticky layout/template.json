@@ -1,0 +1,10 @@
+{
+  "name": "reTerminal Sticky layout",
+  "description": "Made for the Seeed reTerminal Sticky. The scene fills the glass. The scene list becomes a home screen with the time, the date, the battery and the signal, and a tab beside each key saying what it does. Swipe up for the list and down for the settings. Double-press AI for the list. Or pick a rail of buttons beside the keys, or a status bar.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.13"
+}

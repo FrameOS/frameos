@@ -2221,6 +2221,15 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not windowSceneListing.isNil and limit > 0:
       return nimIntToJS(ctx, limit.int32)
     return jsUndefSentinel(ctx)
+  of "eventMap":
+    # The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    # map"): what its keys and swipes do whatever scene shows, for a layout
+    # that labels the keys beside the glass. Undefined with none (the
+    # preview of a scene, a frame never given one).
+    let rules = e.owner.frameConfig.eventMap
+    if not rules.isNil and rules.kind == JArray:
+      return jsonToJS(ctx, rules)
+    return jsUndefSentinel(ctx)
   of "theme":
     # The theme of the desktop around the frame's scene (ui/theme.nim), for
     # what an element's `look` cannot reach: an SVG's fill, a mask in the
@@ -2301,7 +2310,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme"]
+      "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")

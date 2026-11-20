@@ -1066,6 +1066,7 @@ export const buttonRoleByLabel: Record<string, string> = {
   "KEY2": "prev",
   "KEY3": "next",
   "BUTTON": "primary",
+  "AI": "primary",
   "POWER": "primary",
   "OK": "primary",
   "ENTER": "primary",

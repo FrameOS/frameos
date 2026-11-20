@@ -847,7 +847,8 @@
     "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
     "roleByLabel": {
       "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",
-      "KEY3": "next", "BUTTON": "primary", "POWER": "primary", "OK": "primary", "ENTER": "primary",
+      "KEY3": "next", "BUTTON": "primary", "AI": "primary",
+      "POWER": "primary", "OK": "primary", "ENTER": "primary",
       "SELECT": "primary", "HOME": "menu", "MENU": "menu", "EXIT": "back", "BACK": "back", "NEXT": "next",
       "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "refresh"
     },
