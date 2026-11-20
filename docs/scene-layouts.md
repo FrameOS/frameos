@@ -482,7 +482,13 @@ any picture at all ran the whole desktop on every pass of the window in front:
 24 without windows (the hardware bench, 2026-11-19). And a window wholly under
 another, the one in front or one above it, draws nothing of its scene
 (`hiddenUnder`, the same text in the six desktops that stack windows): its
-scene stays open and running, and draws again when it shows.
+scene stays open and running, and draws again when it shows. Where only a few
+scenes run at once (an ESP32, `app.frame.windows`), a window behind another runs
+at most every five seconds (`scene_rhythm.WindowBehindSeconds`), whatever its
+own interval: each of its runs is the whole desktop drawn again, and an
+animation behind took the window in front from 20 frames a second to 1 on the
+SenseCAP Indicator. Brought to the front, it runs at its own pace at once (the
+switch starts a fresh pass). A Pi and the browser keep every window's own pace.
 
 **Windows or one scene** (`windowMode`, every desktop of windows): Automatic,
 On or Off. Off, the desktop shows the frame's scene alone in its look, one

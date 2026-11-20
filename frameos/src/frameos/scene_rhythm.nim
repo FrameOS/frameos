@@ -67,6 +67,13 @@ const
     ## A panel already overdue asks for the next pass now; 0 would mean "no
     ## opinion" to the hosts.
   MaxCanvasMarks = 4
+  WindowBehindSeconds* = 5.0
+    ## Where only a few scenes run at once (app.frame.windows: an ESP32), a
+    ## window behind another runs at most this often. It is a picture: each
+    ## of its runs draws the whole desktop again around it (its JavaScript, its
+    ## tree, its raster), which on a SenseCAP Indicator took the window in
+    ## front from 20 frames a second to 1 while an animation ran behind it
+    ## (2026-11-19). In front it runs at its own pace again.
 
 type CanvasMark = object
   canvas: Image
@@ -571,13 +578,14 @@ proc rhythmRestore*(scene: FrameScene, image: Image) =
     copyPixels(image, c.copy)
 
 proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: Image,
-    nextSleep: float) =
+    nextSleep: float, floor = 0.0) =
   ## After `scene` ran for a scene node: schedule it (a due run only), and
   ## keep what it drew if it will not be due again by the next pass and the
   ## canvas will not keep it for us. `nextSleep` is what its run set (-1:
   ## nothing), which means "this scene next renders in N seconds" and never
   ## reaches the scene drawing it. Nothing `given` (a `<Scene>`, a layout's
-  ## chrome): the schedule alone.
+  ## chrome): the schedule alone. `floor`: the soonest it may run again,
+  ## whatever it asks (a window behind another, WindowBehindSeconds).
   let r = scene.rhythm
   if r.isNil:
     return
@@ -585,7 +593,7 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
   if decision == rdRun and r.scheduledPass != passId:
     r.scheduledPass = passId
     let interval = if scene.layoutPaced: contentInterval(scene) else: scene.refreshInterval
-    let wait = max(if nextSleep >= 0: nextSleep else: interval, 0.0)
+    let wait = max(if nextSleep >= 0: nextSleep else: interval, floor)
     r.interval = wait
     r.dueAt = passStart + wait
   if given.isNil:

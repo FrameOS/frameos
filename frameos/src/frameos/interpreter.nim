@@ -954,6 +954,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   var
     child: FrameScene
     asItIs = yielded # the scene itself, not a copy: props do not set its state
+    hostWindow = false # one of the frame's own scenes, in a window
   if yielded:
     child = yieldScene
     if child.isNil or child == owner:
@@ -962,6 +963,7 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     if child.isNil:
       return nil
     asItIs = true
+    hostWindow = true
   else:
     if sceneId == owner.id.string:
       return nil
@@ -1042,7 +1044,10 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
   rhythmLeaveChild(saved)
   child.repainting = false
   if due:
-    rhythmAfterRun(child, rdRun, nil, nil, inner.nextSleep)
+    # A window behind another, where only a few scenes run at once: at most
+    # every few seconds, as each of its runs draws the whole desktop again.
+    rhythmAfterRun(child, rdRun, nil, nil, inner.nextSleep,
+      floor = if hostWindow and windowLimit() > 0: WindowBehindSeconds else: 0.0)
   if not r.embedImage.isNil or embedBytesAllowed(image.byteSize):
     if r.embedImage.isNil:
       r.embedImage = image

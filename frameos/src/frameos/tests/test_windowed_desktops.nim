@@ -68,6 +68,20 @@ export function get(app) {
     "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
       {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
 
+# A scene that animates (every 50 ms) and counts its runs.
+proc countingPanel(id, name: string, interval: float, layout = Layout): JsonNode =
+  %*{"id": id, "name": name, "settings": {"execution": "interpreted", "refreshInterval": interval,
+      "backgroundColor": "#000000"},
+    "fields": [], "apps": {}, "layout": {"sceneId": layout},
+    "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+      {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": "#ff00ff"}}},
+      {"id": "3", "type": "app", "data": {"keyword": "logic/setAsState", "config": {"stateKey": "runs", "debugLog": "false"}}},
+      {"id": "4", "type": "code", "data": {"codeJS": "(state.runs || 0) + 1", "codeArgs": [],
+        "codeOutputs": [{"name": "valueJson", "type": "json"}]}}],
+    "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"},
+      {"id": "2", "source": "2", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+      {"id": "3", "source": "4", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/valueJson"}]}
+
 # The "SD card image" sample, as it is built: a slideshow from a folder, every
 # due run of its scene the next photo.
 let photos = getTempDir() / "frameos-windows98-photos"
@@ -151,7 +165,8 @@ var allScenes = %*[layout, tiling, macos, beos, classicMac, nextstep, os2, omarc
   panel("tests/tt-blue", "Blue", "#0000ff", Teletext),
   panel("tests/er-red", "Red", "#ff0000", EReader), panel("tests/er-green", "Green", "#00ff00", EReader),
   panel("tests/er-blue", "Blue", "#0000ff", EReader),
-  panel("tests/tl-red", "Red", "#ff0000", TerminalLayout)]
+  panel("tests/tl-red", "Red", "#ff0000", TerminalLayout),
+  countingPanel("tests/fast", "Fast", 0.05)]
 # Enough BeOS scenes for a Deskbar longer than the panel.
 for i in 0 ..< 16: allScenes.add panel("tests/be-" & $i, "Scene " & $i, "#808080", BeOS)
 setUploadedInterpretedScenes(parseInterpretedScenes($allScenes))
@@ -3742,6 +3757,56 @@ suite "windows by the frame's room, and windows hidden under others":
     let open = desk().state{"openScenes"}
     check open.isNil or open.len == 0
     desk().state.delete("windows")
+    desk().state["openScenes"] = %*[]
+    chooseLayout("")
+    discard pass()
+
+suite "a window behind another where only a few scenes run at once":
+  # Each run of a window behind another draws the whole desktop again (it is a
+  # picture): where only a few scenes run at once it runs every few seconds
+  # (scene_rhythm.WindowBehindSeconds), and on a Pi at its own pace.
+  setup:
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      %*[{"id": "tests/fast", "name": "Fast", "windowSize": "300x200"},
+        {"id": "tests/red", "name": "Red", "windowSize": "300x200"}]
+
+  test "an animation behind runs every few seconds there, at its own pace elsewhere":
+    for (memory, few) in [(8 * 1024 * 1024 - 65536, true), (0, false)]:
+      checkpoint $few
+      deviceMemoryBytesOverride = memory
+      discard focusOn("tests/red")
+      desk().state["openScenes"] = %*[]
+      chooseLayout(Layout)
+      discard pass()
+      desk().state["windowMode"] = %"on"
+      desk().state["boxes"] = %*{}
+      desk().state["wins"] = %*[]
+      discard pass()
+      discard focusOn("tests/fast")
+      discard pass()
+      discard focusOn("tests/red")
+      discard pass()
+      # Red in front, over half of Fast.
+      var ws = wins()
+      for w in ws:
+        if w{"id"}.getStr() == "tests/fast":
+          w["x"] = %0; w["y"] = %0; w["w"] = %300; w["h"] = %200; w["max"] = %false
+        elif w{"id"}.getStr() == "tests/red":
+          w["x"] = %150; w["y"] = %100; w["w"] = %300; w["h"] = %200; w["max"] = %false
+      desk().state["wins"] = ws
+      discard pass()
+      let fast = hosted["tests/fast"]
+      check not isHole(fast) # something is over it: a picture
+      let before = fast.state{"runs"}.getInt()
+      for i in 1 .. 20:
+        clock += 0.1
+        discard pass()
+      let ran = fast.state{"runs"}.getInt() - before
+      checkpoint "ran " & $ran
+      if few: check ran <= 1
+      else: check ran >= 10
+      check problems.len == 0
+    deviceMemoryBytesOverride = 0
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()
