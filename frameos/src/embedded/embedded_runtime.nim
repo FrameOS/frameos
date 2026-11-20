@@ -677,6 +677,7 @@ proc makeRoomForScenes*(whole: bool) =
   else:
     return
   clearCoverageCache()
+  clearGlyphCache()
   when defined(memProbe): memProbe("  makeRoomForScenes: old scene dropped")
 
 proc loadSceneInputs(inputs: seq[FrameSceneInput]): int

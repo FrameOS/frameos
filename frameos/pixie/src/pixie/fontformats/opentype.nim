@@ -1,4 +1,4 @@
-import algorithm, chroma, flatty/binny, flatty/encode, math, ../common, ../paths,
+import algorithm, bumpy, chroma, flatty/binny, flatty/encode, math, ../common, ../paths,
     strutils, tables, unicode, vmath
 
 ## See https://docs.microsoft.com/en-us/typography/opentype/spec/
@@ -456,7 +456,6 @@ type
     cpal*: CpalTable
     cblc*: CblcTable
     sbix*: SbixTable
-    glyphPaths: Table[Rune, Path]
     colorGlyphLayers: Table[Rune, seq[ColorGlyphLayer]]
 
 when defined(release):
@@ -2873,11 +2872,41 @@ proc parseGlyph(opentype: OpenType, rune: Rune): Path {.inline.} =
 proc getGlyphPath*(
   opentype: OpenType, rune: Rune
 ): Path {.raises: [PixieError].} =
-  if rune notin opentype.glyphPaths:
-    let path = opentype.parseGlyph(rune)
-    path.transform(scale(vec2(1, -1)))
-    opentype.glyphPaths[rune] = path
-  opentype.glyphPaths.getOrDefault(rune, nil) # Never actually returns nil
+  ## The rune's outline in font units, y down: read from the font every time,
+  ## and the caller's to keep or change. It was kept per rune for good, a KB
+  ## or so a glyph and every glyph a frame ever drew; a text drawn again is
+  ## drawn from the glyph cache (paths.nim), which keeps coverage, not
+  ## outlines, and reading a glyph is a microsecond.
+  result = opentype.parseGlyph(rune)
+  result.transform(scale(vec2(1, -1)))
+
+proc glyphBox*(opentype: OpenType, rune: Rune, box: var Rect): bool {.raises: [].} =
+  ## The rune's bounding box as its glyf header states it, in font units, y
+  ## down like getGlyphPath: what a glyph path's bounds are made of without
+  ## reading its outline. False where there is none to read (a CFF or bitmap
+  ## font: outline it); true with an empty box for a glyph with no outline.
+  box = rect(0, 0, 0, 0)
+  if opentype.glyf == nil or opentype.cff != nil:
+    return false
+  let glyphId = opentype.getGlyphId(rune).int
+  if glyphId >= opentype.glyf.offsets.len:
+    return false
+  let glyphOffset = opentype.glyf.offsets[glyphId]
+  if glyphId + 1 < opentype.glyf.offsets.len and
+      glyphOffset == opentype.glyf.offsets[glyphId + 1]:
+    return true
+  let i = glyphOffset.int - opentype.bufBase
+  if i < 0 or i + 10 > opentype.buf.len:
+    return false
+  let
+    xMin = opentype.buf.readInt16(i + 2).swap().float32
+    yMin = opentype.buf.readInt16(i + 4).swap().float32
+    xMax = opentype.buf.readInt16(i + 6).swap().float32
+    yMax = opentype.buf.readInt16(i + 8).swap().float32
+  if xMax < xMin or yMax < yMin:
+    return false
+  box = rect(xMin, -yMax, xMax - xMin, yMax - yMin)
+  true
 
 proc getColorGlyphLayers*(
   opentype: OpenType, rune: Rune

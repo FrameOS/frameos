@@ -612,6 +612,11 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     # the geometry of a UI's unchanged elements was most of a repaint
     # (docs/perf-todo.md). Let go with the rest when render memory is short.
     coverageCacheBudget = 256 * 1024
+    # Text is drawn from pixie's glyph cache: each glyph's coverage at its
+    # size and quarter-pixel offset, four bits a pixel, and nothing else of
+    # it (paths.nim, docs/jsx-ui.md "Text and fonts"). A UI's letters at two
+    # or three sizes are a few hundred small masks.
+    glyphCacheBudget = 64 * 1024
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
