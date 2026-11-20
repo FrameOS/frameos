@@ -282,6 +282,48 @@ block:
   doAssert maxDiff(plain, cached) <= 64 + tolerance("rgbx"), $maxDiff(plain, cached)
   doAssert differing(plain, cached, by = 16 + tolerance("rgbx")) <= plain.width * plain.height div 100
 
+# A render larger than the budget: with a pass per render, the glyphs that fit
+# stay and the rest are drawn from masks made and let go; plain LRU puts out
+# each glyph just before it is drawn again and keeps nothing a render can use.
+# Last: a pass, once started, stays on for the thread.
+block:
+  const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  var paths: seq[Path]
+  for c in letters:
+    paths.add typeface.glyphPath(Rune(c), 24)
+  proc render(image: Image) =
+    for i, path in paths:
+      image.fillPath(path, rgba(0, 0, 0, 255), translate(vec2(10 + float32(i mod 13) * 24, 30 + float32(i div 13) * 28)))
+  glyphCacheBudget = 256 * 1024
+  clearGlyphCache()
+  let whole = make("gray4")
+  whole.render()
+  doAssert glyphCacheEntries() == letters.len
+  let needs = glyphCacheUsedBytes()
+
+  glyphCacheBudget = needs div 2
+  clearGlyphCache()
+  for i in 0 ..< 3:
+    glyphCacheHits = 0
+    glyphCacheMisses = 0
+    make("gray4").render()
+    doAssert glyphCacheUsedBytes() <= glyphCacheBudget
+  doAssert glyphCacheHits == 0, "plain LRU, a render over the budget: " & $glyphCacheHits
+
+  clearGlyphCache()
+  var last: Image
+  for i in 0 ..< 3:
+    newGlyphCachePass()
+    glyphCacheHits = 0
+    glyphCacheMisses = 0
+    last = make("gray4")
+    last.render()
+    doAssert glyphCacheUsedBytes() <= glyphCacheBudget
+  doAssert glyphCacheHits >= letters.len div 3, "with passes: " & $glyphCacheHits & " hits"
+  doAssert glyphCacheHits + glyphCacheMisses == letters.len
+  # A glyph drawn from a mask not kept paints what a kept one does.
+  doAssert maxDiff(whole, last) == 0
+
 glyphCacheBudget = 0
 clearGlyphCache()
 echo "glyph cache: ok"

@@ -766,8 +766,10 @@
   stays in memory (no per-glyph path tables, no outline cache on the
   typeface). A new way to draw text goes through `fillText` or `glyphPath`,
   never a run's outline made per render; the cache stays the render
-  thread's (`{.threadvar.}`), budgeted (64 KB on an ESP32) and emptied with
-  the coverage cache when render memory is short. The built-in face is an
+  thread's (`{.threadvar.}`), budgeted (on an ESP32 by the panel's area,
+  64 KB at 800x480 up to 256 KB, with a pass per render so a render over the
+  budget keeps what fits) and emptied with the coverage cache when render
+  memory is short. The built-in face is an
   indexed font read where it lies (`assets/compiled/fonts/Ubuntu-Regular.fosf`,
   pixie's `fontformats/indexedfont.nim`): after `generate_embedded_font.py`
   run `tools/generate_indexed_font.py` (its `--check` is in the backend

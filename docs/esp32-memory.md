@@ -276,8 +276,9 @@ ESP32); and the coverage cache kept 8-bit masks of those paths, each with a
 row table and a 96-byte header. Now a glyph is one entry of pixie's glyph
 cache (`docs/jsx-ui.md` "The glyph cache"): its coverage at its size and
 quarter pixel, trimmed, four bits a pixel, plus 48 bytes counted for the
-entry, within 64 KB on an ESP32. Nothing of an outline outlives the fill
-that needed it.
+entry, within 64 KB on an 800x480 ESP32 (more on a larger panel, by its
+area, up to 256 KB: `embedded_main.nim`). Nothing of an outline outlives the
+fill that needed it.
 
 A home panel's UI (eight cards, ~300 glyphs at four sizes) laid out and drawn
 into a 480x480 565 canvas with the ESP32's budgets, 200 taps, on a 64-bit

@@ -615,8 +615,14 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     # Text is drawn from pixie's glyph cache: each glyph's coverage at its
     # size and quarter-pixel offset, four bits a pixel, and nothing else of
     # it (paths.nim, docs/jsx-ui.md "Text and fonts"). A UI's letters at two
-    # or three sizes are a few hundred small masks.
-    glyphCacheBudget = 64 * 1024
+    # or three sizes are a few hundred small masks at 800x480; the letters
+    # grow with the panel (the E1003's layout and scene: 69-83 KB at
+    # 1872x1404), so the budget does too, up to 256 KB. Let go with the
+    # rest when render memory is short (utils/memory.nim).
+    # In floats: an int is 32 bits here, and 64 KB times the E1003's pixels
+    # overflowed it (the runtime's init failed on the first test build).
+    glyphCacheBudget = clamp(int(64.0 * 1024.0 * frameWidth.float * frameHeight.float / (800.0 * 480.0)),
+      64 * 1024, 256 * 1024)
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
@@ -769,6 +775,7 @@ proc fos_nim_render_impl(
     # (frameos/render_probe.nim), the measurement docs/perf-todo.md is paced by.
     probeOn = debugEnabled()
     fos_render_breathe_reset()
+    newGlyphCachePass() # what this render draws stays over what it would put out
     let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
@@ -893,6 +900,7 @@ proc fos_nim_render_alloc_impl(
     # e-paper panel, a sixteen-grey one drawing in its buffer), as on the
     # LCD path above; without it an e-paper render said only its total.
     probeOn = debugEnabled()
+    newGlyphCachePass() # what this render draws stays over what it would put out
     let cacheAtStart = probeBegin()
     # Where the canvas is the panel buffer (a sixteen-grey panel, or the head
     # of a colour panel's 565 canvas, main.c frameos_nim_share_canvas) the

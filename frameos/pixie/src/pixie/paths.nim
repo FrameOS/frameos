@@ -3302,6 +3302,13 @@ proc fillFromCoverageCache(
 # most 1/8 px from where it was put. Least recently used out first, within
 # `glyphCacheBudget` bytes (data plus GlyphEntryBytes an entry); 0 = off,
 # which is pixie's default: the host sets it per render thread.
+#
+# A host that starts a pass per render (`newGlyphCachePass`) gets a cache that
+# a render larger than the budget does not empty: a miss never puts out a
+# glyph the same pass drew. Plain LRU loses every glyph to the render that
+# needs a few more than fit (each letter goes just before it is drawn again,
+# the E1003's layout: 3 hits in 62 at 64 KB, 2026-11-20); with passes the
+# glyphs that fit stay, and the rest are drawn from masks made and let go.
 
 type
   GlyphKey = object
@@ -3315,6 +3322,7 @@ type
     x0, y0: int32 # the mask's top left, relative to the glyph's whole-pixel origin
     w, h: int32
     newer, older: int32 # the LRU list, -1 at its ends
+    pass: uint32 # the pass that last drew it (newGlyphCachePass)
     chain: int32 # the next entry in its bucket, or in the free list; -1: none
     data: seq[uint8] # rows of (w + 1) div 2 bytes, the left pixel in the low nibble
 
@@ -3339,6 +3347,7 @@ var
   glyphLive {.threadvar.}: int
   glyphCacheBytes {.threadvar.}: int
   glyphRow {.threadvar.}: seq[uint8] # one row's coverage, unpacked for the blit
+  glyphPass {.threadvar.}: uint32 # 0: no passes, plain LRU
 
 var glyphOutliner*: GlyphOutliner
   ## Set once by fonts.nim: how a glyph path's outline is made.
@@ -3367,6 +3376,13 @@ proc clearGlyphCache*() {.raises: [].} =
   glyphRow.setLen(0)
   glyphLive = 0
   glyphCacheBytes = 0
+
+proc newGlyphCachePass*() {.raises: [].} =
+  ## A render begins: what it draws from now on is kept over what an earlier
+  ## render drew, and never put out for a glyph drawn later in it.
+  inc glyphPass
+  if glyphPass == 0:
+    glyphPass = 1
 
 proc glyphCacheUsedBytes*(): int {.raises: [].} =
   glyphCacheBytes
@@ -3436,9 +3452,10 @@ proc findGlyph(key: GlyphKey): int32 =
   while result >= 0 and glyphMasks[result].key != key:
     result = glyphMasks[result].chain
 
-proc keepGlyph(mask: sink GlyphMask): int32 =
+proc keepGlyph(mask: var GlyphMask): int32 =
   ## Takes `mask` in as the newest entry, letting the oldest go first while
-  ## it would not fit.
+  ## it would not fit; -1 (and `mask` left as it is) when that would put out
+  ## a glyph this pass drew.
   let bytes = mask.data.len + GlyphEntryBytes
   if glyphBuckets.len == 0:
     glyphMasks.setLen(0)
@@ -3449,14 +3466,17 @@ proc keepGlyph(mask: sink GlyphMask): int32 =
     glyphCacheBytes = 0
     rehashGlyphs(64)
   while glyphOldest >= 0 and glyphCacheBytes + bytes > glyphCacheBudget:
+    if glyphPass != 0 and glyphMasks[glyphOldest].pass == glyphPass:
+      return -1
     dropOldestGlyph()
+  mask.pass = glyphPass
   if glyphFree >= 0:
     result = glyphFree
     glyphFree = glyphMasks[result].chain
-    glyphMasks[result] = mask
+    glyphMasks[result] = move(mask)
   else:
     result = glyphMasks.len.int32
-    glyphMasks.add mask
+    glyphMasks.add move(mask)
   inc glyphLive
   glyphCacheBytes += bytes
   pushNewestGlyph(result)
@@ -3606,6 +3626,7 @@ proc fillGlyph*(
   var i = findGlyph(key)
   if i >= 0:
     inc glyphCacheHits
+    glyphMasks[i].pass = glyphPass
     if i != glyphNewest:
       unlinkGlyph(i)
       pushNewestGlyph(i)
@@ -3614,8 +3635,11 @@ proc fillGlyph*(
     var mask = rasterizeGlyph(path, size, key, fx, fy)
     if mask.w < 0:
       return false
-    if (mask.data.len + GlyphEntryBytes) * 4 > glyphCacheBudget:
-      # More than a quarter of the budget: drawn from the mask made, not kept.
+    if (mask.data.len + GlyphEntryBytes) * 4 <= glyphCacheBudget:
+      i = keepGlyph(mask)
+    if i < 0:
+      # More than a quarter of the budget, or no room this pass: drawn from
+      # the mask made, not kept.
       if mask.w == 0:
         return true
       let at = glyphMasks.len
@@ -3623,7 +3647,6 @@ proc fillGlyph*(
       image.blitGlyph(at.int32, ix, iy, color.asRgbx(), blendMode)
       glyphMasks.setLen(at)
       return true
-    i = keepGlyph(move(mask))
   image.blitGlyph(i, ix, iy, color.asRgbx(), blendMode)
   true
 
