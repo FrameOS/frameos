@@ -53,6 +53,10 @@ const
   MaxRepaints = 6
     ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
     ## each costs a look at every element's bounds, and those over it.
+  CatchUpArea = 4096
+    ## Damage against a buffer's own frame this large (in pixels) is worth
+    ## a second damageRects, against the newest frame, to copy instead of
+    ## raster what that frame already shows.
   MaxHeldFrames = 6
     ## Records kept (a parse is 16-45 KB of PSRAM on an ESP32): three frame
     ## buffers, each with a whole frame or a hole's picture and a bar's.
@@ -190,7 +194,7 @@ proc newestHeldFrame(target: Image): int =
   if panelBufferGeneration.isNil:
     return -1
   for i in countdown(heldFrames.high, 0):
-    let frame = heldFrames[i]
+    template frame: untyped = heldFrames[i] # not a copy: it holds a seq
     if frame.buffer != panelBuffer and frame.width == target.width and
         frame.height == target.height and frame.isRegion == target.isView and
         (not target.isView or frame.origin == target.origin) and
@@ -198,21 +202,26 @@ proc newestHeldFrame(target: Image): int =
       return i
   -1
 
-proc copyFrameIn(target: Image, source: pointer) =
-  ## What `source` (another of the panel's buffers) holds where `target` is.
+proc copyRectIn(target: Image, source: pointer, r: tuple[x, y, w, h: int]) =
+  ## What `source` (another of the panel's buffers) holds in the rectangle
+  ## `r` of `target`.
   if target.format == pfGray4:
     let raw = cast[ptr UncheckedArray[uint8]](source)
-    for y in 0 ..< target.height:
-      let index = target.dataIndex(0, y)
-      copyGray4Levels(target.data8, index, raw, index, target.width)
+    for y in r.y ..< r.y + r.h:
+      let index = target.dataIndex(r.x, y)
+      copyGray4Levels(target.data8, index, raw, index, r.w)
     return
   let
     bpp = target.bytesPerPixel
     d = cast[ptr UncheckedArray[byte]](target.bufferPointer)
     s = cast[ptr UncheckedArray[byte]](source)
-  for y in 0 ..< target.height:
-    let offset = target.dataIndex(0, y) * bpp
-    copyMem(d[offset].addr, s[offset].addr, target.width * bpp)
+  for y in r.y ..< r.y + r.h:
+    let offset = target.dataIndex(r.x, y) * bpp
+    copyMem(d[offset].addr, s[offset].addr, r.w * bpp)
+
+proc copyFrameIn(target: Image, source: pointer) =
+  ## What `source` (another of the panel's buffers) holds where `target` is.
+  target.copyRectIn(source, (0, 0, target.width, target.height))
 
 proc canvasesShown(svg: Svg): seq[tuple[image: Image, version: int]] =
   for p in svg.pictures:
@@ -413,6 +422,23 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
         if not found.full and found.rects.area < whole:
           copyFrameIn(target, heldFrames[source].buffer)
           rects = found.rects
+          base = some(heldFrames[source])
+    elif rects.area >= CatchUpArea and base.isSome:
+      # Most of what this buffer is behind on (it was last drawn two or
+      # three renders ago on an LCD's three) the newest frame of another
+      # buffer already shows: copied in, and only what is new since that
+      # frame drawn. A tap's change was rastered once per buffer before, the
+      # Home sample's card 17 ms each time on a SenseCAP Indicator.
+      let source = newestHeldFrame(target)
+      if source >= 0:
+        let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
+        if not found.full and found.rects.area < rects.area:
+          for r in rects:
+            target.copyRectIn(heldFrames[source].buffer, r)
+          # Outside the copies the pixels are still this buffer's own.
+          let own = canvasRects(base.get(), parsed, target)
+          rects = found.rects
+          rects.add own
           base = some(heldFrames[source])
     if base.isSome and rects.area < whole:
       # Canvases drawn into since: pixie sees the same picture in them.
