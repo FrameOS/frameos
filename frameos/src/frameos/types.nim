@@ -871,6 +871,10 @@ type
     ## test that is done with the loop does, instead of letting a generous
     ## `maxIterations` run out at the loop's idle pace (200 ms a pass).
     stopMessageLoop*: bool = false
+    ## Ends startRenderLoop after the pass at hand, its sleep cut short, the
+    ## same way: a test done with the loop sets it, rather than waiting out
+    ## `maxCycles` at the scenes' own pace.
+    stopRenderLoop*: bool = false
     ## Compiled scenes initialized since their last "open": the generated init
     ## fires "open" itself, so the runner must not fire it a second time.
     openedByInit*: seq[SceneId]

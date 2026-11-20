@@ -722,7 +722,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         continue
 
       inc cycles
-      if maxCycles > 0 and cycles >= maxCycles:
+      if maxCycles > 0 and cycles >= maxCycles or self.stopRenderLoop:
         break
 
       # If no sleep duration provided by the scene, calculate based on the interval
@@ -755,7 +755,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       let cloudLinkGenerationAtSleep = currentCloudLinkGeneration()
       var remainingSleepMs = sleepDuration
       while remainingSleepMs > 0:
-        if self.triggerRenderNext:
+        if self.triggerRenderNext or self.stopRenderLoop:
           break
         if watchCloudLink and currentCloudLinkGeneration() != cloudLinkGenerationAtSleep:
           self.logger.log(%*{"event": "render:cloudLinkChanged", "sceneId": currentScene.id.string})

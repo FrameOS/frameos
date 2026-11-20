@@ -71,6 +71,7 @@ suite "windows on the Pi's runner":
           if slot.child == runnerThread.scenes[sceneA]: return true)
       check InterpretedFrameScene(layout).sceneNodes.len == 0
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -178,6 +179,7 @@ suite "windows on the Pi's runner":
       # None of them is the scene a restart comes back to.
       check runnerThread.scenes[sceneA].state{"message"}.getStr() == "hi"
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -236,6 +238,7 @@ suite "windows on the Pi's runner":
       check runnerThread.scenes[sceneB].state{"message"}.getStr() == "saved"
       check layout.state{"open"} == %*[sceneA.string, settingsA.string, sceneB.string, SceneSettingsId]
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -319,6 +322,7 @@ suite "closing a window on a desktop opens nothing else":
       check windowOf(sceneA).isNil
       check windowOf(settingsA).isNil
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -373,6 +377,7 @@ suite "closing a window on a desktop opens nothing else":
       check windowOf(sceneA){"min"}.getBool()
       check windowOf(settingsA).isNil
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -412,6 +417,7 @@ suite "closing a window on a desktop opens nothing else":
       sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoScene)
       check waitUntil(proc(): bool = settled(sceneB) and not layout.state{"closed"}.getBool())
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
@@ -445,6 +451,7 @@ suite "closing a window on a desktop opens nothing else":
       check waitUntil(proc(): bool = settled(sceneB))
       check layout.state{"open"} == %*[sceneB.string]
       runnerThread.stopMessageLoop = true
+      runnerThread.stopRenderLoop = true
       waitFor renderLoop
       waitFor messageLoop
     finally:
