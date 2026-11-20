@@ -12,7 +12,7 @@ import socket
 import threading
 import time
 
-from .console import Console
+from .console import parse_payload_json, Console
 from .parse import RENDER_DONE, RENDER_FAILED, event, stats, summarize
 
 ANIMATION_MIN_FPS_RATIO = 0.8   # an animation below 80 % of its scene's target rate is `slow`
@@ -145,7 +145,15 @@ def status(con):
 
 
 def scene_list(con):
-    lst = con.usb_api_json('scene-list', 30) or {}
+    # One try with a long wait first: a retry sends the command again and the
+    # payload starts over. An LCD that animates logs every frame on its
+    # 115200-baud console, and the SenseCAP Indicator's 12 KB list took 54 s
+    # behind DVD logo bounce (2026-11-19): three 30 s tries each cut it off, and
+    # the scenes suite benched nothing and reported no issues.
+    ok, body = con.usb_api('scene-list', 120)
+    lst = parse_payload_json(body) if body else None
+    if not isinstance(lst, dict):
+        lst = con.usb_api_json('scene-list', 30) or {}
     return lst.get('scenes') or []
 
 
@@ -191,7 +199,8 @@ def suite_scenes(ctx, frame, scene_filter=None):
     if debug_was == '0':
         con.command('set debug 1', 1.5)
     intervals = {s.get('id'): s.get('refreshInterval') for s in ((st.get('scenes') or {}).get('scenes') or [])}
-    scenes = [s for s in scene_list(con) if not s.get('isLayout')]
+    listed = scene_list(con)
+    scenes = [s for s in listed if not s.get('isLayout')]
     scene_filter = scene_filter or getattr(ctx, 'scene_filter', None)
     if scene_filter:
         scenes = [s for s in scenes if s['id'] in scene_filter or s.get('name') in scene_filter]
@@ -199,6 +208,11 @@ def suite_scenes(ctx, frame, scene_filter=None):
         scenes = scenes[:4]
     scenes, left_out = pick_scenes(ctx, frame, scenes)
     results, issues = [], []
+    if not listed:
+        # Never a quiet pass: nothing was benched.
+        issues.append(issue('fail', 'no_scenes', 'scenes',
+                            'the board listed no scenes, so none was benched (an empty set, or a console '
+                            'too busy to answer: an LCD animating when the suite began)'))
     for sc in scenes:
         where = f"scene {sc.get('name')}"
         t_start = time.time()
