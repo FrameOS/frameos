@@ -520,7 +520,7 @@ export const get = () => (
   2026.10.22+): `onClick={(e) => ...}`. `e.target` (a copy of the event,
   as React's) is there for a field's edit and a box's scroll only
   (`e.target.value`, `e.target.scrollTop`): a pointer's handler has none
-  since 2026.11.13. The innermost element
+  since 2026.11.14. The innermost element
   with a handler for the event takes it, so a tap on a label inside a card
   runs the card's `onClick`.
 - **A press is captured**, as a browser captures a touch: the innermost
