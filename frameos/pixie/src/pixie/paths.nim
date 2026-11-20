@@ -21,10 +21,20 @@ type
     Move, Line, HLine, VLine, Cubic, SCubic, Quad, TQuad, Arc,
     RMove, RLine, RHLine, RVLine, RCubic, RSCubic, RQuad, RTQuad, RArc
 
-  GlyphSource* = ref object of RootObj
+  GlyphSource* {.acyclic.} = ref object of RootObj
     ## A face whose glyphs can be outlined: fonts.nim's Typeface. `serial`
     ## names it in the glyph cache, as an address would not (a face let go
     ## and another made at the same address would draw its masks).
+    ##
+    ## Acyclic: nothing a face holds leads back to it. A face's own outlines
+    ## (an OpenType's colour layers, an SVG font's glyphs) are parsed paths
+    ## without a `glyphFace`, and the glyph paths that name a face
+    ## (`newGlyphPath`) are never kept in one; a Typeface's fallbacks cannot
+    ## lead back either, or `fallbackTypeface` would never return. Without the
+    ## mark every Path (its `glyphFace`), and through it every SvgElement,
+    ## coverage mask and Arrangement, was a possible cycle: each one let go
+    ## was a cycle-collector root, about 280 a tap on a UI and the
+    ## GC_fullCollect after an ESP32 render tracing all of them (2026-11-20).
     serial*: uint32
 
   GlyphOutliner* = proc(face: GlyphSource, rune: int32, size: float32): Path {.

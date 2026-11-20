@@ -8,7 +8,8 @@ const
   SP = Rune(32)
 
 type
-  Typeface* = ref object of GlyphSource
+  Typeface* {.acyclic.} = ref object of GlyphSource
+    ## Acyclic as a GlyphSource is (paths.nim): `fallbacks` never leads back.
     opentype: OpenType
     indexed: IndexedFont ## read where it lies (fontformats/indexedfont.nim)
     svgFont: SvgFont
