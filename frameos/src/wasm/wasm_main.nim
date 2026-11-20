@@ -353,6 +353,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     namedPanelFormat = 0
     boardPanelFormat = 0
     boardRotate = 0
+    app_runtime.boardRotation = -1
     pendingSceneStates = initTable[string, JsonNode]()
     builtInToRestore = ""
     clearRenderPaletteOverride()
@@ -725,6 +726,7 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
     if not rotateNode.isNil and rotateNode.kind == JInt and rotateNode.getInt() in [0, 90, 180, 270]:
       rotate = rotateNode.getInt()
       boardRotate = rotate
+      app_runtime.boardRotation = rotate
       rebuildInput = true
     if rebuildInput:
       # The dispatcher's input state copies the buttons' roles when it is

@@ -42,8 +42,9 @@ A scenes file is a JSON array of scenes. Each scene is
   from a service), `"Games"`, `"Fun & animations"` (comics, toys,
   animations), `"Notes & tools"` (to-dos, notes, drawing, practical tools),
   `"AI & generative"` (made by an AI service), `"Demos & examples"` (a demo,
-  made-up data or a building block); a layout's is `"Multi app layouts"` or
-  `"Single app layouts"`. Write the name exactly. Which screen a scene is for
+  made-up data or a building block); a layout's is `"Multi app layouts"`,
+  `"Single app layouts"` or `"Device layouts"` (one made for a device, which
+  `settings.devices` names: `["seeed_reterminal_sticky"]`). Write the name exactly. Which screen a scene is for
   is no category: the store reads that from the scene itself (a
   `refreshInterval` under a second needs a fast screen).
 - `settings.needs` (optional): what the scene needs of a frame, when the store
@@ -719,11 +720,19 @@ export function get(app) {
 - `app.frame.sceneName` is the name of the scene it wraps. `app.frame.wifiRssi`
   and `app.frame.batteryPercent` are undefined on a frame that cannot tell: check
   first and draw nothing then.
+- `app.frame.eventMap` is what the frame's keys and swipes do whatever scene
+  shows (`{event, match, emit, as}` rules: a `button` rule's `match` names the
+  key's `label` and its `action`, `longPress` for a hold). A layout that labels
+  the keys beside the glass reads it, and keeps a default for a frame that has
+  none (the preview).
 - Handlers open the frame's own screens: `frameos.dispatch('sceneSwitcher')` the
   scene list, `frameos.dispatch('sceneSettings')` the settings of the scene
   showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
 - A layout stays up around those built-in screens too. To give them the whole
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
+- A scene's keyboard on the screen is only as wide as the `<yield />`. To let it
+  reach across the layout while someone types, return a bare `<yield />` when
+  `app.frame.typing` is true.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
@@ -1193,6 +1202,10 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. Returning a bare <yield />
+     * then gives the scene the whole panel, so the keyboard reaches across what the layout drew beside it
+     * (FrameOS 2026.11.14+; undefined before). */
+    typing?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
      * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
@@ -1232,6 +1245,11 @@ interface FrameOSApp {
      * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
+    /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
+     * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
+     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * the frame has none (the preview of a scene) (FrameOS 2026.11.14+; undefined before). */
+    eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
   initialized?: boolean;
   log(...args: any[]): void;

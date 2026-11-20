@@ -13,6 +13,12 @@ default is no layout (a scene is the whole frame).
 - `settings.desktop: true` says it is a desktop that runs the frame's scenes
   in windows ([Windows](#windows)): the frame page lists the desktops apart
   from the layouts around one scene.
+- `settings.devices` says it is made for one device, or a few: their hardware
+  ids as the frame settings name them (`["seeed_reterminal_sticky"]`;
+  `layoutDevices` in `utils/sceneLayouts.ts` reads it, and drops anything that
+  is no id). Such a layout goes on the store's Device layouts shelf. Nothing
+  on a frame reads it: a layout that knows its device reads the panel and the
+  event map, as the reTerminal ones do.
 
 ## What can be a layout
 
@@ -32,7 +38,7 @@ to the AI. The runtime does not check: a layout with no yield shows no content.
 **Starters.** Every repo sample whose scene is a layout (`Top bar`, `Bottom bar`,
 `Side rail`, `Windows 98`, `Tiling`, `macOS`, `BeOS`, `Classic Mac`, `NeXTSTEP`, `OS/2 Warp`, `Omarchy`,
 `Commander`, `Teletext`, `E-reader`, `Polaroid`, `Front page`, `Terminal`,
-`Gallery wall` in `repo/scenes/samples`) is also one click away on both planes
+`Gallery wall`, `reTerminal Sticky`, `reTerminal` in `repo/scenes/samples`) is also one click away on both planes
 (`frontend/scripts/generateLayoutStarters.mjs`): "New layout" in the frame's
 Layouts group, "Add layout" at the end of the Add scene drawer while it has none,
 and "Add a layout" in its Settings under Layouts. The iOS app offers the same
@@ -73,12 +79,14 @@ viewer's, kept in this browser by layout id (`frameos.preview.layoutSettings`,
 unless the workspace is told not to remember), never on a scene or a frame.
 
 **In the store.** Layouts are the store front's second side (Scenes |
-Layouts), with two shelves of their own
+Layouts), with three shelves of their own
 (`cloud/apps/auth-web/src/lib/categories.ts`): Multi app layouts (`desktops`, the
-desktops) and Single app layouts (`layouts`; "Desktop layouts" and "Full screen
-layouts" before 2026-11-19). A layout is always on its kind's, whatever it
-or its owner states (`validateSceneZip`'s `sceneCategory`: Multi app layouts when
-it says `settings.desktop`), and a scene is never on one; the classifier never
+desktops), Single app layouts (`layouts`; "Desktop layouts" and "Full screen
+layouts" before 2026-11-19) and Device layouts (`devices`, made for one device:
+2026-11-20). A layout is always on its kind's, whatever it
+or its owner states (`validateSceneZip`'s `sceneCategory`: Device layouts when it
+says `settings.devices`, else Multi app layouts when it says `settings.desktop`),
+and a scene is never on one; the classifier never
 sees a layout. A layout's page previews it around the samples, windowed for a
 desktop (above). A frame's own Scene store lists them under a Layouts heading
 and tries one on the frame before it is kept (docs/scene-store.md "Trying a
@@ -103,6 +111,15 @@ hands the built-in scene that layout (`state.layout`, `event_loop.nim`), and it
 runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
 `builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
 `if (app.frame.systemScene) return <yield />` gives them the whole panel.
+
+**While a scene types.** The keyboard on the screen is laid out in the canvas of
+the scene that has the field, so inside a layout it is only as wide as the
+`<yield />`. `app.frame.typing` is true in the layout's app while that scene has
+the keyboard up (`FrameScene.typing`, read off `ui/events.keyboardShown` at the
+start of each layout pass, which runs the layout again when it changes):
+`if (app.frame.typing) return <yield />` gives the scene the whole panel, and
+the keyboard reaches across the rail or bar beside it. The reTerminal layouts
+do this.
 Its `app.state.openedOver` then holds the name of the scene the built-in scene
 opened over (a layout is made afresh around it), for a taskbar to keep that
 scene's button.
@@ -128,7 +145,9 @@ workspace keep showing what each scene was given.
 
 **What a layout can ask.** `app.frame.sceneName` is the name of the scene it
 wraps (its own, shown on its own), `app.frame.wifiRssi` and
-`app.frame.batteryPercent` are what the frame knows, and its handlers can open
+`app.frame.batteryPercent` are what the frame knows, `app.frame.eventMap` is
+what the frame's keys and swipes do whatever scene shows (the frame's event
+map, undefined in the preview of a scene: keep a default), and its handlers can open
 the built-in screens with `frameos.dispatch('sceneSwitcher')`,
 `frameos.dispatch('sceneSettings')` and `frameos.dispatch('sceneSettings', {page:
 'frame'})` for the frame's own page, which is all the Windows 98 taskbar's Start,
@@ -666,3 +685,68 @@ to every scene wearing that layout.
 where a render is free, a worn layout renders when its chrome or its scene is
 due; on e-paper or a deep-sleeping frame the scene's own interval stays the
 fastest it renders, whatever the chrome's clock says.
+
+## Made for a device: the reTerminal layouts
+
+Two samples are made for one family of frames, and know where its keys are
+on the case (Seeed's drawings), so what a key does is written beside the key:
+what a press does, and under it, smaller, what holding it does.
+Each reads `app.frame.eventMap` for what the keys do, and falls back to the
+map the planes give that board. The keys' places are in one table at the top
+of each app (as a share of the glass, the panel unturned), and the side they
+are on follows `app.frame.rotate`; a "Keys are on the" field overrides it.
+Both give the settings the whole panel, and draw only when the scene draws:
+on e-paper the chrome never wakes the frame sooner than its scene would
+(`scene_rhythm.nim`).
+
+- **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
+  upright, its panel turned 270, with the AI, UP and DOWN keys on its right
+  edge. The scene gets the whole glass. When the scene list is open (a swipe up,
+  or AI pressed twice: the layout's own binding, while the frame's map leaves
+  that free), the layout turns it into a home screen. That screen has the time
+  and the date, the battery and the signal, the swipes and a tab beside each
+  key with what it does in the list: UP and DOWN move (held, a page), AI
+  opens (held, talks). AI's `primary` role is the contract's
+  (`buttons.roleByLabel`). "Around the scene" also offers a rail beside the
+  keys. The rail has a tab per key, a tap on it a press of that key (a
+  `button` dispatched with the key's label and role), plus Scenes, Settings,
+  the time and the battery. The third choice is a status bar. A press of AI
+  that the frame's map leaves to the scene also draws the picture again
+  (`render`), so the layout calls it Refresh.
+- **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
+  E1004, the model read off the panel (size and colour) or set. A bar along
+  the edge with the keys holds the scene's name, the signal, the battery and
+  the time it was drawn, with a cap under each key: the arrows' press is the
+  scene's (Next, Prev), the green key's draws the picture again (Refresh: the
+  layout dispatches `render` for a press the frame's map leaves free), and
+  the small word is the hold (a note under the scene's name says so: the
+  E1001's keys are 44 px apart, no room for "hold"). On the E1001-E1003 the
+  keys are on the top edge, right of centre, and seen from the front the one
+  labelled RIGHT is the leftmost. The E1004's panel is upright (1200x1600)
+  with the touch keys under the picture (printed alike: no green key, so the
+  help says "Refresh"); hung landscape they are beside it, on the right at
+  rotate 90 and on the left at 270, and so is the bar, a narrow strip
+  (6.5 units) whose words are turned to run along it (an `<svg>` of `<text>`:
+  the UI lays text out level), reading down on the right and up on the left,
+  the battery's percentage under it. On a board rendered on
+  its plane `app.frame.rotate` is the board's, as on the board, though the
+  wasm runtime draws the canvas already turned. The green key pressed twice opens the scene list, where the caps
+  say what a press does there, and holding it closes the list where the map
+  leaves the hold free (the E1004; the others talk). On the touch E1003 the name, the gear and the
+  status are buttons too.
+
+Both are on the store's Device layouts shelf (`settings.devices` names the
+boards), and both are set up through their fields, on the install or from the
+frame page's gear: whether the signal, the battery and the time show (24 or 12
+hours, or none), whether the small hold words and the help lines do (the
+E-series' hint under the name; the Sticky's date, swipe help and rail buttons),
+whether the Refresh key or AI draws the picture again when pressed (off: the
+press is the scene's alone, and its cap says "To scene") and opens the scene
+list when pressed twice, white on black or black on white, and the text size
+(0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
+on until it is turned off, so an install from before keeps its look.
+
+The pictures in their pull request were made with
+`frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board
+(size, canvas, pixel format, event map) and dithered to its panel.
+

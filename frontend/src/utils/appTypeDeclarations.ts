@@ -330,6 +330,10 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. Returning a bare <yield />
+     * then gives the scene the whole panel, so the keyboard reaches across what the layout drew beside it
+     * (FrameOS 2026.11.14+; undefined before). */
+    typing?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
      * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
@@ -369,6 +373,11 @@ interface FrameOSApp {
      * other), for what look cannot color, as an SVG's fill in the accent's color. Undefined with no desktop or one in
      * its own look (FrameOS 2026.11.10+; undefined before). */
     theme?: Record<string, string | string[]>;
+    /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
+     * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
+     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * the frame has none (the preview of a scene) (FrameOS 2026.11.14+; undefined before). */
+    eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
   initialized?: boolean;
   log(...args: any[]): void;

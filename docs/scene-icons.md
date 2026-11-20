@@ -45,7 +45,7 @@ category titles (the Category select in the scene's settings, the store's
 `categories.ts` / the SPA's `storeCategories.ts`): Photos, Art & galleries,
 Clocks & time, Calendars & agendas, Weather, Home & dashboards, Games, Fun &
 animations, Notes & tools, AI & generative, Demos & examples, and Multi app
-layouts / Single app layouts for a layout. The scene keeps the name as text and nothing
+layouts / Single app layouts / Device layouts for a layout. The scene keeps the name as text and nothing
 maps it to anything: a name of the owner's own is kept, shown as it is in the
 select, and is a category like any other.
 
@@ -70,9 +70,9 @@ select, and is a category like any other.
   (`validateSceneZip`'s `sceneCategory`, `writeSceneVersion`), so the shelf and
   the scene agree; otherwise the listing's category stands. A store category
   set by hand is replaced at the next version only when the scene names
-  another of the store's. A layout is always on its kind's shelf (Multi app
-  layouts for `settings.desktop`, else Single app layouts), whatever it
-  names, and a scene never on a layout's. A title the store had before
+  another of the store's. A layout is always on its kind's shelf (Device
+  layouts for one made for a device, `settings.devices`; Multi app layouts
+  for `settings.desktop`; else Single app layouts), whatever it names, and a scene never on a layout's. A title the store had before
   (`formerTitles` in `categories.ts`: "Data & dashboards", "Fun & comics",
   "Tools & utilities", "Real time") still files a scene under the shelf that
   took its place.

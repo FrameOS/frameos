@@ -437,6 +437,9 @@ type
     wornLayout*: FrameScene
     wornLayoutFailedFor*: string
     systemScene*: bool
+    ## On a layout: the scene it wraps has the keyboard on the screen up
+    ## (`app.frame.typing`), as its last render pass found.
+    typing*: bool
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm

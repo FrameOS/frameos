@@ -232,7 +232,11 @@ the runtime answer for the board's panel instead
 white or grey panel (a scene's "auto" draws in high contrast there),
 `app.frame.fast` false and `paper` true on anything but an LCD, and the scene switcher and
 the scene settings take e-paper's look, as the board's own runtime would:
-an ESP32 sets the same value from its own panel at init (`embedded_main.nim`).
+an ESP32 sets the same value from its own panel at init (`embedded_main.nim`). Its `rotate`
+is the board's too: the runtime draws the canvas already turned and keeps
+0 itself, but `app.frame.rotate` says the board's rotation
+(`app_runtime.boardRotation`), so a layout that puts its chrome beside a
+board's keys finds them where the board's own runtime would.
 Every phase of a scene reads it, `init()`, an event, a handler and what runs
 after an `await` included, never the canvas, which only a render has. The
 browser preview running as an ESP32 is told no panel, only the canvas the

@@ -114,6 +114,7 @@ describe("scene categories", () => {
       "",
       "Multi app layouts",
       "Single app layouts",
+      "Device layouts",
     ]);
     const own = sceneCategoryOptions("Clocks", false);
     expect(own[own.length - 1]).toEqual({ value: "Clocks", label: "Clocks" });

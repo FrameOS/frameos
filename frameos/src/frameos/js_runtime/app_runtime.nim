@@ -158,6 +158,10 @@ var currentEnv: JsAppEvalEnv
   ## Every interpreter is entered from one thread, and a scene's apps share
   ## its context, so the call says which app is talking, never the context.
 var nextJsAppKey = 0
+var boardRotation* = -1
+  ## The board's rotation where the runtime draws for one that turns the
+  ## picture itself (the wasm runtime's `set_frame`), else -1: what
+  ## `app.frame.rotate` says, as it does on the board.
 var appContexts: seq[tuple[runtime: ptr JSRuntime, context: ptr JSContext]]
   ## The scenes' contexts the app prelude and natives are in.
 
@@ -2151,7 +2155,10 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # The render scale in effect for the scene, whatever kind of app asks.
     return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
   of "rotate":
-    return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
+    # A board rendered on its plane is turned by the board: the runtime draws
+    # its canvas already turned and keeps 0 itself, and says the board's.
+    let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
+    return nimIntToJS(ctx, rotate.int32)
   of "assetsPath":
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
   of "storages":
@@ -2190,6 +2197,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # A layout around the scene list or the settings: it may give them the
     # whole panel by returning a bare <yield />.
     if not e.owner.scene.isNil and e.owner.scene.systemScene:
+      return nimBoolToJS(ctx, true)
+    return jsUndefSentinel(ctx)
+  of "typing":
+    # A layout around a scene that has the keyboard on the screen up: it may
+    # give the scene the whole panel by returning a bare <yield />.
+    if not e.owner.scene.isNil and e.owner.scene.typing:
       return nimBoolToJS(ctx, true)
     return jsUndefSentinel(ctx)
   of "batteryPercent":
@@ -2233,6 +2246,15 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     let limit = windowLimit()
     if not windowSceneListing.isNil and limit > 0:
       return nimIntToJS(ctx, limit.int32)
+    return jsUndefSentinel(ctx)
+  of "eventMap":
+    # The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    # map"): what its keys and swipes do whatever scene shows, for a layout
+    # that labels the keys beside the glass. Undefined with none (the
+    # preview of a scene, a frame never given one).
+    let rules = e.owner.frameConfig.eventMap
+    if not rules.isNil and rules.kind == JArray:
+      return jsonToJS(ctx, rules)
     return jsUndefSentinel(ctx)
   of "theme":
     # The theme of the desktop around the frame's scene (ui/theme.nim), for
@@ -2314,7 +2336,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "wentBack", "batteryPercent", "wifiRssi", "theme"]
+      "paper", "color", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")

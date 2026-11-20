@@ -17,7 +17,8 @@ export type StoreCategory = {
   hint: string;
   // What the shelf holds: scenes, or layouts (a scene with settings.isLayout,
   // which wraps the others). A layout's shelf follows from what it is
-  // (settings.desktop or not), never from a classifier or a stated topic, and
+  // (made for a device, settings.devices; a desktop, settings.desktop; or
+  // neither), never from a classifier or a stated topic, and
   // a scene never goes on a layout's shelf: the store front splits the two
   // before it shows any shelf (docs/scene-store.md "Categories").
   kind: "scene" | "layout";
@@ -132,6 +133,14 @@ export const storeCategories: StoreCategory[] = [
     kind: "layout",
     formerTitles: ["Full screen layouts"],
   },
+  {
+    slug: "devices",
+    title: "Device layouts",
+    description:
+      "Made for one device: what its keys do, written beside them, and its touch screen, battery and signal looked after.",
+    hint: "a layout made for one device (settings.devices), drawn around its keys, screen and sensors",
+    kind: "layout",
+  },
 ];
 
 // Slugs a category had before (2026-11-18: the Real time shelf became the
@@ -144,12 +153,13 @@ export const formerCategorySlugs: Record<string, string> = {
 /** The shelves that hold scenes, in shelf order. */
 export const sceneCategories = storeCategories.filter((category) => category.kind === "scene");
 
-/** The shelves that hold layouts: desktops, then full screen. */
+/** The shelves that hold layouts: desktops, full screen, then the ones made for a device. */
 export const layoutCategories = storeCategories.filter((category) => category.kind === "layout");
 
-/** The shelf a layout goes on: by what it is, never by what it says. */
-export function layoutCategorySlug(desktop: boolean): string {
-  return desktop ? "desktops" : "layouts";
+/** The shelf a layout goes on: by what it is, never by what it says. One made
+ * for a device (`settings.devices`) goes on Device layouts, a desktop or not. */
+export function layoutCategorySlug(desktop: boolean, forDevice = false): string {
+  return forDevice ? "devices" : desktop ? "desktops" : "layouts";
 }
 
 export function isLayoutCategory(slug: string | null | undefined): boolean {
