@@ -607,8 +607,11 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   the small word is the hold (a note under the scene's name says so: the
   E1001's keys are 44 px apart, no room for "hold"). On the E1001-E1003 the
   keys are on the top edge, right of centre, and seen from the front the one
-  labelled RIGHT is the leftmost. On the E1004 the touch keys are under the
-  picture. The green key pressed twice opens the scene list, where the caps
+  labelled RIGHT is the leftmost. The E1004's panel is upright (1200x1600)
+  with the touch keys under the picture; hung landscape they are beside it,
+  on the right at rotate 90 and on the left at 270. On a board rendered on
+  its plane `app.frame.rotate` is the board's, as on the board, though the
+  wasm runtime draws the canvas already turned. The green key pressed twice opens the scene list, where the caps
   say what a press does there. On the touch E1003 the name, the gear and the
   status are buttons too.
 

@@ -651,30 +651,43 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
     if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
       return result.role(if look.lit: "tileLit" else: "tile")
   let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
-  result.children.add look.titleRow(index, size)
+  result.children.add look.titleRow(index, size, size)
   # Its icon above the name where the card has room for both (the number
   # row, the name's lines, the gap), up to three letters tall. The name
   # takes two lines when it looks too long for one (a letter is about half
-  # as wide as it is tall), and is cut to what it was given.
+  # as wide as it is tall), each line `leading-tight` (5/4 of the size: the
+  # budget here is the line the layout draws, or a second line ran over the
+  # card's border), and is cut to what it was given. A third of the room the
+  # name leaves (up to the number row's height) goes under the icon and the
+  # name, the rest to the icon, so the two sit in the middle of the card
+  # rather than on its bottom edge under the number row.
   let
     icon = self.entries[index].icon
     inner = 2 * look.border + 2 * look.inner
     gap = max(2, size div 4)
-    lines = if title.len * size * 11 div 20 > grid.tileW - inner: 2 else: 1
+    line = size * 5 div 4
+    room = grid.tileH - inner - size - gap
+    fit = max(1, room div line)
+    lines = min(fit, if title.len * size * 11 div 20 > grid.tileW - inner: 2 else: 1)
+    spare = room - lines * line - gap
+    under = if icon.len == 0: 0 else: min(size, max(0, spare - 12) div 3)
     side = if icon.len == 0: 0
-      else: min(min(grid.tileH - inner - size - lines * (size * 6 div 5) - gap, (grid.tileW - inner) * 2 div 3),
-        size * 3)
-  var name = "grow flex items-center justify-center text-center font-bold"
+      else: min(min(spare - under, (grid.tileW - inner) * 2 div 3), size * 3)
+    shown = if side >= 12: side + gap + lines * line else: min(fit, 3) * line
+  var name = "grow min-h-0 flex items-center justify-center text-center font-bold leading-tight"
   name.px("text", size)
+  name.px("pb", clamp(room - shown, 0, size))
   if side >= 12:
     name.add " flex-col"
     name.px("gap", gap)
     let column = el("div", name, iconNode(icon, side))
-    column.children.add el("div", if lines == 1: "text-center line-clamp-1" else: "text-center line-clamp-2",
+    column.children.add el("div", if lines == 1: "text-center line-clamp-1 max-w-full" else: "text-center line-clamp-2 max-w-full",
       txt(title))
     result.children.add column
   else:
-    name.add " line-clamp-3"
+    var cut = " line-clamp-"
+    cut.addInt(min(fit, 3))
+    name.add cut
     result.children.add el("div", name, txt(title))
   result = result.role(if look.lit: "tileLit" else: "tile")
 

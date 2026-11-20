@@ -58,7 +58,7 @@ const BOARDS = {
   seeed_reterminal_e1001: { width: 800, height: 480, pixelFormat: 1, canvasBits: 8, palette: 'blackWhite', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
   seeed_reterminal_e1002: { width: 800, height: 480, pixelFormat: 7, canvasBits: 32, palette: 'spectra6', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
   seeed_reterminal_e1003: { width: 1872, height: 1404, pixelFormat: 8, canvasBits: 4, palette: 'sixteenGray', eventMap: [...ARROWS, ...VOICE, ...SWIPES], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
-  seeed_reterminal_e1004: { width: 1600, height: 1200, pixelFormat: 7, canvasBits: 16, palette: 'spectra6', eventMap: [...ARROWS], buttons: ['RIGHT', 'LEFT', 'REFRESH'] },
+  seeed_reterminal_e1004: { width: 1200, height: 1600, pixelFormat: 7, canvasBits: 16, palette: 'spectra6', eventMap: [...ARROWS], buttons: ['RIGHT', 'LEFT', 'REFRESH'] },
 }
 
 const spec = JSON.parse(await readFile(resolve(specArg), 'utf8'))
@@ -140,7 +140,7 @@ async function shoot(shot) {
   call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [board.canvasBits])
   const eventMap = shot.eventMap === undefined || shot.eventMap === 'board' ? board.eventMap : shot.eventMap
   const gpioButtons = (board.buttons ?? []).map((label, i) => ({ pin: 3 + i, label }))
-  if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ pixelFormat: board.pixelFormat, eventMap, gpioButtons })])) {
+  if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ pixelFormat: board.pixelFormat, eventMap, gpioButtons, rotate })])) {
     throw new Error(`${shot.name}: set_frame: ${lastError()}`)
   }
   if (shot.renderScale) call('frameos_wasm_set_render_scale', null, ['number'], [shot.renderScale])

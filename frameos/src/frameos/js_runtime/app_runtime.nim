@@ -158,6 +158,10 @@ var currentEnv: JsAppEvalEnv
   ## Every interpreter is entered from one thread, and a scene's apps share
   ## its context, so the call says which app is talking, never the context.
 var nextJsAppKey = 0
+var boardRotation* = -1
+  ## The board's rotation where the runtime draws for one that turns the
+  ## picture itself (the wasm runtime's `set_frame`), else -1: what
+  ## `app.frame.rotate` says, as it does on the board.
 var appContexts: seq[tuple[runtime: ptr JSRuntime, context: ptr JSContext]]
   ## The scenes' contexts the app prelude and natives are in.
 
@@ -2151,7 +2155,10 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # The render scale in effect for the scene, whatever kind of app asks.
     return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
   of "rotate":
-    return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
+    # A board rendered on its plane is turned by the board: the runtime draws
+    # its canvas already turned and keeps 0 itself, and says the board's.
+    let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
+    return nimIntToJS(ctx, rotate.int32)
   of "assetsPath":
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
   of "storages":
