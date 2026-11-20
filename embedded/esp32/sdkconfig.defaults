@@ -98,6 +98,14 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 # Burns frame reads its photo and writes 460 KB. That frame's draw went from
 # 115 to 90 ms (2026-10-26).
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+# A 32 KB instruction cache, not 16: QuickJS's interpreter, the JSX factory and
+# the walker run from flash, and with 16 KB the same JavaScript ran 30-40%
+# faster or slower depending on where an unrelated change moved the code. On
+# the SenseCAP Indicator (2026-11-20) a tap in a grid of a hundred memo()'d
+# cells went from 114 to 68 ms, the home panel from 66 to 52, a tap that
+# changes nothing from 16 to 12.5. It costs 16 KB of internal SRAM, which the
+# heap no longer has: docs/esp32-memory.md "A 32 KB instruction cache".
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev.
 # The "common" bundle (43 roots: ISRG/Let's Encrypt, DigiCert, Amazon, Google,

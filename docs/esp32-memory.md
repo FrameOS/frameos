@@ -425,6 +425,56 @@ render and the next button press work.
 What the aborted call allocated in Nim stays leaked; the restart rules above
 still decide when that is too much.
 
+## A 32 KB instruction cache (2026-11-20, proposed)
+
+The S3's instruction cache is 16 KB (`CONFIG_ESP32S3_INSTRUCTION_CACHE_16KB`,
+IDF's default), and QuickJS's interpreter, the JSX factory, the walker and
+the layout run from flash through it. With 16 KB, how fast the same
+JavaScript runs depends on where the linker put things: the same list of a
+hundred elements took a 11.4, 12.4, 15.3 or 21.4 ms `get()` in four images
+that differed only in code that list never runs (`docs/perf-todo.md`
+"memo() and a handler's call in C"). 32 KB makes the JavaScript faster and
+the swings smaller (SenseCAP Indicator, same scenes and taps, medians of 12
+to 13 taps):
+
+| Tap | 16 KB | 32 KB |
+| --- | --- | --- |
+| 100 memo()'d cells, render (`get()`) | 114 ms (55) | 68 ms (11.8) |
+| 100 cells, no memo() (`get()`, walk) | 79 ms (21.4, 24.4) | 54 ms (9.1, 13.0) |
+| Home panel | 66 ms | 52 ms |
+| A handler that changes nothing | 16 ms | 12.5 ms |
+
+What it costs is internal SRAM, 16 KB of it, and that is what the frame
+has least of. The cache's second 16 KB comes out of the main internal heap
+region (`0x3fcb0878`, 233,112 bytes with 16 KB; `0x3fcb48b0`, 216,672 with
+32 KB). The same image's internal heap with each, from boot through a
+Scene store fetch (TLS), a switch storm over 18 scenes, the frame page and a
+desktop with two windows (`heapinfo`, `build/pressure.py` on the research
+branch):
+
+| Internal heap | 16 KB | 32 KB |
+| --- | --- | --- |
+| Free at boot | 69.8 KB | 53.8 KB |
+| Free after the storm, the frame page, two windows | 52.9 KB | 36.1 KB |
+| `min_ever_free` at the end | 10.7 KB | **3.8 KB** |
+| Largest free block | 19.5 KB | 24.6 KB |
+
+The largest block is no gain: it is the 64 KB region kept for internal-only
+allocations (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`), which sits at another
+address in each image and fragments differently. The floor is the number
+that matters, and 3.8 KB, reached in the TLS handshake, is too close to an
+allocation failure (the SenseCAP's floor has already fallen release by
+release: 19.5 KB on 2026.11.10, 12.5 on 11.12). Every S3 board runs the
+generic image, the reTerminal E1004 (internal free 54-58 KB in the bench run
+of 2026-11-19, `min_ever_free` not recorded) and the e-paper boards
+included, which gain less (their renders are raster and panel time).
+
+So the change waits until the 16 KB are found elsewhere in internal SRAM
+(the main region is 229 KB allocated: Wi-Fi, lwIP, the tasks' stacks, the
+LCD's bounce buffers). Until then the 16 KB cache is also why a
+performance number from one image does not carry to the next: compare
+images built from the same tree, or at 32 KB.
+
 ## Boot and render costs
 
 Same bench frame, for context when weighing "do less at boot" ideas:
