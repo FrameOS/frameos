@@ -363,8 +363,9 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
   ## scene order (`next` / `prev` of the scene showing, wrapping around; the
   ## list's first or last when nothing is). While the scene switcher shows, a
-  ## direction turns its page instead (`forward` / `back` to it): the swipe
-  ## or the key that walks the scenes walks the tiles there. While the scene
+  ## direction is its `forward` / `back` instead (the highlight a screenful of
+  ## tiles on or back): the swipe or the key that walks the scenes walks the
+  ## tiles there. While the scene
   ## settings show, the scene they were opened from is the one a direction
   ## walks from. False when nothing could switch: a direction the contract
   ## does not know, or a frame with no scene list.
@@ -461,9 +462,11 @@ proc backFrom(loop: EventLoop, current: FrameScene): string =
 
 proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
   ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
-  ## it was opened from. While either shows, either command goes back to that
-  ## scene (the settings unsaved): the swipe that opened one closes it, and
-  ## so does the other edge's. The switcher forgets a scene that left the
+  ## it was opened from. While one shows, its own command goes back to that
+  ## scene (the settings unsaved): the swipe that opened it closes it, and so
+  ## does the other edge's, but for the other one asked for in its place
+  ## (`swap`: the list with `{swap: true}` or on a desktop, the frame page
+  ## over the switcher). The switcher forgets a scene that left the
   ## list, and one opened by name knows none: then the list's first. The
   ## settings get the scene's fields.
   # One way out (no early `return`): on the ESP32 every one repeats the
@@ -472,12 +475,14 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   let payload = newJObject()
   var next = sceneId
   let page = envelope.payload{"page"}.getStr()
-  # From the settings straight to the scene list when asked (a taskbar's Start),
-  # and from the scene list straight to the frame page (its gear, the way back
-  # from a layout that broke the scenes): the scene behind stays behind, and
-  # the layout goes on as it was.
+  # The other built-in scene asked for over one, where it says so: it opens in
+  # its place, the scene behind staying behind and the layout going on as it
+  # was. From a scene's settings straight to the scene list when asked (a
+  # taskbar's Start), alike on every host, and always on a desktop, where the
+  # settings stay open in their window; from the scene list straight to the
+  # frame page (its gear, the way back from a layout that broke the scenes).
   let swap = current.isBuiltIn and (if sceneId == SceneSwitcherId:
-      current.id.string == SceneSettingsId and envelope.payload{"swap"}.getBool()
+      isSceneSettings(current.id.string) and (envelope.payload{"swap"}.getBool() or builtInScenesStay)
     else: current.id.string == SceneSwitcherId and page == "frame")
   # `{page: "safe"}` (safe mode): the frame page with no layout around it,
   # opened or not already. The scene it came from, and its layout, stay as they
@@ -511,6 +516,7 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     payload.put("state", state)
   else:
     next = loop.backFrom(current)
+    sceneWentBackTo = next
   if safe and not current.isNil and current.id.string == sceneId:
     # Already up (the pull before this one opened it): no switch to make.
     loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
@@ -533,17 +539,21 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
   ## its fields and values, so several stay open side by side, each with its
   ## edits. The frame page (`{page: "frame"}`) is one window, the plain id,
   ## opened over the scene in front or over the scene the settings in front
-  ## are for. While a built-in scene is in front, the command goes back from
-  ## it, as `builtInScene` does, but for the frame page asked for over a
-  ## scene's settings or over the scene list (its gear).
+  ## are for. While a scene's settings or the frame page are in front, the
+  ## command goes back from them, as `builtInScene` does, but for the frame
+  ## page asked for over a scene's settings; over the scene list it opens the
+  ## settings of the scene the list was opened from, each in its window.
   let
     current = loop.host.sceneFor(none(SceneId))
     framePage = envelope.payload{"page"}.getStr() == "frame"
     payload = newJObject()
-  # A built-in scene other than the frame page: the switcher, or a scene's
-  # settings window.
-  if current.isBuiltIn and not (framePage and current.id.string != SceneSettingsId):
-    payload.put("sceneId", newJString(loop.backFrom(current)))
+  # A scene's settings window asked for again, or the frame page: back. The
+  # scene list instead opens the settings asked for over the scene it was
+  # opened from (a swipe down over it), as the frame page opens over either.
+  if current.isBuiltIn and isSceneSettings(current.id.string) and
+      not (framePage and current.id.string != SceneSettingsId):
+    sceneWentBackTo = loop.backFrom(current)
+    payload.put("sceneId", newJString(sceneWentBackTo))
     return loop.host.selectScene(payload)
   let state = newJObject()
   let opener =
@@ -562,6 +572,11 @@ proc settingsWindows(loop: EventLoop, envelope: EventEnvelope): bool =
       state.put("layout", worn)
   if not current.isNil and not current.isBuiltIn:
     current.settingsOf(state)
+  elif not framePage and opener.len > 0:
+    # Over the scene list: the scene it was opened from, in its window.
+    let scene = loop.host.sceneFor(some(SceneId(opener)))
+    if not scene.isNil:
+      scene.settingsOf(state)
   if framePage:
     state.put("opened", newJString("frame"))
   payload.put("state", state)
@@ -724,10 +739,13 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     loop.renderWanted = true
     result = true
   of evSetCurrentScene:
+    sceneWentBackTo = ""
     result = loop.selectScene(envelope)
     if result:
       loop.renderWanted = true
   of evSceneSwitcher, evSceneSettings:
+    # Opening one is a choice; going back from one says so (`sceneWentBackTo`).
+    sceneWentBackTo = ""
     # Where built-in scenes stay open as windows: one a scene, and the frame
     # page one of its own (`settingsWindows`). Safe mode's page as anywhere.
     if envelope.name == evSceneSettings and builtInScenesStay and envelope.payload{"page"}.getStr() != "safe":

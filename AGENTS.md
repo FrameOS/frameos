@@ -193,7 +193,7 @@
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
-  own, never a scene switch: the switcher pages on them), up from the bottom
+  own, never a scene switch: the switcher moves a screenful on them), up from the bottom
   the scene switcher and down from the top the settings (as the SenseCAP
   preset does)
   (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
@@ -216,12 +216,16 @@
   and the dispatcher resolves it (`event_loop.nim` hands it `state.from`;
   while it or the scene settings show, either command goes back there, but
   its header's gear, `sceneSettings {page: "frame"}`, opens the frame page,
-  shown only while the frame offers one), never a host. It is drawn
+  shown only while the frame offers one, `{swap: true}` the list over a
+  scene's settings, and on a desktop the other one always opens beside), never
+  a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
-  host's scene order through `sceneSwitcherListing`, and on Linux shows each
-  scene's last snapshot (`sceneSwitcherThumbnail`,
+  host's scene order through `sceneSwitcherListing`, grouped by category as
+  the desktops group theirs, in one list that scrolls (no pages), and on
+  Linux shows each scene's last snapshot (`sceneSwitcherThumbnail`,
   `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
-  black on white with the keys walking an inverted highlight.
+  black on white with the keys walking an inverted highlight that the list
+  scrolls to.
 - Both built-in scenes are drawn in the layout of the scene they were opened
   from (`state.layout` from the dispatcher, `ownRun` / `builtInRunner` into
   `interpreter.runEvent`; `docs/scene-layouts.md`). A new one goes the same way.
@@ -740,7 +744,8 @@
   `app.frame.scenes` entry, the groups by name, Other last) and draws a scene's own icon through
   `ownIcon`, each the same text in all eight with a list: change any of them in
   every copy
-  (`test_windowed_desktops.nim` checks they match).
+  (`test_windowed_desktops.nim` checks they match), and `grouped` in the scene
+  switcher (`sceneSwitcher/scene.nim`, the same rule in Nim) with them.
   Where memory is short only so many run at once (`app_runtime.windowLimit`, by
   the PSRAM the panel leaves (`memory.sceneMemoryBytes`): 2 on an 8 MB ESP32,
   1 on the 13.3" E1004, 4 on 16 MB, `app.frame.windows`): the layouts close the one

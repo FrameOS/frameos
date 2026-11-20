@@ -330,6 +330,11 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
+     * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
+     * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
+     * undefined before, and whenever it is false). */
+    wentBack?: boolean;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;

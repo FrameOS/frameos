@@ -3810,3 +3810,35 @@ suite "a window behind another where only a few scenes run at once":
     desk().state["openScenes"] = %*[]
     chooseLayout("")
     discard pass()
+
+suite "one scene at a time, a window closed or put away (each desktop's arrive and reopen)":
+  test "are the same functions, word for word, in every desktop of windows with one scene at a time":
+    for start in ["// One scene at a time (windows off), the window around", "function reopen(app, keys) {"]:
+      let copies = copiesOf(start, [layout, macos, beos, classicMac, nextstep, os2])
+      check copies[0].len > 0
+      for text in copies: check text == copies[0]
+
+  test "a scene chosen shows its window again, and the focus come back or a built-in scene over it leave it be":
+    let fn = copiesOf("// One scene at a time (windows off), the window around", [layout])[0] & "\n}\n"
+    proc after(frame, state: string): JsonNode =
+      let scene = FrameScene(id: "tests/probe".SceneId, frameConfig: config, state: parseJson(state), logger: logger())
+      let owner = AppRoot(nodeId: 1.NodeId, nodeName: "probe", scene: scene, frameConfig: config)
+      let runtime = newJsAppRuntime(category = "data", outputType = "image",
+        source = fn & "export function get(app) {\n  arrive({ frame: " & frame & ", state: app.state }, ['minimized', 'closed'])\n  return null\n}\n",
+        sourceName = "app.tsx")
+      discard runtime.get(owner, %*{}, ExecutionContext(scene: scene, event: "render", payload: %*{}, loopIndex: 0,
+        loopKey: ".", nextSleep: -1))
+      scene.state
+    # Another scene chosen (the list, a key, the API): shown.
+    check after("{ sceneId: 'b' }", """{"last": "a", "minimized": true, "closed": true}""") ==
+      %*{"last": "b", "minimized": false, "closed": false}
+    # The same scene picked in the list: shown.
+    check after("{ sceneId: 'a' }", """{"last": "system/sceneSwitcher", "closed": true}""") ==
+      %*{"last": "a", "closed": false}
+    # The list itself over it, and the list gone back to it by itself: as it was.
+    check after("{ sceneId: 'system/sceneSwitcher', systemScene: true }", """{"last": "a", "closed": true}""") ==
+      %*{"last": "system/sceneSwitcher", "closed": true}
+    check after("{ sceneId: 'a', wentBack: true }", """{"last": "system/sceneSwitcher", "closed": true}""") ==
+      %*{"last": "a", "closed": true}
+    # No switch: nothing changes.
+    check after("{ sceneId: 'a' }", """{"last": "a", "minimized": true}""") == %*{"last": "a", "minimized": true}

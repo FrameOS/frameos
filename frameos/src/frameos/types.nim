@@ -954,3 +954,10 @@ var builtInScenesStay* {.threadvar.}: bool
   ## another, without going back by itself, stays open as it was, for a
   ## layout's window (docs/scene-layouts.md "Windows"). Unset, leaving it
   ## closes it.
+var sceneWentBackTo* {.threadvar.}: string
+  ## The scene a built-in scene (the switcher, the settings) last went back
+  ## to by itself (its Close or Cancel, its own command again, its timeout),
+  ## set by the dispatcher (event_loop.nim `builtInScene`, `settingsWindows`);
+  ## "" once anything else picks a scene. A layout reads it as
+  ## `app.frame.wentBack`: a desktop opens no window again for a scene the
+  ## focus only came back to (docs/scene-layouts.md "Windows").

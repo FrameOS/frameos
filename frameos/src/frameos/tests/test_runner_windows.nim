@@ -12,9 +12,10 @@ import ../runner
 import ../scenes
 import ../types
 import ../channels
-from ../events import SceneSettingsId, settingsWindowId
+from ../events import SceneSettingsId, SceneSwitcherId, settingsWindowId
 from ../layout_choice import layoutListing
 import system/sceneSettings/scene as sceneSettings
+from ../scene_switcher_linux import installSceneSwitcherHooks
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -240,3 +241,211 @@ suite "windows on the Pi's runner":
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
+
+proc desktopRunner(layoutFile, layoutId: string, ids: seq[SceneId], layoutState: JsonNode = nil): RunnerThread =
+  ## A Pi's runner with the sample `layoutFile` around `ids`, the first one
+  ## showing, the way the tests above start one.
+  var scenes = %*[parseFile(Samples / layoutFile / "scenes.json")[0]]
+  for i, id in ids:
+    let scene = panel(id.string, ["#ff0000", "#00ff00", "#0000ff"][i mod 3], layoutId)
+    if not layoutState.isNil:
+      scene["layout"]["state"] = layoutState
+    scenes.add scene
+  updateUploadedScenes(parseInterpretedScenes($scenes))
+  setUploadedSceneOrder(ids)
+  var config = loadConfig()
+  config.device = "framebuffer"
+  config.controlCode = ControlCode(enabled: false, position: "center",
+    qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+  var logger = Logger(frameConfig: config, enabled: true)
+  logger.log = proc(payload: JsonNode) = discard
+  logger.enable = proc() = discard
+  logger.disable = proc() = discard
+  result = RunnerThread(frameConfig: config, scenes: initTable[SceneId, FrameScene](),
+    currentSceneId: ids[0], lastRenderAt: 0.0, sleepFuture: none(Future[void]),
+    isRendering: false, triggerRenderNext: false, logger: logger)
+  result.installWindowHooks()
+  # The scene list as the runner lists it, so it knows the scene it opened from.
+  installSceneSwitcherHooks()
+
+proc altF4() =
+  ## The key the desktop closes the window in front with, as a keyboard sends it.
+  sendEvent("keyDown", %*{"key": "F4", "code": "F4", "repeat": false, "shift": false, "ctrl": false,
+    "alt": true, "meta": false}, eoHttpAdmin)
+
+suite "closing a window on a desktop opens nothing else":
+  test "the window in front closed gives the focus to the one under it, not to the scene it was opened from":
+    let sceneA = "tests/windows/a".SceneId
+    let sceneB = "tests/windows/b".SceneId
+    let runnerThread = desktopRunner("Windows 98 layout", "layout-windows-98", @[sceneA, sceneB])
+    try:
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 300)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 6000)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA) and
+        not runnerThread.scenes[sceneA].wornLayout.isNil)
+      let layout = runnerThread.scenes[sceneA].wornLayout
+      proc windowOf(id: SceneId): JsonNode =
+        for win in layout.state{"wins"}.getElems():
+          if win{"id"}.getStr() == id.string:
+            return win
+      proc settled(id: SceneId): bool =
+        runnerThread.currentSceneId == id and layout.state{"last"}.getStr() == id.string
+      proc forward(id: SceneId) =
+        layout.state["asked"] = %id.string
+        sendEvent("setCurrentScene", %*{"sceneId": id.string}, eoScene)
+        check waitUntil(proc(): bool = settled(id))
+      # Control Panel opened over A, then B in front, then Control Panel again:
+      # under it is B's window, and A's under that.
+      sendEvent("sceneSettings", %*{"page": "frame"}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(SceneSettingsId.SceneId))
+      forward(sceneB)
+      forward(SceneSettingsId.SceneId)
+      check runnerThread.scenes[SceneSettingsId.SceneId].state{"from"}.getStr() == sceneA.string
+      altF4()
+      # B has the focus, the window that was under; A stays behind it.
+      check waitUntil(proc(): bool = settled(sceneB))
+      check windowOf(SceneSettingsId.SceneId).isNil
+      check not windowOf(sceneA).isNil
+      check windowOf(sceneA){"z"}.getInt() < windowOf(sceneB){"z"}.getInt() or
+        layout.state{"openScenes"}.getElems()[^1].getStr() == sceneB.string
+      # A scene's settings close with it: A's settings in front, and A closed.
+      forward(sceneA)
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      let settingsA = settingsWindowId(sceneA.string).SceneId
+      check waitUntil(proc(): bool = settled(settingsA))
+      forward(sceneA)
+      altF4()
+      check waitUntil(proc(): bool = settled(sceneB))
+      check windowOf(sceneA).isNil
+      check windowOf(settingsA).isNil
+      runnerThread.stopMessageLoop = true
+      waitFor renderLoop
+      waitFor messageLoop
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a window closed stays closed when the scene list goes back to its scene, and opens when it is picked":
+    let sceneA = "tests/windows/a".SceneId
+    let sceneB = "tests/windows/b".SceneId
+    let runnerThread = desktopRunner("Windows 98 layout", "layout-windows-98", @[sceneA, sceneB])
+    try:
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 300)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 6000)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA) and
+        not runnerThread.scenes[sceneA].wornLayout.isNil)
+      let layout = runnerThread.scenes[sceneA].wornLayout
+      proc windowOf(id: SceneId): JsonNode =
+        for win in layout.state{"wins"}.getElems():
+          if win{"id"}.getStr() == id.string:
+            return win
+      proc settled(id: SceneId): bool =
+        runnerThread.currentSceneId == id and layout.state{"last"}.getStr() == id.string
+      check waitUntil(proc(): bool = not windowOf(sceneA).isNil)
+      # The last window closed: a bare desktop, A still the frame's scene.
+      altF4()
+      check waitUntil(proc(): bool = windowOf(sceneA).isNil and layout.state{"gone"}.getStr() == sceneA.string)
+      check runnerThread.currentSceneId == sceneA
+      # The scene list, and its own Close (the command again): back on A, which
+      # stays closed, and the list's window goes.
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId) and not windowOf(SceneSwitcherId.SceneId).isNil)
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneA))
+      check windowOf(sceneA).isNil
+      check windowOf(SceneSwitcherId.SceneId).isNil
+      check layout.state{"wins"}.len == 0
+      # The scene list again, and A picked in it (its tile is this switch): A opens.
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId))
+      sendEvent("setCurrentScene", %*{"sceneId": sceneA.string}, eoScene)
+      check waitUntil(proc(): bool = settled(sceneA) and not windowOf(sceneA).isNil)
+      check windowOf(SceneSwitcherId.SceneId).isNil
+      # Minimized, the same: the settings cancelled leave it minimized.
+      layout.state["wins"] = %*[block:
+        var win = windowOf(sceneA)
+        win["min"] = %true
+        win]
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      let settingsA = settingsWindowId(sceneA.string).SceneId
+      check waitUntil(proc(): bool = settled(settingsA))
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneA))
+      check windowOf(sceneA){"min"}.getBool()
+      check windowOf(settingsA).isNil
+      runnerThread.stopMessageLoop = true
+      waitFor renderLoop
+      waitFor messageLoop
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "one scene at a time, a window minimized or closed stays so under the scene list, and the next scene shows":
+    let sceneA = "tests/windows/a".SceneId
+    let sceneB = "tests/windows/b".SceneId
+    let runnerThread = desktopRunner("Windows 98 layout", "layout-windows-98", @[sceneA, sceneB],
+      %*{"windowMode": "off", "showWindowBar": true})
+    try:
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 300)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 6000)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA) and
+        not runnerThread.scenes[sceneA].wornLayout.isNil)
+      let layout = runnerThread.scenes[sceneA].wornLayout
+      proc settled(id: SceneId): bool =
+        runnerThread.currentSceneId == id and layout.state{"last"}.getStr() == id.string
+      check waitUntil(proc(): bool = settled(sceneA))
+      check layout.state{"wins"}.isNil
+      # A minimized (its task button), then B from anywhere: B shows.
+      layout.state["minimized"] = %true
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneB))
+      check not layout.state{"minimized"}.getBool()
+      # B closed (its window's close), then the scene list closed again: still closed.
+      layout.state["closed"] = %true
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId))
+      check layout.state{"closed"}.getBool()
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneB))
+      check layout.state{"closed"}.getBool()
+      # And B picked in the list: its window again.
+      sendEvent("sceneSwitcher", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(SceneSwitcherId.SceneId))
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoScene)
+      check waitUntil(proc(): bool = settled(sceneB) and not layout.state{"closed"}.getBool())
+      runnerThread.stopMessageLoop = true
+      waitFor renderLoop
+      waitFor messageLoop
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "on the tiling desktop a scene's tile closed stays closed when a built-in tile goes back to it":
+    let sceneA = "tests/windows/a".SceneId
+    let sceneB = "tests/windows/b".SceneId
+    let runnerThread = desktopRunner("Tiling layout", "layout-tiling", @[sceneA, sceneB])
+    try:
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 300)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 6000)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA) and
+        not runnerThread.scenes[sceneA].wornLayout.isNil)
+      let layout = runnerThread.scenes[sceneA].wornLayout
+      proc settled(id: SceneId): bool =
+        runnerThread.currentSceneId == id and layout.state{"last"}.getStr() == id.string
+      proc ask(id: SceneId, event: string, payload: JsonNode) =
+        layout.state["asked"] = %id.string
+        sendEvent(event, payload, eoScene)
+        check waitUntil(proc(): bool = settled(id))
+      ask(sceneB, "setCurrentScene", %*{"sceneId": sceneB.string})
+      ask(sceneA, "setCurrentScene", %*{"sceneId": sceneA.string})
+      # Setup opened over A, then A's tile closed (its X: out of `open`).
+      ask(SceneSettingsId.SceneId, "sceneSettings", %*{"page": "frame"})
+      check runnerThread.scenes[SceneSettingsId.SceneId].state{"from"}.getStr() == sceneA.string
+      layout.state["open"] = %*[sceneB.string, SceneSettingsId]
+      # Setup's own Cancel: back to A by itself. A's tile stays closed, Setup's
+      # goes, and B, which had the focus before, takes it.
+      sendEvent("sceneSettings", %*{}, eoHttpAdmin)
+      check waitUntil(proc(): bool = settled(sceneB))
+      check layout.state{"open"} == %*[sceneB.string]
+      runnerThread.stopMessageLoop = true
+      waitFor renderLoop
+      waitFor messageLoop
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())

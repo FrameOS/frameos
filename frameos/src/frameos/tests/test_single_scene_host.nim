@@ -387,7 +387,7 @@ block scene_switcher_on_one_scene:
   doAssert switchHost.ensureScene() and switchHost.scene.state{"from"}.getStr() == order[1].string
   discard switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
     payload: %*{}, image: newImage565(320, 240), hasImage: true, loopIndex: 0, loopKey: "."))
-  let grid = switcherGrid(2, 320, 240, thumbnails = false)
+  let grid = switcherGrid(320, 240, thumbnails = false)
   let wireX = (grid.x0 + grid.tileW div 2) * 32767 div 320
   let wireY = (grid.y0 + grid.tileH div 2) * 32767 div 240
   let at = getMonoTime().ticks div 1_000_000

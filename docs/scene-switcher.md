@@ -3,9 +3,10 @@
 *Written 2026-10-28.*
 
 Swipe up from the bottom of a touch screen and the frame shows every scene it
-has as a tile with its title; tap one and the frame shows it. The same screen
-works on e-paper, with the keys: the highlight walks the tiles, and a key
-picks one. A gear in its header opens the frame's own settings page.
+has as a tile with its title, grouped by category, in one list that scrolls;
+tap one and the frame shows it. The same screen works on e-paper, with the
+keys: the highlight walks the tiles, the list scrolls to it, and a key picks
+one. A gear in its header opens the frame's own settings page.
 
 | Piece | Where |
 |---|---|
@@ -30,7 +31,10 @@ like `setCurrentScene {direction}`:
   from the top) goes back the same way, and `sceneSwitcher` over the scene
   settings closes them unsaved ([scene-settings.md](scene-settings.md)), or,
   with `{swap: true}` (a taskbar's Start), goes straight to the list, the
-  scene behind staying behind.
+  scene behind staying behind. On a desktop, where both stay open in windows
+  of their own, the other one always opens: `sceneSwitcher` over a scene's
+  settings opens the list, `sceneSettings` over the list the settings of the
+  scene it was opened from.
 - **The gear** in the header goes the other way: `sceneSettings {page:
   "frame"}` while the switcher shows opens the frame page
   ([scene-settings.md](scene-settings.md) "The frame page") over the scene
@@ -43,11 +47,12 @@ like `setCurrentScene {direction}`:
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
 scene and goes back there, and so does a switcher whose `from` has left the
-list (it forgets `from` then, and when it is left). While it shows,
-`setCurrentScene {direction}` turns its page instead (`next` is `forward`,
-`prev` is `back`): the swipe or the key the frame's event map walks the
-scenes with walks the tiles in the switcher, and the frame stays on it. On a
-reTerminal, RIGHT held in the switcher is the next page.
+list (it forgets `from` then, and when it is left). While it shows, the
+dispatcher hands it `setCurrentScene {direction}` as `forward` (`next`) or
+`back` (`prev`), which move its highlight a screenful of tiles on or back
+("Using it"): the swipe or the key the frame's event map walks the scenes with
+walks the tiles in the switcher, and the frame stays on it. On a reTerminal,
+RIGHT held in the switcher is a screenful on.
 
 Who may say it (`origins`): the frame's event map, a scene (a "Scenes" button
 in a scene's own UI), a schedule, the HTTP API with the frame access key or
@@ -60,8 +65,8 @@ bottom}`) on every touch screen that ships an event map: the HyperPixels
 (when frame.json has no `eventMap`), the SenseCAP Indicator and the
 reTerminal E1003, whose e-paper has a touch glass: that is how a touch
 screen changes the scene. In from the left and the right are `back` and
-`forward`, the scene's own (docs/events.md), which the switcher takes as the
-page before and the next. Down from the top is the scene's settings
+`forward`, the scene's own (docs/events.md), which the switcher takes as a
+screenful back and on. Down from the top is the scene's settings
 (`sceneSettings`, [scene-settings.md](scene-settings.md)), the other scene
 the runtime draws itself. The SenseCAP Indicator's one key opens the
 switcher too, pressed twice (pressed once it switches the screen off and on,
@@ -76,7 +81,9 @@ list, the control planes never push it, and nothing persists it. A reboot,
 a restart or a deep sleep comes back on the scene it was opened from (the
 Linux runner does not write `scene.json` for a system scene; the ESP32
 writes neither `last_scene` nor `pending_scene` for it). Its state (`from`,
-`highlight`, `page`, `touchedAt`) is in memory only.
+`highlight`, `touchedAt`) is in memory only, and so is how far its list is
+scrolled, which is kept with its UI's input like any scrolling box's
+(docs/jsx-ui.md "Scrolling and clipping").
 
 It is an `ExportedInterpretedScene` with no nodes, whose `init`, `runEvent`
 and `render` are its own: the Linux runner finds it with the system scenes
@@ -87,8 +94,9 @@ scene through its export so the switcher needs nothing else from the host.
 ### What it lists
 
 The host's scene list, in the order `setCurrentScene {direction}` walks it
-(`EventHost.sceneOrder`), with each scene's name (and its window size and icon,
-docs/scene-icons.md), through `sceneSwitcherListing`:
+(`EventHost.sceneOrder`), with each scene's name (and its window size, icon and
+category, docs/scene-icons.md), through `sceneSwitcherListing`. Every host's
+listing carries the category (`listingItem`'s entries are the same):
 
 | Host | List | Names |
 |---|---|---|
@@ -96,23 +104,45 @@ docs/scene-icons.md), through `sceneSwitcherListing`:
 | ESP32 | the catalog (`/state/scene-index.json`) on the lazy path, the parsed payload's order otherwise | the catalog's, or the parsed scenes' |
 | wasm preview | the loaded payload's order | the parsed scenes' |
 
+It shows them grouped (`grouped`, the same rule as the desktops' JavaScript
+`grouped`, docs/scene-layouts.md "Long lists of scenes"): a category's scenes
+together under a heading with its name, the categories sorted by name with
+case aside (the raw name breaking a tie), each trimmed, and the scenes without
+one, or in a category named "Other" in any case, last under "Other". Within a
+group the scenes keep the list's order. Where no scene has a category there
+are no headings, and the list is as the host gave it. The tiles are numbered,
+and the keys walk them, in the order shown. JavaScript lowers every letter
+for the comparison and the Nim lowers A to Z and the Latin-1 capitals
+(`folded`): two categories that differ only in another script's capitals can
+sort the other way round.
+
 ### How it is drawn
 
 It builds a UI tree in Nim (`SvgNode`s with Tailwind classes) and lays it out
 with the JSX layer (`ui/layout.nim`), so it needs no QuickJS and draws
 through the one rasterizer (`utils/svg_frames.nim`): on an LCD only the
 tile that changed is repainted. Its tiles are regions for `ui/events.nim`,
-which hit-tests the taps as it does a JS app's UI. It is laid out at the
+which hit-tests the taps and scrolls the list under a finger as it does a JS
+app's UI. It is laid out at the
 frame's render scale, sized from the panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
 `switcherGrid` picks the densest grid whose tiles stay big enough to read (at
-least a fifth of the shorter side across, up to six by six), and among grids
-as dense the one whose pictures (at the frame's aspect) or name cards come
-out largest. The tiles keep that size whatever the number of scenes: three
-scenes fill three slots of the same grid that thirty would page through,
-rather than growing to fill the page. More scenes than a page holds page,
-with the page and two arrows in the header.
+least a fifth of the shorter side across, up to six by six on a screen), and
+among grids as dense the one whose pictures (at the frame's aspect) or name
+cards come out largest. The tiles keep that size whatever the number of
+scenes: three scenes fill three slots of the same grid that thirty scroll
+through, rather than growing to fill the screen.
+
+The tiles are one list under the header, a box with `overflow-y-auto` from
+the header to the bottom edge, the whole width (ui/layout.nim; docs/jsx-ui.md
+"Scrolling and clipping"): rows of tiles, and where the scenes have
+categories a heading across the list over each group, whose first tile
+starts a row of its own (`spots`). A list longer than the screen scrolls,
+with the layer's thin bar at its right edge; the rows cut by the bottom edge
+say there is more. Its scroll is the layer's, kept by the list's place in the
+tree (the root's first child, `ListKey`), which is how the keys move it too.
+Opened, the list starts at its top and scrolls to the highlighted tile.
 
 The header ends with the gear and Close. The gear is there only while the
 frame offers its page (`frameSettingsRead` answers, as the scene settings'
@@ -133,16 +163,19 @@ the control plane") brings it back with the page.
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
   `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
   inverted, and no press feedback: a refresh to show a finger is down would
-  be seconds of flashing for nothing. Only its taps count.
+  be seconds of flashing for nothing. A tap counts, and a finger dragging
+  the list is drawn once, where it let go (ui/events.nim keeps quiet until
+  then).
 - **A round panel** (`frameos/panel_shape.nim` `panelIsRound`: the HyperPixel
   2.1" Round, whose 480x480 shows and takes touches only inside its circle)
   keeps everything `RoundInset` (12 px) in from the rim, where the bezel
-  covers the glass: the tiles fill the square inscribed in that circle, and
-  the four arcs around it hold the title and the page (12 o'clock), the page
-  arrows (9 and 3) and Close (6), each box cut to the chord it sits on. The
+  covers the glass: the list is the square inscribed in that circle and
+  scrolls inside it, the arc above holds the title (12 o'clock) and the one
+  below Close and the gear (6), each box cut to the chord it sits on. The
   bottom swipe opens it from the rim there (`input_state.nim` `edgeAt`).
-  `test_scene.nim` checks every hit region and every pixel drawn for 1, 5, 9
-  and 20 scenes, on every page, pressed and highlighted.
+  `test_scene.nim` checks every hit region where it shows and every pixel
+  drawn for 1, 5, 9 and 20 scenes, with categories and without, at the top
+  of the list and scrolled to its end, pressed and highlighted.
 
 ### Pictures
 
@@ -185,24 +218,38 @@ The preview lists names only.
 
 ## Using it
 
-- **Touch:** tap a tile to show that scene, swipe left or right across the
-  tiles (or in from the right or the left edge: the frame's `forward` and
-  `back`) for the next or the previous page, tap the gear for the frame's
-  settings, tap Close (or swipe up from the bottom again) to go back.
+- **Touch:** tap a tile to show that scene, drag the list up or down to
+  scroll it (on e-paper it shows where it got to when the finger lifts, one
+  refresh, and a tap after that opens the tile under the finger), swipe in
+  from the right or the left edge (the frame's `forward` and `back`) to move
+  the highlight a screenful on or back, tap the gear for the frame's
+  settings, tap Close (or swipe up from the bottom again) to go back. A
+  mouse's wheel scrolls the list (Linux, the preview).
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
-  highlight one tile on, `prev` / `up` one back (wrapping, across pages, and
-  through the gear after the last tile, which keeps the page showing and is
-  inverted like a tile);
+  highlight one tile on, `prev` / `up` one back (wrapping, and through the
+  gear after the last tile, which is inverted like a tile), and the list
+  scrolls as little as it takes to show the tile they land on, its heading
+  with it where it starts a group: on e-paper the keys are all there is to
+  follow;
   `primary`, `refresh` and `menu` (OK, REFRESH, BOOT, HOME) show the
   highlighted scene, or open the frame page on the gear; `back` goes back. A press is one step and a double press
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.
   A long press stays the frame's: on a reTerminal LEFT and RIGHT held walk
-  the scenes, which in the switcher is its pages (`setCurrentScene
-  {direction}` turns the page there).
-- **A keyboard** (Linux): the arrows walk the grid, Page Up and Down turn
-  the page, Enter shows the scene, Escape goes back.
+  the scenes, which in the switcher is a screenful back and on
+  (`setCurrentScene {direction}` is `back` and `forward` there).
+- **A screenful** (`forward` and `back`, a scene direction, Page Down and
+  Up): the highlight moves as many tiles as a screen holds (the grid's
+  columns times its rows, in the room the last render had), no further than
+  the last tile or the first, and the list scrolls with it; from the last
+  tile on goes to the first, from the first back to the last. It is what a
+  page turn was before the list scrolled, so the frame's event map needs no
+  change.
+- **A keyboard** (Linux): the arrows walk the grid (up and down to the tile
+  in the same column of the row above or below, the last of a shorter row,
+  since a category starts a row of its own), Page Up and Down a screenful,
+  Enter shows the scene, Escape goes back.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and
   five on e-paper, counted from the last tap or key. An ESP32 that deep-sleeps
   stays awake that long when the switcher opens, so its keys are heard.
@@ -242,3 +289,11 @@ bigger with it than without: the module's code 8.6 KB and its strings
 - What raises is reported where any scene's is (the dispatcher, the render
   pass), and opened by name the switcher knows no scene it came from, so the
   dispatcher has nothing to add to a `setCurrentScene`.
+
+The list that scrolls and the categories (2026-11-20) took the page arrows,
+the page number and the swipe handling out and put in the grouping (one pass
+and an insertion sort of the category names), the tiles' places (`spots`)
+and the scroll to the highlight; the scrolling itself is the JSX layer's,
+already in the image. That change was not measured on the ESP32-S3 image:
+no image was built for it. The firmware-size comment on its pull request is
+the number.

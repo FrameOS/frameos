@@ -40,7 +40,13 @@ as it resolves `sceneSwitcher`:
   from the other edge closes either built-in scene, so the frame never stacks
   one over the other. `sceneSettings {page: "frame"}` while the switcher shows
   (its gear, docs/scene-switcher.md) opens the frame page over the scene the
-  switcher was opened from instead, and Back there goes to that scene.
+  switcher was opened from instead, and Back there goes to that scene;
+  `sceneSwitcher {swap: true}` over a scene's settings (a taskbar's Start)
+  opens the list the same way, on every host (a Pi, whose settings are
+  `system/sceneSettings#<scene id>`, went back until 2026.11.14). On a desktop, where each opens in a window of its own and stays
+  open beside the others ("In a window"), the other one always opens: the
+  swipe up over a scene's settings opens the list, the swipe down over the
+  list the settings of the scene it was opened from.
 
 Who may say it (`origins`) is the switcher's list: the frame's event map, a
 scene, a schedule, the HTTP API with the frame access key or an admin
