@@ -103,8 +103,9 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 # faster or slower depending on where an unrelated change moved the code. On
 # the SenseCAP Indicator (2026-11-20) a tap in a grid of a hundred memo()'d
 # cells went from 114 to 68 ms, the home panel from 66 to 52, a tap that
-# changes nothing from 16 to 12.5. It costs 16 KB of internal SRAM, which the
-# heap no longer has: docs/esp32-memory.md "A 32 KB instruction cache".
+# changes nothing from 16 to 12.5. It costs 16 KB of the main internal heap
+# region; the six static Wi-Fi RX buffers below give the internal floor back:
+# docs/esp32-memory.md "A 32 KB instruction cache".
 CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev.
@@ -185,7 +186,7 @@ CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM=y
 # DMA-capable internal RAM, and a 64 KB send buffer with 64 TX buffers drained
 # that pool to 6 KB; 16 KB and IDF's 32 kept it at 44 KB and still pushed in
 # half the time (median 8.8 s). The static RX buffers and the block-ack
-# windows are internal DMA memory too, and stay as they were. A board without
+# windows are internal DMA memory too (six static buffers, below). A board without
 # PSRAM would take all of it from internal RAM: the C3 overlay puts IDF's
 # defaults back.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
@@ -195,6 +196,14 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=64
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+# Six static RX buffers, not ten: each is 1.6 KB of internal DMA memory, and
+# the four these give back pay for the 32 KB instruction cache above. Six is
+# the block-ack window (CONFIG_ESP_WIFI_RX_BA_WIN), the least IDF recommends.
+# The SenseCAP's internal floor over four boots and a TLS fetch each: 10.0 to
+# 10.5 KB with a 16 KB cache and ten buffers, 7.9 to 8.4 with 32 KB and ten,
+# 9.8 to 10.8 with 32 KB and six. A 1 MB HTTPS download took the same 1.4 to
+# 1.7 s with 10, 6 or 4 (2026-11-20; docs/esp32-memory.md).
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 
 # The RGB LCD of the SenseCAP Indicator (lcd_st7701s_rgb.c) is NOT restarted
 # at every vertical blank. IDF 5.5's restart starts the DMA at bounce buffer 0

@@ -461,19 +461,49 @@ branch):
 
 The largest block is no gain: it is the 64 KB region kept for internal-only
 allocations (`CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL`), which sits at another
-address in each image and fragments differently. The floor is the number
-that matters, and 3.8 KB, reached in the TLS handshake, is too close to an
-allocation failure (the SenseCAP's floor has already fallen release by
-release: 19.5 KB on 2026.11.10, 12.5 on 11.12). Every S3 board runs the
-generic image, the reTerminal E1004 (internal free 54-58 KB in the bench run
-of 2026-11-19, `min_ever_free` not recorded) and the e-paper boards
-included, which gain less (their renders are raster and panel time).
+address in each image and fragments differently.
 
-So the change waits until the 16 KB are found elsewhere in internal SRAM
-(the main region is 229 KB allocated: Wi-Fi, lwIP, the tasks' stacks, the
-LCD's bounce buffers). Until then the 16 KB cache is also why a
-performance number from one image does not carry to the next: compare
-images built from the same tree, or at 32 KB.
+### Where the floor is, and what pays for it
+
+That run's floor is one run's. Four reboots of each image, `heapinfo` after
+boot and again after a Scene store visit (TLS), say more (`build/bootfloor.py`
+on the research branch). The floor is reached at boot, in Wi-Fi's start and
+the first connections, not under the pressure run: the store visit, the
+switch storm and two windows never took it lower. Nearly all of it is the
+64 KB internal-only region's own minimum; the main region is full (4 bytes
+left at its lowest) in every image, and `malloc` then goes to PSRAM.
+
+| Image (same tree, SenseCAP) | `min_ever_free`, four boots | First Scene store render |
+| --- | --- | --- |
+| 16 KB cache, 10 static Wi-Fi RX buffers (today) | 10.0-10.5 KB | 2,383-2,394 ms |
+| 32 KB, 10 | 7.9-8.4 KB | 1,923-1,928 ms |
+| 32 KB, 6 | 9.8-10.8 KB | 1,909-1,941 ms |
+| 32 KB, 4 | 13.4-13.5 KB | 1,909-1,921 ms |
+| 32 KB, 4, `SPIRAM_MALLOC_ALWAYSINTERNAL` 4096 | 13.3-13.4 KB | 1,931-1,952 ms |
+
+The lever is the static Wi-Fi RX buffers (`CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM`,
+1.6 KB of internal DMA memory each, held from `esp_wifi_init` on). The others
+were measured once each and did not help: `SPIRAM_MALLOC_ALWAYSINTERNAL` at
+4096 or 2048 (8.3, 7.7 KB) and the internal-only reserve at 32 KB (9.2 KB).
+Task stacks were not moved: the render task's must stay internal (it reads
+SPIFFS with the cache off), and so must any task that touches flash.
+
+Six buffers is IDF's own floor for them (no fewer than the block-ack window,
+`CONFIG_ESP_WIFI_RX_BA_WIN`, 6), and it gives back the 16 KB cache's floor.
+Four gives 3 KB more but sits under that window. A 1 MB HTTPS download
+(`fetchText`) took 1.44-1.67 s and a 300 KB photo through `fetchImage` (its
+decode included) 4.96-5.14 s with 10, 6 or 4 buffers alike, six runs each;
+that path is held at about 5 Mbit/s by the internet, not the radio. What is
+not measured yet: a download on the LAN at full speed (a backend's scene set,
+a picture from a NAS) and an OTA download, where fewer buffers would show
+first as dropped frames and retransmits.
+
+A console `restart` sometimes ends in an RTC watchdog reset (`rst:0x10`)
+instead of a software one, right after `fos_wifi: connection lost reason=8`:
+twice in twelve restarts of the images with four or six buffers, never in
+eight with ten, and once in eight of the release image (ten buffers) in the
+bench logs of 2026-11-18. Too few to blame the buffers or clear them; watch
+for it.
 
 ## Boot and render costs
 
