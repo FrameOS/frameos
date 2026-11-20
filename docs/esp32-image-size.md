@@ -158,7 +158,7 @@ runtime.
    bytes (the kerning pre-resolved and uncompressed, 21 KB, is most of it;
    ASCII's blocks stored raw 1.7 KB) and ~5.4 KB of reader (pixie's
    `indexedfont` ~4 KB, opentype's composite reader made generic 1.0 KB):
-   **IMAGE_DELTA**, for a face that holds under 1 KB of RAM
+   **+22,416 B** over the glyph cache (esp32-s3 app 3,200,624 B, 394 KB free in the slot), for a face that holds under 1 KB of RAM
    (`docs/esp32-memory.md` "The built-in face is read where it lies", which
    has the options weighed). Its first cut was +35.2 KB: the glyf records
    kept their own boxes and each class subtable its own right-class ranges.
