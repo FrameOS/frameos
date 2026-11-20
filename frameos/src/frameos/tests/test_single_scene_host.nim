@@ -754,8 +754,89 @@ block windows_where_memory_is_short:
   render()
   doAssert lim.windows.len == 0, "no desktop, no windows"
   lim.setWindowed(false)
+
+  # Where one scene runs at a time (the 13.3" E1004), the scene in front takes
+  # that place: the one left is not kept, open on the desktop or not.
+  deviceMemoryBytesOverride = 3 * 1024 * 1024
+  doAssert windowLimit() == 1
+  lim.setWindowed(true)
+  show(plain)
+  show(a)
+  render()
+  desk(a.string)
+  doAssert not lim.keepsInWindow(a), "one at a time: nothing is kept for a window"
+  show(b)
+  doAssert lim.windows.len == 0, "the scene left went, open on the desktop or not"
+  render()
+  desk(a.string, b.string)
+  doAssert hostSceneFor(a).isNil, "and no window starts beside the one in front"
+  lim.setWindowed(false)
+
+  # Where two run, the window kept longest ago goes at the switch, before the
+  # next scene starts beside them.
+  deviceMemoryBytesOverride = 8 * 1024 * 1024 - 65536
+  lim.setWindowed(true)
+  show(a)
+  render()
+  desk(a.string)
+  show(b)
+  render()
+  desk(a.string, b.string)
+  doAssert lim.windows.len == 1 and lim.windows.hasKey(a)
+  lim.makeCurrent(c)
+  doAssert lim.windows.len == 1 and lim.windows.hasKey(b) and not lim.windows.hasKey(a),
+    "B kept, A let go as it was left: two in all with C"
+  lim.setWindowed(false)
   deviceMemoryBytesOverride = 0
   echo "windows where memory is short ok"
+
+# A scene that wears another layout than the one parked lets the parked one go
+# as its own starts: nobody wears it any more, and its interpreters held their
+# memory until the next switch (NeXTSTEP's beside OS/2 Warp on a reTerminal
+# E1004, 2026-11-19). The scenes it had open go to the new layout.
+block another_layout_lets_the_parked_one_go:
+  let layoutJsx = "export function get(app) { return <div className=\"flex flex-col w-full h-full\"><yield /></div> }"
+  proc desk(id: string): JsonNode =
+    %*{"id": id, "name": id, "settings": {"execution": "interpreted",
+      "refreshInterval": 60, "backgroundColor": "#000000", "isLayout": true}, "fields": [],
+      "apps": {"ui": {"name": "ui", "category": "data", "version": "1.0.0", "fields": [],
+        "output": [{"name": "image", "type": "image"}],
+        "sources": {"app.tsx": layoutJsx, "config.json": "{\"name\": \"ui\", \"output\": [{\"name\": \"image\", \"type\": \"image\"}], \"fields\": []}"}}},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
+        {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+        {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+  proc wearing(id, layoutId: string): JsonNode =
+    %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 300,
+      "backgroundColor": "#000000"}, "fields": [], "apps": {},
+      "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+        {"id": "2", "type": "app", "data": {"keyword": "render/color", "config": {"color": "#ff0000"}}}],
+      "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "2", "targetHandle": "prev"}],
+      "layout": {"sceneId": layoutId, "state": {}}}
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($(%*[
+    desk("tests/deskOne"), desk("tests/deskTwo"), wearing("tests/inOne", "tests/deskOne"),
+    wearing("tests/inTwo", "tests/deskTwo")]))))
+  let h = SingleSceneHost(frameConfig: FrameConfig(width: 40, height: 40, rotate: 0,
+    scalingMode: "cover", debug: false, saveAssets: %*false), logger: logger)
+  h.requestSelect = proc (sceneId: string): bool =
+    h.makeCurrent(sceneId.SceneId)
+    true
+  h.sceneOrder = proc (): seq[SceneId] = @["tests/inOne".SceneId, "tests/inTwo".SceneId]
+  h.start()
+  h.makeCurrent("tests/inOne".SceneId)
+  doAssert h.ensureScene()
+  discard h.renderScene(ExecutionContext(scene: h.scene, event: "render",
+    payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+  doAssert not h.scene.wornLayout.isNil and h.scene.wornLayout.id.string == "tests/deskOne"
+  h.makeCurrent("tests/inTwo".SceneId)
+  doAssert h.ensureScene()
+  discard h.renderScene(ExecutionContext(scene: h.scene, event: "render",
+    payload: %*{}, image: newImage(40, 40), hasImage: true, loopIndex: 0, loopKey: "."))
+  doAssert h.scene.wornLayout.id.string == "tests/deskTwo"
+  doAssert takeParkedLayout("tests/deskOne").isNil, "the first desk is not parked any more"
+  replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
+  echo "another layout lets the parked one go ok"
 
 # ------------------------------------------- the frame page beside the focus
 #

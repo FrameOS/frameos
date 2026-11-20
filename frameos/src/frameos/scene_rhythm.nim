@@ -613,13 +613,28 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
 
 # --------------------------------------------------- around a layout's hole
 
-proc rhythmChromeCanStay*(host: FrameScene): bool =
-  ## Every embedded scene of this UI is a hole. A picture of one is part of the
-  ## UI's drawing, and a split's panels are no UI of its own.
+proc rhythmChromeHasHoles*(host: FrameScene): bool =
+  ## This UI draws around holes, so what it drew can be left on the canvas
+  ## (a split's panels are no UI of its own).
   for i in 0 ..< host.slots.len:
-    if not host.slots[i].hole:
+    if host.slots[i].hole:
+      return true
+
+proc rhythmChromeCanStay*(host: FrameScene): bool =
+  ## A UI with holes, whose every other embedded scene (a picture: a window
+  ## behind another) is not due this pass. A picture is part of the UI's
+  ## drawing, so one that is due draws the UI again; one that is not is the
+  ## same picture as last time. Before, any picture ran the whole UI on every
+  ## pass of its holes: a desktop with a window behind the one in front ran its
+  ## JavaScript and raster for each frame of an animation in front, 1.9 fps for
+  ## DVD logo bounce on the SenseCAP Indicator's Windows 98 (2026-11-19).
+  result = false
+  for i in 0 ..< host.slots.len:
+    template s: untyped = host.slots[i]
+    if s.hole:
+      result = true
+    elif passDepth == 0 or decided(s.child).runsThisPass:
       return false
-  host.slots.len > 0
 
 var chromeOwed {.threadvar.}: bool
 
@@ -658,14 +673,16 @@ proc rhythmVisitChrome*(host: FrameScene): RhythmDecision =
 
 proc rhythmRestoreChrome*(host: FrameScene, image: Image) =
   ## The chrome out of the frame buffer that holds it, around the holes: what
-  ## this buffer's holes hold is their scenes' business.
+  ## this buffer's holes hold is their scenes' business. A picture is the
+  ## chrome's and comes with it.
   let src = otherCanvasHolding(host.rhythm.chromePass)
   if src.isNil:
     return
   var holes: seq[PixelBox]
   for i in 0 ..< host.slots.len:
     template s: untyped = host.slots[i]
-    holes.add((s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y)))
+    if s.hole:
+      holes.add((s.x.int, s.y.int, int(s.visible[2] - s.x), int(s.visible[3] - s.y)))
   for r in aroundHoles(image.width, image.height, holes):
     if r.w > 0 and r.h > 0:
       copyPixels(image.view(r.x, r.y, r.w, r.h), src.view(host.canvasX.int + r.x, host.canvasY.int + r.y, r.w, r.h))

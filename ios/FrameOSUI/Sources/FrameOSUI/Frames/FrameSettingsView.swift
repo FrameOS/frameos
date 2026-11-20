@@ -451,6 +451,18 @@ struct AddBindingSheet: View {
     @State private var edge = "left"
     @State private var kind = "nextScene"
     @State private var sceneId = ""
+    /// The Show scene's settings set here, by field name (the SPA's row of
+    /// the scene's public fields): a field left alone keeps the scene's own.
+    @State private var settings: [String: JSONValue] = [:]
+
+    var sceneFields: [SceneField] {
+        guard kind == "showScene", let scene = scenes.first(where: { $0.id == sceneId }) else { return [] }
+        return SceneForm.visiblePublicFields(scene.fields, [settings])
+    }
+
+    func setting(_ field: SceneField) -> Binding<JSONValue> {
+        Binding { settings[field.name] ?? field.defaultValue ?? .null } set: { settings[field.name] = $0 }
+    }
 
     var body: some View {
         NavigationStack {
@@ -487,7 +499,22 @@ struct AddBindingSheet: View {
                         }
                     }
                 }
+                if !sceneFields.isEmpty {
+                    Section {
+                        ForEach(sceneFields) { field in
+                            SceneFieldEditor(field: field, value: setting(field))
+                        }
+                        if !settings.isEmpty {
+                            Button("Keep the scene's own values") { settings = [:] }
+                        }
+                    } header: {
+                        Text("Show it with")
+                    } footer: {
+                        Text("A field left alone keeps the scene's own value.")
+                    }
+                }
             }
+            .onChange(of: sceneId) { _, _ in settings = [:] }
             .navigationTitle("Add")
             .inlineTitle()
             .toolbar {
@@ -496,7 +523,8 @@ struct AddBindingSheet: View {
                     Button("Add") {
                         let gesture: ButtonBinding.Gesture = isSwipe
                             ? .edge(edge) : .button(label: label.trimmingCharacters(in: .whitespaces), action: press)
-                        add(ButtonBinding(gesture: gesture, kind: kind, sceneId: kind == "showScene" ? sceneId : nil))
+                        let state = kind == "showScene" ? SceneForm.applyState(sceneFields, values: settings) : [:]
+                        add(ButtonBinding(gesture: gesture, kind: kind, sceneId: kind == "showScene" ? sceneId : nil, state: state))
                         dismiss()
                     }
                     .disabled((!isSwipe && label.trimmingCharacters(in: .whitespaces).isEmpty) || (kind == "showScene" && sceneId.isEmpty))

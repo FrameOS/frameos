@@ -22,6 +22,11 @@
 #   ios/bin/ui-test --build-only          # build-for-testing, logs in DerivedData/
 #   ios/bin/ui-test --without-building    # the tests on that build
 #
+# --without-building runs the .xctestrun the build left in
+# DerivedData/Build/Products, so the products can be built on one machine and
+# tested on another (CI does: the simulator boots on its own runner while
+# another builds, .github/workflows/ios.yml).
+#
 # Run whole, the simulator boots while the app builds. The halves do not
 # overlap the boot: on CI's three-core macOS VM a first boot is minutes of
 # CPU, not of waiting, and everything beside it ran slower by more than the
@@ -44,6 +49,16 @@ fi
 mkdir -p DerivedData
 # TEST_RUNNER_ variables reach the test process without the prefix.
 xcodebuild_tests() {
+  local what
+  what=(-project FrameOS.xcodeproj -scheme FrameOS -derivedDataPath DerivedData)
+  if [[ "$1" == test-without-building ]]; then
+    # The build's own test plan, not the project: the build may come from
+    # another machine (CI's build job), where there is no generated project.
+    local xctestrun
+    xctestrun="$(ls DerivedData/Build/Products/*.xctestrun 2>/dev/null | head -1)"
+    [[ -n "$xctestrun" ]] || { echo "No build to test: ios/bin/ui-test --build-only first" >&2; exit 1; }
+    what=(-xctestrun "$xctestrun")
+  fi
   TEST_RUNNER_FRAMEOS_UITEST_BACKEND="${FRAMEOS_UITEST_BACKEND:-}" \
   TEST_RUNNER_FRAMEOS_UITEST_EMAIL="${FRAMEOS_UITEST_EMAIL:-}" \
   TEST_RUNNER_FRAMEOS_UITEST_PASSWORD="${FRAMEOS_UITEST_PASSWORD:-}" \
@@ -54,10 +69,8 @@ xcodebuild_tests() {
   TEST_RUNNER_FRAMEOS_UITEST_CLOUD_PASSWORD="${FRAMEOS_UITEST_CLOUD_PASSWORD:-}" \
   TEST_RUNNER_FRAMEOS_UITEST_CLOUD_SCENE="${FRAMEOS_UITEST_CLOUD_SCENE:-}" \
   xcodebuild "$1" \
-    -project FrameOS.xcodeproj \
-    -scheme FrameOS \
+    "${what[@]}" \
     -destination "id=$udid" \
-    -derivedDataPath DerivedData \
     -only-testing:FrameOSUITests \
     CODE_SIGNING_ALLOWED=NO \
     "${@:2}"

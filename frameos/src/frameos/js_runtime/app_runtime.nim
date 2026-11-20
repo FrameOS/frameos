@@ -4053,6 +4053,15 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   var
     svg = root
     regions: seq[UiRegion]
+    keptTree: SvgNode
+  # Put in `lastJsx` only as this returns. The callers hand over `lastJsx`
+  # itself as `root`, which ORC borrows: replaced there mid-way, `root` was
+  # its last owner's and was freed, and every later `root.tag` read freed
+  # memory (a SenseCAP Indicator's Guru Meditation in Tap counter on a
+  # desktop, the hardware bench, 2026-11-19).
+  defer:
+    if not keptTree.isNil:
+      runtime.lastJsx = keptTree
   let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
     # Where a change costs a refresh no press shows, a drag counts whole and
@@ -4077,7 +4086,7 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     # render, and this equal copy goes.
     let kept = target.memo.source
     if not kept.isNil and kept != root and runtime.lastJsx == root:
-      runtime.lastJsx = kept
+      keptTree = kept
   # `<img src="https://…">`: each picture at the size it got, here or on its
   # way (a slow panel fetches it now: one refresh with every picture).
   if runtime.jsxMemo.sawUrl and root.tag != "svg":
