@@ -1626,52 +1626,27 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
 
 # -------- Glyph runs
 #
-# Text is drawn a glyph at a time: each glyph one shared path per typeface,
-# rune and size (kept here), placed with the node's `offset` at a quarter
-# pixel. pixie keeps the coverage of a shared path at each subpixel offset
-# (paths.nim, the coverage cache), so a letter drawn again — in another
-# label, in the next render, in a changed card's new text — is a mask
-# blended into the panel, not an outline flattened and scanned. A run's
-# path, new for every new text, was most of a toggled card's raster on an
-# ESP32 (docs/perf-todo.md). Glyphs sit up to an eighth of a pixel from
-# where the typesetter put them.
-
-var glyphPaths {.threadvar.}: Table[ShapeKey, Path]
-
-# A glyph's path keeps its flattened shapes too (a shared path's), a few KB
-# for a large size: an ESP32 holds a UI's worth, a host more.
-const GlyphPathsMax = when defined(frameosEmbedded): 256 else: 1024
+# Text is drawn a glyph at a time: each glyph a glyph path (pixie's
+# `glyphPath`: the face, the rune, the size and the glyph's box, no outline)
+# placed with the node's `offset` at a quarter pixel. A fill draws it from
+# pixie's glyph cache (paths.nim): its coverage at that size and quarter-pixel
+# offset, four bits a pixel, kept the first time it is drawn, so a letter
+# drawn again (in another label, in the next render, in a changed card's new
+# text) is a mask blended into the panel, not an outline read, flattened and
+# scanned. A run's path, new for every new text, was most of a toggled card's
+# raster on an ESP32 (docs/perf-todo.md). Glyphs sit up to an eighth of a
+# pixel from where the typesetter put them.
 
 proc quarter(v: float32): float32 {.inline.} =
   round(v * 4) / 4
 
 proc glyphPath(font: Font, rune: Rune): Path =
-  ## The rune's outline at the font's size, at the origin, shared; nil for
-  ## a glyph that draws nothing.
-  let face = cast[uint64](font.typeface)
-  var key: ShapeKey
-  key[0] = cast[int32](uint32(face and 0xffff_ffff'u64))
-  key[1] = cast[int32](uint32(face shr 32))
-  key[2] = rune.int32
-  key[3] = int32(font.size * 64)
-  if glyphPaths.hasKey(key):
-    return glyphPaths.getOrDefault(key)
-  if glyphPaths.len >= GlyphPathsMax:
-    glyphPaths.clear()
-  var path: Path
+  ## The rune's glyph at the font's size, at the origin; nil for a glyph that
+  ## draws nothing.
   try:
-    let typeface = font.typeface.fallbackTypeface(rune)
-    if typeface.isNil or not typeface.hasColorGlyph(rune):
-      path = font.typeface.getGlyphPath(rune)
-      path.transform(scale(vec2(font.scale)))
-      path.share()
-      let b = path.localBounds()
-      if b.w <= 0 or b.h <= 0:
-        path = nil
+    font.typeface.glyphPath(rune, font.size)
   except PixieError:
-    path = nil
-  glyphPaths[key] = path
-  path
+    nil
 
 proc emitGlyphs(arrangement: Arrangement, n: UiNode, x, y, opacity: float32,
     drawn: var seq[SvgNode]): bool =

@@ -65,11 +65,11 @@ cheap is that the pictures are reconciled, not the code:
 - **Text that did not change is not set again.** The layout keeps, per UI
   (its `UiMemo`, on the UI's target in `ui/events.nim`), what the last
   layout set in type: the arrangement of each text by its runs, style,
-  width and alignment, and the outlines it emitted at a place. Text that
-  comes back the same is neither typeset nor outlined, and it is handed to
-  pixie as the very same nodes and shared paths, so pixie compares it by
-  identity, keeps its bounds and its flattened shapes. What a layout did
-  not use is let go.
+  width and alignment, and the glyph nodes it emitted at a place. Text that
+  comes back the same is not typeset again, and it is handed to pixie as
+  the very same nodes, so pixie compares it by identity. What a layout did
+  not use is let go. Each glyph is drawn from pixie's glyph cache ("Text and
+  fonts").
 - **Damage is a few boxes, matched in order.** On an LCD whose canvas is
   the panel's own buffer, `utils/svg_frames.nim` keeps the parsed SVG each
   buffer holds and compares the next with it (pixie's `damageRects`): the
@@ -1115,6 +1115,45 @@ Raspberry Pi frame finds families and bold or italic faces among the fonts in
 its assets folder (`fonts/`), as SVG `<text>` does; an ESP32 has one face,
 and draws a bold weight as its outline thickened. White space collapses as in
 HTML; lines wrap at spaces.
+
+### The glyph cache
+
+A text is drawn a glyph at a time, and a glyph is drawn from the coverage it
+had the last time it was drawn at that size and quarter-pixel offset, as
+LVGL draws its pre-rasterized fonts, with pixie's own rasterizer and blends
+(`pixie/paths.nim`, "The glyph cache"):
+
+- The layout emits each glyph as a **glyph path** (pixie's `glyphPath`): the
+  face, the rune, the size and the glyph's box, read from its glyf header,
+  and no outline. The SVG reader makes `<text>` in one colour and without a
+  stroke the same way, and pixie's `fillText` (the Text app, status
+  screens, error frames) draws through the same cache.
+- A fill of a glyph path at a translation and a uniform scale, in one
+  colour, blended normally, is a lookup and a blit: the mask's rows go
+  through the surface's own coverage store (`fillCoverage`), so RGBX, 565,
+  luma and sixteen greys with their dithering are drawn as a fresh fill
+  draws them. A miss reads the outline, rasterizes it through the filler a
+  fill runs, trims it to the pixels it covers and keeps it at **four bits a
+  pixel**; the outline is let go.
+- Keyed by the face's serial (never reused, as an address would be), the
+  rune, the size under the scale (1/64 px) and the offset's quarter pixel
+  each way. The least recently used glyph goes first when the budget is
+  full: 64 KB on an ESP32, 1 MB on a Pi's render thread, 512 KB in the
+  browser preview, nothing in pixie's own tests unless they ask. It is
+  emptied with pixie's coverage cache when render memory runs short. It is
+  the render thread's own (`{.threadvar.}`): a value nobody else touches.
+- A glyph lands at most an eighth of a pixel from where the typesetter put
+  it, and its edge pixels may differ from a fresh fill by up to half a step
+  of sixteen. What the cache cannot do exactly is filled from an outline
+  made for that fill: a rotation or a skew, a gradient, a stroke, a mask
+  blend, a glyph larger than 48 K pixels.
+- The typeface no longer keeps the outline of every glyph it ever drew
+  (`opentype.getGlyphPath` reads it from the font each time, about a
+  microsecond on a laptop), and the layout no longer keeps a path per glyph
+  and size with its flattened shapes.
+
+`set debug 1` shows it on the render line: `glyphs 312/4 9K` is hits,
+misses and what it holds, and the `glyph` fill kind is its blits.
 
 ## Not supported (yet)
 

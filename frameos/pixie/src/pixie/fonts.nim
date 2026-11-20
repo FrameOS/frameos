@@ -8,7 +8,7 @@ const
   SP = Rune(32)
 
 type
-  Typeface* = ref object
+  Typeface* = ref object of GlyphSource
     opentype: OpenType
     svgFont: SvgFont
     filePath*: string
@@ -525,16 +525,54 @@ proc layoutBounds*(spans: seq[Span]): Vec2 {.inline, raises: [].} =
   ## Computes the width and height of the spans in pixels.
   typeset(spans).layoutBounds()
 
-proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+var typefaceSerial: int
+  ## The last serial handed out (`GlyphSource.serial`, the glyph cache's name
+  ## for a face): never reused, so a face let go takes its masks' key with it.
+
+proc newTypeface(): Typeface =
   result = Typeface()
+  result.serial = uint32(atomicInc(typefaceSerial))
+
+proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+  result = newTypeface()
   result.opentype = parseOpenType(buf)
 
 proc parseTtf*(buf: string): Typeface {.raises: [PixieError].} =
   parseOtf(buf)
 
 proc parseSvgFont*(buf: string): Typeface {.raises: [PixieError].} =
-  result = Typeface()
+  result = newTypeface()
   result.svgFont = svgfont.parseSvgFont(buf)
+
+proc outlineGlyph(face: GlyphSource, rune: int32, size: float32): Path {.
+    nimcall, gcsafe, raises: [PixieError].} =
+  ## paths.nim's GlyphOutliner: the rune's outline in `face` at `size` px.
+  let typeface = Typeface(face)
+  result = typeface.getGlyphPath(Rune(rune))
+  result.transform(scale(vec2(size / typeface.scale)))
+
+glyphOutliner = outlineGlyph
+
+proc glyphPath*(typeface: Typeface, rune: Rune, size: float32): Path {.raises: [PixieError].} =
+  ## The rune's glyph at `size` px, at the origin, as a glyph path: a fill
+  ## draws it from the glyph cache (paths.nim) and nothing of its outline is
+  ## kept. Its bounds are the glyph's box from the font where it states one,
+  ## else its outline's. nil for a glyph that draws nothing: a blank, a rune
+  ## no face has, a color glyph (drawn by `fillText`'s own path).
+  let face = typeface.fallbackTypeface(rune)
+  if face.isNil or face.hasColorGlyph(rune):
+    return nil
+  var
+    box: Rect
+    bounds: Rect
+  if face.opentype != nil and face.opentype.glyphBox(rune, box):
+    let s = size / face.scale
+    bounds = rect(box.x * s, box.y * s, box.w * s, box.h * s)
+  else:
+    bounds = outlineGlyph(typeface, rune.int32, size).computeBounds()
+  if bounds.w <= 0 or bounds.h <= 0:
+    return nil
+  newGlyphPath(typeface, rune.int32, size, bounds)
 
 proc runesPath(
   arrangement: Arrangement, spanIndex, first, last: int, line: var int
@@ -688,6 +726,38 @@ proc drawColorGlyphs(
         image, transform * translate(offset) * scale(vec2(bitmapScale))
       )
 
+proc glyphRuns(target: Image, arrangement: Arrangement, transform: Mat3): bool =
+  ## Fills the arrangement a glyph at a time from the glyph cache (paths.nim);
+  ## false where that does not apply (the cache is off, a transform that is
+  ## not a translation and a uniform scale, an underline, a strikethrough, a
+  ## paint that is not one colour), for the outlines instead.
+  if glyphCacheBudget <= 0:
+    return false
+  if transform[0, 1] != 0 or transform[1, 0] != 0 or transform[0, 2] != 0 or
+      transform[1, 2] != 0 or transform[2, 2] != 1 or transform[0, 0] <= 0 or
+      abs(transform[1, 1] - transform[0, 0]) > 0.0001'f32 * transform[0, 0]:
+    return false
+  for font in arrangement.fonts:
+    if font.underline or font.strikethrough:
+      return false
+    for paint in font.paints:
+      if paint.kind != SolidPaint:
+        return false
+  for spanIndex, (start, stop) in arrangement.spans:
+    let font = arrangement.fonts[spanIndex]
+    for i in start .. stop:
+      let rune = arrangement.runes[i]
+      if rune.isWhiteSpace:
+        continue
+      let path = font.typeface.glyphPath(rune, font.size)
+      if path.isNil:
+        continue
+      let at = transform * translate(arrangement.positions[i])
+      for paint in font.paints:
+        target.fillPath(path, paint, at)
+    target.drawColorGlyphs(arrangement, spanIndex, transform)
+  true
+
 proc textUber(
   target: Image,
   arrangement: Arrangement,
@@ -699,6 +769,9 @@ proc textUber(
   dashes: seq[float32] = @[],
   stroke: static[bool] = false
 ) =
+  when not stroke:
+    if target.glyphRuns(arrangement, transform):
+      return
   var drawing = -1
   for (spanIndex, path) in arrangement.linePaths():
     let font = arrangement.fonts[spanIndex]
@@ -849,7 +922,7 @@ proc readTypefaces*(filePath: string): seq[Typeface] {.raises: [PixieError].} =
   ## Loads a OpenType Collection (.ttc).
   try:
     for opentype in parseOpenTypeCollection(readFile(filePath)):
-      let typeface = Typeface()
+      let typeface = newTypeface()
       typeface.opentype = opentype
       result.add(typeface)
   except IOError as e:

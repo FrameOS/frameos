@@ -124,6 +124,21 @@ Hosts:
   queueing, and both runner loops end their sleep on it.
 - `frameos/render_probe.nim`: the per-phase split on the device's render line.
 
+## The glyph cache (2026-11-19)
+
+Text no longer goes through the coverage cache: a glyph is a glyph path (no
+outline) and a fill of one is a blit from pixie's glyph cache, its coverage
+at its size and quarter pixel, four bits a pixel, kept the first time it is
+drawn (`docs/jsx-ui.md` "The glyph cache"). It covers the JSX layout's glyph
+runs, SVG `<text>` in one colour and pixie's `fillText` (the Text app, the
+status screens), which used to fill a whole line's outline every render. On a
+host the repaint time is unchanged (a blit 365 ns against a coverage mask's
+378, a whole home-panel repaint 240 µs either way); what it buys is memory
+(`docs/esp32-memory.md` "Text keeps coverage, not outlines": the text
+caches of a home panel went from ~133 KB to 12 KB) and, for the Text app and
+SVG text, a mask where there was an outline. The render line has its counts
+(`glyphs hits/misses KB`). Not measured on a board yet.
+
 ## The hardware bench's slow renders (2026-11-18)
 
 The bench run of 2026-11-18 (2026.11.11) flagged four scenes at 10 to 16 s a

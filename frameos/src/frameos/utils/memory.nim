@@ -7,7 +7,7 @@
 ## exhausting the device.
 
 import pixie/decodebudget
-from pixie/paths import clearCoverageCache
+from pixie/paths import clearCoverageCache, clearGlyphCache
 
 export decodebudget
 
@@ -297,12 +297,14 @@ proc releaseRenderMemoryIfShort() =
     # 0 on an ESP32 is under the reserve: as short as it gets.
     if (headroom > 0 or runsAsEmbedded()) and headroom < RenderMemoryShortBytes:
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
+      clearGlyphCache()
       discard renderMemoryReleaseHook(false)
 
 proc releaseRenderMemory*(): bool =
   ## Lets go of what a render can rebuild, whatever the headroom: a fill or a
   ## decode was just refused. Whether anything went (then try it again).
   clearCoverageCache()
+  clearGlyphCache()
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
 proc makeRoomForBlock*(bytes: int): bool =
@@ -422,6 +424,7 @@ proc roomForImage*(bytes: int): bool =
   if bytes <= room:
     return true
   clearCoverageCache()
+  clearGlyphCache()
   if not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(false):
     room = availableRenderBytes()
   bytes <= room

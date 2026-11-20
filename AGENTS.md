@@ -760,6 +760,14 @@
   never paint a UI some other way, or it loses the damage repaint and the
   background waiver (`utils/svg_frames.nim`). pixie's SVG input is the
   `SvgNode` tree, markup included (`parseSvgNodes`).
+- **Text is glyph paths, drawn from pixie's glyph cache** (`docs/jsx-ui.md`
+  "The glyph cache", `pixie/paths.nim`): a glyph is kept as its coverage at
+  its size and quarter pixel, four bits a pixel, and nothing of its outline
+  stays in memory (no per-glyph path tables, no outline cache on the
+  typeface). A new way to draw text goes through `fillText` or `glyphPath`,
+  never a run's outline made per render; the cache stays the render
+  thread's (`{.threadvar.}`), budgeted (64 KB on an ESP32) and emptied with
+  the coverage cache when render memory is short.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
