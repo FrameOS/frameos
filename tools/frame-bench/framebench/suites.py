@@ -740,7 +740,13 @@ def suite_desktop(ctx, frame, layouts=None):
             if not sample:
                 issues.append(issue('fail', 'desktop_missing_sample', where, 'no such sample layout in repo/scenes/samples'))
                 continue
-            scenes = [dict(s) for s in original if s.get('id') not in DESKTOP_LAYOUTS]
+            # The frame's own layouts stay off the set: one chosen on the frame
+            # (its frame page's Layout) wins over every install's while the frame
+            # holds it (layout_choice.layoutFor), and the Sticky's set held an
+            # install copy of Windows 98 under its own id, so its desktop runs
+            # benched that copy's code whatever sample was pushed (2026-11-20).
+            scenes = [dict(s) for s in original
+                      if s.get('id') not in DESKTOP_LAYOUTS and not (s.get('settings') or {}).get('isLayout')]
             for s in scenes:
                 if not (s.get('settings') or {}).get('isLayout'):
                     s['layout'] = {'sceneId': lid}
