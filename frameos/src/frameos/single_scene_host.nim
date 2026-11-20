@@ -762,7 +762,11 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   # to that moment itself; ticking to now first turned a tap made during a
   # 30 s refresh into a 30 s long press before its release was delivered.
   # Time passes in `tick`, between events.
-  host.events.dispatchNow(origin, event, payload)
+  let started = if probeOn: getMonoTime() else: MonoTime()
+  result = host.events.dispatchNow(origin, event, payload)
+  if probeOn:
+    inputNs += (getMonoTime() - started).inNanoseconds
+    inc inputCount
 
 proc tick*(host: SingleSceneHost): bool =
   ## Time passing with nothing sent: a held pointer or button becomes a long
