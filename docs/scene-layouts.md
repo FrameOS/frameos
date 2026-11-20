@@ -574,7 +574,8 @@ fastest it renders, whatever the chrome's clock says.
 ## Made for a device: the reTerminal layouts
 
 Two samples are made for one family of frames, and know where its keys are
-on the case (Seeed's drawings), so what a key does is written beside the key.
+on the case (Seeed's drawings), so what a key does is written beside the key:
+what a press does, and under it, smaller, what holding it does.
 Each reads `app.frame.eventMap` for what the keys do, and falls back to the
 map the planes give that board. The keys' places are in one table at the top
 of each app (as a share of the glass, the panel unturned), and the side they
@@ -589,21 +590,27 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   or AI pressed twice: the layout's own binding, while the frame's map leaves
   that free), the layout turns it into a home screen. That screen has the time
   and the date, the battery and the signal, the swipes and a tab beside each
-  key with what a press does in the list: UP and DOWN move, AI opens. AI's
-  `primary` role is the contract's (`buttons.roleByLabel`). "Around the
-  scene" also offers a rail beside the keys. The rail has a tab per key with
-  what holding it does (a tap on a tab does the same where the glass can),
-  plus Scenes, Settings, the time and the battery. The third choice is a
-  status bar.
+  key with what it does in the list: UP and DOWN move (held, a page), AI
+  opens (held, talks). AI's `primary` role is the contract's
+  (`buttons.roleByLabel`). "Around the scene" also offers a rail beside the
+  keys. The rail has a tab per key, a tap on it a press of that key (a
+  `button` dispatched with the key's label and role), plus Scenes, Settings,
+  the time and the battery. The third choice is a status bar. A press of AI
+  that the frame's map leaves to the scene also draws the picture again
+  (`render`), so the layout calls it Refresh.
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
   the edge with the keys holds the scene's name, the signal, the battery and
-  the time it was drawn, with a cap under each key saying what holding it
-  does. On the E1001-E1003 the keys are on the top edge, right of centre, and
-  seen from the front the one labelled RIGHT is the leftmost. On the E1004 the
-  touch keys are under the picture. The green key pressed twice opens the
-  scene list, where the caps say what a press does there. On the touch E1003
-  the name, the gear and the status are buttons too.
+  the time it was drawn, with a cap under each key: the arrows' press is the
+  scene's (Next, Prev), the green key's draws the picture again (Refresh: the
+  layout dispatches `render` for a press the frame's map leaves free), and
+  the small word is the hold (a note under the scene's name says so: the
+  E1001's keys are 44 px apart, no room for "hold"). On the E1001-E1003 the
+  keys are on the top edge, right of centre, and seen from the front the one
+  labelled RIGHT is the leftmost. On the E1004 the touch keys are under the
+  picture. The green key pressed twice opens the scene list, where the caps
+  say what a press does there. On the touch E1003 the name, the gear and the
+  status are buttons too.
 
 The pictures in their pull request were made with
 `frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board
