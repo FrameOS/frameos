@@ -27,6 +27,7 @@ import base64
 import json
 import os
 import re
+import threading
 import time
 
 from .parse import stats, summarize
@@ -113,6 +114,12 @@ def scenes_for(frame) -> list[dict]:
 
 
 # ------------------------------------------------------------- isolation
+# Every frame's suite runs in its own thread and all share one journal file:
+# a read-change-write without the lock lost a write on 2026-11-19 (the
+# SenseCAP's animation scene stayed on the board).
+_LOCK = threading.Lock()
+
+
 def _journal() -> dict:
     try:
         with open(JOURNAL) as fh:
@@ -127,33 +134,48 @@ def _write_journal(j: dict):
         json.dump(j, fh, indent=1)
 
 
-def isolate(con, frame, backend_url: str):
-    j = _journal()
-    j[frame['port']] = {'backend': backend_url, 'module': frame.get('module'), 'frame_id': frame.get('frame_id'),
-                        'scenes': [], 'since': time.strftime('%Y-%m-%dT%H:%M:%S')}
-    _write_journal(j)
-    con.command(f'set backend {ISOLATED_BACKEND}', 1.5)
-
-
-def note_scene(frame, sid):
-    j = _journal()
-    if frame['port'] in j and sid not in j[frame['port']]['scenes']:
-        j[frame['port']]['scenes'].append(sid)
+def _journal_set(port, entry):
+    with _LOCK:
+        j = _journal()
+        if entry is None:
+            j.pop(port, None)
+        else:
+            j[port] = entry
         _write_journal(j)
 
 
+def isolate(con, frame, backend_url: str):
+    _journal_set(frame['port'], {'backend': backend_url, 'module': frame.get('module'), 'frame_id': frame.get('frame_id'),
+                                 'scenes': [], 'since': time.strftime('%Y-%m-%dT%H:%M:%S')})
+    if backend_url:
+        con.command(f'set backend {ISOLATED_BACKEND}', 1.5)
+
+
+def note_scene(frame, sid):
+    with _LOCK:
+        j = _journal()
+        if frame['port'] in j and sid not in j[frame['port']]['scenes']:
+            j[frame['port']]['scenes'].append(sid)
+            _write_journal(j)
+
+
 def restore(con, frame, entry=None):
-    """Delete the benchmark scenes and point the board back at its backend."""
-    j = _journal()
-    entry = entry or j.get(frame['port'])
+    """Delete the benchmark scenes and point the board back at its backend.
+    Every benchmark scene id is deleted, journaled or not (a delete of a scene
+    the board does not hold is refused, nothing more)."""
+    with _LOCK:
+        entry = entry or _journal().get(frame['port'])
     if not entry:
         return None
-    for sid in entry.get('scenes') or []:
-        con.usb_api(f'scene-delete {sid}', 30)
+    ids = list(dict.fromkeys((entry.get('scenes') or []) + [s['id'] for s in scenes_for({'lcd': True})]))
+    listed = con.usb_api_json('scene-list', 60) or {}
+    held = {s.get('id') for s in listed.get('scenes') or []}
+    for sid in ids:
+        if not held or sid in held:
+            con.usb_api(f'scene-delete {sid}', 30)
     if entry.get('backend'):
         con.command(f"set backend {entry['backend']}", 1.5)
-    j.pop(frame['port'], None)
-    _write_journal(j)
+    _journal_set(frame['port'], None)
     return entry
 
 
@@ -191,7 +213,9 @@ def heapinfo(con) -> dict:
     for line in con.command('heapinfo', 3):
         if line.startswith('---'):
             low = line.lower()
-            section = 'internal_malloc' if 'malloc' in low else 'psram' if 'psram' in low else 'internal' if 'internal' in low else None
+            # `--- internal (MALLOC_CAP_INTERNAL)`, `--- internal as malloc() sees it (...)`, `--- psram (...)`
+            section = ('internal_malloc' if 'as malloc' in low else 'psram' if low.startswith('--- psram')
+                       else 'internal' if low.startswith('--- internal') else None)
             continue
         m = HEAP_LINE.search(line)
         if m and section and section not in out:
@@ -234,13 +258,8 @@ def suite_benchmark(ctx, frame):
     n = getattr(ctx, 'bench_n', 5) if not ctx.quick else 2
     slow = frame.get('refresh_s', 0) >= SLOW_PANEL_S
     try:
-        if backend_url and getattr(ctx, 'isolate', True):
-            isolate(con, frame, backend_url)
-        else:
-            # Journal the scenes anyway, so a killed run's are deleted.
-            j = _journal()
-            j[frame['port']] = {'backend': None, 'module': frame.get('module'), 'scenes': []}
-            _write_journal(j)
+        # Journaled either way, so a killed run's scenes are deleted.
+        isolate(con, frame, backend_url if getattr(ctx, 'isolate', True) else None)
         if debug_was == '1':
             # The probe split is not on every firmware's render line: time
             # every board without it, as it ships.
@@ -248,6 +267,11 @@ def suite_benchmark(ctx, frame):
         for scene in scenes_for(frame):
             payload = json.dumps(scene, separators=(',', ':')).encode()
             ok, line = con.put_bytes(f'scene-put {len(payload)}', payload, 120)
+            if not ok:
+                # A long payload can lose a few bytes on the way (the Sticky's
+                # USB on 2026.11.11: 119021 of 119048): once more.
+                con.idle(2)
+                ok, line = con.put_bytes(f'scene-put {len(payload)}', payload, 120)
             if not ok:
                 issues.append(issue('fail', 'bench_put', scene['name'], line[:200]))
                 continue
@@ -262,8 +286,17 @@ def suite_benchmark(ctx, frame):
                 results[key] = entry
                 continue
             if key == 'anim':
+                # The board sums up its animation every ten seconds or so
+                # (fos_animation.c) and the first one holds the start: watch
+                # until the third, 35 s at most.
                 con.drain()
-                wa = summarize(con.idle(ctx.passive or 8))
+                got = []
+                end = time.time() + 35
+                while time.time() < end:
+                    got += con.idle(1)
+                    if len([1 for _, x in got if '"render:animation"' in x and '"running"' in x]) >= 3:
+                        break
+                wa = summarize(got)
                 running = [a for a in wa['animation'] if a.get('status') == 'running']
                 anim = running[1:] if len(running) > 1 else running
                 entry['animation'] = [{k: a.get(k) for k in ('frames', 'fps', 'avgMs', 'maxMs', 'periodMs', 'seconds')} for a in anim]

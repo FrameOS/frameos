@@ -204,7 +204,9 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
                 _m(rows, f'bench.{key}.done_ms', _median_of(spread([w.get('done_ms') for w in warm])), 'ms',
                    spread([w.get('done_ms') for w in warm]))
                 packs = [w.get('pack_ms') for w in warm if w.get('in_place') is False]
-                if packs:
+                # 0 on every render: the panel packs nothing apart (the
+                # E1003's grey canvas is the panel's buffer), no metric.
+                if packs and max(p or 0 for p in packs) > 0:
                     _m(rows, f'bench.{key}.pack_ms', _median_of(spread(packs)), 'ms', spread(packs))
             if key == 'cpu':
                 lines = [b for w in warm for b in w.get('bench') or [] if b.get('bench') == 'cpu']
@@ -227,11 +229,17 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
         _m(rows, 'mem.largest.internal', (heap.get('internal') or {}).get('largest'), 'bytes')
         _m(rows, 'mem.bench.psram_low', bm.get('psram_low'), 'bytes')
         # Derived: the baseline's cost taken off (SCORES.md).
-        by = {r['metric']: r['value'] for r in rows}
-        base = by.get('bench.base.render_ms')
+        by = {r['metric']: r for r in rows}
+        base = (by.get('bench.base.render_ms') or {}).get('value')
         for key in ('raster', 'ui'):
-            if base is not None and by.get(f'bench.{key}.render_ms') is not None:
-                _m(rows, f'bench.{key}.net_ms', max(0.0, by[f'bench.{key}.render_ms'] - base), 'ms')
+            r = by.get(f'bench.{key}.render_ms')
+            if base is not None and r is not None:
+                # The render's own spread, less the baseline's median.
+                net = {k: max(0.0, r[k] - base) for k in ('min', 'p25', 'p75', 'max') if k in r}
+                if net:
+                    net['n'] = r.get('n')
+                _m(rows, f'bench.{key}.net_ms', max(0.0, r['value'] - base), 'ms', net or None)
+        by = {r['metric']: r['value'] for r in rows}
         colds = [by.get(f'bench.{k}.cold_ms') for k in ('cpu', 'raster', 'ui', 'image')]
         s = spread(colds)
         _m(rows, 'bench.switch_ms', _median_of(s), 'ms', s)

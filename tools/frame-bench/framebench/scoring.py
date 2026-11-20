@@ -37,13 +37,42 @@ CATEGORIES = {
                ('mem.largest.psram', 'higher', None), ('mem.idle.psram_free', 'higher', None)],
 }
 PERFORMANCE = ('cpu', 'graphics', 'image', 'responsiveness')
+# Compared only with panels of the same colors: a black-and-white threshold
+# and a six-color Spectra dither are not the same work. Their reference key is
+# `<metric>@<panel_colors>`.
+BY_PANEL_COLORS = {'bench.image.pack_ms'}
+
+
+def ref_key(metric, board):
+    return f"{metric}@{board.get('panel_colors')}" if metric in BY_PANEL_COLORS else metric
 LABELS = {'cpu': 'CPU', 'graphics': 'Graphics', 'image': 'Image', 'responsiveness': 'Responsiveness',
           'memory': 'Memory', 'stability': 'Stability', 'frameos': 'FrameOS score'}
 
 # 1000 points: the median over the boards benched on REFERENCE_BUILD, after
-# normalization (`bench.py html --reference` prints it from the records).
+# normalization (`bench.py scores --reference 2026.11.12` prints it from the
+# records). The dither's is per panel colors (BY_PANEL_COLORS).
 # Frozen: changing a number is a new SCORE_VERSION.
-REFERENCE: dict[str, float] = {}
+REFERENCE: dict[str, float] = {
+    # from the runs of 2026-11-19/20: the five ESP32 boards on 2026.11.12
+    'bench.anim.fps': 3.6,
+    'bench.cpu.float_ms': 1116,
+    'bench.cpu.int_ms': 662,
+    'bench.cpu.json_ms': 1083,
+    'bench.cpu.str_ms': 385,
+    'bench.image.pack_ms@bw': 31.25,
+    'bench.image.pack_ms@spectra6': 2126.8229,
+    'bench.image.render_ms': 1612.8525,
+    'bench.raster.net_ms': 5924.4792,
+    'bench.switch_ms': 4257.0,
+    'bench.ui.net_ms': 257,
+    'bench.ui.tap_ms': 603.5,
+    'mem.idle.psram_free': 4585040.0,
+    'mem.largest.psram': 3407872,
+    'mem.min_ever.internal': 30115,
+    'mem.min_ever.psram': 3017900,
+    'resp.boot.first_render_ms': 20885.0,
+    'resp.switcher.open_ms': 1804,
+}
 
 
 def stability_score(crash: float, fail: float) -> float:
@@ -137,11 +166,12 @@ def scores(results=None, reference=None):
                     continue
                 v, vlo, vhi = (_norm(x, how, board) for x in (med, lo, hi))
                 row['values'][metric] = {'value': med, 'normalized': v, 'lo': lo, 'hi': hi}
-                s = _metric_score(v, reference.get(metric), better)
+                ref = reference.get(ref_key(metric, board))
+                s = _metric_score(v, ref, better)
                 if s is None:
                     continue
-                s_lo = _metric_score(vhi if better == 'lower' else vlo, reference.get(metric), better)
-                s_hi = _metric_score(vlo if better == 'lower' else vhi, reference.get(metric), better)
+                s_lo = _metric_score(vhi if better == 'lower' else vlo, ref, better)
+                s_hi = _metric_score(vlo if better == 'lower' else vhi, ref, better)
                 parts.append(s)
                 los.append(s_lo or s)
                 his.append(s_hi or s)
@@ -160,11 +190,12 @@ def reference_from(results=None, build=REFERENCE_BUILD):
     """The REFERENCE table: per metric, the median over boards of the
     normalized value on `build`."""
     per = defaultdict(list)
+    boards = {b['board_id']: b for b in read('boards', results)}
+    scored = {x[0] for c in CATEGORIES.values() for x in c}
     for row in scores(results, reference={}):
         if row['build'] != build:
             continue
         for metric, v in row['values'].items():
-            if v.get('normalized') is not None:
-                per[metric].append(v['normalized'])
-    return {m: round(statistics.median(v), 4) for m, v in sorted(per.items())
-            if any(m == x[0] for c in CATEGORIES.values() for x in c)}
+            if metric in scored and v.get('normalized') is not None:
+                per[ref_key(metric, boards.get(row['board_id'], {}))].append(v['normalized'])
+    return {m: round(statistics.median(v), 4) for m, v in sorted(per.items())}

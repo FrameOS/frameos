@@ -62,10 +62,18 @@ build that prints `2026.11.11` lands as `2026.11.11+elf.<sha>`, not as the
 release. Run `sizes --elf` for every release you flash.
 
 **Benching an older release** (`~/.frameos-bench/releases/<v>/` holds the
-signed images): flash it with `~/.frameos-bench/firmware/flash_checked.sh`
-(the board's module is checked first), run `--suites status,reboot,benchmark`
-at once, then flash the next. Never `ota` (the SenseCAP boot-loops on
-releases up to 2026.11.12), and put each board back on what it ran before.
+signed images): `~/.frameos-bench/firmware/xversion.py <worktree> <label>
+<generic-app.bin> <32mb-app.bin>` finds every ESP32 by `usb_api status`,
+flashes each through `flash_checked.sh` (module checked again, the board's
+own slot and baud), waits until each answers, and runs
+`--suites status,reboot,benchmark` (about 10 minutes for all five; the E1004
+is last). Flash the next version straight after: a board on an older release
+reconnected to the backend installs the latest release over the air within
+minutes (the Sticky on 2026.11.11 did, 2026-11-19). Never `ota` (the SenseCAP
+boot-loops on releases up to 2026.11.12), and put each board back on what it
+ran before. Its benchmark data then compares like for like across versions:
+`~/.frameos-bench/firmware/compare_builds.py <worktree> <build> ...` lists it
+per board, `bench.py scores --builds ...` as scores.
 
 **Slow panels are sampled.** A frame whose panel takes 20 s or more to
 refresh (the 7.3" and 13.3" Spectras: the E1002, the E1004) runs what has

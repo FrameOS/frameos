@@ -50,7 +50,8 @@ render line.
 A metric's score is **1000 x reference / value** (lower is better) or
 **1000 x value / reference** (higher is better). The reference is the median
 over the boards benched on **2026.11.12** of that metric, normalized as below,
-frozen in `scoring.REFERENCE`. A category is the **geometric mean** of the
+frozen in `scoring.REFERENCE` (the five ESP32 boards, 2026-11-19/20;
+`bench.py scores --reference 2026.11.12` prints it again). A category is the **geometric mean** of the
 scores of the metrics a board has; a board without touch has no tap score,
 an LCD has no dither, and neither is counted as zero.
 
@@ -58,7 +59,7 @@ an LCD has no dither, and neither is counted as zero.
 |---|---|---|
 | **CPU** | `bench.cpu.int_ms`, `float_ms`, `json_ms`, `str_ms` | no: the same work everywhere |
 | **Graphics** | `bench.raster.net_ms` (raster minus base), `bench.ui.net_ms`, `bench.anim.fps` | raster per panel megapixel; the UI and fps as felt |
-| **Image** | `bench.image.render_ms`, `bench.image.pack_ms` (e-paper) | decode + resize per megapixel decoded plus drawn (0.79 + the panel's); dither per panel megapixel |
+| **Image** | `bench.image.render_ms`, `bench.image.pack_ms` (e-paper that packs apart) | decode + resize per megapixel decoded plus drawn (0.79 + the panel's); dither per panel megapixel, against panels of the same colors only (a black-and-white threshold is 31 ms a megapixel, a six-color Spectra dither 2,100: `BY_PANEL_COLORS`) |
 | **Responsiveness** | `bench.switch_ms` (median cold switch to a benchmark scene), `bench.ui.tap_ms`, `resp.boot.first_render_ms`, `resp.switcher.open_ms` | no: as felt, the panel's refresh included (a 30 s Spectra is slow to respond, and that is the board) |
 | **Memory** | `mem.min_ever.psram`, `mem.min_ever.internal` (heapinfo's minimum since boot, after the benchmark), `mem.largest.psram`, `mem.idle.psram_free` | no: room left for scenes on this board (a panel's frame buffer is part of the board) |
 
@@ -88,10 +89,15 @@ times what a `sampled` one does on a slow panel. The counts are shown with it.
 - Across **builds on one board**: everything, like for like.
 - Across **boards**: CPU as is (same work); raster, decode and dither per
   megapixel; responsiveness and memory as felt (they include the panel). A
-  board runs its CPU at the clock FrameOS gives it: 240 MHz on an RGB LCD or
-  a touch board (`cpu: 240 MHz (touch)` at boot, recorded as `chip.cpu_mhz`),
-  ESP-IDF's default 160 MHz on the others (the E1002, the E1004), which print
-  nothing. A CPU score is the board as it ships, not the chip at its best.
+  board runs its CPU at the clock FrameOS gives it: an RGB LCD or touch board
+  says `cpu: 240 MHz (touch)` at boot (recorded as `chip.cpu_mhz`), the
+  others (the E1002, the E1004) print nothing, yet run the integer loop as
+  fast as the 240 MHz boards (662 ms against 659 ms, 2026-11-19). What differs
+  is memory: the allocation-heavy JSON loop is 40 % slower on the E1002 and
+  E1004 than on the E1003 and the Sticky, and every loop is about 10 % slower on
+  the SenseCAP, probably because its RGB LCD reads its frame buffer from PSRAM
+  all the time (not measured). A CPU score is the board as it ships, not the
+  chip at its best.
 - A dev build is `<release>+<sha>` (`2026.11.12+49345dbb4`); a build made on
   the bench under a release's number is `+elf.<sha>` and is never mistaken for
   the release (the run of 2026-11-18 18:00, long taken for "the last full run

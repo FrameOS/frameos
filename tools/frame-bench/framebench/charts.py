@@ -204,8 +204,12 @@ def write(out=None, results=None) -> str:
                  f'{REFERENCE_BUILD}; higher is better. How the numbers are made: <code>tools/frame-bench/SCORES.md</code>.</p>')
 
     # ---- scores
-    scored = [r for r in rows if any(c in r['categories'] for c in PERFORMANCE)]
-    builds = sorted({r['build'] for r in scored}, key=_build_key)
+    # Builds that ran the benchmark (the scores' input), never a bench build
+    # without a sha; the latest SLOTS of them, so no two builds share a color.
+    benched = sorted({r['build'] for r in rows if 'cpu' in r['categories'] and '+elf.' not in r['build']},
+                     key=_build_key)[-SLOTS:]
+    scored = [r for r in rows if r['build'] in benched]
+    builds = benched
     parts.append('<h2>Scores by build</h2>')
     if not REFERENCE:
         parts.append('<p class="note">No reference frozen yet (scoring.REFERENCE): scores appear once it is.</p>')

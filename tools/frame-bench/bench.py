@@ -172,6 +172,32 @@ def cmd_html(args):
     print(f'report: {charts.write(args.out)}')
 
 
+def cmd_scores(args):
+    """The scores as a Markdown table (for a PR body), or `--reference`: the
+    REFERENCE table to freeze into scoring.py."""
+    from framebench import scoring
+    if args.reference:
+        print(json.dumps(scoring.reference_from(build=args.reference), indent=1))
+        return
+    builds = args.builds.split(',') if args.builds else None
+    cats = ('frameos', *scoring.PERFORMANCE, 'memory')
+    print('| board | build | ' + ' | '.join(scoring.LABELS[c] for c in cats) + ' | Stability (full) |')
+    print('|---|---|' + '---:|' * (len(cats) + 1))
+    from framebench.charts import _build_key
+    for r in sorted(scoring.scores(), key=lambda r: (r['board'], _build_key(r['build']))):
+        if builds and r['build'] not in builds:
+            continue
+        if not any(c in r['categories'] for c in cats):
+            continue
+        cells = []
+        for c in cats:
+            s = r['categories'].get(c)
+            cells.append(f"{s['score']} ({s['lo']}–{s['hi']})" if s else '—')
+        st = r['stability'].get('full') or {}
+        cells.append(f"{st['score']} ({st['crash']:g} crash, {st['fail']:g} fail)" if st else '—')
+        print(f"| {r['board']} | {r['build']} | " + ' | '.join(cells) + ' |')
+
+
 def cmd_restore(args, ports=None):
     """What a killed benchmark suite left on a board (its backend pointed at a
     closed port, the benchmark scenes): put back, port by port."""
@@ -234,9 +260,13 @@ def main():
     h = sub.add_parser('html', help='results -> a static HTML report')
     h.add_argument('--out', help='default tools/frame-bench/results/report.html')
     sub.add_parser('restore', help='undo what a killed benchmark suite left on the boards')
+    s = sub.add_parser('scores', help='the scores as a Markdown table')
+    s.add_argument('--builds', help='comma list of builds to show')
+    s.add_argument('--reference', metavar='BUILD', help='print the REFERENCE table from this build instead')
     args = ap.parse_args()
     sys.exit({'discover': lambda a: (cmd_discover(a), 0)[1], 'run': cmd_run, 'report': cmd_report,
-              'import': cmd_import, 'sizes': cmd_sizes, 'html': cmd_html, 'restore': cmd_restore}[args.cmd](args) or 0)
+              'import': cmd_import, 'sizes': cmd_sizes, 'html': cmd_html, 'restore': lambda a: (cmd_restore(a), 0)[1],
+              'scores': cmd_scores}[args.cmd](args) or 0)
 
 
 if __name__ == '__main__':
