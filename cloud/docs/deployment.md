@@ -7,7 +7,19 @@ cleanup, or sync jobs need separate execution.
 
 ## Required Runtime
 
-- Node.js 22.
+- Node.js 22, from NodeSource's apt repo (`deb.nodesource.com/node_22.x`,
+  pinned above Ubuntu's package in `/etc/apt/preferences.d/nodesource` and
+  allowed in `/etc/apt/apt.conf.d/52unattended-upgrades-nodesource`).
+  Ubuntu's own `nodejs` is in universe and gets no security fixes without
+  Ubuntu Pro: production sat on 22.22.1 through four Node security releases
+  until 2026-11-20. A Node update reaches the services at their next restart
+  (a deploy, a reboot).
+- Unattended upgrades on, and a reboot when `/var/run/reboot-required`
+  exists: a kernel or libc fix does nothing until then (the box once ran
+  165 days on its install kernel with ten security kernels waiting). A
+  reboot is about 30 s of downtime; frames reconnect by themselves.
+- sshd keys only (`/etc/ssh/sshd_config.d/10-frameos-hardening.conf`:
+  no passwords, no keyboard-interactive, no X11 forwarding).
 - pnpm workspace install.
 - Postgres.
 - HTTPS public URL for OAuth callbacks.
