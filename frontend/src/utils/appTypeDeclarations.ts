@@ -330,6 +330,11 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
+     * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
+     * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
+     * undefined before, and whenever it is false). */
+    wentBack?: boolean;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;
@@ -350,6 +355,11 @@ interface FrameOSApp {
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
      * (FrameOS 2026.11.10+). */
     scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+    /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
+     * window without their going back, so still open beside the scene showing, their page and edits as they were.
+     * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes
+     * side by side (FrameOS 2026.11.14+; undefined before, and where scenes run one at a time). */
+    keptOpen?: string[];
     /** How many of those scenes may run at once, the one in front included, where that is limited (2 on an
      * ESP32 with 8 MB of PSRAM, 1 beside a 13.3-inch colour panel's canvas, 4 with more). A desktop opening
      * one more closes the one that had the focus longest ago. Undefined where there is no limit (a Raspberry
