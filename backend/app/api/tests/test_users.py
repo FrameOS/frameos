@@ -3,7 +3,7 @@ from httpx import ASGITransport, AsyncClient
 from app.fastapi import app
 from app.models.user import User
 from sqlalchemy.orm import Session
-from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_401_UNAUTHORIZED, HTTP_422_UNPROCESSABLE_ENTITY
+from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_401_UNAUTHORIZED, HTTP_422_UNPROCESSABLE_CONTENT
 
 
 async def assert_password_login_status(client, email: str, password: str, expected_status: int):
@@ -152,7 +152,7 @@ async def test_change_current_user_email_rejects_duplicate(async_client, db: Ses
 async def test_change_current_user_email_rejects_invalid_email(async_client, db: Session, email):
     response = await async_client.post("/api/user/email", json={"email": email, "current_password": "testpassword"})
 
-    assert response.status_code == HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == HTTP_422_UNPROCESSABLE_CONTENT
     db.expire_all()
     assert_stored_password(db, "test@example.com", "testpassword", True)
 
@@ -370,7 +370,7 @@ async def test_change_current_user_password_rejects_invalid_payloads(
 async def test_change_current_user_password_requires_all_fields(async_client):
     response = await async_client.post("/api/user/password", json={"current_password": "testpassword"})
 
-    assert response.status_code == HTTP_422_UNPROCESSABLE_ENTITY
+    assert response.status_code == HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio

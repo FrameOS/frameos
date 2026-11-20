@@ -116,4 +116,4 @@ async def get_chat(chat_id: str, db: Session = Depends(get_db)):
         .order_by(ChatMessage.created_at.asc())
         .all()
     )
-    return ChatDetailResponse(chat=chat, messages=messages)
+    return ChatDetailResponse(chat=ChatSummary.model_validate(chat), messages=messages)

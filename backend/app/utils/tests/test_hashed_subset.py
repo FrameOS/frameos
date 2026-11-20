@@ -73,8 +73,10 @@ def test_the_committed_lock_carries_a_hash_for_every_requirement():
     lock = hashed_subset.parse_lock((BACKEND / "requirements.txt").read_text(encoding="utf-8"))
     assert len(lock) > 100
     assert [name for name, (_version, entry) in lock.items() if len(entry) < 2] == []
-    # The packages a macOS-only resolution leaves out.
-    assert "greenlet" in lock
+    # A package only a universal resolution includes: click's Windows-only
+    # colorama. (It was SQLAlchemy's Linux-only greenlet until SQLAlchemy 2.1
+    # made greenlet optional.)
+    assert "colorama" in lock
     # Hash mode rejects a dependency missing from the file; pip-tools needs these.
     assert {"pip", "setuptools"} <= set(lock)
 
