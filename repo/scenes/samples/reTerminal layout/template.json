@@ -1,6 +1,6 @@
 {
   "name": "reTerminal layout",
-  "description": "Made for the Seeed reTerminal E1001, E1002, E1003 and E1004. A status bar beside the keys shows the signal, the battery and when the picture was drawn. Under each key it says what a hold does. The bar changes only when the scene draws. Double-press the green key for the scene list, which shows how to move through it. On the touch E1003 the bar is also buttons.",
+  "description": "Made for the Seeed reTerminal E1001, E1002, E1003 and E1004. A status bar beside the keys shows the signal, the battery and when the picture was drawn. Under each key it says what a press does, and smaller what a hold does. The bar changes only when the scene draws. Double-press the green key for the scene list, which shows how to move through it. On the touch E1003 the bar is also buttons.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
