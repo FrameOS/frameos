@@ -765,6 +765,7 @@ proc ensureSpans(n: UiNode) =
   ## (a `<br>` stays a line break), and trimmed at both ends.
   if n.spans.len > 0 or n.runs.len == 0:
     return
+  n.bold.setLen(0) # the fonts of these spans only
   var
     lastSpace = true
     faceStyles: seq[Text]
@@ -885,6 +886,11 @@ proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arr
     if n.memo >= 0:
       n.arrangement = memo.kept[n.memo].arrangement
       n.bold = memo.kept[n.memo].bold
+      # The bold fonts are the recalled arrangement's now: spans set here
+      # before would be typeset with fonts `bold` does not hold, and the next
+      # text set from them drew its bold glyphs once (the Gallery sample's
+      # label, after a few taps).
+      n.spans.setLen(0)
       n.arrangedW = width
       n.arrangedAlign = align
       return n.arrangement
