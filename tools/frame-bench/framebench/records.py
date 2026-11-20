@@ -317,6 +317,18 @@ def frame_metrics(fr: dict, issues: list[dict]) -> list[dict]:
 
     # Stability: the run's issues for this frame (merged ones carry a count).
     mine = [i for i in issues if i.get('frame') == fr.get('name') and i.get('suite') != 'compare']
+    # One reboot matches two boot lines (`rst:` and the bootloader's) and was
+    # reported twice, 0.1 s apart: count a reboot once per 2 s.
+    boots, kept = [], []
+    for i in mine:
+        m = re.search(r'rebooted at \+([\d.]+)s', i.get('detail') or '') if i.get('kind') == 'reboot' else None
+        if m:
+            t = float(m.group(1))
+            if any(abs(t - b) < 2 for b in boots):
+                continue
+            boots.append(t)
+        kept.append(i)
+    mine = kept
     count = lambda pred: sum(i.get('count', 1) for i in mine if pred(i))  # noqa: E731
     for sev in ('crash', 'fail', 'slow', 'note'):
         _m(rows, f'stab.{sev}', count(lambda i, s=sev: i.get('severity') == s), 'count')

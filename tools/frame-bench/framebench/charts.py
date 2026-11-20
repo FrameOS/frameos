@@ -15,7 +15,7 @@ from collections import defaultdict
 from . import BENCH_VERSION
 from .benchmarks import WORKLOAD
 from .records import RESULTS, read
-from .scoring import CATEGORIES, LABELS, PERFORMANCE, REFERENCE, REFERENCE_BUILD, SCORE_VERSION, scores
+from .scoring import LABELS, PERFORMANCE, REFERENCE, REFERENCE_BUILD, SCORE_VERSION, scores
 
 E = html.escape
 SLOTS = 8  # the categorical palette's slots (CSS --s1..--s8); a ninth series folds
