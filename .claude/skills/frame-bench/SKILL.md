@@ -37,17 +37,21 @@ tools/frame-bench/bench.py run --frames sensecap,e1003 --suites scenes,desktop
 tools/frame-bench/bench.py run --baseline ~/.frameos-bench/<older-run>   # flag regressions
 tools/frame-bench/bench.py report <run-dir> --baseline <older-run-dir>
 tools/frame-bench/bench.py run --suites status,reboot,benchmark   # the scored benchmark alone (~5-15 min)
-tools/frame-bench/bench.py import            # backfill run dirs into tools/frame-bench/results/*.jsonl
+tools/frame-bench/bench.py import            # backfill run dirs into ../frameos-benchmarks/data/*.jsonl
 tools/frame-bench/bench.py sizes --elf v2026.11.13   # a new release's image sizes (and ELF shas)
-tools/frame-bench/bench.py html              # results/report.html: scores, trends, image size, stability
+tools/frame-bench/bench.py html              # ../frameos-benchmarks/index.html: scores, trends, image size, stability
 tools/frame-bench/bench.py restore           # undo a killed benchmark suite (backend address, scenes)
 ```
 
 ## Scores and records
 
-Every finished `run` is imported into `tools/frame-bench/results/`
-(`boards`, `runs`, `metrics`, `images` as JSON Lines: `results/SCHEMA.md`);
-commit those files and `results/report.html` with the change the run was for.
+The results are their own repo, `FrameOS/frameos-benchmarks`, cloned beside
+the main checkout (`../frameos-benchmarks`; `$FRAMEOS_BENCHMARKS` to put it
+elsewhere; a worktree finds it through git). Every finished `run` is imported
+into its `data/` (`boards`, `runs`, `metrics`, `images` as JSON Lines: its
+`SCHEMA.md`); run `bench.py html` (its `index.html`, the GitHub Pages site)
+and commit and push both there, saying in the message what the run was for
+(the build, the change). Nothing of a run goes into this repo.
 The scores (`tools/frame-bench/SCORES.md`) come from the **benchmark** suite:
 fixed scenes (`tools/frame-bench/benchmarks/`) put on the board over USB,
 timed by the lines every firmware prints, so a release from before the suite

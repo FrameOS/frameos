@@ -3,8 +3,10 @@
 One number per category, per board, per FrameOS build, in the spirit of
 LVGL's board certification: a fixed test suite, published scores. Here for
 every release and every dev build between them. The code is
-`framebench/scoring.py`; the records it reads are `results/SCHEMA.md`; the
-page is `bench.py html` (`results/report.html`).
+`framebench/scoring.py`; the records it reads are in their own repo,
+[FrameOS/frameos-benchmarks](https://github.com/FrameOS/frameos-benchmarks)
+(`data/*.jsonl`, `SCHEMA.md`); the page is `bench.py html`, published at
+<https://frameos.github.io/frameos-benchmarks/>.
 
 ## What is measured, and why this way
 

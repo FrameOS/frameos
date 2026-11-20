@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from . import BENCH_VERSION
 from .benchmarks import WORKLOAD
-from .records import RESULTS, read
+from .records import REPORT, read
 from .scoring import LABELS, PERFORMANCE, REFERENCE, REFERENCE_BUILD, SCORE_VERSION, scores
 
 E = html.escape
@@ -188,7 +188,7 @@ def _table(header, rows):
 
 
 def write(out=None, results=None) -> str:
-    out = out or os.path.join(results or RESULTS, 'report.html')
+    out = out or (os.path.join(results, 'report.html') if results else REPORT)
     rows = scores(results)
     boards = read('boards', results)
     board_slot = {b['board_id']: i for i, b in enumerate(boards)}

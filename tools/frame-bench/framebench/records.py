@@ -1,5 +1,5 @@
 """Bench results as records: append-only JSON Lines, one table per file, the
-shape a database will take later (tools/frame-bench/results/SCHEMA.md).
+shape a database will take later (SCHEMA.md in FrameOS/frameos-benchmarks).
 
     boards.jsonl   one row per board identity (module, panel, chip, memory)
     runs.jsonl     one row per run x board: firmware build, mode, suites
@@ -26,7 +26,26 @@ from . import BENCH_VERSION
 HERE = os.path.dirname(os.path.abspath(__file__))
 BENCH_DIR = os.path.dirname(HERE)
 REPO = os.path.dirname(os.path.dirname(BENCH_DIR))
-RESULTS = os.environ.get('FRAMEOS_BENCH_RESULTS') or os.path.join(BENCH_DIR, 'results')
+
+
+def _benchmarks_checkout() -> str:
+    """The results live in their own repo, FrameOS/frameos-benchmarks:
+    $FRAMEOS_BENCHMARKS, else a clone beside the main frameos checkout (found
+    through git, so a worktree finds it too)."""
+    if os.environ.get('FRAMEOS_BENCHMARKS'):
+        return os.path.abspath(os.path.expanduser(os.environ['FRAMEOS_BENCHMARKS']))
+    try:
+        common = subprocess.run(['git', '-C', BENCH_DIR, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+                                capture_output=True, text=True, timeout=10).stdout.strip()
+        main = os.path.dirname(common) if common else REPO
+    except Exception:
+        main = REPO
+    return os.path.join(os.path.dirname(main), 'frameos-benchmarks')
+
+
+BENCHMARKS = _benchmarks_checkout()
+RESULTS = os.path.join(BENCHMARKS, 'data')
+REPORT = os.path.join(BENCHMARKS, 'index.html')
 BOARDS_JSON = os.path.join(BENCH_DIR, 'boards.json')
 SCHEMA = 1
 RIG = os.environ.get('FRAMEOS_BENCH_RIG', 'devbox')
@@ -51,6 +70,9 @@ def read(table, results=None) -> list[dict]:
 def append(table, rows, results=None):
     if not rows:
         return
+    if not results and not os.path.isdir(BENCHMARKS):
+        raise SystemExit(f'no results checkout at {BENCHMARKS}: git clone git@github.com:FrameOS/frameos-benchmarks.git '
+                         f'there, or set FRAMEOS_BENCHMARKS')
     os.makedirs(results or RESULTS, exist_ok=True)
     with open(_path(table, results), 'a') as fh:
         for row in rows:

@@ -9,13 +9,16 @@ runs the same on every firmware, releases and dev builds alike.
 ```
 frameos/.venv/bin/python3 tools/frame-bench/bench.py discover
 frameos/.venv/bin/python3 tools/frame-bench/bench.py run --rediscover
-frameos/.venv/bin/python3 tools/frame-bench/bench.py html     # results/report.html
+frameos/.venv/bin/python3 tools/frame-bench/bench.py html     # ../frameos-benchmarks/index.html
 ```
 
 - How to set it up, what each suite does and how to read a run's report:
   `.claude/skills/frame-bench/SKILL.md`.
 - The scores (categories, formula, noise, what is not measured): `SCORES.md`.
-- The records every run adds (`results/*.jsonl`), ready for a database:
-  `results/SCHEMA.md`.
+- The results are their own repo, [FrameOS/frameos-benchmarks](https://github.com/FrameOS/frameos-benchmarks)
+  (the page: <https://frameos.github.io/frameos-benchmarks/>): clone it beside
+  this checkout (`../frameos-benchmarks`, or set `$FRAMEOS_BENCHMARKS`). Every
+  run adds its records to `data/*.jsonl` there, ready for a database
+  (`SCHEMA.md` there), and `html` writes its `index.html`.
 - The benchmark scenes: `benchmarks/<name>/app.tsx` (the JPEG is made by
   `benchmarks/image/make_photo.py`); the board list: `boards.json`.
