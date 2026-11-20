@@ -562,6 +562,12 @@ template applyCoverage(rgbxVec, coverage: M128i): M128i =
     rgbxOdd = mm_and_si128(rgbxVec, oddMask)
   rgbxEven = mm_mulhi_epu16(rgbxEven, unpacked)
   rgbxOdd = mm_mulhi_epu16(rgbxOdd, unpacked)
+  # Rounded, as the scalar `rgbx * coverage` (common.nim) is: truncated, a
+  # pixel came out one step darker here than in the scalar loop beside it,
+  # and which loop drew a pixel follows the row's 16-byte alignment, so the
+  # same element drew differently in two buffers (test_coverage_rounding.nim).
+  rgbxEven = mm_add_epi16(rgbxEven, mm_set1_epi16(127))
+  rgbxOdd = mm_add_epi16(rgbxOdd, mm_set1_epi16(127))
   rgbxEven = mm_srli_epi16(mm_mulhi_epu16(rgbxEven, div255), 7)
   rgbxOdd = mm_srli_epi16(mm_mulhi_epu16(rgbxOdd, div255), 7)
 
