@@ -1298,6 +1298,12 @@
   scenes, layouts or the backend link, on the frames attached.
 - It holds every serial port open with pyserial's defaults: a CH340 board
   resets when DTR and RTS flip one at a time, so never set them by hand.
+- **The boards are shared between sessions: book one before you touch it**
+  (its console, a flash, a push, a bench): `tools/frame-bench/boards.py book
+  <board> --who "<your session> (...)" --for "..."`, release it when done, and
+  never use one someone else holds (`~/.frameos-bench/BOOKINGS.md`; the
+  skill's "Booking a board"). `bench.py run` and the flashing scripts book,
+  wait and skip by it.
 
 ## End-to-end tooling
 - `e2e/README.md` is the map of every end-to-end suite: the scene-renderer snapshot harness (`e2e/run`, `makescenes.py`, `makesnapshots.py`, baselines in `e2e/snapshots`; `./run dataGradient` renders one scene), the Playwright frontend + cloud-workspace suite (`e2e/frontend-visual`), the opt-in real-SSH deploy test (`e2e/deploy`) and the Docker/ESP32 image jobs. It also carries the local-run recipes (port overrides, `FRONTEND_VISUAL_MAX_DIFF=1`, why a reused server drifts).

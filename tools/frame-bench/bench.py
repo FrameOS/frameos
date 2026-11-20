@@ -11,6 +11,12 @@
     tools/frame-bench/bench.py html                       # data -> ../frameos-benchmarks/index.html (scores, trends)
     tools/frame-bench/bench.py restore                    # undo a killed benchmark suite (backend, scenes)
 
+The boards are shared between agents: `run` books each board it benches
+(tools/frame-bench/boards.py, ~/.frameos-bench/BOOKINGS.md) for as long as it
+runs, never opens one someone else has booked, and waits for those (runs the
+free ones meanwhile) unless `--skip-booked`. Pass `--who "<session> (...)"`
+(or set $FRAMEOS_BENCH_WHO) so others know whom to ask.
+
 Environment: FRAMEOS_BENCH_BACKEND (default http://localhost:8989),
 FRAMEOS_BENCH_TOKEN (a backend API token), FRAMEOS_BENCH_HOST_IP (this
 machine's address as the frames see it, for the offline suite).
@@ -32,18 +38,31 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from framebench import benchmarks, inventory, records, report  # noqa: E402
+from framebench import benchmarks, bookings, inventory, records, report  # noqa: E402
 from framebench.backend import Backend  # noqa: E402
 from framebench.suites import DEFAULT, SUITES, Ctx  # noqa: E402
 
 LOCAL_ONLY = {'scenes', 'builtin', 'input', 'storm', 'soak', 'offline', 'desktop', 'reboot', 'benchmark'}
 
 HOME = os.path.expanduser(os.environ.get('FRAMEOS_BENCH_HOME', '~/.frameos-bench'))
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+
+
+def others_boards(who):
+    """The boards someone other than `who` has booked, and the ports where
+    inventory.json last saw them: discovery opens none of those."""
+    held = {b for b, h in bookings.holders().items() if not bookings._same(h['holder'], who or '')}
+    saved = os.path.join(HOME, 'inventory.json')
+    seen = inventory.load(saved) if os.path.exists(saved) else []
+    return held, {f['port'] for f in seen if bookings.key_of(f.get('module', '')) in held}
 
 
 def cmd_discover(args):
     be = Backend()
-    frames = inventory.discover(be if be.token else None)
+    held, skip = others_boards(os.environ.get('FRAMEOS_BENCH_WHO'))
+    if held:
+        print('booked by someone else, not asked: ' + ', '.join(sorted(held)))
+    frames = inventory.discover(be if be.token else None, skip_ports=skip)
     inventory.save(os.path.join(HOME, 'inventory.json'), frames)
     for f in frames:
         print(f"{f['port']:14} frame {str(f.get('frame_id')):>3}  {f.get('name', '')[:24]:24} {f['module'][:28]:28} "
@@ -61,7 +80,7 @@ def pick(frames, wanted):
                                      or k == f['port'] or k == str(f.get('frame_id')) for k in keys)]
 
 
-def run_frame(ctx, frame, suites, results):
+def run_frame(ctx, frame, suites, results, keep=None):
     res = {**{k: v for k, v in frame.items() if k != 'api_key'}, 'suites': {}}
     results.append(res)
     for name in suites:
@@ -69,6 +88,8 @@ def run_frame(ctx, frame, suites, results):
             continue
         if name in LOCAL_ONLY and frame['kind'] != 'local':
             continue
+        if keep:
+            keep()  # the booking moves on with the run
         t = time.time()
         print(f"[{frame.get('name')}] {name} ...", flush=True)
         try:
@@ -84,12 +105,52 @@ def run_frame(ctx, frame, suites, results):
             json.dump({'frames': results}, fh, default=str)
 
 
+def booked_run(ctx, frame, suites, results, who, args, ports):
+    """One frame of a run, booked for it (bookings.py): a board someone else
+    holds is waited for (or left out with --skip-booked), found again on the
+    ports once it is free, and released when the run is done with it."""
+    key = frame.get('key') or bookings.key_of(frame.get('module', ''))
+    name = frame.get('name') or key
+    if not key:
+        print(f'[{name}] not in boards.json: benched without a booking')
+        return run_frame(ctx, frame, suites, results)
+    what = f"bench.py run --suites {','.join(suites)} ({os.path.basename(REPO)})"
+    say = lambda m: print(f'[{name}] {m}', flush=True)  # noqa: E731
+    if args.skip_booked:
+        done, refused = bookings.book([key], who, what, args.book_hours)
+    else:
+        done = bookings.wait_for([key], who, what, args.book_hours, timeout=args.wait_hours * 3600, say=say)
+        refused = {} if done else bookings.holders([key])
+    if not done:
+        for b, h in refused.items():
+            say(f"left out: booked by {h['holder']} until {h['until']} ({h['what']})")
+        return
+    try:
+        if frame.get('waiting'):
+            found = inventory.find(frame['module'], ctx.backend, exclude=set(ports))
+            if not found:
+                say('free now, but no port answers as it: left out')
+                return
+            frame = found
+            ports.add(frame['port'])
+            say(f"free now, on {frame['port']}")
+        run_frame(ctx, frame, suites, results, keep=lambda: bookings.book([key], who, what, args.book_hours))
+    finally:
+        if not args.keep_booked:
+            bookings.release([key], who)
+
+
 def cmd_run(args):
     be = Backend()
+    who = args.who or os.environ.get('FRAMEOS_BENCH_WHO') or f'bench-{os.getpid()}'
+    if not (args.who or os.environ.get('FRAMEOS_BENCH_WHO')):
+        print(f'booking as "{who}": pass --who "<session> (...)" so others know whom to ask')
+    held, skip = others_boards(who)
     saved = os.path.join(HOME, 'inventory.json')
-    if args.rediscover or not os.path.exists(saved):
-        frames = inventory.discover(be if be.token else None)
-        inventory.save(saved, frames)
+    if args.rediscover or not os.path.exists(saved) or held:
+        frames = inventory.discover(be if be.token else None, skip_ports=skip)
+        inventory.save(saved, frames + [f for f in (inventory.load(saved) if os.path.exists(saved) else [])
+                                        if f.get('port') in skip])
     else:
         frames = inventory.load(saved)
         moved = inventory.still_there(pick(frames, args.frames))
@@ -100,10 +161,25 @@ def cmd_run(args):
             frames = inventory.discover(be if be.token else None)
             inventory.save(saved, frames)
     frames = pick(frames, args.frames)
+    # Someone else's boards: waited for in their own thread, found when free.
+    found = {f['module'] for f in frames}
+    names = bookings.boards()
+    with open(bookings.BOARDS_JSON) as fh:
+        known = json.load(fh).get('boards', {})
+    for key in sorted(held):
+        module = names[key]
+        stub = {'key': key, 'module': module, 'name': known.get(module, {}).get('name', key), 'port': None,
+                'waiting': True, 'kind': 'local'}
+        if module not in found and pick([stub], args.frames):
+            h = bookings.holders([key]).get(key, {})
+            print(f"{key}: booked by {h.get('holder')} until {h.get('until')} ({h.get('what')}): "
+                  + ('left out (--skip-booked)' if args.skip_booked else 'benched once it is free'))
+            if not args.skip_booked:
+                frames.append(stub)
     if not frames:
         print('no frames selected')
         return 1
-    leftover = cmd_restore(None, ports=[f['port'] for f in frames])
+    leftover = cmd_restore(None, ports=[f['port'] for f in frames if f.get('port')])
     if leftover:
         print('put back what an earlier benchmark suite left:', leftover)
     stamp = time.strftime('%Y%m%d-%H%M%S')
@@ -122,9 +198,10 @@ def cmd_run(args):
             else 'full' if args.full else 'sampled')
     results = []
     threads = []
+    ports = {f['port'] for f in frames if f.get('port')}
     for f in frames:
         suites = args.suites.split(',') if args.suites and args.suites != 'default' else DEFAULT.get(f['kind'], ['status'])
-        th = threading.Thread(target=run_frame, args=(ctx, f, suites, results))
+        th = threading.Thread(target=booked_run, args=(ctx, f, suites, results, who, args, ports))
         th.start()
         threads.append(th)
     for th in threads:
@@ -258,6 +335,13 @@ def main():
     r.add_argument('--no-isolate', action='store_true',
                    help='benchmark suite: leave the backend connected (by default it points at a closed port while it runs)')
     r.add_argument('--no-record', action='store_true', help='do not import the run into the frameos-benchmarks checkout')
+    r.add_argument('--who', help='who books the boards: your session name first ($FRAMEOS_BENCH_WHO)')
+    r.add_argument('--skip-booked', action='store_true', help='leave out the boards someone else has booked, instead of waiting')
+    r.add_argument('--wait-hours', type=float, default=6.0, help='give up on a booked board after so many hours (default 6)')
+    r.add_argument('--keep-booked', action='store_true',
+                   help='keep the boards booked after the run (a script that does more with them releases them itself)')
+    r.add_argument('--book-hours', type=float, default=2.0,
+                   help='each board is booked so far ahead, moved on at every suite (default 2)')
     p = sub.add_parser('report')
     p.add_argument('run_dir')
     p.add_argument('--baseline')
