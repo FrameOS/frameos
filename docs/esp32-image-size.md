@@ -151,7 +151,18 @@ runtime.
    kerning pair unchanged (its `--check`, run by the backend suite). A Latin
    subset would take about 25 KB more, at the cost of blank glyphs for scenes
    that render Greek or Cyrillic.
-6. **Move the font to SPIFFS** (−146 KB per OTA slot): the `state` partition
+   **Then read in place** (2026-11-19, against the glyph cache's build): the
+   image holds the indexed font (`tools/generate_indexed_font.py`), 87,896 B
+   as it is, instead of the 57,645 B gzipped TTF, because the TTF was
+   inflated whole and parsed into 162 KB of RAM for good. +29.8 KB of font
+   bytes (the kerning pre-resolved and uncompressed, 26 KB, is most of it;
+   ASCII's blocks stored raw 2.4 KB) and +5.4 KB of reader (pixie's
+   `indexedfont` 4.0 KB, opentype's composite reader made generic 1.0 KB):
+   **+35.2 KB**, 3,212,816 B, for a face that holds under 1 KB of RAM
+   (`docs/esp32-memory.md` "The built-in face is read where it lies", which
+   has the options weighed).
+6. **Move the font to SPIFFS** (−88 KB per OTA slot since it is read in
+   place, which would read it by `pread` there): the `state` partition
    has room on every profile except 4 MB. Bigger job than 5 (provisioning +
    boot-time load) but takes the weight out of *both* slots.
 7. **Config-gate heavy optional apps** (~100–200 KB): calendar+ical is 97 KB;

@@ -354,7 +354,7 @@ def generate_asset_modules(project_root: Path) -> None:
             ".",
             "--file",
             "assets/compiled/fonts/Ubuntu-Regular.fosf",
-            "--raw-const",
+            "--raw-data",
             "defaultFontData",
             "--output",
             "src/assets/fonts.nim",

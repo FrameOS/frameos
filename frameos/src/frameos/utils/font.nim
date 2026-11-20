@@ -26,7 +26,7 @@ proc getDefaultTypeface*(): Typeface =
   if not typefaces.hasKey(defaultFont):
     withLock typefaceLock:
       if not typefaces.hasKey(defaultFont):
-        typefaces[defaultFont] = parseIndexedTypeface(fontAssets.defaultFontData)
+        typefaces[defaultFont] = parseIndexedTypeface(fontAssets.defaultFontData())
   return typefaces[defaultFont]
 
 proc hasFallbackTypeface(typeface, fallback: Typeface): bool =

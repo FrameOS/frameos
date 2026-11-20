@@ -767,7 +767,11 @@
   typeface). A new way to draw text goes through `fillText` or `glyphPath`,
   never a run's outline made per render; the cache stays the render
   thread's (`{.threadvar.}`), budgeted (64 KB on an ESP32) and emptied with
-  the coverage cache when render memory is short.
+  the coverage cache when render memory is short. The built-in face is an
+  indexed font read where it lies (`assets/compiled/fonts/Ubuntu-Regular.fosf`,
+  pixie's `fontformats/indexedfont.nim`): after `generate_embedded_font.py`
+  run `tools/generate_indexed_font.py` (its `--check` is in the backend
+  suite), and never inflate a face whole into RAM on a device again.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events

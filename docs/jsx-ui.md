@@ -1151,6 +1151,10 @@ LVGL draws its pre-rasterized fonts, with pixie's own rasterizer and blends
   (`opentype.getGlyphPath` reads it from the font each time, about a
   microsecond on a laptop), and the layout no longer keeps a path per glyph
   and size with its flattened shapes.
+- The built-in face itself is read where it lies: an indexed font in the
+  program's read-only data, its tables searched in place and a glyph's
+  outline inflated from its block only on a glyph-cache miss
+  (`docs/esp32-memory.md` "The built-in face is read where it lies").
 
 `set debug 1` shows it on the render line: `glyphs 312/4 9K` is hits,
 misses and what it holds, and the `glyph` fill kind is its blits.
