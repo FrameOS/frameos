@@ -435,11 +435,16 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
         if not found.full and found.rects.area < rects.area:
           for r in rects:
             target.copyRectIn(heldFrames[source].buffer, r)
-          # Outside the copies the pixels are still this buffer's own.
-          let own = canvasRects(base.get(), parsed, target)
-          rects = found.rects
-          rects.add own
-          base = some(heldFrames[source])
+          # The source is usually the buffer on the glass, the only one the
+          # firmware's loading mark is drawn into, and drawing it counts a
+          # write there: written while it was copied, the copies may hold the
+          # mark, and this buffer's own damage is drawn after all.
+          if panelBufferGeneration(heldFrames[source].buffer) == heldFrames[source].generation.int64:
+            # Outside the copies the pixels are still this buffer's own.
+            let own = canvasRects(base.get(), parsed, target)
+            rects = found.rects
+            rects.add own
+            base = some(heldFrames[source])
     if base.isSome and rects.area < whole:
       # Canvases drawn into since: pixie sees the same picture in them.
       rects.add canvasRects(base.get(), parsed, target)
