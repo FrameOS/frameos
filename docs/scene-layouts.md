@@ -616,11 +616,16 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   E1001's keys are 44 px apart, no room for "hold"). On the E1001-E1003 the
   keys are on the top edge, right of centre, and seen from the front the one
   labelled RIGHT is the leftmost. The E1004's panel is upright (1200x1600)
-  with the touch keys under the picture; hung landscape they are beside it,
-  on the right at rotate 90 and on the left at 270. On a board rendered on
+  with the touch keys under the picture (printed alike: no green key, so the
+  help says "Refresh"); hung landscape they are beside it, on the right at
+  rotate 90 and on the left at 270, and so is the bar, a narrow strip
+  (6.5 units) whose words are turned to run along it (an `<svg>` of `<text>`:
+  the UI lays text out level), reading down on the right and up on the left,
+  the battery's percentage under it. On a board rendered on
   its plane `app.frame.rotate` is the board's, as on the board, though the
   wasm runtime draws the canvas already turned. The green key pressed twice opens the scene list, where the caps
-  say what a press does there. On the touch E1003 the name, the gear and the
+  say what a press does there, and holding it closes the list where the map
+  leaves the hold free (the E1004; the others talk). On the touch E1003 the name, the gear and the
   status are buttons too.
 
 Both are on the store's Device layouts shelf (`settings.devices` names the
@@ -628,7 +633,7 @@ boards), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
 E-series' hint under the name; the Sticky's date, swipe help and rail buttons),
-whether the green key or AI draws the picture again when pressed (off: the
+whether the Refresh key or AI draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is

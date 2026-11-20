@@ -107,14 +107,24 @@ frame's render scale, sized from the panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
 `switcherGrid` picks the densest grid whose tiles stay big enough to read (at
-least a fifth of the shorter side across, up to six by six), and among grids
-as dense the one whose pictures (at the frame's aspect) or name cards come
-out largest. The tiles keep that size whatever the number of scenes: three
-scenes fill three slots of the same grid that thirty would page through,
-rather than growing to fill the page. More scenes than a page holds page,
-with the page and two arrows in the header.
+least 23% of the shorter side across and 17.5% of it high, up to twelve by
+twelve), and among grids as dense the one whose pictures (at the frame's
+aspect) or name cards come out largest. The tiles keep that size whatever the
+number of scenes: three scenes fill three slots of the same grid that thirty
+would page through, rather than growing to fill the page. **Nor do they grow
+with the screen** (`GridUnitMax`, 2026-11-20): the shorter side they are a
+share of is 480 px at most, so a tile, the header and the gaps are as large
+on a 10" panel as on a 7.5" one (112 x 84 px at least), and the bigger panel
+shows more of them on a page. The frame's render scale is what makes them
+larger. More scenes than a page holds page, with the page and two arrows in
+the header.
 
-The header ends with the gear and Close. The gear is there only while the
+The header ends with the gear and Close. **A frame that takes no taps has
+neither**, and no page arrows: e-paper whose event map binds its keys and
+nothing else (`takesNoTaps`; every touch preset binds the edge swipes, so a
+map of keys alone is a board of keys alone, the reTerminal E1001, E1002 and
+E1004). Its header is the title and the page; its keys open, walk and go
+back. The gear is there only while the
 frame offers its page (`frameSettingsRead` answers, as the scene settings'
 gear): not in an editor's preview, and not while the frame's control plane
 turned the settings on the screen off (`frame_settings_on_screen`), where it
@@ -200,7 +210,9 @@ The preview lists names only.
   together with their timing, so the next refresh shows where they got to.
   A long press stays the frame's: on a reTerminal LEFT and RIGHT held walk
   the scenes, which in the switcher is its pages (`setCurrentScene
-  {direction}` turns the page there).
+  {direction}` turns the page there). One the frame's map leaves free goes
+  back from a `primary`, `refresh`, `menu` or `back` key: the E1004's
+  REFRESH held closes the list (the E1001-E1003's talks, as their map says).
 - **A keyboard** (Linux): the arrows walk the grid, Page Up and Down turn
   the page, Enter shows the scene, Escape goes back.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and

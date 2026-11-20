@@ -266,12 +266,15 @@ block e_paper_turns_the_page_at_the_first_tap:
   # The reTerminal E1003 (1872x1404, sixteen greys): a tap on the header's
   # arrow turned the page in the state and nothing showed it, since the
   # contract renders nothing after a tap (2026-11-10).
-  listed = entries(40)
+  # Its 10" page holds a hundred and more tiles (GridUnitMax): two hundred
+  # scenes are two pages.
+  listed = entries(200)
   sent.setLen(0)
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(1872, 1404))
   doAssert scene.paper, "an ESP32 e-paper hears taps alone"
-  let grid = switcherGrid(40, 1872, 1404, thumbnails = false)
+  let grid = switcherGrid(200, 1872, 1404, thumbnails = false)
+  doAssert grid.pages == 2, $grid
   let page = scene.state{"page"}.getInt()
   var turned = false
   for cx in countup(900, 1872 - grid.pad, 4):
@@ -590,6 +593,57 @@ block a_scene_icon_on_its_tile:
   doAssert marked.inkIn(pictures, 0, light = true) > numbered.inkIn(pictures, 0, light = true) + 400
   doAssert marked.inkIn(pictures, 2, light = true) == numbered.inkIn(pictures, 2, light = true)
   sceneSwitcherThumbnail = nil
+
+
+block tiles_keep_their_size_on_a_bigger_screen:
+  # Past a 480 px screen a tile is the size it is on one, and a page holds
+  # more of them (GridUnitMax, 2026-11-20): the 10" E1003 shows its twelve
+  # scenes in tiles the 7.5" E1001's size, not in four tiles a row.
+  let small = switcherGrid(12, 800, 480, thumbnails = false)
+  let large = switcherGrid(12, 1872, 1404, thumbnails = false)
+  let scaled = switcherGrid(12, 936, 702, thumbnails = false, unit = 1404)
+  doAssert large.perPage > small.perPage * 3, $large
+  doAssert large.tileW < small.tileW * 5 div 4 and large.tileH < small.tileH * 5 div 4, $large & " " & $small
+  doAssert large.headerH == small.headerH and large.pad == small.pad, $large
+  # At a render scale of 2 it is laid out on half the pixels: still more
+  # tiles than the E1001's, each as large there, so twice as large on the glass.
+  doAssert scaled.perPage > small.perPage and scaled.tileW < small.tileW * 5 div 4, $scaled
+
+block a_board_of_keys_alone_has_no_buttons_to_tap:
+  # The reTerminal E1001: e-paper, its frame's map binds its keys and no
+  # swipe, so no finger reaches the header: no Close, no gear, no arrows.
+  listed = entries(80)
+  frameSettingsRead = proc(): JsonNode {.nimcall, gcsafe.} = %*{"wifi": {}}
+  var keys = config(800, 480, "embedded")
+  keys.eventMap = %*[
+    {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}}]
+  doAssert takesNoTaps(keys, paper = true)
+  doAssert not takesNoTaps(keys, paper = false), "an LCD may have a finger or a mouse"
+  var touch = config(800, 480, "embedded")
+  touch.eventMap = %*[
+    {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}}]
+  doAssert not takesNoTaps(touch, paper = true), "a map with swipes is a touch screen's"
+  doAssert not takesNoTaps(config(800, 480, "embedded"), paper = true), "no map: maybe a finger"
+  let scene = newSwitcher(keys, opener = "scene-1")
+  discard scene.draw(newImageGray8(800, 480))
+  doAssert scene.paper and scene.keysOnly and not scene.gear
+  let grid = switcherGrid(80, 800, 480, thumbnails = false)
+  doAssert grid.pages > 1
+  for cx in countup(grid.pad, 800 - grid.pad, 3):
+    sent.setLen(0)
+    scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
+    doAssert sent.len == 0 and scene.state{"page"}.getInt() == 0, "nothing in the header at " & $cx & ": " & $sent
+  # Its keys walk, open, and a long press of the key that opens goes back
+  # (the E1004's REFRESH, which the frame's map leaves free).
+  sent.setLen(0)
+  scene.send("button", %*{"label": "REFRESH", "role": "refresh", "action": "longPress"})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSwitcher, $sent
+  sent.setLen(0)
+  scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "longPress"})
+  doAssert sent.len == 0, "an arrow held is the frame's, else nothing: " & $sent
+  frameSettingsRead = nil
 
 localEventSink = nil
 echo "scene switcher: ok"

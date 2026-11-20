@@ -83,14 +83,19 @@ type
     paper*: bool ## drawn in e-paper's look last time (panelLook)
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
+    keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close, gear or page arrows to draw
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
   SwitcherNode = 1 ## the ui/events target its tiles live in
   IdleSecondsFast* = 60.0
   IdleSecondsSlow* = 300.0
-  MaxCols = 6
-  MaxRows = 6
+  MaxCols = 12
+  MaxRows = 12
+  GridUnitMax = 480
+    ## The most a grid's sizes are a share of: a tile is as large on a bigger
+    ## screen as on a 480 px one, and the bigger screen shows more of them
+    ## (the render scale is what makes them larger).
   # The page arrows, drawn (no font has to have the glyph): one markup, its
   # path's points either way.
   ChevronHead = "<svg viewBox=\"0 0 24 24\"><path d=\"M"
@@ -247,7 +252,11 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
   ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
   ## UI laid out at its render scale); the canvas's shorter edge without it.
-  let unit = if unit > 0: unit else: min(width, height)
+  ## Never more than `GridUnitMax`: past a 480 px screen the tiles, the
+  ## header and the gaps keep their size and a page holds more (the owner's
+  ## rule, 2026-11-20: tiles that grew with the screen showed a 10" panel
+  ## twelve scenes as large as a 4" one), up to `MaxCols` x `MaxRows`.
+  let unit = min(if unit > 0: unit else: min(width, height), GridUnitMax)
   result.pad = clamp(permille(unit, 35), 4, 24)
   result.gap = clamp(permille(unit, 25), 3, 16)
   result.headerH = clamp(permille(unit, 110), 18, 64)
@@ -269,8 +278,8 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false, u
       gw = result.side
       gh = result.side
   let
-    minW = min(clamp(unit div 5, 48, 200), gw)
-    minH = min(clamp(permille(unit, 150), 36, 160), gh)
+    minW = min(clamp(permille(unit, 233), 48, 200), gw)
+    minH = min(clamp(permille(unit, 175), 36, 160), gh)
   var
     best = -1.0
     bestCapacity = 0
@@ -424,11 +433,27 @@ proc framePageOffered(): bool =
   ## gear: the page would not open.
   not frameSettingsRead.isNil and not frameSettingsRead().isNil
 
+proc takesNoTaps*(frameConfig: FrameConfig, paper: bool): bool =
+  ## Nothing on this frame takes a tap: e-paper whose event map binds its keys
+  ## and nothing else. Every touch screen's preset binds the swipes in from
+  ## its edges (fos_board.c's TOUCH_EDGE_SWIPES, device_event_map.nim, the
+  ## SPA's table), so a map of keys alone is a board of keys alone: the
+  ## reTerminal E1001, E1002 and E1004. A frame with no map, or any rule that
+  ## is not a key's, may have a finger or a mouse, and keeps the buttons.
+  if not paper or frameConfig.isNil or frameConfig.eventMap.isNil or
+      frameConfig.eventMap.kind != JArray or frameConfig.eventMap.len == 0:
+    return false
+  for rule in frameConfig.eventMap:
+    if rule{"event"}.getStr() != "button":
+      return false
+  true
+
 proc opened(self: SceneSwitcherScene) =
   ## Shown: the scene it was opened from is the highlighted one, the list's
   ## first when there is none or it is gone (then Close goes to the first).
   self.entries = listEntries()
-  self.gear = framePageOffered()
+  self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
+  self.gear = framePageOffered() and not self.keysOnly
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
@@ -442,8 +467,9 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## down and prev / up walk the tiles, a press one step and a double press
   ## two, so every tap counts; primary, refresh and menu (OK, REFRESH, BOOT)
   ## show the highlighted scene (open the frame page on the gear), back goes
-  ## back. A long press is the frame's (its event map walks the scenes) or
-  ## nothing.
+  ## back. A long press is the frame's where its event map binds it (walk the
+  ## scenes, talk); one it leaves free goes back from the key that opens or
+  ## from back, so a board of keys alone (the E1004's REFRESH) has a way out.
   # One way out (no early `return`): each one repeats the clean-up of what
   # was read so far.
   let action = payload{"action"}.getStr()
@@ -460,6 +486,10 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     else: acted = false
     if acted:
       self.touch()
+  elif action == "longPress":
+    case payload{"role"}.getStr()
+    of "primary", "refresh", "menu", "back": leave()
+    else: discard
 
 when not defined(frameosEmbedded):
   proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
@@ -694,7 +724,8 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index, slot: int, grid: Swit
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
     width, size, small: int, button: string) =
   ## A rectangular panel's header: the title, the page and its arrows, the
-  ## frame page's gear, Close.
+  ## frame page's gear, Close; on a frame that takes no taps the title and
+  ## the page alone.
   var c: string
   c.at(0, 0, width, grid.headerH)
   c.add " flex items-center"
@@ -707,13 +738,18 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
   header.children.add el("span", c, txt("Scenes"))
   let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
   if grid.pages > 1:
-    header.children.add arrowButton(arrow, true, button).onClick(self.entries.len + 1)
+    if not self.keysOnly:
+      header.children.add arrowButton(arrow, true, button).onClick(self.entries.len + 1)
     c = "shrink-0"
     c.px("text", small)
     header.children.add el("span", c, txt(pageText(page, grid.pages)))
-    header.children.add arrowButton(arrow, false, button).onClick(self.entries.len + 2)
+    if not self.keysOnly:
+      header.children.add arrowButton(arrow, false, button).onClick(self.entries.len + 2)
   if self.gear:
     header.children.add self.gearButton(arrow, paper, self.highlighted() == self.entries.len, button)
+  if self.keysOnly:
+    root.children.add header.role("bar")
+    return
   c = "shrink-0 rounded-full"
   c.px("px", max(6, small))
   c.px("py", max(2, small div 4))
@@ -895,11 +931,14 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   ## One render: the list read again, laid out, drawn into `image`, and the
   ## tiles left behind for the pointer.
   self.entries = listEntries()
-  self.gear = framePageOffered()
   if self.indexOf(self.opener()) < 0:
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
   (self.paper, self.slow) = panelLook(self.frameConfig, image)
+  # Keys alone: no button to tap, and no gear for the keys to walk to (its
+  # page wants a finger).
+  self.keysOnly = takesNoTaps(self.frameConfig, self.paper)
+  self.gear = framePageOffered() and not self.keysOnly
   # A slow panel shows no press: a refresh to say a finger is down is seconds
   # of flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
