@@ -121,6 +121,21 @@ export function get(app) {
 }
 """
 
+# A window behind another (a picture: something is painted over it) beside the
+# one in front (a hole), counting the UI's own runs.
+const pictureAndHoleUi = """
+export function get(app) {
+  frameos.setState("uiRuns", (app.state.uiRuns || 0) + 1)
+  return (
+    <div className="relative w-full h-full bg-white">
+      <div className="absolute left-0 top-0 w-[20px] h-[40px] flex"><Scene id="tests/child" /></div>
+      <div className="absolute left-[5px] top-[30px] w-[10px] h-[5px] bg-black" />
+      <div className="absolute left-[20px] top-0 w-[20px] h-[40px] flex"><Scene id="tests/fastChild" /></div>
+    </div>
+  )
+}
+"""
+
 const escapingUi = """
 export function get(app) {
   if (app.frame.systemScene) return <yield />
@@ -298,6 +313,7 @@ let scenesJson = "[" & [
   panel("tests/fastChild", "#ff00ff", 1.0),
   jsxScene("tests/twoHoles", twoScenesUi, 300.0),
   jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
+  jsxScene("tests/pictureAndHole", pictureAndHoleUi, 300.0),
   jsxScene("tests/twoHolesInLayout", twoScenesUi, 300.0).withLayout("tests/holeLayout"),
   jsxScene("tests/taskbar", taskbarUi, 1.0, ""","isLayout": true"""),
   panel("tests/inTaskbar", "#0000ff", 600.0).withLayout("tests/taskbar"),
@@ -781,6 +797,44 @@ suite "a <yield /> that is a hole":
     check not scene.slots[0].hole
     check canvas.color(20, 20) == colored("#00ffff")
     check canvas.color(10, 32) == colored("#000000")
+
+  test "a picture that is not due leaves the UI alone while a hole beside it animates":
+    let scene = newScene("tests/pictureAndHole")
+    let canvas = newImage(W, H)
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check scene.slots.len == 2
+    var picture, hole = -1
+    for i, slot in scene.slots:
+      if slot.hole: hole = i else: picture = i
+    check picture >= 0 and hole >= 0
+    let slow = scene.panelOf("tests/child")
+    let fast = scene.panelOf("tests/fastChild")
+    check canvas.color(5, 5) == colored("#00ffff")   # the picture
+    check canvas.color(10, 32) == colored("#000000") # what is over it
+    check canvas.color(30, 5) == colored("#ff00ff")  # the hole
+    # Only the one in front is due: neither the UI nor the picture runs, and the
+    # canvas keeps both.
+    for tick in 1 .. 3:
+      rhythmClockOverride = 1000.0 + tick.float
+      discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check slow.runs == 1 and fast.runs == 4
+    check canvas.color(5, 5) == colored("#00ffff")
+    check canvas.color(10, 32) == colored("#000000")
+    # The other frame buffer gets the chrome and the picture around the hole.
+    let other = newImage(W, H)
+    rhythmClockOverride = 1004.0
+    discard pass(scene, other)
+    check scene.state{"uiRuns"}.getInt() == 1
+    check other.color(5, 5) == colored("#00ffff")
+    check other.color(10, 32) == colored("#000000")
+    check other.color(30, 5) == colored("#ff00ff")
+    # The picture's own time came: the UI draws it again.
+    rhythmClockOverride = 1501.0
+    discard pass(scene, canvas)
+    check scene.state{"uiRuns"}.getInt() == 2
+    check slow.runs == 2
 
   test "chrome that sets its next sleep is left alone until then":
     let scene = newScene("tests/inTaskbar")
