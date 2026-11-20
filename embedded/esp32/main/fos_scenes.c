@@ -87,6 +87,7 @@ static volatile bool s_store_changing = false;
 static bool store_split_behind(void);
 static bool store_sweep_behind(void);
 static void store_split_stored(void);
+static bool backend_set_written(uint32_t timeout_ms);
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
  * index on flash says, i.e. what the frame is rendering); s_pending_source is
  * the source declared by the producer of a stored-but-not-yet-applied payload,
@@ -1981,12 +1982,30 @@ static esp_err_t store_set_as_changes_locked(const char *json, size_t len, fos_s
  * lock by the one writer holding it (store_pace_hook reads it). */
 static volatile bool s_store_urgent = false;
 
+/* How long a one-scene change waits for a backend set the store task is
+ * writing; past it the change is refused (a backend's patch: the whole set
+ * next pass). As long as a spooled set waits (SPOOL_STORE_WAIT_MS). */
+#define CHANGE_STORE_WAIT_MS 90000
+
 static esp_err_t apply_store_change(fos_scene_store_change_t *change, fos_scenes_source_t source,
                                     const char *etag, const char *event, bool urgent,
                                     fos_scene_store_result_t *result)
 {
     memset(result, 0, sizeof(*result));
     s_last_error[0] = '\0';
+    /* A backend set the runtime took whole is written by the store task as
+     * changes against the index on flash, after its etag is already the one
+     * a patch is read against. A change applied first was undone by that
+     * write: the Code editor, put right after the frame's own scenes went
+     * back, came out "4 written at once, 0 kept, 1 dropped", and every sync
+     * after it was a 304 (the reTerminal E1002, the hardware bench,
+     * 2026-11-20). The set goes on flash first, then the change on top. */
+    if (!backend_set_written(CHANGE_STORE_WAIT_MS)) {
+        set_scene_simple_error("store-busy", result->put_bytes);
+        log_scene_event(event, "error", scene_source_str((int)source), "", s_last_error, 0, 0, 0,
+                        ESP_ERR_TIMEOUT);
+        return ESP_ERR_TIMEOUT;
+    }
     /* A local edit leaves the set whose it was: scenes the cloud pushed stay
      * fenced off the LAN (fos_cloud.c) however one of them was edited. */
     int effective = source == FOS_SCENES_SOURCE_LOCAL ? (s_pending ? s_pending_source : s_source) : (int)source;
@@ -2415,6 +2434,9 @@ typedef struct {
 #define STORE_TASK_STACK 6144
 static portMUX_TYPE s_store_mux = portMUX_INITIALIZER_UNLOCKED;
 static store_job_t s_store_next;   /* under s_store_mux */
+/* The store task is writing a backend set (store_backend_payload); under
+ * s_store_mux. With s_store_next.set, what a one-scene change waits for. */
+static bool s_store_writing_set = false;
 /* A whole payload a producer stored waits to be split (store_split_stored);
  * under s_store_mux. */
 static bool s_store_split_wanted = false;
@@ -2640,6 +2662,7 @@ static void store_task(void *arg)
             portENTER_CRITICAL(&s_store_mux);
             store_job_t job = s_store_next;
             s_store_next = (store_job_t){0};
+            s_store_writing_set = job.set != NULL;
             bool split = job.set == NULL && s_store_split_wanted;
             if (split) s_store_split_wanted = false;
             /* Last: a set or a split comes first, and leaves an apply that
@@ -2651,6 +2674,9 @@ static void store_task(void *arg)
             if (job.set != NULL) {
                 store_backend_payload(&job);
                 scene_set_free(job.set);
+                portENTER_CRITICAL(&s_store_mux);
+                s_store_writing_set = false;
+                portEXIT_CRITICAL(&s_store_mux);
             } else if (split) {
                 store_split_stored();
             } else if (sweep) {
@@ -2742,6 +2768,44 @@ bool fos_scenes_store_wait(uint32_t timeout_ms)
 bool fos_scenes_store_busy(void)
 {
     return s_store_busy;
+}
+
+static bool backend_set_waiting(void)
+{
+    portENTER_CRITICAL(&s_store_mux);
+    bool waiting = s_store_next.set != NULL || s_store_writing_set;
+    portEXIT_CRITICAL(&s_store_mux);
+    return waiting;
+}
+
+/* Whether no backend set waits to be written, after waiting up to
+ * `timeout_ms` for the one that does (apply_store_change). On the render
+ * task the store task is told it is waited for, so its pace stops waiting
+ * out renders and the input hold only this task releases. */
+static bool backend_set_written(uint32_t timeout_ms)
+{
+    if (s_store_task == NULL || xTaskGetCurrentTaskHandle() == s_store_task || !backend_set_waiting()) return true;
+    bool render = fos_client_on_render_task();
+    if (render) s_render_waits_for_store = true;
+    int64_t until = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    bool written = true;
+    int64_t from = esp_timer_get_time();
+    while (backend_set_waiting()) {
+        if (esp_timer_get_time() >= until) {
+            ESP_LOGW(TAG, "a backend set still being written after %u ms: change refused", (unsigned)timeout_ms);
+            written = false;
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (render) s_render_waits_for_store = false;
+    if (written) {
+        /* A warning, so a console at the default level shows it: each one is
+         * a change this race would have dropped. */
+        ESP_LOGW(TAG, "a change waited %u ms for the backend set's write",
+                 (unsigned)((esp_timer_get_time() - from) / 1000));
+    }
+    return written;
 }
 
 fos_scene_set_t *fos_scenes_backend_fetch(bool force, char *etag_out, size_t etag_len, esp_err_t *out_err)
