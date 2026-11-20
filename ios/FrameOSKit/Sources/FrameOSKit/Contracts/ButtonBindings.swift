@@ -20,23 +20,28 @@ public struct ButtonBinding: Hashable, Sendable, Identifiable {
     public var kind: String
     /// For `showScene` alone.
     public var sceneId: String?
+    /// For `showScene` alone: the values of that scene's public fields the
+    /// press shows it with (`setCurrentScene`'s `state`); empty, the scene as it is.
+    public var state: [String: JSONValue]
 
     public let id = UUID()
 
-    public init(gesture: Gesture, kind: String, sceneId: String? = nil) {
+    public init(gesture: Gesture, kind: String, sceneId: String? = nil, state: [String: JSONValue] = [:]) {
         self.gesture = gesture
         self.kind = kind
         self.sceneId = sceneId
+        self.state = state
     }
 
     public static func == (lhs: ButtonBinding, rhs: ButtonBinding) -> Bool {
-        lhs.gesture == rhs.gesture && lhs.kind == rhs.kind && lhs.sceneId == rhs.sceneId
+        lhs.gesture == rhs.gesture && lhs.kind == rhs.kind && lhs.sceneId == rhs.sceneId && lhs.state == rhs.state
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(gesture)
         hasher.combine(kind)
         hasher.combine(sceneId)
+        hasher.combine(state)
     }
 }
 
@@ -72,7 +77,9 @@ public enum ButtonBindings {
     public static func actionTitle(_ binding: ButtonBinding, sceneName: (String) -> String? = { _ in nil }) -> String {
         guard binding.kind == "showScene" else { return actionTitles[binding.kind] ?? binding.kind }
         let id = binding.sceneId ?? ""
-        return "Show scene: \(sceneName(id) ?? (id.isEmpty ? "?" : id))"
+        let settings = binding.state.count
+        let suffix = settings == 0 ? "" : settings == 1 ? " (1 setting)" : " (\(settings) settings)"
+        return "Show scene: \(sceneName(id) ?? (id.isEmpty ? "?" : id))\(suffix)"
     }
 
     /// The rule the section writes for one binding (the SPA's bindingRule).
@@ -93,7 +100,9 @@ public enum ButtonBindings {
         case "prevScene":
             return ["event": event, "match": match, "emit": "setCurrentScene", "as": ["direction": "prev"]]
         case "showScene":
-            return ["event": event, "match": match, "emit": "setCurrentScene", "as": ["sceneId": .string(binding.sceneId ?? "")]]
+            var values: [String: JSONValue] = ["sceneId": .string(binding.sceneId ?? "")]
+            if !binding.state.isEmpty { values["state"] = .object(binding.state) }
+            return ["event": event, "match": match, "emit": "setCurrentScene", "as": .object(values)]
         default:
             return ["event": event, "match": match, "emit": .string(binding.kind), "as": [:]]
         }
@@ -120,7 +129,15 @@ public enum ButtonBindings {
             if asValues.count == 1, let direction = asValues["direction"]?.stringValueIfString, direction == "next" || direction == "prev" {
                 return ButtonBinding(gesture: gesture, kind: direction == "next" ? "nextScene" : "prevScene")
             }
-            if asValues.count == 1, let sceneId = asValues["sceneId"]?.stringValueIfString, !sceneId.isEmpty {
+            // A scene by id, and the values of its public fields the press
+            // shows it with (`state`, an object; an empty one is no settings).
+            if let sceneId = asValues["sceneId"]?.stringValueIfString, !sceneId.isEmpty,
+               asValues.keys.allSatisfy({ $0 == "sceneId" || $0 == "state" })
+            {
+                if let state = asValues["state"] {
+                    guard let settings = state.objectValue else { return nil }
+                    return ButtonBinding(gesture: gesture, kind: "showScene", sceneId: sceneId, state: settings)
+                }
                 return ButtonBinding(gesture: gesture, kind: "showScene", sceneId: sceneId)
             }
             return nil

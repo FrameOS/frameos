@@ -915,6 +915,11 @@ proc takeParked(layoutId: string): FrameScene {.nimcall.} =
     result = parkedLayout
     parkedLayout = nil
 
+proc releaseOtherParked(layoutId: string, before: proc(layout: FrameScene) {.nimcall.}) {.nimcall.} =
+  if not parkedLayout.isNil and parkedLayout.id.string != layoutId:
+    before(parkedLayout)
+    dropParkedLayout()
+
 proc carryLayout(self: RunnerThread, fromId, toId: SceneId) =
   ## The frame goes from one scene to another: the layout the first wore is
   ## parked for the next, and an older copy of it that the next one holds
@@ -973,6 +978,7 @@ proc windowListing(): JsonNode =
 
 proc installWindowHooks*(self: RunnerThread) =
   takeParkedLayout = takeParked
+  releaseParkedLayout = releaseOtherParked
   builtInScenesStay = true
   hostSceneFor = proc(sceneId: SceneId): FrameScene {.closure, gcsafe.} =
     {.cast(gcsafe).}:

@@ -35,28 +35,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ios:
-    name: iOS app
-    runs-on: macos-15
-    timeout-minutes: 40
+  # Whether the app itself changes. The simulator build and the UI tests test
+  # the app: a pull request that changes only a corpus, a contract or the
+  # ported SPA logic (the other paths above) is what FrameOSKit's tests
+  # replay, and the Swift tables generated from a contract are under ios/
+  # themselves. Pushes, and pull requests that touch ios/ or this file, run it
+  # all. On Linux, so a pull request without app changes takes no macOS runner
+  # for the build and the UI tests.
+  changes:
+    name: "iOS app: what changes"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      app: ${{ steps.app.outputs.changed }}
     steps:
-      - uses: actions/checkout@v4
-
-      # The simulator build and the UI tests are seven of the job's nine
-      # minutes on GitHub's three-core macOS VM, and they test the app: a pull
-      # request that changes only a corpus, a contract or the ported SPA logic
-      # (the other paths above) is what FrameOSKit's tests replay, and the
-      # Swift tables generated from a contract are under ios/ themselves.
-      # Pushes, and pull requests that touch ios/ or this file, run it all.
       - name: Does the app itself change
         id: app
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ "$EVENT" != "pull_request" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -74,6 +76,17 @@ jobs:
             echo "Nothing under ios/ changes: FrameOSKit's tests only."
           fi
 
+  # FrameOSKit's tests (the shared corpora), on a runner of their own: half a
+  # minute of tests that need not wait behind the app's build.
+  kit:
+    name: "iOS app: FrameOSKit tests"
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Xcode
         run: |
           # The newest released Xcode on the image (betas left out).
@@ -85,34 +98,131 @@ jobs:
       - name: FrameOSKit tests (the shared corpora)
         run: swift test --package-path ios/FrameOSKit
 
+  # The one build: the app and its UI tests for the simulator (build-for-
+  # testing), handed to the UI test job as an artifact. A compile error fails
+  # this job, not the tests.
+  build:
+    name: "iOS app: build"
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          latest="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
       - name: Install XcodeGen
-        if: steps.app.outputs.changed == 'true'
         run: brew install xcodegen
 
-      # The one build: the app and its UI tests for the simulator they run on
-      # (build-for-testing). A build for the generic simulator destination
-      # here was a second compile of the same app, which the test run could
-      # not reuse. A compile error fails this step, not the next.
       - name: Build the app and its UI tests for the simulator
-        if: steps.app.outputs.changed == 'true'
         run: ios/bin/ui-test --build-only
 
-      # The UI tests (ios/FrameOSUITests) on a simulator: the app starts (no
-      # crash at launch, e.g. a generated table that does not decode) and
-      # the sign-in screen works, the cloud first and the backend below. The
-      # tour of the whole app needs a backend and is skipped here; run it
-      # with ios/bin/test-backend + ios/bin/ui-test (ios/README.md).
-      #
-      # The simulator boots here, not earlier beside the build: a first boot
-      # on this three-core VM is minutes of CPU, and overlapping it slowed the
-      # steps beside it by more than it saved (swift test 25 s -> 418 s).
-      - name: UI tests on a simulator
-        if: steps.app.outputs.changed == 'true'
+      # The apps, the test bundles and the .xctestrun that names them, in a
+      # tar: an artifact alone loses the executable bits.
+      - name: Pack the build
+        run: |
+          cd ios/DerivedData/Build/Products
+          find . -maxdepth 2 \( -name '*.xctestrun' -o -name '*.app' -o -name '*.xctest' \) -print0 |
+            tar --null -cf "$RUNNER_TEMP/ios-ui-test-build.tar" -T -
+          ls -lh "$RUNNER_TEMP/ios-ui-test-build.tar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-build
+          path: ${{ runner.temp }}/ios-ui-test-build.tar
+          retention-days: 1
+          overwrite: true
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcodebuild-build-log
+          path: ios/DerivedData/ui-test-build.log
+          if-no-files-found: ignore
+
+  # The UI tests (ios/FrameOSUITests) on a simulator: the app starts (no
+  # crash at launch, e.g. a generated table that does not decode) and the
+  # sign-in screen works, the cloud first and the backend below. The tour of
+  # the whole app needs a backend and is skipped here; run it with
+  # ios/bin/test-backend + ios/bin/ui-test (ios/README.md).
+  #
+  # A simulator's first boot on GitHub's three-core macOS VM is two to three
+  # minutes of CPU. Beside the build on one VM it slowed both by more than it
+  # saved (swift test 25 s -> 418 s, 2026-11-12), so it boots here, on a VM of
+  # its own, while the build job compiles, and the tests run on that job's
+  # build when it is in.
+  ui:
+    name: "iOS app: UI tests"
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: macos-15
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          latest="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' ! -iname '*beta*' | sort -V | tail -1)"
+          sudo xcode-select -s "$latest/Contents/Developer"
+          xcodebuild -version
+
+      - name: Boot the simulator
+        timeout-minutes: 10
+        run: |
+          udid="$(ios/bin/simulator)"
+          echo "Simulator $udid"
+          xcrun simctl bootstatus "$udid" -b >/dev/null
+
+      # The build job's artifact, once it is uploaded (artifacts of a run in
+      # progress are listed as soon as they are). A build job that ends
+      # without one ends this job too.
+      - name: Wait for the build
+        timeout-minutes: 30
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          while true; do
+            found="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/artifacts?name=ios-ui-test-build" \
+              --jq '.artifacts | length' || echo 0)"
+            if [ "$found" != "0" ]; then echo "The build is in"; break; fi
+            build="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN/attempts/$ATTEMPT/jobs?per_page=100" \
+              --jq '.jobs[] | select(.name == "iOS app: build") | .status + " " + (.conclusion // "")' || true)"
+            case "$build" in
+              "completed success"*) ;;  # listed in a moment
+              completed*) echo "The build job ended without a build: $build" >&2; exit 1 ;;
+            esac
+            sleep 5
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-ui-test-build
+          path: ${{ runner.temp }}
+
+      - name: Unpack the build
+        run: |
+          mkdir -p ios/DerivedData/Build/Products
+          tar -xf "$RUNNER_TEMP/ios-ui-test-build.tar" -C ios/DerivedData/Build/Products
+
+      - name: UI tests on the simulator
         timeout-minutes: 20
         run: ios/bin/ui-test --without-building
 
       - name: Upload the screenshots
-        if: always() && steps.app.outputs.changed == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-ui-test-screenshots
@@ -124,7 +234,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-xcodebuild-logs
-          path: |
-            ios/DerivedData/ui-test-build.log
-            ios/DerivedData/ui-test.log
+          path: ios/DerivedData/ui-test.log
           if-no-files-found: ignore

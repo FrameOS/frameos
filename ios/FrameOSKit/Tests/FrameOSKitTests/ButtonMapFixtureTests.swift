@@ -24,6 +24,7 @@ import Testing
             }
             #expect(row.kind == expected["binding"]?["action"]?["kind"]?.stringValue, "rule \(index) kind")
             #expect(row.sceneId == expected["binding"]?["action"]?["sceneId"]?.stringValue, "rule \(index) scene")
+            #expect(row.state == (expected["binding"]?["action"]?["state"]?.objectValue ?? [:]), "rule \(index) settings")
             #expect(ButtonBindings.gestureTitle(row.gesture) == expected["gestureTitle"]?.stringValue, "rule \(index) gesture title")
             #expect(ButtonBindings.actionTitle(row) { $0 == "weather" ? "Weather" : nil } == expected["actionTitle"]?.stringValue,
                     "rule \(index) action title")
