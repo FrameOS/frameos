@@ -155,6 +155,62 @@ suite "jsx events":
     check ui.scene.state{"calls"}.getInt() == 5
     check image[25, 25] == green and image[85, 25] == green and image[145, 25] == red
 
+  test "memo(Component) keyed: a row put in or moved runs alone, the rest are taken back":
+    # The C memo() (js_runtime/jsx_native.nim) keeps slots by `key` when there
+    # is one, by turn otherwise: rows that moved find their slot, a new one
+    # runs, a row that left is let go, and a row whose props changed runs.
+    let ui = newUi("""
+      let rows = [1, 2, 3]
+      let label = 'a'
+      let calls = []
+      const Row = memo(({ n, text }) => {
+        calls.push(n)
+        return <div className="w-10 h-5 bg-red-500">{`${text}${n}`}</div>
+      })
+      const Static = memo(() => <div className="w-10 h-5 bg-blue-500" />)
+      export function get(app) {
+        calls = []
+        const tree = (
+          <div className="flex flex-col gap-1 p-2 bg-white" onClick={() => {
+            if (rows.length === 3) rows = [3, 1, 4, 2]
+            else label = 'b'
+          }}>
+            <Static />
+            {rows.map((n) => <Row key={n} n={n} text={label} />)}
+          </div>
+        )
+        frameos.setState('calls', calls.join(','))
+        return tree
+      }
+    """, "tests/jsx-memo-keys", width = 100, height = 100)
+    discard ui.render()
+    check ui.scene.state{"calls"}.getStr() == "1,2,3"
+    discard ui.render()
+    check ui.scene.state{"calls"}.getStr() == "" # nothing changed: nothing ran
+    check dispatchUiEvent("tests/jsx-memo-keys", "tap", at(50, 95))
+    discard ui.render()
+    check ui.scene.state{"calls"}.getStr() == "4" # moved rows found their slots
+    check dispatchUiEvent("tests/jsx-memo-keys", "tap", at(50, 95))
+    discard ui.render()
+    check ui.scene.state{"calls"}.getStr() == "3,1,4,2" # every row's text changed
+    discard ui.render()
+    check ui.scene.state{"calls"}.getStr() == ""
+
+  test "a handler's event: the payload, where it landed, and e.target only for an edit":
+    let ui = newUi("""
+      export function get(app) {
+        return (
+          <div className="flex p-5 bg-white">
+            <div className="w-20 h-10 bg-red-500" onClick={(e) => frameos.setState('seen',
+              `${e.type} ${e.pointerType} ${e.localX},${e.localY} ${e.width}x${e.height} ${typeof e.target}`)} />
+          </div>
+        )
+      }
+    """, "tests/jsx-event-shape")
+    discard ui.render()
+    check dispatchUiEvent("tests/jsx-event-shape", "tap", at(25, 23))
+    check ui.scene.state{"seen"}.getStr() == "tap mouse 5,3 80x40 undefined"
+
   test "a render only the pointer asked for lays the last tree out again":
     # hover: changed and no handler ran: the new picture without get(), as
     # CSS restyles :hover. A handler, any other event, or the scene's own

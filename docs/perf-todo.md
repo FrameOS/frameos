@@ -139,6 +139,49 @@ caches of a home panel went from ~133 KB to 12 KB) and, for the Text app and
 SVG text, a mask where there was an outline. The render line has its counts
 (`glyphs hits/misses KB`). Not measured on a board yet.
 
+## memo() and a handler's call in C (2026-11-20)
+
+Where a tap's time goes that no state model would skip: a research pass
+(branch `research/ui-state-model`) put probes on the SenseCAP Indicator and
+found two fixed costs in JavaScript plumbing.
+
+- **memo() was 1.1 ms a call**, hit or miss: a `Map` lookup, `Object.keys`
+  twice and a loop, each a builtin read from flash. An element made inline is
+  ~0.1 ms, a plain component call ~0.35, so memo() made things slower unless
+  it skipped a big subtree: six memo()'d cards were 6 to 7 ms of the home
+  panel's 11 ms `get()`. It is C now (`js_runtime/jsx_native.nim`: the slots
+  in two arrays of C structs, swapped when a new `get()` begins), the same
+  semantics, ~0.25 ms a call.
+- **A handler went through the prelude's `__frameosHandle`**: the payload as
+  JSON text, `JSON.parse`, two object spreads, then the handler; 1.5 to 2 ms
+  for a handler that itself ran in 0.1. It is called straight from Nim now,
+  its event built there, `e.target` only where the docs promise one (a
+  field's edit, a box's scroll).
+
+The render line says what the events since the last line took to dispatch
+(`| input 7.2/2`: two events, handlers included). Measured on the board, the
+same scenes and taps, main against this change (medians):
+
+| | main | now |
+| --- | --- | --- |
+| Home panel (six memo()'d cards), tap render | 68 ms, get 10.1 | 63 ms, get 6.7 |
+| 100 memo()'d cells, tap render | 165 ms, get 104 | 87 ms, get 28 |
+| To-do, a tap's dispatch (pointerUp, tap, handler) | 15.0 ms | 9.8 ms |
+| Calculator / Counter, a tap's dispatch | 8.8 / 9.3 ms | 7.2 / 7.6 ms |
+| A tap whose handler changes nothing, its dispatch | 8.7 ms | 7.2 ms |
+
++2.3 KB of flash (the C memo with its class, less the prelude's handler).
+
+What is still fixed in every tap, for the next pass (the research branch's
+probes, a tap whose handler changes nothing): ~7 ms of dispatch (the input
+state 1.4 for down and up, the event maps 0.6, the `event:render` log line
+0.7, the handler's call around it 0.9, the rest the queue), ~3 ms between the
+dispatch and the render (`render:scene`'s log line and the frame buffer), a
+16 ms render of a tree that did not change (the scene program around the app
+node ~4, the app node ~6, `native` ~5 of which the debug profile is most),
+and ~5 ms after it for the `render:framebuffer` / `render:device` /
+`render:done` lines and the buffer switch.
+
 ## The hardware bench's slow renders (2026-11-18)
 
 The bench run of 2026-11-18 (2026.11.11) flagged four scenes at 10 to 16 s a

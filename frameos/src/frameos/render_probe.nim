@@ -38,6 +38,9 @@ type RenderPhase* = enum
   phFit = "fit"        ## the automatic fit of a drawn image into the panel's range (utils/asset_colors)
 
 var probeOn* = false
+var
+  inputNs*: int64 ## events dispatched since the last render line (single_scene_host.send)
+  inputCount*: int
 
 var
   accNs: array[RenderPhase, int64]
@@ -106,6 +109,13 @@ proc probeLine*(cacheAtStart: (int, int, int, int)): string =
   for reason in CacheSkip:
     if cacheSkips[reason] > 0:
       result.add " " & $reason & " " & $cacheSkips[reason]
+  if inputCount > 0:
+    # What the events since the last line took to dispatch, handlers
+    # included: a tap's pointerDown, pointerUp and its handler come before
+    # the render it asks for.
+    result.add " | input " & ms1(inputNs) & "/" & $inputCount
+    inputNs = 0
+    inputCount = 0
 
 var
   quietNs: array[RenderPhase, int64]

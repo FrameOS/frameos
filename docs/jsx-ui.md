@@ -91,14 +91,17 @@ cheap is that the pictures are reconciled, not the code:
   is handed again (`parseSvg`'s `reuse`), and damageRects knows those
   elements without comparing them. Gradient ids and handler numbers are part
   of what must match.
-- **`memo(Component)`**, as React's (the prelude's, `js_runtime/runtime.nim`):
+- **`memo(Component)`**, as React's (in C, `js_runtime/jsx_native.nim`; the
+  prelude's JavaScript one in `js_runtime/runtime.nim` is the reference):
   a component called with props shallow-equal to its last call at the same
   place (its turn among the render's calls, or its `key`) returns the element
   it made then, the same object. The walker gave that element a number
   (`__frameosNode`) and takes its nodes back without reading it, its
   handler functions copied into the render's list at the numbers they had.
   Pass values, not functions made anew each render, and make the handlers
-  inside the component.
+  inside the component. A call costs about 0.25 ms on the SenseCAP Indicator,
+  hit or miss (the JavaScript one was 1.1 ms), and an element made inline
+  about 0.1: memo() pays off around a component of a few elements or more.
 - **The pointer alone does not run get().** A render asked for only because
   hover:, active: or group-hover: changed (no handler ran) lays the last
   tree out again with the new pointer, as a browser restyles `:hover`
@@ -514,7 +517,10 @@ export const get = () => (
   (`edgeSwipe`, docs/events.md "Edge swipes"): no element hears any of that
   touch, so a slider at the edge of a page is safe from it. The handler gets the event's payload plus `type`, `localX` and `localY`
   (from the element's corner) and `width` / `height` (the element's size,
-  2026.10.22+): `onClick={(e) => ...}`. The innermost element
+  2026.10.22+): `onClick={(e) => ...}`. `e.target` (a copy of the event,
+  as React's) is there for a field's edit and a box's scroll only
+  (`e.target.value`, `e.target.scrollTop`): a pointer's handler has none
+  since 2026.11.14. The innermost element
   with a handler for the event takes it, so a tap on a label inside a card
   runs the card's `onClick`.
 - **A press is captured**, as a browser captures a touch: the innermost

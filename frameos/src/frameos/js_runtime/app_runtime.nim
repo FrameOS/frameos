@@ -3456,14 +3456,6 @@ const appJsPrelude* = compactJs("""
     } };
   };
   globalThis.__frameosDropApp = (key) => { delete __frameosApps[key]; };
-  // A JSX UI's onClick (and friends), numbered by the walker (js_runtime/jsx.nim).
-  globalThis.__frameosHandle = (key, id, event, type, localX, localY, width, height) => {
-    const handler = ((__frameosApps[key] || {}).handlers || [])[id];
-    if (typeof handler !== "function") return;
-    const e = { ...JSON.parse(event), type, localX, localY, width, height };
-    e.target = { ...e }; // React's e.target.value (a field), e.target.scrollTop (a box)
-    handler(e);
-  };
   // A node in a flow calls run(), a node feeding a field calls get(). An app
   // without the one its node needs does nothing, so say so, once.
   globalThis.__frameosInvoke = (key, name) => {
@@ -3471,7 +3463,10 @@ const appJsPrelude* = compactJs("""
     if (!a) return undefined;
     const mod = (a.module && a.module.default) || a.module || {};
     const fn = mod[name];
-    if (name === "get") globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
+    if (name === "get") {
+      globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
+      if (typeof __frameosNextRender === "function") __frameosNextRender();
+    }
     if (typeof fn === "function") {
       const r = fn(a.app, globalThis.__frameosContext);
       // An async init() goes on between renders (docs/async-js.md): a throw
@@ -3890,21 +3885,35 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     ctx = runtime.js.context
     configJson = if owner of DynamicJsApp: DynamicJsApp(owner).configJson else: newJObject()
   runtime.midCall:
-    var args {.noinit.}: array[8, JSValue]
-    args[0] = JS_NewInt32(ctx, runtime.appKey.int32)
-    args[1] = JS_NewInt32(ctx, handler.int32)
-    args[2] = nimStringToJS(ctx, $event)
-    args[3] = nimStringToJS(ctx, name)
-    # localX, localY, width, height: one call for the four, where each
-    # JS_NewFloat64 inlined is over 100 bytes of soft-float double on an ESP32.
-    for i in 0 .. 3:
-      args[4 + i] = nimFloatToJS(ctx, hit[i])
+    # The handler straight from the app's list, its event built here: no
+    # JSON text to parse, no JavaScript in between, and `e.target` (a copy
+    # of the event, as React's) only where the docs promise one: a field's
+    # edit and a box's scroll. The way through the prelude's __frameosHandle
+    # (the payload as JSON text, parsed, spread twice) was 1.5 to 2 ms of a
+    # tap on the SenseCAP Indicator, for a handler that ran in 0.1.
+    let entry = runtime.appEntry()
+    let handlers = if jsIsObject(entry): JS_GetPropertyStr(ctx, entry, "handlers") else: jsUndefined(ctx)
+    let fn = if jsIsObject(handlers): JS_GetPropertyUint32(ctx, handlers, handler.uint32) else: jsUndefined(ctx)
+    JS_FreeValue(ctx, handlers)
+    JS_FreeValue(ctx, entry)
+    if JS_IsFunction(ctx, fn) == 0:
+      JS_FreeValue(ctx, fn)
+      return
+    proc eventObject(): JSValue =
+      result = if not event.isNil and event.kind == JObject: jsonToJS(ctx, event) else: JS_NewObject(ctx)
+      discard JS_SetPropertyStr(ctx, result, "type", nimStringToJS(ctx, name))
+      const names = ["localX", "localY", "width", "height"]
+      for i in 0 .. 3:
+        discard JS_SetPropertyStr(ctx, result, names[i].cstring, nimFloatToJS(ctx, hit[i]))
+    var e = eventObject()
+    if name in ["change", "input", "keyDown", "scroll"]:
+      discard JS_SetPropertyStr(ctx, e, "target", eventObject())
     var returned: JSValue
     withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
         context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))):
-      returned = callGlobalFunction(ctx, "__frameosHandle", args)
-    for arg in args:
-      JS_FreeValue(ctx, arg)
+      returned = JS_Call(ctx, fn, jsUndefined(ctx), 1, addr e)
+    JS_FreeValue(ctx, e)
+    JS_FreeValue(ctx, fn)
     if JS_IsException(returned) != 0:
       frameos_apps.logError(owner, "JS app handler failed: " &
         runtime.appText(mappedJsExceptionDetails(ctx).message))
