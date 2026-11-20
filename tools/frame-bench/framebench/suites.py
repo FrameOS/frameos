@@ -140,6 +140,37 @@ def wait_render(con, timeout):
     return con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)), timeout)
 
 
+def switch_scene(con, frame, sid, name=None):
+    """`scene <id>` and wait for a render of THAT scene that started after the
+    command. Returns (ok, t_cmd, t_done, last line, summary of the window)."""
+    con.drain()
+    t_cmd = time.time()
+    con.send(f'scene {sid}')
+    started = {'n': None}
+
+    def switched(x):
+        if x.startswith('scene select failed'):
+            return True
+        if x.startswith('render #') and ' started: scene ' in x and (sid in x or (name and f'"{name}"' in x)):
+            started['n'] = x.split()[1]
+            return False
+        # The scene's own `render:done` ends it too: when its start line
+        # went out without the scene (`started: scene ""`, firmware up to
+        # 2026.11.12 reading the shared scene info buffer: the E1004's
+        # Unsplash image), or when the console lost the `done in` line
+        # (bytes dropped on the E1004's CH340, 2026-11-19: Low Poly
+        # Animals rendered in 39.7 s and read as "no render").
+        if x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x and '"status":"ok"' in x:
+            return True
+        return started['n'] is not None and (x.startswith(f"render {started['n']} done") or x.startswith(f"render {started['n']} failed"))
+
+    t_done, line, got = con.wait_for(switched, render_timeout(frame))
+    _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
+    w = summarize(got + tail)
+    ok = bool(t_done) and not (line or '').startswith(('scene select failed', 'render #')) or bool(line and ' done in ' in line)
+    return ok, t_cmd, t_done, line, w
+
+
 def status(con):
     return con.usb_api_json('status', 20) or {}
 
@@ -204,31 +235,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
         t_start = time.time()
         entry = {'id': sc['id'], 'name': sc.get('name'), 'bytes': sc.get('bytes'), 'refreshInterval': intervals.get(sc['id'])}
         # 1. switch. Wait for a render that STARTED after the command for this scene.
-        con.drain()
-        t_cmd = time.time()
-        con.send(f"scene {sc['id']}")
-        started = {'n': None}
-
-        def switched(x, sid=sc['id'], name=sc.get('name')):
-            if x.startswith('scene select failed'):
-                return True
-            if x.startswith('render #') and ' started: scene ' in x and (sid in x or (name and f'"{name}"' in x)):
-                started['n'] = x.split()[1]
-                return False
-            # The scene's own `render:done` ends it too: when its start line
-            # went out without the scene (`started: scene ""`, firmware up to
-            # 2026.11.12 reading the shared scene info buffer: the E1004's
-            # Unsplash image), or when the console lost the `done in` line
-            # (bytes dropped on the E1004's CH340, 2026-11-19: Low Poly
-            # Animals rendered in 39.7 s and read as "no render").
-            if x.startswith('{"event":"render:done"') and f'"sceneId":"{sid}"' in x and '"status":"ok"' in x:
-                return True
-            return started['n'] is not None and (x.startswith(f"render {started['n']} done") or x.startswith(f"render {started['n']} failed"))
-
-        t_done, line, got = con.wait_for(switched, render_timeout(frame))
-        _, _, tail = con.wait_for(lambda x: x.startswith('{"event":"render:done"'), 3)
-        w = summarize(got + tail)
-        ok = bool(t_done) and not (line or '').startswith(('scene select failed', 'render #')) or bool(line and ' done in ' in line)
+        ok, t_cmd, t_done, line, w = switch_scene(con, frame, sc['id'], sc.get('name'))
         entry['switch'] = {
             'ok': ok,
             'wall_ms': round((t_done - t_cmd) * 1000) if t_done else None,
@@ -917,8 +924,11 @@ def suite_code(ctx, frame, opens=None):
     return {'code': results, 'issues': issues}
 
 
+from .benchmarks import suite_benchmark  # noqa: E402  (it imports helpers from here)
+
 SUITES = {
     'status': suite_status,
+    'benchmark': suite_benchmark,
     'code': suite_code,
     'scenes': suite_scenes,
     'builtin': suite_builtin,
@@ -932,7 +942,9 @@ SUITES = {
 }
 # What `--suites default` runs per frame kind.
 DEFAULT = {
-    'local': ['status', 'reboot', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
+    # `benchmark` right after the restart: its memory reading (heapinfo's
+    # minimum since boot) then covers the boot and the benchmark alone.
+    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
     'thin': ['status', 'thin'],
     'pico': ['thin'],
 }

@@ -36,7 +36,36 @@ tools/frame-bench/bench.py run --full          # no sampling on the slow e-paper
 tools/frame-bench/bench.py run --frames sensecap,e1003 --suites scenes,desktop
 tools/frame-bench/bench.py run --baseline ~/.frameos-bench/<older-run>   # flag regressions
 tools/frame-bench/bench.py report <run-dir> --baseline <older-run-dir>
+tools/frame-bench/bench.py run --suites status,reboot,benchmark   # the scored benchmark alone (~5-15 min)
+tools/frame-bench/bench.py import            # backfill run dirs into tools/frame-bench/results/*.jsonl
+tools/frame-bench/bench.py sizes --elf v2026.11.13   # a new release's image sizes (and ELF shas)
+tools/frame-bench/bench.py html              # results/report.html: scores, trends, image size, stability
+tools/frame-bench/bench.py restore           # undo a killed benchmark suite (backend address, scenes)
 ```
+
+## Scores and records
+
+Every finished `run` is imported into `tools/frame-bench/results/`
+(`boards`, `runs`, `metrics`, `images` as JSON Lines: `results/SCHEMA.md`);
+commit those files and `results/report.html` with the change the run was for.
+The scores (`tools/frame-bench/SCORES.md`) come from the **benchmark** suite:
+fixed scenes (`tools/frame-bench/benchmarks/`) put on the board over USB,
+timed by the lines every firmware prints, so a release from before the suite
+existed is benched exactly like main. While it runs, the board's backend points
+at a closed port on the board (no pulls, and no over-the-air update to the
+backend's release halfway: a board on 2026.11.10 checks every 8.3 minutes);
+`~/.frameos-bench/isolated.json` keeps the real address until it is back.
+
+A build is known by its image's ELF sha, never by the version it prints:
+`bench.py sizes --elf <tag>` records each release's sha, so a run on a bench
+build that prints `2026.11.11` lands as `2026.11.11+elf.<sha>`, not as the
+release. Run `sizes --elf` for every release you flash.
+
+**Benching an older release** (`~/.frameos-bench/releases/<v>/` holds the
+signed images): flash it with `~/.frameos-bench/firmware/flash_checked.sh`
+(the board's module is checked first), run `--suites status,reboot,benchmark`
+at once, then flash the next. Never `ota` (the SenseCAP boot-loops on
+releases up to 2026.11.12), and put each board back on what it ran before.
 
 **Slow panels are sampled.** A frame whose panel takes 20 s or more to
 refresh (the 7.3" and 13.3" Spectras: the E1002, the E1004) runs what has
@@ -61,6 +90,7 @@ Exit code 2 means a `crash` or `fail` issue.
 |---|---|---|
 | `status` | firmware, memory, storage, scene list, HTTPS state | all |
 | `reboot` | `restart`: time to the bootup event and the first picture; nothing crashes | local |
+| `benchmark` | the benchmark scenes (CPU, raster, UI, JPEG decode + dither, animation on an LCD, a tap on touch), each cold and five times warm, then `heapinfo`: the scores' input (`SCORES.md`) | local, console only |
 | `scenes` | every scene: switch (wall vs render time), an LCD's animation for `--passive` s (fps vs the scene's period, stalls), `--warm` renders with the per-phase probe (`set debug 1` for the run), the render path (`in place` on an LCD), a tap on touch boards | local |
 | `builtin` | scene switcher and scene settings open / close | local |
 | `input` | a drag across the panel, next / previous scene | touch |
@@ -77,6 +107,13 @@ Issue severities: `crash` (panic, abort, watchdog, brownout, reboot, OOM),
 
 ## Adding things
 
+- **A new board kind**: nothing is required; results are keyed by what
+  `usb_api status` says it is (module, panel, chip, PSRAM, flash). Add it to
+  `tools/frame-bench/boards.json` for its name and panel size (the per-megapixel
+  scores need the size: the status gives it from 2026.11.10 on).
+- **A new benchmark**: a folder in `tools/frame-bench/benchmarks/`, a line in
+  `framebench/benchmarks.py`, its metric in `records.frame_metrics` and, if
+  it scores, `scoring.CATEGORIES`; bump `WORKLOAD`.
 - **A new frame**: plug it in, attach it to the backend (copy its scenes into
   the backend frame FIRST — `usb_api scene-list` / `scene-get` on 2026.11.7 and
   later — then `set backend`, `set api_key`, `set frame_id`, `restart` on its
