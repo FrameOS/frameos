@@ -296,14 +296,62 @@ A glyph not kept costs about 1.6 times a direct fill of its outline the
 first time (7.9 µs against 4.8 for a 16 px glyph), once per size and
 quarter pixel.
 
-**What is left is the typeface itself**: on the ESP32 and in wasm the
-built-in face is inflated whole from flash (140,772 bytes, into a string
-that grows to 256 KB on the way) and parsed, which holds 162 KB for the life
-of the process (64-bit host: the glyf table copied, both loca tables, hmtx,
-cmap, the name table and the GPOS pairs and class tables), and peaks at
-424 KB while the first text is drawn. Reading it where it lies, a glyph at
-a time, is the next step; its design and numbers are in the glyph cache's
-pull request ("Part 2").
+## The built-in face is read where it lies (2026-11-19)
+
+Until then the built-in face was inflated whole from flash on first use
+(140,772 bytes, into a string that grew to 256 KB on the way) and parsed,
+which held **162 KB for the life of the process** (64-bit host: the glyf
+table copied, both loca tables, hmtx, cmap, the name table and the GPOS
+pairs and class tables) and **peaked at 424 KB** while the first text was
+drawn. Now every runtime compiles in `assets/compiled/fonts/Ubuntu-Regular.fosf`
+(`tools/generate_indexed_font.py`, made from the stripped TTF) as a string
+constant, which stays in the program's read-only data (flash on an ESP32),
+and pixie reads it in place (`fontformats/indexedfont.nim`):
+
+- the character map (125 runs), the advances and a box per glyph (8 bytes a
+  glyph), the kerning pre-resolved in pixie's lookup order (21 KB: per class
+  subtable its left glyphs' classes and nonzero rows, and the right classes
+  of all of them at once, 250 distinct combinations over 776 runs of glyphs)
+  are binary searches over those bytes, nothing copied;
+- the TrueType glyf records, less the box each record repeats (the glyph
+  table has it; the outline reader skips it), sit in blocks of about 2 KB; the blocks holding
+  printable ASCII are stored as they are and read in place, the others are
+  deflated, and a glyph the glyph cache does not have inflates its block into
+  a two-block cache on the thread that asked (a block at its exact length).
+
+| | Before | After |
+| --- | --- | --- |
+| Held once the face is made | 162 KB | under 1 KB |
+| Peak at the first text | +424 KB | one block, ≤ 2 KB, and zippy's ~3.5 KB of tables on the stack |
+| Held while text is drawn | (the 162 KB) | ≤ 4 KB of blocks per drawing thread; none for ASCII |
+| The home panel's render, everything held | 463 KB | 303 KB |
+
+The options weighed (flash is the font's bytes in the image; Δ against the
+gzipped TTF's 57.6 KB):
+
+| | Flash | Δ | Held |
+| --- | --- | --- | --- |
+| The gzipped TTF, inflated and parsed (before) | 57.6 KB | – | 162 KB |
+| The stripped TTF uncompressed, read in place | 140.8 KB | +83 KB | ~0 |
+| **The indexed font (chosen)** | **74.5 KB** | **+16.9 KB** | **< 1 KB + ≤ 4 KB of blocks** |
+| … every block deflated | 72.8 KB | +15.2 KB | same, and ASCII inflates (32 inflates a cold home panel) |
+| … kerning deflated and expanded into RAM | 68.0 KB | +10.4 KB | ~21 KB |
+| … its first cut (records with their boxes, a right-class range table a subtable) | 87.9 KB | +30.3 KB | the same |
+
+ASCII stored raw costs 1.7 KB of flash and is the difference between 32
+inflates and 1 on a cold render of the home panel. The first cut was 13.4 KB
+larger: the 8-byte box every glyf record carries (7.5 KB of deflated blocks;
+the glyph table already had a box, rounded outwards) and a range table of
+right classes for each of the eight class subtables (10.2 KB, now 4.3 KB as
+the combinations shared by all of them, and one search instead of eight).
+Bigger blocks (4 KB: −1.8 KB, twice the RAM), narrower left ranges (−1.4 KB)
+and bitmap rows (−1.2 KB, a popcount a pair) were measured and left. Text sets and draws
+identically: the reader's advances, kerning and outlines are the TrueType
+font's, command for command (`test_indexed_font.nim`; the generator's
+`--check` replays the same in Python in the backend suite). A face from the
+SD card is still a TTF parsed whole (≤ 1 MB, one at a time, 3 MB headroom):
+reading those in place (by `pread`, the kerning built in RAM) is the next
+step, and needs nothing from either control plane, which sync raw TTFs.
 
 ## Gradient fills paint in strips (2026-08-24)
 

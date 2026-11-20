@@ -57,6 +57,7 @@ def create_project_layout(tmp_path: Path) -> Path:
     write(frameos_root / "src" / "apps" / "data" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
     write(frameos_root / "assets" / "compiled" / "web" / "control.html", "<html>control</html>\n")
     write(frameos_root / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf", b"font")
+    write(frameos_root / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.fosf", b"FOSF")
     write(frameos_root / "assets" / "compiled" / "tz" / "timezone_aliases.json", "{}\n")
 
     return frameos_root
