@@ -26,7 +26,7 @@ import system/sceneSettings/scene as sceneSettings
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/scene_icon
-from frameos/utils/memory import panelMemoryBytes
+from frameos/utils/memory import panelMemoryBytes, waitingTextDrops
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -678,6 +678,7 @@ proc makeRoomForScenes*(whole: bool) =
     return
   clearCoverageCache()
   clearGlyphCache()
+  inc waitingTextDrops
   when defined(memProbe): memProbe("  makeRoomForScenes: old scene dropped")
 
 proc loadSceneInputs(inputs: seq[FrameSceneInput]): int

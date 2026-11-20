@@ -9,6 +9,11 @@
 import pixie/decodebudget
 from pixie/paths import clearCoverageCache, clearGlyphCache
 
+var waitingTextDrops* {.threadvar.}: int
+  ## Counted up wherever pixie's kept masks and glyphs are let go (memory is
+  ## short, a scene went): every UI's waiting texts (ui/layout.nim's
+  ## UiMemo.older) go too, at its next layout.
+
 export decodebudget
 
 when defined(frameosEmbedded):
@@ -298,6 +303,7 @@ proc releaseRenderMemoryIfShort() =
     if (headroom > 0 or runsAsEmbedded()) and headroom < RenderMemoryShortBytes:
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
       clearGlyphCache()
+      inc waitingTextDrops
       discard renderMemoryReleaseHook(false)
 
 proc releaseRenderMemory*(): bool =
@@ -305,6 +311,7 @@ proc releaseRenderMemory*(): bool =
   ## decode was just refused. Whether anything went (then try it again).
   clearCoverageCache()
   clearGlyphCache()
+  inc waitingTextDrops
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
 proc makeRoomForBlock*(bytes: int): bool =
@@ -425,6 +432,7 @@ proc roomForImage*(bytes: int): bool =
     return true
   clearCoverageCache()
   clearGlyphCache()
+  inc waitingTextDrops
   if not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(false):
     room = availableRenderBytes()
   bytes <= room
