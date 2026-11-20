@@ -2297,6 +2297,12 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
       if rendering:
         # A layout's nextSleep is the layout's: it never reaches the frame.
         let parentSleep = context.nextSleep
+        # The scene's keyboard on the screen came or went: the layout draws
+        # again, and may give the scene the whole panel to type on.
+        let typing = ui_events.keyboardShown(self.id.string)
+        if typing != layout.typing:
+          layout.typing = typing
+          rhythmMarkDue(layout)
         let saved = rhythmEnterHole()
         context.nextSleep = -1
         runEvent(layout, context)

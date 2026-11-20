@@ -650,6 +650,9 @@ export function get(app) {
   its keys narrower where the circle is, on no band of its own; the UI is
   laid out above it (`keyboardBox`, `UiInput.round`). Not on an ESP32: no
   board of it is round.
+- **Inside a layout** the keyboard is as wide as the scene's `<yield />`; a
+  layout that returns a bare `<yield />` while `app.frame.typing` is true
+  gives it the whole panel (docs/scene-layouts.md, "While a scene types").
 - **The keyboard reaches the screen's edges**, so a press on it is a key and
   never an edge swipe (docs/events.md "Edge swipes"): a finger on its outer
   keys types instead of changing the scene. A key is typed where the finger

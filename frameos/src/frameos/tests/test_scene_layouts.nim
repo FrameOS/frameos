@@ -8,6 +8,7 @@ import ../interpreter
 import ../layout_choice
 import ../scene_rhythm
 import ../types
+import ../ui/events as ui_events
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
@@ -130,6 +131,25 @@ export function get(app) {
       <yield />
     </div>
   )
+}
+"""
+
+# A layout that gives the scene the whole panel while its keyboard is up.
+const typingLayoutUi = """
+export function get(app) {
+  if (app.frame.typing) return <yield />
+  return (
+    <div className="flex flex-col w-full h-full">
+      <div className="h-[20px] bg-white" />
+      <yield />
+    </div>
+  )
+}
+"""
+
+const fieldUi = """
+export function get(app) {
+  return <input className="w-full h-full" />
 }
 """
 
@@ -295,6 +315,8 @@ let scenesJson = "[" & [
   panel("tests/fastInHole", "#0000ff", 0.05).withLayout("tests/holeLayout"),
   jsxScene("tests/counter2", counterUi, 3000.0).withLayout("tests/holeLayout"),
   jsxScene("tests/escaping", escapingUi, 1.0, ""","isLayout": true"""),
+  jsxScene("tests/typingLayout", typingLayoutUi, 1.0, ""","isLayout": true"""),
+  jsxScene("tests/typing", fieldUi, 3000.0).withLayout("tests/typingLayout"),
   panel("tests/fastChild", "#ff00ff", 1.0),
   jsxScene("tests/twoHoles", twoScenesUi, 300.0),
   jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
@@ -460,6 +482,21 @@ suite "layouts":
     rhythmClockOverride = 1000.01
     let green = pass(scene)
     check green.color(5, 35) == colored("#22c55e")
+
+  test "a layout knows when the scene it wraps has the keyboard up, and can give it the whole panel":
+    forgetTypedKeys()
+    let scene = newScene("tests/typing")
+    discard pass(scene)
+    check not scene.layoutOf.typing
+    check scene.layoutOf.holeIn.y == 20
+    for (event, buttons) in [("pointerDown", 1), ("pointerUp", 0)]:
+      let press = %*{"x": 5, "y": 30, "pointerId": 0, "pointerType": "mouse", "button": 0, "buttons": buttons}
+      runEvent(scene, ExecutionContext(scene: scene, event: event, payload: press, loopIndex: 0, loopKey: ".", nextSleep: -1))
+    check keyboardShown("tests/typing")
+    rhythmClockOverride = 1000.01
+    discard pass(scene)
+    check scene.layoutOf.typing
+    check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == H
 
   test "a layout is told the name of the scene it wraps":
     let scene = newScene("tests/inTaskbar")

@@ -111,6 +111,15 @@ hands the built-in scene that layout (`state.layout`, `event_loop.nim`), and it
 runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
 `builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
 `if (app.frame.systemScene) return <yield />` gives them the whole panel.
+
+**While a scene types.** The keyboard on the screen is laid out in the canvas of
+the scene that has the field, so inside a layout it is only as wide as the
+`<yield />`. `app.frame.typing` is true in the layout's app while that scene has
+the keyboard up (`FrameScene.typing`, read off `ui/events.keyboardShown` at the
+start of each layout pass, which runs the layout again when it changes):
+`if (app.frame.typing) return <yield />` gives the scene the whole panel, and
+the keyboard reaches across the rail or bar beside it. The reTerminal layouts
+do this.
 Its `app.state.openedOver` then holds the name of the scene the built-in scene
 opened over (a layout is made afresh around it), for a taskbar to keep that
 scene's button.

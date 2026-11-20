@@ -17,7 +17,7 @@
 //   "layoutState": { ... },           // the layout's public fields
 //   "scene": "clock",                 // shown first
 //   "eventMap": [...] | "board",      // the frame's event map; "board" takes the board's own
-//   "steps": [["event", "sceneSwitcher", {}], ["tap", x, y], ["render"]],
+//   "steps": [["event", "sceneSwitcher", {}], ["tap", x, y], ["wait", ms], ["render"]],
 //   "framePage": true                 // offer the frame page (the gear)
 // }] }
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -34,6 +34,9 @@ if (!wasmDirArg || !specArg || !outArg) {
 const wasmDir = resolve(wasmDirArg)
 const outDir = resolve(outArg)
 const { ditherFrame, panelPaletteFor } = await import(pathToFileURL(join(root, 'frameos', 'wasm', 'src', 'dither.ts')).href)
+
+// A touch position on the wire: 0..WIRE_MAX across the panel (fos_touch.c).
+const WIRE_MAX = 32767
 
 // The reTerminal family and its event maps, as the planes seed them
 // (backend/app/tasks/embedded_firmware.py, embedded/esp32/main/fos_board.c).
@@ -190,9 +193,26 @@ async function shoot(shot) {
     if (kind === 'event') {
       call('frameos_wasm_event', 'boolean', ['string', 'string'], [args[0], JSON.stringify(args[1] ?? {})])
     } else if (kind === 'tap') {
-      const at = { x: args[0], y: args[1], pointerId: 1, pointerType: 'touch', button: 0 }
+      // An ESP32's glass reports the touch in wire units over the panel
+      // (fos_touch.c), which the runtime turns into the canvas's point.
+      const at = {
+        // On the canvas of an unturned frame ("portrait" included); a turned
+        // one's glass is the panel, which this does not turn back.
+        x: Math.round((args[0] * WIRE_MAX) / (width - 1)),
+        y: Math.round((args[1] * WIRE_MAX) / (height - 1)),
+        pointerId: 1, pointerType: 'touch', button: 0,
+      }
+      // The position first, then the press, as the page's pointer sends them.
+      call('frameos_wasm_event', 'boolean', ['string', 'string'], ['pointerMove', JSON.stringify({ ...at, buttons: 0 })])
       call('frameos_wasm_event', 'boolean', ['string', 'string'], ['pointerDown', JSON.stringify({ ...at, buttons: 1 })])
       call('frameos_wasm_event', 'boolean', ['string', 'string'], ['pointerUp', JSON.stringify({ ...at, buttons: 0 })])
+    } else if (kind === 'wait') {
+      // Time passing, ticked as the page's worker does while input is timed.
+      const until = Date.now() + (args[0] ?? 600)
+      while (Date.now() < until) {
+        call('frameos_wasm_tick', 'boolean', [], [])
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
     } else if (kind === 'state') {
       call('frameos_wasm_set_scene_state', 'boolean', ['string'], [JSON.stringify(args[0])])
     } else if (kind === 'input') {

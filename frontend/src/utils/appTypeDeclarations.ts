@@ -330,6 +330,10 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. Returning a bare <yield />
+     * then gives the scene the whole panel, so the keyboard reaches across what the layout drew beside it
+     * (FrameOS 2026.11.13+; undefined before). */
+    typing?: boolean;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;

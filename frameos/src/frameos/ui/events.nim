@@ -360,6 +360,12 @@ proc uiListens*(sceneId, event: string): bool =
         if r.wants(event, target.input.slow):
           return true
 
+proc keyboardShown*(sceneId: string): bool =
+  ## Whether a UI of the scene has the keyboard on the screen up.
+  for target in targets:
+    if target.sceneId == sceneId and target.input.keyboard and target.input.focus > 0:
+      return true
+
 proc keyboardAt*(sceneId: string, x, y: float32): bool =
   ## Whether the scene's keyboard on the screen is under (x, y), in its
   ## canvas's pixels, as the last render drew it. The dispatcher asks of a

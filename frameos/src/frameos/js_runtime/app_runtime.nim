@@ -2199,6 +2199,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not e.owner.scene.isNil and e.owner.scene.systemScene:
       return nimBoolToJS(ctx, true)
     return jsUndefSentinel(ctx)
+  of "typing":
+    # A layout around a scene that has the keyboard on the screen up: it may
+    # give the scene the whole panel by returning a bare <yield />.
+    if not e.owner.scene.isNil and e.owner.scene.typing:
+      return nimBoolToJS(ctx, true)
+    return jsUndefSentinel(ctx)
   of "batteryPercent":
     # An ESP32 with a battery. A Pi and the preview have nothing to say.
     when defined(freertos):
@@ -2317,7 +2323,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "batteryPercent", "wifiRssi", "theme", "eventMap"]
+      "paper", "color", "sceneName", "systemScene", "typing", "batteryPercent", "wifiRssi", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")

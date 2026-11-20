@@ -730,6 +730,9 @@ export function get(app) {
   showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
 - A layout stays up around those built-in screens too. To give them the whole
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
+- A scene's keyboard on the screen is only as wide as the `<yield />`. To let it
+  reach across the layout while someone types, return a bare `<yield />` when
+  `app.frame.typing` is true.
 - A layout on its own has nothing to wrap, so its `<yield />` is an empty area in
   a render. That is correct, not a blank to fix.
 - On a frame that runs scenes side by side (a Pi, an ESP32), `app.frame.scenes`
@@ -1199,6 +1202,10 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
+    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. Returning a bare <yield />
+     * then gives the scene the whole panel, so the keyboard reaches across what the layout drew beside it
+     * (FrameOS 2026.11.13+; undefined before). */
+    typing?: boolean;
     /** The battery's charge from 0 to 100, on an ESP32 frame with a battery. Undefined elsewhere, so check
      * before drawing it (FrameOS 2026.11.5+; undefined before). */
     batteryPercent?: number;
