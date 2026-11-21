@@ -264,15 +264,11 @@ parameter:
 void EPD_3in97_Display(UBYTE *Image)
 {
     EPD_3in97_WaitPending();
-    UWORD i;
-    UWORD height = EPD_3in97_HEIGHT;
-    UWORD width = EPD_3in97_WIDTH/8;
-
+    // The rows lie one after another: one write of the plane, not a chip
+    // select and a transaction per row (960 of them a partial update, ~30 ms
+    // of the reTerminal Sticky's 70, 2026-11-21).
     EPD_3in97_SendCommand(0x24);   //write RAM for black(0)/white (1)
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Image+i*width), width);
-    }
+    EPD_3in97_SendData2(Image, (UDOUBLE)EPD_3in97_HEIGHT * (EPD_3in97_WIDTH / 8));
     EPD_3in97_TurnOnDisplay();
 }
 
@@ -300,24 +296,16 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Display_Partial(UBYTE *Image, UBYTE *Previous)
 {
-    UWORD i;
-    UWORD height = EPD_3in97_HEIGHT;
-    UWORD width = EPD_3in97_WIDTH/8;
+    UDOUBLE plane = (UDOUBLE)EPD_3in97_HEIGHT * (EPD_3in97_WIDTH / 8);
 
     EPD_3in97_WaitPending();
     EPD_3in97_SetCursor(0, 0);
     EPD_3in97_SendCommand(0x26);   //write RAM for the previous picture
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Previous+i*width), width);
-    }
+    EPD_3in97_SendData2(Previous, plane);
 
     EPD_3in97_SetCursor(0, 0);
     EPD_3in97_SendCommand(0x24);   //write RAM for black(0)/white (1)
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Image+i*width), width);
-    }
+    EPD_3in97_SendData2(Image, plane);
     EPD_3in97_TurnOnDisplay_Partial();
 }
 
