@@ -140,6 +140,25 @@ def wait_render(con, timeout):
     return con.wait_for(lambda x: bool(RENDER_DONE.match(x) or RENDER_FAILED.match(x)), timeout)
 
 
+def wait_scene_render(con, timeout, shows):
+    """Wait for a render whose `started: scene ...` line `shows(line)` says is
+    the one wanted, to its `done` / `failed`; returns (t, line, lines)."""
+    started = {'n': None}
+
+    def finished(x):
+        if x.startswith('render #') and ' started: scene ' in x:
+            named = x.split(' started: scene ', 1)[1].strip()
+            # Firmware up to 2026.11.12 could start a render with the name
+            # empty (`started: scene ""`): either scene, as before.
+            if started['n'] is None and (named == '""' or shows(named)):
+                started['n'] = x.split()[1]
+            return False
+        if started['n'] is None:
+            return False
+        return bool((RENDER_DONE.match(x) or RENDER_FAILED.match(x)) and x.split()[1] == started['n'])
+    return con.wait_for(finished, timeout)
+
+
 def switch_scene(con, frame, sid, name=None):
     """`scene <id>` and wait for a render of THAT scene that started after the
     command. Returns (ok, t_cmd, t_done, last line, summary of the window)."""
@@ -270,7 +289,19 @@ def suite_scenes(ctx, frame, scene_filter=None):
         # 2. alone for a while: an animation or a fast rhythm shows here.
         if ok and frame['lcd'] and ctx.passive:
             con.drain()
-            w = summarize(con.idle(ctx.passive))
+            t_watch = time.time()
+            got = con.idle(ctx.passive)
+            w = summarize(got)
+            # The firmware sums up an animation every 10 s (render:animation),
+            # so a window shorter than that can miss it and report a 30 fps
+            # scene as still (the SenseCAP's DVD logo, 2026-11-21). A scene
+            # that logged no renders and no summary may be animating: watch
+            # until its summary comes, 11 s at most. One that ticks in full
+            # (a clock's second) is not animating and does not wait.
+            if not [a for a in w['animation'] if a.get('status') == 'running'] and len(w['done']) < 2:
+                _, _, more = con.wait_for(lambda x: '"render:animation"' in x and '"running"' in x, 11.0)
+                got += more
+                w = summarize(got)
             # The first summary after a switch holds the scene's first frame (its
             # JS compiled, its pictures decoded): judge the steady state after it.
             running = [a for a in w['animation'] if a.get('status') == 'running']
@@ -279,7 +310,7 @@ def suite_scenes(ctx, frame, scene_filter=None):
             # average, firmware after 2026.11.11): the last one in the window.
             quiet = next((r['probe']['quiet'] for r in reversed(w['renders']) if r['probe'].get('quiet')), None)
             entry['passive'] = {
-                'seconds': ctx.passive,
+                'seconds': round(time.time() - t_watch, 1),
                 'renders': len(w['done']),
                 'quiet': quiet,
                 'animation': [{k: a.get(k) for k in ('frames', 'fps', 'avgMs', 'maxMs', 'periodMs', 'seconds', 'jsKB', 'freePsramKB')} for a in anim],
@@ -377,13 +408,23 @@ def suite_builtin(ctx, frame):
     con = ctx.console(frame)
     out, issues = {}, []
     t0 = time.time()
+    builtin = {'sceneSwitcher': ('system/sceneSwitcher', 'Scene switcher'),
+               'sceneSettings': ('system/sceneSettings', 'Scene settings')}
     for name in ('sceneSwitcher', 'sceneSettings'):
         res = {}
         for step in ('open', 'close'):
             con.drain()
             t = time.time()
             con.send(f'event {name}')
-            t_done, line, got = wait_render(con, render_timeout(frame))
+            # The render of the scene this step shows: the built-in one when
+            # it opens, any other when it closes. The first render to finish
+            # could still be the scene before's (an animation's frame): on
+            # 2026.11.13 the switcher's own 2.3 s render was counted as its
+            # close and its open read 186 ms.
+            sid, title = builtin[name]
+            shows = (lambda x, sid=sid, title=title: sid in x or f'"{title}"' in x) if step == 'open' else \
+                    (lambda x, sid=sid, title=title: sid not in x and f'"{title}"' not in x)
+            t_done, line, got = wait_scene_render(con, render_timeout(frame), shows)
             w = summarize(got)
             res[step] = {'wall_ms': round((t_done - t) * 1000) if t_done else None,
                          'done_ms': w['done'][-1]['ms'] if w['done'] else None,
