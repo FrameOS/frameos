@@ -580,19 +580,9 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     else:
       inner = UrlViewAll
   elif node.attr("transform").len > 0:
-    let t = node.attr("transform").strip()
-    if t.startsWith("translate(") and t.endsWith(")"):
-      let parts = t[10 ..< t.len - 1].replace(",", " ").splitWhitespace()
-      inner = UrlViewAll
-      if parts.len in 1 .. 2:
-        try:
-          let dx = parseFloat(parts[0]).float32
-          let dy = if parts.len > 1: parseFloat(parts[1]).float32 else: 0'f32
-          inner = [view[0] - dx, view[1] - dy, view[2] - dx, view[3] - dy]
-        except ValueError:
-          discard
-    else:
-      inner = UrlViewAll # scaled or turned: every picture, as before
+    # Moved, scaled or turned (the layout does so only to an inline <svg>,
+    # which holds no <img>): every picture in it, as before.
+    inner = UrlViewAll
   for child in node.children:
     runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner)
 
