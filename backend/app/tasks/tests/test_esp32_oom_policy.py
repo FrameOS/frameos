@@ -52,7 +52,7 @@ def test_glue_guards_every_scene_load():
     # A scene switch off flash (frameos_nim_load_scene) that did not fit
     # rebooted the frame from Nim's raiseOutOfMem when it ran unguarded.
     glue = (ESP32_DIR / "components" / "frameos_nim" / "frameos_nim_glue.c").read_text()
-    for impl in ("fos_nim_load_scene_impl(scene_json)", "fos_nim_load_scenes_impl(scenes, lens, scene_count)"):
+    for impl in ("fos_nim_load_scene_impl(scene, len)", "fos_nim_load_scenes_impl(scenes, lens, scene_count)"):
         call = glue.index(impl)
         assert "s_nim_oom_jmp_armed = true;" in glue[call - 200 : call], impl
     assert "fos_oom_policy_abort(" in glue

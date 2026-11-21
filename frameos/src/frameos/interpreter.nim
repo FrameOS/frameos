@@ -2931,7 +2931,8 @@ proc appSourcesInObject(s: string, i: var int, sceneId, keyword: string, found: 
     let key = readKey(s, i)
     if key == "id":
       id = readText(s, i)
-    elif key == "scenes" and openValue(s, i, '['):
+    elif not defined(frameosEmbedded) and key == "scenes" and openValue(s, i, '['):
+      # An upload, state/uploaded.json: a Pi's. A board's slot is one scene.
       while moreItems(s, i, ']'):
         if openValue(s, i, '{') and appSourcesInObject(s, i, sceneId, keyword, found):
           return true

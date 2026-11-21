@@ -3136,15 +3136,13 @@ proc jsAppSourceNameFromSources*(sources: JsonNode): string =
   return ""
 
 proc jsAppSourceFromSources*(sources: JsonNode): string =
-  if sources.isNil or sources.kind != JObject:
-    return ""
-  for filename in JsAppSourceNames:
-    if sources.hasKey(filename) and sources[filename].kind == JString:
-      return sources[filename].getStr()
-  return ""
+  let name = jsAppSourceNameFromSources(sources)
+  if name.len > 0: sources[name].getStr() else: ""
 
 proc hasJsAppSource*(sources: JsonNode): bool =
-  jsAppSourceFromSources(sources).len > 0
+  ## Whether the app has a main module, its text not copied to find out.
+  let name = jsAppSourceNameFromSources(sources)
+  name.len > 0 and sources[name].str.len > 0
 
 proc outputTypeFromConfig(config: JsonNode): string =
   if config.isNil or config.kind != JObject:
