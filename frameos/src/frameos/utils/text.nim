@@ -134,33 +134,38 @@ else:
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
-proc dilateCoverage(scratch: Image, radius: int): seq[uint8] {.strokeHotLoop.} =
-  ## The scratch image's alpha, grown by `radius` pixels in every direction:
-  ## the maximum over the (2r+1)^2 square around each pixel, as a row pass
-  ## and a column pass.
-  let
-    w = scratch.width
-    h = scratch.height
-    pixels = cast[ptr UncheckedArray[ColorRGBX]](scratch.bufferPointer)
-  var rows = newSeq[uint8](w * h)
+proc dilateInPlace(cov: ptr UncheckedArray[uint8], w, h, radius: int,
+    rowBuf, ring: ptr UncheckedArray[uint8]) {.strokeHotLoop.} =
+  ## A coverage plane (a byte a pixel, rows of `w`) grown by `radius` pixels
+  ## in every direction, in place: the maximum over the (2r+1)^2 square
+  ## around each pixel, as a row pass and a column pass. `rowBuf` holds one
+  ## row, `ring` `radius` rows: the column pass keeps the rows above as they
+  ## were before it wrote them, and reads the rows below, not written yet.
   for y in 0 ..< h:
-    let base = scratch.dataIndex(0, y)
+    let row = cast[ptr UncheckedArray[uint8]](cov[y * w].addr)
+    copyMem(rowBuf, row, w)
     for x in 0 ..< w:
       var m = 0'u8
       for k in max(0, x - radius) .. min(w - 1, x + radius):
-        let a = pixels[base + k].a
+        let a = rowBuf[k]
         if a > m: m = a
-      rows[y * w + x] = m
-  result = newSeq[uint8](w * h)
+      row[x] = m
   for y in 0 ..< h:
+    let row = cast[ptr UncheckedArray[uint8]](cov[y * w].addr)
+    copyMem(rowBuf, row, w)
     for x in 0 ..< w:
-      var m = 0'u8
-      for k in max(0, y - radius) .. min(h - 1, y + radius):
-        let a = rows[k * w + x]
-        if a > m: m = a
-      result[y * w + x] = m
+      var m = rowBuf[x]
+      for k in 1 .. radius:
+        if y - k >= 0:
+          let a = ring[((y - k) mod radius) * w + x]
+          if a > m: m = a
+        if y + k < h:
+          let a = cov[(y + k) * w + x]
+          if a > m: m = a
+      row[x] = m
+    copyMem(ring[(y mod radius) * w].addr, rowBuf, w)
 
-proc blendCoverage(image: Image, coverage: seq[uint8], w, h, left, top: int, color: ColorRGBX) {.strokeHotLoop.} =
+proc blendCoverage(image: Image, coverage: ptr UncheckedArray[uint8], w, h, left, top: int, color: ColorRGBX) {.strokeHotLoop.} =
   ## `color` (premultiplied, full coverage at its own alpha) through
   ## `coverage` onto `image` at (left, top), clipped to the image.
   if color.a == 0:
@@ -176,10 +181,10 @@ proc blendCoverage(image: Image, coverage: seq[uint8], w, h, left, top: int, col
       if tx < 0 or tx >= image.width: continue
       let c = coverage[y * w + x].uint32
       if c == 0: continue
-      # The scratch was filled in the border color, so its alpha is the
-      # color's alpha times the glyph coverage: scale the color by that.
+      # The coverage is the glyphs' alone (filled in white): the color's own
+      # alpha scales it, as filling in the color itself would have.
       let
-        sa = min(c, color.a.uint32)
+        sa = (c * color.a.uint32 + 127) div 255
         src = rgbx(
           uint8((color.r.uint32 * sa + color.a.uint32 div 2) div color.a.uint32),
           uint8((color.g.uint32 * sa + color.a.uint32 div 2) div color.a.uint32),
@@ -226,7 +231,13 @@ proc fillTextApproxStroke*(
   ## compositing that image 16 times was still 1.3 s (pixie's blend loop runs
   ## at the firmware's -Os, checks on). Now the text is rasterized once into
   ## a scratch image of its ink box, its coverage grown by a square maximum
-  ## filter and blended once, both loops at -O2: ~300 ms. The same outline, its
+  ## filter and blended once, both loops at -O2: ~300 ms. The scratch is a
+  ## grey image, the text filled in white on black so its luma is the
+  ## coverage, grown in place: a byte a pixel and a few rows. It was RGBA
+  ## and two planes, 6 bytes a pixel, and a caption across the reTerminal
+  ## E1004's 1200 px asked 3.2 MB with 1.1 MB free: every render of
+  ## Wikimedia Commons stamped, 24,582 glyphs and 2.4 s (the hardware bench,
+  ## 2026-11-21). The same outline, its
   ## corners a little fuller where the rings left gaps, its antialiased rim a
   ## little lighter (a maximum where stacked copies compounded). A scratch the
   ## memory left cannot hold, or a border layout of several colors, stamps.
@@ -262,8 +273,8 @@ proc fillTextApproxStroke*(
     y1 = ceil(bounds.y + bounds.h).int + margin
     w = x1 - x0
     h = y1 - y0
-    # The scratch (4 bytes a pixel) and the two coverage planes (1 each).
-    scratchBytes = w.int64 * h.int64 * 6
+    # The grey scratch (a byte a pixel) and the dilation's rows.
+    scratchBytes = w.int64 * h.int64 + w.int64 * (radius + 1)
   # Whatever the renderer could still get for an image (availableRenderBytes:
   # the largest free block, the reserve kept back), less a margin: the
   # scratch lives only for this call.
@@ -277,12 +288,27 @@ proc fillTextApproxStroke*(
     lastApproxStroke.path = "stamped: no memory for the scratch"
     image.fillTextStamped(arrangement, origin, radius)
     return
-  var coverage: seq[uint8]
-  block:
-    let scratch = newImage(w, h)
+  let scratch = newImageGray8(w, h)
+  # The glyphs' coverage alone: every span in opaque white for the fill, the
+  # arrangement's own paints put back after.
+  var saved: seq[seq[Paint]]
+  let white = newPaint(SolidPaint)
+  white.color = color(1, 1, 1, 1)
+  for font in arrangement.fonts:
+    saved.add font.paints
+    font.paints = @[white]
+  try:
     scratch.fillText(arrangement, translate(vec2(fracX - x0.float32, fracY - y0.float32)))
-    coverage = dilateCoverage(scratch, radius)
-  image.blendCoverage(coverage, w, h, baseX.int + x0, baseY.int + y0, borderColor.rgbx())
+  finally:
+    for i, font in arrangement.fonts:
+      font.paints = saved[i]
+  var rows = newSeq[uint8](w * (radius + 1))
+  let
+    cov = scratch.data8
+    rowBuf = cast[ptr UncheckedArray[uint8]](rows[0].addr)
+    ring = cast[ptr UncheckedArray[uint8]](rows[w].addr)
+  dilateInPlace(cov, w, h, radius, rowBuf, ring)
+  image.blendCoverage(cov, w, h, baseX.int + x0, baseY.int + y0, borderColor.rgbx())
   lastApproxStroke.path = "dilated"
 
 # ---------- Rich text (caret) or plain spans
