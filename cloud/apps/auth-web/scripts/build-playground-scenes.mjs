@@ -21,6 +21,8 @@ const target = join(appDir, "public", "playground-assets", "scenes.json");
 // API key or an account in the frame's settings, or a process on a Pi.
 export const excludedTemplates = new Set([
   "Bird field journal",
+  // Any page, through the store's anonymous preview proxy: a public web proxy.
+  "Browser",
   "Chromium Screenshot",
   "Google Photos",
   "Haiku of the hour",

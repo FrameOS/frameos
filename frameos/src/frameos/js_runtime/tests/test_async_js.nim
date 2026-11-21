@@ -361,6 +361,35 @@ suite "async JavaScript":
     check jsIoInFlight() == 0
     check logged.anyIt("<img> https://img.test" in it)
 
+  test "<img src>: a picture far down a box that scrolls is fetched when the box scrolls near it":
+    let u = ui("""
+      export function get(app) {
+        return (
+          <div className="flex flex-col w-[6px] h-[4px] overflow-y-auto bg-black" scrollTop={app.config.top}>
+            <img src="https://img.test/near.png?ms=40" className="w-[6px] h-[2px] shrink-0" />
+            <div className="h-[40px] shrink-0" />
+            <img src="https://img.test/far.png?ms=40" className="w-[6px] h-[2px] shrink-0" />
+          </div>
+        )
+      }
+    """, "imglazy")
+    discard u.draw(%*{"top": 0})
+    check jsIoInFlight() == 1 # the one in sight
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+    discard drainRenders()
+    discard u.draw(%*{"top": 40})
+    check jsIoInFlight() == 1 # the far one, now in sight
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+    discard drainRenders()
+    let picture = u.draw(%*{"top": 40})
+    check not picture.isNil
+    if picture.isNil:
+      echo logged
+    else:
+      # Rows 2-3: the far picture, scrolled to 40 (shaded by the box's scroll bar).
+      check picture[1, 3].r > 150 and picture[1, 3].g == 0
+      check picture[1, 0] == rgbx(0, 0, 0, 255)
+
   test "where nothing pumps, an <img> is fetched in the render":
     asyncPumped = false
     defer: asyncPumped = true
