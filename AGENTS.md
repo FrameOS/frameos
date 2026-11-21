@@ -221,9 +221,13 @@
   a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, grouped by category as
-  the desktops group theirs, in one list that scrolls (no pages), and on
-  Linux shows each scene's last snapshot (`sceneSwitcherThumbnail`,
-  `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
+  the desktops group theirs, in one list that scrolls (no pages); the Linux
+  host still keeps each scene's last snapshot (`sceneSwitcherThumbnail`,
+  `frameos/scene_switcher_linux.nim`, no longer drawn); it is a folder's icon
+  view (Explorer's, Finder's: an icon over its name, one size, more of them
+  in a bigger room, compact category groups: `switcherGrid`), and every
+  desktop of windows opens it as its window of every scene, in its theme;
+  fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight that the list
   scrolls to.
 - Both built-in scenes are drawn in the layout of the scene they were opened
@@ -327,7 +331,7 @@
   beside the page's scenes, and the page's scene select follows the runtime
   (the worker's `sceneInfo`).
 - Browsing is the app's own `fetch` of the store's listing for frames
-  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer=fast` / `without=fast,linux`
+  (`/api/store/device/scenes`, from the host's `url`; 24 a page while it scrolls and a screenful on e-paper, `prefer=fast` / `without=fast,linux`
   from what the scene needs, `frontend/src/utils/sceneNeeds.ts`, never a category). A layout is tried: a `preview` with
   `show: false` and then the frame's own layout choice (`storeAction('layout')`, `app_runtime.nim`); Keep installs it
   around every scene (doc section "Trying a layout"). The store front's first split is Scenes | Layouts; a layout's
