@@ -1761,16 +1761,13 @@ describe("store publish and distribution", () => {
     expect(download.status).toBe(200);
     expect(download.headers.get("x-scene-version")).toBe("2");
     const { unzipSync } = await import("fflate");
+    const { readTemplateZip } = await import("../../lib/scene-zip");
     const zipBytes = await download.arrayBuffer();
     const files = unzipSync(new Uint8Array(zipBytes));
-    const scenesPath = Object.keys(files).find((name) =>
-      name.endsWith("scenes.json"),
-    )!;
-    // The served zip's scenes carry the download's own origin stamp; the
-    // digest header describes those served bytes.
-    expect(
-      JSON.parse(Buffer.from(files[scenesPath]!).toString("utf8")),
-    ).toEqual(stamped(editedScenes, sceneId, 2));
+    // The served zip's scenes (scene folders, docs/scene-packages.md) carry
+    // the download's own origin stamp; the digest header describes those
+    // served bytes.
+    expect(readTemplateZip(new Uint8Array(zipBytes))?.scenes).toEqual(stamped(editedScenes, sceneId, 2));
     expect(download.headers.get("x-scene-sha256")).toBe(
       createHash("sha256").update(new Uint8Array(zipBytes)).digest("hex"),
     );

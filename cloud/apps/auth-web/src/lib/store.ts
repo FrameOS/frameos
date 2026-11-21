@@ -640,7 +640,7 @@ export function rebuildZip(
 ): Buffer | undefined {
   try {
     const zip = readTemplateZip(new Uint8Array(zipBytes));
-    if (!zip) {
+    if (!zip?.manifestPath) {
       return undefined;
     }
     const scenes = changes.scenesJson === undefined ? zip.scenes : (JSON.parse(changes.scenesJson) as unknown);

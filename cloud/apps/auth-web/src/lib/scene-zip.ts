@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, zipSync } from "fflate";
 import {
+  packageRoot,
   setFromPackageFiles,
   setPackageFiles,
 } from "../../../../../frontend/src/utils/scenePackage";
@@ -24,7 +25,8 @@ export type TemplateZip = {
   /** Where everything is: `""` or `"<name>/"`. */
   folder: string;
   manifest: Record<string, unknown>;
-  manifestPath: string;
+  /** null: a zip of scenes without a template.json (read, but no template). */
+  manifestPath: string | null;
   scenes: unknown[];
   /** The scenes' bytes as text in the zip, for bounding what is built from them. */
   sceneBytes: number;
@@ -36,18 +38,23 @@ function depth(path: string): number {
 }
 
 /** A template zip's manifest, scenes and cover, whichever form its scenes
- * are in; undefined when it has no template.json at the top or one folder
- * down, its scenes cannot be read, or a bound is exceeded. */
+ * are in; undefined when its template.json is deeper than one folder, its
+ * scenes cannot be read, or a bound is exceeded. A zip without a
+ * template.json (scenes alone) reads with `manifestPath` null. */
 export function readTemplateZip(zip: Uint8Array): TemplateZip | undefined {
   try {
     const files = unzipBounded(zip, isTemplateZipEntry);
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-    if (!manifestPath || depth(manifestPath) > 1) {
+    const manifestPath =
+      Object.keys(files)
+        .filter((name) => /(^|\/)template\.json$/.test(name))
+        .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0] ?? null;
+    if (manifestPath && depth(manifestPath) > 1) {
       return undefined;
     }
-    const folder = manifestPath.slice(0, manifestPath.length - "template.json".length);
+    const root = manifestPath
+      ? manifestPath.slice(0, manifestPath.length - "template.json".length)
+      : packageRoot(Object.keys(files).filter((name) => !/(^|\/)image\.jpg$/.test(name)));
+    const folder = root && !root.endsWith("/") ? `${root}/` : root;
     const texts: Record<string, string> = {};
     let sceneBytes = 0;
     for (const [name, data] of Object.entries(files)) {

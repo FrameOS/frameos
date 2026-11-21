@@ -92,7 +92,7 @@ export function rebuildZipWithSceneOrigins(
 ): Buffer | undefined {
   try {
     const zip = readTemplateZip(new Uint8Array(zipBytes));
-    if (!zip) {
+    if (!zip?.manifestPath) {
       return undefined;
     }
     const scenes = withStoreSceneOrigin(zip.scenes, source);
