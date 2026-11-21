@@ -167,7 +167,8 @@ proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
 
 proc hasColorGlyph*(typeface: Typeface, rune: Rune): bool {.inline, raises: [].} =
   ## Returns if there is a color (emoji) glyph for this rune.
-  typeface.opentype != nil and typeface.opentype.hasColorGlyph(rune)
+  (typeface.opentype != nil and typeface.opentype.hasColorGlyph(rune)) or
+    (typeface.file != nil and typeface.file.hasColorGlyph(rune.int32))
 
 proc fallbackTypeface*(typeface: Typeface, rune: Rune): Typeface =
   ## Looks through fallback typefaces to find one that has the glyph.
@@ -755,6 +756,67 @@ proc computePath*(arrangement: Arrangement): Path {.raises: [PixieError].} =
   for path in arrangement.computePaths():
     result.addPath(path)
 
+type ColorGlyphEntry = object
+  face: uint32 ## the typeface's serial
+  rune: int32
+  size: int32 ## the font size in 1/64 px
+  image: Image ## the bitmap at the size it is drawn
+  offset: Vec2 ## its top left from the pen
+
+var
+  colorGlyphCacheBudget* {.threadvar.}: int
+    ## Bytes of colour glyphs from file fonts (fontformats/filefont.nim) kept
+    ## on this thread at the size they were drawn, the one drawn longest ago
+    ## going first; 0 keeps none (each is read and decoded where it draws).
+  colorGlyphs {.threadvar.}: seq[ColorGlyphEntry]
+  colorGlyphBytes {.threadvar.}: int
+  colorGlyphDecodes* {.threadvar.}: int ## PNGs this thread decoded for them
+
+proc clearColorGlyphCache*() {.raises: [].} =
+  ## Lets go of this thread's kept colour glyphs.
+  colorGlyphs = @[]
+  colorGlyphBytes = 0
+
+proc colorGlyphCacheBytes*(): int {.raises: [].} =
+  colorGlyphBytes
+
+proc fileColorGlyph(
+  typeface: Typeface, rune: Rune, size: float32, offset: var Vec2
+): Image {.raises: [PixieError].} =
+  ## A file font's colour glyph scaled to `size` px, and where its top left
+  ## goes from the pen (`offset`): read from the card, decoded and scaled
+  ## once, then kept within `colorGlyphCacheBudget`. The PNG at the strike's
+  ## size (136x128 for Noto Color Emoji, 70 KB decoded) lives only while it
+  ## is scaled; what is kept is the size it is drawn at.
+  let key = int32(round(size * 64))
+  for i in 0 ..< colorGlyphs.len:
+    if colorGlyphs[i].face == typeface.serial and colorGlyphs[i].rune == rune.int32 and
+        colorGlyphs[i].size == key:
+      let entry = colorGlyphs[i]
+      colorGlyphs.delete(i)
+      colorGlyphs.add entry # drawn now: the last to go
+      offset = entry.offset
+      return entry.image
+  var bitmap: BitmapGlyph
+  if not typeface.file.bitmapGlyph(rune.int32, size, bitmap):
+    return nil
+  let s = size / bitmap.ppem
+  offset = vec2(bitmap.xOffset, -bitmap.yOffset) * s
+  inc colorGlyphDecodes
+  let full = newImage(decodePng(bitmap.png))
+  bitmap.png = ""
+  result = newImage(max(1, ceil(full.width.float32 * s).int), max(1, ceil(full.height.float32 * s).int))
+  result.draw(full, scale(vec2(s)))
+  let bytes = result.width * result.height * 4
+  if bytes * 4 > colorGlyphCacheBudget:
+    return # too big to keep: drawn from this copy and let go
+  while colorGlyphs.len > 0 and colorGlyphBytes + bytes > colorGlyphCacheBudget:
+    colorGlyphBytes -= colorGlyphs[0].image.width * colorGlyphs[0].image.height * 4
+    colorGlyphs.delete(0)
+  colorGlyphs.add ColorGlyphEntry(face: typeface.serial, rune: rune.int32, size: key,
+    image: result, offset: offset)
+  colorGlyphBytes += bytes
+
 proc drawColorGlyphs(
   target: Image,
   arrangement: Arrangement,
@@ -772,10 +834,18 @@ proc drawColorGlyphs(
     if typeface == nil or not typeface.hasColorGlyph(rune):
       continue
 
-    let
-      position = arrangement.positions[runeIndex]
-      opentype = typeface.opentype
+    let position = arrangement.positions[runeIndex]
 
+    if typeface.file != nil:
+      # A colour bitmap read where it lies: drawn at the size it is kept at.
+      var offset: Vec2
+      let image = typeface.fileColorGlyph(rune, font.size, offset)
+      if image != nil:
+        let at = position + offset
+        target.draw(image, transform * translate(vec2(round(at.x), round(at.y))))
+      continue
+
+    let opentype = typeface.opentype
     let layers = opentype.getColorGlyphLayers(rune)
     if layers.len > 0:
       # COLR layered vector glyph.

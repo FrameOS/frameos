@@ -628,6 +628,10 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     # ceiling is higher (512 KB, 1 MB on 32 MB): it draws with many faces
     # from the SD card (docs/esp32-fonts.md), each glyph of each its own.
     glyphCacheBudget = glyphCacheBudgetBytes()
+    # Colour emoji from the card's emoji font are images, not coverage: kept
+    # at the size they are drawn, within half the glyph budget (pixie's
+    # fonts.nim colour glyph cache, docs/esp32-fonts.md "Emoji").
+    colorGlyphCacheBudget = glyphCacheBudget div 2
     # Fonts on the card are read where they lie, a 512-byte page at a time
     # through a cache made when one first draws (pixie's filefont.nim).
     fileFontPages = fontPageSlots()

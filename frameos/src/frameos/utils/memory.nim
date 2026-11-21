@@ -9,6 +9,7 @@
 import pixie/decodebudget
 from pixie/paths import clearCoverageCache, clearGlyphCache
 from pixie/fontformats/filefont import clearFontPages
+from pixie/fonts import clearColorGlyphCache
 
 var waitingTextDrops* {.threadvar.}: int
   ## Counted up wherever pixie's kept masks and glyphs are let go (memory is
@@ -338,6 +339,7 @@ proc releaseRenderMemoryIfShort() =
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
       clearGlyphCache()
       clearFontPages() # fonts read in place: their pages and tables
+      clearColorGlyphCache() # and their emoji, kept at the size drawn
       inc waitingTextDrops
       discard renderMemoryReleaseHook(false)
 
@@ -347,6 +349,7 @@ proc releaseRenderMemory*(): bool =
   clearCoverageCache()
   clearGlyphCache()
   clearFontPages() # fonts read in place: their pages and tables
+  clearColorGlyphCache() # and their emoji, kept at the size drawn
   inc waitingTextDrops
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
@@ -469,6 +472,7 @@ proc roomForImage*(bytes: int): bool =
   clearCoverageCache()
   clearGlyphCache()
   clearFontPages() # fonts read in place: their pages and tables
+  clearColorGlyphCache() # and their emoji, kept at the size drawn
   inc waitingTextDrops
   if not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(false):
     room = availableRenderBytes()

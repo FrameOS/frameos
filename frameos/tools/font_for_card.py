@@ -22,8 +22,8 @@ Each face is written as `<Family>-<Style>.ttf` from its name table (the name
 a scene's `font-[Family]` or SVG `font-family` finds it by,
 `utils/font.nim` `svgFontFileFor`), or `--out` for a single face, and read
 back as the frame will: TrueType outlines, a format 4 or 12 character map,
-16-bit glyph ids. Bitmap-only colour fonts (Noto Color Emoji) have no
-outlines to convert and are refused.
+16-bit glyph ids. A colour bitmap font (CBDT/CBLC, Noto Color Emoji) is read
+in place as it is, its emoji drawn in colour; sbix and COLR fonts are not.
 
     python3 tools/font_for_card.py MyFont.otf                 # -> ./MyFont-Regular.ttf
     python3 tools/font_for_card.py Inter.ttc --out-dir card/fonts
@@ -54,8 +54,9 @@ SUBSETS = {
 
 def problem(font: TTFont) -> str | None:
     """Why the frame cannot read this face in place, or None."""
-    if "glyf" not in font or "loca" not in font:
-        return "no TrueType outlines"
+    bitmaps = "CBDT" in font and "CBLC" in font  # colour emoji, read in place too
+    if ("glyf" not in font or "loca" not in font) and not bitmaps:
+        return "no TrueType outlines or colour bitmaps"
     tables = font["cmap"].tables if "cmap" in font else []
     if not any(t.platformID in (0, 3) and t.format in (4, 12) for t in tables):
         return "no Unicode character map of format 4 or 12"
@@ -171,7 +172,7 @@ def convert(path: Path, args: argparse.Namespace) -> list[Path]:
             subset(font, args.subset)
         why = problem(font)
         if why:
-            raise SystemExit(f"{path}: {why} (bitmap-only colour fonts cannot be converted)")
+            raise SystemExit(f"{path}: {why} (sbix and COLR colour fonts cannot be converted)")
         out = Path(args.out) if args.out else Path(args.out_dir) / file_name(font)
         out.parent.mkdir(parents=True, exist_ok=True)
         font.save(str(out))

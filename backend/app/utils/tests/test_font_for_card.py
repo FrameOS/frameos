@@ -21,12 +21,11 @@ def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([sys.executable, str(TOOL), *args], capture_output=True, text=True)
 
 
-def test_every_shipped_font_but_the_emoji_bitmaps_is_read_in_place():
-    fonts = sorted(str(p) for p in SHIPPED.glob("*.ttf") if p.name != "NotoColorEmoji.ttf")
-    assert len(fonts) >= 60
+def test_every_shipped_font_is_read_in_place_the_emoji_bitmaps_too():
+    fonts = sorted(str(p) for p in SHIPPED.glob("*.ttf"))
+    assert len(fonts) >= 61
     result = run("--check", *fonts)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert run("--check", str(SHIPPED / "NotoColorEmoji.ttf")).returncode == 1
 
 
 def test_a_cff_font_becomes_truetype_with_the_same_characters(tmp_path):

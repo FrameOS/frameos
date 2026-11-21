@@ -24,10 +24,15 @@
 ## thrashing; with them, none. Nothing of a glyph's outline stays in memory
 ## outside the glyph cache (paths.nim).
 ##
+## A colour bitmap font (CBDT/CBLC, Noto Color Emoji) is read the same way:
+## a glyph's PNG is found through the CBLC index subtables where they lie and
+## read from CBDT when it is drawn (`bitmapGlyph`), by pixie's rules for the
+## strike; it has no outlines.
+##
 ## Not read here: CFF outlines (an .otf of PostScript curves), collections
-## (.ttc), WOFF, colour and bitmap glyphs. `frameos/tools/font_for_card.py`
-## turns those into a TrueType file this reads; a variable font draws its
-## default instance, as pixie's whole parse does.
+## (.ttc), WOFF, COLR and sbix colour glyphs. `frameos/tools/font_for_card.py`
+## turns the first three into a TrueType file this reads; a variable font
+## draws its default instance, as pixie's whole parse does.
 
 import bumpy, vmath, ../common, ../paths, opentype
 
@@ -53,6 +58,7 @@ type
       ## looked for there). Eight bytes a subtable, read once at the open:
       ## walking the lookup list for every pair read a page of it a lookup.
     kernAt: int ## the kern table, read only without GPOS (as pixie does)
+    cblcAt, cbdtAt: int ## colour bitmap glyphs (CBLC, CBDT); 0 for none
 
 type
   RuneMemo = object
@@ -64,6 +70,7 @@ type
     glyph: int32
     advance: uint16
     boxKind: uint8 ## 0 not read yet, 1 none, 2 the box below
+    colorKind: uint8 ## 0 not read yet, 1 no colour bitmap, 2 one
     box: array[4, int16] ## x min, y min, x max, y max as the glyf header says
   KernMemo = object
     font: uint32
@@ -75,6 +82,7 @@ const
   FontPageBytes* = 1 shl PageShift
   DefaultPages = 16
   MaxRecordBytes = 64 * 1024 ## a glyf record larger than this is refused
+  MaxPngBytes = 512 * 1024 ## and a colour glyph's PNG
 
 var
   fileFontIds: int
@@ -311,10 +319,18 @@ proc openFileFont*(path: string, fileSize: int): FileFont {.raises: [PixieError]
     elif t == tag("post"): post = offset
     elif t == tag("GPOS"): gpos = offset
     elif t == tag("kern"): font.kernAt = offset
+    elif t == tag("CBLC"): font.cblcAt = offset
+    elif t == tag("CBDT"): font.cbdtAt = offset
   if head == 0 or hhea == 0 or maxp == 0 or font.hmtxAt == 0 or cmap == 0:
     fail("a required table is missing")
-  if font.glyfAt == 0 or font.locaAt == 0:
+  if font.cblcAt == 0 or font.cbdtAt == 0:
+    font.cblcAt = 0
+    font.cbdtAt = 0
+  if (font.glyfAt == 0 or font.locaAt == 0) and font.cblcAt == 0:
     fail("no glyf outlines (convert it with frameos/tools/font_for_card.py)")
+  if font.glyfAt == 0 or font.locaAt == 0:
+    font.glyfAt = 0 # colour bitmaps only
+    font.locaAt = 0
   font.glyfEnd = font.glyfAt + glyfLen
   font.unitsPerEm = font.u16(head + 18)
   font.longLoca = font.i16(head + 50) != 0
@@ -454,7 +470,7 @@ proc glyphBox*(font: FileFont, glyph: int, box: var Rect): bool {.raises: [].} =
   ## `getGlyphPath`'s outline; false where there is none to read. True with
   ## an empty box for a glyph with no outline.
   box = rect(0, 0, 0, 0)
-  if glyph < 0 or glyph >= font.numGlyphs:
+  if glyph < 0 or glyph >= font.numGlyphs or font.glyfAt == 0:
     return false
   let slot = font.glyphMemoOf(glyph)
   if glyphMemo[slot].boxKind == 0:
@@ -477,6 +493,8 @@ proc parseGlyfGlyph*(font: FileFont, glyphId: uint16, recursionDepth: int): Path
   let glyph = glyphId.int
   if glyph >= font.numGlyphs:
     fail("glyph " & $glyph)
+  if font.glyfAt == 0:
+    return newPath() # a colour bitmap font has no outlines
   let
     start = font.locaOf(glyph)
     stop = font.locaOf(glyph + 1)
@@ -649,6 +667,149 @@ proc kerning*(font: FileFont, left, right: int): int {.raises: [].} =
     return kernMemo[slot].value.int
   result = font.lookupKerning(left, right)
   kernMemo[slot] = KernMemo(font: font.id, pair: pair, value: result.int32)
+
+
+proc bitmapRecord(font: FileFont, strike, glyph: int,
+    dataAt, dataLen, format: var int, metricsAt: var int): bool =
+  ## Where the glyph's data is in the strike whose BitmapSize record is at
+  ## `strike`, in place: its index subtable found in the strike's array and
+  ## read for this glyph (opentype.nim `parseCbdtIndexSubTable`'s formats).
+  ## `metricsAt`: the subtable's big metrics (formats 2 and 5), 0 for none.
+  let
+    arrayAt = font.cblcAt + font.u32(strike)
+    count = font.u32(strike + 8)
+  for t in 0 ..< min(count, 4096):
+    let
+      entry = arrayAt + t * 8
+      first = font.u16(entry)
+      last = font.u16(entry + 2)
+    if glyph < first or glyph > last or last < first:
+      continue
+    let
+      sub = arrayAt + font.u32(entry + 4)
+      indexFormat = font.u16(sub)
+      imageFormat = font.u16(sub + 2)
+      imageAt = font.cbdtAt + font.u32(sub + 4)
+      j = glyph - first
+    if imageFormat notin [17, 18, 19]:
+      return false # only PNG glyphs, as opentype.nim
+    format = imageFormat
+    metricsAt = 0
+    case indexFormat
+    of 1, 3:
+      let (o1, o2) =
+        if indexFormat == 1: (font.u32(sub + 8 + j * 4), font.u32(sub + 12 + j * 4))
+        else: (font.u16(sub + 8 + j * 2), font.u16(sub + 10 + j * 2))
+      dataAt = imageAt + o1
+      dataLen = o2 - o1
+    of 2:
+      dataLen = font.u32(sub + 8)
+      dataAt = imageAt + j * dataLen
+      metricsAt = sub + 12
+    of 4:
+      var
+        lo = 0
+        hi = font.u32(sub + 8) - 1
+      dataLen = 0
+      while lo <= hi:
+        let
+          mid = (lo + hi) div 2
+          r = sub + 12 + mid * 4
+          g = font.u16(r)
+        if g < glyph: lo = mid + 1
+        elif g > glyph: hi = mid - 1
+        else:
+          dataAt = imageAt + font.u16(r + 2)
+          dataLen = font.u16(r + 6) - font.u16(r + 2)
+          break
+    of 5:
+      dataLen = font.u32(sub + 8)
+      metricsAt = sub + 12
+      var
+        lo = 0
+        hi = font.u32(sub + 20) - 1
+        found = -1
+      while lo <= hi:
+        let
+          mid = (lo + hi) div 2
+          g = font.u16(sub + 24 + mid * 2)
+        if g < glyph: lo = mid + 1
+        elif g > glyph: hi = mid - 1
+        else:
+          found = mid
+          break
+      if found < 0:
+        return false
+      dataAt = imageAt + found * dataLen
+    else:
+      return false
+    return dataLen > 0
+  false
+
+proc bestStrike(font: FileFont, glyph: int, sizePx: float32): int =
+  ## The strike to draw `glyph` from at `sizePx`: the smallest at least that
+  ## big, else the largest (opentype.nim `getBitmapGlyph`); -1 for none.
+  result = -1
+  var bestPpem = 0
+  for s in 0 ..< min(font.u32(font.cblcAt + 4), 64):
+    let strike = font.cblcAt + 8 + s * 48
+    var dataAt, dataLen, format, metricsAt: int
+    if not font.bitmapRecord(strike, glyph, dataAt, dataLen, format, metricsAt):
+      continue
+    let ppem = font.u8(strike + 44)
+    if result == -1 or (bestPpem.float32 < sizePx and ppem > bestPpem) or
+        (bestPpem.float32 >= sizePx and ppem.float32 >= sizePx and ppem < bestPpem):
+      result = strike
+      bestPpem = ppem
+
+proc hasColorGlyph*(font: FileFont, rune: int32): bool {.raises: [].} =
+  ## Whether the rune has a colour bitmap glyph (remembered with its advance).
+  if font.cblcAt == 0:
+    return false
+  let glyph = font.glyphIdOf(rune)
+  if glyph < 0 or glyph >= font.numGlyphs:
+    return false
+  let slot = font.glyphMemoOf(glyph)
+  if glyphMemo[slot].colorKind == 0:
+    glyphMemo[slot].colorKind = if font.bestStrike(glyph, 0) >= 0: 2 else: 1
+  glyphMemo[slot].colorKind == 2
+
+proc bitmapGlyph*(font: FileFont, rune: int32, sizePx: float32,
+    bitmap: var BitmapGlyph): bool {.raises: [PixieError].} =
+  ## The rune's colour bitmap glyph for `sizePx`: its PNG read from CBDT now,
+  ## and where it goes, as opentype.nim `getBitmapGlyph` gives it.
+  if font.cblcAt == 0:
+    return false
+  let glyph = font.glyphIdOf(rune)
+  if glyph < 0:
+    return false
+  let strike = font.bestStrike(glyph, sizePx)
+  if strike < 0:
+    return false
+  var dataAt, dataLen, format, metricsAt: int
+  discard font.bitmapRecord(strike, glyph, dataAt, dataLen, format, metricsAt)
+  var pngAt, pngLen: int
+  case format
+  of 17, 18:
+    bitmap.xOffset = cast[int8](font.u8(dataAt + 2).uint8).float32
+    bitmap.yOffset = cast[int8](font.u8(dataAt + 3).uint8).float32
+    pngLen = if format == 17: font.u32(dataAt + 5) else: font.u32(dataAt + 8)
+    pngAt = dataAt + (if format == 17: 9 else: 12)
+  of 19:
+    if metricsAt == 0:
+      return false
+    bitmap.xOffset = cast[int8](font.u8(metricsAt + 2).uint8).float32
+    bitmap.yOffset = cast[int8](font.u8(metricsAt + 3).uint8).float32
+    pngLen = font.u32(dataAt)
+    pngAt = dataAt + 4
+  else:
+    return false
+  if pngLen <= 0 or pngLen > MaxPngBytes:
+    return false
+  bitmap.png = font.bytes(pngAt, pngLen)
+  bitmap.ppem = font.u8(strike + 44).float32
+  bitmap.yOffsetIsBottom = false
+  true
 
 when defined(release):
   {.pop.}

@@ -27,14 +27,21 @@ iterator sampleRunes(): Rune =
     yield Rune(r)
 
 suite "TrueType fonts read where they lie":
-  test "every shipped font is read in place, and an emoji bitmap font is refused":
+  test "every shipped font is read in place, the emoji bitmaps too, and a CFF font is refused":
     let fonts = shippedFonts()
     check fonts.len >= 60
     for path in fonts:
       let face = openTypefaceFile(path)
       check face.scale > 0
-    expect PixieError:
-      discard openTypefaceFile(fontsDir / "NotoColorEmoji.ttf")
+    let emoji = openTypefaceFile(fontsDir / "NotoColorEmoji.ttf")
+    check emoji.hasColorGlyph(Rune(0x1F600))
+    check not emoji.hasColorGlyph(Rune('A'))
+    let cff = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "pixie" / "tests" / "fonts" / "Inter-Bold.ttf"
+    try:
+      discard openTypefaceFile(cff)
+      check false
+    except PixieError as e:
+      check "CFF outlines" in e.msg and "font_for_card.py" in e.msg
 
   test "metrics, the character map, advances and boxes are pixie's":
     for path in shippedFonts():
@@ -207,7 +214,7 @@ suite "the frame's fonts, read in place":
     check fileTypeface("Galindo-Regular.ttf", assets) == a
     check fileTypeface("Nonesuch.ttf", assets).isNil
     check fileTypeface("../fonts/Galindo-Regular.ttf", assets).isNil
-    check fileTypeface("NotoColorEmoji.ttf", assets).isNil # bitmaps only
+    check fileTypeface("NotoColorEmoji.ttf", assets) != nil # colour bitmaps
 
   test "SVG and JSX text past the parse budget is read in place, not dropped":
     setSvgFontAssetsPath(assets)
@@ -224,3 +231,88 @@ suite "the frame's fonts, read in place":
       check face != default
       check face notin seen
       seen.add face
+
+suite "colour emoji from a bitmap font read in place":
+  const text = "Hi 😀 the 🎉 party 👍🏽 ok ❤️ 🇪🇪"
+
+  proc emojiFace(file: bool): Typeface =
+    let
+      base = if file: openTypefaceFile(fontsDir / "Ubuntu-Regular.ttf") else: parseTtf(readFile(fontsDir / "Ubuntu-Regular.ttf"))
+      emoji = if file: openTypefaceFile(fontsDir / "NotoColorEmoji.ttf") else: parseTtf(readFile(fontsDir / "NotoColorEmoji.ttf"))
+    base.fallbacks.add emoji
+    base
+
+  proc drawn(face: Typeface, size: float32): Image =
+    let font = newFont(face)
+    font.size = size
+    font.paint = parseHtmlColor("#000")
+    result = newImage(520, 80)
+    result.fill(rgba(255, 255, 255, 255))
+    result.fillText(font.typeset(text), translate(vec2(6, 10)))
+
+  test "draws as pixie's whole parse of the same font, within a resampling's difference":
+    let previousBudget = colorGlyphCacheBudget
+    defer: colorGlyphCacheBudget = previousBudget
+    colorGlyphCacheBudget = 64 * 1024
+    for size in [18'f32, 32]:
+      checkpoint $size
+      let
+        a = drawn(emojiFace(true), size)
+        b = drawn(emojiFace(false), size)
+      var
+        colored, far = 0
+        total = 0.0
+      for y in 0 ..< a.height:
+        for x in 0 ..< a.width:
+          let
+            p = a.unsafe[x, y]
+            q = b.unsafe[x, y]
+            d = max(max(abs(p.r.int - q.r.int), abs(p.g.int - q.g.int)), abs(p.b.int - q.b.int))
+          if q.r != q.g or q.g != q.b:
+            inc colored # the whole parse drew colour here
+          total += d.float
+          if d > 96:
+            inc far
+      # Both drew the emoji in colour, and in the same places: the copy kept
+      # at its size lands on a whole pixel, the whole parse's at a fraction.
+      check colored > 200
+      check total / (a.width * a.height).float < 6
+      check far < colored div 4
+
+  test "kept at the size drawn, within the budget, and read again only when it went":
+    let previousBudget = colorGlyphCacheBudget
+    defer: colorGlyphCacheBudget = previousBudget
+    clearColorGlyphCache()
+    colorGlyphCacheBudget = 16 * 1024
+    let face = emojiFace(true)
+    let font = newFont(face)
+    font.size = 24
+    let image = newImage(400, 60)
+    colorGlyphDecodes = 0
+    image.fillText(font.typeset("😀🎉👍"))
+    check colorGlyphDecodes == 3
+    image.fillText(font.typeset("😀🎉👍"))
+    check colorGlyphDecodes == 3 # all three kept
+    check colorGlyphCacheBytes() <= 16 * 1024
+    # More than fit: the oldest go, the budget holds.
+    image.fillText(font.typeset("🍎🍌🍇🍉🍓🍒🍑🥝🍍🥥🥑🍆"))
+    check colorGlyphCacheBytes() <= 16 * 1024
+    clearColorGlyphCache()
+    check colorGlyphCacheBytes() == 0
+
+  test "an emoji's PNG and its decode are let go once it is drawn":
+    let previousBudget = colorGlyphCacheBudget
+    defer: colorGlyphCacheBudget = previousBudget
+    clearColorGlyphCache()
+    clearFontPages()
+    colorGlyphCacheBudget = 0 # nothing kept
+    let font = newFont(emojiFace(true))
+    font.size = 40
+    let image = newImage(400, 80)
+    image.fillText(font.typeset("😀")) # the page cache and tables made
+    GC_fullCollect()
+    let before = getOccupiedMem()
+    image.fillText(font.typeset("😀🎉👍🍎🍌🍇"))
+    GC_fullCollect()
+    # Six 136x128 PNGs decoded (70 KB each) and scaled: none of it stays.
+    check getOccupiedMem() - before < 4096

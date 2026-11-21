@@ -36,35 +36,6 @@ proc hasFallbackTypeface(typeface, fallback: Typeface): bool =
       return true
   false
 
-proc getEmojiFallbackTypeface(assetsPath: string): Typeface =
-  when defined(frameosEmbedded):
-    return nil
-  else:
-    if assetsPath.len == 0:
-      return nil
-
-    let fontPath = assetsPath / "fonts" / emojiFallbackFont
-    if not fileExists(fontPath):
-      return nil
-
-    let cacheKey = "emoji:" & normalizedPath(fontPath)
-    if not typefaces.hasKey(cacheKey):
-      withLock typefaceLock:
-        if not typefaces.hasKey(cacheKey):
-          typefaces[cacheKey] = parseTtf(readFile(fontPath))
-    return typefaces[cacheKey]
-
-proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
-  result = typeface
-  when not defined(frameosEmbedded):
-    let fallback = getEmojiFallbackTypeface(assetsPath)
-    if fallback == nil or typeface.hasFallbackTypeface(fallback):
-      return
-
-    withLock typefaceLock:
-      if not typeface.hasFallbackTypeface(fallback):
-        typeface.fallbacks.add(fallback)
-
 proc fontNameOk(font: string): bool =
   font.len > 0 and "/" notin font and ".." notin font and "~" notin font
 
@@ -134,6 +105,53 @@ proc fileTypeface*(font: string, assetsPath: string): Typeface =
     return nil
 
 when defined(frameosEmbedded):
+  var
+    emojiFace: Typeface
+    emojiLooked: bool
+    emojiLookedAt: MonoTime
+
+proc getEmojiFallbackTypeface(assetsPath: string): Typeface =
+  ## The colour emoji face a text falls back to for the runes its own face
+  ## lacks, when the frame's fonts folder has it. On an ESP32 it is read where
+  ## it lies on the card like every face there (a CBDT font: each emoji's PNG
+  ## read and decoded when it is drawn, kept at its drawn size in pixie's
+  ## colour glyph cache; docs/esp32-fonts.md "Emoji"), and whether the card
+  ## has it is asked at most every 30 s, not at every text.
+  if assetsPath.len == 0:
+    return nil
+  when defined(frameosEmbedded):
+    let now = getMonoTime()
+    if not emojiLooked or (now - emojiLookedAt).inSeconds >= 30 or
+        (emojiFace != nil and emojiFace.isStale):
+      emojiLooked = true
+      emojiLookedAt = now
+      emojiFace =
+        if fileExists(assetsPath & "/fonts/" & emojiFallbackFont): fileTypeface(emojiFallbackFont, assetsPath)
+        else: nil
+    return emojiFace
+  else:
+    let fontPath = assetsPath / "fonts" / emojiFallbackFont
+    if not fileExists(fontPath):
+      return nil
+
+    let cacheKey = "emoji:" & normalizedPath(fontPath)
+    if not typefaces.hasKey(cacheKey):
+      withLock typefaceLock:
+        if not typefaces.hasKey(cacheKey):
+          typefaces[cacheKey] = parseTtf(readFile(fontPath))
+    return typefaces[cacheKey]
+
+proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
+  result = typeface
+  let fallback = getEmojiFallbackTypeface(assetsPath)
+  if fallback == nil or fallback == typeface or typeface.hasFallbackTypeface(fallback):
+    return
+
+  withLock typefaceLock:
+    if not typeface.hasFallbackTypeface(fallback):
+      typeface.fallbacks.add(fallback)
+
+when defined(frameosEmbedded):
   ## Fonts on an ESP32 come off the SD card ("Sync fonts" puts FrameOS's
   ## collection there; any TrueType file a user adds counts), and every one
   ## of them is read where it lies (fileTypeface): a face open costs a few
@@ -158,7 +176,8 @@ proc getTypeface*(font: string, assetsPath: string,
     else:
       getDefaultTypeface()
   when defined(frameosEmbedded):
-    return embeddedTypeface(font, assetsPath)
+    let face = embeddedTypeface(font, assetsPath)
+    return if withEmoji: face.withEmojiFallback(assetsPath) else: face
   else:
     # sanitize input, expect only a legit file name (can't go .. or /etc/passwd)
     if "/" in font or ".." in font or "~" in font:
