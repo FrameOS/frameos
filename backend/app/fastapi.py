@@ -131,7 +131,7 @@ if serve_html:
                 raise
 
         def frameos_app_config(request: Request | None = None) -> dict:
-            app_config = {}
+            app_config: dict[str, str | int] = {}
             if config.HASSIO_RUN_MODE:
                 app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
             if config.FRAMEOS_PUBLIC_SCHEME == "https":

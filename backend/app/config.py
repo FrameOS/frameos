@@ -110,9 +110,11 @@ def addon_public_port(info: dict) -> int | None:
     the Supervisor did not say)."""
     network = (info.get("data") or {}).get("network") or {}
     value = network.get(ADDON_PUBLIC_CONTAINER_PORT) if isinstance(network, dict) else None
+    if not isinstance(value, (int, str)):
+        return None
     try:
         port = int(value)
-    except (TypeError, ValueError):
+    except ValueError:
         return None
     return port if 0 < port < 65536 else None
 
