@@ -40,6 +40,7 @@ export {
   type CursorRect,
   type CursorSprite,
 } from './cursor'
+export { pageHasGesture, pickFiles, saveFile, type PickedFile, type PreviewFileRequest } from './files'
 export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } from './dither'
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'

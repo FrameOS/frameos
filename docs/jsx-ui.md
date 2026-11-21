@@ -358,6 +358,13 @@ export function get(app) {
   an ESP32 (2026.11.5+), where a smooth scale takes ~600 ms at 480x480. For a
   picture that follows fingers and is drawn again when they lift, as the Map
   scene's pinch is.
+- **Trails are a canvas never cleared.** The Solitaire sample's win cascade
+  (`cascade.ts`, Windows solitaire's) draws each frame's few new copies of a
+  falling card over the last ones: the trails cost the canvas, the screen's
+  size, however long it runs, and a frame repaints only the copies' box. Its
+  record is the seed and the step, and a fresh canvas gets the steps so far
+  in at most 120 copies. A list of SVG elements that grows each frame would
+  be parsed whole every render instead.
 
 ## Layout
 

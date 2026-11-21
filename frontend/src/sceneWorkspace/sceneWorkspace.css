@@ -1209,6 +1209,16 @@ canvas.lightbox__image {
   font-size: 13px;
 }
 
+/* The Files scene's Upload or Download, asked with a button of the page's
+   when the tap's gesture ran out before the request arrived. */
+.live-preview__file-request {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text);
+}
+
 .live-preview__fast-toggle {
   font-size: 13px;
 }

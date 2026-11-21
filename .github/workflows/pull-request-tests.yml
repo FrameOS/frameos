@@ -174,7 +174,8 @@ jobs:
         run: bash frameos/tools/ci_nimcache.sh save ${{ matrix.shard }}
 
       # Plain `node --test` suites next to FrameOS code that no JS workspace
-      # job runs: the wasm preview's HTTP host library (its request guard)
+      # job runs: the wasm preview's HTTP host library (its request guard), its
+      # worker's Upload and Download (the files written where the runtime said)
       # and the frameos-editor embed helper (its origin filter).
       - name: Set up Node for FrameOS JS unit tests
         if: ${{ matrix.shard == 1 }}
@@ -184,7 +185,7 @@ jobs:
 
       - name: FrameOS JS unit tests
         if: ${{ matrix.shard == 1 }}
-        run: node --test frameos/tools/wasm/frameos_library.test.mjs frameos/editor/embed.test.mjs
+        run: node --test frameos/tools/wasm/frameos_library.test.mjs frameos/tools/wasm/preview_worker_files.test.mjs frameos/editor/embed.test.mjs
 
       - name: FrameOS ESP32 Nim compile
         if: ${{ matrix.shard == 1 }}
@@ -282,6 +283,12 @@ jobs:
       # pictures fetched in the render, one a render, and then no more renders.
       - name: Draw <img src> pictures in the browser preview
         run: node frameos/tools/wasm_img_src.mjs "$RUNNER_TEMP/frameos-wasm"
+
+      # The Files scene's Upload and Download through the real preview worker:
+      # a file picked lands in the preview's folder, the scene lists and opens
+      # it, and Download hands the page its bytes.
+      - name: Upload and download in the browser preview's Files
+        run: node frameos/tools/wasm_files_transfer.mjs "$RUNNER_TEMP/frameos-wasm"
 
       # What a scene hears of its panel (app.frame.paper, color) in every
       # phase, in the preview, running as an ESP32 and drawn for a board.

@@ -48,6 +48,8 @@ import frameos/panel_shape
 import frameos/scene_store_hooks
 import frameos/scene_code_hooks
 import frameos/frame_settings_hooks
+when not defined(frameosEmbedded):
+  import frameos/file_transfer_hooks
 from frameos/ui/theme import themeSource
 
 type
@@ -1851,6 +1853,46 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       return jsNull(ctx)
     return nimBoolToJS(ctx, false)
 
+when not defined(frameosEmbedded):
+  proc jsTransfer(ctx: ptr JSContext, op: JSValue, argsJson: JSValue): JSValue {.nimcall.} =
+    ## `frameos.transfer(op, args)` (file_transfer_hooks.nim): files between
+    ## the assets and the computer showing the frame, the browser preview's
+    ## alone. JSON text back: "" is null (no host: every frame), "!" and a
+    ## reason is what the prelude throws. The path is resolved against the
+    ## app's own sandbox here, as its asset calls are: "upload" {dir, storage}
+    ## is a write into that folder ("" its top), "download" {path, storage} a
+    ## read of that file. Not in the ESP32's image: no page there to ask.
+    let e = env(ctx)
+    let host = fileTransfer
+    var answer = ""
+    if e != nil and not host.isNil:
+      let what = toNimString(ctx, op)
+      case what
+      of "read":
+        answer = host(storeAsker(e), what, "")
+      of "upload", "download":
+        let upload = what == "upload"
+        var given = newJObject()
+        try:
+          given = parseJson(toNimString(ctx, argsJson))
+        except CatchableError:
+          discard
+        let
+          rel = given{if upload: "dir" else: "path"}.getStr().strip(chars = {'/'})
+          storage = given{"storage"}.getStr()
+        if upload and e.runtime.assetGrant == agRead:
+          answer = "!this app's permissions do not include assets-write"
+        else:
+          let full =
+            if upload and rel.len == 0: assetsRoot(e, storage)
+            elif upload and not assetFolderPathOk(rel): ""
+            else: resolveAssetPath(e, rel, write = upload, storage = storage)
+          answer = if full.len == 0 or (if upload: fileExists(full) else: not fileExists(full)): "false"
+                   else: host(storeAsker(e), what, full)
+      else:
+        answer = "!no such operation: " & what
+    nimStringToJS(ctx, answer)
+
 ## Streams let apps pass around and process data bigger than memory allows in
 ## one piece: a data app can return a streamRef (it travels between nodes as
 ## plain JSON), and the consumer reads it chunk by chunk. Backed by simple
@@ -3326,6 +3368,7 @@ const appJsPrelude* = compactJs("""
     storeAction: (action, args) => jsStoreAction(String(action || ""), JSON.stringify(args || {}, __appReplacer)) === true,
     frame: (op, arg) => __frameosOp(jsFrame, "frame", op, arg, op === "apply"),
     code: (op, arg, j = op === "ask" || op === "save") => __frameosOp(jsCode, "code", op, j ? { ...arg, action: op } : arg, j),
+    transfer: (op, arg) => typeof jsTransfer == "function" ? __frameosOp(jsTransfer, "transfer", op, arg, true) : null,
     measureText: (texts, o = {}) => texts.length
       ? jsMeasureText(texts.join("\n"), String(o.className || ""), Number(o.width || 0)).split(" ").map(Number)
       : [],
@@ -3643,6 +3686,8 @@ proc registerAppNatives(js: var QuickJS) =
   js.registerFunction("jsAsyncStart", jsAsyncStart)
   js.registerFunction("jsTypedOps", jsTypedOps)
   js.registerFunction("jsMeasureText", jsMeasureText)
+  when not defined(frameosEmbedded):
+    js.registerFunction("jsTransfer", jsTransfer)
   probe(phPrelude):
     evalAppPrelude(js)
 
