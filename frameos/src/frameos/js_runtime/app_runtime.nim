@@ -11,6 +11,7 @@ import frameos/values
 import frameos/utils/http_client
 import frameos/utils/line_reader
 import frameos/utils/zip_entry
+import frameos/utils/file_slice
 import frameos/utils/base64_field
 import frameos/spool
 import frameos/layout_choice
@@ -1507,8 +1508,19 @@ type AssetOptions = object
   ## every exit of one proc, and every exit destroyed them all: 625 cleanup
   ## calls, 14.8 KB of the ESP32 image for this one bridge.
   storage, entry, background: string
-  shallow, text, keep, contain, hasLength: bool
-  offset, length, width, height: int
+  shallow, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
+  offset, length, width, height, maskOffset, maskLength: int
+  pixels, mask: RawPixels
+
+proc rawPixelsOf(pixels: JsonNode): RawPixels =
+  result = RawPixels(width: pixels{"width"}.getInt(0), height: pixels{"height"}.getInt(0),
+    colors: pixels{"colors"}.getInt(1), bits: pixels{"bits"}.getInt(8),
+    predictor: pixels{"predictor"}.getInt(1), invert: pixels{"invert"}.getBool(false))
+  # The palette as RGB bytes, written in hex (six digits an entry).
+  let hex = pixels{"palette"}.getStr()
+  for i in countup(0, hex.len - 2, 2):
+    try: result.palette.add char(parseHexInt(hex[i .. i + 1]))
+    except ValueError: break
 
 proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} =
   let options = optionsArg(ctx, data)
@@ -1526,6 +1538,20 @@ proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} 
     result.length = length.getInt()
   result.width = options{"width"}.getInt(0)
   result.height = options{"height"}.getInt(0)
+  result.inflate = options{"inflate"}.getBool(false)
+  result.bytes = options{"bytes"}.getBool(false)
+  let pixels = options{"pixels"}
+  if not pixels.isNil and pixels.kind == JObject:
+    result.hasPixels = true
+    result.pixels = rawPixelsOf(pixels)
+  # mask: another slice of samples, grey, the picture's opacity (a PDF's SMask).
+  let mask = options{"mask"}
+  if not mask.isNil and mask.kind == JObject and mask{"pixels"}.kind == JObject:
+    result.hasMask = true
+    result.maskOffset = mask{"offset"}.getInt(0)
+    result.maskLength = mask{"length"}.getInt(high(int32).int)
+    result.maskInflate = mask{"inflate"}.getBool(false)
+    result.mask = rawPixelsOf(mask{"pixels"})
 
 proc assetStorage(ctx: ptr JSContext, data: JSValue): string {.noinline.} =
   optionsArg(ctx, data){"storage"}.getStr()
@@ -1586,6 +1612,17 @@ proc assetsRead(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSVa
       # that is not there. What the file is is the app's to say (a
       # library shows "not an EPUB" on the book), not the frame's log.
       return jsNull(ctx)
+  elif options.inflate:
+    # A compressed stream inside the file (a PDF's FlateDecode): the
+    # slice inflated, never more than the read limit of it held.
+    let length = if options.hasLength: options.length else: int(getFileSize(full)) - offset
+    try:
+      contents = readFileSlice(full, offset, length, true, readMax)
+    except FileSliceTooBig:
+      logAssetSliceTooBig(e, pathStr & " inflated", readMax + 1, readMax)
+      return jsNull(ctx)
+    except FileSliceError:
+      return jsNull(ctx)
   else:
     let fileSize = int(getFileSize(full))
     var length = if options.hasLength: options.length else: fileSize - offset
@@ -1603,6 +1640,13 @@ proc assetsRead(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSVa
     contents = newString(length)
     let bytesRead = file.readBuffer(addr contents[0], length)
     contents.setLen(bytesRead)
+  if options.bytes:
+    # bytes: a Uint8Array of them, for a parser that reads binary.
+    var args = [JS_NewArrayBufferCopy(ctx, contents.cstring, contents.len.csize_t),
+      JS_NewInt32(ctx, 0), JS_NewInt32(ctx, contents.len.int32)]
+    result = JS_NewTypedArray(ctx, 3, addr args[0], 2) # JS_TYPED_ARRAY_UINT8
+    JS_FreeValue(ctx, args[0])
+    return result
   nimStringToJS(ctx, if options.text: utf8Whole(contents, offset > 0) else: encode(contents))
 
 proc assetPicture(e: JsAppEvalEnv, keep: bool, width, height: int): Image =
@@ -1618,25 +1662,55 @@ proc assetPicture(e: JsAppEvalEnv, keep: bool, width, height: int): Image =
   elif like.isNil: newImage(width, height)
   else: newImageLike(like, width, height)
 
-proc assetZipImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image =
-  ## A picture inside a ZIP (an EPUB's illustration): the member whole,
-  ## under the read limit, decoded at the size asked (a JPEG scaled as
-  ## it decodes, a PNG a row at a time) into a picture of its own, then
-  ## put over `background` where it is transparent: a canvas without
-  ## alpha (an ESP32's) would otherwise show those parts black.
-  var member: string
-  try:
-    member = readZipEntry(full, options.entry, 0, -1, jsAssetReadMaxBytes(e))
-  except ZipEntryError:
-    return nil
-  if member.len == 0:
-    return nil
-  if options.width <= 0 or options.height <= 0:
-    return decodeImageWithDisplayBounds(member)
-  var decoded = newImage(options.width, options.height)
-  discard decodeImageWithFallback(member, decoded,
-    if options.contain: fitContain else: fitCover)
-  member = ""
+proc assetPartImage(e: JsAppEvalEnv, full: string, options: AssetOptions): Image =
+  ## A picture inside a ZIP (an EPUB's illustration) or at a slice of a file
+  ## (a PDF's JPEG, or with `pixels` its raw samples): the member or slice
+  ## whole, under the read limit, decoded at the size asked (a JPEG scaled
+  ## as it decodes, a PNG a row at a time, samples scaled as they come) into
+  ## a picture of its own, then put over `background` where it is
+  ## transparent: a canvas without alpha (an ESP32's) would otherwise show
+  ## those parts black.
+  var decoded: Image
+  if options.hasPixels:
+    if options.width <= 0 or options.height <= 0:
+      return nil
+    try:
+      decoded = decodeRawPixels(full, options.offset,
+        if options.hasLength: options.length else: high(int32).int,
+        options.inflate, options.pixels, options.width, options.height)
+    except FileSliceError, PixieError:
+      return nil
+  else:
+    var member: string
+    try:
+      member =
+        if options.entry.len > 0: readZipEntry(full, options.entry, 0, -1, jsAssetReadMaxBytes(e))
+        elif options.hasLength and options.length <= jsAssetReadMaxBytes(e):
+          readFileSlice(full, options.offset, options.length, options.inflate, jsAssetReadMaxBytes(e))
+        else: ""
+    except ZipEntryError, FileSliceError:
+      return nil
+    if member.len == 0:
+      return nil
+    if options.width <= 0 or options.height <= 0:
+      return decodeImageWithDisplayBounds(member)
+    decoded = newImage(options.width, options.height)
+    discard decodeImageWithFallback(member, decoded,
+      if options.contain: fitContain else: fitCover)
+    member = ""
+  if options.hasMask and decoded.width == options.width and decoded.height == options.height:
+    # Its opacity from the mask's samples, scaled to the same size: the
+    # picture premultiplied by it, to go over the background below.
+    try:
+      let alpha = decodeRawPixels(full, options.maskOffset, options.maskLength,
+        options.maskInflate, options.mask, options.width, options.height)
+      for i in 0 ..< options.width * options.height:
+        let a = alpha.data[i].r.uint32
+        let c = decoded.data[i]
+        decoded.data[i] = rgbx(uint8(c.r.uint32 * a div 255), uint8(c.g.uint32 * a div 255),
+          uint8(c.b.uint32 * a div 255), uint8(c.a.uint32 * a div 255))
+    except FileSliceError, PixieError:
+      discard # no mask: the picture opaque
   result = assetPicture(e, options.keep, options.width, options.height)
   if result.isNil:
     return nil
@@ -1699,7 +1773,7 @@ proc assetsImage(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSV
   if full.len == 0 or not fileExists(full):
     return jsNull(ctx)
   let image =
-    if options.entry.len > 0: assetZipImage(e, full, options)
+    if options.entry.len > 0 or options.hasLength or options.hasPixels: assetPartImage(e, full, options)
     else: assetFileImage(e, full, options)
   if image.isNil:
     return jsNull(ctx)

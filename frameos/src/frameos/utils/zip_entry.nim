@@ -17,7 +17,7 @@
 ## refused: an EPUB is none of them.
 
 import pixie/common
-import pixie/inflatestream
+import frameos/utils/file_slice
 
 type
   ZipEntryError* = object of CatchableError
@@ -49,7 +49,6 @@ const
   ## A central directory bigger than this is not a book (an EPUB's is a few
   ## KB a hundred members).
   MaxCentralDirectoryBytes = 8 * 1024 * 1024
-  ReadChunkBytes = 16 * 1024
 
 var lastDirectory {.threadvar.}: ZipDirectory
 
@@ -155,24 +154,6 @@ proc readMember*(f: File, member: ZipMember, offset, maxBytes: int, knownSize = 
 
   var output = newStringOfCap(wanted)
   var seen = 0'i64 # inflated bytes so far, kept or not
-  var left = member.compressedSize
-  var chunk = newString(ReadChunkBytes)
-  # One seek, then the member front to back: a seek per chunk walks a big
-  # file's index again on SPIFFS (seconds a picture).
-  f.setFilePos(dataStart)
-  let pull = proc (): InflateSegment {.gcsafe, raises: [PixieError].} =
-    if left <= 0:
-      return InflateSegment(data: nil, len: 0)
-    let take = int(min(left, ReadChunkBytes.int64))
-    var got = 0
-    try:
-      got = f.readBuffer(addr chunk[0], take)
-    except IOError, OSError:
-      raise newException(PixieError, "the ZIP could not be read")
-    if got <= 0:
-      return InflateSegment(data: nil, len: 0)
-    left -= got
-    InflateSegment(data: cast[ptr UncheckedArray[uint8]](addr chunk[0]), len: got)
   var full = false
   let onData = proc (data: openArray[uint8]) {.gcsafe, raises: [PixieError].} =
     let first = seen
@@ -188,7 +169,8 @@ proc readMember*(f: File, member: ZipMember, offset, maxBytes: int, knownSize = 
       full = true
       raise newException(PixieError, "enough")
   try:
-    uncompressStreamDeflate(onData, pull)
+    # One seek, then the member front to back (file_slice.nim).
+    streamRange(f, dataStart, member.compressedSize, scDeflate, onData)
   except PixieError as error:
     if not full:
       fail("the ZIP's member " & member.name & " could not be inflated: " & error.msg)

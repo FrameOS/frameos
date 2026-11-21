@@ -432,7 +432,7 @@ proc uncompressIdats(
       p = data[start].unsafeAddr
     result = try: uncompress(p, len) except ZippyError: failInvalid()
 
-proc unfilterRow(
+proc unfilterRow*(
   cur: var seq[uint8], prev: seq[uint8], filterType: uint8, rowBytes, bpp: int
 ) {.raises: [PixieError].} =
   ## Unfilters one scanline in place. prev must hold the previous unfiltered

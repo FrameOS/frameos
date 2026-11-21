@@ -119,7 +119,21 @@ window at a time so only the slice asked for is held
 (`frameos/src/frameos/utils/zip_entry.nim`; the Books sample reads its
 chapters so). `loadAssetImage(path, {entry, width, height, background})`
 decodes a picture inside a ZIP the same way, at the size asked, over
-`background` where it is transparent (an ESP32's canvas has no alpha). Asset
+`background` where it is transparent (an ESP32's canvas has no alpha).
+From 2026.11.14 a slice of a file can be what it holds rather than its bytes
+(`frameos/src/frameos/utils/file_slice.nim`; the PDF viewer sample reads its
+documents so): `readAsset(path, {offset, length, inflate: true})` inflates a
+zlib (or raw deflate) stream that starts at `offset`, never more than the read
+limit of it (a damaged stream is null);
+`{bytes: true}` gives any read as a `Uint8Array` instead of base64.
+`loadAssetImage(path, {offset, length, width, height})` decodes the picture
+file at that slice (a PDF's JPEG), and with `pixels: {width, height, colors,
+bits, predictor, palette, invert}` the slice is raw samples instead (a PDF
+image's: 1 grey, 3 RGB or 4 CMYK colours, 1 to 16 bits, PNG or TIFF
+predictors, an indexed palette as hex RGB), `inflate`d when compressed and
+scaled to `width` x `height` a row at a time as they come. `mask: {offset,
+length, inflate, pixels}` is another slice of grey samples, the picture's
+opacity (a PDF's soft mask), put over `background`. Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,
