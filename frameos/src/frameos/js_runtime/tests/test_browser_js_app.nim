@@ -4,7 +4,8 @@
 ## the request seam. FRAMEOS_BROWSER_SHOTS=<dir> writes what it drew;
 ## FRAMEOS_BROWSER_HN=<dir> serves a saved front.html, item.html and news.css
 ## in place of the built-in page (to look at the real site offline;
-## FRAMEOS_BROWSER_HN_FRONT=item.html opens on the comments).
+## FRAMEOS_BROWSER_HN_FRONT=item.html opens on the comments);
+## FRAMEOS_BROWSER_SITE=<dir> serves any saved site (see `site`).
 
 import std/[json, os, sequtils, strutils, times, unittest]
 import pixie
@@ -44,8 +45,21 @@ const Story = """<html><head><title>Frames</title></head><body><h1>Frames that b
 
 var asked: seq[string]
 
+proc site(): seq[(string, string)] =
+  ## FRAMEOS_BROWSER_SITE=<dir>: a saved site, its urls.txt "<url> <file>" a
+  ## line, the first the page the browser opens on.
+  let dir = getEnv("FRAMEOS_BROWSER_SITE")
+  if dir.len > 0:
+    for line in lines(dir / "urls.txt"):
+      let parts = line.splitWhitespace()
+      if parts.len == 2:
+        result.add (parts[0], dir / parts[1])
+
 proc serve(url, httpMethod, body: string, headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
   asked.add url
+  for (saved, file) in site():
+    if saved == url:
+      return (200, readFile(file))
   let saved = getEnv("FRAMEOS_BROWSER_HN")
   if saved.len > 0:
     if url == "https://news.ycombinator.com/":
@@ -125,7 +139,8 @@ suite "the Browser scene":
     setUploadedInterpretedScenes(parseInterpretedScenes($(%*[sample])))
     resetInterpretedScenes()
     logger.frameConfig = config
-    init("browser".SceneId, config, logger, %*{})
+    let saved = site()
+    init("browser".SceneId, config, logger, if saved.len > 0: %*{"homepage": saved[0][0]} else: %*{})
 
   proc tap(scene: FrameScene, x, y: int) =
     scene.send("tap", %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch"})
@@ -137,6 +152,22 @@ suite "the Browser scene":
       if abs(c.r.int - color.r.int) + abs(c.g.int - color.g.int) + abs(c.b.int - color.b.int) < slack:
         return x
     -1
+
+  test "draws a saved site, scrolled a screen at a time and back (FRAMEOS_BROWSER_SITE)":
+    if getEnv("FRAMEOS_BROWSER_SITE").len == 0:
+      skip()
+    else:
+      asyncPumped = false
+      let config = testConfig()
+      let scene = load(config)
+      discard draw(scene, config, "front")
+      for i in 1 .. 3:
+        scene.send("wheel", %*{"x": 400, "y": 300, "deltaX": 0, "deltaY": 5})
+        discard draw(scene, config, "scrolled-" & $i)
+      # Back at the top: the pictures there are still drawn.
+      scene.send("wheel", %*{"x": 400, "y": 300, "deltaX": 0, "deltaY": -15})
+      discard draw(scene, config, "top")
+      if problems.len > 0: echo problems
 
   test "draws Hacker News where a render may wait, and opens a story from a tap on its title":
     # A frame that fetches in the render (e-paper, a deep sleeper, the browser preview).
@@ -150,8 +181,9 @@ suite "the Browser scene":
     if problems.len > 0: echo problems
     check problems.len == 0
     if getEnv("FRAMEOS_BROWSER_HN").len > 0:
-      # The real front page: the first story's comments, the page as JSX, zoomed in.
-      scene.tap(330, 106)
+      # The real front page (in its phone layout: the frame is under its 750 px
+      # @media): the first story's comments, the page as JSX, zoomed in.
+      scene.tap(400, 130)
       discard draw(scene, config, "comments")
       check asked[^1].startsWith("https://news.ycombinator.com/item?id=")
       scene.tap(778, 19)

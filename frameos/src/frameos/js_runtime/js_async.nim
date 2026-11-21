@@ -509,16 +509,37 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
     if entry.state == uiReady and entry.url == url and runtime.keptImageIds.contains(entry.id):
       return runtime.images.getOrDefault(entry.id, nil)
 
-proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
-    node: SvgNode, scale: float32, blocking: bool) =
-  ## The layout's `<img src="https://…">`s (ui/layout.nim `image-url`), each
-  ## given its picture at the size it was laid out at, in panel pixels;
-  ## nothing drawn where there is none yet.
+type UrlView = array[4, float32]
+  ## Left, top, right, bottom, in a node's own coordinates.
+
+const UrlViewAll: UrlView = [-1e9'f32, -1e9, 1e9, 1e9]
+
+proc attrNum(node: SvgNode, name: string, default: float32): float32 =
+  let text = node.attr(name)
+  if text.len == 0:
+    return default
+  try: parseFloat(text).float32
+  except ValueError: default
+
+proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+    node: SvgNode, scale: float32, blocking: bool, view: UrlView) =
   let url = node.attr("image-url")
   if url.len > 0:
     let
-      w = max(1, round(node.attrFloat("width") * scale).int)
-      h = max(1, round(node.attrFloat("height") * scale).int)
+      x = node.attrNum("x", 0)
+      y = node.attrNum("y", 0)
+      width = node.attrNum("width", 0)
+      height = node.attrNum("height", 0)
+    if x + width < view[0] or x > view[2] or y + height < view[1] or y > view[3]:
+      # Out of sight and not near it: fetched when a scroll brings it close,
+      # and drawn as nothing until then (a picture it had stays).
+      if node.image.isNil and node.tag != "g":
+        node.tag = "g"
+        node.forgetParse()
+      return
+    let
+      w = max(1, round(width * scale).int)
+      h = max(1, round(height * scale).int)
       fit = case node.attr("preserveAspectRatio")
         of "none": fitStretch
         of "xMidYMid meet": fitContain
@@ -530,5 +551,62 @@ proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       node.tag = tag
       node.forgetParse()
     return
+  var inner = view
+  if node.tag == "svg" and node.attr("viewBox").len > 0:
+    # A box that clips or scrolls (ui/layout.nim `viewport`): the part of the
+    # view it shows, and a screen of itself around that, in its coordinates.
+    let parts = node.attr("viewBox").replace(",", " ").splitWhitespace()
+    let
+      x = node.attrNum("x", 0)
+      y = node.attrNum("y", 0)
+      w = node.attrNum("width", 0)
+      h = node.attrNum("height", 0)
+    var box: array[4, float32]
+    var ok = parts.len == 4 and w > 0 and h > 0
+    if ok:
+      for i in 0 .. 3:
+        try: box[i] = parseFloat(parts[i]).float32
+        except ValueError: ok = false
+    if ok and box[2] > 0 and box[3] > 0:
+      let
+        sx = box[2] / w
+        sy = box[3] / h
+        left = max(view[0], x) - w
+        top = max(view[1], y) - h
+        right = min(view[2], x + w) + w
+        bottom = min(view[3], y + h) + h
+      inner = [box[0] + (left - x) * sx, box[1] + (top - y) * sy,
+        box[0] + (right - x) * sx, box[1] + (bottom - y) * sy]
+    else:
+      inner = UrlViewAll
+  elif node.attr("transform").len > 0:
+    let t = node.attr("transform").strip()
+    if t.startsWith("translate(") and t.endsWith(")"):
+      let parts = t[10 ..< t.len - 1].replace(",", " ").splitWhitespace()
+      inner = UrlViewAll
+      if parts.len in 1 .. 2:
+        try:
+          let dx = parseFloat(parts[0]).float32
+          let dy = if parts.len > 1: parseFloat(parts[1]).float32 else: 0'f32
+          inner = [view[0] - dx, view[1] - dy, view[2] - dx, view[3] - dy]
+        except ValueError:
+          discard
+    else:
+      inner = UrlViewAll # scaled or turned: every picture, as before
   for child in node.children:
-    runtime.fillUrlImages(owner, context, child, scale, blocking)
+    runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner)
+
+proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
+    node: SvgNode, scale: float32, blocking: bool) =
+  ## The layout's `<img src="https://…">`s (ui/layout.nim `image-url`), each
+  ## given its picture at the size it was laid out at, in panel pixels;
+  ## nothing drawn where there is none yet. Only the pictures that show, or
+  ## are within a screen of showing (a box that scrolls: within a box's
+  ## height of its viewport), are fetched, as a browser's lazy loading does:
+  ## a long page's every picture at once pushed each other out of the kept
+  ## ones (docs/async-js.md).
+  let
+    w = node.attrNum("width", 0)
+    h = node.attrNum("height", 0)
+    view = if w > 0 and h > 0: [-w, -h, 2 * w, 2 * h] else: UrlViewAll
+  runtime.fillUrlImagesIn(owner, context, node, scale, blocking, view)

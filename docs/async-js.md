@@ -74,6 +74,12 @@ Scene store puts the scene's initial under each cover).
   `docs/jsx-ui.md` "Photos that stay"): the same url at the same size is
   one picture while the interpreter lives. At a new size (the box changed)
   the old one stands in until the new one is in.
+- **Only what shows, or is within a screen of showing, is fetched**, as a
+  browser's lazy loading does: a picture further down a box that scrolls
+  (more than the box's own height past what it shows) is fetched when a
+  scroll brings it near, and is nothing until then (`fillUrlImages` reads the
+  boxes' viewports). A long page's every picture at once pushed each other
+  out of the kept ones below (the Browser sample on frameos.net, 2026-11-21).
 - A failure is the app's log line `<img> https://host: why` and is asked
   again after 30 s; a picture that loses its memory within 10 s of coming
   (the app shows more than fits) waits 30 s too, so two pictures cannot push

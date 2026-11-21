@@ -1,6 +1,6 @@
 {
   "name": "Browser",
-  "description": "A web browser on the frame: type an address or words to search for, and the page is downloaded, stripped of its scripts, styles and hidden parts, and drawn as JSX with the colors and sizes of its style sheets. Tap a link to open it in place, hold one to open it or show its QR code for a phone. Back and forward, reload, home, text size, and a view of the page as the JSX it became. Made with Hacker News as the benchmark: its front page, comments and search work.",
+  "description": "A web browser on the frame: type an address or words to search for, and the page is downloaded, stripped of its scripts and hidden parts, and drawn as JSX with the colors, sizes and layout of its style sheets (Tailwind sites included). Tap a link to open it in place, hold one to open it or show its QR code for a phone. Back and forward, reload, home, text size, and a view of the page as the JSX it became. Made with Hacker News as the benchmark: its front page, comments and search work.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
