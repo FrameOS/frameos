@@ -271,8 +271,10 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
             halves += (if text[j] == ' ': 6 elif code == ord(kEnter): 4
               elif code < 32 and page != kpNumbers: 3 else: 2)
           rowUnit = max(min(unit, (across - (keys - 1) * gap) * 2 div max(halves, 1)), 8)
-      if across > 0: c.px("w", across)
-      else: c.add " w-full"
+      # As wide as the page's widest row (its `cols` keys), not the panel: on a
+      # wide panel the keys stop growing, and a row as wide as the panel gave
+      # the space bar all of what they left (the reTerminal E1003, 2026-11-21).
+      c.px("w", if across > 0: across else: cols * unit + (cols - 1) * gap)
       inc rowIndex
       row = el("div", move c)
       result.children.add row

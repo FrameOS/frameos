@@ -366,6 +366,22 @@ proc keyboardShown*(sceneId: string): bool =
     if target.sceneId == sceneId and target.input.keyboard and target.input.focus > 0:
       return true
 
+proc keyboardState*(sceneId: string, scale: var float32, accents: var int, field: var array[4, float32]): bool =
+  ## The scene's UI with the keyboard on the screen up, for the frame's keyboard
+  ## (ui/layout.nim KeyboardDock): its canvas pixels to each of its own, the
+  ## key whose accents show (0: none) and where its focused field is in the
+  ## scene's canvas (x, y, w, h). False when none has it up.
+  for target in targets:
+    if target.sceneId == sceneId and target.input.keyboard and target.input.focus > 0:
+      scale = if target.scale > 0: target.scale else: 1'f32
+      accents = target.input.accents
+      field = [0'f32, 0, 0, 0]
+      for r in target.regions:
+        if r.key == target.input.focus - 1:
+          field = [target.offsetX + r.x * scale, target.offsetY + r.y * scale, r.w * scale, r.h * scale]
+          break
+      return true
+
 proc keyboardAt*(sceneId: string, x, y: float32): bool =
   ## Whether the scene's keyboard on the screen is under (x, y), in its
   ## canvas's pixels, as the last render drew it. The dispatcher asks of a
@@ -1159,11 +1175,12 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
         into.add [target.offsetX + r.visible[0] * scale, target.offsetY + r.visible[1] * scale,
                   target.offsetX + r.visible[2] * scale, target.offsetY + r.visible[3] * scale]
 
-proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
+proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = false): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,
   ## the picture is the UI's), what the pointer is over or pressing changed,
-  ## a field's text or caret moved, or a box scrolled.
+  ## a field's text or caret moved, or a box scrolled. `keysOnly`: a press on
+  ## the frame's keyboard, for the UI whose field has it and no other.
   let
     # The event as its handler kind, compared as a number from here on.
     kind = handlerKind(event)
@@ -1194,7 +1211,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         result = true
     return
   for target in targets:
-    if target.sceneId != sceneId:
+    if target.sceneId != sceneId or keysOnly and not (target.input.keyboard and target.input.focus > 0):
       continue
     if not target.dragging:
       for r in target.regions:

@@ -19,6 +19,7 @@ import frameos/events_gen
 import frameos/ui/tailwind
 import frameos/ui/keyboard
 import frameos/ui/tree
+from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
 import frameos/utils/qr
@@ -145,6 +146,28 @@ type
     accents: UiNode      ## a held key's accents, likewise
     menu: UiNode         ## a selection's menu, likewise
 
+  KeyboardDock* = object
+    ## The frame's keyboard (docs/jsx-ui.md "The frame's keyboard"): while a
+    ## field of the scene a layout wraps has the keyboard on the screen, the
+    ## keyboard is not drawn in that scene's UI but over the frame, docked at
+    ## the bottom of the panel with the layout laid out above it, or on a
+    ## desktop as a window over every other. The interpreter places it before
+    ## a pass, in the frame canvas's pixels; the field's UI lays it out there
+    ## (`layoutUiDocked`), its keys regions of that UI like any key, and the
+    ## interpreter draws `svg` over the frame after the layout.
+    sceneId*: string            ## the scene whose field it types into (the layout's own, or the
+                                ## scene it wraps); "" while each UI keeps its own
+    front*, around*: string     ## this pass's scene and its layout ...
+    desktop*: bool              ## ... a desktop: a window behind shows no keyboard
+    grip*: float32              ## a window's bar on top, to drag it by; 0 docked
+    x*, y*, w*, h*: float32     ## where it goes on the frame's canvas, bar included
+    frameW*, frameH*: float32   ## that canvas
+    sceneX*, sceneY*: float32   ## where that scene's canvas is on it, this pass ...
+    placed*: bool               ## ... once it was drawn there
+    round*: bool                ## a round panel: its rows inside the circle
+    svg*: SvgNode               ## what its UI laid out: the keys and a held key's accents
+    accents*: array[4, float32] ## ... that row on the frame's canvas: x, y, w, h (w 0: none)
+
   UiNode {.acyclic.} = ref object
     kind: UiKind
     box: Box
@@ -228,6 +251,7 @@ const
   AccentKey = 1 shl 23   ## a held key's accents, likewise
   EndsKey = 1 shl 25     ## where a selection made by touch starts and ends (+ 1), as its field shows them
   MenuKey = 1 shl 26     ## its menu
+  GripKey = 1 shl 27     ## the frame's keyboard's bar, as a window (KeyboardDock)
   Unbounded = 1e9'f32
   MaxDepth = 64
 
@@ -439,6 +463,9 @@ var
   ends {.threadvar.}: array[2, array[4, float32]] ## a selection made by touch: its start and end
                                                   ## (x, y, -, line height), as emitField found them ...
   endsFound {.threadvar.}: bool                   ## ... when it did
+  frameKeyboard* {.threadvar.}: KeyboardDock      ## the frame's keyboard, set by the interpreter
+  docking {.threadvar.}: bool ## layoutUi lays the frame's keyboard out (`dock`), not its own
+  dock {.threadvar.}: KeyboardDock ## ... in this UI's pixels, `sceneX`/`sceneY` its corner
 
 proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, rootH: float32,
     input: UiInput) =
@@ -2335,13 +2362,13 @@ proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInp
   true
 
 proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var seq[SvgNode],
-    gradients: var int, regions: var seq[UiRegion]): bool =
+    gradients: var int, regions: var seq[UiRegion], at: var array[4, float32]): bool =
   ## The accents of the held key, `r` its region as the keyboard was just
   ## placed: a row of keys its size above it (ui/keyboard.nim `accentTree`),
   ## centred on it as far as the screen, or a round panel's circle, allows,
   ## and under it when there is no room above. It goes on top of everything;
   ## the keyboard stays there to touch (a tap on it puts the row away and
-  ## types, ui/events.nim). False for a key without accents.
+  ## types, ui/events.nim). False for a key without accents. `at`: where it went.
   let
     count = formCount(input.accents, input.page)
     hinted = hintOf(input.accents, input.page).len > 0
@@ -2404,6 +2431,7 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   shown.size = shown.layout(popW.float32, popH.float32, true, true)
   shown.x = float32(x)
   shown.y = float32(y)
+  at = [shown.x, shown.y, popW.float32, popH.float32]
   shown.emit(0, 0, 1, drawn, gradients, regions)
   if not memo.isNil:
     memo.accents = shown
@@ -2476,6 +2504,64 @@ proc selectionChrome(at: array[2, array[3, float32]], seen: array[2, bool], widt
   if not memo.isNil:
     memo.menu = shown
 
+proc dockedKeys(input: var UiInput, regions: var seq[UiRegion]) =
+  ## The frame's keyboard (KeyboardDock), laid out where the interpreter put
+  ## it, in this UI's pixels (`dock`): what it draws goes into a picture of
+  ## the frame's size, its keys into this UI's regions, moved by where the UI
+  ## is on the frame, so a press there is a key like any other.
+  var
+    drawn: seq[SvgNode]
+    keys: seq[UiRegion]
+    gradients = 0
+  let kb = int(dock.h - dock.grip)
+  emitBackdrop = rgba(0, 0, 0, 0)
+  when not defined(frameosEmbedded):
+    if dock.round:
+      # Rows on no band of their own: the panel under them is the keyboard's.
+      let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
+        ("height", $int(dock.frameH - dock.y))])
+      band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+      drawn.add band
+  if dock.grip > 0:
+    # A window's bar, in the keys' look: the interpreter drags it, so nothing
+    # here hears it.
+    let bar = el("div", if input.paper: "flex items-center justify-center bg-white border-2 border-black"
+      else: "flex items-center justify-center rounded-t-lg bg-zinc-900",
+      el("div", if input.paper: "w-[40px] h-[4px] rounded-full bg-black" else: "w-[40px] h-[4px] rounded-full bg-zinc-500"))
+      .role("keyboard").build(initText(), dock.w, dock.grip, 0, GripKey, input, false, nil)
+    bar.size = bar.layout(dock.w, dock.grip, true, true)
+    bar.x = dock.x
+    bar.y = dock.y
+    bar.emit(0, 0, 1, drawn, gradients, keys)
+  let tree = keyboardTree(int(dock.w), kb, input.page, input.shift, input.paper, dock.round,
+    int(dock.y), int(dock.frameH), input.accents, input.flash).build(initText(), dock.w, kb.float32, 0,
+      KeyboardKey, input, false, if memo.isNil: nil else: memo.keyboard)
+  tree.size = tree.layout(dock.w, kb.float32, true, true)
+  tree.x = dock.x
+  tree.y = dock.y + dock.grip
+  tree.emit(0, 0, 1, drawn, gradients, keys)
+  if input.flash > 0:
+    input.flashDrawn = true
+  if not memo.isNil:
+    memo.keyboard = tree
+  dock.accents = [0'f32, 0, 0, 0]
+  if input.accents > 0:
+    var shown = false
+    for i in countdown(keys.high, 0):
+      if keys[i].handlers[ueClick] - 1 == KeyBase + input.accents:
+        shown = keys[i].accentPopup(int(dock.frameW), int(dock.frameH), input, drawn, gradients, keys, dock.accents)
+        break
+    if not shown:
+      input.accents = 0
+  for r in keys.mitems:
+    r.x -= dock.sceneX
+    r.y -= dock.sceneY
+    for e in 0 .. 3:
+      r.visible[e] -= (if e mod 2 == 0: dock.sceneX else: dock.sceneY)
+  regions.add keys
+  dock.svg = SvgNode(tag: "svg", attrs: @[("width", $int(dock.frameW)), ("height", $int(dock.frameH))])
+  dock.svg.children = move drawn
+
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
@@ -2488,8 +2574,12 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   ui = addr input
   focusSeen = false
   endsFound = false
+  # The frame's keyboard, when it is this UI's (layoutUiDocked): laid out in
+  # the whole of its image, the keyboard over the frame instead.
+  let docked = docking and input.keyboard and input.focus > 0
+  docking = false
   var kbTop, kb: int
-  if input.keyboard and input.focus > 0: (kbTop, kb) = keyboardBox(width, height, input.round)
+  if input.keyboard and input.focus > 0 and not docked: (kbTop, kb) = keyboardBox(width, height, input.round)
   else: kbTop = height
   let
     w = width.float32
@@ -2547,6 +2637,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     # A link's QR code: over everything, the keyboard gone (events.openLink).
     input.open = 0
     linkCard(input.link, w, height.float32, input, result.children, gradients, regions)
+  elif docked:
+    dockedKeys(input, regions)
   elif kb > 0:
     let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
       height, input.accents, input.flash).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
@@ -2565,7 +2657,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
       for i in countdown(regions.high, 0):
         if regions[i].handlers[ueClick] - 1 == KeyBase + input.accents:
           let key = regions[i]
-          shown = key.accentPopup(width, height, input, result.children, gradients, regions)
+          var at: array[4, float32]
+          shown = key.accentPopup(width, height, input, result.children, gradients, regions, at)
           break
       if not shown:
         input.accents = 0
@@ -2624,6 +2717,34 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     memo.rootH = h
     memo = nil
   ui = nil
+
+proc layoutUiDocked*(root: SvgNode, width, height: int, input: var UiInput, regions: var seq[UiRegion],
+    textMemo: UiMemo, sceneId: string, scale, offX, offY: float32): SvgNode =
+  ## layoutUi for a UI of the scene `sceneId`, `scale` canvas pixels to each of
+  ## its own and its corner (`offX`, `offY`) in the scene's canvas: with the
+  ## frame's keyboard (KeyboardDock) when it is that scene's and this UI's
+  ## field has the keyboard. Its picture and its accents' row are then the
+  ## frame's to draw, in the frame canvas's pixels.
+  template k: untyped = frameKeyboard
+  if k.desktop and input.keyboard and sceneId != k.front and sceneId != k.around:
+    # A window behind: its field keeps the keyboard for when it comes forward,
+    # and the frame's is the window in front's.
+    input.keyboard = false
+    result = layoutUi(root, width, height, input, regions, textMemo)
+    input.keyboard = input.focus > 0
+    return
+  if not (k.placed and sceneId.len > 0 and k.sceneId == sceneId and input.keyboard and input.focus > 0):
+    return layoutUi(root, width, height, input, regions, textMemo)
+  let s = if scale > 0: scale else: 1'f32
+  dock = KeyboardDock(x: k.x / s, y: k.y / s, w: k.w / s, h: k.h / s, grip: k.grip / s,
+    frameW: k.frameW / s, frameH: k.frameH / s, sceneX: (k.sceneX + offX) / s, sceneY: (k.sceneY + offY) / s,
+    round: k.round)
+  docking = true
+  result = layoutUi(root, width, height, input, regions, textMemo)
+  docking = false
+  k.svg = move dock.svg
+  for e in 0 .. 3:
+    k.accents[e] = dock.accents[e] * s
 
 proc source*(memo: UiMemo): SvgNode =
   ## The tree the last layout was built from: the one handed in, or, when

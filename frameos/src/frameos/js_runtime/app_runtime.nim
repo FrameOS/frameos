@@ -4241,7 +4241,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
         requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
         requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
     try:
-      svg = layoutUi(root, layoutWidth, layoutHeight, target.input, regions, target.memo)
+      # Inside a layout a field's keyboard is the frame's (KeyboardDock): its
+      # corner here is where the last render put this UI in the scene's canvas.
+      svg = layoutUiDocked(root, layoutWidth, layoutHeight, target.input, regions, target.memo, sceneId,
+        regionScale, target.offsetX, target.offsetY)
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil

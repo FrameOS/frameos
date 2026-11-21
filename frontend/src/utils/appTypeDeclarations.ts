@@ -347,9 +347,9 @@ interface FrameOSApp {
     /** True in a layout's app while it wraps a built-in scene (the scene list, the settings). Returning a bare <yield />
      * then gives that scene the whole panel (FrameOS 2026.11.5+; undefined before). */
     systemScene?: boolean;
-    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. Returning a bare <yield />
-     * then gives the scene the whole panel, so the keyboard reaches across what the layout drew beside it
-     * (FrameOS 2026.11.14+; undefined before). */
+    /** True in a layout's app while the scene it wraps has the keyboard on the screen up. The keyboard is the
+     * frame's then, at the bottom of the panel with the layout laid out above it (on a desktop, a window over the
+     * others); returning a bare <yield /> gives the scene all the room it leaves (FrameOS 2026.11.14+; undefined before). */
     typing?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window

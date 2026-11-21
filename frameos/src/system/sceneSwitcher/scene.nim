@@ -971,7 +971,8 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   target.input.slow = slow
   target.input.round = isRound(self.frameConfig)
   var regions: seq[UiRegion]
-  let svg = layoutUi(tree, roomW, roomH, target.input, regions, target.memo)
+  let svg = layoutUiDocked(tree, roomW, roomH, target.input, regions, target.memo, sceneId,
+    image.width.float32 / max(roomW, 1).float32, 0, 0)
   let bg = background(paper)
   var owed = some(bg)
   if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
