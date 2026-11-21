@@ -800,6 +800,33 @@ proc walkSvgText(
       # element is better than losing the document it sits in.
       discard
 
+proc addColorGlyphs(
+  elements: var seq[(Path, SvgProperties)], arrangement: Arrangement, font: Font,
+  origin: Vec2, props: SvgProperties
+) =
+  ## The run's colour (emoji) glyphs as `<image>` elements where the pen puts
+  ## them: a colour glyph is a picture, not an outline, so the text's paths
+  ## have nothing of it (fonts.nim `colorGlyphImage`, docs/jsx-ui.md). Drawn
+  ## by the same pass as everything else, damage and all.
+  for j, rune in arrangement.runes:
+    if rune.isWhiteSpace or rune.int32 < 0x80:
+      continue
+    var offset: Vec2
+    let image =
+      try: font.typeface.colorGlyphImage(rune, font.size, offset)
+      except PixieError: nil
+    if image.isNil:
+      continue
+    let at = origin + arrangement.positions[j] + offset
+    var p = props
+    p.image = image
+    p.imageClip = false
+    p.imagePixelated = false
+    p.imageBox = rect(round(at.x), round(at.y), image.width.float32, image.height.float32)
+    let box = newPath()
+    box.rect(p.imageBox) # its bounds (damage); never filled
+    elements.add (box, p)
+
 proc parseSvgText(
   node: SvgNode, props: SvgProperties
 ): seq[(Path, SvgProperties)] =
@@ -897,10 +924,12 @@ proc parseSvgText(
         var props = run.props
         props.transform = props.transform * translate(origin + arrangement.positions[j])
         result.add (glyph, props)
+      result.addColorGlyphs(arrangement, font, origin, run.props)
       continue
     let path = arrangements[i].computePath()
     path.transform(translate(origin))
     result.add (path, run.props)
+    result.addColorGlyphs(arrangements[i], font, origin, run.props)
 
 proc parseSvgLength(value: string, reference: float32): float32 =
   ## A gradient coordinate: a user-space number, or a percentage of

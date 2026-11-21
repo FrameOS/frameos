@@ -4,6 +4,7 @@
  * variables the Pi version uses, set at runtime through DEV_SetPinConfig.
  */
 #include "DEV_Config.h"
+#include "fos_bus_share.h"
 
 #include <stdarg.h>
 
@@ -49,6 +50,9 @@ static int s_spi_hz = EPD_SPI_HZ;
 static bool s_bus_ready = false;
 static bool s_bus_shared = false;
 static int s_bus_miso = -1;
+/* Who holds the shared bus and whether the panel is listening: a wait it
+ * sleeps through lets a card read in between (fos_bus_share.h). */
+static fos_bus_share_t s_share;
 
 int DEV_SPI_Bus_Init(int miso_pin)
 {
@@ -84,17 +88,29 @@ int DEV_SPI_Bus_Share(int miso_pin)
 {
     if (DEV_SPI_Bus_Init(miso_pin) != 0) return -1;
     s_bus_shared = true;
+    s_share.shared = true;
     return (int)EPD_SPI_HOST;
 }
 
 void DEV_SPI_Acquire(void)
 {
-    if (s_bus_shared && s_spi) spi_device_acquire_bus(s_spi, portMAX_DELAY);
+    if (s_bus_shared && s_spi) {
+        spi_device_acquire_bus(s_spi, portMAX_DELAY);
+        fos_bus_share_take(&s_share);
+    }
 }
 
 void DEV_SPI_Release(void)
 {
-    if (s_bus_shared && s_spi) spi_device_release_bus(s_spi);
+    if (s_bus_shared && s_spi) {
+        fos_bus_share_give(&s_share);
+        spi_device_release_bus(s_spi);
+    }
+}
+
+uint32_t DEV_SPI_Bus_Yields(void)
+{
+    return s_share.yields;
 }
 
 void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr)
@@ -175,6 +191,11 @@ void DEV_Digital_Write(UWORD Pin, UBYTE Value)
 {
     if (Pin >= GPIO_NUM_MAX) return;
     gpio_set_level(Pin, Value);
+    /* The panel's chip selects: while one is low it listens, and the bus is
+     * not let go (DEV_Delay_ms). */
+    if ((int)Pin == EPD_CS_PIN) fos_bus_share_select(&s_share, FOS_BUS_CS_MAIN, Value == 0);
+    if ((int)Pin == EPD_CS_M_PIN) fos_bus_share_select(&s_share, FOS_BUS_CS_M, Value == 0);
+    if ((int)Pin == EPD_CS_S_PIN) fos_bus_share_select(&s_share, FOS_BUS_CS_S, Value == 0);
 }
 
 UBYTE DEV_Digital_Read(UWORD Pin)
@@ -187,7 +208,17 @@ void DEV_Delay_ms(UDOUBLE xms)
 {
     if (xms == 0) return;
     TickType_t ticks = pdMS_TO_TICKS(xms);
+    /* A wait in a refresh the panel is not listening through (every busy
+     * loop sleeps here): the bus goes to a card that shares it for the wait,
+     * and comes back after (fos_bus_share.h). A card read during a Spectra's
+     * 30 s waveform waited for all of it. */
+    bool yield = s_spi && fos_bus_share_may_yield(&s_share);
+    if (yield) {
+        s_share.yields++;
+        spi_device_release_bus(s_spi);
+    }
     vTaskDelay(ticks > 0 ? ticks : 1);
+    if (yield) spi_device_acquire_bus(s_spi, portMAX_DELAY);
 }
 
 UDOUBLE DEV_Millis(void)
@@ -307,6 +338,7 @@ UBYTE DEV_Module_Init(void)
     configure_output(EPD_DC_PIN, 0);
     configure_output(EPD_CS_PIN, 1);
     configure_output(EPD_CS_S_PIN, 1);
+    fos_bus_share_deselect_all(&s_share);
     configure_output(EPD_PWR_PIN, 1);
 
     gpio_reset_pin(EPD_BUSY_PIN);

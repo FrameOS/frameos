@@ -87,11 +87,15 @@ void DEV_Module_Exit(void);
  * DEV_SPI_Release around its init-display-sleep sequence), because the
  * vendor drivers drive CS by hand and an SD transaction in between would
  * clock the panel with its CS low. The sdspi driver acquires the bus per
- * transaction of its own, so the two take turns. */
+ * transaction of its own, so the two take turns; and the panel lets the bus
+ * go for each wait it sleeps through with every chip select high (a busy
+ * wait, a waveform: DEV_Delay_ms, fos_bus_share.h), so a card read during a
+ * refresh waits a tick, not the refresh. DEV_SPI_Bus_Yields counts those. */
 int DEV_SPI_Bus_Init(int miso_pin);
 int DEV_SPI_Bus_Share(int miso_pin);
 void DEV_SPI_Acquire(void);
 void DEV_SPI_Release(void);
+uint32_t DEV_SPI_Bus_Yields(void);
 
 /*
  * Structured debug logging for the panel drivers; same contract as the
