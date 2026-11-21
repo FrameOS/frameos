@@ -51,7 +51,9 @@ block refused_lists_are_derived:
   # admin API or the system.
   # `uiTimer` is the runtime's own (a JSX UI's timer, made by the tick): the
   # system's alone.
-  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uiTimer", "uploadScenes", "voiceChat"]
+  # `uiAction` names an element of the UI that shows now: a schedule cannot
+  # know which, so it is the voice key's, the preview's and the API's.
+  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uiTimer", "uploadScenes", "uiAction", "voiceChat"]
   doAssert refusedEvents(eoHttpAdmin) == @["uiTimer", "voiceChat"]
   doAssert refusedEvents(eoSystem) == @["voiceChat"]
   # A scene is refused the device commands, and the lifecycle events — those

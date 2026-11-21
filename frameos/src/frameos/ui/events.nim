@@ -342,6 +342,8 @@ proc uiListens*(sceneId, event: string): bool =
   ## a key's accents want the finger that holds it, wherever it slides.
   for target in targets:
     if target.sceneId == sceneId:
+      if event == evUiAction and target.regions.len > 0:
+        return true
       if target.input.focus > 0 and event in ["tap", "keyDown", "textInput"]:
         return true
       if target.input.accents > 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]:
@@ -722,6 +724,29 @@ proc flashKey(target: UiTarget, code: int) =
   target.input.flashDrawn = false
   target.flashSeen = false
 
+proc nextField(target: UiTarget, back = false) =
+  ## Tab: the focus goes to the next field down the tree (the one before
+  ## with `back`: Tab held, or Shift+Tab), around past the last, as a
+  ## browser's Tab walks a form. A <select> is passed over: its list is no
+  ## place to type.
+  var
+    at = -1
+    fields: seq[int]
+  for i in 0 ..< target.regions.len:
+    if target.regions[i].typesIn:
+      if target.regions[i].key == target.input.focus - 1:
+        at = fields.len
+      fields.add i
+  if fields.len == 0:
+    return
+  let next =
+    if at < 0: (if back: fields.len - 1 else: 0)
+    elif back: (at + fields.len - 1) mod fields.len
+    else: (at + 1) mod fields.len
+  let r = target.regions[fields[next]]
+  if r.key + 1 != target.input.focus:
+    target.focusField(r, r.x + r.w - 1, r.y + r.h / 2)
+
 proc pressKey(target: UiTarget, code: int) =
   ## A key of the on-screen keyboard (ui/keyboard.nim): a character typed,
   ## or what its byte stands for.
@@ -736,6 +761,7 @@ proc pressKey(target: UiTarget, code: int) =
     target.keyDown("Backspace")
     target.erase(false)
   elif code == ord(kEnter): target.enter()
+  elif code == ord(kTab): target.nextField()
   elif code == ord(kLetters): i.page = kpLetters
   elif code == ord(kSymbols): i.page = kpSymbols
   elif code == ord(kMore): i.page = kpMore
@@ -775,6 +801,9 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
   ## and goes on erasing until the finger lifts (`uiTimer`). A key with
   ## neither has no long-press handler, so this never sees one.
   template i: untyped = target.input
+  if code == ord(kTab):
+    target.nextField(back = true)
+    return
   if code == ord(kBackspace):
     target.pressKey(code)
     if i.slow:
@@ -1010,6 +1039,7 @@ when not defined(frameosEmbedded):
     of "Delete": target.erase(true)
     of "Enter": target.enter(heard = true)
     of "Escape": target.blurField()
+    of "Tab": target.nextField(back = payload{"shift"}.getBool())
     else: target.moveCaret(key, extend = payload{"shift"}.getBool())
 
   const WheelNotchPx = 72'f32
@@ -1175,6 +1205,148 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
         into.add [target.offsetX + r.visible[0] * scale, target.offsetY + r.visible[1] * scale,
                   target.offsetX + r.visible[2] * scale, target.offsetY + r.visible[3] * scale]
 
+# ------------------------------------------------------------------ by voice
+
+proc uiScreen*(sceneIds: openArray[string], into: var string, keyboard: var bool) =
+  ## What a person could do on the UIs of `sceneIds` (the scene showing, the
+  ## layout it wears) as the last renders drew them: the voice key's screen
+  ## digest (docs/voice-chat.md "Voice actions"), one JSON object per element
+  ## a tap, a field or a scroll can reach, added to `into` comma-separated.
+  ## An element scrolled out of sight is left out. Its `id` is what
+  ## `uiAction` takes: `<node>:<key>`, and `:<scene>` after it for a UI of
+  ## any scene but the first.
+  for target in targets:
+    var at = -1
+    for i, id in sceneIds:
+      if id == target.sceneId:
+        at = i
+        break
+    if at < 0 or target.regions.len == 0:
+      continue
+    if target.input.keyboard and target.input.focus > 0:
+      keyboard = true
+    for spot in target.memo.uiSpots():
+      let r = target.regionOf(spot.key)
+      if r < 0:
+        continue
+      let v = target.regions[r].visible
+      if v[2] <= v[0] or v[3] <= v[1]:
+        continue
+      if into.len > 0 and into[^1] != '[':
+        into.add ','
+      into.add "{\"id\":\""
+      into.addInt target.nodeId
+      into.add ':'
+      into.addInt spot.key
+      if at > 0:
+        into.add ':'
+        into.add target.sceneId
+      into.add "\",\"do\":\""
+      into.add(if spot.field == 4: "pick" elif spot.field > 0: "type" elif spot.tap: "tap" else: "scroll")
+      into.add '"'
+      if spot.field == 2: into.add ",\"lines\":true"
+      if spot.field == 3: into.add ",\"number\":true"
+      if spot.scroll and (spot.tap or spot.field > 0): into.add ",\"scroll\":true"
+      if spot.key == target.input.focus - 1: into.add ",\"focus\":true"
+      for (name, text) in [("text", spot.text), ("label", spot.label), ("near", spot.near)]:
+        if text.len > 0:
+          into.add ",\""
+          into.add name
+          into.add "\":"
+          into.add escapeJson(text)
+      into.add '}'
+
+proc uiAction(sceneId: string, payload: JsonNode): bool =
+  ## `uiAction` (docs/events.md): an element of a UI pressed, typed into or
+  ## scrolled by its key, as a person would at the screen. The target is
+  ## `<node>:<key>[:<scene>]` as uiScreen listed it; one that is gone does
+  ## nothing. True when the UI changed.
+  if payload.isNil or payload.kind != JObject:
+    return
+  let
+    id = payload{"target"}.getStr()
+    first = id.find(':')
+  if first <= 0:
+    return
+  var second = id.find(':', first + 1)
+  if second < 0: second = id.len
+  var node, key: int
+  try:
+    node = parseInt(id[0 ..< first])
+    key = parseInt(id[first + 1 ..< second])
+  except ValueError:
+    return
+  let target = uiTarget(if second < id.len: id[second + 1 .. ^1] else: sceneId, node, create = false)
+  if target.isNil:
+    return
+  let at = target.regionOf(key)
+  if at < 0:
+    return
+  let
+    r = target.regions[at]
+    action = payload{"do"}.getStr("tap")
+    # Where a finger would press it: the middle of what shows of it, in the
+    # UI's pixels (`hit`) and the scene's (`x`, `y` of the handler's event).
+    lx = (max(r.visible[0], r.x) + min(r.visible[2], r.x + r.w)) / 2
+    ly = (max(r.visible[1], r.y) + min(r.visible[3], r.y + r.h)) / 2
+    scale = if target.scale > 0: target.scale else: 1'f32
+  case action
+  of "type", "set":
+    if not r.typesIn:
+      return
+    target.focusField(r, r.x + r.w - 1, ly)
+    if action == "set":
+      target.input.sel = 1 # all of it, which the text replaces
+      target.input.caret = target.input.text.len
+    let text = payload{"text"}.getStr()
+    if text.len > 0 or action == "set":
+      target.insert(text)
+    if payload{"submit"}.getBool():
+      target.enter()
+    return true
+  of "scroll":
+    if r.scrollY <= 0 and r.scrollX <= 0:
+      return
+    let
+      by = payload{"by"}.getFloat(0.8)
+      (sx, sy) = target.input.scrolled(r.key)
+    if r.scrollY > 0:
+      target.input.scrollTo(r.key, sx, clamp(sy + by * r.h, 0, r.scrollY))
+    else:
+      target.input.scrollTo(r.key, clamp(sx + by * r.w, 0, r.scrollX), sy)
+    target.inputOnly = true
+    target.scrolledBy(r)
+    return true
+  else:
+    if r.field == 4:
+      if target.input.focus > 0:
+        target.blurField()
+      target.input.open = r.key + 1
+      target.input.fresh = true
+      target.inputOnly = true
+      return true
+    if r.field > 0:
+      target.focusField(r, r.x + r.w - 1, ly)
+      return true
+    let handler = r.handlers[ueClick]
+    if handler <= 0:
+      return
+    if target.input.focus > 0:
+      target.blurField() # a tap elsewhere takes the keyboard away
+    if handler - 1 == LinkOpen:
+      target.openLink(r.key)
+      return true
+    if handler - 1 >= KeyBase or target.call.isNil:
+      return
+    let event = newJObject()
+    event["x"] = newJInt(int(target.offsetX + lx * scale))
+    event["y"] = newJInt(int(target.offsetY + ly * scale))
+    event["pointerId"] = newJInt(0)
+    event["pointerType"] = newJString("touch")
+    target.call(handler - 1, "tap", event, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
+    target.inputOnly = false # whatever the handler changed, get() shows it
+    true
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = false): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,
@@ -1196,6 +1368,8 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     touch = placed and payload{"pointerType"}.getStr() == "touch"
     pointer = if payload.isNil or payload.kind != JObject: 0 else: payload{"pointerId"}.getInt(0)
     follows = event in ["pointerMove", "pointerUp", "pointerCancel"]
+  if event == evUiAction:
+    return uiAction(sceneId, payload)
   var
     handled = false
     capturing: UiTarget # the UI holding this pointer's press, if one does

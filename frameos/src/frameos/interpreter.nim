@@ -2246,6 +2246,12 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     if not routePointer(scene, context) and dispatchUiEvent(self.id.string, context.event, context.payload):
       rhythmMarkDue(self)
       sendEvent("render", %*{}, eoScene)
+  of "uiAction":
+    # An element pressed, typed into or scrolled by its key (voice, the
+    # preview, the API): no position to route, the target names its UI.
+    if dispatchUiEvent(self.id.string, context.event, context.payload):
+      rhythmMarkDue(self)
+      sendEvent("render", %*{}, eoScene)
   else:
     when defined(frameosEmbedded):
       uiSceneEvent(self.id.string)

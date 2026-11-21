@@ -34,6 +34,7 @@ SECRET_SETTING_FIELDS: dict[str, frozenset[str]] = {
     "openAI": frozenset({"apiKey", "backendApiKey"}),
     "posthog": frozenset({"backendApiKey"}),
     "unsplash": frozenset({"accessKey"}),
+    "typeSafe": frozenset({"apiKey"}),
     "buildHost": frozenset({"sshKey"}),
     "modalSandbox": frozenset({"tokenId", "tokenSecret"}),
 }

@@ -99,6 +99,7 @@ import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/sce
 import { POST as voiceRoute } from "../../../app/api/frames/[frameId]/voice/[sessionId]/route";
 import { POST as saveAccountSettings } from "../../../app/api/settings/route";
 import { TRANSCRIPTION_URL, voiceChatId } from "../../lib/ai/voice";
+import { JEV_URL } from "../../lib/ai/voice-actions";
 import { buildSystemPrompt } from "../../lib/ai/prompts";
 import { GET as getScenePreview } from "../../../app/api/frames/[frameId]/scene-preview/route";
 import { waitForPendingAiMetering } from "../../lib/billing";
@@ -112,6 +113,8 @@ let userCounter = 0;
 const realFetch = globalThis.fetch;
 // What the stubbed transcription "hears", and the audio it was handed.
 const heard = { calls: [] as { prompt: string | null; wavBytes: number }[], text: "switch to the calendar please" };
+// What the stubbed Jev answers (docs/voice-chat.md "Voice actions"), and what it was asked.
+const jev = { answers: {} as Record<string, unknown>, asked: [] as { body: Record<string, unknown>; auth: string }[] };
 
 afterAll(async () => {
   await waitForPendingAiMetering();
@@ -126,9 +129,22 @@ beforeEach(async () => {
   script.rounds.length = 0;
   heard.calls.length = 0;
   heard.text = "switch to the calendar please";
+  jev.answers = {};
+  jev.asked.length = 0;
+  process.env.TYPESAFE_API_KEY = "ts-voice-test";
   await waitForPendingAiMetering();
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url === JEV_URL) {
+      jev.asked.push({
+        auth: new Headers(init?.headers).get("authorization") ?? "",
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({ answers: jev.answers, model: "jev-test", usage: { input_tokens: 1, output_tokens: 1 } }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    }
     if (url !== TRANSCRIPTION_URL) {
       return realFetch(input, init);
     }
@@ -185,7 +201,7 @@ function devicePublicKey() {
 }
 
 // A store scene whose scenes.json carries one runtime scene, `runtimeId`.
-async function createStoreScene(accountId: string, name: string, runtimeId: string) {
+async function createStoreScene(accountId: string, name: string, runtimeId: string, extra: Record<string, unknown> = {}) {
   const [scene] = await db
     .insert(storeScenes)
     .values({
@@ -201,7 +217,7 @@ async function createStoreScene(accountId: string, name: string, runtimeId: stri
   if (!scene) {
     throw new Error("scene insert failed");
   }
-  const scenes = [{ edges: [], id: runtimeId, name, nodes: [] }];
+  const scenes = [{ edges: [], id: runtimeId, name, nodes: [], ...extra }];
   await db.insert(storeSceneVersions).values({
     content: Buffer.from(zipSync({ "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)) })),
     contentType: "application/zip",
@@ -287,6 +303,30 @@ function chunk(
 }
 
 const SECOND = 32_000;
+
+// The screen digest a frame sends before its audio (frameos/voice_screen.nim).
+function screenDigest(frameId: string, token: string, session: string, digest: Record<string, unknown>) {
+  const body = new TextEncoder().encode(JSON.stringify(digest));
+  return voiceRoute(
+    new NextRequest(new URL(`/api/frames/${frameId}/voice/${session}?screen=1&seq=99999`, baseUrl), {
+      body,
+      headers: { authorization: `Bearer ${token}`, "content-length": String(body.length), "content-type": "application/json" },
+      method: "POST",
+    }),
+    { params: Promise.resolve({ frameId, sessionId: session }) },
+  );
+}
+
+const TODO_SCREEN = {
+  scene: "todo-rt",
+  t: [
+    { do: "tap", id: "2:10", label: "Mark done", near: "Buy milk" },
+    { do: "type", id: "2:11", text: "Buy milk" },
+    { do: "type", id: "2:20", label: "Add a to-do" },
+    { do: "tap", id: "2:21", text: "Add" },
+  ],
+  v: 1,
+};
 
 describe("POST /api/frames/{id}/voice/{session}", () => {
   it("streams chunks, transcribes the sentence and queues the spoken scene switch", async () => {
@@ -694,6 +734,85 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect((await chunk(frame.frame_id, frame.access_token, "sess-0004", 0, false, 64 * 1024 + 1)).status).toBe(413);
     expect((await chunk(frame.frame_id, frame.access_token, "bad id!", 0, false, SECOND)).status).toBe(400);
     expect(heard.calls).toEqual([]);
+  });
+
+  it("does a voice action on the frame's screen with no chat turn: Jev picks, the reply carries the events", async () => {
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const todo = await createStoreScene(frame.accountId, "To-do", "todo-rt", {
+      customEvents: [{ aliases: ["clean up"], description: "Remove the to-dos that are done", name: "clearDone" }],
+    });
+    const calendar = await createStoreScene(frame.accountId, "Calendar", "calendar-rt");
+    await assignScenes(frame.frame_id, [todo.id, calendar.id]);
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    heard.text = "Add oat milk.";
+    jev.answers = {
+      field: { choice: "f1", confidence: 0.9, probabilities: { f1: 0.97 }, type: "choice" },
+      kind: { choice: "fill", confidence: 0.9, probabilities: { fill: 0.96 }, type: "choice" },
+      replace: { noul: 0.1, type: "noul" },
+      submit: { noul: 0.9, type: "noul" },
+      words: { choice: "w1", confidence: 0.9, probabilities: { w1: 0.98 }, type: "choice" },
+    };
+
+    const screen = await screenDigest(frame.frame_id, frame.access_token, "sess-va01", TODO_SCREEN);
+    expect(screen.status).toBe(202);
+    expect(await screen.json()).toEqual({ ok: true, screen: true });
+    const response = await chunk(frame.frame_id, frame.access_token, "sess-va01", 0, true, SECOND);
+    expect(await response.json()).toEqual({
+      events: [{ name: "uiAction", payload: { do: "type", submit: true, target: "2:20", text: "Oat milk" } }],
+      ok: true,
+      reply: "Added \u201cOat milk\u201d.",
+      tools: ["voice_action"],
+      transcript: "Add oat milk.",
+    });
+    expect(script.requests).toEqual([]);
+    expect(jev.asked).toHaveLength(1);
+    expect(jev.asked[0]!.auth).toBe("Bearer ts-voice-test");
+    const asked = jev.asked[0]!.body as { state: Record<string, unknown>; questions: Record<string, { criteria: Record<string, string> }> };
+    expect(asked.state.said).toBe("Add oat milk.");
+    expect(asked.state.scene).toBe("To-do");
+    expect(asked.questions.kind!.criteria.action).toContain("Remove the to-dos that are done");
+    expect(asked.questions.scene!.criteria.s0).toBe("Calendar");
+    // Nothing queued: the frame does it itself.
+    expect(await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).toEqual([]);
+    const rows = await db.select().from(aiChatMessages).orderBy(aiChatMessages.createdAt);
+    expect(rows.map((row) => [row.role, row.tool])).toEqual([
+      ["user", "voice"],
+      ["assistant", "log"],
+      ["assistant", "voice"],
+    ]);
+    expect(rows[1]!.content).toContain('"target":"2:20"');
+  });
+
+  it("hands several things to the chat, which steers with the screen tools", async () => {
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const todo = await createStoreScene(frame.accountId, "To-do", "todo-rt");
+    await assignScenes(frame.frame_id, [todo.id]);
+    heard.text = "Add eggs and bread.";
+    jev.answers = { kind: { choice: "several", confidence: 0.8, probabilities: { several: 0.9 }, type: "choice" } };
+    script.rounds.push(
+      {
+        calls: [
+          { arguments: { submit: true, target: "2:20", text: "Eggs" }, call_id: "c1", name: "type_text" },
+          { arguments: { submit: true, target: "2:20", text: "Bread" }, call_id: "c2", name: "type_text" },
+        ],
+        text: "",
+      },
+      { calls: [], text: "Added eggs and bread." },
+    );
+    await screenDigest(frame.frame_id, frame.access_token, "sess-va02", TODO_SCREEN);
+    const response = await chunk(frame.frame_id, frame.access_token, "sess-va02", 0, true, SECOND);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.reply).toBe("Added eggs and bread.");
+    expect(body.events).toEqual([
+      { name: "uiAction", payload: { do: "type", submit: true, target: "2:20", text: "Eggs" } },
+      { name: "uiAction", payload: { do: "type", submit: true, target: "2:20", text: "Bread" } },
+    ]);
+    const first = script.requests[0]!;
+    expect(first.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["press", "type_text", "scene_action"]));
+    const context = JSON.stringify(first.input);
+    expect(context).toContain("On the screen (press and type_text take these ids):");
   });
 
   it("tells the frame when the account has no AI, or nothing was heard", async () => {

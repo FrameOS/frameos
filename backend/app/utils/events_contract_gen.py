@@ -16,16 +16,17 @@ BUILT_IN_SCENE_IDS: frozenset[str] = frozenset({SCENE_SWITCHER_ID, SCENE_SETTING
 # origin -> contract events it may not emit. `http:write` is the frame access
 # key: what it is refused needs an admin session or the serverApiKey instead.
 REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
-    "driver": frozenset({"init", "open", "close", "uiTimer", "turnOn", "turnOff", "toggleScreen", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"}),
+    "driver": frozenset({"init", "open", "close", "uiTimer", "turnOn", "turnOff", "toggleScreen", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "uiAction", "voiceChat"}),
     "preview": frozenset({"init", "open", "close", "uiTimer", "turnOn", "turnOff", "toggleScreen", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"}),
     "scene": frozenset({"init", "open", "close", "uiTimer", "reload", "restart", "reboot", "uploadScenes", "voiceChat"}),
-    "schedule": frozenset({"init", "open", "close", "uiTimer", "uploadScenes", "voiceChat"}),
+    "schedule": frozenset({"init", "open", "close", "uiTimer", "uploadScenes", "uiAction", "voiceChat"}),
     "http:write": frozenset({"init", "open", "close", "uiTimer", "reload", "restart", "reboot", "uploadScenes", "voiceChat"}),
     "http:admin": frozenset({"uiTimer", "voiceChat"}),
-    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "toggleScreen", "gpio", "sceneSwitcher", "sceneSettings", "back", "forward", "reload", "voiceChat"}),
+    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "toggleScreen", "gpio", "sceneSwitcher", "sceneSettings", "back", "forward", "reload", "uiAction", "voiceChat"}),
     "system": frozenset({"voiceChat"}),
-    "eventMap": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "gpio", "button", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
-    "panel": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "uploadScenes", "voiceChat"}),
+    "eventMap": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "gpio", "button", "metrics", "reload", "restart", "reboot", "uploadScenes", "uiAction"}),
+    "panel": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "uploadScenes", "uiAction", "voiceChat"}),
+    "voice": frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "sceneSettings", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"}),
 }
 
 # Origins a scene opts into per custom event: `origins` on its declaration.
@@ -34,7 +35,7 @@ CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({"schedule", "cloud"
 DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({"metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"})
 
 # Every event the contract names; anything else a producer says is a custom event.
-CONTRACT_EVENTS: frozenset[str] = frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"})
+CONTRACT_EVENTS: frozenset[str] = frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "uiTimer", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "pinch", "edgeSwipe", "wheel", "turnOn", "turnOff", "toggleScreen", "gpio", "button", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings", "back", "forward", "metrics", "reload", "restart", "reboot", "uploadScenes", "uiAction", "voiceChat"})
 
 # Events the frame event route accepts and the command-queue verb each becomes
 # (the contract's `cloud` column; the cloud's cloudEventRouteVerbs). `profiles`:

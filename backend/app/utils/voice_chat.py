@@ -46,6 +46,7 @@ import httpx
 from app.models.frame import Frame
 from app.utils.ai_chat_agent import OpenAiRequestError, ToolBox, ToolOutput, build_initial_input, run_agent_loop
 from app.utils.ai_chat_tools import untrusted_result
+from app.utils.voice_actions import SCREEN_TOOL_DEFINITIONS, SCREEN_TOOL_LABELS, VoiceScreenTools
 
 __all__ = [
     "VOICE_MAX_AUDIO_BYTES",
@@ -131,6 +132,10 @@ def voice_scenes(scenes: Any) -> list[JsonObject]:
 # photo library's (docs/photos.md): listing it and playing a folder on the
 # frame are one switch, since the listing is what names the folder.
 VOICE_TOOL_PERMISSIONS = {
+    # The screen's (app/utils/voice_actions.py): a use of the scene showing.
+    "press": "use_scenes",
+    "type_text": "use_scenes",
+    "scene_action": "use_scenes",
     "activate_scene": "use_scenes",
     "set_scene_state": "use_scenes",
     "render_now": "use_scenes",
@@ -144,7 +149,7 @@ VOICE_TOOL_PERMISSIONS = {
 # How the context names each switch to the model, on and off.
 VOICE_PERMISSION_DESCRIPTIONS = {
     "change_settings": "change the frame's settings (rotate_frame)",
-    "use_scenes": "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
+    "use_scenes": "use the installed scenes: switch between them, set their fields, redraw, press and type on the screen (activate_scene, set_scene_state, render_now, press, type_text, scene_action)",
     "create_scenes": "put new scenes on the frame (show_image, create_scene, change_scene)",
     "use_albums": "play the photo albums: list them, show one on the frame (list_albums, show_album)",
 }
@@ -204,6 +209,10 @@ class VoiceSession:
     next_seq: int = 0
     received: int = 0
     updated_at: float = field(default_factory=time.monotonic)
+    # The frame's screen digest, sent before the audio (docs/voice-chat.md
+    # "Voice actions", app/utils/voice_actions.read_screen); None from a
+    # frame that sends none.
+    screen: dict[str, Any] | None = None
 
     def audio(self) -> bytes:
         return b"".join(self.chunks)
@@ -245,6 +254,19 @@ class VoiceSessionStore:
             session.chunks.append(data)
             session.received += len(data)
         session.next_seq += 1
+        session.updated_at = self._now()
+        return session
+
+    def set_screen(self, frame_id: int, session_id: str, screen: dict[str, Any]) -> VoiceSession:
+        """The screen digest for a session, before (or between) its chunks: it
+        starts the session when it is the first to arrive."""
+        self._sweep()
+        key = (frame_id, session_id)
+        session = self._sessions.get(key)
+        if session is None:
+            session = VoiceSession(frame_id=frame_id, session_id=session_id)
+            self._sessions[key] = session
+        session.screen = screen
         session.updated_at = self._now()
         return session
 
@@ -346,6 +368,10 @@ async def transcribe_pcm(
 
 
 # ----------------------------------------------------------------- prompt
+
+# The route's voice action (app/utils/voice_actions.py): the transcript ->
+# the turn the frame acts on, or None for the chat.
+DecideVoiceAction = Callable[[str], Awaitable["VoiceTurnResult | None"]]
 
 
 def build_voice_system_prompt() -> str:
@@ -686,8 +712,11 @@ class VoiceTools(ToolBox):
         install_album: InstallAlbum | None = None,
         build_scene: BuildScene | None = None,
         preview_scene: JsonObject | None = None,
+        screen_tools: VoiceScreenTools | None = None,
     ) -> None:
         self._frame = frame
+        # press / type_text / scene_action, when the frame sent its screen.
+        self.screen_tools = screen_tools
         self._active_scene_id = active_scene_id
         self._build_scene = build_scene
         # The scene the frame shows for now without holding it (the voice
@@ -707,10 +736,16 @@ class VoiceTools(ToolBox):
     def definitions(self) -> list[JsonObject]:
         # A tool the owner switched off is not offered at all; `call` refuses
         # it as well, for a model that names one from an earlier turn.
-        return [tool for tool in VOICE_TOOL_DEFINITIONS if self.permissions.allows(str(tool["name"]))]
+        tools = [*VOICE_TOOL_DEFINITIONS, *(SCREEN_TOOL_DEFINITIONS if self.screen_tools is not None else [])]
+        return [tool for tool in tools if self.permissions.allows(str(tool["name"]))]
 
     def label(self, name: str) -> str:
-        return VOICE_TOOL_LABELS.get(name, name)
+        return VOICE_TOOL_LABELS.get(name) or SCREEN_TOOL_LABELS.get(name, name)
+
+    @property
+    def events(self) -> list[JsonObject]:
+        """What the screen tools added for the frame to do, in order."""
+        return list(self.screen_tools.events) if self.screen_tools is not None else []
 
     def scenes(self) -> list[JsonObject]:
         return voice_scenes(self._frame.scenes)
@@ -738,6 +773,13 @@ class VoiceTools(ToolBox):
                 "error": "not_allowed",
                 "detail": f"The owner has not allowed the voice chat to {VOICE_PERMISSION_DESCRIPTIONS[VOICE_TOOL_PERMISSIONS[name]]} on this frame. Say so; it is a switch in the frame's settings.",
             }))
+        if name in SCREEN_TOOL_LABELS:
+            if self.screen_tools is None:
+                return ToolOutput(json.dumps({"ok": False, "error": "no_screen", "detail": "The frame sent no screen."}))
+            outcome = self.screen_tools.call(name, args)
+            if outcome.get("ok"):
+                self.changed.append(name)
+            return ToolOutput(json.dumps(outcome))
         if name == "list_scenes":
             listing = [
                 {
@@ -1023,6 +1065,10 @@ class VoiceTurnResult:
     reply: str
     tools: list[str]
     actions: list[VoiceAction] = field(default_factory=list)
+    # What the frame does itself from the origin `voice`, in order: the voice
+    # action's, or what the chat's press / type_text / scene_action added
+    # (docs/voice-chat.md "Voice actions").
+    events: list[dict[str, Any]] = field(default_factory=list)
 
 
 def voice_frame_context(
@@ -1094,7 +1140,11 @@ async def run_voice_turn(
         max_rounds=MAX_VOICE_ROUNDS,
     )
     return VoiceTurnResult(
-        transcript=transcript, reply=result.reply.strip() or "Done.", tools=list(result.tool_calls), actions=list(tools.actions)
+        transcript=transcript,
+        reply=result.reply.strip() or "Done.",
+        tools=list(result.tool_calls),
+        actions=list(tools.actions),
+        events=tools.events,
     )
 
 
@@ -1108,11 +1158,14 @@ async def transcribe_and_answer(
     context_block: str,
     history: list[dict[str, str]],
     tools: VoiceTools,
+    decide: DecideVoiceAction | None = None,
     http_client: httpx.AsyncClient | None = None,
 ) -> VoiceTurnResult | tuple[str, str]:
     """The whole answer to a finished session, or (error, detail) for the
     frame to sound as an error: `nothing_heard`, `transcription_failed`,
-    `chat_failed`."""
+    `chat_failed`. `decide` is the voice action's fast path (the route's,
+    over app/utils/voice_actions.py): what it answers is the turn, and None
+    from it is the chat's."""
     peak = pcm_peak(pcm)
     if peak < VOICE_SILENCE_PEAK:
         return "nothing_heard", f"silence (peak {peak})"
@@ -1127,6 +1180,10 @@ async def transcribe_and_answer(
         return "nothing_heard", "the transcription came back empty"
     if transcript_is_hint_echo(transcript, scene_names):
         return "nothing_heard", "only the scene names came back"
+    if decide is not None:
+        decided = await decide(transcript)
+        if decided is not None:
+            return decided
     try:
         return await run_voice_turn(
             transcript=transcript,

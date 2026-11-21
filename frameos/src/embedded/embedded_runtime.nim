@@ -285,6 +285,10 @@ proc sceneStateJson*(): string =
     return if persisted.isNil: "{}" else: $persisted
   $residentSceneState(persistable = false)
 
+proc voiceScreenJson*(): string =
+  ## The voice key's screen digest (frameos/voice_screen.nim).
+  host.voiceScreen(sceneStateJson())
+
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
 

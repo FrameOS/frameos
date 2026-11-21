@@ -21,6 +21,7 @@
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_codec.h"
+#include "fos_events.h"
 #include "fos_mic.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -49,6 +50,8 @@ static const char *TAG = "fos_voice";
 #define VOICE_KEEP_AWAKE_MS 210000
 /* The answer the plane sends: the transcript, a short reply, tool names. */
 #define VOICE_REPLY_MAX_BYTES 4096
+/* How long the screen digest waits for a render to let go of the runtime. */
+#define VOICE_SCREEN_WAIT_MS 1500
 /* What the frame log keeps of the transcript and the reply. */
 #define VOICE_LOG_TEXT_MAX 300
 
@@ -301,17 +304,21 @@ static bool plane_configured(void)
 
 /* One chunk: open, write, read the answer. `*status` is the HTTP status (0
  * when nothing came back); `reply` (may be NULL) receives the body. The
- * connection stays open for the next chunk (keep-alive). */
-static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len, bool done,
+ * connection stays open for the next chunk (keep-alive). `done` -1 is the
+ * screen digest instead (`?screen=1`, no chunk number spent). */
+static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len, int done,
                             int *status, char *reply, size_t reply_len)
 {
     char url[sizeof(up->base) + 48];
-    snprintf(url, sizeof(url), "%s?seq=%u&done=%d", up->base, up->seq, done ? 1 : 0);
+    /* seq=99999: a plane that does not read the digest refuses it untouched
+     * (out of range on a backend, a chunk of no session on the cloud). */
+    if (done < 0) snprintf(url, sizeof(url), "%s?screen=1&seq=99999", up->base);
+    else snprintf(url, sizeof(url), "%s?seq=%u&done=%d", up->base, up->seq, done);
     *status = 0;
     if (reply && reply_len) reply[0] = '\0';
     esp_err_t err = esp_http_client_set_url(up->client, url);
     if (err != ESP_OK) return err;
-    esp_http_client_set_timeout_ms(up->client, done ? VOICE_DONE_TIMEOUT_MS : VOICE_CHUNK_TIMEOUT_MS);
+    esp_http_client_set_timeout_ms(up->client, done > 0 ? VOICE_DONE_TIMEOUT_MS : VOICE_CHUNK_TIMEOUT_MS);
     err = esp_http_client_open(up->client, (int)len);
     if (err != ESP_OK) return err;
     size_t sent = 0;
@@ -324,7 +331,7 @@ static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len,
         sent += (size_t)w;
     }
     /* The last byte is up: from here the plane transcribes and answers. */
-    if (done && s_tick_phase != TICK_OFF) s_tick_phase = TICK_THINKING;
+    if (done > 0 && s_tick_phase != TICK_OFF) s_tick_phase = TICK_THINKING;
     int64_t content_length = esp_http_client_fetch_headers(up->client);
     if (content_length < 0) {
         esp_http_client_close(up->client);
@@ -346,7 +353,7 @@ static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len,
             reply[used] = '\0';
         }
     }
-    up->seq++;
+    if (done >= 0) up->seq++;
     return ESP_OK;
 }
 
@@ -402,6 +409,20 @@ static void handle_reply(const char *body, int status, uint32_t recorded_ms)
     voice_log("voice:reply", fields);
     printf("voice: heard \"%s\" -> \"%s\"\n", heard, said);
     bool acted = cJSON_IsArray(tools) && cJSON_GetArraySize(tools) > 0;
+    /* What the plane picked from the screen digest (docs/voice-chat.md
+     * "Voice actions"): events the frame does itself, in order, from the
+     * origin `voice` — an element pressed or typed into, a scene switched,
+     * a custom event — queued for the render task like any producer's, and
+     * drawn by the render the release below lets go. */
+    const cJSON *event;
+    cJSON_ArrayForEach(event, cJSON_GetObjectItem(json, "events")) {
+        const cJSON *name = cJSON_GetObjectItem(event, "name");
+        if (!cJSON_IsString(name)) continue;
+        char *payload = cJSON_PrintUnformatted(cJSON_GetObjectItem(event, "payload"));
+        fos_events_dispatch_from_plane(FOS_ORIGIN_VOICE, name->valuestring, payload);
+        cJSON_free(payload);
+        acted = true;
+    }
     cJSON_Delete(json);
     /* On the panel: what was heard, in quotes, and the answer. The chat's
      * scene switch, when it made one, is the render this rides along on. */
@@ -449,6 +470,7 @@ static void relay_task(void *arg)
     voice_upload_t up = {0};
     char auth[FOS_STR_LEN + 16];
     char *reply = NULL;
+    char *screen = NULL;
 
     /* The whole session's audio: 30 s, or what PSRAM has (a render holds a
      * few megabytes on a big panel), down to 5 s. */
@@ -487,6 +509,11 @@ static void relay_task(void *arg)
         goto out;
     }
     voice_log("voice:listening", NULL);
+    /* What is on the screen as the key goes down (frameos/voice_screen.nim),
+     * for the plane to pick what was meant from: read now, while the capture
+     * runs, and sent before the first chunk so the plane prepares while the
+     * talking goes on. A render in the way and it goes without. */
+    screen = frameos_nim_voice_screen_copy(VOICE_SCREEN_WAIT_MS);
 
     /* The plane and the connection. A frame that just woke records while
      * Wi-Fi comes up; the capture goes on meanwhile. */
@@ -521,6 +548,13 @@ static void relay_task(void *arg)
         goto out;
     }
     esp_http_client_set_header(up.client, "Authorization", auth);
+    if (screen) {
+        int screen_status = 0;
+        esp_http_client_set_header(up.client, "Content-Type", "application/json");
+        send_chunk(&up, (const uint8_t *)screen, strlen(screen), -1, &screen_status, NULL, 0);
+        free(screen);
+        screen = NULL;
+    }
     esp_http_client_set_header(up.client, "Content-Type", "audio/L16; rate=16000; channels=1");
 
     /* Chunks go up as the talking fills them; the release (or a full
@@ -583,6 +617,7 @@ static void relay_task(void *arg)
     esp_http_client_cleanup(up.client);
 
 out:
+    free(screen);
     /* Every path above left a notice (the answer or the error); this draws it. */
     fos_client_release_render();
     if (s_buf) {

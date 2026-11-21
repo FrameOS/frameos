@@ -1,0 +1,10 @@
+{
+  "name": "Voice memos",
+  "description": "Voice memos that keep the voice key an AI key: hold it and speak, and what matches something on the screen is done (\"open the plumber memo\", \"delete the last one\", \"next page\"), what asks for the frame is the voice chat's, and only what matches nothing is saved as a memo (the scene's catch-all custom event, docs/voice-chat.md \"Voice actions\"). Without a microphone, type a memo and Save. Every memo is a text file in the assets folder (Voice memos/<date time>.txt, the folder is a setting), listed newest first a page at a time: tap one to read all of it, the bin to delete it (it asks first). Settings: title, folder, order, 12- or 24-hour times, and high contrast for black-and-white and grey panels (automatic by default).",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

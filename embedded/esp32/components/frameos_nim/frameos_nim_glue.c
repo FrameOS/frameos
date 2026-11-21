@@ -68,6 +68,7 @@ extern const char *fos_nim_scene_info_json_impl(void);
 extern void fos_nim_current_scene_id_impl(char *out, size_t len);
 extern void fos_nim_current_scene_name_impl(char *out, size_t len);
 extern const char *fos_nim_scene_state_json_impl(void);
+extern const char *fos_nim_voice_screen_impl(void);
 extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern bool fos_nim_scene_running_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *const *scenes, const size_t *lens, int count);
@@ -986,6 +987,18 @@ const char *frameos_nim_scene_state_json_wait(int timeout_ms)
     const char *json = fos_nim_scene_state_json_impl();
     nim_lock_give();
     return json;
+}
+
+char *frameos_nim_voice_screen_copy(int timeout_ms)
+{
+    if (!s_nim_ready) return NULL;
+    if (!nim_lock_take_for(timeout_ms)) return NULL;
+    const char *json = fos_nim_voice_screen_impl();
+    size_t len = json ? strlen(json) : 0;
+    char *copy = len ? heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    if (copy) memcpy(copy, json, len + 1);
+    nim_lock_give();
+    return copy;
 }
 
 const char *frameos_nim_scene_state_json(void)
