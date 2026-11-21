@@ -4,6 +4,12 @@ import bumpy, chroma, common, os, fileformats/png, fontformats/opentype,
     strutils, unicode, vmath
 
 const
+  pixieOpenType* = not defined(pixieNoOpenType)
+    ## `-d:pixieNoOpenType` leaves the whole-parse OpenType reader out: a
+    ## typeface is then the indexed font, a file font or an SVG font only.
+    ## The ESP32 reads every font where it lies, so nothing on it ever set
+    ## `opentype`, but every accessor still asked, and that kept 14 KB of the
+    ## reader in the image.
   autoLineHeight*: float32 = -1 ## Use default line height for the font size
   LF = Rune(10)
   SP = Rune(32)
@@ -11,13 +17,15 @@ const
 type
   Typeface* {.acyclic.} = ref object of GlyphSource
     ## Acyclic as a GlyphSource is (paths.nim): `fallbacks` never leads back.
-    opentype: OpenType
+    when pixieOpenType:
+      opentype: OpenType
     indexed: IndexedFont ## read where it lies (fontformats/indexedfont.nim)
     file: FileFont ## a TrueType file read where it lies (fontformats/filefont.nim)
     svgFont: SvgFont
     filePath*: string
     fallbacks*: seq[Typeface]
-    bitmapGlyphCache: Table[(Rune, int), Image] ## (rune, ppem) -> decoded PNG
+    when pixieOpenType:
+      bitmapGlyphCache: Table[(Rune, int), Image] ## (rune, ppem) -> decoded PNG
 
   Font* = ref object
     typeface*: Typeface
@@ -61,9 +69,10 @@ type
 
 proc scale*(typeface: Typeface): float32 {.inline, raises: [].} =
   ## The scale factor to transform font units into pixels.
-  if typeface.opentype != nil:
-    typeface.opentype.head.unitsPerEm.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.head.unitsPerEm.float32
+  if typeface.indexed != nil:
     typeface.indexed.unitsPerEm.float32
   elif typeface.file != nil:
     typeface.file.unitsPerEm.float32
@@ -72,9 +81,10 @@ proc scale*(typeface: Typeface): float32 {.inline, raises: [].} =
 
 proc ascent*(typeface: Typeface): float32 {.raises: [].} =
   ## The font ascender value in font units.
-  if typeface.opentype != nil:
-    typeface.opentype.hhea.ascender.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.hhea.ascender.float32
+  if typeface.indexed != nil:
     typeface.indexed.ascender.float32
   elif typeface.file != nil:
     typeface.file.ascender.float32
@@ -83,9 +93,10 @@ proc ascent*(typeface: Typeface): float32 {.raises: [].} =
 
 proc descent*(typeface: Typeface): float32 {.raises: [].} =
   ## The font descender value in font units.
-  if typeface.opentype != nil:
-    typeface.opentype.hhea.descender.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.hhea.descender.float32
+  if typeface.indexed != nil:
     typeface.indexed.descender.float32
   elif typeface.file != nil:
     typeface.file.descender.float32
@@ -94,9 +105,10 @@ proc descent*(typeface: Typeface): float32 {.raises: [].} =
 
 proc lineGap*(typeface: Typeface): float32 {.raises: [].} =
   ## The font line gap value in font units.
-  if typeface.opentype != nil:
-    result = typeface.opentype.hhea.lineGap.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.hhea.lineGap.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.lineGap.float32
   elif typeface.file != nil:
     result = typeface.file.lineGap.float32
@@ -108,57 +120,64 @@ proc lineHeight*(typeface: Typeface): float32 {.inline, raises: [].} =
 
 proc capHeight*(typeface: Typeface): float32 {.raises: [].} =
   ## The font cap height value in font units.
-  if typeface.opentype != nil:
-    result = typeface.opentype.os2.sCapHeight.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.os2.sCapHeight.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.capHeight.float32
   elif typeface.file != nil:
     result = typeface.file.capHeight.float32
 
 proc underlinePosition(typeface: Typeface): float32 =
-  if typeface.opentype != nil:
-    result = typeface.opentype.post.underlinePosition.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.post.underlinePosition.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.underlinePosition.float32
   elif typeface.file != nil:
     result = typeface.file.underlinePosition.float32
 
 proc underlineThickness(typeface: Typeface): float32 =
-  if typeface.opentype != nil:
-    result = typeface.opentype.post.underlineThickness.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.post.underlineThickness.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.underlineThickness.float32
   elif typeface.file != nil:
     result = typeface.file.underlineThickness.float32
 
 proc strikeoutPosition(typeface: Typeface): float32 =
-  if typeface.opentype != nil:
-    result = typeface.opentype.os2.yStrikeoutPosition.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.os2.yStrikeoutPosition.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.strikeoutPosition.float32
   elif typeface.file != nil:
     result = typeface.file.strikeoutPosition.float32
 
 proc strikeoutThickness(typeface: Typeface): float32 =
-  if typeface.opentype != nil:
-    result = typeface.opentype.os2.yStrikeoutSize.float32
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.os2.yStrikeoutSize.float32
+  if typeface.indexed != nil:
     result = typeface.indexed.strikeoutSize.float32
   elif typeface.file != nil:
     result = typeface.file.strikeoutSize.float32
 
 proc isCCW(typeface: Typeface): bool {.inline.} =
   ## Returns the expected winding order of a font.
-  if typeface.opentype != nil:
-    return typeface.opentype.isCCW()
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.isCCW()
   if typeface.indexed != nil or typeface.file != nil:
     return true # TrueType outlines
 
 proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
   ## Returns if there is a glyph for this rune.
-  if typeface.opentype != nil:
-    typeface.opentype.hasGlyph(rune)
-  elif typeface.indexed != nil:
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.hasGlyph(rune)
+  if typeface.indexed != nil:
     typeface.indexed.hasGlyph(rune.int32)
   elif typeface.file != nil:
     typeface.file.hasGlyph(rune.int32)
@@ -167,8 +186,10 @@ proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
 
 proc hasColorGlyph*(typeface: Typeface, rune: Rune): bool {.inline, raises: [].} =
   ## Returns if there is a color (emoji) glyph for this rune.
-  (typeface.opentype != nil and typeface.opentype.hasColorGlyph(rune)) or
-    (typeface.file != nil and typeface.file.hasColorGlyph(rune.int32))
+  when pixieOpenType:
+    if typeface.opentype != nil and typeface.opentype.hasColorGlyph(rune):
+      return true
+  typeface.file != nil and typeface.file.hasColorGlyph(rune.int32)
 
 proc fallbackTypeface*(typeface: Typeface, rune: Rune): Typeface =
   ## Looks through fallback typefaces to find one that has the glyph.
@@ -179,29 +200,59 @@ proc fallbackTypeface*(typeface: Typeface, rune: Rune): Typeface =
     if typeface != nil:
       return typeface
 
+proc faceGlyphPath(face: Typeface, rune: Rune): Path {.raises: [PixieError].} =
+  ## The rune's outline in `face`'s own units.
+  when pixieOpenType:
+    if face.opentype != nil:
+      return face.opentype.getGlyphPath(rune)
+  if face.indexed != nil:
+    result = face.indexed.getGlyphPath(rune.int32)
+  elif face.file != nil:
+    result = face.file.getGlyphPath(rune.int32)
+  else:
+    result = newPath()
+    result.addPath(face.svgFont.getGlyphPath(rune))
+
 proc getGlyphPath*(
   typeface: Typeface, rune: Rune
 ): Path {.inline, raises: [PixieError].} =
   ## The glyph path for the rune.
-  result = newPath()
-
   let typeface2 = typeface.fallbackTypeface(rune)
   if typeface2 == nil:
-    return
+    return newPath()
 
-  if typeface2.opentype != nil:
-    result = typeface2.opentype.getGlyphPath(rune)
-  elif typeface2.indexed != nil:
-    result = typeface2.indexed.getGlyphPath(rune.int32)
-  elif typeface2.file != nil:
-    result = typeface2.file.getGlyphPath(rune.int32)
-  else:
-    result.addPath(typeface2.svgFont.getGlyphPath(rune))
+  result = typeface2.faceGlyphPath(rune)
 
   # Apply typeface ratio.
   let ratio = typeface.scale / typeface2.scale
   if ratio != 1.0:
     result.transform(scale(vec2(ratio, ratio)))
+
+proc faceAdvance(face: Typeface, rune: Rune): float32 {.raises: [].} =
+  ## The rune's advance in `face`'s own units.
+  when pixieOpenType:
+    if face.opentype != nil:
+      return face.opentype.getAdvance(rune)
+  if face.indexed != nil:
+    face.indexed.advance(max(face.indexed.glyphIdOf(rune.int32), 0)).float32
+  elif face.file != nil:
+    face.file.advance(max(face.file.glyphIdOf(rune.int32), 0)).float32
+  else:
+    face.svgFont.getAdvance(rune)
+
+proc faceKerning(face: Typeface, left, right: Rune): float32 {.raises: [].} =
+  ## The pair's kerning in `face`'s own units.
+  when pixieOpenType:
+    if face.opentype != nil:
+      return face.opentype.getKerningAdjustment(left, right)
+  if face.indexed != nil:
+    let font = face.indexed
+    font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
+  elif face.file != nil:
+    let font = face.file
+    font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
+  else:
+    face.svgfont.getKerningAdjustment(left, right)
 
 proc getAdvance*(typeface: Typeface, rune: Rune): float32 {.inline, raises: [].} =
   ## The advance for the rune in pixels.
@@ -210,14 +261,7 @@ proc getAdvance*(typeface: Typeface, rune: Rune): float32 {.inline, raises: [].}
     # Get tofu advance, see tofu_advance test.
     typeface2 = typeface
 
-  if typeface2.opentype != nil:
-    result = typeface2.opentype.getAdvance(rune)
-  elif typeface2.indexed != nil:
-    result = typeface2.indexed.advance(max(typeface2.indexed.glyphIdOf(rune.int32), 0)).float32
-  elif typeface2.file != nil:
-    result = typeface2.file.advance(max(typeface2.file.glyphIdOf(rune.int32), 0)).float32
-  else:
-    result = typeface2.svgFont.getAdvance(rune)
+  result = typeface2.faceAdvance(rune)
 
   # Apply typeface ratio.
   result *= typeface.scale / typeface2.scale
@@ -234,16 +278,7 @@ proc getKerningAdjustment*(
     return
   # Only do kerning if both typefaces are the same.
   if typefaceRight == typefaceLeft:
-    if typefaceRight.opentype != nil:
-      result = typefaceRight.opentype.getKerningAdjustment(left, right)
-    elif typefaceRight.indexed != nil:
-      let font = typefaceRight.indexed
-      result = font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
-    elif typefaceRight.file != nil:
-      let font = typefaceRight.file
-      result = font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
-    else:
-      result = typefaceRight.svgfont.getKerningAdjustment(left, right)
+    result = typefaceRight.faceKerning(left, right)
 
     # Apply typeface ratio.
     result *= typeface.scale / typefaceRight.scale
@@ -594,12 +629,13 @@ proc newTypeface(): Typeface =
   result = Typeface()
   result.serial = uint32(atomicInc(typefaceSerial))
 
-proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
-  result = newTypeface()
-  result.opentype = parseOpenType(buf)
+when pixieOpenType:
+  proc parseOtf*(buf: string): Typeface {.raises: [PixieError].} =
+    result = newTypeface()
+    result.opentype = parseOpenType(buf)
 
-proc parseTtf*(buf: string): Typeface {.raises: [PixieError].} =
-  parseOtf(buf)
+  proc parseTtf*(buf: string): Typeface {.raises: [PixieError].} =
+    parseOtf(buf)
 
 proc parseIndexedTypeface*(data: sink string): Typeface {.raises: [PixieError].} =
   ## A typeface read where it lies (fontformats/indexedfont.nim): a string
@@ -650,7 +686,10 @@ proc glyphPath*(typeface: Typeface, rune: Rune, size: float32): Path {.raises: [
   var
     box: Rect
     bounds: Rect
-  if (face.opentype != nil and face.opentype.glyphBox(rune, box)) or
+  var boxed = false
+  when pixieOpenType:
+    boxed = face.opentype != nil and face.opentype.glyphBox(rune, box)
+  if boxed or
       (face.indexed != nil and face.indexed.glyphBox(face.indexed.glyphIdOf(rune.int32), box)) or
       (face.file != nil and face.file.glyphBox(max(face.file.glyphIdOf(rune.int32), 0), box)):
     let s = size / face.scale
@@ -804,8 +843,12 @@ proc faceColorGlyph(
   if typeface.file != nil:
     if not typeface.file.bitmapGlyph(rune.int32, size, bitmap):
       return nil
-  elif typeface.opentype == nil or not typeface.opentype.getBitmapGlyph(rune, size, bitmap):
-    return nil
+  else:
+    when pixieOpenType:
+      if typeface.opentype == nil or not typeface.opentype.getBitmapGlyph(rune, size, bitmap):
+        return nil
+    else:
+      return nil
   let s = size / bitmap.ppem
   let top = bitmap.yOffset
   inc colorGlyphDecodes
@@ -872,42 +915,43 @@ proc drawColorGlyphs(
         target.draw(image, transform * translate(vec2(round(at.x), round(at.y))))
       continue
 
-    let opentype = typeface.opentype
-    let layers = opentype.getColorGlyphLayers(rune)
-    if layers.len > 0:
-      # COLR layered vector glyph.
-      let layerScale = font.size / typeface.scale
-      for layer in layers:
-        let path = newPath()
-        path.addPath(layer.path)
-        path.transform(translate(position) * scale(vec2(layerScale)))
-        let paint = newPaint(SolidPaint)
-        paint.color =
-          if layer.useTextColor:
-            font.paint.color
-          else:
-            layer.color.color
-        target.fillPath(path, paint, transform)
-      continue
+    when pixieOpenType:
+      let opentype = typeface.opentype
+      let layers = opentype.getColorGlyphLayers(rune)
+      if layers.len > 0:
+        # COLR layered vector glyph.
+        let layerScale = font.size / typeface.scale
+        for layer in layers:
+          let path = newPath()
+          path.addPath(layer.path)
+          path.transform(translate(position) * scale(vec2(layerScale)))
+          let paint = newPaint(SolidPaint)
+          paint.color =
+            if layer.useTextColor:
+              font.paint.color
+            else:
+              layer.color.color
+          target.fillPath(path, paint, transform)
+        continue
 
-    # Embedded PNG bitmap glyph (CBDT or sbix).
-    var bitmap: BitmapGlyph
-    if opentype.getBitmapGlyph(rune, font.size, bitmap):
-      let key = (rune, bitmap.ppem.int)
-      if key notin typeface.bitmapGlyphCache:
-        typeface.bitmapGlyphCache[key] = newImage(decodePng(bitmap.png))
-      let
-        image = typeface.bitmapGlyphCache.getOrDefault(key, nil)
-        bitmapScale = font.size / bitmap.ppem
-        top =
-          if bitmap.yOffsetIsBottom:
-            bitmap.yOffset + image.height.float32
-          else:
-            bitmap.yOffset
-        offset = position + vec2(bitmap.xOffset, -top) * bitmapScale
-      target.draw(
-        image, transform * translate(offset) * scale(vec2(bitmapScale))
-      )
+      # Embedded PNG bitmap glyph (CBDT or sbix).
+      var bitmap: BitmapGlyph
+      if opentype.getBitmapGlyph(rune, font.size, bitmap):
+        let key = (rune, bitmap.ppem.int)
+        if key notin typeface.bitmapGlyphCache:
+          typeface.bitmapGlyphCache[key] = newImage(decodePng(bitmap.png))
+        let
+          image = typeface.bitmapGlyphCache.getOrDefault(key, nil)
+          bitmapScale = font.size / bitmap.ppem
+          top =
+            if bitmap.yOffsetIsBottom:
+              bitmap.yOffset + image.height.float32
+            else:
+              bitmap.yOffset
+          offset = position + vec2(bitmap.xOffset, -top) * bitmapScale
+        target.draw(
+          image, transform * translate(offset) * scale(vec2(bitmapScale))
+        )
 
 proc glyphRuns(target: Image, arrangement: Arrangement, transform: Mat3): bool =
   ## Fills the arrangement a glyph at a time from the glyph cache (paths.nim);
@@ -1083,39 +1127,41 @@ proc strokeText*(
     dashes
   )
 
-proc readTypeface*(filePath: string): Typeface {.raises: [PixieError].} =
-  ## Loads a typeface from a file.
-  try:
-    result =
-      case splitFile(filePath).ext.toLowerAscii():
-        of ".ttf":
-          parseTtf(readFile(filePath))
-        of ".otf":
-          parseOtf(readFile(filePath))
-        of ".svg":
-          parseSvgFont(readFile(filePath))
-        else:
-          raise newException(PixieError, "Unsupported font format")
-  except IOError as e:
-    raise newException(PixieError, e.msg, e)
+when pixieOpenType:
+  proc readTypeface*(filePath: string): Typeface {.raises: [PixieError].} =
+    ## Loads a typeface from a file.
+    try:
+      result =
+        case splitFile(filePath).ext.toLowerAscii():
+          of ".ttf":
+            parseTtf(readFile(filePath))
+          of ".otf":
+            parseOtf(readFile(filePath))
+          of ".svg":
+            parseSvgFont(readFile(filePath))
+          else:
+            raise newException(PixieError, "Unsupported font format")
+    except IOError as e:
+      raise newException(PixieError, e.msg, e)
 
-  result.filePath = filePath
+    result.filePath = filePath
 
-proc readTypefaces*(filePath: string): seq[Typeface] {.raises: [PixieError].} =
-  ## Loads a OpenType Collection (.ttc).
-  try:
-    for opentype in parseOpenTypeCollection(readFile(filePath)):
-      let typeface = newTypeface()
-      typeface.opentype = opentype
-      result.add(typeface)
-  except IOError as e:
-    raise newException(PixieError, e.msg, e)
+  proc readTypefaces*(filePath: string): seq[Typeface] {.raises: [PixieError].} =
+    ## Loads a OpenType Collection (.ttc).
+    try:
+      for opentype in parseOpenTypeCollection(readFile(filePath)):
+        let typeface = newTypeface()
+        typeface.opentype = opentype
+        result.add(typeface)
+    except IOError as e:
+      raise newException(PixieError, e.msg, e)
+
+  proc readFont*(filePath: string): Font {.raises: [PixieError].} =
+    ## Loads a font from a file.
+    newFont(readTypeface(filePath))
 
 proc name*(typeface: Typeface): string =
   ## Returns the name of the font.
-  if typeface.opentype != nil:
-    return typeface.opentype.fullName
-
-proc readFont*(filePath: string): Font {.raises: [PixieError].} =
-  ## Loads a font from a file.
-  newFont(readTypeface(filePath))
+  when pixieOpenType:
+    if typeface.opentype != nil:
+      return typeface.opentype.fullName

@@ -10,7 +10,7 @@
 ## thread touches). Advances, kerning and outlines are the TrueType font's,
 ## as `opentype.nim` reads them.
 
-import bumpy, vmath, zippy, ../common, ../paths, opentype
+import bumpy, vmath, ../common, ../inflatestream, ../paths, opentype
 
 type
   IndexedFont* = ref object
@@ -190,15 +190,14 @@ proc inflatedBlock(font: IndexedFont, b: int): int =
   blockFont[result] = 0
   var inflated: string
   try:
-    inflated = uncompress(font.data[start].addr, stop - start, dfDeflate)
-  except ZippyError as e:
+    # Its length is known, so the string is made that size and the block is
+    # inflated in a buffer of its own size, not the stream's 64 KB window.
+    inflated = uncompressDeflate(font.data[start].addr, stop - start, rawLen)
+  except PixieError as e:
     raise newException(PixieError, "Invalid indexed font block: " & e.msg, e)
   if inflated.len != rawLen:
     fail("block length")
-  # Kept at its length: the inflate's own string grew by doubling.
-  blockData[result] = newString(rawLen)
-  if rawLen > 0:
-    copyMem(blockData[result][0].addr, inflated[0].addr, rawLen)
+  blockData[result] = move inflated
   blockFont[result] = font.id
   blockIndex[result] = b
 

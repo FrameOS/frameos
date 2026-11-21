@@ -3731,6 +3731,56 @@ proc fillPath*(
       image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
         mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
 
+proc strokeSolidShapes(
+  image: Image,
+  shapes: seq[Polygon],
+  color: Color,
+  transform: Mat3,
+  pixelScale: float32,
+  strokeWidth: float32,
+  lineCap: LineCap,
+  lineJoin: LineJoin,
+  miterLimit: float32,
+  dashes: seq[float32],
+  blendMode: BlendMode
+) {.raises: [PixieError].} =
+  ## strokePath's one colour: `shapes` (the path flattened at `pixelScale`)
+  ## outlined and filled. Not generic, so a Path and path data share it.
+  let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
+  defer:
+    if pathProbeOn:
+      pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
+      inc pathProbeCount[ppStroke]
+  let
+    # An opaque color blended normally is outlined and filled a batch of
+    # subpaths at a time: what one batch paints, the next painting again
+    # leaves as it was (bar the soft edge where two batches cross). A
+    # stroke outlines every point (a round join is a circle) and the fill
+    # holds every edge of the outline at once, so a long path (a map's
+    # roads, thousands of subpaths) outlined whole needed megabytes that
+    # a frame does not have. A translucent stroke stays one fill: two
+    # batches over the same pixels would show where they cross.
+    batches = color.a >= 1 and blendMode == NormalBlend
+  var
+    first = 0
+    points = 0
+  for i in 0 ..< shapes.len:
+    points += shapes[i].len
+    if i == shapes.high or (batches and points >= strokeBatchPoints):
+      var outline = strokeShapes(
+        shapes.toOpenArray(first, i),
+        strokeWidth,
+        lineCap,
+        lineJoin,
+        miterLimit,
+        dashes,
+        pixelScale
+      )
+      outline.transform(transform)
+      image.fillShapes(outline, color, NonZero, blendMode)
+      first = i + 1
+      points = 0
+
 proc strokePath*(
   image: Image,
   path: SomePath,
@@ -3765,42 +3815,10 @@ proc strokePath*(
             true, strokeWidth, lineCap, lineJoin, miterLimit, dashes)
         if masked:
           return
-      let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
-      defer:
-        if pathProbeOn:
-          pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
-          inc pathProbeCount[ppStroke]
-      let
-        pixelScale = transform.pixelScale()
-        shapes = parseSomePath(path, false, pixelScale)
-        # An opaque color blended normally is outlined and filled a batch of
-        # subpaths at a time: what one batch paints, the next painting again
-        # leaves as it was (bar the soft edge where two batches cross). A
-        # stroke outlines every point (a round join is a circle) and the fill
-        # holds every edge of the outline at once, so a long path (a map's
-        # roads, thousands of subpaths) outlined whole needed megabytes that
-        # a frame does not have. A translucent stroke stays one fill: two
-        # batches over the same pixels would show where they cross.
-        batches = color.a >= 1 and paint.blendMode == NormalBlend
-      var
-        first = 0
-        points = 0
-      for i in 0 ..< shapes.len:
-        points += shapes[i].len
-        if i == shapes.high or (batches and points >= strokeBatchPoints):
-          var outline = strokeShapes(
-            shapes.toOpenArray(first, i),
-            strokeWidth,
-            lineCap,
-            lineJoin,
-            miterLimit,
-            dashes,
-            pixelScale
-          )
-          outline.transform(transform)
-          image.fillShapes(outline, color, NonZero, paint.blendMode)
-          first = i + 1
-          points = 0
+      let pixelScale = transform.pixelScale()
+      image.strokeSolidShapes(parseSomePath(path, false, pixelScale), color,
+        transform, pixelScale, strokeWidth, lineCap, lineJoin, miterLimit,
+        dashes, paint.blendMode)
     return
 
   var bounds = shapeBounds(path, transform)
@@ -3821,6 +3839,58 @@ proc strokePath*(
         miterLimit,
         dashes
       )
+
+proc fillPathText*(
+  image: Image,
+  data: string,
+  paint: Paint,
+  transform = mat3(),
+  windingRule = NonZero
+) {.raises: [PixieError].} =
+  ## fillPath for path data that is read here and let go (the SVG reader's
+  ## long paths, `lateData`): one colour straight from the commands' flattening,
+  ## any other paint through a Path. Draws what `fillPath(data, ...)` does
+  ## without a second copy of fillPath made for strings.
+  paint.opacity = clamp(paint.opacity, 0, 1)
+  if paint.opacity == 0:
+    return
+  if paint.kind != SolidPaint:
+    image.fillPath(parsePath(data), paint, transform, windingRule)
+    return
+  if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
+    var color = paint.color
+    color.a *= paint.opacity
+    pathProbe(ppFill):
+      var shapes = parsePath(data).commandsToShapes(true, transform.pixelScale())
+      shapes.transform(transform)
+      image.fillShapes(shapes, color, windingRule, paint.blendMode)
+
+proc strokePathText*(
+  image: Image,
+  data: string,
+  paint: Paint,
+  transform = mat3(),
+  strokeWidth: float32 = 1.0,
+  lineCap = ButtCap,
+  lineJoin = MiterJoin,
+  miterLimit = defaultMiterLimit,
+  dashes: seq[float32] = @[]
+) {.raises: [PixieError].} =
+  ## strokePath for path data that is read here and let go, as fillPathText.
+  paint.opacity = clamp(paint.opacity, 0, 1)
+  if paint.opacity == 0:
+    return
+  if paint.kind != SolidPaint:
+    image.strokePath(parsePath(data), paint, transform, strokeWidth, lineCap,
+      lineJoin, miterLimit, dashes)
+    return
+  if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
+    var color = paint.color
+    color.a *= paint.opacity
+    let pixelScale = transform.pixelScale()
+    image.strokeSolidShapes(parsePath(data).commandsToShapes(false, pixelScale),
+      color, transform, pixelScale, strokeWidth, lineCap, lineJoin, miterLimit,
+      dashes, paint.blendMode)
 
 proc overlaps(
   shapes: seq[Polygon],

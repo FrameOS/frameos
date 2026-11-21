@@ -416,22 +416,6 @@ proc writePixels16(
       else:
         discard # 16-bit paletted PNG is not a valid color/bit-depth combo.
 
-proc uncompressIdats(
-  data: ptr UncheckedArray[uint8], idats: seq[(int, int)]
-): string =
-  if idats.len > 1:
-    var imageData: string
-    for (start, len) in idats:
-      let op = imageData.len
-      imageData.setLen(imageData.len + len)
-      copyMem(imageData[op].addr, data[start].addr, len)
-    result = try: uncompress(imageData) except ZippyError: failInvalid()
-  else:
-    let
-      (start, len) = idats[0]
-      p = data[start].unsafeAddr
-    result = try: uncompress(p, len) except ZippyError: failInvalid()
-
 proc unfilterRow*(
   cur: var seq[uint8], prev: seq[uint8], filterType: uint8, rowBytes, bpp: int
 ) {.raises: [PixieError].} =
@@ -491,6 +475,16 @@ type InflateRunProc = proc (
   ## Runs one full inflate of a PNG's IDAT stream, emitting the uncompressed
   ## bytes through onData. Abstracts over where the compressed bytes live
   ## (in-memory segments or a pull source).
+
+proc uncompressIdats(
+  data: ptr UncheckedArray[uint8], idats: seq[(int, int)]
+): string =
+  ## The IDAT chunks' zlib stream read where they lie, through the same
+  ## inflater the streamed decode uses (one inflater in the image, not two).
+  try:
+    uncompressZlib(idatSlices(data, idats))
+  except PixieError:
+    failInvalid()
 
 proc streamRows(
   header: PngHeader,
@@ -830,119 +824,18 @@ proc checkFullDecodeBudget(header: PngHeader) =
   checkDecodeBudget(header, planBytes)
 
 proc parsePngStructure(
+  segments: openArray[InflateSegment]
+): PngStructure {.raises: [PixieError].}
+
+proc parsePngStructure(
   data: ptr UncheckedArray[uint8], len: int
 ): PngStructure {.raises: [PixieError].} =
   ## Validates the PNG signature and every chunk (including CRCs) and
   ## collects the header, palette, transparency and IDAT locations without
-  ## decoding any image data.
-  if len < (8 + (8 + 13 + 4) + 4): # Magic bytes + IHDR + IEND
-    failInvalid()
-
-  # PNG file signature
-  let signature = cast[array[8, uint8]](data.readUint64(0))
-  if signature != pngSignature:
-    failInvalid()
-
-  var
-    pos = 8 # After signature
-    counts = ChunkCounts()
-    header: PngHeader
-    palette: seq[ColorRGB]
-    transparency: string
-    idats: seq[(int, int)]
-    prevChunkType: string
-
-  # First chunk must be IHDR
-  if data.readUint32(pos).swap() != 13 or
-    data.readStr(pos + 4, 4) != "IHDR":
-    failInvalid()
-  inc(pos, 8)
-  header = decodeHeader(data[pos].addr)
-  prevChunkType = "IHDR"
-  inc(pos, 13)
-
-  let headerCrc = crc32(data[pos - 17].addr, 17)
-  if headerCrc != data.readUint32(pos).swap():
-    failCRC()
-  inc(pos, 4) # CRC
-
-  while true:
-    if pos + 8 > len:
-      failInvalid()
-
-    let
-      chunkLen = data.readUint32(pos).swap().int
-      chunkType = data.readStr(pos + 4, 4)
-    inc(pos, 8)
-
-    if chunkLen > high(int32).int:
-      failInvalid()
-
-    if pos + chunkLen + 4 > len:
-      failInvalid()
-
-    case chunkType:
-    of "IHDR":
-      failInvalid()
-    of "PLTE":
-      inc counts.PLTE
-      if counts.PLTE > 1 or counts.IDAT > 0 or counts.tRNS > 0:
-        failInvalid()
-      palette = decodePalette(data[pos].addr, chunkLen)
-    of "tRNS":
-      inc counts.tRNS
-      if counts.tRNS > 1 or counts.IDAT > 0:
-        failInvalid()
-      transparency = data.readStr(pos, chunkLen)
-      case header.colorType:
-      of 0:
-        if transparency.len != 2:
-          failInvalid()
-      of 2:
-        if transparency.len != 6:
-          failInvalid()
-      of 3:
-        if transparency.len > palette.len:
-          failInvalid()
-      else:
-        failInvalid()
-    of "IDAT":
-      inc counts.IDAT
-      if counts.IDAT > 1 and prevChunkType != "IDAT":
-        failInvalid()
-      if header.colorType == 3 and counts.PLTE == 0:
-        failInvalid()
-      idats.add((pos, chunkLen))
-    of "IEND":
-      if chunkLen != 0:
-        failInvalid()
-    else:
-      if (chunkType.readUint8(0) and 0b00100000) == 0:
-        raise newException(
-          PixieError, "Unrecognized PNG critical chunk " & chunkType
-        )
-
-    inc(pos, chunkLen)
-
-    let chunkCrc = crc32(data[pos - chunkLen - 4].addr, chunkLen + 4)
-    if chunkCrc != data.readUint32(pos).swap():
-      failCRC()
-    inc(pos, 4) # CRC
-
-    prevChunkType = chunkType
-
-    if pos == len or prevChunkType == "IEND":
-      break
-
-  if prevChunkType != "IEND":
-    failInvalid()
-
-  PngStructure(
-    header: header,
-    palette: palette,
-    transparency: transparency,
-    idats: idats
-  )
+  ## decoding any image data: the segmented parser over one segment, where
+  ## the IDAT spans it collects are offsets into `data` (one parser in the
+  ## image, not a contiguous copy of it beside the segmented one).
+  parsePngStructure([InflateSegment(data: data, len: len)])
 
 proc decodeWholePng(
   data: ptr UncheckedArray[uint8], structure: PngStructure
