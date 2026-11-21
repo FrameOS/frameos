@@ -645,7 +645,9 @@ export function get(app) {
   US layout under the UI, which is laid out in what is left and scrolled so
   the field shows. Its pages are letters (shift for one capital, shift
   tapped twice for all of them), `123` and `#+=`; a `type="number"` field
-  gets a number pad. A key is a region of the UI like a button, so it works
+  gets a number pad. Its keys stop growing on a wide panel, and every row is
+  then as wide as the page's widest one, the space bar taking what the keys
+  beside it leave (not the panel's width). A key is a region of the UI like a button, so it works
   with a finger, a pen or the mouse over the preview, and on e-paper too, a
   refresh a key (it shows no press there). An ESP32 board has no keyboard of
   its own, ever.

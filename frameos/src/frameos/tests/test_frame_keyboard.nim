@@ -109,6 +109,7 @@ let scenes = %*[
   jsxScene("tests/bars", barsLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
     "backgroundColor": "#000000", "isLayout": true}}"""),
   jsxScene("tests/form", formUi, """{"layout": {"sceneId": "tests/bars"}}"""),
+  jsxScene("tests/bareForm", formUi),
   jsxScene("tests/search", searchLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
     "backgroundColor": "#000000", "isLayout": true}}"""),
   win98,
@@ -340,6 +341,90 @@ suite "the frame's keyboard on a small screen":
     check after.color(10, Small.h - 10) == colored("#0000ff")
     check problems.len == 0
 
+# ------------------------------------------------------------ its rows
+
+proc rowsOf(sceneId: string): seq[tuple[y, left, right: float32]] =
+  ## The keyboard's rows as its keys were laid out: each row's top, and its
+  ## first key's left edge and its last key's right edge, top row first.
+  let target = uiTarget(sceneId, 2, create = false)
+  doAssert not target.isNil
+  for r in target.regions:
+    let code = r.handlers[ueClick] - 1 - KeyBase
+    if code <= 0 or code >= 256:
+      continue # not a key: the app's, or the keyboard's own box
+    var found = false
+    for row in result.mitems:
+      if abs(row.y - r.y) < 1:
+        row.left = min(row.left, r.x)
+        row.right = max(row.right, r.x + r.w)
+        found = true
+    if not found:
+      result.add (r.y, r.x, r.x + r.w)
+  for i in 1 ..< result.len:
+    var j = i
+    while j > 0 and result[j].y < result[j - 1].y:
+      swap(result[j], result[j - 1])
+      dec j
+
+proc rowsMatch(sceneId: string): bool =
+  ## The bottom row (123, comma, space, period, Enter) as wide as the top row
+  ## of letters (or of symbols), the same left and right edges.
+  let rows = rowsOf(sceneId)
+  doAssert rows.len == 4, $rows
+  result = abs(rows[^1].left - rows[0].left) <= 1 and abs(rows[^1].right - rows[0].right) <= 1
+  if not result:
+    echo sceneId, " rows: ", rows
+
+proc pressKey(scene: FrameScene, sceneId: string, code: int, dx, dy: float32) =
+  ## A tap on key `code` of the scene's keyboard, its canvas `dx`, `dy` on the frame's.
+  let target = uiTarget(sceneId, 2, create = false)
+  let scale = if target.scale > 0: target.scale else: 1'f32
+  for r in target.regions:
+    if r.handlers[ueClick] - 1 == KeyBase + code:
+      discard scene.tap(float(dx + target.offsetX + (r.x + r.w / 2) * scale),
+        float(dy + target.offsetY + (r.y + r.h / 2) * scale))
+      return
+  doAssert false, "no key " & $code
+
+suite "the keyboard's rows":
+  for size in [(w: 1872, h: 1404), (w: 800, h: 480)]:
+    let tag = $size.w & "x" & $size.h
+    test "on a " & tag & " panel its bottom row is as wide as the rows above it, in a scene and docked":
+      forgetTypedKeys()
+      let config = configOf(size)
+      # A scene of its own: the keyboard inside its UI, as before.
+      let bare = init("tests/bareForm".SceneId, config, logger(config), %*{})
+      discard pass(bare, size)
+      discard bare.tap(100, float(size.h - 20))
+      check keyboardShown("tests/bareForm")
+      shot(pass(bare, size), "rows-" & tag & "-scene")
+      check frameKeyboard.sceneId == ""
+      check rowsMatch("tests/bareForm")
+      bare.pressKey("tests/bareForm", ord(kSymbols), 0, 0)
+      shot(pass(bare, size), "rows-" & tag & "-scene-symbols")
+      check rowsMatch("tests/bareForm")
+      bare.pressKey("tests/bareForm", ord(kMore), 0, 0)
+      discard pass(bare, size)
+      check rowsMatch("tests/bareForm")
+      # Inside a layout: the frame's, docked under it.
+      let docked = init("tests/form".SceneId, config, logger(config), %*{})
+      discard pass(docked, size)
+      discard docked.tap(100, float(size.h - 20 - 20))
+      check keyboardShown("tests/form")
+      shot(pass(docked, size), "rows-" & tag & "-docked")
+      check frameKeyboard.sceneId == "tests/form" and frameKeyboard.w == size.w.float32
+      check rowsMatch("tests/form")
+      docked.pressKey("tests/form", ord(kSymbols), frameKeyboard.sceneX, frameKeyboard.sceneY)
+      shot(pass(docked, size), "rows-" & tag & "-docked-symbols")
+      check rowsMatch("tests/form")
+      # Done: the next test starts with no field that has it.
+      docked.pressKey("tests/form", ord(kEnter), frameKeyboard.sceneX, frameKeyboard.sceneY)
+      discard pass(docked, size)
+      check not keyboardShown("tests/form")
+      bare.pressKey("tests/bareForm", ord(kEnter), 0, 0)
+      check not keyboardShown("tests/bareForm")
+      check problems.len == 0
+
 # ------------------------------------------------------------ a desktop
 
 var
@@ -396,6 +481,7 @@ suite "the frame's keyboard on a desktop":
     check k.sceneId == "tests/windowForm"
     check k.grip > 0
     check k.w < Desk.w.float32 and k.x > 0 and k.y + k.h <= Desk.h.float32
+    check rowsMatch("tests/windowForm")
     # Over every window: in its own look (the desktop's theme) where the
     # window behind was.
     check two.color(int(k.x + 2), int(k.y + k.h / 2)) == colored("#ff0000")
