@@ -120,3 +120,25 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
     expect(stored[0]?.nodes[0]?.data.keyword).toBe("data/immich");
   });
 });
+
+describe("what a frame is sent", () => {
+  it("carries no app tests, and a scene saved back keeps the store's", async () => {
+    const { keepAppTestFiles, scenesForFrame } = await import("./retired-apps");
+    const scenes = [{ id: "s", nodes: [], apps: { a: { sources: { "app.ts": "x", "app.test.ts": "t" } } } }];
+    expect(scenesForFrame(scenes, null)[0]!.apps.a.sources).toEqual({ "app.ts": "x" });
+    expect(scenes[0]!.apps.a.sources["app.test.ts"]).toBe("t");
+    const stored = {
+      id: "s",
+      apps: { a: { sources: { "app.ts": "old", "app.test.ts": "t", "lib.test.ts": "u" } }, gone: { sources: { "x.test.ts": "v" } } },
+    };
+    const saved = {
+      id: "s",
+      apps: { a: { name: "A", sources: { "app.ts": "new", "lib.test.ts": "mine" } }, b: { sources: { "app.ts": "b" } } },
+    };
+    const kept = keepAppTestFiles(saved, stored) as unknown as { apps: Record<string, { sources: Record<string, string> }> };
+    expect(kept.apps.a!.sources).toEqual({ "app.ts": "new", "lib.test.ts": "mine", "app.test.ts": "t" });
+    expect(kept.apps.b).toEqual({ sources: { "app.ts": "b" } });
+    expect(kept.apps.gone).toBeUndefined();
+    expect(keepAppTestFiles(saved, undefined)).toBe(saved);
+  });
+});

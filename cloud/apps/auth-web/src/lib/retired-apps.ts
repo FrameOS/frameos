@@ -292,9 +292,43 @@ export function stripAppTestFiles<T>(scenes: T[]): T[] {
   return scenes;
 }
 
-// As scenesForRuntime, for an ESP32: also without the apps' test files.
-export function scenesForEmbeddedRuntime<T>(scenes: T[], runtimeVersion: string | null | undefined): T[] {
+// What any frame is sent: scenesForRuntime without the apps' test files,
+// which run in the editor and never on a frame (a frame's code editor saving
+// a scene back keeps the store's: keepAppTestFiles, panel-code.ts).
+export function scenesForFrame<T>(scenes: T[], runtimeVersion: string | null | undefined): T[] {
   return stripAppTestFiles(scenesForRuntime(scenes, runtimeVersion));
+}
+
+export const scenesForEmbeddedRuntime = scenesForFrame;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/** `scene` with the test files of `stored` (the store's copy of the same
+ * scene) put back into each app both have: a frame is never sent an app's
+ * tests, so a scene its code editor saves back has none. A test file the
+ * scene carries itself wins. */
+export function keepAppTestFiles<T>(scene: T, stored: unknown): T {
+  const own = scene as Record<string, unknown>;
+  if (!isRecord(stored) || !isRecord(own.apps) || !isRecord(stored.apps)) {
+    return scene;
+  }
+  const apps: Record<string, unknown> = { ...own.apps };
+  for (const [keyword, app] of Object.entries(apps)) {
+    const before = (stored.apps as Record<string, unknown>)[keyword];
+    if (!isRecord(app) || !isRecord(before) || !isRecord(before.sources)) {
+      continue;
+    }
+    const sources: Record<string, unknown> = isRecord(app.sources) ? { ...app.sources } : {};
+    for (const [path, text] of Object.entries(before.sources)) {
+      if (isAppTestFile(path) && typeof text === "string" && !(path in sources)) {
+        sources[path] = text;
+      }
+    }
+    apps[keyword] = { ...app, sources };
+  }
+  return { ...own, apps } as T;
 }
 
 // A converted copy, for readers that show, edit or render scenes.

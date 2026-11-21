@@ -47,7 +47,7 @@ from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
 from app.utils.server_address import split_address
 from app.utils.render_scale import normalize_render_scale
-from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
+from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_frame
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
 from app.utils.versions import current_frameos_version
@@ -2064,7 +2064,7 @@ async def apply_frame_sync(
             # Same stamp the stored copy gets, so device and backend agree.
             normalize_scenes_execution(frame_scenes)
             # ...and in the form its runtime reads (utils/retired_apps.py).
-            backend_push_payload["scenes"] = scenes_for_runtime(frame_scenes, frame_runtime_version(frame))
+            backend_push_payload["scenes"] = scenes_for_frame(frame_scenes, frame_runtime_version(frame))
 
     if database_changed:
         await update_frame(db, redis, frame)

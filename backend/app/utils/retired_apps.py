@@ -407,6 +407,31 @@ def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
     return result
 
 
-def scenes_for_embedded_runtime(scenes: Any, runtime_version: str | None) -> list:
-    """As scenes_for_runtime, for an ESP32: also without the apps' test files."""
+def scenes_for_frame(scenes: Any, runtime_version: str | None) -> list:
+    """What any frame is sent: scenes_for_runtime without the apps' test
+    files, which run in the editor and never on a frame (a frame's code
+    editor saving a scene back keeps the plane's, keep_app_test_files)."""
     return strip_app_test_files(scenes_for_runtime(scenes, runtime_version))
+
+
+scenes_for_embedded_runtime = scenes_for_frame
+
+
+def keep_app_test_files(scene: dict, stored: dict | None) -> dict:
+    """`scene` with the test files of `stored` (the plane's copy of the same
+    scene) put back into each app both have: a frame is never sent an app's
+    tests, so a scene its code editor saves back has none. A test file the
+    scene carries itself wins."""
+    if not isinstance(stored, dict) or not isinstance(scene.get("apps"), dict) or not isinstance(stored.get("apps"), dict):
+        return scene
+    apps = dict(scene["apps"])
+    for keyword, app in apps.items():
+        before = stored["apps"].get(keyword)
+        if not isinstance(app, dict) or not isinstance(before, dict) or not isinstance(before.get("sources"), dict):
+            continue
+        sources = dict(app["sources"]) if isinstance(app.get("sources"), dict) else {}
+        for path, text in before["sources"].items():
+            if is_app_test_file(path) and isinstance(text, str) and path not in sources:
+                sources[path] = text
+        apps[keyword] = {**app, "sources": sources}
+    return {**scene, "apps": apps}

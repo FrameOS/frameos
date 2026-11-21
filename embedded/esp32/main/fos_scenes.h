@@ -119,6 +119,9 @@ char *fos_scenes_json_copy(size_t *out_len);
  * (frameos/src/embedded/embedded_runtime.nim). Caller frees; NULL when the
  * payload has no such scene. */
 char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len);
+/* The same bytes without the log lines: the runtime reading an app's files
+ * again when an interpreter starts. */
+char *fos_scenes_read_scene_file(const char *scene_id, size_t *out_len);
 
 /* Ask the render task to force a backend sync on its next pass. */
 void fos_scenes_request_sync(void);

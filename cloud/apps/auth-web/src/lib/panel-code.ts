@@ -2,6 +2,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { createDb, frames, storeScenes, storeSceneVersions } from "@frameos-cloud/db";
 import { isBrokenLayout, sceneLayoutProblem } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { createAccountScene } from "./account-scene-create";
+import { keepAppTestFiles } from "./retired-apps";
 import { resolveAiAccess } from "./ai/api-key";
 import { frameContextBlock } from "./ai/frame-context";
 import { OpenAiRequestError } from "./ai/openai";
@@ -254,7 +255,12 @@ async function appendSceneVersion(
   if (!latest) {
     return refused("version_not_found", 409);
   }
-  const rebuilt = rebuildZip(latest.zip, { scenesJson: JSON.stringify(scenes, null, 2) });
+  // The frame was sent each scene without its apps' tests: they stay.
+  const kept = scenes.map((entry) => {
+    const id = (entry as { id?: unknown }).id;
+    return keepAppTestFiles(entry, (latest.scenes ?? []).find((old) => (old as { id?: unknown }).id === id));
+  });
+  const rebuilt = rebuildZip(latest.zip, { scenesJson: JSON.stringify(kept, null, 2) });
   if (!rebuilt) {
     return refused("invalid_scene_zip", 409);
   }

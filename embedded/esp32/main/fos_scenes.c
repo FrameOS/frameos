@@ -1053,6 +1053,20 @@ char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
     return json;
 }
 
+/* A scene's file again, for the runtime to read an app's files from when an
+ * interpreter starts (the parsed scene keeps none, docs/esp32-memory.md):
+ * fos_scenes_read_scene_json without its log lines, which would be one a JS
+ * app started. On the render task, from the slot cache when it has it. */
+char *fos_scenes_read_scene_file(const char *scene_id, size_t *out_len)
+{
+    if (s_store_changing) return NULL;
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) return NULL;
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    return read_slot_file(slot, path, out_len);
+}
+
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
     if (s_store_changing) return false; /* the apply after it loads the new set */

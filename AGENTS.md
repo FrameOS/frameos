@@ -1020,6 +1020,14 @@
   (`renderSvgIntoTarget`, `decodeSvgWithFallback`, `frameos.draw`): a long
   path's commands exist only while it is drawn. A parse kept for its damage
   (`svg_frames.nim`, `reuse`) is not.
+- **A loaded scene keeps none of its apps' files** (the doc's "What a loaded
+  scene keeps"): the scene reader takes a `SceneFiles` (where the scene's
+  JSON lives: a file on disk, an ESP32's slot or the preview's payload by id
+  through `sceneFileReader`) and keeps only the apps' keywords; an app reads
+  its files when its interpreter starts and drops them after the compile
+  (`JsAppRuntime.reload`). A new place that parses scenes says where their
+  JSON lives, or passes `sfResident`, which keeps it all. No frame is sent
+  an app's `*.test.*` files (`scenes_for_frame` / `scenesForFrame`).
 - Measure on the board (`-d:memProbe`, `heapinfo`'s `min_ever_free`) and add
   what you find to the doc: a host model has been wrong both ways.
 

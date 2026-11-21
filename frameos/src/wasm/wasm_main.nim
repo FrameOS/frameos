@@ -485,12 +485,20 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
 
 # ------------------------------------------------------------------ loading
 
+var previewScenesText = ""
+
+sceneFileReader = proc (sceneId: SceneId): string {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}: previewScenesText
+
 proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
   ## Parse and install interpreted scenes from the backend's JSON format
   ## (array of scenes). Returns the number of scenes loaded.
   try:
     codePreviewLoaded($payload)
-    let inputs = parseInterpretedSceneInputs($payload)
+    # The page's scenes as it sent them: what an interpreter reads its app's
+    # files from when it starts (sfHost), the parsed scenes keeping none.
+    previewScenesText = $payload
+    let inputs = parseInterpretedSceneInputs(previewScenesText, SceneFiles(kind: sfHost))
     if inputs.len == 0:
       setLastError("loadScenes: no scenes in payload")
       return 0

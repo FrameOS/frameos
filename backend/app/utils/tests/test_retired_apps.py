@@ -135,3 +135,22 @@ def test_embedded_runtime_gets_no_app_test_files():
     # A copy: the stored scene keeps its tests.
     assert "app.test.ts" in scenes[0]["apps"]["panel"]["sources"]
     assert strip_app_test_files([]) == []
+
+
+def test_no_frame_is_sent_an_apps_tests_and_a_save_back_keeps_the_planes():
+    """docs/esp32-memory.md: what any frame is sent carries no *.test.* file
+    (scenes_for_frame); a scene a frame's code editor saves back gets the
+    plane's tests again (keep_app_test_files)."""
+    from app.utils.retired_apps import keep_app_test_files, scenes_for_frame
+
+    scenes = [{"id": "s", "nodes": [], "apps": {"a": {"sources": {"app.ts": "x", "app.test.ts": "t"}}}}]
+    sent = scenes_for_frame(scenes, None)
+    assert sent[0]["apps"]["a"]["sources"] == {"app.ts": "x"}
+    assert scenes[0]["apps"]["a"]["sources"]["app.test.ts"] == "t"
+    stored = {"id": "s", "apps": {"a": {"sources": {"app.ts": "old", "app.test.ts": "t", "lib.test.ts": "u"}}, "gone": {"sources": {"x.test.ts": "v"}}}}
+    saved = {"id": "s", "apps": {"a": {"name": "A", "sources": {"app.ts": "new", "lib.test.ts": "mine"}}, "b": {"sources": {"app.ts": "b"}}}}
+    kept = keep_app_test_files(saved, stored)
+    assert kept["apps"]["a"]["sources"] == {"app.ts": "new", "lib.test.ts": "mine", "app.test.ts": "t"}
+    assert kept["apps"]["b"] == {"sources": {"app.ts": "b"}}
+    assert "gone" not in kept["apps"]
+    assert keep_app_test_files(saved, None) is saved

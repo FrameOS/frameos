@@ -81,7 +81,7 @@ import {
 } from "../../../../../../src/lib/photos/library";
 import { photoBasename } from "../../../../../../src/lib/photos/paths";
 import { identityRateLimitResponse, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
-import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
+import { scenesForFrame } from "../../../../../../src/lib/retired-apps";
 import { deviceSceneIdForFrame, resolveStoreSceneForFrameScene } from "../../../../../../src/lib/scene-images";
 import { sceneListWithPreview } from "../../../../../../src/lib/scene-preview-list";
 
@@ -380,7 +380,7 @@ export async function POST(
   // and keeps its list. A later push carries the picture along, so it stays
   // selectable until installed or discarded (docs/scene-previews.md).
   const previewScenes: VoicePreview = async (previewed, sceneId) => {
-    const bundle = scenesForRuntime(previewed, frame.frameosVersion);
+    const bundle = scenesForFrame(previewed, frame.frameosVersion);
     const assigned = await buildScenesPayloadForFrame(db, frame.id);
     const delivered = "scenes" in assigned ? sceneListWithPreview(assigned.scenes, bundle) : bundle;
     const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
