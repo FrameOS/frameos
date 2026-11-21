@@ -525,6 +525,112 @@ eight with ten, and once in eight of the release image (ten buffers) in the
 bench logs of 2026-11-18. Too few to blame the buffers or clear them; watch
 for it.
 
+## What a loaded scene keeps (2026-11-21)
+
+A loaded scene used to keep every app's source twice:
+
+- once in its parsed `apps`, each file a string in a JSON tree, held for as
+  long as the scene was resident;
+- once more as each app runtime's copy of its main module.
+
+It also kept every app's metadata from the scene JSON (name, description,
+`fields`, `output`) as a tree that nothing reads. A Pi held its whole
+uploaded set a third time, as text, for the life of the process.
+
+None of that is kept now. Scenes stay JSON everywhere: on the wire, on disk,
+in an ESP32's slots and in the template zips.
+
+**The scene reader**
+
+- The reader in `interpreter.nim` ("Reading scenes.json") takes a
+  `SceneFiles` saying where the scene's JSON lives:
+  - `sfJson`: a Pi's `scenes.json(.gz)` or `state/uploaded.json`;
+  - `sfHost`: the host's text of the scene by id, through
+    `sceneFileReader` (an ESP32's slot, out of the slot cache when it is
+    there, via `fos_scenes_read_scene_file`; the browser preview's payload);
+  - `sfResident`: nowhere, which keeps everything as before.
+- For every kind but `sfResident`, the reader keeps only each app's keyword
+  (`readApps`). It never builds the sources or the metadata. An app's
+  config, fields and defaults are its `config.json`, read with its files.
+
+**When an interpreter starts**
+
+- The app's files are read from where the scene's JSON lives, and only that
+  app's `sources` are built (`appSourcesInJson`).
+- A Pi inflates its deployed `scenes.json.gz` once per scene instance, while
+  `init` runs (`sceneFilesText`), not once per app.
+
+**After compiling** (`app_runtime.ensureReady`)
+
+- The app drops `source` and `sources`. QuickJS strips the source itself.
+- An interpreter that starts again reads the files again
+  (`JsAppRuntime.reload`). That covers a deep sleeper's teardown after a
+  render, memory running short, and a desktop window's scene coming back.
+- A module imported after the compile does the same (`haveSources`).
+
+**On a Pi**
+
+- An uploaded set is written to `state/uploaded.json` before its scenes are
+  registered. The scenes read their files from there.
+- `getUploadedScenePayload` reads the file instead of a copy held in memory.
+
+**What frames are sent.** Both planes strip apps' `*.test.*` files from
+everything they send to any frame (`scenes_for_frame` / `scenesForFrame`);
+until now only an ESP32's sets lost them. A frame's code editor saving a
+scene back gets the plane's tests put back (`keep_app_test_files` /
+`keepAppTestFiles`).
+
+What a scene holds on the Nim heap, read the way a board reads its slot
+(`frameos/tools/scene_memory_probe.nim`, x86_64; "held" is after one render,
+the scene still loaded; QuickJS's heap is the same in all three and not
+counted):
+
+| Sample (JSON) | Parsed: main | Parsed: #947 | Parsed: now | Held: main | Held: #947 | Held: now |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Brick breaker (76 KB) | 96 KB | 16 KB | 14 KB | 120 KB | 37 KB | 35 KB |
+| Code editor (70 KB) | 81 KB | 12 KB | 10 KB | 125 KB | 31 KB | 29 KB |
+| Star shooter (88 KB) | 111 KB | 18 KB | 16 KB | 114 KB | 39 KB | 37 KB |
+| Snake (74 KB) | 92 KB | 17 KB | 16 KB | 111 KB | 38 KB | 36 KB |
+| Windows 98 layout (68 KB) | 79 KB | 14 KB | 12 KB | 137 KB | 44 KB | 42 KB |
+| Calendar (105 KB) | 191 KB | 108 KB | 24 KB | 163 KB* | 158 KB | 74 KB |
+
+\* Calendar fetches its feed and has no network here. Its render fails
+early, so its "held" number is no comparison.
+
+**Reading the table**
+
+- **#947** is the scene-packages stack: it releases the sources the same
+  way.
+- **Now** also drops the apps' metadata, which is what makes the gap on
+  Calendar: 7.6 KB of `fields` as text, over 80 KB as a tree.
+- **The cost** is a read of the scene's JSON each time an interpreter
+  starts. On an ESP32 that is a copy out of the slot cache (a scene shown
+  lately is there) or a SPIFFS read.
+
+**The image** (generic S3, local builds against origin/main bbf437950):
+
+| Build | App image |
+| --- | ---: |
+| main | 3,200,944 B |
+| This change | 3,203,984 B (+3,040 B) |
+
+- What it adds: the JSON scanner for one app's sources (about 540 B), the
+  keyword reader (380 B), the read at an interpreter's start and its reload
+  (about 1 KB with `ensureReady`'s part), and the quiet slot read
+  (`readSceneFile`, 115 B).
+- For comparison, scene packages (#938, #947, #948) cost 7.4 KB, because
+  they also read ZIP slots and rebuild a package's JSON for its readers.
+
+**JSON or packages: the two approaches**
+
+| | This change | Scene packages (#938, #947, #948) |
+| --- | --- | --- |
+| The memory a loaded scene keeps | Released | Released |
+| Scenes on the wire, on disk, in template zips | JSON, as before | Packages as files and ZIPs |
+| Per-file diffs and patches | No | Packages make them possible |
+| Assets inside a scene | No | Packages make them possible |
+| Firmware | +3.0 KB | +7.4 KB |
+
 ## Boot and render costs
 
 Same bench frame, for context when weighing "do less at boot" ideas:
