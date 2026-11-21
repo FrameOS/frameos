@@ -284,13 +284,18 @@ way, each render started with the panel's refresh of the one before finished:
   runes sharing a slot, 450 ms a render) and 71 at every emoji render (a line
   of emoji larger than the colour cache, 2 s); 1 KB pages, two-way memos and
   the pass rule for kept emoji made both 0 to 1.
-- **The panel holds the bus for its whole refresh** (`DEV_SPI_Acquire` in
+- **The panel held the bus for its whole refresh** (`DEV_SPI_Acquire` in
   `frameos_display.c`: the vendor drivers drive CS by hand), so a card read
-  during a Spectra's 30 s refresh waits for it: two pages read right after a
-  render that refreshed took 28 s. Timed renders wait for the refresh
-  anyway (`fos_display_refreshing()`); a render asked for meanwhile (a tap,
-  a switch, the console) that has to read the card waits too. Main reads a
-  card font once, whole, and then never; this reads what a render misses.
+  during a Spectra's 30 s refresh waited for it: two pages read right after a
+  render that refreshed took 28 s. Since 2026-11-21 the panel lends the bus
+  for every wait it sleeps through with its chip selects high
+  (`DEV_Delay_ms`, `fos_bus_share.h`: a busy wait, the waveform), and takes it
+  back after. On the E1002, a scene switched to while the scene before
+  refreshed read its LiberationSerif from the card in 1.35 s (56 pages, 24 ms
+  a page, the same as with the panel idle), where the same reads had waited
+  28 s. The rule, a model of the bus with a card asking at every tick, and
+  the wiring are `test_fos_bus_share.c` and `test_esp32_bus_share.py`; the
+  refresh's log line says how often it lent the bus.
 - **Memory**: internal heap `min_free` after the run 19,907 bytes (main
   25,511): FatFs opens files on the internal heap. PSRAM: the page cache
   and memos, 30.5 KB, against main's parsed face of about 300 KB.

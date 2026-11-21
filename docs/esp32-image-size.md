@@ -1253,6 +1253,16 @@ comparison (compile-time constants now).
   (on the ESP32 now the indexed font's and this one, opentype's gone): one
   over a "read this glyph" proc would save about 1 KB.
 
+## Emoji in JSX and SVG text, and the bus lent: +1,920
+
+Against main at 78332f32c built the same way (2026-11-21): 3,191,664 →
+3,193,584. By symbol: the JSX layer's emoji `<image>` (`emitColorGlyph`,
+0.5 KB, and 0.2 KB in `emitText` / `emitGlyphs`), the SVG reader's
+(`addColorGlyphs` 0.7 KB, 0.1 KB in `parseSvgText`), the colour glyph cache
+taking a whole-parsed face's bitmap too (+0.1 KB net) and `colorGlyphImage`
+(0.1 KB); the shared bus lent during the panel's waits, 0.15 KB
+(`DEV_Delay_ms`, `DEV_Digital_Write`).
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim

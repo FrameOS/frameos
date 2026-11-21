@@ -1131,7 +1131,13 @@ frame finds families and bold or italic faces among the fonts in its assets
 folder (`fonts/`), as SVG `<text>` does: on an ESP32 that is its SD card,
 where every TrueType file is read where it lies (docs/esp32-fonts.md), and
 `font-[File-Name.ttf]` names one file. A bold weight no face has is drawn as
-its outline thickened. A layout keeps up to 128 family names. White space collapses as in
+its outline thickened. A layout keeps up to 128 family names. Emoji draw in
+colour where the frame's fonts folder has the emoji font (Noto Color Emoji):
+a colour glyph is a picture, so each is an `<image>` at the pen in the same
+tree as the glyph paths, drawn by the same pass, its box damage like any
+element's, kept at the size drawn in pixie's colour glyph cache
+(docs/esp32-fonts.md "Emoji"); its advance is in the layout and in
+`frameos.measureText`. SVG `<text>` does the same. White space collapses as in
 HTML; lines wrap at spaces.
 
 ### The glyph cache
