@@ -11,6 +11,7 @@ import std/tables
 import pixie
 import pixie/fileformats/svg
 import frameos/js_runtime/burrito
+from frameos/js_runtime/jsx_native import signalRecords
 import frameos/events_gen
 import frameos/ui/theme
 
@@ -32,6 +33,7 @@ type
     node: SvgNode
     firstHandler, handlers, nodes: int
     used: bool
+    path: seq[int32] ## where its node is in the tree read last (children indexes from the root)
 
   JsxMemo* = object
     ## The nodes of elements memo() made (the prelude's), by the number the
@@ -52,6 +54,9 @@ type
     previous: JSValue  # the last render's, for the handlers of kept nodes
     memo: ptr JsxMemo
     keptCursor: int  # where in memo.kept the next memo()'d element is looked for
+    curPath: seq[int32] # the path of the node whose children are being read
+    topIndex: int32     # the top node's index in its parent (-1: it is the root)
+    track: bool         # paths kept: an app with a signal() record (signalRecords), else nobody splices
 
 proc attrName(name: string): string =
   if name == "className":
@@ -112,6 +117,7 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
   if r.nodes >= MaxNodes or depth > MaxDepth or not (jsIsString(v) or jsIsNumber(v) or jsIsObject(v)):
     return
   inc r.nodes
+  let myIndex = if depth == 0: r.topIndex else: into.len.int32
   if not jsIsObject(v):
     into.add SvgNode(text: toNimString(ctx, v))
     return
@@ -154,6 +160,9 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       r.handlerCount += kept.handlers
       r.nodes += kept.nodes
       kept.used = true
+      if r.track:
+        kept.path = r.curPath
+        if myIndex >= 0: kept.path.add myIndex
       into.add kept.node
       return
   let
@@ -216,7 +225,10 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       let name = $raw
       JS_FreeCString(ctx, raw)
       if name == "children":
+        let tracked = r.track and myIndex >= 0
+        if tracked: r.curPath.add myIndex
         r.addNodes(value, node.children, depth + 1)
+        if tracked: r.curPath.setLen(r.curPath.len - 1)
       elif name in ["src", "href"] and jsIsObject(value):
         node.image = r.imageOf(value)
       elif name == "src" and node.tag == "img" and jsIsString(value):
@@ -261,6 +273,9 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       discard JS_SetPropertyStr(ctx, v, "__frameosNode", JS_NewInt32(ctx, memoId.int32))
     r.memo.kept.add JsxKept(id: memoId, node: node, firstHandler: firstHandler,
       handlers: r.handlerCount - firstHandler, nodes: r.nodes - firstNode, used: true)
+    if r.track:
+      r.memo.kept[^1].path = r.curPath
+      if myIndex >= 0: r.memo.kept[^1].path.add myIndex
 
 proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image],
     holder: JSValueConst, memo: ptr JsxMemo = nil, drawing = false): SvgNode =
@@ -272,7 +287,8 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
   ## `drawing`: what `frameos.draw` paints into a canvas, whose handlers mean
   ## nothing and must not replace the UI's.
   var
-    reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx), memo: memo,
+    reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx), memo: memo, topIndex: -1,
+      track: signalRecords() > 0,
       previous: if jsIsObject(holder): ctx.prop(holder, "handlers") else: jsUndefined(ctx))
     nodes: seq[SvgNode]
   if not memo.isNil:
@@ -293,5 +309,88 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
   else:
     discard JS_SetPropertyStr(ctx, holder, "handlers", reader.handlers)
   if nodes.len > 0: nodes[0] else: SvgNode(tag: "svg")
+
+proc splicedAt(n: SvgNode, path: seq[int32], at: int, repl: SvgNode): SvgNode =
+  ## `n` with the node at `path` (from `at`) replaced by `repl`: the nodes on
+  ## the way copied, every other node the same object, which the layout and
+  ## pixie take for unchanged.
+  if at >= path.len:
+    return repl
+  let i = path[at].int
+  if n.isNil or i < 0 or i >= n.children.len:
+    return nil
+  let child = splicedAt(n.children[i], path, at + 1, repl)
+  if child.isNil:
+    return nil
+  result = SvgNode(tag: n.tag, text: n.text, attrs: n.attrs, children: n.children, image: n.image,
+    path: n.path, offset: n.offset)
+  result.children[i] = child
+
+proc jsxSplice*(ctx: ptr JSContext, root: SvgNode, oldId: int, element: JSValueConst,
+    images: ptr Table[int, Image], holder: JSValueConst, memo: ptr JsxMemo): SvgNode =
+  ## `element`, a memo()'d component's new element (a signal it read was set),
+  ## read where the element numbered `oldId` was in `root`, its handlers at
+  ## the numbers the old one's had: the new root. nil when it cannot be (the
+  ## old one is not in the tree, or its handlers changed in number): a whole
+  ## get() then.
+  if memo.isNil or not jsIsObject(holder):
+    return nil
+  var at = -1
+  for i in 0 ..< memo.kept.len:
+    if memo.kept[i].id == oldId:
+      at = i
+      break
+  if at < 0:
+    return nil
+  let old = memo.kept[at]
+  let handlers = ctx.prop(holder, "handlers")
+  if not jsIsObject(handlers):
+    JS_FreeValue(ctx, handlers)
+    return nil
+  var reader = JsxReader(ctx: ctx, images: images, handlers: handlers, memo: memo,
+    previous: JS_DupValue(ctx, handlers), handlerCount: old.firstHandler, track: true,
+    topIndex: (if old.path.len > 0: old.path[^1] else: -1'i32))
+  if old.path.len > 0:
+    reader.curPath = old.path[0 ..< old.path.len - 1]
+  reader.keptCursor = at
+  var nodes: seq[SvgNode]
+  reader.addNodes(element, nodes, 0)
+  JS_FreeValue(ctx, reader.previous)
+  JS_FreeValue(ctx, handlers)
+  if nodes.len != 1 or reader.handlerCount - old.firstHandler != old.handlers:
+    return nil
+  # The old element's entry goes (the new one has its own), and so do those
+  # of the memo()'d elements around it: what they hold is the old element.
+  var kept = 0
+  for i in 0 ..< memo.kept.len:
+    var around = memo.kept[i].id == oldId or memo.kept[i].path.len < old.path.len
+    if around and memo.kept[i].id != oldId:
+      for j in 0 ..< memo.kept[i].path.len:
+        if memo.kept[i].path[j] != old.path[j]:
+          around = false
+          break
+    if not around:
+      if kept != i: memo.kept[kept] = move memo.kept[i]
+      inc kept
+  memo.kept.setLen(kept)
+  splicedAt(root, old.path, 0, nodes[0])
+
+proc jsxSplicePairs*(ctx: ptr JSContext, root: SvgNode, pairs: JSValueConst,
+    images: ptr Table[int, Image], holder: JSValueConst, memo: ptr JsxMemo): SvgNode =
+  ## What the prelude's __frameosPartial returned, [old number, element, ...],
+  ## spliced into `root` one by one (jsxSplice); nil when it is no list or
+  ## one of them cannot be.
+  if JS_IsArray(ctx, pairs) == 0:
+    return nil
+  result = root
+  let length = ctx.int32Of(ctx.prop(pairs, "length"))
+  var k = 0
+  while k + 1 < length and not result.isNil:
+    let element = JS_GetPropertyUint32(ctx, pairs, (k + 1).uint32)
+    let id = JS_GetPropertyUint32(ctx, pairs, k.uint32)
+    result = jsxSplice(ctx, result, ctx.int32Of(id), element, images, holder, memo)
+    JS_FreeValue(ctx, id)
+    JS_FreeValue(ctx, element)
+    k += 2
 
 {.pop.}
