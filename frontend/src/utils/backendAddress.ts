@@ -32,14 +32,40 @@ function browserBackendScheme(): BackendScheme {
   return window.location.protocol === 'https:' ? 'https' : 'http'
 }
 
+/** The host port Home Assistant publishes the add-on's frames port on: the
+ * backend reads it from the Supervisor (`public_port`), 8989 unless the
+ * owner changed it in the add-on's Network settings. */
+function hassioPublicPort(): string {
+  const port = Number((window as any).FRAMEOS_APP_CONFIG?.public_port)
+  return Number.isInteger(port) && port > 0 && port < 65536 ? String(port) : '8989'
+}
+
 function browserBackendAddressParts(): BackendAddressParts {
   if (typeof window === 'undefined') {
     return { scheme: '', host: '', port: '' }
   }
   const port = inHassioIngress()
-    ? '8989'
+    ? hassioPublicPort()
     : window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
   return { scheme: browserBackendScheme(), host: window.location.hostname, port }
+}
+
+/** The origin a link for something outside this browser is built on: a
+ * kiosk showing a virtual frame, a photo album's share link. The page's own
+ * origin, except behind Home Assistant's ingress, whose URLs need a Home
+ * Assistant login and answer only the ingress session: there it is the
+ * add-on's frames port on the Home Assistant host (issue
+ * FrameOS/frameos-home-assistant-addon#5). */
+export function publicBackendOrigin(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+  if (!inHassioIngress()) {
+    return window.location.origin
+  }
+  const { scheme, host, port } = browserBackendAddressParts()
+  const defaultPort = scheme === 'https' ? '443' : '80'
+  return `${scheme}://${host}${port === defaultPort ? '' : `:${port}`}`
 }
 
 /** "host", "host:8989", "https://host:8443/x", "[fd00::10]:8989" → parts. A

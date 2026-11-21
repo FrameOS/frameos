@@ -7,6 +7,7 @@ import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior }
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
 import { EMBEDDED_VIRTUAL, isThinClientEmbeddedPlatform, withCustomPalette } from '../../../../devices'
 import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
+import { publicBackendOrigin } from '../../../../utils/backendAddress'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
@@ -558,7 +559,9 @@ export function FrameSettingsProvider({
   // grants nothing but the picture. Rotate via device_config.viewToken.
   const virtualViewToken = frameForm.device_config?.viewToken ?? frame.device_config?.viewToken ?? ''
   const virtualUrlToken = virtualViewToken || '<view-token>'
-  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  // Behind Home Assistant's ingress the page's origin is not where a kiosk
+  // reaches the backend: the add-on's frames port is.
+  const virtualUrlOrigin = publicBackendOrigin()
 
   // ESP32 power management, one component, two homes. The cloud pushes these
   // as top-level `set_settings` keys; the backend keeps them in device_config
