@@ -43,6 +43,12 @@ like `setCurrentScene {direction}`:
   screen still reachable, and the frame page's Layout is where it is taken
   off. On a desktop the frame page opens as its window and the switcher stays
   open in its own. A plain `sceneSettings` still goes back.
+- **A scene picked on a desktop** (`builtInScenesStay`) opens beside the
+  list, which stays open in its window as a launcher, as a window that lost
+  the focus does (`app.frame.keptOpen`); brought forward again it is as it
+  was left, scrolled and highlighted. Only its Close, the same command again
+  or its timeout end it (2026-11-22; before, a pick closed it). Without a
+  desktop a pick goes back as always.
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
@@ -159,10 +165,10 @@ larger.
   label, in the theme's `picked` role (Explorer's navy label in Windows 98,
   Finder's blue pill in macOS). A dot at the icon's corner marks the scene it
   was opened from. On e-paper the whole cell is inverted.
-- **Categories** are compact, as Finder's groups: a small name over the first
-  cells of each category with a thin rule under it as far as they go, the
-  next category straight after in the same row, so a category of one takes
-  one cell, not a row. A row keeps a strip for its headings. Where headings
+- **Categories** are sections, as a file manager's: each starts a row of its
+  own under a small name with a thin rule across the row (the owner's call,
+  2026-11-22; before, the next category went on in the row the last one
+  ended in). Only a category's first row has the strip its heading sits in. Where headings
   would be most of the list (fewer than a dozen scenes, or fewer than two a
   category: `headed`) there are none, and the scenes keep the order by
   category in one flow.

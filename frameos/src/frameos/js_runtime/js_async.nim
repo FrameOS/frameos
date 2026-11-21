@@ -33,9 +33,11 @@ const
   UrlImageRetryMs = 30_000
     ## A picture that failed is asked again after this long.
   UrlImageChurnMs = 10_000
-    ## A picture that lost its memory this soon after it came is not loaded
-    ## again at once: the app shows more than fits, and each load would push
-    ## out another of its pictures, for ever. It waits UrlImageRetryMs.
+    ## A picture that lost its memory this soon after it came, while it was
+    ## still being drawn (in this pass or the last), is not loaded again at
+    ## once: the app shows more than fits, and each load would push out
+    ## another of its pictures, for ever. It waits UrlImageRetryMs. One a
+    ## scroll took out of sight and pushed out is loaded again when it is back.
   MaxUrlImages = 96
     ## Entries one app keeps (the pictures themselves are kept pictures,
     ## under their own limits).
@@ -46,7 +48,11 @@ proc findUrlImage(runtime: JsAppRuntime, url: string, width, height: int, fit: S
       return i
   -1
 
-proc rememberUrlImage(runtime: JsAppRuntime, entry: UrlImage) =
+proc rememberUrlImage(runtime: JsAppRuntime, came: UrlImage) =
+  var entry = came
+  if entry.drawn == 0:
+    # Come in for the render that asked: as good as drawn in it.
+    entry.drawn = runtime.urlPass
   let at = runtime.findUrlImage(entry.url, entry.width, entry.height, entry.fit)
   if at >= 0:
     runtime.urlImages[at] = entry
@@ -453,21 +459,43 @@ proc fitName(fit: ScaledDecodeFit): string =
   of fitContain: "contain"
   else: "cover"
 
+proc keptHasRoom(runtime: JsAppRuntime, pixels: int): bool
+  ## Whether one more kept picture of `pixels` pushes none out (app_runtime.nim).
+
+proc drawnKept(runtime: JsAppRuntime, entry: int): Image =
+  ## The kept picture of `urlImages[entry]`, which an `<img>` draws now: the
+  ## newest of the kept, so the ones a scroll took out of sight go first when
+  ## room is needed, never one still on the screen (the Scene store's covers
+  ## loaded and vanished as its list scrolled while the oldest loaded went
+  ## first, 2026-11-22).
+  runtime.urlImages[entry].drawn = runtime.urlPass
+  let id = runtime.urlImages[entry].id
+  let at = runtime.keptImageIds.find(id)
+  if at >= 0 and at < runtime.keptImageIds.high:
+    runtime.keptImageIds.delete(at)
+    runtime.keptImageIds.add(id)
+  runtime.images.getOrDefault(id, nil)
+
 proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
-    url: string, width, height: int, fit: ScaledDecodeFit, blocking: bool): Image =
+    url: string, width, height: int, fit: ScaledDecodeFit, blocking: bool, shown = true): Image =
   ## `<img src="https://…">` at `width` x `height` panel pixels: the picture
   ## if it is here, else a download (off the render unless `blocking`) and,
   ## meanwhile, the same url at another size if one is kept (a box that
   ## changed size), else nothing. Kept pictures: the same url at the same
-  ## size is one picture while the interpreter lives.
+  ## size is one picture while the interpreter lives. One not `shown` (near
+  ## the screen, not on it) is fetched ahead only into room the kept
+  ## pictures have: it never pushes out one that shows.
   var at = runtime.findUrlImage(url, width, height, fit)
   if at >= 0:
     case runtime.urlImages[at].state
     of uiReady:
       let id = runtime.urlImages[at].id
       if runtime.keptImageIds.contains(id):
-        return runtime.images.getOrDefault(id, nil)
-      if (getMonoTime() - runtime.urlImages[at].at).inMilliseconds < UrlImageChurnMs:
+        return runtime.drawnKept(at)
+      if not shown and not runtime.keptHasRoom(width * height):
+        return nil
+      if shown and runtime.urlImages[at].drawn >= runtime.urlPass - 1 and
+          (getMonoTime() - runtime.urlImages[at].at).inMilliseconds < UrlImageChurnMs:
         runtime.urlImages[at] = UrlImage(url: url, width: width, height: height, fit: fit,
           state: uiFailed, at: getMonoTime())
       else:
@@ -477,6 +505,8 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
         at = -1
     of uiLoading:
       discard
+  if at < 0 and not shown and not runtime.keptHasRoom(width * height):
+    return nil
   if at < 0:
     # Nothing pumps (the browser preview, a deep sleeper): no later to fetch
     # in, so the render does. Asked only where the async I/O is compiled in,
@@ -506,7 +536,8 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
       let answer = fetchImageJson(e, url, %*{"width": width, "height": height, "fit": fitName(fit)},
         forceKeep = true)
       let image = answer{"image"}
-      var entry = UrlImage(url: url, width: width, height: height, fit: fit, state: uiFailed, at: getMonoTime())
+      var entry = UrlImage(url: url, width: width, height: height, fit: fit, state: uiFailed, at: getMonoTime(),
+        drawn: runtime.urlPass)
       if not image.isNil and image.kind == JObject:
         entry.state = uiReady
         entry.id = image{"id"}.getInt()
@@ -516,9 +547,9 @@ proc urlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
       if entry.state == uiReady:
         return runtime.images.getOrDefault(entry.id, nil)
   # Meanwhile: the same picture at another size.
-  for entry in runtime.urlImages:
+  for i, entry in runtime.urlImages:
     if entry.state == uiReady and entry.url == url and runtime.keptImageIds.contains(entry.id):
-      return runtime.images.getOrDefault(entry.id, nil)
+      return runtime.drawnKept(i)
 
 type UrlView = array[4, float32]
   ## Left, top, right, bottom, in a node's own coordinates.
@@ -532,8 +563,13 @@ proc attrNum(node: SvgNode, name: string, default: float32): float32 =
   try: parseFloat(text).float32
   except ValueError: default
 
+proc meets(view: UrlView, x, y, width, height: float32): bool {.inline.} =
+  not (x + width < view[0] or x > view[2] or y + height < view[1] or y > view[3])
+
 proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
-    node: SvgNode, scale: float32, blocking: bool, view: UrlView) =
+    node: SvgNode, scale: float32, blocking: bool, view, seen: UrlView, shown: var seq[int]) =
+  ## `view`: what is near the screen, `seen`: what is on it, both in the
+  ## node's coordinates. The kept pictures that show go in `shown`.
   let url = node.attr("image-url")
   if url.len > 0:
     let
@@ -541,7 +577,7 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
       y = node.attrNum("y", 0)
       width = node.attrNum("width", 0)
       height = node.attrNum("height", 0)
-    if x + width < view[0] or x > view[2] or y + height < view[1] or y > view[3]:
+    if not view.meets(x, y, width, height):
       # Out of sight and not near it: fetched when a scroll brings it close,
       # and drawn as nothing until then (a picture it had stays).
       if node.image.isNil and node.tag != "g":
@@ -555,14 +591,20 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
         of "none": fitStretch
         of "xMidYMid meet": fitContain
         else: fitCover
-      image = runtime.urlImage(owner, context, url, w, h, fit, blocking)
+      onScreen = seen.meets(x, y, width, height)
+      image = runtime.urlImage(owner, context, url, w, h, fit, blocking, onScreen)
       tag = if image.isNil: "g" else: "image"
+    if onScreen and not image.isNil:
+      let at = runtime.findUrlImage(url, w, h, fit)
+      if at >= 0 and runtime.urlImages[at].state == uiReady:
+        shown.add runtime.urlImages[at].id
     if node.image != image or node.tag != tag:
       node.image = image
       node.tag = tag
       node.forgetParse()
     return
   var inner = view
+  var innerSeen = seen
   if node.tag == "svg" and node.attr("viewBox").len > 0:
     # A box that clips or scrolls (ui/layout.nim `viewport`): the part of the
     # view it shows, and a screen of itself around that, in its coordinates.
@@ -588,14 +630,23 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
         bottom = min(view[3], y + h) + h
       inner = [box[0] + (left - x) * sx, box[1] + (top - y) * sy,
         box[0] + (right - x) * sx, box[1] + (bottom - y) * sy]
+      let
+        sLeft = max(seen[0], x)
+        sTop = max(seen[1], y)
+        sRight = min(seen[2], x + w)
+        sBottom = min(seen[3], y + h)
+      innerSeen = [box[0] + (sLeft - x) * sx, box[1] + (sTop - y) * sy,
+        box[0] + (sRight - x) * sx, box[1] + (sBottom - y) * sy]
     else:
       inner = UrlViewAll
+      innerSeen = UrlViewAll
   elif node.attr("transform").len > 0:
     # Moved, scaled or turned (the layout does so only to an inline <svg>,
     # which holds no <img>): every picture in it, as before.
     inner = UrlViewAll
+    innerSeen = UrlViewAll
   for child in node.children:
-    runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner)
+    runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner, innerSeen, shown)
 
 proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
     node: SvgNode, scale: float32, blocking: bool) =
@@ -610,4 +661,14 @@ proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     w = node.attrNum("width", 0)
     h = node.attrNum("height", 0)
     view = if w > 0 and h > 0: [-w, -h, 2 * w, 2 * h] else: UrlViewAll
-  runtime.fillUrlImagesIn(owner, context, node, scale, blocking, view)
+    seen = if w > 0 and h > 0: [0'f32, 0, w, h] else: UrlViewAll
+  inc runtime.urlPass
+  var shown: seq[int]
+  runtime.fillUrlImagesIn(owner, context, node, scale, blocking, view, seen, shown)
+  # The pictures that show are the newest of the kept, after those only
+  # near: when room is needed, what is off the screen goes first.
+  for id in shown:
+    let at = runtime.keptImageIds.find(id)
+    if at >= 0 and at < runtime.keptImageIds.high:
+      runtime.keptImageIds.delete(at)
+      runtime.keptImageIds.add(id)

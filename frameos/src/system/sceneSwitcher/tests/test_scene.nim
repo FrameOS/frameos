@@ -497,8 +497,10 @@ block categories_head_their_scenes_and_other_comes_last:
     @["Clocks", "Garden", "Photos", "photos", "\xC3\xA9a", "\xC3\x89clairs", "Other"]
   spots = many.spots(grid)
   doAssert spots[0].top == grid.y0 - grid.listY + grid.headingH
-  # Garden goes on in the row Clocks ends in, its heading over its cells there.
-  doAssert spots[7].col == 7 and spots[7].top == spots[6].top and spots[8].col == 0, $spots
+  # Garden starts a row of its own under its heading, below the row Clocks
+  # ends in, and only a category's first row has a heading's strip.
+  doAssert spots[7].col == 0 and spots[7].top == spots[6].top + grid.tileH + grid.gap + grid.headingH, $spots
+  doAssert spots[8].col == 1 and spots[8].top == spots[7].top, $spots
   doAssert many.highlightedId == "scene-6"
   # No scene with a category: no headings.
   listed = entries(9)
@@ -854,6 +856,55 @@ block a_board_of_keys_alone_has_no_buttons_to_tap:
   scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "longPress"})
   doAssert sent.len == 0, "an arrow held is the frame's, else nothing: " & $sent
   frameSettingsRead = nil
+
+block on_a_desktop_a_pick_keeps_the_list_open:
+  # A scene picked opens beside the list on a desktop (builtInScenesStay): the
+  # focus leaves it as for any window, so it stays open (app.frame.keptOpen)
+  # until it is closed. Without a desktop a pick is going back, as always.
+  listed = entries(6)
+  let grid = switcherGrid(800, 480, thumbnails = false)
+  let at = touchAt(float(grid.x0 + grid.tileW div 2), float(grid.y0 + grid.tileH div 2))
+  proc pick(scene: SceneSwitcherScene) =
+    discard scene.draw(newImage(800, 480))
+    scene.send("pointerDown", at)
+    scene.send("pointerUp", at)
+    sent.setLen(0)
+    scene.send("tap", at)
+  for stay in [true, false]:
+    builtInScenesStay = stay
+    builtInsAway.setLen(0)
+    sent.setLen(0)
+    let scene = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-2")
+    scene.pick()
+    doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene and sent[0][1]["sceneId"].getStr() == "scene-1", $sent
+    scene.send("close", %*{})
+    doAssert builtInsAway.contains(SceneSwitcherId) == stay, $stay & " " & $builtInsAway
+    doAssert scene.state{"away"}.getBool() == stay, $scene.state
+    if stay:
+      # Brought forward from its window: as it was left, not back at the
+      # scene it was opened from. Picked again: still open. Its Close ends it.
+      scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "doublePress"})
+      let lit = scene.highlightedId
+      doAssert lit notin ["scene-1", "scene-2"], lit # neither the pick nor the opener
+      scene.send("open", %*{})
+      doAssert scene.highlightedId == lit, scene.highlightedId & " " & lit
+      scene.pick()
+      scene.send("close", %*{})
+      doAssert builtInsAway.contains(SceneSwitcherId)
+      scene.send("open", %*{})
+      discard scene.draw(newImage(800, 480))
+      var closed = false
+      for cx in countdown(800 - grid.pad - 2, 600, 4):
+        sent.setLen(0)
+        scene.send("tap", %*{"x": cx, "y": grid.headerH div 2, "pointerId": 1, "pointerType": "touch"})
+        if sent.len > 0 and sent[0][0] == evSceneSwitcher:
+          closed = true
+          break
+      doAssert closed, "Close is in the header"
+      scene.send("close", %*{})
+      doAssert not builtInsAway.contains(SceneSwitcherId), "its Close ends it"
+  builtInScenesStay = false
+  builtInsAway.setLen(0)
 
 localEventSink = nil
 echo "scene switcher: ok"

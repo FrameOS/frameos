@@ -1594,6 +1594,25 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
     var decodeContent = content
     return (decodeImageWithDisplayBounds(decodeContent, maxEdge = 0, maxPixels = 0), content)
 
+when not defined(frameosEmbedded):
+  proc decodeSizedBy*(content: var string, targetFor: DecodeTargetProc, fit = fitCover): Image =
+    ## A host's downloaded body decoded into the target `targetFor` makes for
+    ## the photo's size (a kept picture: the size it is drawn at, or the
+    ## photo's own resolution short of room). An SVG, or a body whose size
+    ## cannot be read, decodes as it is. Raises NoRoomForPicture when
+    ## `targetFor` has no room.
+    if looksLikeSvg(content):
+      return decodeImageWithFallback(content)
+    var dimensions: ImageDimensions
+    try:
+      dimensions = decodeImageDimensions(content)
+    except PixieError:
+      return decodeImageWithDisplayBounds(content, maxEdge = 0, maxPixels = 0)
+    let target = targetFor(dimensions.width, dimensions.height)
+    if target.isNil:
+      raise newException(PixieError, NoRoomForPicture)
+    decodeImageWithFallback(content, target, fit)
+
 proc downloadImageWithDataSizedBy*(url: string, targetFor: DecodeTargetProc,
     hintWidth, hintHeight: int, maxBytes = MaxImageDownloadBytes,
     headers: seq[SimpleHttpHeader] = @[], fit = fitCover): tuple[image: Image, data: string] =
@@ -1613,10 +1632,22 @@ proc downloadImageWithDataSizedBy*(url: string, targetFor: DecodeTargetProc,
     return downloadImageFromBufferSizedBy(url, maxBytes, targetFor, hintWidth, hintHeight,
       headers, fit)
   else:
-    # A host decodes at the source's own size whatever the target (see
-    # downloadImageWithDataInto); the preview running as a device decodes into
-    # the size asked for.
-    downloadImageWithDataInto(url, requested(), maxBytes, headers, fit)
+    when defined(frameosWasm):
+      if runsAsEmbedded():
+        # The preview running as a device decodes into the size asked for, as
+        # the device does.
+        return downloadImageWithDataInto(url, requested(), maxBytes, headers, fit)
+    if url.startsWith("data:"):
+      return downloadImageWithDataInto(url, requested(), maxBytes, headers, fit)
+    # A host decodes a kept picture at the size it is drawn at too, never the
+    # photo's own: kept at 512x384, a store's covers drawn at 120x90 filled
+    # the kept pictures' budget nine at a time and pushed each other out as
+    # its list scrolled (2026-11-22).
+    let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
+    if response.code >= 400:
+      raise newException(IOError, response.status)
+    var content = response.body
+    (decodeSizedBy(content, targetFor, fit), content)
 
 proc parseExifJson(output: string): Option[JsonNode] =
   try:
