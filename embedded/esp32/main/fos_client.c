@@ -104,6 +104,10 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
 /* The two ADC bursts behind one pass-start reading are this far apart; a
  * Wi-Fi TX burst that sagged the first one has moved on by the second. */
 #define FOS_BATTERY_RESAMPLE_GAP_MS 60
+/* How old a battery and charger reading a pass that answers input may reuse:
+ * an idle frame runs no pass to refresh it, and the pass after the input hold
+ * releases reads a new one. */
+#define FOS_POWER_READING_REUSE_US (600 * 1000000LL)
 
 /* How long a deep sleep waits for the cloud task to finish streaming the
  * frame's image (an `image_get` the provider queued on this pass's `render`
@@ -683,8 +687,16 @@ void fos_client_render_for_scene(void)
     }
 }
 
+/* The render timeline (`set debug 1`): when the input a render answers
+ * arrived (the first wake since the last render began: a touch edge, a
+ * deferred event, the scene's own request) and when the pass that rendered
+ * it began. render_once logs where the time between went. */
+static int64_t s_tl_arrival_us = 0;
+static int64_t s_tl_pass_us = 0;
+
 void fos_client_wake_for_events(void)
 {
+    if (s_tl_arrival_us == 0) s_tl_arrival_us = esp_timer_get_time();
     if (s_events) {
         xEventGroupSetBits(s_events, INPUT_EVENTS_BIT);
     }
@@ -2531,6 +2543,10 @@ static esp_err_t render_once(bool quiet)
 {
     fos_config_t *config = fos_config();
     int64_t start = esp_timer_get_time();
+    /* What this render answers; input from now on is the next one's. */
+    int64_t tl_arrival_us = s_tl_arrival_us;
+    s_tl_arrival_us = 0;
+    int64_t tl_scene_us = 0, tl_update_us = 0, tl_updated_us = 0;
 
     int width = fos_display_present() ? fos_display_width() : 800;
     int height = fos_display_present() ? fos_display_height() : 480;
@@ -2678,7 +2694,8 @@ static esp_err_t render_once(bool quiet)
         if (render_mhz > wait_mhz) fos_cpu_set_mhz(wait_mhz);
     }
 
-    int64_t framebuffer_ms = (esp_timer_get_time() - start) / 1000;
+    tl_scene_us = esp_timer_get_time();
+    int64_t framebuffer_ms = (tl_scene_us - start) / 1000;
     if (!quiet) {
         log_render_event("render:framebuffer", scene_id, scene_name,
                          err == ESP_OK ? "rendered" : "error", "framebuffer",
@@ -2776,8 +2793,10 @@ static esp_err_t render_once(bool quiet)
             bool fast = fos_input_hold_engaged(&s_input_hold) ||
                         fos_pictures_fast(local_render ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0,
                                           s_last_picture_us, picture_us);
+            tl_update_us = esp_timer_get_time();
             err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
                                      &partial);
+            tl_updated_us = esp_timer_get_time();
             s_last_picture_us = picture_us;
             refresh = err != ESP_OK ? "failed" : partial ? "partial" : "updated";
             if (err == ESP_OK) snprintf(s_refresh_scene_id, sizeof(s_refresh_scene_id), "%s", showing_id);
@@ -2859,6 +2878,30 @@ static esp_err_t render_once(bool quiet)
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
     s_render_attempts++;
+    if (config->debug_logging && !quiet) {
+        /* Where a render's time went, from the input it answers (ms):
+         * waited (arrival -> the pass began), pass (-> this render began:
+         * the pass's chores), scene (the Nim render and pack), before
+         * (-> the panel update: hash, overlays, log lines), update (the
+         * panel's update call: its wait for the last waveform, then the
+         * transfer), after (the rest: state saved, snapshot). */
+        int64_t end_us = esp_timer_get_time();
+        int64_t from = tl_arrival_us > 0 && tl_arrival_us <= start ? tl_arrival_us : start;
+        int64_t pass = s_tl_pass_us > 0 && s_tl_pass_us <= start ? s_tl_pass_us : start;
+        if (from > pass) from = pass;
+        char line[320];
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:timeline\",\"source\":\"esp32\",\"count\":%lu,"
+                 "\"refresh\":\"%s\",\"waited\":%.1f,\"pass\":%.1f,\"scene\":%.1f,"
+                 "\"before\":%.1f,\"update\":%.1f,\"after\":%.1f,\"total\":%.1f}",
+                 (unsigned long)s_render_count, refresh, (pass - from) / 1000.0, (start - pass) / 1000.0,
+                 (tl_scene_us - start) / 1000.0,
+                 tl_update_us ? (tl_update_us - tl_scene_us) / 1000.0 : 0.0,
+                 tl_update_us ? (tl_updated_us - tl_update_us) / 1000.0 : 0.0,
+                 ((tl_update_us ? tl_updated_us : tl_scene_us) > 0 ? (end_us - (tl_update_us ? tl_updated_us : tl_scene_us)) : 0) / 1000.0,
+                 (end_us - from) / 1000.0);
+        frameos_nim_log_hook(line);
+    }
     /* A quiet frame that failed is logged anyway: a broken animation must say
      * why at once, not ten seconds later. */
     if (!quiet || err != ESP_OK) {
@@ -3399,6 +3442,7 @@ static void client_task(void *arg)
             continue;
         }
         int64_t cycle_start = esp_timer_get_time();
+        s_tl_pass_us = cycle_start;
         int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;
         wait_ended_us = 0;
         /* Animation mode (fos_animation.h): the pulls, the sensors and the
@@ -3537,31 +3581,56 @@ static void client_task(void *arg)
              * reading, never inflate it); fos_power_decide then weighs it
              * against the state carried in RTC memory — see fos_power.h for the
              * log this replays. */
+            /* A pass that answers somebody (a tap, a key, an event) reuses a
+             * reading up to ten minutes old: the two samples and the gap between
+             * them, then the charger and the gauge over I2C, were 65-80 ms in
+             * front of every tap's render on the reTerminal Sticky (2026-11-21). */
+            static int64_t s_power_read_us = 0;
+            static int s_power_mv = 0, s_power_pct = -1;
+            static bool s_power_charger_known = false;
+            static fos_charger_status_t s_power_charger;
+            int64_t power_now_us = esp_timer_get_time();
+            bool answering = input_hold_on() || s_asked_us > s_render_began_us;
+            bool power_fresh = s_power_read_us != 0 &&
+                               power_now_us - s_power_read_us < FOS_POWER_READING_REUSE_US;
             int battery_pct = -1, battery_mv = 0;
-            if (fos_battery_present()) {
-                fos_battery_read(&battery_mv, &battery_pct);
-                vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
-                int again_mv = 0, again_pct = -1;
-                fos_battery_read(&again_mv, &again_pct);
-                if (again_mv > battery_mv) {
-                    battery_mv = again_mv;
-                    battery_pct = again_pct;
+            fos_charger_status_t charger;
+            bool charger_known;
+            if (answering && power_fresh) {
+                battery_mv = s_power_mv;
+                battery_pct = s_power_pct;
+                charger = s_power_charger;
+                charger_known = s_power_charger_known;
+            } else {
+                if (fos_battery_present()) {
+                    fos_battery_read(&battery_mv, &battery_pct);
+                    vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
+                    int again_mv = 0, again_pct = -1;
+                    fos_battery_read(&again_mv, &again_pct);
+                    if (again_mv > battery_mv) {
+                        battery_mv = again_mv;
+                        battery_pct = again_pct;
+                    }
                 }
+                /* The charger, where the board has one (fos_charger.c): USB in means
+                 * not on battery, whatever the divider reads of a charging cell. */
+                charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+                fos_gauge_status_t gauge;
+                if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+                    memset(&charger, 0, sizeof(charger));
+                    charger.usb_power = !gauge.discharging;
+                    charger.charging = gauge.charging;
+                    charger.charge_done = gauge.full;
+                    charger_known = true;
+                }
+                s_power_read_us = power_now_us;
+                s_power_mv = battery_mv;
+                s_power_pct = battery_pct;
+                s_power_charger = charger;
+                s_power_charger_known = charger_known;
             }
             /* A clock write SNTP could not land yet (fos_rtc.c). */
             fos_rtc_retry_pending();
-            /* The charger, where the board has one (fos_charger.c): USB in means
-             * not on battery, whatever the divider reads of a charging cell. */
-            fos_charger_status_t charger;
-            bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
-            fos_gauge_status_t gauge;
-            if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
-                memset(&charger, 0, sizeof(charger));
-                charger.usb_power = !gauge.discharging;
-                charger.charging = gauge.charging;
-                charger.charge_done = gauge.full;
-                charger_known = true;
-            }
             fos_power_input_t power_in = {
                 .mv = battery_mv,
                 .deep_sleep = config->deep_sleep,
