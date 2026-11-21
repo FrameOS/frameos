@@ -263,12 +263,74 @@ export async function fetchLatestRelease(
   }
 }
 
+/** Release tags are v-prefixed ("v2026.8.1"); devices compare without it. */
+export function releaseVersion(release: Release): string {
+  return (release.tag_name ?? "").replace(/^v/, "");
+}
+
+// One release by its version, for the update decision's answer when it is
+// not the latest (a stepping stone, a release held back behind a blocked or
+// rolling-out one; docs/auto-updates.md). A published release's assets do not
+// change, so a found one is kept for an hour; a lookup that failed is retried
+// after `releaseRetryMs`. The latest release answers for its own version
+// without a second API call.
+const releaseByTagFreshMs = 60 * 60 * 1000;
+const releaseByTagCache = new Map<
+  string,
+  { release: Release | undefined; at: number; inFlight?: Promise<Release | undefined> }
+>();
+
+const releaseTagVersion = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/;
+
+export async function fetchReleaseForVersion(
+  version: string,
+  now: number = Date.now(),
+): Promise<Release | undefined> {
+  if (!releaseTagVersion.test(version)) {
+    return undefined;
+  }
+  const latest = await fetchLatestRelease(now);
+  if (latest && releaseVersion(latest) === version) {
+    return latest;
+  }
+  const cached = releaseByTagCache.get(version);
+  if (cached?.inFlight) {
+    return cached.inFlight;
+  }
+  if (cached && now - cached.at < (cached.release ? releaseByTagFreshMs : releaseRetryMs)) {
+    return cached.release;
+  }
+  const inFlight = (async () => {
+    try {
+      const response = await fetch(`${releaseApiUrl.replace(/\/latest$/, "")}/tags/v${version}`, {
+        cache: "no-store",
+        headers: githubReleaseHeaders(),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        return cached?.release;
+      }
+      const release = (await response.json()) as Release;
+      return release && typeof release === "object" && releaseVersion(release) === version
+        ? release
+        : cached?.release;
+    } catch {
+      return cached?.release;
+    }
+  })();
+  releaseByTagCache.set(version, { release: cached?.release, at: cached?.at ?? 0, inFlight });
+  const release = await inFlight;
+  releaseByTagCache.set(version, { release, at: now });
+  return release;
+}
+
 /** Forget the cached release (tests only — every suite mocks its own GitHub). */
 export function resetReleaseCacheForTests() {
   releaseCache.release = undefined;
   releaseCache.fetchedAt = 0;
   releaseCache.lastAttemptAt = 0;
   releaseCache.inFlight = undefined;
+  releaseByTagCache.clear();
 }
 
 // Belt and braces: asset URLs come from the GitHub API, but pin the host

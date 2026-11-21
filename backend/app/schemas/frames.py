@@ -115,6 +115,7 @@ class FrameBase(BaseModel):
     scaling_mode: Optional[str]
     render_scale: float = 0
     frame_settings_on_screen: bool = True
+    auto_update: bool = True
     rotate: Optional[int]
     flip: Optional[str]
     debug: Optional[bool]
@@ -253,6 +254,9 @@ class FrameUpdateRequest(BaseModel):
     # The frame page on the frame's own screen; the column is not nullable,
     # so an explicit null is the default, on.
     frame_settings_on_screen: Optional[bool] = None
+    # Installs FrameOS updates by itself (docs/auto-updates.md); not nullable,
+    # so an explicit null is the default, on.
+    auto_update: Optional[bool] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
@@ -287,7 +291,7 @@ class FrameUpdateRequest(BaseModel):
     def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _validate_input_settings(value)
 
-    @field_validator('frame_settings_on_screen')
+    @field_validator('frame_settings_on_screen', 'auto_update')
     @classmethod
     def validate_frame_settings_on_screen(cls, value: Optional[bool]) -> bool:
         return True if value is None else value

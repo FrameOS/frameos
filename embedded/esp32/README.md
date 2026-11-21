@@ -587,6 +587,7 @@ frameos> set battery_pin 2               # ADC1 GPIO tapping VBAT (-1 = none)
 frameos> set battery_divider 2.0         # Vbat = Vpin * divider
 frameos> set frame_settings_on_screen 0 # hide the settings panel's frame page (the plane's switch)
 frameos> set settings_unlock 1           # show it whatever the plane says, until set back to 0
+frameos> set auto_update 0               # no automatic updates (docs/auto-updates.md); `ota` still updates
 frameos> render                          # render immediately
 frameos> ota                             # check for an OTA update now
 frameos> factory-reset
@@ -1991,6 +1992,21 @@ layout this image was built for, so a 16 MB board asks for the 16 MB image. Prog
 `ota:backend` / `ota:cloud` lines; three failures on one version stop the
 retries until a newer release or a power cycle. The 4MB profile has no OTA
 partition, so firmware updates must be flashed over USB.
+
+**Automatic updates** (docs/auto-updates.md). Each plane answers its manifest
+route by the update decision (staged rollouts, blocked releases, stepping
+stones), so what a board is offered is the version it may have now, not always
+the newest. A board with neither a backend nor a cloud enrollment asks the
+cloud's public `GET /api/updates/firmware?platform=<layout>&version=<running>&key=esp32:<16 hex>`
+(the key is the first 8 bytes of the SHA-256 of its station MAC; the MAC never
+leaves the board) from the same 24-hour periodic task, while NVS `auto_update`
+is on (`set auto_update 0`, or the contract's `auto_update` from a plane;
+absent = on). `ota` on the console and the settings page's check ask with
+`&manual=1`, which the rollout does not hold back. The answer is the manifest
+above with a relative `downloadUrl` on the same origin (no credential; the
+image is verified against the release key like every other), lines are
+`ota:standalone`. `set cloud_url` points it at another cloud. A standalone
+board that deep-sleeps is not awake for the 24 hours, so it updates when asked.
 
 ## Adding a panel
 

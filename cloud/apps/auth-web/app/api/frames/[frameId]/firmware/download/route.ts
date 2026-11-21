@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
+import { releaseForDownload } from "../../../../../../src/lib/firmware-offer";
 import {
-  fetchLatestRelease,
   findOtaAsset,
   otaPlatformMatchesHardware,
   streamablePlatforms,
@@ -87,7 +87,10 @@ export async function GET(
     return streamDevFirmwareResponse(dev, rangeStart);
   }
 
-  const release = await fetchLatestRelease();
+  // The release the manifest named (`version`: the update decision's answer,
+  // not always the latest — docs/auto-updates.md); a URL from before the
+  // decision names none and gets the latest.
+  const release = await releaseForDownload(request.nextUrl.searchParams.get("version"));
   if (!release) {
     return jsonError("release_lookup_failed", 502);
   }

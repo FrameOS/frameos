@@ -585,6 +585,26 @@ Both halves are in place.
   Cloud compromise therefore cannot become native code execution through
   the update channel — the worst it can do is ask a frame to check for an
   update it will verify and refuse.
+- **Automatic updates** (docs/auto-updates.md at the repo root, the spec).
+  Which version a frame is offered is the update decision
+  (`src/lib/update-decision.ts`, pinned with the backend's and the Pi
+  runtime's ports by `docs/update-decision-fixtures.json`) over the update
+  manifest read from main on GitHub (`src/lib/update-manifest.ts`): the
+  latest, a stepping stone, an older release while the latest is blocked or
+  still rolling out, or nothing. The frame hub's hourly sweep
+  (`frame-hub/src/auto-update.ts`) enqueues `notify_update_available
+  {version, auto: true}` for each frame it answers, in the frame's 02:00–05:00,
+  at most once per 20 h, never while a deploy-progress record is in flight
+  and never to a frame whose `auto_update` setting is false (kept in the
+  settings mirror for any firmware; pushed to the device from 2026.11.14). A
+  Linux runtime from 2026.11.14 installs exactly that version; the ESP32's
+  `firmware/manifest` answers by the same rule (automatic when the newest
+  nudge was the sweep's in the last 24 h, else manual: the rollout skipped,
+  blocks and stepping stones kept) and answers the board's own version when
+  there is nothing to install, which the firmware logs as `up-to-date`. The
+  public `/api/updates/manifest` (the mirror), `/api/updates/next` (the
+  decision) and `/api/updates/firmware` + `/download` (an ESP32 with no
+  plane) serve frames the cloud does not manage.
 
 The buildroot `.img.gz` SD-card images are signed in the same release job.
 They were once left out ("flashed by hand from a machine that already trusts

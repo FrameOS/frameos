@@ -404,6 +404,32 @@ suite "upgrade status reporting":
     expect ValueError:
       discard parseFrameOSUpgradeOptions(@["--no-restart"])
 
+  test "--version pins the release an update decision chose":
+    check parseFrameOSUpgradeOptions(@["--yes"]).version == ""
+    check parseFrameOSUpgradeOptions(@["--yes", "--version", "2026.11.14"]).version == "2026.11.14"
+    check parseFrameOSUpgradeOptions(@["--version=2026.12.1", "--no-reboot"]).version == "2026.12.1"
+    expect ValueError:
+      discard parseFrameOSUpgradeOptions(@["--version"])
+    expect ValueError:
+      discard parseFrameOSUpgradeOptions(@["--version", "latest"])
+    expect ValueError:
+      discard parseFrameOSUpgradeOptions(@["--version=2026.11"])
+
+  test "a release asked for by tag must be that release":
+    check releaseByTagUrl("2026.11.14") == "https://api.github.com/repos/FrameOS/frameos/releases/tags/v2026.11.14"
+    expect ValueError:
+      discard releaseByTagUrl("../latest")
+    let payload = %*{
+      "tag_name": "v2026.11.14",
+      "assets": [{
+        "name": "frameos-2026.11.14-debian-bookworm-arm64.tar.gz",
+        "browser_download_url": "https://github.com/FrameOS/frameos/releases/download/v2026.11.14/frameos-2026.11.14-debian-bookworm-arm64.tar.gz",
+      }],
+    }
+    check releaseInfoFromPayload(payload, "debian-bookworm-arm64", expectedVersion = "2026.11.14").version == "2026.11.14"
+    expect ValueError:
+      discard releaseInfoFromPayload(payload, "debian-bookworm-arm64", expectedVersion = "2026.11.15")
+
   test "the watcher follows the status file and gives up on a dead child":
     # Before 2026-09-13 this watch lived in the cloud hub client, so an upgrade
     # started from the frame's own admin page reported nothing at all. It lives

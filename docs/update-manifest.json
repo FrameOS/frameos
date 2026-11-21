@@ -1,0 +1,35 @@
+{
+  "$comment": [
+    "What every frame may update to: the input of the update decision",
+    "(docs/auto-updates.md). Frames, backends and the cloud read THIS file on",
+    "main from https://raw.githubusercontent.com/FrameOS/frameos/main/docs/",
+    "update-manifest.json (the cloud mirrors it at /api/updates/manifest), so a",
+    "merge to main is how a release is blocked, paused or made a stepping stone.",
+    "The release workflow appends each release here when it publishes it.",
+    "",
+    "releases[]: version (YYYY.M.N), at (ISO time the rollout starts),",
+    "  rollout? (stages [{afterHours, percent}], else defaultRollout),",
+    "  pausedAt? (the rollout stays at the percent it had then),",
+    "  blocked? (a reason: offered to no frame), blockedTargets? ({\"platform/target",
+    "  pattern\": reason}), targets? (allow-list of patterns), minFrom? (the oldest",
+    "  version that may install it directly), steppingStone? (every newer release",
+    "  needs this one first), channels? (default [\"stable\", \"early\"]).",
+    "paused: a reason stops every automatic update (manual ones too).",
+    "A pattern is \"<platform>/<target>\" (linux | esp32 | pico), exact or ending in *."
+  ],
+  "version": 1,
+  "paused": null,
+  "defaultRollout": [
+    {"afterHours": 0, "percent": 10},
+    {"afterHours": 24, "percent": 25},
+    {"afterHours": 48, "percent": 50},
+    {"afterHours": 96, "percent": 100}
+  ],
+  "releases": [
+    {"version": "2026.11.9", "at": "2026-11-15T13:23:06Z", "rollout": [{"afterHours": 0, "percent": 100}]},
+    {"version": "2026.11.10", "at": "2026-11-17T01:33:51Z", "rollout": [{"afterHours": 0, "percent": 100}]},
+    {"version": "2026.11.11", "at": "2026-11-17T23:57:16Z", "rollout": [{"afterHours": 0, "percent": 100}]},
+    {"version": "2026.11.12", "at": "2026-11-19T01:23:04Z", "rollout": [{"afterHours": 0, "percent": 100}]},
+    {"version": "2026.11.13", "at": "2026-11-20T08:49:48Z"}
+  ]
+}

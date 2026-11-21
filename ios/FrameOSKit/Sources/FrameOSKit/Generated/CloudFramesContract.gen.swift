@@ -6,6 +6,9 @@ enum CloudFramesContractSource {
 {
   "profiles": {
     "esp32": {
+      "auto_update": {
+        "since": "2026.11.14"
+      },
       "awake_after_input_seconds": {
         "since": "2026.11.6"
       },
@@ -177,6 +180,9 @@ enum CloudFramesContractSource {
       }
     },
     "linux": {
+      "auto_update": {
+        "since": "2026.11.14"
+      },
       "colors": {
         "since": "2026.10.2"
       },
@@ -248,6 +254,9 @@ enum CloudFramesContractSource {
     }
   },
   "rules": {
+    "auto_update": {
+      "type": "bool"
+    },
     "awake_after_input_seconds": {
       "max": 3600,
       "min": 0,

@@ -79,6 +79,9 @@ struct FrameSettingsView: View {
                     if keys.contains("debug") {
                         Toggle("Debug logging", isOn: boolBinding("debug", frame, fallback: false))
                     }
+                    if keys.contains("auto_update") {
+                        Toggle("Update automatically", isOn: boolBinding("auto_update", frame, fallback: true))
+                    }
                 } header: {
                     Text("Behavior")
                 }

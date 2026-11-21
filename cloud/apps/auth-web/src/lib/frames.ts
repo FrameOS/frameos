@@ -282,6 +282,40 @@ export function frameSupportsFrameSettingsOnScreen(
   return frameSupportsSettingsFrom(frameSettingsOnScreenFrameSettingsMinVersion, frameosVersion);
 }
 
+// Settings the PLANE honours itself, whatever the device runs: `auto_update`
+// (docs/auto-updates.md), which the hub's sweep and the firmware manifest
+// route read from the mirror. Stored for every firmware version — an owner
+// must be able to turn automatic updates off before the first one reaches a
+// frame too old to take the key — and pushed to the device (which keeps a
+// copy for the day it has no plane) only where its firmware takes the key.
+// Never a reason to refuse a save.
+export const planeKeptFrameSettings: ReadonlySet<string> = new Set(["auto_update"]);
+// 2026.11.14: the firmware that keeps `auto_update` itself (both profiles).
+export const autoUpdateFrameSettingsMinVersion = "2026.11.14";
+export const autoUpdateFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("linux", autoUpdateFrameSettingsMinVersion)].filter((key) => key === "auto_update"),
+);
+export const esp32AutoUpdateFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", autoUpdateFrameSettingsMinVersion)].filter((key) => key === "auto_update"),
+);
+
+/** The part of a validated push the device is sent: without the plane-kept keys its firmware cannot take. */
+export function frameSettingsForDevice(
+  frame: { frameosVersion: string | null | undefined; hardware: unknown },
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const profile = frameContractProfile(frame);
+  return Object.fromEntries(
+    Object.entries(settings).filter(([key]) => {
+      if (!planeKeptFrameSettings.has(key)) {
+        return true;
+      }
+      const since = contractSettingSince(key, profile);
+      return since !== undefined && (since === null || frameSupportsSettingsFrom(since, frame.frameosVersion));
+    }),
+  );
+}
+
 export function frameSupportsColorsSettings(
   frameosVersion: string | null | undefined,
 ): boolean {

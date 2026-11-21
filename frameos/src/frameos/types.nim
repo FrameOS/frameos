@@ -129,6 +129,10 @@ type
     ## control plane turned it off; frame_settings_lock.nim adds the device's
     ## own unlock.
     frameSettingsOnScreen*: bool
+    ## The frame installs FrameOS updates by itself (docs/auto-updates.md).
+    ## On unless turned off. Read by the auto-updater (auto_updater.nim) on a
+    ## frame with no control plane; a plane decides from its own copy.
+    autoUpdate*: bool
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode

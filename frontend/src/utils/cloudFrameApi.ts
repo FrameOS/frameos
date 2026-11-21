@@ -15,6 +15,7 @@ import {
   cloudFrameSupportsEsp32ExtendedSettings,
   displayDriverCloudFrameSettingsMinVersion,
   esp32CloudFrameSettingKeysForVersion,
+  planeHonouredCloudFrameSettingKeys,
   esp32ExtendedCloudFrameSettingsMinVersion,
   esp32TimeZoneCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32TimeZone,
@@ -142,9 +143,12 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
   // extended batch is the mirror image: Pi/Linux only, and only on firmware
   // that knows it (cloudFrameSupportsExtendedSettings) — older firmware
   // refuses the whole push on the first unknown key.
-  const keys = isEsp32CloudFrame(frame)
+  const versionKeys = isEsp32CloudFrame(frame)
     ? esp32CloudFrameSettingKeysForVersion(frame.frameos_version)
     : cloudFrameSettingKeysForVersion(frame.frameos_version)
+  // `auto_update` is the plane's to act on whatever the firmware: always sent,
+  // stored by the cloud, pushed on to the device only from its floor.
+  const keys = Array.from(new Set([...versionKeys, ...planeHonouredCloudFrameSettingKeys]))
   const settings = cloudFrameSettingsPayload(frame, keys)
   if (Object.keys(settings).length === 0) {
     return false

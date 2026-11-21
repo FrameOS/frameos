@@ -454,6 +454,11 @@ class Frame(Base):
     # scale, Restart, Reboot; docs/scene-settings.md "The frame page"). Off
     # leaves the scene's form; an unlock on the device wins over it.
     frame_settings_on_screen = mapped_column(Boolean, nullable=False, default=True)
+    # frame.json `autoUpdate`: whether the frame installs FrameOS updates by
+    # itself (docs/auto-updates.md). This backend decides for its frames from
+    # this column (app/tasks/auto_update.py); the device's copy is what a frame
+    # with no plane goes by.
+    auto_update = mapped_column(Boolean, nullable=False, default=True)
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(Text, nullable=True)
@@ -563,6 +568,7 @@ class Frame(Base):
             'scaling_mode': self.scaling_mode,
             'render_scale': normalize_render_scale(self.render_scale),
             'frame_settings_on_screen': self.frame_settings_on_screen is not False,
+            'auto_update': self.auto_update is not False,
             'rotate': self.rotate,
             'flip': self.flip,
             'debug': self.debug,
@@ -756,6 +762,7 @@ async def new_frame(
         scaling_mode="contain",
         render_scale=0,
         frame_settings_on_screen=True,
+        auto_update=True,
         rotate=0,
         device=device or "web_only",
         timezone=None,
@@ -1083,6 +1090,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         # 0 = automatic from the panel's size; a scene's own setting wins.
         "renderScale": normalize_render_scale(frame.render_scale),
         "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
+        "autoUpdate": getattr(frame, "auto_update", True) is not False,
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

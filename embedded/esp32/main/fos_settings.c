@@ -749,6 +749,13 @@ static bool apply_frame_settings(const cJSON *frame)
         config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
         changed = true;
     }
+    /* `autoUpdate` (docs/auto-updates.md): kept for the day the board has no
+     * plane; the backend decides for its boards itself. */
+    const cJSON *auto_update = cJSON_GetObjectItem(frame, "autoUpdate");
+    if (cJSON_IsBool(auto_update) && config->auto_update != cJSON_IsTrue(auto_update)) {
+        config->auto_update = cJSON_IsTrue(auto_update);
+        changed = true;
+    }
 
     /* `colors` (docs/asset-color-profiles.md): kept as compact JSON and
      * pushed into the Nim runtime every pass like scalingMode, so it applies

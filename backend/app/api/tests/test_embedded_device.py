@@ -86,6 +86,13 @@ def patch_release(release):
     )
 
 
+def manual_check():
+    """The owner pressed Update in the last half hour: the manifest route
+    answers a manual check (docs/auto-updates.md), which with no update
+    manifest to read is the latest release, as before the rule."""
+    return patch('app.utils.frame_updates.manual_ota_requested', new_callable=AsyncMock, return_value=True)
+
+
 async def create_embedded_frame(async_client) -> dict:
     response = await async_client.post('/api/frames/new', json={
         'name': 'ESP32 Frame',
@@ -1244,6 +1251,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'scalingMode': 'contain',
         'renderScale': 1.5,
         'frameSettingsOnScreen': True,
+        'autoUpdate': True,
         'colors': {},
         'palette': measured,
         'maxHttpResponseBytes': 4 * 1024 * 1024,
@@ -1278,6 +1286,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'scalingMode': 'cover',
         'renderScale': 0.0,
         'frameSettingsOnScreen': True,
+        'autoUpdate': True,
         'colors': {},
         'palette': {},  # the panel's own table
         'maxHttpResponseBytes': 4 * 1024 * 1024,
@@ -1542,7 +1551,7 @@ async def test_ota_manifest_relays_the_published_release(async_client, no_auth_c
     frame = await device_frame(async_client, db)
     listing, text = patch_release(release_with('esp32-s3-generic'))
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
             headers=auth(frame))
@@ -1571,7 +1580,7 @@ async def test_ota_manifest_serves_the_layout_the_device_asks_for(async_client, 
     frame = await device_frame(async_client, db)
     listing, text = patch_release(release_with('esp32-s3-generic', 'esp32-s3-16mb'))
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-16mb',
             headers=auth(frame))
@@ -1594,7 +1603,7 @@ async def test_ota_manifest_without_a_platform_uses_the_frames_layout(async_clie
     db.commit()
 
     listing, text = patch_release(release_with('esp32-s3-generic', 'esp32-s3-16mb'))
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest', headers=auth(frame))
 
@@ -1609,7 +1618,7 @@ async def test_ota_manifest_rejects_an_unknown_platform(async_client, no_auth_cl
     frame = await device_frame(async_client, db)
     listing, text = patch_release(release_with('esp32-s3-generic'))
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s9-mega',
             headers=auth(frame))
@@ -1628,7 +1637,7 @@ async def test_ota_manifest_404_when_the_release_has_no_app_image(async_client, 
     }
     listing, text = patch_release(release)
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
             headers=auth(frame))
@@ -1644,7 +1653,7 @@ async def test_ota_manifest_409_for_an_unsigned_release(async_client, no_auth_cl
     frame = await device_frame(async_client, db)
     listing, text = patch_release(release_with('esp32-s3-generic', minisig=False))
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
             headers=auth(frame))
@@ -1658,7 +1667,7 @@ async def test_ota_manifest_502_when_github_is_unreachable(async_client, no_auth
     frame = await device_frame(async_client, db)
     listing, text = patch_release(None)
 
-    with listing, text:
+    with listing, text, manual_check():
         response = await no_auth_client.get(
             f'/api/frames/{frame.id}/embedded/ota/manifest?platform=esp32-s3-generic',
             headers=auth(frame))

@@ -18,6 +18,10 @@ import frameos/version
 
 const
   GitHubLatestReleaseApi* = "https://api.github.com/repos/FrameOS/frameos/releases/latest"
+  ## One release by its tag (`v` & version): what a version-pinned upgrade
+  ## asks for — the version the update decision answered
+  ## (docs/auto-updates.md), not whatever is newest.
+  GitHubReleaseByTagApiPrefix* = "https://api.github.com/repos/FrameOS/frameos/releases/tags/v"
   GitHubReleaseDownloadPrefix* = "https://github.com/FrameOS/frameos/releases/download/"
   SupportedReleaseTargets = [
     "debian-buster",
@@ -44,6 +48,10 @@ type
     dryRun*: bool
     yes*: bool
     noReboot*: bool
+    ## Install exactly this release (`--version 2026.11.14`) instead of the
+    ## latest: the version a control plane or the auto-updater decided on
+    ## (docs/auto-updates.md). Empty = the latest stable release.
+    version*: string
 
   UpgradeFinishAction* = enum
     restartServices  ## the new release can take over in place
@@ -517,7 +525,9 @@ proc verifyReleaseArchiveSignature*(archivePath, minisig, assetName: string) =
       "Release signature does not verify against the FrameOS signing key — refusing to install " &
       archivePath)
 
-proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseInfo =
+proc releaseInfoFromPayload*(payload: JsonNode, target: string, expectedVersion = ""): FrameOSReleaseInfo =
+  ## `expectedVersion`: the release was asked for by tag, and must be that
+  ## one (GitHub answering another tag is refused, not installed).
   if payload == nil or payload.kind != JObject:
     raise newException(ValueError, "GitHub release payload is not an object")
   if payload{"draft"}.getBool(false) or payload{"prerelease"}.getBool(false):
@@ -526,6 +536,8 @@ proc releaseInfoFromPayload*(payload: JsonNode, target: string): FrameOSReleaseI
   result.version = normalizeReleaseVersion(result.tagName)
   if result.version == "unknown":
     raise newException(ValueError, "Latest FrameOS release has no version tag")
+  if expectedVersion.len > 0 and result.version != normalizeReleaseVersion(expectedVersion):
+    raise newException(ValueError, "GitHub answered release " & result.version & " for v" & expectedVersion)
   result.target = target
   result.assetName = "frameos-" & result.version & "-" & target & ".tar.gz"
   result.htmlUrl = payload{"html_url"}.getStr("")
@@ -552,6 +564,26 @@ proc latestFrameOSRelease*(target = ""): FrameOSReleaseInfo =
     maxSeconds = 30,
   )
   releaseInfoFromPayload(parseJson(body), resolvedTarget)
+
+proc releaseByTagUrl*(version: string): string =
+  if not validReleaseVersion(version):
+    raise newException(ValueError, "release version must have exactly three numeric fields (YYYY.M.N): " & version)
+  GitHubReleaseByTagApiPrefix & version
+
+proc frameOSReleaseForVersion*(version: string, target = ""): FrameOSReleaseInfo =
+  ## One release by its tag, validated like the latest one.
+  let url = releaseByTagUrl(version)
+  let resolvedTarget = if target.len > 0: target else: detectUpgradeTarget()
+  var headers = newHttpHeaders()
+  headers["Accept"] = "application/vnd.github+json"
+  headers["User-Agent"] = "FrameOS/" & compiledFrameOSVersion()
+  let body = boundedGetContent(
+    url,
+    headers = headers,
+    maxBytes = 2 * 1024 * 1024,
+    maxSeconds = 30,
+  )
+  releaseInfoFromPayload(parseJson(body), resolvedTarget, expectedVersion = version)
 
 proc currentFrameConfigPath(): string =
   frameosInstallDir() / "current" / "frame.json"
@@ -1249,12 +1281,20 @@ proc performFrameOSUpgrade*(options: FrameOSUpgradeOptions): JsonNode =
   var release = FrameOSReleaseInfo()
   try:
     let target = detectUpgradeTarget()
-    release = latestFrameOSRelease(target)
+    let pinned = options.version.strip()
+    release =
+      if pinned.len > 0: frameOSReleaseForVersion(pinned, target)
+      else: latestFrameOSRelease(target)
     let currentVersion = installedFrameOSVersion()
     ensureCompatibleInstalledLayout(release)
 
     if currentVersion != "unknown" and compareFrameOSVersions(currentVersion, release.version) >= 0:
-      result = statusPayload("up_to_date", "FrameOS is already on the latest stable GitHub release.", release)
+      result = statusPayload("up_to_date",
+        if pinned.len > 0:
+          "FrameOS " & currentVersion & " is not older than the requested release " & release.version & "."
+        else:
+          "FrameOS is already on the latest stable GitHub release.",
+        release)
       writeUpgradeStatus(result)
       setupLog(result["message"].getStr())
       return
@@ -1318,7 +1358,9 @@ proc runFrameOSUpgrade*(options: FrameOSUpgradeOptions): int =
   0
 
 proc parseFrameOSUpgradeOptions*(args: seq[string]): FrameOSUpgradeOptions =
-  for arg in args:
+  var i = 0
+  while i < args.len:
+    let arg = args[i]
     case arg
     of "--dry-run":
       result.dryRun = true
@@ -1326,23 +1368,44 @@ proc parseFrameOSUpgradeOptions*(args: seq[string]): FrameOSUpgradeOptions =
       result.yes = true
     of "--no-reboot":
       result.noReboot = true
+    of "--version":
+      if i + 1 >= args.len:
+        raise newException(ValueError, "--version needs a release version (YYYY.M.N)")
+      inc i
+      result.version = args[i]
     else:
-      raise newException(ValueError, "Unknown FrameOS upgrade option: " & arg)
+      if arg.startsWith("--version="):
+        result.version = arg["--version=".len .. ^1]
+      else:
+        raise newException(ValueError, "Unknown FrameOS upgrade option: " & arg)
+    inc i
+  if result.version.len > 0 and not validReleaseVersion(result.version):
+    raise newException(ValueError, "--version must be a release version (YYYY.M.N): " & result.version)
 
-proc scheduleFrameOSUpgrade*(): JsonNode =
+proc scheduleFrameOSUpgrade*(version = ""): JsonNode =
+  ## Start `frameos upgrade` detached. `version`: install exactly that release
+  ## (the version an update decision answered); empty = the latest.
+  let pinned = version.strip()
+  if pinned.len > 0 and not validReleaseVersion(pinned):
+    raise newException(ValueError, "release version must have exactly three numeric fields (YYYY.M.N): " & pinned)
   let binary = frameosInstallDir() / "current" / "frameos"
   if not fileExists(binary):
     raise newException(ValueError, "FrameOS binary not found: " & binary)
   createDir(frameosInstallDir() / "logs")
   let logPath = frameosInstallDir() / "logs" / "upgrade.log"
-  writeUpgradeStatus(%*{
+  var status = %*{
     "status": "starting",
-    "message": "FrameOS upgrade has been queued.",
+    "message": if pinned.len > 0: "FrameOS upgrade to " & pinned & " has been queued."
+               else: "FrameOS upgrade has been queued.",
     "current_version": installedFrameOSVersion(),
     "compiled_version": compiledFrameOSVersion(),
     "log_path": logPath,
-  })
-  let childCommand = shellQuote(binary) & " upgrade --yes"
+  }
+  if pinned.len > 0:
+    status["requested_version"] = %pinned
+  writeUpgradeStatus(status)
+  let childCommand = shellQuote(binary) & " upgrade --yes" &
+    (if pinned.len > 0: " --version " & shellQuote(pinned) else: "")
   let redirected = childCommand & " >> " & shellQuote(logPath) & " 2>&1 </dev/null"
   if privilegedDoorAvailable():
     # Not root: no transient unit to hide in. The child runs as this user

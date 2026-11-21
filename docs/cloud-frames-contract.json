@@ -72,6 +72,11 @@
       "rule": {"type": "bool"},
       "profiles": {"linux": {"since": "2026.11.5"}, "esp32": {"since": "2026.11.5"}}
     },
+    "auto_update": {
+      "$comment": "frame.json `autoUpdate` / ESP32 NVS `auto_update`: whether the frame installs updates by itself (docs/auto-updates.md). Absent = true. A plane decides for the frames it manages from its own copy (the backend's `auto_update` column, the cloud's settings mirror); the device's copy is what a frame with no plane goes by, and what it keeps if it leaves one.",
+      "rule": {"type": "bool"},
+      "profiles": {"linux": {"since": "2026.11.14"}, "esp32": {"since": "2026.11.14"}}
+    },
     "timezone": {
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "iana_zone"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.34"}}

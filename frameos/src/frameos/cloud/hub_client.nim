@@ -71,6 +71,7 @@ import frameos/server/routes/admin_api_assets_routes
 import frameos/server/state
 import frameos/types
 import frameos/upgrade
+from frameos/privileged import validReleaseVersion
 import frameos/utils/http_client
 import ./device_flow
 import ./enrollment
@@ -259,8 +260,10 @@ type
     ## Accepts a `notify_update_available` nudge. Acks on ACCEPTANCE, like the
     ## service-settings refresh: the upgrade itself runs detached and reports
     ## through the upgrade status file and shipped logs, never through the
-    ## ack. Must be idempotent — hub delivery is at-least-once.
-    requestUpgradeFn*: proc() {.gcsafe.}
+    ## ack. Must be idempotent — hub delivery is at-least-once. `version`: the
+    ## release the provider's update decision chose (docs/auto-updates.md), a
+    ## valid YYYY.M.N or "" for the latest.
+    requestUpgradeFn*: proc(version: string) {.gcsafe.}
     rebootFn*: proc() {.gcsafe.}
     auditFn*: proc(payload: JsonNode) {.gcsafe.}
 
@@ -454,7 +457,7 @@ proc defaultReboot() {.gcsafe.} =
   {.gcsafe.}:
     rebootSystemDetached()
 
-proc defaultRequestUpgrade() {.gcsafe.} =
+proc defaultRequestUpgrade(version: string) {.gcsafe.} =
   ## The `notify_update_available` implementation on the full/Pi profile:
   ## run the device's own signed upgrade flow, detached, exactly as the local
   ## admin's POST /api/upgrade does (frameos/upgrade.nim). The provider
@@ -470,9 +473,12 @@ proc defaultRequestUpgrade() {.gcsafe.} =
       log(%*{"event": "cloud:upgrade", "status": "skipped", "detail": "already_in_flight"})
       return
     try:
-      discard scheduleFrameOSUpgrade()
-      log(%*{"event": "cloud:upgrade", "status": "scheduled",
-             "current_version": installedFrameOSVersion()})
+      discard scheduleFrameOSUpgrade(version)
+      var line = %*{"event": "cloud:upgrade", "status": "scheduled",
+                    "current_version": installedFrameOSVersion()}
+      if version.len > 0:
+        line["requested_version"] = %version
+      log(line)
     except CatchableError as error:
       log(%*{"event": "cloud:upgrade", "status": "error", "detail": error.msg})
 
@@ -659,8 +665,8 @@ proc defaultCloudVerbContext*(frameConfig: FrameConfig, scopes: seq[string],
           deviceScenesPayload(),
       refreshServiceSettingsFn: proc() {.gcsafe.} =
         requestServiceSettingsPull(),
-      requestUpgradeFn: proc() {.gcsafe.} =
-        defaultRequestUpgrade(),
+      requestUpgradeFn: proc(version: string) {.gcsafe.} =
+        defaultRequestUpgrade(version),
       rebootFn: proc() {.gcsafe.} =
         defaultReboot(),
       auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -1494,12 +1500,21 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     # in the cloud:upgrade lines the watcher forwards.
     var notice = %*{"event": "cloud:updateAvailable",
                     "installed": installedFrameOSVersion()}
-    let offeredVersion = msg{"version"}.getStr("")
+    # A version is the provider's update decision (docs/auto-updates.md):
+    # install exactly that release — still fetched from GitHub by tag and
+    # signature-checked here, and refused when it is not newer. Anything that
+    # is not a plain YYYY.M.N is ignored, never passed on.
+    let offered = msg{"version"}
+    let offeredVersion =
+      if offered != nil and offered.kind == JString and validReleaseVersion(offered.getStr()): offered.getStr()
+      else: ""
     if offeredVersion.len > 0:
       notice["version"] = %offeredVersion
+    if msg{"auto"}.getBool(false):
+      notice["auto"] = %true
     log(notice)
     result = CloudVerbReply(ack: ackOk(id))
-    ctx.requestUpgradeFn()
+    ctx.requestUpgradeFn(offeredVersion)
   else:
     let label = if verb.len > 0: verb else: "(missing type)"
     ctx.audit(label, false, "unknown_verb")

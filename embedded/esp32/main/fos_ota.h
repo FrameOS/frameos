@@ -37,7 +37,9 @@ const char *fos_ota_platform(void);
 void fos_ota_mark_boot_valid(void);
 /* Backend-managed frames: GET the backend's OTA manifest, compare it to the
  * running version, download + verify the release image into the inactive
- * slot when it differs, and reboot on success. */
+ * slot when it differs, and reboot on success. A board with no plane asks the
+ * cloud's public /api/updates/firmware instead (docs/auto-updates.md). This
+ * entry is an owner's request; the periodic task asks as an automatic check. */
 esp_err_t fos_ota_check_and_apply(void);
 bool fos_ota_busy(void);
 /* Log the last OTA verdict again (`replayed: true`) if the restart that
@@ -46,7 +48,8 @@ bool fos_ota_busy(void);
 void fos_ota_replay_last_line(void);
 bool fos_ota_boot_request_pending(void);
 esp_err_t fos_ota_run_boot_request(void);
-/* Background task that checks every interval_hours (backend-managed). */
+/* Background task that checks every interval_hours: a backend-managed board,
+ * and a board with no plane while NVS `auto_update` is on. */
 void fos_ota_start_periodic_task(uint32_t interval_hours);
 /* Request an early-boot OTA check and schedule a reboot into it. The delay
  * lets HTTP and USB callers flush their acknowledgement first. */
@@ -59,7 +62,8 @@ void fos_ota_allow_downgrade_once(void);
 /* Whichever of the two paths this board has (a backend's, a cloud's); the
  * console's `ota` and the settings page's Install. `plane_out` may be NULL. */
 esp_err_t fos_ota_request_for_control_plane(const char **plane_out);
-/* A control plane that offers this board images. */
+/* Somewhere offers this board images: its plane, or with none the cloud's
+ * public update route (any board with an OTA slot). */
 bool fos_ota_has_control_plane(void);
 
 /* Asking the control plane whether an update exists, in a task of its own, for

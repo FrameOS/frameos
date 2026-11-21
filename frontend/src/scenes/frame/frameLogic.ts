@@ -442,6 +442,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'scaling_mode',
   'render_scale',
   'frame_settings_on_screen',
+  'auto_update',
   'rotate',
   'flip',
   'scenes',
@@ -498,6 +499,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   awake_after_input_seconds: '2026.11.6',
   render_scale: '2026.10.22',
   frame_settings_on_screen: '2026.11.5',
+  auto_update: '2026.11.14',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -573,6 +575,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   scaling_mode: 'Scaling mode',
   render_scale: 'Scale',
   frame_settings_on_screen: 'Frame settings on the screen',
+  auto_update: 'Update automatically',
   rotate: 'Rotation',
   flip: 'Flip',
   scenes: 'Scenes',
@@ -646,6 +649,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'scaling_mode',
   'render_scale',
   'frame_settings_on_screen',
+  'auto_update',
   'rotate',
   'flip',
   'debug',

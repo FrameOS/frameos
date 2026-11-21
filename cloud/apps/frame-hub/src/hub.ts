@@ -134,6 +134,7 @@ import {
 import { raiseAlert } from "./alerts";
 import { errorField, logError, logInfo, logWarn } from "./log";
 import { createGuardedInterval } from "./periodic";
+import { autoUpdateIntervalMs as defaultAutoUpdateIntervalMs, runAutoUpdateSweep } from "./auto-update";
 import {
   browserEvent,
   commandMessage,
@@ -425,6 +426,8 @@ export interface FrameHubOptions {
   lifecycleAuditDebounceMs?: number;
   assetStreamIdleMs?: number;
   virtualTickIntervalMs?: number;
+  // How often the automatic-update sweep runs (auto-update.ts); an hour.
+  autoUpdateIntervalMs?: number;
   // The refresh floor of a virtual frame, in seconds (the plan's,
   // FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS). Tests shorten it.
   virtualMinIntervalSeconds?: number;
@@ -464,6 +467,8 @@ export interface FrameHub {
   skippedSweeps(): number;
   // Runs one pass over the virtual frames immediately (see runVirtualTick).
   virtualTick(): Promise<void>;
+  // Runs one automatic-update sweep immediately (see auto-update.ts).
+  autoUpdateSweep(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -489,6 +494,8 @@ export async function startFrameHub(
     options.assetStreamIdleMs ?? defaultAssetStreamIdleMs;
   const virtualTickIntervalMs =
     options.virtualTickIntervalMs ?? defaultVirtualTickIntervalMs;
+  const autoUpdateIntervalMs =
+    options.autoUpdateIntervalMs ?? defaultAutoUpdateIntervalMs;
   const virtualMinIntervalSeconds =
     options.virtualMinIntervalSeconds ?? cloudRenderedMinIntervalSeconds;
   const virtualRender = createVirtualRenderQueue(options.virtualRender ?? renderScenes);
@@ -3763,6 +3770,30 @@ export async function startFrameHub(
     run: runVirtualTick,
   });
 
+  // Automatic updates (docs/auto-updates.md): once an hour, every frame the
+  // update decision answers with a version gets notify_update_available
+  // `{version, auto: true}`, and its activity feed says so.
+  const autoUpdate = createGuardedInterval({
+    intervalMs: autoUpdateIntervalMs,
+    onError: (error) =>
+      logError("auto_update.failed", { error: errorField(error) }),
+    onSkip: () => logWarn("auto_update.tick_skipped"),
+    run: async () => {
+      const result = await runAutoUpdateSweep(db, {
+        onNudged: (frame, version, decision) =>
+          recordFrameAudit(frame, "frame.auto_update_queued", {
+            reason: decision.reason,
+            version,
+          }),
+      });
+      if (result.noManifest) {
+        logWarn("auto_update.no_manifest");
+      } else if (result.nudged.length > 0) {
+        logInfo("auto_update.nudged", { frames: result.nudged.length, skipped: result.skipped });
+      }
+    },
+  });
+
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(options.port, options.host, () => {
@@ -3787,6 +3818,7 @@ export async function startFrameHub(
     heartbeat.stop();
     sweep.stop();
     virtualTick.stop();
+    autoUpdate.stop();
     for (const timer of prerenderTimers.values()) {
       clearTimeout(timer);
     }
@@ -3876,5 +3908,6 @@ export async function startFrameHub(
     skippedSweeps: () => sweep.skipped(),
     sweep: () => sweep.runNow(),
     virtualTick: () => virtualTick.runNow(),
+    autoUpdateSweep: () => autoUpdate.runNow(),
   };
 }

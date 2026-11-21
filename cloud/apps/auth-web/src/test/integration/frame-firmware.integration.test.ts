@@ -19,6 +19,7 @@ import { POST as revokeFrameRoute } from "../../../app/api/frames/[frameId]/revo
 import { GET as getFirmwareManifest } from "../../../app/api/frames/[frameId]/firmware/manifest/route";
 import { GET as getFirmwareDownload } from "../../../app/api/frames/[frameId]/firmware/download/route";
 import { resetReleaseCacheForTests } from "../../lib/firmware-release";
+import { resetUpdateManifestCacheForTests } from "../../lib/update-manifest";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -96,9 +97,15 @@ function releasePayload(options: { signed?: boolean } = {}) {
   };
 }
 
+// The update manifest raw.githubusercontent serves (null: none, 404).
+let manifestBody: unknown = null;
+
 function mockGitHub(release: unknown = releasePayload()) {
   fetchMock.mockImplementation((input) => {
     const url = String(input);
+    if (url.startsWith("https://raw.githubusercontent.com/")) {
+      return Promise.resolve(manifestBody === null ? new Response("", { status: 404 }) : Response.json(manifestBody));
+    }
     if (url.startsWith("https://api.github.com/")) {
       return Promise.resolve(Response.json(release));
     }
@@ -122,6 +129,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   resetReleaseCacheForTests();
+  resetUpdateManifestCacheForTests();
+  manifestBody = null;
   resetRateLimitForTests();
   cookieJar.clear();
   vi.stubGlobal("fetch", fetchMock);
@@ -234,8 +243,44 @@ describe("device-authed firmware manifest + download", () => {
       version: "2026.8.1",
       size: firmwareBytes.length,
       minisig: minisigText,
-      downloadUrl: downloadPath(frame_id),
+      downloadUrl: `${downloadPath(frame_id)}&version=2026.8.1`,
     });
+  });
+
+  it("answers the hub's automatic nudge by the update decision, and the owner's by the same rule without the rollout", async () => {
+    // docs/auto-updates.md: frameUpdateCheckIsAutomatic reads the newest
+    // notify_update_available row; the sweep's carries `auto: true`.
+    const { access_token, frame_id } = await enrolledFrame();
+    manifestBody = {
+      releases: [{ version: "2026.8.1", at: "2026-01-01T00:00:00Z", rollout: [{ afterHours: 0, percent: 0 }] }],
+    };
+    resetUpdateManifestCacheForTests();
+    const manifest = async () =>
+      (await getFirmwareManifest(
+        getRequest(manifestPath(frame_id), { authorization: `Bearer ${access_token}` }),
+        routeParams(frame_id),
+      )).json();
+
+    await db.insert(frameCommands).values({
+      frameId: frame_id,
+      payload: { auto: true, version: "2026.8.1" },
+      status: "acked",
+      type: "notify_update_available",
+    });
+    // 0% of frames: an automatic check installs nothing and says why.
+    await expect(manifest()).resolves.toMatchObject({ version: "2026.8.0", reason: "held", update: false });
+
+    await db.insert(frameCommands).values({
+      createdAt: new Date(Date.now() + 1000),
+      frameId: frame_id,
+      payload: null,
+      status: "acked",
+      type: "notify_update_available",
+    });
+    // The owner's Update since: manual, the rollout skipped.
+    await expect(manifest()).resolves.toMatchObject({ version: "2026.8.1", reason: "latest" });
+    manifestBody = null;
+    resetUpdateManifestCacheForTests();
   });
 
   it("401s a missing or garbage bearer without touching GitHub", async () => {

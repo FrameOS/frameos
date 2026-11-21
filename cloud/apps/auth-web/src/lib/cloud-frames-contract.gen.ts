@@ -91,6 +91,19 @@ export const cloudFramesContract = {
         }
       }
     },
+    "auto_update": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.11.14"
+        },
+        "esp32": {
+          "since": "2026.11.14"
+        }
+      }
+    },
     "timezone": {
       "rule": {
         "type": "string",

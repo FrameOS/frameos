@@ -89,4 +89,4 @@ async def test_prune_task_runs_on_empty_directories(db, tmp_path, monkeypatch):
 def test_worker_schedules_the_prune():
     from app.tasks.worker import WorkerSettings
 
-    assert [job.name for job in WorkerSettings.cron_jobs] == ["prune_build_artifacts"]
+    assert [job.name for job in WorkerSettings.cron_jobs] == ["prune_build_artifacts", "auto_update_frames"]

@@ -27,6 +27,7 @@ type
     assetRenames: seq[(string, string)]
     serviceSettingsRefreshes: int
     upgradeRequests: int
+    upgradeVersions: seq[string]
 
 proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContext =
   CloudVerbContext(
@@ -109,8 +110,9 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
       recorded.assetRenames.add((src, dst)),
     refreshServiceSettingsFn: proc() {.gcsafe.} =
       recorded.serviceSettingsRefreshes += 1,
-    requestUpgradeFn: proc() {.gcsafe.} =
-      recorded.upgradeRequests += 1,
+    requestUpgradeFn: proc(version: string) {.gcsafe.} =
+      recorded.upgradeRequests += 1
+      recorded.upgradeVersions.add(version),
     rebootFn: proc() {.gcsafe.} =
       recorded.reboots += 1,
     auditFn: proc(payload: JsonNode) {.gcsafe.} =
@@ -371,7 +373,7 @@ suite "cloud hub verb dispatcher":
     # advertised. Pin one accepted value per key.
     let samples = %*{
       "name": "Kitchen", "rotate": 180, "scaling_mode": "contain",
-      "render_scale": 1.5, "frame_settings_on_screen": false, "timezone": "Europe/Tallinn", "debug": true,
+      "render_scale": 1.5, "frame_settings_on_screen": false, "auto_update": false, "timezone": "Europe/Tallinn", "debug": true,
       "flip": "",
       "error_behavior": {"mode": "show_error_retry", "show_error_retry_seconds": 60},
       "control_code": {"enabled": false},
@@ -1079,6 +1081,17 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 0
     check recorded.persistedSettings.len == 0
     check "notify_update_available" in auditedVerbs(recorded)
+    # "9.9.9" is a version: the upgrade is pinned to it.
+    check recorded.upgradeVersions == @["9.9.9"]
+
+  test "notify_update_available pins the decided version, and only a version":
+    let recorded = Recorded()
+    let ctx = makeContext(recorded)
+    discard handleCloudVerb(ctx, %*{"type": "notify_update_available", "version": "2026.11.14", "auto": true})
+    discard handleCloudVerb(ctx, %*{"type": "notify_update_available"})
+    discard handleCloudVerb(ctx, %*{"type": "notify_update_available", "version": "2026.11.14; reboot"})
+    discard handleCloudVerb(ctx, %*{"type": "notify_update_available", "version": 7})
+    check recorded.upgradeVersions == @["2026.11.14", "", "", ""]
 
 proc panelContext(recorded: Recorded): CloudVerbContext =
   ## A frame with a physical panel.

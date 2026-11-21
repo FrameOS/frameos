@@ -16,6 +16,7 @@ import {
   PaletteField,
   RenderScaleField,
   FrameSettingsOnScreenField,
+  AutoUpdateField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -296,6 +297,7 @@ export function DefaultsSection(): JSX.Element {
         </Field>
         <RenderScaleField />
         <FrameSettingsOnScreenField />
+        <AutoUpdateField />
       </SectionBody>
     </>
   )

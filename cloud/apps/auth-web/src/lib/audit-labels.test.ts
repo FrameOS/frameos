@@ -11,6 +11,7 @@ import {
 // regression. Keep this list in sync with the writers.
 const frameEventTypes = [
   "frame.asset_deleted",
+  "frame.auto_update_queued",
   "frame.asset_mkdir",
   "frame.asset_renamed",
   "frame.asset_uploaded",

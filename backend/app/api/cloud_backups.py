@@ -79,6 +79,7 @@ FRAME_RESTORE_FIELDS = (
     "scaling_mode",
     "render_scale",
     "frame_settings_on_screen",
+    "auto_update",
     "rotate",
     "flip",
     "debug",

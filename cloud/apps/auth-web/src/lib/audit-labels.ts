@@ -57,6 +57,7 @@ export const eventLabels: Record<string, string> = {
   "frame.lan_access_changed": "Frame local network access changed",
   "frame.firmware_version_changed": "Frame firmware version changed",
   "frame.re_enrolled": "Frame re-enrolled (re-keyed in place)",
+  "frame.auto_update_queued": "FrameOS update queued automatically",
   "frame.rebind_token_created": "Frame re-enrollment code created",
   "frame.renamed": "Frame renamed",
   "frame.revoked": "Frame revoked",

@@ -1165,6 +1165,41 @@ jobs:
               --notes-file release-notes.md
           fi
 
+      # Automatic updates (docs/auto-updates.md): frames, backends and the
+      # cloud read docs/update-manifest.json on main, and a release they are
+      # not told about does not exist for them. Appended only now that the
+      # release and every asset are on GitHub, so no frame is offered a
+      # version whose files are not there yet. It starts on the manifest's
+      # defaultRollout (a tenth of frames today, everyone in four days); a
+      # person blocks, pauses or reshapes it by editing the file on main.
+      - name: Add the release to the update manifest
+        env:
+          DOCKER_VERSION: ${{ needs.update-versions.outputs.docker_version }}
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch main \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" manifest-main
+          cd manifest-main
+          git config user.name "frameos-bot"
+          git config user.email "git@frameos.net"
+          for attempt in 1 2 3 4 5; do
+            python3 tools/update_manifest.py add --version "$DOCKER_VERSION"
+            if git diff --quiet -- docs/update-manifest.json; then
+              echo "The manifest already lists $DOCKER_VERSION"
+              exit 0
+            fi
+            git add docs/update-manifest.json
+            git commit -m "chore: $DOCKER_VERSION in the update manifest"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "main moved; trying again ($attempt)"
+            git fetch --depth 1 origin main
+            git reset --hard FETCH_HEAD
+          done
+          echo "::error::could not add $DOCKER_VERSION to docs/update-manifest.json; add it by hand (python3 tools/update_manifest.py add --version $DOCKER_VERSION)"
+          exit 1
+
       - name: Dispatch Discord notification
         env:
           GH_TOKEN: ${{ github.token }}

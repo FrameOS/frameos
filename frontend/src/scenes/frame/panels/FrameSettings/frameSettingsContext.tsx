@@ -155,6 +155,8 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   showFrameSettingsOnScreen: boolean
   /** Why a cloud frame cannot take `frame_settings_on_screen` yet (older firmware); undefined when it can. */
   frameSettingsOnScreenDisabledReason: string | undefined
+  /** "Update automatically" is a frame's that can update itself: not a virtual frame's (the plane renders it), not a Pico's (no OTA). */
+  showAutoUpdate: boolean
 
   /** The panel this frame drives: the device reported it on the cloud, the form holds it elsewhere. */
   paletteDevice: string
@@ -653,6 +655,10 @@ export function FrameSettingsProvider({
   // frame takes it with its next deploy whatever it runs (an older runtime
   // ignores it); a cloud frame from the release that learned the key.
   const showFrameSettingsOnScreen = surface !== 'cloudVirtual' && !isVirtualPlatform && !isPicoPlatform
+  // Automatic updates (docs/auto-updates.md): every frame that has a FrameOS
+  // of its own to update. A virtual frame runs its plane's runtime, a Pico
+  // has no OTA. Never gated on firmware: the plane honours the switch.
+  const showAutoUpdate = surface !== 'cloudVirtual' && !isVirtualPlatform && !isPicoPlatform
   const frameSettingsOnScreenDisabledReason =
     !cloudProfile || cloudFrameSupportsFrameSettingsOnScreen(frame.frameos_version)
       ? undefined
@@ -1001,6 +1007,7 @@ export function FrameSettingsProvider({
     renderScaleDisabledReason,
     renderScaleOptions,
     showFrameSettingsOnScreen,
+    showAutoUpdate,
     frameSettingsOnScreenDisabledReason,
 
     paletteDevice,

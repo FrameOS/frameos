@@ -223,6 +223,13 @@ typedef struct {
      * page"). NVS `fs_on_screen` (u8), absent = on. Set by the backend
      * settings poll, the cloud set_settings and the console. */
     bool frame_settings_on_screen;
+    /* frame.json `autoUpdate` (the contract's `auto_update`): the board
+     * installs FrameOS updates by itself (docs/auto-updates.md). NVS
+     * `auto_update` (u8), absent = on. What a board with no control plane goes
+     * by (its periodic check asks the cloud's /api/updates/firmware); a plane
+     * decides for its boards from its own copy. Set by the cloud
+     * set_settings, the backend settings poll and the console. */
+    bool auto_update;
     /* The device's own override of the above: on, the frame page is offered
      * whatever the control plane says, so a frame whose Wi-Fi broke behind a
      * locked page is not locked out (a Pi's is a file on its boot partition).

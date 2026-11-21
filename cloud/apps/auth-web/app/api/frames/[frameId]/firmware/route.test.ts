@@ -9,6 +9,8 @@ import {
   resetReleaseCacheForTests,
 } from "../../../../../src/lib/firmware-release";
 import { jsonError } from "../../../../../src/lib/device-flow";
+import { frameUpdateCheckIsAutomatic } from "../../../../../src/lib/firmware-offer";
+import { resetUpdateManifestCacheForTests } from "../../../../../src/lib/update-manifest";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -40,12 +42,19 @@ vi.mock("../../../../../src/lib/device-flow", async (importOriginal) => ({
 // every mocked release below and rewrites this whole suite's expectations on
 // whichever machine happens to have that directory. Overridable per test so
 // the dev path itself can still be pinned.
+// Which nudge a manifest fetch answers is a frame_commands query; the
+// decision itself runs for real against the manifest mockGitHub serves.
+vi.mock("../../../../../src/lib/firmware-offer", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  frameUpdateCheckIsAutomatic: vi.fn(() => Promise.resolve(false)),
+}));
 vi.mock("../../../../../src/lib/firmware-release", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   devFirmwareOverride: vi.fn(() => Promise.resolve(undefined)),
 }));
 
 const authMock = vi.mocked(authenticateFrameDevice);
+const automaticMock = vi.mocked(frameUpdateCheckIsAutomatic);
 const devFirmwareMock = vi.mocked(devFirmwareOverride);
 const rateLimitMock = vi.mocked(rateLimitResponse);
 const frameRateLimitMock = vi.mocked(identityRateLimitResponse);
@@ -101,6 +110,16 @@ const releasePayload = {
   tag_name: "v1.2.3",
 };
 
+// The same release renamed to another version, for a decision that answers
+// one older than the latest (a stepping stone, a release held back).
+function releaseAs(version: string) {
+  return JSON.parse(JSON.stringify(releasePayload).replaceAll("1.2.3", version)) as typeof releasePayload;
+}
+
+// The update manifest mockGitHub serves (docs/update-manifest.json's shape);
+// null = GitHub has none (raw.githubusercontent answers 404).
+let manifestBody: unknown = null;
+
 // `honorRange: false` is a CDN that ignores Range and sends the whole file.
 function mockGitHub(
   release: unknown = releasePayload,
@@ -108,6 +127,15 @@ function mockGitHub(
 ) {
   fetchMock.mockImplementation((input, init) => {
     const url = String(input);
+    if (url.startsWith("https://raw.githubusercontent.com/")) {
+      return Promise.resolve(
+        manifestBody === null ? new Response("404", { status: 404 }) : Response.json(manifestBody),
+      );
+    }
+    const tag = /\/releases\/tags\/v([\d.]+)$/.exec(url);
+    if (tag) {
+      return Promise.resolve(Response.json(releaseAs(tag[1]!)));
+    }
     if (url.startsWith("https://api.github.com/")) {
       return Promise.resolve(Response.json(release));
     }
@@ -152,6 +180,9 @@ const routeParams = (id: string) => ({ params: Promise.resolve({ frameId: id }) 
 
 beforeEach(() => {
   resetReleaseCacheForTests();
+  resetUpdateManifestCacheForTests();
+  manifestBody = null;
+  automaticMock.mockResolvedValue(false);
   vi.stubGlobal("fetch", fetchMock);
   authMock.mockResolvedValue({
     frame: { id: frameId } as never,
@@ -187,7 +218,7 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
       version: "1.2.3",
       size: firmwareBytes.length,
       minisig: minisigText,
-      downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`,
+      downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic&version=1.2.3`,
     });
     expect(rateLimitMock.mock.calls[0]?.[1]).toBe("frames:device-firmware-meta");
     // The real budget is the frame's, so frames behind one NAT address do
@@ -373,6 +404,114 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
   });
 });
 
+describe("GET /api/frames/[frameId]/firmware/manifest — the update decision", () => {
+  // docs/auto-updates.md: what a cloud frame is offered is the rule's answer
+  // over the manifest, automatic when the hub's sweep nudged it.
+  const full = [{ afterHours: 0, percent: 100 }];
+  const manifest = (query = "") =>
+    getManifest(
+      request(`/api/frames/${frameId}/firmware/manifest?platform=esp32-s3-generic${query}`),
+      routeParams(frameId),
+    );
+  const asFrame = (frame: Record<string, unknown>) =>
+    authMock.mockResolvedValue({
+      frame: { id: frameId, ...frame } as never,
+      linkedClient: { scopes: ["frame:managed"] } as never,
+    });
+
+  it("offers the newest release not held: the one under a blocked latest, fetched by its tag", async () => {
+    manifestBody = {
+      releases: [
+        { version: "1.2.2", at: "2026-01-01T00:00:00Z", rollout: full },
+        { version: "1.2.3", at: "2026-01-02T00:00:00Z", rollout: full, blocked: "bricks a panel" },
+      ],
+    };
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.1" });
+    automaticMock.mockResolvedValue(true);
+
+    const response = await manifest();
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      version: "1.2.2",
+      reason: "held_back",
+      latest: "1.2.3",
+      held: { version: "1.2.3", why: "blocked" },
+      downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic&version=1.2.2`,
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/releases/tags/v1.2.2"))).toBe(true);
+  });
+
+  it("answers the board's own version when the rule holds everything: the firmware logs up-to-date", async () => {
+    manifestBody = {
+      releases: [{ version: "1.2.3", at: "2026-01-02T00:00:00Z", rollout: full, blocked: "bricks a panel" }],
+    };
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.2" });
+
+    const response = await manifest();
+
+    expect(await response.json()).toEqual({
+      platform: "esp32-s3-generic",
+      version: "1.2.2",
+      size: 1,
+      minisig: "",
+      downloadUrl: "",
+      update: false,
+      reason: "held",
+      latest: "1.2.3",
+      held: { version: "1.2.3", why: "blocked", detail: "bricks a panel" },
+    });
+  });
+
+  it("an automatic nudge respects the rollout; the owner's request skips it", async () => {
+    // 0% after an hour: nobody is in yet.
+    manifestBody = {
+      releases: [{ version: "1.2.3", at: "2026-01-02T00:00:00Z", rollout: [{ afterHours: 0, percent: 0 }] }],
+    };
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.2" });
+    automaticMock.mockResolvedValue(true);
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.2", reason: "held" });
+
+    automaticMock.mockResolvedValue(false);
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.3", reason: "latest" });
+  });
+
+  it("an automatic nudge to a frame whose owner turned automatic updates off installs nothing", async () => {
+    manifestBody = { releases: [{ version: "1.2.3", at: "2026-01-02T00:00:00Z", rollout: full }] };
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.2", settings: { auto_update: false } });
+    automaticMock.mockResolvedValue(true);
+
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.2", reason: "disabled", update: false });
+
+    // The owner's own Update still works.
+    automaticMock.mockResolvedValue(false);
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.3" });
+  });
+
+  it("the version the board names wins over the one it last reported", async () => {
+    manifestBody = { releases: [{ version: "1.2.3", at: "2026-01-02T00:00:00Z", rollout: full }] };
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.2" });
+
+    expect(await (await manifest("&version=1.2.3")).json()).toMatchObject({ version: "1.2.3", reason: "up_to_date" });
+  });
+
+  it("no manifest: an automatic nudge installs nothing, a manual one gets the latest as before", async () => {
+    mockGitHub();
+    asFrame({ frameosVersion: "1.2.2" });
+    automaticMock.mockResolvedValue(true);
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.2", reason: "no_manifest" });
+
+    automaticMock.mockResolvedValue(false);
+    expect(await (await manifest()).json()).toMatchObject({ version: "1.2.3" });
+  });
+});
+
 describe("GET /api/frames/[frameId]/firmware/download", () => {
   const download = (
     platform = "esp32-s3-generic",
@@ -404,6 +543,21 @@ describe("GET /api/frames/[frameId]/firmware/download", () => {
     expect(response.headers.get("content-length")).toBe("22");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(
       firmwareBytes.slice(10),
+    );
+  });
+
+  it("serves the release the manifest named", async () => {
+    mockGitHub();
+
+    const response = await getDownload(
+      request(`/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic&version=1.2.2`),
+      routeParams(frameId),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-frameos-release")).toBe("v1.2.2");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("frameos-1.2.2-esp32-s3-generic-app.bin"))).toBe(
+      true,
     );
   });
 

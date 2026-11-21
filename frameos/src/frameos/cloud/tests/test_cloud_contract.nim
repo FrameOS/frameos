@@ -44,7 +44,7 @@ proc makeContext(recorded: Recorded, scopes: seq[string] = @[]): CloudVerbContex
     deleteAssetFn: proc(path: string) {.gcsafe.} = discard,
     renameAssetFn: proc(src: string, dst: string) {.gcsafe.} = discard,
     refreshServiceSettingsFn: proc() {.gcsafe.} = discard,
-    requestUpgradeFn: proc() {.gcsafe.} = discard,
+    requestUpgradeFn: proc(version: string) {.gcsafe.} = discard,
     rebootFn: proc() {.gcsafe.} = discard,
     auditFn: proc(payload: JsonNode) {.gcsafe.} = discard,
   )

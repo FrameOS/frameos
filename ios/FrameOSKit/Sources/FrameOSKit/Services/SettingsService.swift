@@ -167,16 +167,32 @@ extension FrameOSService {
         // No "interval": a frame renders on its scene's own refresh interval.
         let common: Set<String> = ["rotate", "scaling_mode", "render_scale", "timezone", "frame_settings_on_screen",
                                    "debug", "flip", "deep_sleep", "deep_sleep_on_battery", "wake_check_seconds"]
+        // "Update automatically" (docs/auto-updates.md) is the plane's to act
+        // on whatever the firmware, so it is offered to every frame with a
+        // FrameOS of its own (the SPA's showAutoUpdate), never by the contract.
+        let autoUpdate: Set<String> = Self.offersAutoUpdate(frame) ? ["auto_update"] : []
         switch kind {
         case .cloud:
-            return common.intersection(CloudSettingsContract.shared.keys(for: frame))
+            return common.intersection(CloudSettingsContract.shared.keys(for: frame)).union(autoUpdate)
         case .backend:
             // A backend keeps an ESP32's power settings in device_config
             // (edited in the web workspace), and flip is a Linux setting.
-            let keys = common.subtracting(["deep_sleep", "deep_sleep_on_battery", "wake_check_seconds"])
+            let keys = common.subtracting(["deep_sleep", "deep_sleep_on_battery", "wake_check_seconds"]).union(autoUpdate)
             return frame.isEmbedded ? keys.subtracting(["flip"]) : keys
         }
     }
+
+    /// Not a virtual frame (its plane renders it), not a Pico (no OTA).
+    static func offersAutoUpdate(_ frame: Frame) -> Bool {
+        if frame.hardware["platform"]?.stringValue == "virtual" || frame.raw["platform"]?.stringValue == "virtual" {
+            return false
+        }
+        let embeddedPlatform = frame.raw["embedded"]?.objectValue?["platform"]?.stringValue ?? ""
+        return !embeddedPlatform.hasPrefix("pico")
+    }
+
+    /// Settings a backend acts on itself: saved, never deployed for.
+    static let planeOnlySettings: Set<String> = ["auto_update"]
 
     /// Save settings and send them to the frame. Cloud: `POST …/settings`
     /// (queued as `set_settings`). Backend: `POST /api/frames/{id}` then a
@@ -209,7 +225,7 @@ extension FrameOSService {
                 config[camel] = value
                 deviceConfigChanged = true
             }
-            let deploys = !body.isEmpty
+            let deploys = !Set(body.keys).subtracting(Self.planeOnlySettings).isEmpty
             if deviceConfigChanged { body["device_config"] = .object(config) }
             try await client.call("POST", Self.framePath(frame.id), body: .json(.object(body)))
             if !deploys {
