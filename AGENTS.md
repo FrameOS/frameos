@@ -550,7 +550,18 @@
   editor and catalog tools alone, `voice_scene_builder.py` /
   `voice-scene-builder.ts`, its scene rendered in the frame's memory and
   pushed as the preview — and `rotate_frame`), never the MCP tools: a
-  frame's token is not the owner's. The turns are ONE conversation per frame:
+  frame's token is not the owner's. **Voice actions first**
+  (docs/voice-chat.md "Voice actions"): the frame POSTs a screen digest
+  before its audio (`frameos/voice_screen.nim`, `?screen=1&seq=99999`), the
+  plane asks TypeSafe's Jev one request of typed questions over it and the
+  scene's custom events (`description` / `aliases` / `voice`), and a sure
+  answer comes back as `events` the frame dispatches from the origin `voice`
+  (`uiAction`, a custom event, `setCurrentScene`) with no chat turn; the chat
+  gets the screen as `press` / `type_text` / `scene_action` otherwise.
+  `voice_actions.py` and `voice-actions.ts` replay
+  `docs/voice-action-fixtures.json` (regenerate with
+  `frameos/tools/generate_voice_action_fixtures.py`, `--record` asks Jev).
+  The turns are ONE conversation per frame:
   every exchange is three chat rows (heard, a `log` row of the tools that
   ran, the reply) and the next turn gets the last six exchanges with their
   age and actions (`voice_history_for_model` / `voiceHistoryForModel`), so a

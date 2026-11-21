@@ -388,7 +388,8 @@ async def test_the_owners_switches_narrow_the_tools(async_client, no_auth_client
     assert "- Voice chat may: put new scenes on the frame (show_image, create_scene, change_scene)" in context
     assert (
         "- Voice chat may not: change the frame's settings (rotate_frame); use the installed scenes: switch between "
-        "them, set their fields, redraw (activate_scene, set_scene_state, render_now)"
+        "them, set their fields, redraw, press and type on the screen (activate_scene, set_scene_state, render_now, "
+        "press, type_text, scene_action)"
     ) in context
     # Named anyway: refused with the reason, nothing on the queue, the frame unturned.
     outputs = tool_outputs(openai.requests[1])
@@ -442,12 +443,13 @@ async def test_voice_permissions_are_the_planes_and_never_the_frames(async_clien
 
 
 def test_voice_permissions_default_and_gate_each_tool():
+    from app.utils.voice_actions import SCREEN_TOOL_DEFINITIONS
     from app.utils.voice_chat import VOICE_TOOL_PERMISSIONS, VoicePermissions
 
     defaults = VoicePermissions.from_device_config(None)
     assert defaults.as_dict() == {"change_settings": True, "use_scenes": True, "create_scenes": True, "use_albums": True}
     # Every tool but the listing answers to a switch, and the table names real tools.
-    names = {tool["name"] for tool in VOICE_TOOL_DEFINITIONS}
+    names = {tool["name"] for tool in VOICE_TOOL_DEFINITIONS} | {tool["name"] for tool in SCREEN_TOOL_DEFINITIONS}
     assert set(VOICE_TOOL_PERMISSIONS) == names - {"list_scenes"}
     assert defaults.allows("list_scenes") and defaults.allows("activate_scene") and defaults.allows("show_image")
     # A non-bool is ignored, not believed.
@@ -1182,6 +1184,166 @@ def test_the_progress_text_cuts_the_transcript_and_counts_the_seconds():
     assert len(cut) == 162 and cut.endswith('word…"'), cut
     assert wants_voice_progress("application/x-ndjson") and wants_voice_progress("application/json, application/x-ndjson")
     assert not wants_voice_progress(None) and not wants_voice_progress("*/*")
+
+
+# ------------------------------------------------------------ voice actions
+
+TODO_SCENE = {
+    "id": "todo-3",
+    "name": "To-do",
+    "nodes": [],
+    "edges": [],
+    "customEvents": [{"name": "clearDone", "description": "Remove the to-dos that are done", "aliases": ["clean up"]}],
+}
+SCREEN = {
+    "v": 1,
+    "scene": "todo-3",
+    "t": [
+        {"id": "2:10", "do": "tap", "label": "Mark done", "near": "Buy milk"},
+        {"id": "2:11", "do": "type", "text": "Buy milk"},
+        {"id": "2:20", "do": "type", "label": "Add a to-do"},
+        {"id": "2:21", "do": "tap", "text": "Add"},
+    ],
+}
+
+
+def screen_url(frame, session: str = SESSION) -> str:
+    return f"/api/frames/{frame.id}/embedded/voice/{session}?screen=1&seq=99999"
+
+
+async def todo_frame(async_client, db, redis, monkeypatch, **kwargs):
+    frame = await voice_frame(async_client, db, **kwargs)
+    frame.scenes = [*scenes(), TODO_SCENE]
+    db.add(frame)
+    db.commit()
+    await redis.set(f"frame:{frame.id}:active_scene", "todo-3")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts-test")
+    return frame
+
+
+@pytest.fixture
+def jev(monkeypatch):
+    """Jev's answers, and the requests it was asked."""
+    from app.api import embedded_voice
+
+    asked: list[dict] = []
+    answers: dict = {"value": {}}
+
+    async def fake_ask(request, *, api_key, http_client=None):
+        asked.append({"request": request, "api_key": api_key})
+        return answers["value"]
+
+    monkeypatch.setattr(embedded_voice, "ask_jev", fake_ask)
+    return {"asked": asked, "answers": answers}
+
+
+@pytest.mark.asyncio
+async def test_a_screen_digest_rides_ahead_of_the_audio_and_an_old_frames_seq_stays_refused(
+    async_client, no_auth_client, db, redis
+):
+    """docs/voice-chat.md "Voice actions": `?screen=1&seq=99999` is kept for the
+    session (202), a digest that is none is dropped, and a plain seq that high
+    is still out of range (what an older plane answered the digest with)."""
+    frame = await voice_frame(async_client, db)
+    response = await no_auth_client.post(screen_url(frame), content=json.dumps(SCREEN), headers=auth(frame))
+    assert response.status_code == 202 and response.json() == {"ok": True, "screen": True}
+    from app.api.embedded_voice import voice_sessions
+
+    session = voice_sessions().take(int(frame.id), SESSION)
+    assert session is not None and [t["id"] for t in session.screen["targets"]] == ["2:10", "2:11", "2:20", "2:21"]
+    response = await no_auth_client.post(screen_url(frame), content=b"not json", headers=auth(frame))
+    assert response.json() == {"ok": True, "screen": False}
+    response = await no_auth_client.post(url(frame, 99999), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_voice_action_is_done_by_the_frame_with_no_chat_turn(
+    async_client, no_auth_client, db, redis, heard, jev, monkeypatch
+):
+    """Jev picks the field and the words from the screen: the reply carries the
+    uiAction for the frame to dispatch, the chat model is never asked, and the
+    exchange is three voice chat rows like any other."""
+    frame = await todo_frame(async_client, db, redis, monkeypatch)
+    openai = ScriptedOpenAi([])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    heard["text"]["value"] = "Add oat milk."
+    jev["answers"]["value"] = {
+        "kind": {"type": "choice", "choice": "fill", "confidence": 0.9, "probabilities": {"fill": 0.96}},
+        "field": {"type": "choice", "choice": "f1", "confidence": 0.9, "probabilities": {"f1": 0.97}},
+        "words": {"type": "choice", "choice": "w1", "confidence": 0.9, "probabilities": {"w1": 0.98}},
+        "submit": {"type": "noul", "noul": 0.9},
+        "replace": {"type": "noul", "noul": 0.1},
+    }
+    await no_auth_client.post(screen_url(frame), content=json.dumps(SCREEN), headers=auth(frame))
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ok": True,
+        "transcript": "Add oat milk.",
+        "reply": "Added “Oat milk”.",
+        "tools": ["voice_action"],
+        "events": [{"name": "uiAction", "payload": {"target": "2:20", "do": "type", "text": "Oat milk", "submit": True}}],
+    }
+    assert openai.requests == []
+    request = jev["asked"][0]["request"]
+    assert jev["asked"][0]["api_key"] == "ts-test"
+    assert request["state"]["said"] == "Add oat milk." and request["state"]["scene"] == "To-do"
+    assert "Remove the to-dos that are done" in request["questions"]["kind"]["criteria"]["action"]
+    assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
+    rows = db.query(ChatMessage).order_by(ChatMessage.created_at).all()
+    assert [(m.role, m.tool) for m in rows] == [("user", "voice"), ("assistant", "log"), ("assistant", "voice")]
+    assert '"kind": "fill"' in rows[1].content and '"target": "2:20"' in rows[1].content
+
+
+@pytest.mark.asyncio
+async def test_several_things_go_to_the_chat_which_steers_with_the_screen_tools(
+    async_client, no_auth_client, db, redis, heard, jev, monkeypatch
+):
+    frame = await todo_frame(async_client, db, redis, monkeypatch)
+    heard["text"]["value"] = "Add eggs and bread."
+    jev["answers"]["value"] = {"kind": {"type": "choice", "choice": "several", "confidence": 0.8, "probabilities": {"several": 0.9}}}
+    openai = ScriptedOpenAi([
+        ("", [call("type_text", {"target": "2:20", "text": "Eggs", "submit": True}, "c1"),
+              call("type_text", {"target": "2:20", "text": "Bread", "submit": True}, "c2")]),
+        ("Added eggs and bread.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    await no_auth_client.post(screen_url(frame), content=json.dumps(SCREEN), headers=auth(frame))
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    body = response.json()
+    assert body["reply"] == "Added eggs and bread." and body["tools"] == ["type_text", "type_text"]
+    assert body["events"] == [
+        {"name": "uiAction", "payload": {"target": "2:20", "do": "type", "text": "Eggs", "submit": True}},
+        {"name": "uiAction", "payload": {"target": "2:20", "do": "type", "text": "Bread", "submit": True}},
+    ]
+    first = openai.requests[0]
+    assert {"press", "type_text", "scene_action"} <= {tool["name"] for tool in first["tools"]}
+    context = first["input"][0]["content"][0]["text"]
+    assert "On the screen (press and type_text take these ids):" in context
+    assert "- 2:20: Text field “Add a to-do”" in context
+    assert "- clearDone: Remove the to-dos that are done (also said as: clean up)" in context
+
+
+@pytest.mark.asyncio
+async def test_no_fast_path_without_the_use_scenes_switch_or_a_typesafe_key(
+    async_client, no_auth_client, db, redis, heard, jev, monkeypatch
+):
+    frame = await todo_frame(async_client, db, redis, monkeypatch, permissions={"voiceUseScenes": False})
+    monkeypatch.setattr(ai_chat_agent, "stream_response", ScriptedOpenAi([("The owner switched that off.", [])]))
+    await no_auth_client.post(screen_url(frame), content=json.dumps(SCREEN), headers=auth(frame))
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.json()["reply"] == "The owner switched that off." and "events" not in response.json()
+    assert jev["asked"] == []
+    monkeypatch.delenv("TYPESAFE_API_KEY")
+    frame.device_config = {}
+    db.add(frame)
+    db.commit()
+    monkeypatch.setattr(ai_chat_agent, "stream_response", ScriptedOpenAi([("Done.", [])]))
+    await no_auth_client.post(screen_url(frame, "fedcba9876543210"), content=json.dumps(SCREEN), headers=auth(frame))
+    response = await no_auth_client.post(url(frame, 0, done=1, session="fedcba9876543210"), content=SECOND_OF_SPEECH,
+                                         headers={**auth(frame), **PCM_HEADERS})
+    assert response.json()["reply"] == "Done." and jev["asked"] == []
 
 
 def test_a_voice_turn_leaves_layouts_out():

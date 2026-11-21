@@ -91,6 +91,7 @@ const char *frameos_nim_scene_state_json(void) { return "{}"; }
 /* No runtime, no lock to wait for: the _wait variants never time out here. */
 const char *frameos_nim_scene_info_json_wait(int timeout_ms) { (void)timeout_ms; return frameos_nim_scene_info_json(); }
 const char *frameos_nim_scene_state_json_wait(int timeout_ms) { (void)timeout_ms; return frameos_nim_scene_state_json(); }
+char *frameos_nim_voice_screen_copy(int timeout_ms) { (void)timeout_ms; return NULL; }
 bool frameos_nim_scene_snapshot_wait(int timeout_ms, const char **info_json, const char **state_json)
 {
     (void)timeout_ms;

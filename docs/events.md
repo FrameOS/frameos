@@ -190,6 +190,27 @@ declaration:
 "customEvents": [{"name": "nextPage", "origins": ["schedule", "cloud"]}]
 ```
 
+A custom event can also be named by voice (docs/voice-chat.md, "Voice
+actions"): the origin `voice` may always send one, and the control plane
+offers the scene's custom events to what was said by what their declaration
+says of them — `description` (what it does), `aliases` (other ways to say
+it, at most 12) and `voice`: `match` (the default: offered when it has a
+description or aliases), `fallback` (what everything said goes to when
+nothing else on the screen matches; one per scene) or `never`. The frame
+ignores these keys. Sent by voice, the payload is `{text, at}`:
+
+```json
+"customEvents": [{"name": "voiceMemo", "description": "Save what was said as a voice memo",
+                  "aliases": ["take a note"], "voice": "fallback"}]
+```
+
+**`uiAction`** does to an element of a JSX UI what a finger would, by its
+place in the tree rather than a position: `{target: "<node>:<key>", do:
+"tap" | "type" | "set" | "scroll", text?, submit?, by?}`, `target` as the
+voice key's screen digest lists it (`frameos/voice_screen.nim`). It is the
+UI layer's (`ui/events.nim` `uiAction`, reached through `runEventInner` like a
+tap), from `voice`, the preview, the HTTP API and the scene itself.
+
 Which origins can be opted into is `customEvents.declarableOrigins`. The edges
 that cannot see the scene (the scheduler, the hub verb, a control plane's
 schedule validator) let such an event through, and the dispatcher asks the

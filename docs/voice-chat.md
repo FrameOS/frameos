@@ -429,6 +429,79 @@ itself stays on every real ESP32 board, because it is how a PDM microphone
 on a header is declared; once the clock and data pins are set the controls
 appear, and Button actions offers "Voice chat" on the same rule.
 
+## Voice actions: the screen first, the chat when it must
+
+The voice key stays the AI key, and most of what is said needs no chat: it is
+something on the screen. Before its audio the frame sends a **screen digest**
+(`frameos/voice_screen.nim`, built from the layout's last tree by
+`ui/layout.nim` `uiSpots` and `ui/events.nim` `uiScreen`; on the ESP32 read
+under the runtime lock as the key goes down, `frameos_nim_voice_screen_copy`,
+and POSTed by `fos_voice.c` ahead of chunk 0):
+
+```
+POST .../voice/<session>?screen=1&seq=99999   (application/json)
+{"v":1,"scene":"to-do","kb":true,"open":["calendar"],"state":{...},
+ "t":[{"id":"2:125","do":"type","label":"Add a to-do","focus":true},
+      {"id":"2:90428","do":"tap","label":"Mark done","near":"Book the dentist"}, ...]}
+-> 202 {"ok": true, "screen": true}
+```
+
+`seq=99999` is out of range on purpose: a plane that does not read the digest
+refuses it untouched (422 on a backend, a chunk of no session on the cloud)
+and the turn goes on as before. Each target is an element a tap, a field or a
+scroll reaches, its `id` `<node>:<key>` (and `:<scene>` for the layout's
+own), `do` `tap` / `type` / `pick` / `scroll`, and what it says: `text`, a
+`label` (`aria-label`, `title`, `alt`, a field's placeholder), `near` (the row
+it sits on), `focus` for the field with the keyboard. What the plane holds of
+the scene (its custom events, docs/events.md) and of the frame (its other
+scenes) it does not send.
+
+At the closing chunk, after the transcription, the plane asks **TypeSafe's
+Jev** (`POST https://api.typesafe.ai/v1/systemone`, model `jev-latest`) one
+request of typed questions (`app/utils/voice_actions.py`,
+`src/lib/ai/voice-actions.ts`, pinned together by
+`docs/voice-action-fixtures.json`):
+
+- `kind`: dictating into the field with the keyboard, Enter there, words into
+  a field, a press, one of the scene's actions (its custom events, and
+  `back` / `forward` when it hears them), another scene or window, several
+  things, something else — and the scene's `fallback` event when it has one;
+- `press`, `field`, `action`, `scene`: which one, each with "None of these";
+- `words`: which of the utterance's readings is the text to type (the whole
+  of it, without "add" in front, without "to the list" behind, a rename's new
+  name: `text_candidates`);
+- `submit` and `replace`: yes / no.
+
+Jev answers them all in one pass (150-250 ms). A sure answer (`kind` at 0.45 or
+more, its target at 0.35 or more, not "several" or "something else") is the
+turn: the reply carries the frame's **`events`** and no chat runs.
+
+```
+200 {"ok":true,"transcript":"Add milk.","reply":"Added “Milk”.","tools":["voice_action"],
+     "events":[{"name":"uiAction","payload":{"target":"2:125","do":"type","text":"Milk","submit":true}}]}
+```
+
+The frame dispatches them in order from the origin `voice`
+(`fos_events_dispatch_from_plane`), before the render the session releases:
+`uiAction` (docs/events.md), a custom event with `{text, at}`,
+`setCurrentScene` (a desktop's window brought to the front is the same).
+Anything else — several things, a question, a new scene, an unsure answer, a
+failed Jev call, no TypeSafe key — is the chat turn, which then has the
+screen in its context and three more tools: `press {target}`, `type_text
+{target, text, submit?, replace?}` and `scene_action {name, text?}`, each adding
+an event to the same `events` (so "add eggs and bread" is two `type_text`
+calls). All three, and the fast path, answer to **Use installed scenes**.
+
+The key: a backend's Settings → `typeSafe.apiKey`, else its
+`TYPESAFE_API_KEY`; the cloud's `TYPESAFE_API_KEY`. The exchange is the three
+voice chat rows as ever; the log row is `voice_action {"did": {...}}`.
+
+The samples: **To-do** (its circle and bin say `title="Mark done"` /
+`"Delete"`: "add milk", "tick off the dentist", "delete the bike light one",
+"rename X to Y") and **Voice memos** (its `voiceMemo` is the scene's
+`fallback`: what matches nothing on the screen is saved as a memo).
+`cloud/apps/auth-web/evals/voice-actions` measures the decisions against Jev.
+
 ## What is not here yet
 
 - **Editing an installed scene in place.** `change_scene` never writes a saved

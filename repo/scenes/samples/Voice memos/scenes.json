@@ -1,0 +1,193 @@
+[
+  {
+    "id": "voice-memos",
+    "name": "Voice memos",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#f6f1e7",
+      "windowSize": "800x480",
+      "icon": "M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"
+    },
+    "fields": [
+      {
+        "name": "title",
+        "label": "Title",
+        "type": "string",
+        "value": "Voice memos",
+        "placeholder": "Voice memos",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "folder",
+        "label": "Folder in the assets",
+        "type": "string",
+        "value": "Voice memos",
+        "placeholder": "Voice memos",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "sort",
+        "label": "Order",
+        "type": "select",
+        "value": "newest",
+        "options": [
+          {
+            "value": "newest",
+            "label": "Newest first"
+          },
+          {
+            "value": "oldest",
+            "label": "Oldest first"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "timeFormat",
+        "label": "Times",
+        "type": "select",
+        "value": "24h",
+        "options": [
+          {
+            "value": "24h",
+            "label": "24-hour (14:05)"
+          },
+          {
+            "value": "12h",
+            "label": "12-hour (2:05 PM)"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "contrast",
+        "label": "Contrast",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "label": "Auto: high contrast where the panel shows no color"
+          },
+          {
+            "value": "color",
+            "label": "Color"
+          },
+          {
+            "value": "high",
+            "label": "High contrast"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 1
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "ui",
+        "type": "app",
+        "position": {
+          "x": 355,
+          "y": -126
+        },
+        "data": {
+          "keyword": "voiceMemos",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 390,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "ui-image",
+        "type": "codeNodeEdge",
+        "source": "ui",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "voiceMemos": {
+        "name": "Voice memos",
+        "category": "data",
+        "description": "Memos spoken into the frame's microphone (the voiceMemo event) or typed, saved as text files in the assets folder and listed newest first.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Voice memos\",\n  \"category\": \"data\",\n  \"description\": \"Memos spoken into the frame's microphone (the voiceMemo event) or typed, saved as text files in the assets folder and listed newest first.\",\n  \"version\": \"1.1.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"events\": [\n    \"voiceMemo\",\n    \"back\",\n    \"forward\"\n  ],\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}",
+          "app.tsx": "// @name Voice memos\n// @background #f6f1e7\n// @refresh 3600\n// Voice memos: hold the frame's voice key and speak, and what you said is\n// saved as a memo, a text file in the frame's assets folder, and listed here,\n// newest first. The voice key stays the frame's AI key: what matches\n// something on the screen is done (\"open the plumber memo\", \"delete the\n// last one\", \"next page\"), and only what matches nothing becomes a memo:\n// the scene's custom event `voiceMemo` is its `voice: fallback`, which the\n// control plane sends with {text, at} (docs/voice-chat.md \"Voice actions\").\n// Without a microphone (a Pi, the preview) type a memo at the bottom and\n// Save. Tap a memo to read all of it, the bin to delete it (it asks first).\n//\n// Every memo is one file: <folder>/<YYYY-MM-DD HH.MM.SS>.txt in the frame's\n// local time, UTF-8. Files are the memory: nothing else is kept, so a memo\n// copied off the frame, or one dropped into the folder, is a memo here.\n\nconst MAX_CHARS = 8000 // a memo longer than this is cut (30 s of speech is far less)\nconst PREVIEW_BYTES = 240 // what is read of a memo for its row\nconst HINT = 'On a frame with a microphone, hold the voice key and speak.'\n\n// High contrast where the panel shows no color (black and white, greys), or\n// when the scene's Contrast setting asks for it.\nconst highContrast = (app) => {\n  const mode = app.state.contrast || 'auto'\n  return mode === 'high' || (mode === 'auto' && app.frame.color === false)\n}\n\n// Warm paper, navy ink, one terracotta accent for what was just saved and\n// for Save. High contrast: black on white, borders instead of tints.\nconst THEMES = {\n  color: {\n    page: 'bg-[#f6f1e7] text-[#1d2b4a]',\n    muted: 'text-[#5d6880]',\n    card: 'bg-white border border-[#e4dccb]',\n    fresh: 'bg-white border-2 border-[#c2553a]',\n    when: 'text-[#1d2b4a]',\n    accent: 'text-[#c2553a]',\n    dot: 'bg-[#c2553a]',\n    field: 'bg-white border border-[#d8cfbd] focus:border-[#1d2b4a]',\n    save: 'bg-[#c2553a] text-white active:bg-[#a5452d]',\n    plain: 'bg-[#e9e1d1] text-[#1d2b4a] active:bg-[#ddd3bf]',\n    remove: 'bg-[#1d2b4a] text-white active:bg-[#2c3d63]',\n    off: 'text-[#b9b2a3]',\n    banner: 'bg-[#1d2b4a] text-white',\n  },\n  high: {\n    page: 'bg-white text-black',\n    muted: 'text-black',\n    card: 'bg-white border-2 border-black',\n    fresh: 'bg-white border-4 border-black',\n    when: 'text-black',\n    accent: 'text-black',\n    dot: 'bg-black',\n    field: 'bg-white border-2 border-black',\n    save: 'bg-black text-white',\n    plain: 'bg-white text-black border-2 border-black',\n    remove: 'bg-black text-white',\n    off: 'text-white',\n    banner: 'bg-black text-white',\n  },\n}\n\n// ------------------------------------------------------------------ files\n\n// The folder setting as a path in the assets folder: no leading or trailing\n// slash, no \"..\", no hidden names (the frame refuses those anyway).\nconst folderOf = (app) => {\n  const parts = String(app.state.folder ?? '')\n    .split('/')\n    .map((part) => part.trim())\n    .filter((part) => part && part !== '.' && part !== '..' && !part.startsWith('.'))\n  return parts.length ? parts.join('/') : 'Voice memos'\n}\n\n// makeAssetFolder makes one folder inside one that is there: walk down.\nconst ensureFolder = (folder) => {\n  let path = ''\n  for (const part of folder.split('/')) {\n    path = path ? `${path}/${part}` : part\n    if (!frameos.assetExists(path)) frameos.makeAssetFolder(path)\n  }\n}\n\nconst B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\n\n// writeAsset takes base64, and the runtime has no btoa or TextEncoder: the\n// text's UTF-8 bytes, then base64, by hand.\nconst utf8Base64 = (text) => {\n  const bytes = []\n  for (let i = 0; i < text.length; i++) {\n    let c = text.charCodeAt(i)\n    if (c >= 0xd800 && c < 0xdc00 && i + 1 < text.length) {\n      const low = text.charCodeAt(i + 1)\n      if (low >= 0xdc00 && low < 0xe000) {\n        c = 0x10000 + ((c - 0xd800) << 10) + (low - 0xdc00)\n        i++\n      }\n    }\n    if (c >= 0xd800 && c < 0xe000) c = 0xfffd // half a pair: the replacement character\n    if (c < 0x80) bytes.push(c)\n    else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 63))\n    else if (c < 0x10000) bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63))\n    else bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63))\n  }\n  let out = ''\n  for (let i = 0; i < bytes.length; i += 3) {\n    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0)\n    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63]\n    out += i + 1 < bytes.length ? B64[(n >> 6) & 63] : '='\n    out += i + 2 < bytes.length ? B64[n & 63] : '='\n  }\n  return out\n}\n\nconst pad = (n, width = 2) => String(n).padStart(width, '0')\n\n// \"2026-11-18 11.04.05\" in the frame's local time (Date is local on a frame).\nconst stamp = (date) =>\n  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +\n  `${pad(date.getHours())}.${pad(date.getMinutes())}.${pad(date.getSeconds())}`\n\n// The text as it is kept: no control characters but line breaks, trimmed, cut.\nconst cleanText = (raw) =>\n  String(raw ?? '')\n    .replace(/\\r\\n?/g, '\\n')\n    .replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f]/g, ' ')\n    .trim()\n    .slice(0, MAX_CHARS)\n\n// Save one memo; the path, or null when it was empty or the frame refused it.\nconst saveMemo = (app, raw, at) => {\n  const text = cleanText(raw)\n  if (!text) return null\n  const parsed = at ? new Date(at) : null\n  const when = parsed && !isNaN(parsed.getTime()) ? parsed : new Date()\n  const folder = folderOf(app)\n  ensureFolder(folder)\n  // Two memos in one second: \"… 2.txt\", \"… 3.txt\".\n  const base = `${folder}/${stamp(when)}`\n  let path = `${base}.txt`\n  for (let n = 2; frameos.assetExists(path) && n < 100; n++) path = `${base} ${n}.txt`\n  if (!frameos.writeAsset(path, utf8Base64(`${text}\\n`))) {\n    frameos.remember('error', 'The memo could not be saved: the frame refused the file.')\n    frameos.log(`Voice memos: could not write ${path}`)\n    return null\n  }\n  frameos.remember('error', null)\n  frameos.remember('fresh', path)\n  frameos.remember('open', null)\n  frameos.remember('asking', null)\n  // The list turns to the page that holds it (get() finds it).\n  frameos.remember('seek', path)\n  return path\n}\n\nconst NAME = /^(\\d{4})-(\\d\\d)-(\\d\\d) (\\d\\d)\\.(\\d\\d)\\.(\\d\\d)(?: (\\d+))?\\.txt$/i\n\n// The folder's memos, sorted: {path, name, date (or null for a file not\n// named by this scene)}. Only the names are read here.\nconst listMemos = (app) => {\n  const folder = folderOf(app)\n  const memos = []\n  for (const path of frameos.listAssets(folder, { shallow: true }) || []) {\n    if (path.endsWith('/') || !/\\.txt$/i.test(path)) continue\n    const name = path.slice(path.lastIndexOf('/') + 1)\n    const m = NAME.exec(name)\n    const date = m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null\n    // \"… 05 2.txt\" sorts after \"… 05.txt\" (a space sorts before a dot).\n    const key = m ? `${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}${m[6]}${pad(m[7] ? +m[7] : 1, 3)}` : `0 ${name}`\n    memos.push({ path, name, date, key })\n  }\n  memos.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))\n  if (app.state.sort !== 'oldest') memos.reverse()\n  return memos\n}\n\n// A memo's first words for its row. Files do not change once written, so\n// the preview is remembered per path (only the page's, to stay small).\nconst previewsFor = (memos) => {\n  const kept = frameos.recall('previews') || {}\n  const next = {}\n  let read = false\n  for (const memo of memos) {\n    if (typeof kept[memo.path] === 'string') {\n      next[memo.path] = kept[memo.path]\n      continue\n    }\n    const text = frameos.readAsset(memo.path, { text: true, length: PREVIEW_BYTES })\n    next[memo.path] = (text || '').replace(/\\s+/g, ' ').trim()\n    read = true\n  }\n  if (read || Object.keys(kept).length !== memos.length) frameos.remember('previews', next)\n  return next\n}\n\n// ------------------------------------------------------------------- time\n\nconst DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n\nconst clock = (app, date) => {\n  if (app.state.timeFormat === '12h') {\n    const h = date.getHours() % 12 || 12\n    return `${h}:${pad(date.getMinutes())} ${date.getHours() < 12 ? 'AM' : 'PM'}`\n  }\n  return `${pad(date.getHours())}:${pad(date.getMinutes())}`\n}\n\n// \"Today\", \"Yesterday\", \"Wed 18 Nov\", or \"18 Nov 2025\" for another year.\nconst dayLabel = (date, now) => {\n  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()\n  const days = Math.round((startOf(now) - startOf(date)) / 86400000)\n  if (days === 0) return 'Today'\n  if (days === 1) return 'Yesterday'\n  const short = `${date.getDate()} ${MONTHS[date.getMonth()].slice(0, 3)}`\n  if (date.getFullYear() !== now.getFullYear()) return `${short} ${date.getFullYear()}`\n  return `${DAYS[date.getDay()].slice(0, 3)} ${short}`\n}\n\nconst longDate = (app, date) =>\n  `${DAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}, ${clock(app, date)}`\n\n// ----------------------------------------------------------------- events\n\n// The plane sends {text, at} when the voice key was held over this scene;\n// back and forward turn the pages, or close and step through an open memo.\nexport function onEvent(app, context) {\n  if (context.event === 'voiceMemo') {\n    const payload = context.payload || {}\n    if (!cleanText(payload.text)) return false // nothing heard: nothing to save or draw\n    saveMemo(app, payload.text, payload.at) // a refused write shows its banner\n    return true\n  }\n  const open = frameos.recall('open')\n  if (open) {\n    if (context.event === 'back') {\n      frameos.remember('open', null)\n      return true\n    }\n    if (context.event === 'forward') {\n      const memos = listMemos(app)\n      const at = memos.findIndex((memo) => memo.path === open)\n      if (at >= 0 && at + 1 < memos.length) {\n        frameos.remember('open', memos[at + 1].path)\n        return true\n      }\n    }\n    return false\n  }\n  const page = frameos.recall('page') || 0\n  if (context.event === 'back' && page > 0) {\n    frameos.remember('page', page - 1)\n    return true\n  }\n  if (context.event === 'forward') {\n    frameos.remember('page', page + 1) // get() holds it to the last page\n    return true\n  }\n  return false\n}\n\n// ------------------------------------------------------------------ icons\n\nconst Icon = ({ d, size, className = '' }) => (\n  <svg className={className} width={size} height={size} viewBox=\"0 0 24 24\" fill=\"currentColor\">\n    <path d={d} />\n  </svg>\n)\nconst MIC =\n  'M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z'\nconst BIN = 'M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z'\nconst LEFT = 'M15.41,16.58L10.83,12L15.41,7.41L14,6L8,12L14,18L15.41,16.58Z'\nconst RIGHT = 'M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z'\n\n// --------------------------------------------------------------------- UI\n\nexport function get(app, context) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const t = highContrast(app) ? THEMES.high : THEMES.color\n  // One unit per 480 px of the shorter side, so 800x480, 480x800 and 480x480\n  // read the same and a 1600x1200 panel is drawn larger.\n  const s = Math.max(0.8, Math.min(2, Math.min(W, H) / 480))\n  const px = (n) => Math.round(n * s)\n  const portrait = H > W * 1.1\n  const narrow = W < 640 // a square or small panel: no count in the header\n  const now = new Date()\n  const title = String(app.state.title ?? '').trim() || 'Voice memos'\n  const error = frameos.recall('error')\n\n  const memos = listMemos(app)\n  const openPath = frameos.recall('open')\n  const open = openPath ? memos.find((memo) => memo.path === openPath) : null\n  const asking = frameos.recall('asking')\n  const fresh = frameos.recall('fresh')\n\n  const pad4 = px(16)\n  const remove = (path) => {\n    frameos.deleteAsset(path)\n    frameos.remember('asking', null)\n    frameos.remember('open', null)\n    if (fresh === path) frameos.remember('fresh', null)\n  }\n  // \"today, 11:04\" inside a sentence\n  const whenOf = (memo) =>\n    memo.date\n      ? `${dayLabel(memo.date, now).replace(/^(Today|Yesterday)/, (word) => word.toLowerCase())}, ${clock(app, memo.date)}`\n      : memo.name.replace(/\\.txt$/i, '')\n\n  const banner = error ? (\n    <div className={`flex items-center gap-3 rounded-xl px-4 py-2 ${t.banner}`} onClick={() => frameos.remember('error', null)}>\n      <span className={`flex-1 text-[${px(16)}px]`}>{error}</span>\n      <span className={`text-[${px(16)}px] font-bold`}>OK</span>\n    </div>\n  ) : null\n\n  // ---- one memo, all of it\n  if (open) {\n    const text = (frameos.readAsset(open.path, { text: true }) || '').trim()\n    const paragraphs = text.split(/\\n+/)\n    const confirming = asking === open.path\n    // The text scrolls in a box of a known height (a scroller needs one):\n    // the canvas less the margins, the button row, the card's padding and date.\n    const bodyH = H - 2 * pad4 - px(48) - px(12) - 2 * px(20) - px(22) - px(12) - (error ? px(56) : 0)\n    return (\n      <div className={`flex flex-col w-full h-full gap-[${px(12)}px] p-[${pad4}px] ${t.page}`}>\n        <div className=\"flex items-center gap-3\">\n          <div className={`h-[${px(48)}px] pl-2 pr-4 rounded-xl flex items-center text-[${px(18)}px] font-bold ${t.plain}`}\n            onClick={() => { frameos.remember('open', null); frameos.remember('asking', null) }}>\n            <Icon d={LEFT} size={px(28)} />\n            <span>{portrait ? 'Back' : title}</span>\n          </div>\n          <div className=\"flex-1\" />\n          {confirming ? (\n            <div className=\"flex items-center gap-2\">\n              <span className={`text-[${px(18)}px] font-bold`}>Delete it?</span>\n              <div className={`h-[${px(48)}px] px-4 rounded-xl flex items-center text-[${px(18)}px] ${t.plain}`}\n                onClick={() => frameos.remember('asking', null)}>Cancel</div>\n              <div className={`h-[${px(48)}px] px-4 rounded-xl flex items-center text-[${px(18)}px] font-bold ${t.remove}`}\n                onClick={() => remove(open.path)}>Delete</div>\n            </div>\n          ) : (\n            <div className={`h-[${px(48)}px] px-4 rounded-xl flex items-center gap-1 text-[${px(18)}px] ${t.plain}`}\n              onClick={() => frameos.remember('asking', open.path)}>\n              <Icon d={BIN} size={px(24)} />\n              <span>Delete</span>\n            </div>\n          )}\n        </div>\n        {banner}\n        <div className={`flex flex-col flex-1 rounded-2xl p-[${px(20)}px] gap-[${px(12)}px] ${t.card}`}>\n          <span className={`h-[${px(22)}px] text-[${px(16)}px] font-bold ${t.accent}`}>\n            {open.date ? longDate(app, open.date) : open.name}\n          </span>\n          <div className={`h-[${bodyH}px] overflow-y-auto`}>\n            <div className={`flex flex-col gap-[${px(12)}px]`}>\n              {paragraphs.map((line) => (\n                <span className={`text-[${px(24)}px] leading-snug`}>{line}</span>\n              ))}\n            </div>\n          </div>\n        </div>\n      </div>\n    )\n  }\n\n  // ---- the list, a page at a time (a row per memo, only the page is read)\n  const headerH = px(portrait ? 92 : 80) // room for the hint on two lines\n  const composerH = px(56)\n  const rowH = px(portrait ? 84 : 64)\n  const gap = px(8)\n  const room = H - 2 * pad4 - headerH - composerH - 2 * px(12) - (error ? px(44) : 0)\n  const perPage = Math.max(1, Math.floor((room + gap) / (rowH + gap)))\n  const pages = Math.max(1, Math.ceil(memos.length / perPage))\n  let page = Math.min(Math.max(0, frameos.recall('page') || 0), pages - 1)\n  const seek = frameos.recall('seek')\n  if (seek) {\n    const at = memos.findIndex((memo) => memo.path === seek)\n    if (at >= 0) page = Math.floor(at / perPage)\n    frameos.remember('page', page)\n    frameos.remember('seek', null)\n  }\n  const shown = memos.slice(page * perPage, (page + 1) * perPage)\n  const previews = previewsFor(shown)\n  const turn = (to) => {\n    frameos.remember('page', to)\n    frameos.remember('asking', null)\n  }\n\n  const draft = frameos.recall('draft') || ''\n  const save = () => {\n    if (saveMemo(app, frameos.recall('draft') || '', null)) frameos.remember('draft', '')\n  }\n\n  const pager =\n    pages > 1 ? (\n      <div className=\"flex items-center gap-1\">\n        <div className={`w-[${px(48)}px] h-[${px(48)}px] rounded-xl flex items-center justify-center ${page > 0 ? t.plain : ''}`}\n          title=\"Previous page\" onClick={() => { if (page > 0) turn(page - 1) }}>\n          <Icon d={LEFT} size={px(30)} className={page > 0 ? '' : t.off} />\n        </div>\n        <span className={`text-[${px(16)}px] ${t.muted}`}>{`${page + 1} / ${pages}`}</span>\n        <div className={`w-[${px(48)}px] h-[${px(48)}px] rounded-xl flex items-center justify-center ${page + 1 < pages ? t.plain : ''}`}\n          title=\"Next page\" onClick={() => { if (page + 1 < pages) turn(page + 1) }}>\n          <Icon d={RIGHT} size={px(30)} className={page + 1 < pages ? '' : t.off} />\n        </div>\n      </div>\n    ) : null\n\n  const count = memos.length === 1 ? '1 memo' : `${memos.length} memos`\n\n  const row = (memo) => {\n    const preview = previews[memo.path] || ''\n    if (asking === memo.path) {\n      return (\n        <div className={`flex items-center gap-3 rounded-2xl px-4 h-[${rowH}px] ${t.card}`}>\n          <span className={`flex-1 text-[${px(18)}px] truncate`}>{`Delete the memo from ${whenOf(memo)}?`}</span>\n          <div className={`h-[${px(46)}px] px-4 rounded-xl flex items-center text-[${px(18)}px] ${t.plain}`}\n            onClick={() => frameos.remember('asking', null)}>Cancel</div>\n          <div className={`h-[${px(46)}px] px-4 rounded-xl flex items-center text-[${px(18)}px] font-bold ${t.remove}`}\n            onClick={() => remove(memo.path)}>Delete</div>\n        </div>\n      )\n    }\n    const isFresh = memo.path === fresh\n    const when = memo.date ? (\n      <div className={portrait ? 'flex items-center gap-2' : `flex flex-col w-[${px(132)}px] shrink-0`}>\n        <span className={`text-[${px(15)}px] ${isFresh ? `font-bold ${t.accent}` : t.muted}`}>\n          {isFresh ? 'Just saved' : dayLabel(memo.date, now)}\n        </span>\n        <span className={`text-[${px(portrait ? 15 : 22)}px] font-bold ${t.when}`}>{clock(app, memo.date)}</span>\n      </div>\n    ) : (\n      <span className={`text-[${px(15)}px] ${t.muted} truncate ${portrait ? '' : `w-[${px(132)}px] shrink-0`}`}>{memo.name}</span>\n    )\n    return (\n      <div className={`flex items-center gap-2 rounded-2xl pl-4 pr-1 h-[${rowH}px] ${isFresh ? t.fresh : t.card}`}>\n        <div className={`flex-1 min-w-0 h-full gap-[${px(portrait ? 2 : 14)}px] ${portrait ? 'flex flex-col justify-center' : 'flex items-center'}`}\n          onClick={() => { frameos.remember('open', memo.path); frameos.remember('asking', null); frameos.remember('fresh', null) }}>\n          {when}\n          <span className={`flex-1 min-w-0 text-[${px(19)}px] ${portrait ? 'line-clamp-2 leading-snug' : 'line-clamp-2 leading-snug'}`}>\n            {preview || '(empty)'}\n          </span>\n        </div>\n        <div className={`w-[${px(48)}px] h-[${px(48)}px] shrink-0 rounded-xl flex items-center justify-center ${t.muted}`}\n          title=\"Delete\" onClick={() => frameos.remember('asking', memo.path)}>\n          <Icon d={BIN} size={px(24)} />\n        </div>\n      </div>\n    )\n  }\n\n  const empty = (\n    <div className=\"flex flex-col flex-1 items-center justify-center gap-3\">\n      <div className={`w-[${px(84)}px] h-[${px(84)}px] rounded-full flex items-center justify-center ${t.card}`}>\n        <Icon d={MIC} size={px(46)} className={t.accent} />\n      </div>\n      <span className={`text-[${px(24)}px] font-bold`}>No memos yet</span>\n      <span className={`text-[${px(17)}px] ${t.muted} text-center px-4`}>{`${HINT} Or type one below.`}</span>\n    </div>\n  )\n\n  return (\n    <div className={`flex flex-col w-full h-full gap-[${px(12)}px] p-[${pad4}px] ${t.page}`}>\n      <div className={`flex items-center gap-3 h-[${headerH}px]`}>\n        <div className={`w-[${px(52)}px] h-[${px(52)}px] shrink-0 rounded-full flex items-center justify-center ${t.dot}`}>\n          <Icon d={MIC} size={px(30)} className=\"text-white\" />\n        </div>\n        <div className=\"flex flex-col flex-1 min-w-0\">\n          <span className={`text-[${px(30)}px] font-bold truncate`}>{title}</span>\n          <span className={`text-[${px(15)}px] ${t.muted} line-clamp-2`}>{HINT}</span>\n        </div>\n        {memos.length && !narrow && !(portrait && pager) ? <span className={`text-[${px(16)}px] ${t.muted} shrink-0`}>{count}</span> : null}\n        {pager}\n      </div>\n      {banner}\n      {memos.length ? (\n        <div className={`flex flex-col flex-1 gap-[${gap}px]`}>{shown.map(row)}</div>\n      ) : (\n        empty\n      )}\n      <div className={`flex items-center gap-3 h-[${composerH}px]`}>\n        <input className={`flex-1 h-full px-4 rounded-xl text-[${px(19)}px] ${t.field}`}\n          value={draft} placeholder=\"Type a memo\"\n          onChange={(e) => frameos.remember('draft', e.target.value)}\n          onKeyDown={(e) => { if (e.key === 'Enter') save() }} />\n        <div className={`h-full px-[${px(22)}px] rounded-xl flex items-center text-[${px(19)}px] font-bold ${draft.trim() ? t.save : t.plain}`}\n          onClick={save}>\n          Save\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    },
+    "customEvents": [
+      {
+        "name": "voiceMemo",
+        "description": "Save what was said as a voice memo",
+        "aliases": [
+          "take a note",
+          "note this down",
+          "remember this",
+          "new memo"
+        ],
+        "voice": "fallback",
+        "fields": [
+          {
+            "name": "text",
+            "label": "Text",
+            "type": "string"
+          },
+          {
+            "name": "at",
+            "label": "At",
+            "type": "string"
+          }
+        ]
+      }
+    ]
+  }
+]

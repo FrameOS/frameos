@@ -699,6 +699,18 @@ picks the edge a press drags (`cursor_shape.nim` `edgeCursor`).
 
 ## Fields and the keyboard
 
+The on-screen keyboard has a Tab key (an arrow to a bar, left of the comma or
+the space): it moves the focus to the next field down the tree, around past
+the last; held, to the one before. A keyboard's Tab does the same, Shift+Tab
+back. A `<select>` is passed over.
+
+What a person could do on a UI is also what the voice key sends its control
+plane (docs/voice-chat.md "Voice actions", `ui/layout.nim` `uiSpots`): each
+element with an `onClick`, each field and each box with more to scroll, with
+its text, its `aria-label` / `title` / `alt` / `placeholder`, and the text of
+the row it sits on. A password field's text is never in it. `uiAction`
+(docs/events.md) presses, types into or scrolls one by the id listed there.
+
 `<input>` and `<textarea>` are fields to type into, controlled as in React:
 the field shows `value`, and every edit calls `onChange` (or `onInput`)
 with the text as it would be, as `e.value` and `e.target.value`. Keep it

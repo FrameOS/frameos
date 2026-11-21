@@ -1005,5 +1005,42 @@
     "description": "Go forward, the other way from `back`: the next photo or page (the scene switcher moves its highlight a screenful on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen.",
     "canListen": true,
     "fields": []
+  },
+  {
+    "name": "uiAction",
+    "description": "Do to an element of a JSX UI what a person would, by its place in the tree instead of a position: press it (`tap`), type `text` into a field (`type`: the field gets the focus, the text goes in as the on-screen keyboard would put it, at the end, and with `submit` the field's Enter follows; `set` replaces what the field says), or scroll a box that scrolls by `by` of its height (`scroll`). `target` is `<node>:<key>` of a UI of the scene showing, as its screen digest lists it (docs/voice-chat.md, \"Voice actions\"); a target that is no longer there does nothing.",
+    "canDispatch": true,
+    "fields": [
+      {
+        "name": "target",
+        "label": "Target",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "do",
+        "label": "Do",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "text",
+        "label": "Text",
+        "type": "string",
+        "required": false
+      },
+      {
+        "name": "submit",
+        "label": "Submit",
+        "type": "boolean",
+        "required": false
+      },
+      {
+        "name": "by",
+        "label": "By",
+        "type": "float",
+        "required": false
+      }
+    ]
   }
 ]

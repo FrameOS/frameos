@@ -46,6 +46,7 @@ var
   infoBuffer: string
   sceneInfoBuffer: string
   sceneStateBuffer: string
+  voiceScreenBuffer: string
 
 proc sceneWidth(): int {.inline.} =
   if frameRotate in [90, 270]: frameHeight else: frameWidth
@@ -1241,6 +1242,15 @@ proc fos_nim_open_home_impl(): bool {.exportc, cdecl.} =
   except Exception as e:
     log("open home failed: " & e.msg)
     result = false
+
+proc fos_nim_voice_screen_impl(): cstring {.exportc, cdecl.} =
+  ## The voice key's screen digest (frameos/voice_screen.nim), for fos_voice.c
+  ## to send its plane before the audio. Under the runtime lock (the glue's).
+  try:
+    voiceScreenBuffer = voiceScreenJson()
+  except CatchableError, Defect:
+    voiceScreenBuffer = "{}"
+  voiceScreenBuffer.cstring
 
 proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
