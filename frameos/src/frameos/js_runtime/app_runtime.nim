@@ -76,6 +76,7 @@ type
     state: UrlImageState
     at: MonoTime
     id: int
+    drawn: int ## the pass (`urlPass`) it was last drawn in
 
   JsAppRuntime* = ref object
     category*: string
@@ -146,6 +147,7 @@ type
     lineStreamIds: seq[int]
     ## `<img src="https://…">`'s pictures by url and size (js_async.nim).
     urlImages: seq[UrlImage]
+    urlPass: int ## fillUrlImages's passes, one a render of the app's UI
     ## The config of the newest call into the app (its node's fields, public
     ## state included): what `app.config` reads in async code, which runs
     ## after the call that started it (js_async.nim asyncEnv).
@@ -2822,6 +2824,11 @@ proc keptPixels(runtime: JsAppRuntime): int =
     let image = runtime.images.getOrDefault(id)
     if not image.isNil:
       result += image.width * image.height
+
+proc keptHasRoom(runtime: JsAppRuntime, pixels: int): bool =
+  let count = runtime.keptImageIds.len + 1
+  count <= MaxKeptImages or
+    (count <= MaxKeptThumbnails and runtime.keptPixels() + pixels <= KeptThumbnailPixels)
 
 proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode =
   result = runtime.storeImageJson(image)

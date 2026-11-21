@@ -245,6 +245,17 @@ suite "kept images sized by the start of the download":
     made = probeSourceTarget(head(encoded(240, 180)), targetFor)
     check (made.width, made.height) == (400, 300)
 
+  test "a host keeps a downloaded picture at the size asked, not the photo's":
+    # The browser preview and the playground fetch an <img> in the render
+    # (fetchImageJson): kept at the thumbnail's 512x384, a store's covers
+    # drawn at 128x96 filled the kept pictures nine at a time (2026-11-22).
+    let ui = newUi(gallery(true), "tests/sized-host")
+    let targetFor = ui.runtime.keptTargetFor(ui.owner, nil, 128, 96, fitCover)
+    var body = encoded(512, 384)
+    let made = decodeSizedBy(body, targetFor, fitCover)
+    check (made.width, made.height) == (128, 96)
+    check made[64, 48] == rgbx(10, 20, 30, 255)
+
   test "short of room for the size asked, the photo's own resolution":
     let ui = newUi(gallery(true), "tests/sized-source")
     let logs = ui.capturing()

@@ -73,7 +73,11 @@ Scene store puts the scene's initial under each cover).
 - The picture is a kept picture (`fetchImage` `keep`: 48 small ones,
   `docs/jsx-ui.md` "Photos that stay"): the same url at the same size is
   one picture while the interpreter lives. At a new size (the box changed)
-  the old one stands in until the new one is in.
+  the old one stands in until the new one is in. When room is needed the
+  least lately drawn goes first, never one on the screen: a list scrolled
+  past the kept ones lets go of what scrolled out of sight (the Scene store's
+  covers came and went as it scrolled while the first loaded went first,
+  2026-11-22).
 - **Only what shows, or is within a screen of showing, is fetched**, as a
   browser's lazy loading does: a picture further down a box that scrolls
   (more than the box's own height past what it shows) is fetched when a
@@ -82,8 +86,9 @@ Scene store puts the scene's initial under each cover).
   out of the kept ones below (the Browser sample on frameos.net, 2026-11-21).
 - A failure is the app's log line `<img> https://host: why` and is asked
   again after 30 s; a picture that loses its memory within 10 s of coming
-  (the app shows more than fits) waits 30 s too, so two pictures cannot push
-  each other out for ever. A `data:` URL is decoded at once, everywhere.
+  while it is still drawn (the app shows more than fits) waits 30 s too, so
+  two pictures cannot push each other out for ever. One that went while out
+  of sight is fetched again as soon as it is back. A `data:` URL is decoded at once, everywhere.
 - Not for headers or a color profile: that is `frameos.fetchImage`.
 
 ### `frameos.useFetch` (for `get()`)
