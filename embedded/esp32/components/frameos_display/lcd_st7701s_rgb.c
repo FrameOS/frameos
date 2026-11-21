@@ -1,4 +1,5 @@
-/* ST7701S 480x480 RGB LCD (the Seeed SenseCAP Indicator's). See lcd_st7701s_rgb.h. */
+/* ST7701S 480x480 RGB LCD (the Seeed SenseCAP Indicator's) and the Sunton
+ * ESP32-8048S070's EK9716 800x480. See lcd_st7701s_rgb.h. */
 #include "lcd_st7701s_rgb.h"
 
 #include <stdbool.h>
@@ -8,12 +9,13 @@
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
-static const char *TAG = "fos_lcd";
+#define TAG "fos_lcd"
 
 /* ---------------------------------------------------------------- boards */
 
 typedef struct {
     const char *preset;
+    int width, height; /* the glass */
     /* The expander's bus, the expander's pins (the TCA9535's P0..P15, or the
      * HT8574's P0..P7 with the same numbers below 8). */
     int i2c_sda, i2c_scl;
@@ -30,6 +32,8 @@ typedef struct {
     uint32_t pclk_hz;
     uint32_t hsync_pulse, hsync_back, hsync_front;
     uint32_t vsync_pulse, vsync_back, vsync_front;
+    /* Data out on the falling edge (the EK9716) or the rising (the ST7701S). */
+    int pclk_active_neg;
     /* Lines per bounce buffer (two of them, internal RAM): how late the
      * refill interrupt may run before a frame breaks. Must divide the
      * height. */
@@ -54,6 +58,7 @@ typedef struct {
 static const lcd_board_t k_boards[] = {
     {
         .preset = "seeed_sensecap_indicator_d1",
+        .width = 480, .height = 480,
         .i2c_sda = 39, .i2c_scl = 40,
         .exp_lcd_cs = 4, .exp_lcd_rst = 5, .exp_tp_rst = 7,
         .exp_hold_high = {8, 10},
@@ -64,24 +69,80 @@ static const lcd_board_t k_boards[] = {
         .pclk_hz = 12 * 1000 * 1000,
         .hsync_pulse = 8, .hsync_back = 50, .hsync_front = 10,
         .vsync_pulse = 8, .vsync_back = 20, .vsync_front = 10,
+        .pclk_active_neg = 0,
         /* 2 x 19.2 KB: ~0.9 ms of slack at 12 MHz, where ten lines (ESPHome's)
          * still dropped frames during a render's bulk copies. */
+        .bounce_lines = 20,
+    },
+    /* Sunton (a.k.a. GUITION) ESP32-8048S070 ("CYD 7"): an ESP32-S3-WROOM-1
+     * (16 MB QIO flash, 8 MB octal PSRAM) next to a 7.0" 800x480 IPS glass
+     * whose EK9716 driver scans what the host writes and answers to nothing —
+     * no SPI init, no IO expander, no controller at all. Data lines
+     * B0..B4 = GPIO15,7,6,5,4, G0..G5 = GPIO9,46,3,8,16,1, R0..R4 =
+     * GPIO14,21,47,48,45; HSYNC 39, VSYNC 40, DE 41, PCLK 42 (the panel's
+     * connector runs the sync lines on pins of its own, so the S3's LCD-peripheral
+     * IOMUX pads are not in play). The backlight is GPIO2 through an LED boost
+     * driver, high = on. The GT911 touch panel is on the chip's I2C pins
+     * (SDA19/SCL20, reset GPIO38, INT unwired — R17 is not populated, so the
+     * touch driver polls): the touch driver's bus, not this board table's,
+     * and the SD slot is SPI (CS10/MOSI11/SCK12/MISO13). USB is a CH340 on
+     * UART0; GPIO19/20 are the touch bus, so the USB-Serial/JTAG PHY is not
+     * wired to anything usable.
+     *
+     * The porches and the falling-edge clock are the panel driver's own
+     * Arduino_GFX entry for this board (moononournation/Arduino_GFX,
+     * examples/PDQgraphicstest: hsync 180/30/16, vsync 12/13/10, 12 MHz,
+     * pclk_active_neg=1); the alternate 16 MHz / porch set in the LovyanGFX
+     * community config is the same panel at the same polarity. 12 MHz for
+     * the same reason as the Indicator: the generic image runs DIO flash and
+     * 80 MHz PSRAM on one shared bus. `lcd pclk <mhz>` tunes it live. */
+    {
+        .preset = "sunton_esp32_8048s070",
+        .width = 800, .height = 480,
+        .i2c_sda = -1, .i2c_scl = -1,
+        .exp_lcd_cs = -1, .exp_lcd_rst = -1, .exp_tp_rst = -1,
+        .exp_hold_high = {-1, -1},
+        .spi_sck = -1, .spi_sda = -1,
+        .backlight = 2,
+        .hsync = 39, .vsync = 40, .de = 41, .pclk = 42,
+        .data = {15, 7, 6, 5, 4, 9, 46, 3, 8, 16, 1, 14, 21, 47, 48, 45},
+        .pclk_hz = 12 * 1000 * 1000,
+        .hsync_pulse = 30, .hsync_back = 16, .hsync_front = 180,
+        .vsync_pulse = 13, .vsync_back = 10, .vsync_front = 12,
+        .pclk_active_neg = 1,
+        /* 2 x 32 KB: 20 of 480 lines, ~2.9 ms of slack at 12 MHz. */
         .bounce_lines = 20,
     },
 };
 
 static const lcd_board_t *s_board = &k_boards[0];
+/* The selected board's geometry. The panel table entry (what the rest of the
+ * firmware sizes the render target, the canvas and the backend's picture by)
+ * must agree; fos_display_init refuses a mismatch before init. */
+static int s_width = 480;
+static int s_height = 480;
+static size_t s_fb_bytes = (size_t)480 * 480 * 2u;
 
 void fos_lcd_st7701s_select_board(const char *hardware_preset)
 {
     s_board = &k_boards[0];
-    if (!hardware_preset || !hardware_preset[0]) return;
-    for (size_t i = 0; i < sizeof(k_boards) / sizeof(k_boards[0]); i++) {
-        if (strcmp(hardware_preset, k_boards[i].preset) == 0) {
-            s_board = &k_boards[i];
-            return;
+    if (hardware_preset && hardware_preset[0]) {
+        for (size_t i = 0; i < sizeof(k_boards) / sizeof(k_boards[0]); i++) {
+            if (strcmp(hardware_preset, k_boards[i].preset) == 0) {
+                s_board = &k_boards[i];
+                break;
+            }
         }
     }
+    s_width = s_board->width;
+    s_height = s_board->height;
+    s_fb_bytes = (size_t)s_width * (size_t)s_height * 2u;
+}
+
+void fos_lcd_st7701s_size(int *width, int *height)
+{
+    if (width) *width = s_width;
+    if (height) *height = s_height;
 }
 
 #if SOC_LCD_RGB_SUPPORTED
@@ -217,9 +278,17 @@ static esp_err_t expander_probe(uint8_t addr, bool eight_bit)
     return ESP_OK;
 }
 
+/* A board with no controller of its own: nothing to initialise over the
+ * bit-banged SPI, and no expander to reset it or the touch controller. */
+static bool board_has_controller(const lcd_board_t *b)
+{
+    return b->spi_sck >= 0 && b->spi_sda >= 0;
+}
+
 static esp_err_t expander_init(void)
 {
     const lcd_board_t *b = s_board;
+    if (!board_has_controller(b) && b->i2c_sda < 0) return ESP_OK;
     i2c_master_bus_config_t bus_config = {
         .i2c_port = -1,
         .sda_io_num = (gpio_num_t)b->i2c_sda,
@@ -391,6 +460,7 @@ static const uint16_t k_st7701s_init[] = {
 static void controller_init(void)
 {
     const lcd_board_t *b = s_board;
+    if (!board_has_controller(b)) return; /* the EK9716 scans; nothing to tell */
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << b->spi_sck) | (1ULL << b->spi_sda),
         .mode = GPIO_MODE_OUTPUT,
@@ -417,12 +487,12 @@ static void controller_init(void)
 
 static uint32_t h_total(const lcd_board_t *b)
 {
-    return FOS_LCD_ST7701S_WIDTH + b->hsync_pulse + b->hsync_back + b->hsync_front;
+    return (uint32_t)b->width + b->hsync_pulse + b->hsync_back + b->hsync_front;
 }
 
 static uint32_t v_total(const lcd_board_t *b)
 {
-    return FOS_LCD_ST7701S_HEIGHT + b->vsync_pulse + b->vsync_back + b->vsync_front;
+    return (uint32_t)b->height + b->vsync_pulse + b->vsync_back + b->vsync_front;
 }
 
 static void timing_for_pclk(uint32_t hz)
@@ -477,15 +547,15 @@ static esp_err_t rgb_init(void)
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
             .pclk_hz = b->pclk_hz,
-            .h_res = FOS_LCD_ST7701S_WIDTH,
-            .v_res = FOS_LCD_ST7701S_HEIGHT,
+            .h_res = b->width,
+            .v_res = b->height,
             .hsync_pulse_width = b->hsync_pulse,
             .hsync_back_porch = b->hsync_back,
             .hsync_front_porch = b->hsync_front,
             .vsync_pulse_width = b->vsync_pulse,
             .vsync_back_porch = b->vsync_back,
             .vsync_front_porch = b->vsync_front,
-            .flags.pclk_active_neg = 0,
+            .flags.pclk_active_neg = b->pclk_active_neg,
         },
         .data_width = 16,
         .bits_per_pixel = 16,
@@ -493,8 +563,8 @@ static esp_err_t rgb_init(void)
          * being scanned (a single buffer showed the new picture's top over
          * the old one's bottom for a frame or two: a flicker every time the
          * clock changed), and the next one is drawn while the last waits for
-         * its frame boundary. 460 KB of PSRAM each, counted in
-         * fos_display_render_psram_bytes. */
+         * its frame boundary. 460 KB of PSRAM each on a 480x480 panel (the
+         * S070's are 768 KB; both are counted in fos_display_render_psram_bytes). */
         .num_fbs = LCD_FBS,
         /* The frame buffers live in PSRAM; the DMA scans two bounce
          * buffers in internal RAM that an interrupt refills from them.
@@ -509,7 +579,7 @@ static esp_err_t rgb_init(void)
          * CONFIG_LCD_RGB_RESTART_IN_VSYNC: its restart at every blank kept
          * a stale refill count and left the picture one bounce buffer
          * ahead (sdkconfig.defaults). */
-        .bounce_buffer_size_px = FOS_LCD_ST7701S_WIDTH * b->bounce_lines,
+        .bounce_buffer_size_px = (size_t)b->width * b->bounce_lines,
         .dma_burst_size = 64,
         .hsync_gpio_num = b->hsync,
         .vsync_gpio_num = b->vsync,
@@ -564,7 +634,7 @@ static uint32_t s_updating_count = 0;
 static uint32_t s_updating_ms = 0;
 static esp_timer_handle_t s_updating_timer = NULL;
 
-#define LCD_FB_BYTES ((size_t)FOS_LCD_ST7701S_WIDTH * FOS_LCD_ST7701S_HEIGHT * 2u)
+#define LCD_FB_BYTES s_fb_bytes
 
 /* The buffer last presented is being scanned: wait for the frame boundary
  * that switched to it (a few frames at most; on a timeout the switch still
@@ -635,7 +705,7 @@ static void present_back(void)
     /* A picture after a switch began is that switch's: the loading mark
      * goes, from whichever buffer holds it, before this one is on the way. */
     fos_lcd_st7701s_loading_end();
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, s_width, s_height, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
      * clear it, so the wait in settle_front is for one that ends after it. */
     xSemaphoreTake(s_frame_done, 0);
@@ -700,7 +770,7 @@ static void splash_task(void *arg)
         if (s_splash_on) {
             int64_t now_us = esp_timer_get_time();
             uint16_t *fb = (uint16_t *)s_fbs[s_front];
-            fos_lcd_splash_draw(fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+            fos_lcd_splash_draw(fb, s_width, s_height,
                                 (uint32_t)((now_us - start_us) / 1000), true);
             /* A wait that lasts gets its line; a line already up is
              * replaced at once, so it never says what is already done. */
@@ -708,7 +778,7 @@ static void splash_task(void *arg)
             if (wanted != shown &&
                 (shown != FOS_LCD_SPLASH_NO_STATUS ||
                  now_us - s_splash_status_at_us >= (int64_t)FOS_LCD_SPLASH_STATUS_DELAY_MS * 1000)) {
-                fos_lcd_splash_draw_status(fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+                fos_lcd_splash_draw_status(fb, s_width, s_height,
                                            (fos_lcd_splash_status_t)wanted);
                 shown = wanted;
             }
@@ -801,8 +871,8 @@ void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
             return;
         }
         s_mark.saved_words = LCD_MARK_SAVED_WORDS;
-        s_mark.width = FOS_LCD_ST7701S_WIDTH;
-        s_mark.height = FOS_LCD_ST7701S_HEIGHT;
+        s_mark.width = s_width;
+        s_mark.height = s_height;
     }
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
     uint16_t *before = s_mark.drawn_in;
@@ -836,14 +906,14 @@ int fos_lcd_st7701s_init(void)
      * buffer, so whichever is scanned shows it. */
     for (int i = 0; i < LCD_FBS; i++) {
         memset(s_fbs[i], 0, LCD_FB_BYTES);
-        fos_lcd_splash_draw((uint16_t *)s_fbs[i], FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, 0, false);
+        fos_lcd_splash_draw((uint16_t *)s_fbs[i], s_width, s_height, 0, false);
     }
     backlight_set(true);
     s_ready = true;
     s_splash_on = true;
     if (xTaskCreate(splash_task, "fos_splash", 2048, NULL, 1, NULL) != pdPASS) s_splash_on = false;
-    ESP_LOGI(TAG, "ST7701S %dx%d up: RGB565 scan-out from PSRAM, pclk %lu Hz", FOS_LCD_ST7701S_WIDTH,
-             FOS_LCD_ST7701S_HEIGHT, (unsigned long)s_board->pclk_hz);
+    ESP_LOGI(TAG, "%s %dx%d up: RGB565 scan-out from PSRAM, pclk %lu Hz", s_board->preset, s_width,
+             s_height, (unsigned long)s_board->pclk_hz);
     return 0;
 }
 
@@ -952,8 +1022,8 @@ esp_err_t fos_lcd_st7701s_backlight(bool on)
 static void draw_updating(uint8_t *fb)
 {
     memset(fb, 0, LCD_FB_BYTES);
-    fos_lcd_splash_draw((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, 0, false);
-    fos_lcd_splash_draw_status((uint16_t *)fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+    fos_lcd_splash_draw((uint16_t *)fb, s_width, s_height, 0, false);
+    fos_lcd_splash_draw_status((uint16_t *)fb, s_width, s_height,
                                FOS_LCD_SPLASH_UPDATING);
 }
 
@@ -1019,7 +1089,7 @@ void fos_lcd_st7701s_updating_end(bool picture_follows)
     bool held = xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle();
     if (!held) xSemaphoreTake(s_write_lock, portMAX_DELAY);
     if (s_pending_front == s_updating_shown) {
-        esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[s_front]);
+        esp_lcd_panel_draw_bitmap(s_panel, 0, 0, s_width, s_height, s_fbs[s_front]);
         xSemaphoreTake(s_frame_done, 0);
         s_presented_at = s_frames;
         s_pending_front = -1;

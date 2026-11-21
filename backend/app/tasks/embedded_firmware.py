@@ -188,6 +188,18 @@ EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS = {
 # is the status LED): Seeed's SenseCraft HMI board config, Zephyr's board
 # file. Its IT8951 answers on the card's MISO, GPIO8.
 EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS = {**EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS, "pwr": 39}
+# The Sunton ESP32-8048S070's microSD slot, on an SPI bus of its own (the
+# chip's FSPI): CS GPIO10, SCK GPIO12, MISO GPIO13, MOSI GPIO11, no power
+# switch and no card-detect contact. fos_board.c's k_sd_pins is the device
+# copy.
+EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS = {
+    "cs": 10,
+    "sck": 12,
+    "miso": 13,
+    "mosi": 11,
+    "pwr": -1,
+    "det": -1,
+}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -209,6 +221,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "seeed_reterminal_e1002": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "seeed_reterminal_e1003": EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS,
     "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+    "sunton_esp32_8048s070": EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS,
     # The Sticky's pins are defined further down; filled in after the table.
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
@@ -298,6 +311,40 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
 # on the LCD's bus, polled (no INT, no reset, no load switch at the chip).
 EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH = {"touchPins": "sda=39,scl=40,int=-1,rst=-1,en=-1"}
+# Sunton (GUITION) ESP32-8048S070 (ESP32-S3-WROOM-1, 16 MB flash, 8 MB octal
+# PSRAM): the 7" 800x480 EK9716 IPS glass on the chip's parallel RGB
+# interface, no SPI init and no IO expander. Its wiring — sixteen data lines,
+# the sync pins, the backlight on GPIO2 — is the LCD driver's own board table
+# (embedded/esp32/components/frameos_display/lcd_st7701s_rgb.c), so the EPD
+# pin slots carry nothing. The GT911 touch controller is on the chip's I2C
+# pins, SDA19/SCL20 (the S3's USB pads; the firmware detaches the
+# USB-Serial/JTAG PHY first), reset on GPIO38, and its interrupt line (GPIO18)
+# is behind an unpopulated resistor (R17), so the driver polls it. A CH340 on
+# UART0 is the USB port. The microSD slot (CS10/MOSI11/SCK12/MISO13) is on
+# its own SPI bus (fos_board_sd_pins); no power switch or detect contact.
+EMBEDDED_SUNTON_ESP32_8048S070_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS = [{"pin": 0, "label": "BOOT"}]
+# The one key (BOOT, GPIO0) works like the Indicator's: pressed it switches
+# the screen off and on, pressed twice it opens the scene switcher; held it
+# does nothing. The edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
+# fos_board.c's ONE_BUTTON_TOGGLE("BOOT") is the device copy.
+EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP = [
+    {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+    {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
+]
+# Parity with fos_board.c's k_touch_pins, nothing provisions it: the GT911 on
+# the chip's I2C pins, polled (INT unwired), reset GPIO38, no load switch.
+EMBEDDED_SUNTON_ESP32_8048S070_TOUCH = {"touchPins": "sda=19,scl=20,int=-1,rst=38,en=-1"}
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -783,6 +830,24 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "eventMap": EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP,
         **EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH,
     },
+    # Sunton (GUITION) ESP32-8048S070: the 7" 800x480 RGB LCD, its wiring in
+    # the LCD driver's board table; see EMBEDDED_SUNTON_ESP32_8048S070_PINS.
+    "sunton_esp32_8048s070": {
+        "device": "lcd.ek9716_800x480",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SUNTON_ESP32_8048S070_PINS,
+        "gpioButtons": EMBEDDED_SUNTON_ESP32_8048S070_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP,
+        **EMBEDDED_SUNTON_ESP32_8048S070_TOUCH,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "sunton_esp32_8048s070",
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -1036,12 +1101,15 @@ EMBEDDED_EXTRA_PANELS = {
     # HAT and the reTerminal E1003. Its `dc` pin slot carries MISO.
     "EPD_10in3": FOS_PIXEL_4BPP_GRAY,
     "LCD_ST7701S_480x480": FOS_PIXEL_RGB565,
+    # The Sunton 7" 800x480 EK9716, same ST7701S RGB driver stack.
+    "LCD_EK9716_800x480": FOS_PIXEL_RGB565,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
 EMBEDDED_DEVICE_PANELS = {
     "oled.ssd1306_72x40": "OLED_SSD1306_72x40",
     "lcd.st7701s_480x480": "LCD_ST7701S_480x480",
+    "lcd.ek9716_800x480": "LCD_EK9716_800x480",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"

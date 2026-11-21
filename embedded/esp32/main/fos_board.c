@@ -145,11 +145,12 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
  * pressed switches the screen off and on, and pressed twice opens the scene
  * switcher; held it does nothing (on a board with a microphone that is the
  * voice key). The edges swipe (TOUCH_EDGE_SWIPES). */
-#define INDICATOR_KEY \
-    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
+#define ONE_BUTTON_TOGGLE(label) \
+    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"press\"}," \
     "\"emit\":\"toggleScreen\",\"as\":{}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"doublePress\"}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"doublePress\"}," \
     "\"emit\":\"sceneSwitcher\",\"as\":{}}"
+#define INDICATOR_KEY ONE_BUTTON_TOGGLE("BUTTON")
 
 /* Each group of rules once, joined when a frame needs its map: whole maps
  * spelled out per preset held the arrows three times and the swipes three. */
@@ -168,6 +169,9 @@ static const struct {
     {"seeed_reterminal_e1003", RETERMINAL_ARROWS, RETERMINAL_VOICE, true},
     {"seeed_reterminal_e1004", RETERMINAL_ARROWS, NULL, false},
     {"seeed_sensecap_indicator_d1", INDICATOR_KEY, NULL, true},
+    /* The Sunton ESP32-8048S070: the BOOT key (GPIO0) and a touch screen,
+     * no microphone. The key works like the Indicator's; the edges swipe. */
+    {"sunton_esp32_8048s070", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
 };
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
@@ -353,6 +357,9 @@ static const struct {
     {"seeed_reterminal_e1002", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
     {"seeed_reterminal_e1003", "cs=14,sck=7,miso=8,mosi=9,pwr=39,det=15"},
     {"seeed_reterminal_e1004", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
+    /* The Sunton ESP32-8048S070's microSD slot on its own SPI bus
+     * (CS10/MOSI11/SCK12/MISO13; no power switch or detect contact). */
+    {"sunton_esp32_8048s070", "cs=10,sck=12,miso=13,mosi=11"},
 };
 
 const char *fos_board_sd_pins(const char *hardware_preset)
@@ -383,6 +390,12 @@ static const struct {
     {"seeed_reterminal_sticky", "sda=3,scl=2,int=21,rst=41,en=42"},
     {"seeed_reterminal_e1003", "sda=19,scl=20,int=2,rst=48"},
     {"seeed_sensecap_indicator_d1", "sda=39,scl=40,int=-1,rst=-1,en=-1"},
+    /* The Sunton ESP32-8048S070's GT911 (0x5d) on the chip's I2C pins
+     * (SDA19/SCL20 — the S3's USB pads, which fos_touch.c frees from the
+     * USB-Serial/JTAG PHY before the bus comes up), reset on GPIO38. Its
+     * interrupt line (GPIO18) is behind an unpopulated resistor (R17), so
+     * the driver polls it. */
+    {"sunton_esp32_8048s070", "sda=19,scl=20,int=-1,rst=38,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap

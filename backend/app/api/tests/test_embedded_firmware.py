@@ -670,9 +670,50 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
     assert "touch_pins" not in settings
 
 
+def test_embedded_hardware_preset_for_sunton_esp32_8048s070():
+    frame = Frame(id=15, embedded={"hardwarePreset": "sunton_esp32_8048s070"})
+    ensure_embedded_frame_defaults(frame)
+    # The 7" 800x480 RGB LCD: 16-bit colour, rendered on-device on the 8 MB
+    # module (16 MB of flash).
+    assert frame.device == "lcd.ek9716_800x480"
+    assert embedded_panel_for_frame(frame) == "LCD_EK9716_800x480"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_EK9716_800x480") == FOS_PIXEL_RGB565
+    assert embedded_buffer_size(800, 480, FOS_PIXEL_RGB565) == 800 * 480 * 2
+    # The LCD's wiring is the firmware's own board table: no EPD pins.
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    # The BOOT key: pressed it switches the screen, twice it opens the scene
+    # switcher; the LCD's edges swipe like the Indicator's.
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
+    assert frame.event_map == [
+        {"event": "button", "match": {"label": "BOOT", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
+    ]
+    assert "batteryPin" not in frame.device_config
+    assert "buzzerPin" not in frame.device_config
+    assert "micClkPin" not in frame.device_config
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_EK9716_800x480"
+    assert settings["gpio_buttons"] == "0:BOOT"
+    # The GT911 on the chip's I2C pins is the board's own (fos_board.c).
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["sunton_esp32_8048s070"]
+    assert preset["touchPins"] == "sda=19,scl=20,int=-1,rst=38,en=-1"
+    assert "touch_pins" not in settings
+
+
 def test_embedded_panel_for_lcd_device_without_preset():
     frame = Frame(id=14, device="lcd.st7701s_480x480", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
+    frame = Frame(id=16, device="lcd.ek9716_800x480", embedded={"platform": "esp32-s3"})
+    assert embedded_panel_for_frame(frame) == "LCD_EK9716_800x480"
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():

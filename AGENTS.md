@@ -189,9 +189,9 @@
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
-  and the E1003, the Sticky and the SenseCAP Indicator the edge swipes
-  (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
-  keep the three alike). A Linux frame never given a map runs its device's:
+  and the E1003, the Sticky, the SenseCAP Indicator and the Sunton S070 the
+  edge swipes (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset
+  table: keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
   own, never a scene switch: the switcher moves a screenful on them), up from the bottom
   the scene switcher and down from the top the settings (as the SenseCAP

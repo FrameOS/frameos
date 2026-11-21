@@ -290,6 +290,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_xiao_ee05` | S3 | EPD_7in5_V2 by default | XIAO ePaper Display Board EE05, 24-pin panels only, chosen as on the EE04; KEY3 GPIO8, battery switch GPIO39. Unverified on hardware |
 | `seeed_xiao_epaper_7in5` | C3 | EPD_7in5_V2 7.5" mono | XIAO 7.5" ePaper Panel, thin client; SCK8/MOSI10, CS3, DC5, RST2, BUSY4; BOOT GPIO9; no battery sense |
 | `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
+| `sunton_esp32_8048s070` | S3 | LCD_EK9716_800x480 7" IPS LCD (RGB, 16-bit colour) | Sunton (GUITION) ESP32-8048S070, 16MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table (no SPI init, no IO expander), backlight GPIO2, no EPD pins; the BOOT key GPIO0 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); GT911 touch on the chip's I2C 19/20 (the USB-Serial/JTAG PHY is detached from those pads first), reset GPIO38, polled (its interrupt line is behind an unpopulated R17); microSD on its own SPI bus (CS10/SCK12/MISO13/MOSI11); USB is a CH340 on UART0 |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
   it renders on-device like the E-series; every pin below is from Seeed's
@@ -473,7 +474,12 @@ for the two Spectra boards most of the bench work runs on:
   SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own
   firmware sends; the backlight is GPIO45. All of it is
   `components/frameos_display/lcd_st7701s_rgb.c`, a board table the preset
-  selects, and the panel is `LCD_ST7701S_480x480` in a new pixel format,
+  selects — one entry per glass, the Indicator's 480x480 and the Sunton
+  ESP32-8048S070's 800x480 EK9716 (whose pins, framing and backlight GPIO2
+  differ but which takes no SPI setup at all, so the same driver serves both;
+  the size is a runtime value, `fos_lcd_st7701s_size`, and `fos_display_init`
+  refuses a panel table entry that disagrees with it) — and the panel is
+  `LCD_ST7701S_480x480` (or `LCD_EK9716_800x480`) in a new pixel format,
   `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel, pixie's
   `pfRgb565` layout; the canvas stores with pixie's per-pixel dither so a
   gradient does not step every eight levels, and the snapshot goes out as a
@@ -2013,8 +2019,9 @@ is `set panel EPD_13in3e` on the serial console (or the setup portal dropdown,
 which lists the whole table) followed by a restart — no rebuild. Panels whose
 symbols collide with a newer variant of the same family are excluded
 (`EPD_7in5_V2_gray`, `EPD_4in2b_V2_old`, `EPD_7in5b_V2_old`), as is the
-12.48" multi-controller stack; the IT8951's `EPD_10in3` and the SSD1306 OLED
-are hand-written drivers in the component (`EXTRA_PANELS` in the generator).
+12.48" multi-controller stack; the IT8951's `EPD_10in3`, the SSD1306 OLED and
+the two RGB LCDs (`LCD_ST7701S_480x480`, `LCD_EK9716_800x480`) are hand-written
+drivers in the component (`EXTRA_PANELS` in the generator).
 `FRAMEOS_SELECTED_PANEL` (backend builds
 set it from the frame's device) only chooses the boot-time default panel.
 Published release images remain per flash-size profile, but one generic image

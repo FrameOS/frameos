@@ -120,6 +120,8 @@ NATIVE_DEVICE_DIMENSIONS = {
     "oled.ssd1306_72x40": (72, 40),
     # The Seeed SenseCAP Indicator's RGB LCD (embedded/esp32 LCD_ST7701S_480x480); no Pi driver.
     "lcd.st7701s_480x480": (480, 480),
+    # The Sunton ESP32-8048S070's RGB LCD (embedded/esp32 LCD_EK9716_800x480); no Pi driver.
+    "lcd.ek9716_800x480": (800, 480),
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
     "pimoroni.inky_impression_5_7": (600, 448),

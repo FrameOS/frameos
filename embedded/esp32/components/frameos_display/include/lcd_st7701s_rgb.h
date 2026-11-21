@@ -1,10 +1,11 @@
 /*
- * ST7701S 480x480 IPS LCD on the ESP32-S3's parallel RGB interface — the 4"
- * screen of the Seeed SenseCAP Indicator (D1, D1S, D1L, D1Pro).
+ * IPS LCDs on the ESP32-S3's parallel RGB interface: the ST7701S 480x480 of
+ * the Seeed SenseCAP Indicator (D1, D1S, D1L, D1Pro) and the EK9716 800x480
+ * of the Sunton (GUITION) ESP32-8048S070.
  *
  * Not a Waveshare panel: a hand-written entry in the runtime panel table
  * (generate_panel_table.py EXTRA_PANELS) with the same init/clear/display/
- * sleep shape. Frames on this panel are 480x480 in FOS_PIXEL_RGB565, one
+ * sleep shape. Frames on these panels are FOS_PIXEL_RGB565: one
  * little-endian 5/6/5 word per pixel, which the LCD peripheral scans out
  * continuously from one of two PSRAM frame buffers through 20-line bounce
  * buffers in internal RAM: a blit is a copy into the hidden buffer (or no
@@ -13,16 +14,21 @@
  * are what they are: embedded/esp32/README.md, "SenseCAP Indicator".
  *
  * The sixteen data lines, the sync pins and the pixel clock are the chip's
- * LCD peripheral's; the controller's own setup goes over a 9-bit 3-wire SPI
- * bit-banged on two GPIOs with chip-select and reset on an I2C IO expander
- * (a TCA9535 at 0x20, an HT8574 at 0x39 on later batches), the way Seeed's
- * own firmware does it. All of that is the board's wiring, so the hardware
- * preset selects the table (fos_lcd_st7701s_select_board); the panel key
- * stays LCD_ST7701S_480x480. The one board known is the SenseCAP Indicator.
+ * LCD peripheral's. The Indicator's controller setup goes over a 9-bit
+ * 3-wire SPI bit-banged on two GPIOs with chip-select and reset on an I2C
+ * IO expander (a TCA9535 at 0x20, an HT8574 at 0x39 on later batches), the
+ * way Seeed's own firmware does it; the Sunton's EK9716 scans what the
+ * host writes and takes no setup at all. All of that is the board's
+ * wiring, so the hardware preset selects the table
+ * (fos_lcd_st7701s_select_board); the panel key stays LCD_ST7701S_480x480
+ * on the Indicator and LCD_EK9716_800x480 on the Sunton. The two boards
+ * known are the SenseCAP Indicator and the Sunton ESP32-8048S070.
  *
- * The expander's I2C bus (SDA39/SCL40 on the Indicator) also carries the
- * FT6336U touch controller: fos_lcd_st7701s_i2c_bus hands the bus to
- * fos_touch.c instead of letting two drivers open the same pins.
+ * The Indicator's expander I2C bus (SDA39/SCL40) also carries the FT6336U
+ * touch controller: fos_lcd_st7701s_i2c_bus hands the bus to fos_touch.c
+ * instead of letting two drivers open the same pins. The Sunton has no
+ * expander bus — its GT911 touch panel is on the chip's own I2C pins
+ * (SDA19/SCL20), opened by the touch driver itself.
  */
 #pragma once
 
@@ -33,13 +39,15 @@
 #include "lcd_loading.h"
 #include "lcd_splash.h"
 
-#define FOS_LCD_ST7701S_WIDTH 480
-#define FOS_LCD_ST7701S_HEIGHT 480
-
-/* Pick the board's wiring by hardware preset ("seeed_sensecap_indicator_d1");
- * an unknown or empty preset keeps the Indicator's, the only one there is.
- * Called by fos_display_init before the first blit. */
+/* Pick the board's wiring by hardware preset ("seeed_sensecap_indicator_d1"
+ * or "sunton_esp32_8048s070"); an unknown or empty preset keeps the
+ * Indicator's. Called by fos_display_init before the first blit. */
 void fos_lcd_st7701s_select_board(const char *hardware_preset);
+
+/* The selected board's glass, in pixels. The panel table entry the rest of
+ * the firmware sizes the render target, the canvas and the backend's
+ * picture by must agree with this; fos_display_init refuses a mismatch. */
+void fos_lcd_st7701s_size(int *width, int *height);
 
 /* The panel table's four: init brings the whole stack up once (expander,
  * controller, RGB peripheral, backlight), showing the FrameOS mark on black
@@ -74,11 +82,13 @@ int64_t fos_lcd_st7701s_buffer_generation(const uint8_t *buf);
 void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf));
 
 /* The expander's I2C bus when it runs on exactly these pins: `*bus` gets the
- * `i2c_master_bus_handle_t`; ESP_ERR_NOT_FOUND for other pins or before init,
- * ESP_ERR_NOT_SUPPORTED on a chip without an RGB LCD peripheral. */
+ * `i2c_master_bus_handle_t`; ESP_ERR_NOT_FOUND for other pins, for a board
+ * with no expander bus (the Sunton), or before init, ESP_ERR_NOT_SUPPORTED
+ * on a chip without an RGB LCD peripheral. */
 esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 
-/* Backlight on or off (the Indicator's GPIO45). ESP_ERR_INVALID_STATE before init. */
+/* Backlight on or off (the Indicator's GPIO45, the Sunton's GPIO2).
+ * ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
 
 /* A scene store begins: hundreds of flash writes, through which the refill
