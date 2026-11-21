@@ -381,9 +381,11 @@ export function attachPointerInput(
   }
 }
 
-// Keys whose default is to scroll the page: taken by the scene while the
-// picture has the focus.
+// Keys whose default is to scroll the page, or (Tab) to move the browser's
+// focus off the picture: taken by the scene while the picture has the focus.
+// Tab walks the frame's UI (docs/jsx-ui.md "Keys").
 const SCROLLING_KEYS = new Set([
+  'Tab',
   'ArrowUp',
   'ArrowDown',
   'ArrowLeft',

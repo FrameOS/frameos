@@ -286,10 +286,14 @@ The preview lists names only.
   tile on goes to the first, from the first back to the last. It is what a
   page turn was before the list scrolled, so the frame's event map needs no
   change.
-- **A keyboard** (Linux): the arrows walk the grid (up and down to the tile
-  in the same column of the row above or below, the last of a shorter row,
-  since a category starts a row of its own), Page Up and Down a screenful,
-  Enter shows the scene, Escape goes back.
+- **A keyboard** (Linux, the preview): the arrows walk the grid (up and down
+  to the tile in the same column of the row above or below, the last of a
+  shorter row, since a category starts a row of its own), Tab one tile on
+  and Shift+Tab one back as the buttons do, Page Up and Down a screenful,
+  Enter shows the scene, Escape goes back. The highlight is the switcher's
+  one focus: the JSX keys' ring (docs/jsx-ui.md "Keys") is not drawn here,
+  and Tab rings neither a tile's icon and name apart nor the layout around
+  it.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and
   five on e-paper, counted from the last tap or key. An ESP32 that deep-sleeps
   stays awake that long when the switcher opens, so its keys are heard.

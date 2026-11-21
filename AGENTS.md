@@ -809,6 +809,16 @@
   in `runEventInner` (every host) and dispatches `render` when something
   changed. A new handler is a `UiEvent` and a walker attribute, never a
   `case event` in a host.
+- **Keys** (`docs/jsx-ui.md` "Keys"): Tab / Shift+Tab ring every element
+  there is to press (one stop per element), Enter presses it, Escape lets
+  go; a frame's buttons are those keys by role (a press once, a double press
+  twice, a long press the event map's). The scene's own code hears a key
+  first and keeps it with an event node or an `onEvent` that returns true
+  (the desktops' Alt+Tab, the Commander's Tab). The scene's UI and its
+  layout's are ONE walk with one ring (`interpreter.keysPlanned` / `keysTo`,
+  `ui_events.uiKeys`), decided once at the top of `runEvent`; a built-in
+  scene keeps its own (the switcher's highlight). A new way to reach an
+  element is a stop in `uiKeys`, never a second ring.
 - **A desktop's look** (`docs/jsx-ui.md` "Themes"): an element with
   `look="button"` (a role of the layout's `theme`) is dressed by
   `ui/theme.nim`'s `role`, as the Nim UIs are; one without keeps its classes.
