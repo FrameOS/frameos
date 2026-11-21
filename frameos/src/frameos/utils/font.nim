@@ -82,11 +82,12 @@ proc refuseFont(font: string, reason: string, extra: JsonNode = nil) =
   ## Say why exactly once per font name: a scene that names a missing font
   ## renders every interval, and one line per render is a log that cannot be
   ## read.
-  if font in refusedFonts:
-    return
-  if refusedFonts.len >= 64:
-    refusedFonts.delete(0)
-  refusedFonts.add font
+  withLock typefaceLock:
+    if font in refusedFonts:
+      return
+    if refusedFonts.len >= 64:
+      refusedFonts.delete(0)
+    refusedFonts.add font
   var payload = %*{"event": "font:fallback", "font": font, "reason": reason}
   if extra != nil:
     for key, value in extra.pairs:
@@ -124,9 +125,9 @@ proc fileTypeface*(font: string, assetsPath: string): Typeface =
       if fileFaces.len >= FileFacesMax:
         fileFaces.delete(0)
       fileFaces.add (font, face)
-    let refused = refusedFonts.find(font)
-    if refused >= 0:
-      refusedFonts.delete(refused)
+      let refused = refusedFonts.find(font)
+      if refused >= 0:
+        refusedFonts.delete(refused)
     return face
   except CatchableError as error:
     refuseFont(font, "could not be read in place", %*{"error": error.msg})
