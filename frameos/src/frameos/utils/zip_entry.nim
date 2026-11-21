@@ -17,6 +17,7 @@
 ## refused: an EPUB is none of them.
 
 import pixie/common
+import pixie/inflatestream
 import frameos/utils/file_slice
 
 type
@@ -32,6 +33,14 @@ type
     compressedSize*: int64
     size*: int64
     localOffset: int64
+
+  ZipSource* = object
+    ## Where a ZIP's bytes are: an open file, or a block in memory (a scene
+    ## package an ESP32 read off its slot, docs/scene-packages.md) that the
+    ## caller keeps alive while the source is used.
+    file*: File
+    data*: ptr UncheckedArray[char]
+    size*: int64
 
   ZipDirectory = object
     path: string
@@ -62,40 +71,56 @@ proc le32(s: string, i: int): int64 =
   s[i].uint8.int64 or (s[i + 1].uint8.int64 shl 8) or
     (s[i + 2].uint8.int64 shl 16) or (s[i + 3].uint8.int64 shl 24)
 
-proc readAt(f: File, pos: int64, len: int): string =
+proc fileSource*(f: File, knownSize = -1'i64): ZipSource =
+  ZipSource(file: f, size: if knownSize >= 0: knownSize else: f.getFileSize())
+
+proc memorySource*(bytes: string): ZipSource =
+  ## `bytes` as a ZIP: the string must outlive the source.
+  ZipSource(data: if bytes.len > 0: cast[ptr UncheckedArray[char]](unsafeAddr bytes[0]) else: nil,
+    size: bytes.len)
+
+proc isZip*(bytes: openArray[char]): bool =
+  ## Starts with a local file header: what a scene package's bytes do.
+  bytes.len >= 4 and bytes[0] == 'P' and bytes[1] == 'K' and bytes[2] == '\x03' and bytes[3] == '\x04'
+
+proc readAt(src: ZipSource, pos: int64, len: int): string =
+  let len = int(max(0'i64, min(len.int64, src.size - pos)))
   result = newString(len)
   if len == 0:
     return
-  f.setFilePos(pos)
-  let got = f.readBuffer(addr result[0], len)
+  if src.file.isNil:
+    copyMem(addr result[0], addr src.data[pos], len)
+    return
+  src.file.setFilePos(pos)
+  let got = src.file.readBuffer(addr result[0], len)
   result.setLen(got)
 
-proc findEndRecord(f: File, fileSize: int64): (string, int) =
+proc findEndRecord(src: ZipSource): (string, int) =
   ## The tail holding the end record, and where in it the record starts.
   for look in [EocdFirstLook, EocdSearchBytes]:
-    let tailLen = int(min(fileSize, look.int64))
-    let tail = readAt(f, fileSize - tailLen, tailLen)
+    let tailLen = int(min(src.size, look.int64))
+    let tail = readAt(src, src.size - tailLen, tailLen)
     var i = tail.len - 22
     while i >= 0:
       if le32(tail, i) == EocdSignature:
         return (tail, i)
       dec i
-    if tailLen.int64 == fileSize:
+    if tailLen.int64 == src.size:
       break
   fail("not a ZIP file")
 
-proc readMembers(f: File, fileSize: int64): seq[ZipMember] =
-  if fileSize < 22:
+proc readMembers(src: ZipSource): seq[ZipMember] =
+  if src.size < 22:
     fail("not a ZIP file")
-  let (tail, eocd) = findEndRecord(f, fileSize)
+  let (tail, eocd) = findEndRecord(src)
   let count = le16(tail, eocd + 10)
   let cdSize = le32(tail, eocd + 12)
   let cdOffset = le32(tail, eocd + 16)
   if count == 0xFFFF or cdSize == 0xFFFFFFFF'i64 or cdOffset == 0xFFFFFFFF'i64:
     fail("ZIP64 archives are not supported")
-  if cdSize > MaxCentralDirectoryBytes or cdOffset + cdSize > fileSize:
+  if cdSize > MaxCentralDirectoryBytes or cdOffset + cdSize > src.size:
     fail("the ZIP's directory is damaged")
-  let cd = readAt(f, cdOffset, cdSize.int)
+  let cd = readAt(src, cdOffset, cdSize.int)
   var p = 0
   while p + 46 <= cd.len and le32(cd, p) == CentralSignature:
     let nameLen = le16(cd, p + 28)
@@ -112,45 +137,43 @@ proc readMembers(f: File, fileSize: int64): seq[ZipMember] =
       localOffset: le32(cd, p + 42))
     p += 46 + nameLen + extraLen + commentLen
 
-proc zipMembers*(f: File, path = "", knownSize = -1'i64): seq[ZipMember] =
+proc zipMembers*(src: ZipSource, path = ""): seq[ZipMember] =
   ## Every member the central directory lists, in its order. With a path, the
   ## last archive's directory is kept and used again while its size holds.
-  let fileSize = if knownSize >= 0: knownSize else: f.getFileSize()
-  if path.len > 0 and lastDirectory.path == path and lastDirectory.fileSize == fileSize:
+  if path.len > 0 and lastDirectory.path == path and lastDirectory.fileSize == src.size:
     return lastDirectory.members
-  result = readMembers(f, fileSize)
+  result = readMembers(src)
   if path.len > 0:
-    lastDirectory = ZipDirectory(path: path, fileSize: fileSize, members: result)
+    lastDirectory = ZipDirectory(path: path, fileSize: src.size, members: result)
 
 proc forgetZipDirectory*() =
   ## Drops the kept directory (a test that rewrites a file in place).
   lastDirectory = ZipDirectory()
 
-proc findMember*(f: File, name: string, path = "", knownSize = -1'i64): ZipMember =
-  for member in zipMembers(f, path, knownSize):
+proc findMember*(src: ZipSource, name: string, path = ""): ZipMember =
+  for member in zipMembers(src, path):
     if member.name == name:
       return member
   fail("no member called " & name)
 
-proc readMember*(f: File, member: ZipMember, offset, maxBytes: int, knownSize = -1'i64): string =
+proc readMember*(src: ZipSource, member: ZipMember, offset, maxBytes: int): string =
   ## Bytes offset ..< offset + maxBytes of the member (fewer at its end).
   if (member.flags and 1) != 0:
     fail(member.name & " is encrypted")
   if member.meth notin [0, 8]:
     fail(member.name & " uses compression method " & $member.meth)
-  let header = readAt(f, member.localOffset, 30)
+  let header = readAt(src, member.localOffset, 30)
   if header.len < 30 or le32(header, 0) != LocalSignature:
     fail("the ZIP's member " & member.name & " is damaged")
   let dataStart = member.localOffset + 30 + le16(header, 26) + le16(header, 28)
-  let fileSize = if knownSize >= 0: knownSize else: f.getFileSize()
-  if dataStart + member.compressedSize > fileSize:
+  if dataStart + member.compressedSize > src.size:
     fail("the ZIP's member " & member.name & " is cut short")
   let start = max(0, offset).int64
   if start >= member.size or maxBytes <= 0:
     return ""
   let wanted = int(min(maxBytes.int64, member.size - start))
   if member.meth == 0:
-    return readAt(f, dataStart + start, wanted)
+    return readAt(src, dataStart + start, wanted)
 
   var output = newStringOfCap(wanted)
   var seen = 0'i64 # inflated bytes so far, kept or not
@@ -169,12 +192,27 @@ proc readMember*(f: File, member: ZipMember, offset, maxBytes: int, knownSize = 
       full = true
       raise newException(PixieError, "enough")
   try:
-    # One seek, then the member front to back (file_slice.nim).
-    streamRange(f, dataStart, member.compressedSize, scDeflate, onData)
+    if src.file.isNil:
+      # In memory: the member's bytes are one segment.
+      var given = false
+      let at = cast[ptr UncheckedArray[uint8]](addr src.data[dataStart])
+      let length = member.compressedSize.int
+      let pull = proc (): InflateSegment {.gcsafe, raises: [PixieError].} =
+        if given: return InflateSegment(data: nil, len: 0)
+        given = true
+        InflateSegment(data: at, len: length)
+      uncompressStreamDeflate(onData, pull)
+    else:
+      # One seek, then the member front to back (file_slice.nim).
+      streamRange(src.file, dataStart, member.compressedSize, scDeflate, onData)
   except PixieError as error:
     if not full:
       fail("the ZIP's member " & member.name & " could not be inflated: " & error.msg)
   output
+
+proc readWhole*(src: ZipSource, member: ZipMember): string =
+  ## The whole member.
+  readMember(src, member, 0, member.size.int)
 
 proc readZipEntry*(path, name: string, offset, maxBytes: int, limit = high(int)): string =
   ## Bytes offset ..< offset + maxBytes of the member called name; a negative
@@ -184,8 +222,8 @@ proc readZipEntry*(path, name: string, offset, maxBytes: int, limit = high(int))
   if not f.open(path):
     fail("could not open " & path)
   defer: f.close()
-  let fileSize = f.getFileSize()
-  let member = findMember(f, name, path, fileSize)
+  let src = fileSource(f)
+  let member = findMember(src, name, path)
   let length =
     if maxBytes < 0: max(0'i64, member.size - max(0, offset).int64)
     else: min(maxBytes.int64, max(0'i64, member.size - max(0, offset).int64))
@@ -193,7 +231,7 @@ proc readZipEntry*(path, name: string, offset, maxBytes: int, limit = high(int))
     var error = newException(ZipEntryTooBig, name & " is " & $length & " bytes, over the " & $limit & " byte limit")
     error.size = length
     raise error
-  readMember(f, member, offset, length.int, fileSize)
+  readMember(src, member, offset, length.int)
 
 proc zipEntrySize*(path, name: string): int64 =
   ## The member's size inflated, as the directory says.
@@ -201,4 +239,4 @@ proc zipEntrySize*(path, name: string): int64 =
   if not f.open(path):
     fail("could not open " & path)
   defer: f.close()
-  findMember(f, name, path).size
+  findMember(fileSource(f), name, path).size

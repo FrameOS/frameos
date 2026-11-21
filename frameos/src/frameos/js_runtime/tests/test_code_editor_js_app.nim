@@ -232,7 +232,7 @@ suite "the Code editor scene":
 
   test "scrolls a long file, colored, and types where it is tapped":
     let config = testConfig()
-    let scene = load(config, %*{"spot": {"view": "code", "id": "long", "file": "face/app.tsx"}})
+    let scene = load(config, %*{"spot": {"view": "code", "id": "long", "file": "apps/face/app.tsx"}})
     proc drawn(name: string): Image = draw(scene, config, name)
     proc blue(image: Image): int =
       ## Pixels in the keywords' blue (#569cd6), anti-aliased edges aside.
@@ -271,7 +271,7 @@ suite "the Code editor scene":
     # by the difference once; an edit is no reason to do that again.
     forgetTypedKeys() # the test before typed on a keyboard: this one starts on the screen's
     let config = testConfig(480, 320)
-    let scene = load(config, %*{"spot": {"view": "code", "id": "wordy", "file": "face/app.tsx"}})
+    let scene = load(config, %*{"spot": {"view": "code", "id": "wordy", "file": "apps/face/app.tsx"}})
     discard draw(scene, config, "wordy-open")
     discard draw(scene, config, "wordy-top")
     var ui: UiTarget

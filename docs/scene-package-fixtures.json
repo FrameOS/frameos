@@ -1,0 +1,1290 @@
+{
+  "_comment": "docs/scene-packages.md: a scene as files. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-package-fixtures.test.ts (frontend/src/utils/scenePackage.ts), backend/app/utils/tests/test_scene_package.py (app/utils/scene_package.py) and frameos/src/frameos/tests/test_scene_package.nim (frameos/scene_package.nim, which only reads). In `files`, scene.json and template.json are given parsed (compare them as JSON); every other file is its exact text.",
+  "scenes": [
+    {
+      "name": "one app with a folder, an inline app and a code node",
+      "scene": {
+        "id": "weather",
+        "name": "Weather",
+        "settings": {
+          "refreshInterval": 900,
+          "icon": "M0 0h24v24H0z"
+        },
+        "fields": [
+          {
+            "name": "city",
+            "type": "string",
+            "value": "Tallinn",
+            "access": "public"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "1",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "2",
+            "type": "app",
+            "data": {
+              "keyword": "weatherCard",
+              "config": {
+                "units": "metric"
+              }
+            }
+          },
+          {
+            "id": "3",
+            "type": "app",
+            "data": {
+              "keyword": "inlineClock",
+              "sources": {
+                "app.ts": "export function get() { return 'now' }\n",
+                "config.json": "{\"name\": \"Inline clock\"}\n"
+              }
+            }
+          },
+          {
+            "id": "4",
+            "type": "code",
+            "data": {
+              "codeJS": "state.city.toUpperCase()"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "1",
+            "sourceHandle": "next",
+            "target": "2",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {
+          "weatherCard": {
+            "name": "Weather card",
+            "category": "render",
+            "version": "1.0.0",
+            "sources": {
+              "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+              "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+              "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+              "app.test.tsx": "test('renders', () => {})\n"
+            }
+          }
+        }
+      },
+      "files": {
+        "scene.json": {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0"
+            }
+          }
+        },
+        "apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "apps/weatherCard/app.test.tsx": "test('renders', () => {})\n"
+      }
+    },
+    {
+      "name": "tests left out, as a frame is sent",
+      "scene": {
+        "id": "weather",
+        "name": "Weather",
+        "settings": {
+          "refreshInterval": 900,
+          "icon": "M0 0h24v24H0z"
+        },
+        "fields": [
+          {
+            "name": "city",
+            "type": "string",
+            "value": "Tallinn",
+            "access": "public"
+          }
+        ],
+        "nodes": [
+          {
+            "id": "1",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          },
+          {
+            "id": "2",
+            "type": "app",
+            "data": {
+              "keyword": "weatherCard",
+              "config": {
+                "units": "metric"
+              }
+            }
+          },
+          {
+            "id": "3",
+            "type": "app",
+            "data": {
+              "keyword": "inlineClock",
+              "sources": {
+                "app.ts": "export function get() { return 'now' }\n",
+                "config.json": "{\"name\": \"Inline clock\"}\n"
+              }
+            }
+          },
+          {
+            "id": "4",
+            "type": "code",
+            "data": {
+              "codeJS": "state.city.toUpperCase()"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "e1",
+            "source": "1",
+            "sourceHandle": "next",
+            "target": "2",
+            "targetHandle": "prev"
+          }
+        ],
+        "apps": {
+          "weatherCard": {
+            "name": "Weather card",
+            "category": "render",
+            "version": "1.0.0",
+            "sources": {
+              "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+              "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+              "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+              "app.test.tsx": "test('renders', () => {})\n"
+            }
+          }
+        }
+      },
+      "files": {
+        "scene.json": {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0"
+            }
+          }
+        },
+        "apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n"
+      },
+      "withoutTests": true
+    },
+    {
+      "name": "keywords with a slash and a percent, an app without sources",
+      "scene": {
+        "id": "odd",
+        "name": "Odd keywords",
+        "nodes": [],
+        "edges": [],
+        "apps": {
+          "data/immich": {
+            "name": "Slash keyword",
+            "sources": {
+              "app.ts": "export const a = 1\n"
+            }
+          },
+          "100%": {
+            "name": "Percent keyword",
+            "sources": {
+              "app.js": "export const b = 2\n"
+            }
+          },
+          "noSources": {
+            "name": "Metadata only"
+          }
+        }
+      },
+      "files": {
+        "scene.json": {
+          "id": "odd",
+          "name": "Odd keywords",
+          "nodes": [],
+          "edges": [],
+          "apps": {
+            "data/immich": {
+              "name": "Slash keyword"
+            },
+            "100%": {
+              "name": "Percent keyword"
+            },
+            "noSources": {
+              "name": "Metadata only"
+            }
+          }
+        },
+        "apps/data%2Fimmich/app.ts": "export const a = 1\n",
+        "apps/100%25/app.js": "export const b = 2\n"
+      }
+    },
+    {
+      "name": "a scene without apps",
+      "scene": {
+        "id": "bare",
+        "name": "No apps",
+        "nodes": [
+          {
+            "id": "n",
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          }
+        ],
+        "edges": []
+      },
+      "files": {
+        "scene.json": {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      }
+    }
+  ],
+  "sets": [
+    {
+      "name": "a template of two scenes",
+      "scenes": [
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        },
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      ],
+      "manifest": {
+        "name": "Weather and more",
+        "description": "Two scenes",
+        "image": "./image.jpg",
+        "frameosVersion": "2026.11.14"
+      },
+      "files": {
+        "template.json": {
+          "name": "Weather and more",
+          "description": "Two scenes",
+          "image": "./image.jpg",
+          "frameosVersion": "2026.11.14",
+          "scenes": [
+            "./Weather",
+            "./No apps"
+          ]
+        },
+        "Weather/scene.json": {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0"
+            }
+          }
+        },
+        "Weather/apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "Weather/apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "Weather/apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "Weather/apps/weatherCard/app.test.tsx": "test('renders', () => {})\n",
+        "No apps/scene.json": {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      }
+    }
+  ],
+  "folderNames": [
+    {
+      "scenes": [
+        {
+          "id": "c1",
+          "name": "Clock"
+        },
+        {
+          "id": "c2",
+          "name": "clock"
+        },
+        {
+          "id": "apps",
+          "name": "apps"
+        },
+        {
+          "id": "u/1",
+          "name": "  A/B: c?  "
+        },
+        {
+          "id": "e-1",
+          "name": ""
+        },
+        {
+          "id": "p",
+          "name": "photo.jpg"
+        },
+        {
+          "id": "d",
+          "name": "..."
+        },
+        {
+          "id": "Clock",
+          "name": "Clock"
+        }
+      ],
+      "folders": [
+        "Clock",
+        "clock (c2)",
+        "apps (scene)",
+        "A-B- c-",
+        "e-1",
+        "photo.jpg (p)",
+        "d",
+        "Clock (scene)"
+      ]
+    },
+    {
+      "scenes": [
+        {
+          "id": "x",
+          "name": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        {
+          "id": "y"
+        }
+      ],
+      "folders": [
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "y"
+      ]
+    }
+  ],
+  "reads": [
+    {
+      "name": "a template zip under its folder",
+      "files": {
+        "Weather and more/template.json": "{\n  \"name\": \"Weather and more\",\n  \"description\": \"Two scenes\",\n  \"image\": \"./image.jpg\",\n  \"frameosVersion\": \"2026.11.14\",\n  \"scenes\": [\n    \"./Weather\",\n    \"./No apps\"\n  ]\n}\n",
+        "Weather and more/Weather/scene.json": "{\n  \"id\": \"weather\",\n  \"name\": \"Weather\",\n  \"settings\": {\n    \"refreshInterval\": 900,\n    \"icon\": \"M0 0h24v24H0z\"\n  },\n  \"fields\": [\n    {\n      \"name\": \"city\",\n      \"type\": \"string\",\n      \"value\": \"Tallinn\",\n      \"access\": \"public\"\n    }\n  ],\n  \"nodes\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"weatherCard\",\n        \"config\": {\n          \"units\": \"metric\"\n        }\n      }\n    },\n    {\n      \"id\": \"3\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"inlineClock\",\n        \"sources\": {\n          \"app.ts\": \"export function get() { return 'now' }\\n\",\n          \"config.json\": \"{\\\"name\\\": \\\"Inline clock\\\"}\\n\"\n        }\n      }\n    },\n    {\n      \"id\": \"4\",\n      \"type\": \"code\",\n      \"data\": {\n        \"codeJS\": \"state.city.toUpperCase()\"\n      }\n    }\n  ],\n  \"edges\": [\n    {\n      \"id\": \"e1\",\n      \"source\": \"1\",\n      \"sourceHandle\": \"next\",\n      \"target\": \"2\",\n      \"targetHandle\": \"prev\"\n    }\n  ],\n  \"apps\": {\n    \"weatherCard\": {\n      \"name\": \"Weather card\",\n      \"category\": \"render\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n",
+        "Weather and more/Weather/apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "Weather and more/Weather/apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "Weather and more/Weather/apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "Weather and more/Weather/apps/weatherCard/app.test.tsx": "test('renders', () => {})\n",
+        "Weather and more/No apps/scene.json": "{\n  \"id\": \"bare\",\n  \"name\": \"No apps\",\n  \"nodes\": [\n    {\n      \"id\": \"n\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    }\n  ],\n  \"edges\": []\n}\n",
+        "Weather and more/image.jpg": "(a picture)"
+      },
+      "scenes": [
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        },
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      ],
+      "manifest": {
+        "name": "Weather and more",
+        "description": "Two scenes",
+        "image": "./image.jpg",
+        "frameosVersion": "2026.11.14",
+        "scenes": [
+          "./Weather",
+          "./No apps"
+        ]
+      }
+    },
+    {
+      "name": "the form before packages: template.json naming scenes.json",
+      "files": {
+        "Legacy/template.json": "{\"name\": \"Legacy\", \"scenes\": \"./scenes.json\", \"image\": \"./image.jpg\"}",
+        "Legacy/scenes.json": "[{\"id\": \"weather\", \"name\": \"Weather\", \"settings\": {\"refreshInterval\": 900, \"icon\": \"M0 0h24v24H0z\"}, \"fields\": [{\"name\": \"city\", \"type\": \"string\", \"value\": \"Tallinn\", \"access\": \"public\"}], \"nodes\": [{\"id\": \"1\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}, {\"id\": \"2\", \"type\": \"app\", \"data\": {\"keyword\": \"weatherCard\", \"config\": {\"units\": \"metric\"}}}, {\"id\": \"3\", \"type\": \"app\", \"data\": {\"keyword\": \"inlineClock\", \"sources\": {\"app.ts\": \"export function get() { return 'now' }\\n\", \"config.json\": \"{\\\"name\\\": \\\"Inline clock\\\"}\\n\"}}}, {\"id\": \"4\", \"type\": \"code\", \"data\": {\"codeJS\": \"state.city.toUpperCase()\"}}], \"edges\": [{\"id\": \"e1\", \"source\": \"1\", \"sourceHandle\": \"next\", \"target\": \"2\", \"targetHandle\": \"prev\"}], \"apps\": {\"weatherCard\": {\"name\": \"Weather card\", \"category\": \"render\", \"version\": \"1.0.0\", \"sources\": {\"config.json\": \"{\\n  \\\"name\\\": \\\"Weather card\\\",\\n  \\\"category\\\": \\\"render\\\"\\n}\\n\", \"app.tsx\": \"import { icon } from './lib/icons'\\nexport function get(app) {\\n  return <div>{icon(app.config.units)} \\u00b0C \\u2014 \\u201cquoted\\u201d</div>\\n}\\n\", \"lib/icons.ts\": \"export const icon = (u: string) => (u === 'metric' ? '\\u2600' : '?')\\n\", \"app.test.tsx\": \"test('renders', () => {})\\n\"}}}}, {\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}]"
+      },
+      "scenes": [
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        },
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      ],
+      "manifest": {
+        "name": "Legacy",
+        "scenes": "./scenes.json",
+        "image": "./image.jpg"
+      }
+    },
+    {
+      "name": "a bare scenes.json at the top",
+      "files": {
+        "scenes.json": "[{\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}]"
+      },
+      "scenes": [
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      ],
+      "manifest": null
+    },
+    {
+      "name": "one scene package at the top",
+      "files": {
+        "scene.json": "{\n  \"id\": \"weather\",\n  \"name\": \"Weather\",\n  \"settings\": {\n    \"refreshInterval\": 900,\n    \"icon\": \"M0 0h24v24H0z\"\n  },\n  \"fields\": [\n    {\n      \"name\": \"city\",\n      \"type\": \"string\",\n      \"value\": \"Tallinn\",\n      \"access\": \"public\"\n    }\n  ],\n  \"nodes\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"weatherCard\",\n        \"config\": {\n          \"units\": \"metric\"\n        }\n      }\n    },\n    {\n      \"id\": \"3\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"inlineClock\",\n        \"sources\": {\n          \"app.ts\": \"export function get() { return 'now' }\\n\",\n          \"config.json\": \"{\\\"name\\\": \\\"Inline clock\\\"}\\n\"\n        }\n      }\n    },\n    {\n      \"id\": \"4\",\n      \"type\": \"code\",\n      \"data\": {\n        \"codeJS\": \"state.city.toUpperCase()\"\n      }\n    }\n  ],\n  \"edges\": [\n    {\n      \"id\": \"e1\",\n      \"source\": \"1\",\n      \"sourceHandle\": \"next\",\n      \"target\": \"2\",\n      \"targetHandle\": \"prev\"\n    }\n  ],\n  \"apps\": {\n    \"weatherCard\": {\n      \"name\": \"Weather card\",\n      \"category\": \"render\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n",
+        "apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "apps/weatherCard/app.test.tsx": "test('renders', () => {})\n"
+      },
+      "scenes": [
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        }
+      ],
+      "manifest": null
+    },
+    {
+      "name": "scene folders without template.json, by name",
+      "files": {
+        "b/scene.json": "{\n  \"id\": \"bare\",\n  \"name\": \"No apps\",\n  \"nodes\": [\n    {\n      \"id\": \"n\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    }\n  ],\n  \"edges\": []\n}\n",
+        "a/scene.json": "{\n  \"id\": \"weather\",\n  \"name\": \"Weather\",\n  \"settings\": {\n    \"refreshInterval\": 900,\n    \"icon\": \"M0 0h24v24H0z\"\n  },\n  \"fields\": [\n    {\n      \"name\": \"city\",\n      \"type\": \"string\",\n      \"value\": \"Tallinn\",\n      \"access\": \"public\"\n    }\n  ],\n  \"nodes\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"weatherCard\",\n        \"config\": {\n          \"units\": \"metric\"\n        }\n      }\n    },\n    {\n      \"id\": \"3\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"inlineClock\",\n        \"sources\": {\n          \"app.ts\": \"export function get() { return 'now' }\\n\",\n          \"config.json\": \"{\\\"name\\\": \\\"Inline clock\\\"}\\n\"\n        }\n      }\n    },\n    {\n      \"id\": \"4\",\n      \"type\": \"code\",\n      \"data\": {\n        \"codeJS\": \"state.city.toUpperCase()\"\n      }\n    }\n  ],\n  \"edges\": [\n    {\n      \"id\": \"e1\",\n      \"source\": \"1\",\n      \"sourceHandle\": \"next\",\n      \"target\": \"2\",\n      \"targetHandle\": \"prev\"\n    }\n  ],\n  \"apps\": {\n    \"weatherCard\": {\n      \"name\": \"Weather card\",\n      \"category\": \"render\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n",
+        "a/apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "a/apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "a/apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "a/apps/weatherCard/app.test.tsx": "test('renders', () => {})\n"
+      },
+      "scenes": [
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        },
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        }
+      ],
+      "manifest": null
+    },
+    {
+      "name": "template.json lists one folder: the others follow by name",
+      "files": {
+        "template.json": "{\"scenes\": [\"./b\"]}",
+        "c/scene.json": "{\n  \"id\": \"weather\",\n  \"name\": \"Weather\",\n  \"settings\": {\n    \"refreshInterval\": 900,\n    \"icon\": \"M0 0h24v24H0z\"\n  },\n  \"fields\": [\n    {\n      \"name\": \"city\",\n      \"type\": \"string\",\n      \"value\": \"Tallinn\",\n      \"access\": \"public\"\n    }\n  ],\n  \"nodes\": [\n    {\n      \"id\": \"1\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    },\n    {\n      \"id\": \"2\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"weatherCard\",\n        \"config\": {\n          \"units\": \"metric\"\n        }\n      }\n    },\n    {\n      \"id\": \"3\",\n      \"type\": \"app\",\n      \"data\": {\n        \"keyword\": \"inlineClock\",\n        \"sources\": {\n          \"app.ts\": \"export function get() { return 'now' }\\n\",\n          \"config.json\": \"{\\\"name\\\": \\\"Inline clock\\\"}\\n\"\n        }\n      }\n    },\n    {\n      \"id\": \"4\",\n      \"type\": \"code\",\n      \"data\": {\n        \"codeJS\": \"state.city.toUpperCase()\"\n      }\n    }\n  ],\n  \"edges\": [\n    {\n      \"id\": \"e1\",\n      \"source\": \"1\",\n      \"sourceHandle\": \"next\",\n      \"target\": \"2\",\n      \"targetHandle\": \"prev\"\n    }\n  ],\n  \"apps\": {\n    \"weatherCard\": {\n      \"name\": \"Weather card\",\n      \"category\": \"render\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}\n",
+        "c/apps/weatherCard/config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+        "c/apps/weatherCard/app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+        "c/apps/weatherCard/lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+        "c/apps/weatherCard/app.test.tsx": "test('renders', () => {})\n",
+        "b/scene.json": "{\n  \"id\": \"bare\",\n  \"name\": \"No apps\",\n  \"nodes\": [\n    {\n      \"id\": \"n\",\n      \"type\": \"event\",\n      \"data\": {\n        \"keyword\": \"render\"\n      }\n    }\n  ],\n  \"edges\": []\n}\n"
+      },
+      "scenes": [
+        {
+          "id": "bare",
+          "name": "No apps",
+          "nodes": [
+            {
+              "id": "n",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            }
+          ],
+          "edges": []
+        },
+        {
+          "id": "weather",
+          "name": "Weather",
+          "settings": {
+            "refreshInterval": 900,
+            "icon": "M0 0h24v24H0z"
+          },
+          "fields": [
+            {
+              "name": "city",
+              "type": "string",
+              "value": "Tallinn",
+              "access": "public"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "1",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "2",
+              "type": "app",
+              "data": {
+                "keyword": "weatherCard",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "3",
+              "type": "app",
+              "data": {
+                "keyword": "inlineClock",
+                "sources": {
+                  "app.ts": "export function get() { return 'now' }\n",
+                  "config.json": "{\"name\": \"Inline clock\"}\n"
+                }
+              }
+            },
+            {
+              "id": "4",
+              "type": "code",
+              "data": {
+                "codeJS": "state.city.toUpperCase()"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "1",
+              "sourceHandle": "next",
+              "target": "2",
+              "targetHandle": "prev"
+            }
+          ],
+          "apps": {
+            "weatherCard": {
+              "name": "Weather card",
+              "category": "render",
+              "version": "1.0.0",
+              "sources": {
+                "config.json": "{\n  \"name\": \"Weather card\",\n  \"category\": \"render\"\n}\n",
+                "app.tsx": "import { icon } from './lib/icons'\nexport function get(app) {\n  return <div>{icon(app.config.units)} °C — “quoted”</div>\n}\n",
+                "lib/icons.ts": "export const icon = (u: string) => (u === 'metric' ? '☀' : '?')\n",
+                "app.test.tsx": "test('renders', () => {})\n"
+              }
+            }
+          }
+        }
+      ],
+      "manifest": {
+        "scenes": [
+          "./b"
+        ]
+      }
+    },
+    {
+      "name": "files win over sources scene.json still carries; a folder no app names becomes one",
+      "files": {
+        "scene.json": "{\"id\": \"m\", \"name\": \"Merged\", \"nodes\": [], \"edges\": [], \"apps\": {\"a\": {\"name\": \"A\", \"sources\": {\"app.ts\": \"old\\n\", \"util.ts\": \"kept\\n\"}}}}",
+        "apps/a/app.ts": "new\n",
+        "apps/b/app.js": "added\n",
+        "assets/logo.png": "(ignored)"
+      },
+      "scenes": [
+        {
+          "id": "m",
+          "name": "Merged",
+          "nodes": [],
+          "edges": [],
+          "apps": {
+            "a": {
+              "name": "A",
+              "sources": {
+                "app.ts": "new\n",
+                "util.ts": "kept\n"
+              }
+            },
+            "b": {
+              "sources": {
+                "app.js": "added\n"
+              }
+            }
+          }
+        }
+      ],
+      "manifest": null
+    }
+  ],
+  "refusals": [
+    {
+      "name": "no scene.json anywhere",
+      "files": {
+        "apps/a/app.ts": "x"
+      },
+      "code": "missing_scenes"
+    },
+    {
+      "name": "scene.json is not an object",
+      "files": {
+        "scene.json": "[1]"
+      },
+      "code": "invalid_scene"
+    },
+    {
+      "name": "scene.json is not JSON",
+      "files": {
+        "scene.json": "{"
+      },
+      "code": "invalid_scene"
+    },
+    {
+      "name": "a file climbs out of its app",
+      "files": {
+        "scene.json": "{\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}",
+        "apps/a/../../x.ts": "x"
+      },
+      "code": "unsafe_path"
+    },
+    {
+      "name": "an app file at the top of apps/",
+      "files": {
+        "scene.json": "{\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}",
+        "apps/x.ts": "x"
+      },
+      "code": "unsafe_path"
+    },
+    {
+      "name": "template.json lists a folder without a scene",
+      "files": {
+        "template.json": "{\"scenes\": [\"./gone\"]}",
+        "b/scene.json": "{\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}"
+      },
+      "code": "missing_scene"
+    },
+    {
+      "name": "template.json is not an object",
+      "files": {
+        "template.json": "[]",
+        "b/scene.json": "{\"id\": \"bare\", \"name\": \"No apps\", \"nodes\": [{\"id\": \"n\", \"type\": \"event\", \"data\": {\"keyword\": \"render\"}}], \"edges\": []}"
+      },
+      "code": "invalid_template"
+    },
+    {
+      "name": "template.json names a scenes.json that is not there",
+      "files": {
+        "template.json": "{\"scenes\": \"./scenes.json\"}"
+      },
+      "code": "missing_scenes"
+    }
+  ]
+}
