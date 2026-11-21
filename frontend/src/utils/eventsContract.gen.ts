@@ -1081,7 +1081,7 @@ export const buttonRoleByLabel: Record<string, string> = {
   "LEFT": "prev",
   "UP": "up",
   "DOWN": "down",
-  "REFRESH": "refresh"
+  "REFRESH": "primary"
 }
 export const buttonActions: readonly string[] = ["press", "doublePress", "longPress"]
 export const gpioActions: readonly string[] = ["down", "up"]

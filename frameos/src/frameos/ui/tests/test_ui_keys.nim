@@ -5,6 +5,7 @@ import frameos/utils/font # installs the typeface resolver text uses
 import frameos/ui/layout
 import frameos/ui/keyboard
 import frameos/ui/events
+import frameos/events_gen
 
 # The keys (docs/jsx-ui.md "Keys"): Tab walks what there is to press, Enter
 # presses what is ringed, Escape lets go; a frame's buttons are those keys.
@@ -130,6 +131,13 @@ suite "the keys":
     check target.ringed == 1
     check uiButtonKeys(["keys"], button("back", "press"))
     check target.ringed == -1
+    # A menu key is a way out, as on a remote: Escape, never Enter.
+    discard uiButtonKeys(["keys"], button("next", "press"))
+    check uiButtonKeys(["keys"], button("menu", "press"))
+    check target.ringed == -1
+    check calls == @[(1, "tap"), (1, "tap"), (1, "tap")]
+    # The reTerminal's green key is its primary key.
+    check buttonRoleForLabel("REFRESH") == "primary"
     forgetUiTarget("keys", 1)
 
   test "a UI with nothing to press does not hear keys or buttons":

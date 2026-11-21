@@ -1061,10 +1061,10 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
       self.drawForm(context.image)
   of "button":
     # The frame's buttons as the keys (ui/events.nim "keys"): next and prev
-    # walk the form, the green key presses what is ringed. Back goes back,
-    # once a list, the keyboard or the ring is gone.
+    # walk the form, the green key presses what is ringed. Back (and menu)
+    # goes back, once a list, the keyboard or the ring is gone.
     acted = -1
-    let goesBack = payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press"
+    let goesBack = payload{"role"}.getStr() in ["back", "menu"] and payload{"action"}.getStr() == "press"
     if (if goesBack: not uiKeys([self.uiId], "Escape") else: not uiButtonKeys([self.uiId], payload)):
       if goesBack:
         self.back()
