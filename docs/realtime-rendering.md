@@ -377,13 +377,13 @@ firmware from `ESP32_SHARED_CANVAS_FIRMWARE` on (`esp32CanvasRotation`);
 older or unknown firmware keeps the two.
 
 Any other grey or black-and-white panel renders in pixie's 8-bit luma surface
-(`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM, not only when RGBX does not fit: blending is
+(`pfGray8`), because its error diffusion wants the 256 levels, whatever the PSRAM: blending is
 per channel, so the luma of a composite is the composite of the lumas, and
 every pass over the canvas — a fill, a blend, the dither — moves a quarter of
 the bytes. The rule, in every copy (C, Nim, the backend, both device-limits
 ports, `docs/device-limits-fixtures.json`): 4-bit for sixteen greys, luma for
-another grey panel, 565 for an RGB565 LCD, and for a colour e-paper panel RGBX while two of it fit PSRAM,
-565 beyond. So a canvas does not say what the panel is: what a scene hears
+another grey panel, and 565 for an RGB565 LCD and every colour e-paper panel (RGBX where two of it
+fitted PSRAM until 2026.11.13: see docs/esp32-memory.md). So a canvas does not say what the panel is: what a scene hears
 of it (`app.frame.fast`, `paper` and `color`, the built-in scenes' look, the scene
 rhythm's floor) is the panel the firmware names at init
 (`panel_shape.boardPanelFormat`, set in `embedded_main.nim`).

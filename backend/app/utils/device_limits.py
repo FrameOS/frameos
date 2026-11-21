@@ -22,9 +22,6 @@ from app.utils.versions import version_tuple
 
 # FOS_NIM_EMERGENCY_RESERVE_BYTES: armed at boot, outside the render budget.
 ESP32_EMERGENCY_RESERVE_BYTES = 1024 * 1024
-# FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE: a colour e-paper canvas is RGBX only
-# while two of it fit the PSRAM heap, RGB565 past that.
-ESP32_RGBX_MAX_PSRAM_SHARE = 2
 # fos_pixel_format_t: the panel formats a luma canvas serves, the sixteen-grey
 # one that has a 4-bit canvas, and the RGB565 LCD whose canvas is its own frame
 # buffer.
@@ -79,17 +76,13 @@ def esp32_canvas_bytes_per_pixel(
     width: int, height: int, psram_bytes: int, pixel_format: int | None = None
 ) -> float:
     """fos_render_canvas_bits_per_pixel, in bytes: half a byte on a sixteen-grey
-    panel, luma on another grey panel and 565 on an RGB565 LCD whatever the
-    PSRAM; RGBX while it fits on any other."""
+    panel, luma on another grey panel and 565 on any other (an RGB565 LCD, a
+    colour e-paper), whatever the PSRAM: a colour e-paper panel had RGBX while
+    two of it fitted until 2026.11.13."""
     if pixel_format == ESP32_PIXEL_4BPP_GRAY:
         return 0.5
     if pixel_format in ESP32_GREY_PIXEL_FORMATS:
         return 1
-    if pixel_format == ESP32_PIXEL_RGB565:
-        return 2
-    pixels = max(1, width) * max(1, height)
-    if pixels * 4 * ESP32_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
-        return 4
     return 2
 
 

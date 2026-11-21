@@ -347,11 +347,7 @@ size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_tota
     if (width <= 0 || height <= 0) return 0;
     if (format == FOS_PIXEL_4BPP_GRAY) return 4;
     if (fos_pixel_format_is_grey(format)) return 8;
-    if (format == FOS_PIXEL_RGB565) return 16;
-    size_t rgbx = (size_t)width * (size_t)height * 4u;
-    if (psram_total_bytes > 0 && rgbx * FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_total_bytes) {
-        return 32;
-    }
+    (void)psram_total_bytes; /* no longer decides: every colour canvas is 565 */
     return 16;
 }
 

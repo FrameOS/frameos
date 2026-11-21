@@ -25,7 +25,22 @@ Measured 2026-08-14 on v2026.8.19 with `-d:memProbe`:
 The first render after a boot — the one that also pays the scene parse and
 the app transpiles — no longer touches the emergency reserve.
 
-## The canvas is RGBX where it fits, 565 where it must (2026-08-23)
+## Every colour canvas is 565 (2026-11-21)
+
+The rule below gave the 800×480 colour boards (the reTerminal E1002, the
+PhotoPainter) an RGBX canvas: 1.5 MB, a panel buffer of 192 KB beside it, and
+none of pixie's 565 fast paths (a gradient over the page went through a mask
+image the size of the page: 2.7 s of each of the E1002's clocks, the hardware
+bench of 2026-11-21). The E1004's pictures, drawn in dithered 565 since
+2026.8.31, showed the store dither is enough, so on the owner's word every
+colour e-paper panel now draws in 565 whatever the PSRAM (every copy of the
+rule and `docs/device-limits-fixtures.json` together): 0.77 MB of canvas
+on an 800×480 board, its picture packed into the canvas where it is unturned
+(no panel buffer of its own), and the 565 paths. A board on 2026.11.13 or
+older still draws in RGBX; both planes count it as 565, which overstates its
+room by about 0.9 MB until it takes the release.
+
+## The canvas is RGBX where it fits, 565 where it must (2026-08-23, until 2026-11-21)
 
 One rule in three places — `fos_render_canvas_bits_per_pixel`
 (components/frameos_display), `sceneCanvasFormat` (embedded_runtime.nim),
