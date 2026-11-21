@@ -6,8 +6,10 @@ import pytest
 from app.models.frame import Frame
 from app.utils.device_limits import (
     describe_out_of_memory,
+    esp32_canvas_is_panel_buffer,
     esp32_canvas_rotation,
     esp32_device_limits,
+    esp32_palette_panel_buffer_bytes,
     frame_render_device,
 )
 
@@ -59,6 +61,31 @@ def test_an_e1003_whose_firmware_shares_the_panel_buffer_has_one_buffer_more():
                      embedded={"hardwarePreset": "seeed_reterminal_e1003"},
                      last_successful_deploy={"frameos_version": "2026.11.7"})
     assert frame_render_device(baseline).rotate == 0
+
+
+def test_a_colour_panel_packs_in_its_canvas_only_where_memory_needs_it():
+    """The E1004 (1200x1600 on 8 MB) packs its picture in its 565 canvas and
+    charges no panel buffer; the E1002 (800x480 on 8 MB) keeps one of its own,
+    so it renders while its panel refreshes, and is charged it."""
+    def frame(preset, width, height):
+        return Frame(id=7, mode="embedded", width=width, height=height, rotate=0,
+                     embedded={"hardwarePreset": preset, "lastBoot": {"frameosVersion": "2026.12.0"}})
+
+    e1004 = frame_render_device(frame("seeed_reterminal_e1004", 1200, 1600))
+    assert e1004 is not None and e1004.rotate == 0 and e1004.pixel_format == 7
+    assert e1004.limits(1200, 1600)["memoryBytes"] == 11_180_032
+    e1002 = frame_render_device(frame("seeed_reterminal_e1002", 800, 480))
+    assert e1002 is not None and e1002.rotate == 0 and e1002.pixel_format == 7
+    assert e1002.limits(800, 480)["memoryBytes"] == 7_916_032
+    # The four colours' buffer is a quarter of a byte a pixel (panel_buffer_size).
+    assert esp32_palette_panel_buffer_bytes(800, 480, 5) == 96_000
+    assert esp32_palette_panel_buffer_bytes(801, 480, 7) == 192_480
+    assert not esp32_canvas_is_panel_buffer(7, 0, 2, 800, 480, 8 * 1024 * 1024)
+    assert esp32_canvas_is_panel_buffer(7, 0, 2, 1200, 1600, 8 * 1024 * 1024)
+    assert not esp32_canvas_is_panel_buffer(7, 0, 2, 1200, 1600, 16 * 1024 * 1024)
+    assert not esp32_canvas_is_panel_buffer(7, 90, 2, 1200, 1600, 8 * 1024 * 1024)
+    # The sixteen greys' rule is the size's no matter.
+    assert esp32_canvas_is_panel_buffer(8, 0, 0.5, 800, 480, 16 * 1024 * 1024)
 
 
 def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():

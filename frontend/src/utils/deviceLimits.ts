@@ -166,23 +166,44 @@ function esp32PixelFormatIsPalette(pixelFormat: unknown): boolean {
   return pixelFormat === 5 || pixelFormat === 6 || pixelFormat === 7
 }
 
+/** A colour panel's picture is packed into its canvas only where the canvas
+ * and a panel buffer apart would take more than this share of the PSRAM
+ * (main.c PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR): the canvas is the display's
+ * for the whole refresh, so the next render waits for the glass. */
+export const ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR = 2
+
+/** frameos_display.c panel_buffer_size for a colour e-paper panel: rows of
+ * whole bytes, four pixels a byte for four colours (5), two for seven or
+ * Spectra 6. */
+export function esp32PalettePanelBufferBytes(width: number, height: number, pixelFormat: number | null): number {
+  const pixelsPerByte = pixelFormat === 5 ? 4 : 2
+  return Math.ceil(Math.max(1, width) / pixelsPerByte) * Math.max(1, height)
+}
+
 /** Whether the scene canvas is the panel buffer itself while nothing turns
  * it: a sixteen-grey panel's 4-bit canvas is its packed picture byte for byte
  * (the firmware's main.c canvas_is_panel_picture: one 1.31 MB buffer on a
  * reTerminal E1003, not two), and a colour panel's picture is packed into the
- * first bytes of its 565 canvas (main.c canvas_holds_panel_picture: 960 KB
- * back on a reTerminal E1004). `rotate` is the frame's rotation, null when it
- * is not known or the firmware keeps two buffers (esp32CanvasRotation);
- * `canvasBytesPerPixel` the canvas (esp32CanvasBytesPerPixel). */
+ * first bytes of its 565 canvas where the two apart would take more than half
+ * the PSRAM (main.c canvas_holds_panel_picture: 960 KB back on a reTerminal
+ * E1004; an 800x480 board or a 1200x1600 panel on 16 MB keeps a buffer of its
+ * own). `rotate` is the frame's rotation, null when it is not known or the
+ * firmware keeps two buffers (esp32CanvasRotation); `canvasBytesPerPixel` the
+ * canvas (esp32CanvasBytesPerPixel). */
 export function esp32CanvasIsPanelBuffer(
   pixelFormat: number | null,
   rotate: number | null,
-  canvasBytesPerPixel: number | null = null
+  canvasBytesPerPixel: number | null,
+  width: number,
+  height: number,
+  psramBytes: number
 ): boolean {
   if (rotate !== 0) return false
-  return (
-    pixelFormat === ESP32_PIXEL_4BPP_GRAY || (esp32PixelFormatIsPalette(pixelFormat) && canvasBytesPerPixel === 2)
-  )
+  if (pixelFormat === ESP32_PIXEL_4BPP_GRAY) return true
+  if (!esp32PixelFormatIsPalette(pixelFormat) || canvasBytesPerPixel !== 2) return false
+  const canvasBytes = Math.max(1, width) * Math.max(1, height) * 2
+  const apart = canvasBytes + esp32PalettePanelBufferBytes(width, height, pixelFormat)
+  return apart > Math.floor(psramBytes / ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR)
 }
 
 /** "2026.11.6" (also "v2026.11.6+<sha>") as numbers; null when it is not one. */
@@ -236,7 +257,10 @@ export function esp32DeviceHeapBytes(
   const packedBytes = esp32CanvasIsPanelBuffer(
     pixelFormat,
     rotate,
-    esp32CanvasBytesPerPixel(width, height, psramBytes, pixelFormat)
+    esp32CanvasBytesPerPixel(width, height, psramBytes, pixelFormat),
+    width,
+    height,
+    psramBytes
   )
     ? 0
     : pixelFormat === ESP32_PIXEL_RGB565

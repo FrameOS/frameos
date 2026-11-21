@@ -162,8 +162,11 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  *   with a per-pixel dither (pixie `ditherStores`); the E1004's pictures
  *   showed that dither is enough, so every colour panel draws in 565 (the
  *   owner, 2026-11-21): half the canvas (0.77 MB on an 800x480 board), the
- *   picture packed in the canvas's own bytes where it is unturned (main.c
- *   canvas_holds_panel_picture), and pixie's 565 fast paths.
+ *   picture packed in the canvas's own bytes where it is unturned and the
+ *   two apart would take more than half the PSRAM (main.c
+ *   canvas_holds_panel_picture: the E1004 on 8 MB; elsewhere a panel buffer
+ *   of its own, so the next render need not wait out a refresh), and pixie's
+ *   565 fast paths.
  *
  * The same rule lives, in bytes (0.5 for 4 bits), in
  * `embedded_render_canvas_bytes_per_pixel`
@@ -176,7 +179,8 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * canvas_is_panel_picture: unturned sixteen greys) both device-limits ports
  * charge no second buffer (`esp32CanvasIsPanelBuffer`), and so where a colour
  * panel's picture is packed in the first bytes of its 565 canvas (main.c
- * canvas_holds_panel_picture: unturned, no partial waveform). */
+ * canvas_holds_panel_picture: unturned, no partial waveform, and the canvas
+ * plus a panel buffer over half the module's PSRAM). */
 /* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
 size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_total_bytes,

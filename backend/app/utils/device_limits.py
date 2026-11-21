@@ -38,21 +38,49 @@ ESP32_PACK_IN_CANVAS_FIRMWARE = "2026.11.10"
 ESP32_PALETTE_PIXEL_FORMATS = frozenset({5, 6, 7})
 
 
+# A colour panel's picture is packed into its canvas only where the canvas and
+# a panel buffer apart would take more than this share of the PSRAM (main.c
+# PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR): the canvas is the display's for the
+# whole refresh, so the next render waits for the glass.
+ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR = 2
+# fos_pixel_format_t's four colours, two bits a pixel; the other colour
+# formats take four.
+ESP32_PIXEL_2BPP_BWYR = 5
+
+
+def esp32_palette_panel_buffer_bytes(width: int, height: int, pixel_format: int | None) -> int:
+    """frameos_display.c panel_buffer_size for a colour e-paper panel: rows of
+    whole bytes, four pixels a byte for four colours, two for seven or Spectra 6."""
+    pixels_per_byte = 4 if pixel_format == ESP32_PIXEL_2BPP_BWYR else 2
+    return -(-max(1, width) // pixels_per_byte) * max(1, height)
+
+
 def esp32_canvas_is_panel_buffer(
-    pixel_format: int | None, rotate: int | None, canvas_bytes_per_pixel: float | None = None
+    pixel_format: int | None,
+    rotate: int | None,
+    canvas_bytes_per_pixel: float | None,
+    width: int,
+    height: int,
+    psram_bytes: int,
 ) -> bool:
     """Whether the scene canvas is the panel buffer itself while nothing turns
     it: a sixteen-grey panel's 4-bit canvas is its packed picture byte for byte
     (the firmware's main.c canvas_is_panel_picture: one 1.31 MB buffer on a
     reTerminal E1003, not two), and a colour panel's picture is packed into the
-    first bytes of its 565 canvas (main.c canvas_holds_panel_picture: 960 KB
-    back on a reTerminal E1004). `rotate` None: not known, or firmware that
-    keeps two (esp32_canvas_rotation)."""
+    first bytes of its 565 canvas where the two apart would take more than half
+    the PSRAM (main.c canvas_holds_panel_picture: 960 KB back on a reTerminal
+    E1004; an 800x480 board or a 1200x1600 panel on 16 MB keeps a buffer of its
+    own). `rotate` None: not known, or firmware that keeps two
+    (esp32_canvas_rotation)."""
     if rotate != 0:
         return False
-    return pixel_format == ESP32_PIXEL_4BPP_GRAY or (
-        pixel_format in ESP32_PALETTE_PIXEL_FORMATS and canvas_bytes_per_pixel == 2
-    )
+    if pixel_format == ESP32_PIXEL_4BPP_GRAY:
+        return True
+    if pixel_format not in ESP32_PALETTE_PIXEL_FORMATS or canvas_bytes_per_pixel != 2:
+        return False
+    canvas_bytes = max(1, width) * max(1, height) * 2
+    apart = canvas_bytes + esp32_palette_panel_buffer_bytes(width, height, pixel_format)
+    return apart > psram_bytes // ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR
 
 
 def esp32_canvas_rotation(rotate: object, firmware_version: object, pixel_format: object = None) -> int | None:
@@ -97,7 +125,7 @@ def esp32_device_limits(
     on its RGBX canvas that a 565- or luma-canvas device does not."""
     pixels = max(1, width) * max(1, height)
     canvas_bytes_per_pixel = esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
-    if esp32_canvas_is_panel_buffer(pixel_format, rotate, canvas_bytes_per_pixel):
+    if esp32_canvas_is_panel_buffer(pixel_format, rotate, canvas_bytes_per_pixel, width, height, psram_bytes):
         packed_bytes = 0
     elif pixel_format == ESP32_PIXEL_RGB565:
         packed_bytes = pixels * 2 * 4
