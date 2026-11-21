@@ -29,6 +29,32 @@
   pointer-events: none;
 }
 
+/* The Files scene's Upload or Download, asked with the page's own button
+   when the tap's gesture ran out before the request arrived. */
+.playground__ask {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 10px 12px;
+  border: 2px solid #000;
+  background: #fff;
+  color: #000;
+  font: 14px/1.4 system-ui, sans-serif;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.4);
+}
+
+.playground__ask button {
+  padding: 4px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* The frame is the whole page: the site's theme switch has nothing to switch. */
 body:has(.playground) .theme-toggle {
   display: none;

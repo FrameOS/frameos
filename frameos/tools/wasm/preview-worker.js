@@ -16,6 +16,8 @@
 //        Restart and Reboot come out as `sceneEvent`s `restart` / `reboot`, a new scale as `frameSettings`.
 //        sceneState: public field values for the scene it starts on, set before the first render
 //        (`sceneStateSeeded` in `ready` says they were; an older bundle leaves that false).
+//        fileTransfer: the page answers `fileRequest`s (a file picker, a download), so the Files scene shows
+//        Upload and Download (frameos/file_transfer_preview.nim). `ready`'s `fileTransfer` says the bundle took it.
 //        lanAccess: the previewed cloud frame's local network access (docs/lan-access.md); `false` makes the
 //        runtime refuse private hosts the way that frame would. Absent = nothing to copy, nothing refused.
 //   {type: 'render'}                       force a render now
@@ -33,6 +35,10 @@
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 //   {type: 'clipboard', text}              the browser's clipboard, for the frame's next Paste (docs/jsx-ui.md
 //                                          "Selecting, copying and pasting"); a bundle without it ignores it
+//   {type: 'fileUpload', id, files}        the files the person picked for the Files scene's Upload: [{name, data}]
+//                                          (data an ArrayBuffer), written into the folder request `id` named
+//   {type: 'fileTransferDone', id, ok, error?}  the page's end of request `id` without files: a download saved
+//                                          (ok), or the picker or the save given up (error 'cancelled')
 // Messages out:
 //   {type: 'ready', sceneInfo, sceneStateSeeded, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents,
 //    clipboard}
@@ -57,6 +63,10 @@
 //                                            hotX, hotY, pixels, scale, hideMs}; null for "none")
 //   {type: 'assetsResult', requestId, ok, ...} reply to an 'assets' request
 //   {type: 'clipboard', text}                 a Copy or a Cut in a JSX field: for the browser's clipboard
+//   {type: 'fileRequest', id, op, name, data?} the Files scene asks the page: op 'upload' (pick files from the
+//                                            computer for the folder `name`, answered with `fileUpload`) or
+//                                            'download' (save `data`, an ArrayBuffer, as `name`, answered with
+//                                            `fileTransferDone`). A new request replaces one still waiting.
 //
 // Browser asset folder: the runtime's /srv/assets (the same path a real frame
 // keeps its assets at) is an emscripten IDBFS mount — files live in this
@@ -643,6 +653,181 @@ async function handleAssetsRequest(msg) {
   }
 }
 
+// ------------------------------------------- files to and from the computer
+
+// Upload and Download in the Files scene (frameos/file_transfer_preview.nim).
+// The runtime asks while the scene's tap runs (onFrameosFileRequest); the
+// request goes to the page, because a file picker and a download start from a
+// person's gesture and only the page has one. The page answers with the files
+// picked (`fileUpload`, written here into the folder the runtime named, never
+// one the page names) or with `fileTransferDone`, and the runtime draws the
+// scene that asked again. One request at a time: a new one replaces another
+// still waiting, in the runtime too.
+let fileTransferOn = false
+const fileRequests = new Map() // id -> {op, path}
+
+function onFileRequest(text) {
+  let request = null
+  try {
+    request = JSON.parse(text)
+  } catch (e) {
+    return
+  }
+  // Out of the runtime's call first: the answer goes back into it.
+  setTimeout(() => startFileRequest(request), 0)
+}
+
+// A path the runtime named, relative to the assets root, or null for one
+// outside it.
+function assetPathFromRuntime(path) {
+  const text = String(path || '')
+  if (text !== ASSETS_ROOT && !text.startsWith(ASSETS_ROOT + '/')) {
+    return null
+  }
+  return normalizeAssetPath(text)
+}
+
+function baseNameOf(rel) {
+  return rel.slice(rel.lastIndexOf('/') + 1)
+}
+
+function startFileRequest(request) {
+  const id = Number(request && request.id) || 0
+  const rel = assetPathFromRuntime(request && request.path)
+  fileRequests.clear()
+  if (!id || rel === null || !assetsMounted) {
+    finishFileRequest(id, false, 0, 'failed')
+    return
+  }
+  if (request.op === 'download') {
+    let data
+    try {
+      const bytes = Module.FS.readFile(assetAbsolutePath(rel))
+      data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+    } catch (e) {
+      finishFileRequest(id, false, 0, 'failed')
+      return
+    }
+    fileRequests.set(id, { op: 'download', path: rel })
+    post({ type: 'fileRequest', id, op: 'download', name: baseNameOf(rel), data }, [data])
+  } else if (request.op === 'upload') {
+    fileRequests.set(id, { op: 'upload', path: rel })
+    post({ type: 'fileRequest', id, op: 'upload', name: rel ? baseNameOf(rel) : '' })
+  } else {
+    finishFileRequest(id, false, 0, 'failed')
+  }
+}
+
+// A picked file's name as a name in the folder: no folders, no control
+// characters, no dot first (the listing hides those), not too long.
+function cleanFileName(name) {
+  let clean = String(name || '')
+  clean = clean.slice(Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\')) + 1)
+  clean = clean.replace(/[\u0000-\u001f\u007f]/g, '').replace(/^[.\s]+/, '').trim()
+  if (clean.length > 120) {
+    const dot = clean.lastIndexOf('.')
+    const ext = dot > 0 && clean.length - dot <= 10 ? clean.slice(dot) : ''
+    clean = clean.slice(0, 120 - ext.length) + ext
+  }
+  return clean || 'file'
+}
+
+function pathExists(path) {
+  try {
+    Module.FS.stat(path)
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+// `name` in `dir`, or "name (2).jpg" and on when that is taken: an upload
+// never replaces a file that is there.
+function freeFileName(dir, name) {
+  if (!pathExists(dir + '/' + name)) {
+    return name
+  }
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  for (let n = 2; n < 1000; n++) {
+    const next = stem + ' (' + n + ')' + ext
+    if (!pathExists(dir + '/' + next)) {
+      return next
+    }
+  }
+  return null
+}
+
+async function handleFileUpload(msg) {
+  const id = Number(msg.id) || 0
+  const request = fileRequests.get(id)
+  if (!request || request.op !== 'upload') {
+    return
+  }
+  fileRequests.delete(id)
+  const files = Array.isArray(msg.files) ? msg.files : []
+  let count = 0
+  let error = files.length === 0 ? 'cancelled' : ''
+  try {
+    const dir = assetAbsolutePath(request.path)
+    fsEnsureDir(dir)
+    let total = assetsTotalBytes()
+    for (const file of files) {
+      // Any realm's ArrayBuffer (a page's, a test's): Uint8Array reads its bytes.
+      const bytes = file && file.data && typeof file.data.byteLength === 'number' ? new Uint8Array(file.data) : new Uint8Array(0)
+      if (total + bytes.length > ASSETS_MAX_BYTES) {
+        error = 'too_big'
+        break
+      }
+      const name = freeFileName(dir, cleanFileName(file && file.name))
+      if (!name) {
+        error = 'failed'
+        continue
+      }
+      Module.FS.writeFile(dir + '/' + name, bytes)
+      total += bytes.length
+      count++
+    }
+  } catch (e) {
+    log('assets: an upload failed: ' + errorText(e))
+    error = 'failed'
+  }
+  if (count > 0) {
+    await persistAssets()
+    post({ type: 'assetsChanged' })
+  }
+  finishFileRequest(id, count > 0, count, error)
+}
+
+function handleFileTransferDone(msg) {
+  const id = Number(msg.id) || 0
+  const request = fileRequests.get(id)
+  if (!request) {
+    return
+  }
+  fileRequests.delete(id)
+  const ok = msg.ok === true && request.op === 'download'
+  finishFileRequest(id, ok, ok ? 1 : 0, ok ? '' : String(msg.error || 'cancelled'))
+}
+
+function finishFileRequest(id, ok, count, error) {
+  if (!Module || outOfMemory || typeof Module._frameos_wasm_file_transfer_done !== 'function') {
+    return
+  }
+  try {
+    call('frameos_wasm_file_transfer_done', 'boolean', ['number', 'boolean', 'number', 'string'], [
+      id,
+      ok,
+      count,
+      error || '',
+    ])
+  } catch (e) {
+    post({ type: 'error', message: 'file transfer failed: ' + errorText(e) })
+  }
+  renderSoonIfRequested()
+}
+
 // ------------------------------------------------- simulated device memory
 
 // The runtime returns 3 from a render whose allocation was refused under the
@@ -853,6 +1038,8 @@ async function init(msg) {
       onFrameosLog: (message) => post({ type: 'log', message }),
       // A tapped link (docs/jsx-ui.md "Links"): the page opens it in a tab.
       onFrameosOpenLink: (url) => post({ type: 'openLink', url: String(url) }),
+      // Upload / Download in the Files scene: handed to the page (below).
+      onFrameosFileRequest: (text) => onFileRequest(text),
       onFrameosEvent: (name, payload) => {
         let parsed = {}
         try {
@@ -932,6 +1119,15 @@ async function init(msg) {
         post({ type: 'log', message: 'the frame page is unavailable in this runtime build' })
       }
     }
+    // Upload and Download in the Files scene, for a page that opens a file
+    // picker and saves a file when asked (`fileRequest` below). A bundle
+    // without the export shows neither.
+    fileTransferOn = false
+    fileRequests.clear()
+    if (msg.fileTransfer === true && typeof Module._frameos_wasm_set_file_transfer === 'function') {
+      call('frameos_wasm_set_file_transfer', null, ['boolean'], [true])
+      fileTransferOn = true
+    }
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.
@@ -988,6 +1184,9 @@ async function init(msg) {
       cursor: typeof Module._frameos_wasm_cursor === 'function',
       // The frame's clipboard is the browser's (2026.11.11): 'clipboard' in and out.
       clipboard: hasClipboard(),
+      // Upload and Download in the Files scene (2026.11.14): `fileRequest` out, `fileUpload` and
+      // `fileTransferDone` in.
+      fileTransfer: fileTransferOn,
     })
     clipboardChanges = hasClipboard() ? call('frameos_wasm_clipboard_changes', 'number', [], []) : -1
     renderNow()
@@ -1116,7 +1315,17 @@ function handleEvent(name, payload) {
 // memory (renderNow) the runtime was left mid-render and nothing goes into it
 // again: the page makes a new worker to start over. Clicks went on into it
 // and each came back as "event failed".
-const RUNTIME_MESSAGES = new Set(['render', 'event', 'selectScene', 'resize', 'chooseLayout', 'setRenderScale', 'clipboard'])
+const RUNTIME_MESSAGES = new Set([
+  'render',
+  'event',
+  'selectScene',
+  'resize',
+  'chooseLayout',
+  'setRenderScale',
+  'clipboard',
+  'fileUpload',
+  'fileTransferDone',
+])
 
 self.onmessage = (ev) => {
   const msg = ev.data || {}
@@ -1177,6 +1386,12 @@ self.onmessage = (ev) => {
       break
     case 'clipboard':
       setClipboard(msg.text)
+      break
+    case 'fileUpload':
+      void handleFileUpload(msg)
+      break
+    case 'fileTransferDone':
+      handleFileTransferDone(msg)
       break
     case 'runAppTests':
       handleRunAppTests(msg)

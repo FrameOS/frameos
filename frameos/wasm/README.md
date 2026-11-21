@@ -148,6 +148,26 @@ await preview.resetAssets() // wipe + regenerate the samples
 `onReady(sceneInfo, assets)` reports whether the folder is persistent or in-memory.
 Pass `browserAssets: false` for an empty in-memory folder instead.
 
+### Files from and to the computer
+
+The Files scene has Upload and Download here (`fileTransfer`, on by default; a bundle that has them
+says `runtimeInfo.fileTransfer`). A file picker and a download need a gesture in the page, and the
+tap on Upload is still one when the request arrives a few milliseconds later, so the preview opens
+the picker (or saves the file) at once. When the page has no gesture left
+(`navigator.userActivation.isActive` is false, or the browser cannot say), it calls
+`onFileRequest(request)` instead: show a button whose click calls `preview.answerFileRequest()`,
+and one for `preview.cancelFileRequest()`; `onFileRequest(null)` says it is over. Without
+`onFileRequest` the preview tries anyway. The files picked go into the folder the scene shows, in
+the browser asset folder above.
+
+```ts
+const preview = createFrameOSPreview({
+  ...options,
+  onFileRequest: (request) => showAsk(request), // {id, op: 'upload' | 'download', name} or null
+})
+askButton.onclick = () => preview.answerFileRequest()
+```
+
 Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePublicStateFields`,
 `coerceStateFieldValue`, `sceneEventButtons`, and the `StateField`/`FrameOSScene` types.
 
