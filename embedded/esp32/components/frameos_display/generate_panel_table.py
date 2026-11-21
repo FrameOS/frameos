@@ -115,6 +115,21 @@ EXTRA_PANELS = [
         "display": "fos_lcd_st7701s_display",
         "sleep": "fos_lcd_st7701s_sleep",
     },
+    {
+        # The Sunton ESP32-8048S070's 7" IPS glass (EK9716): the same driver
+        # and the same RGB565 shape, at 800x480; the board's wiring (no
+        # expander, no controller SPI) comes from the hardware preset.
+        "name": "LCD_EK9716_800x480",
+        "width": 800,
+        "height": 480,
+        "format": 9,  # FOS_PIXEL_RGB565
+        "bus": 3,
+        "header": "lcd_st7701s_rgb.h",
+        "init": "fos_lcd_st7701s_init",
+        "clear": "fos_lcd_st7701s_clear",
+        "display": "fos_lcd_st7701s_display",
+        "sleep": "fos_lcd_st7701s_sleep",
+    },
 ]
 
 FOS_PANEL_BUS_SPI = 0

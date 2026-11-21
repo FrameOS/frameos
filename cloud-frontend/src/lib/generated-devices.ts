@@ -787,6 +787,12 @@ export const piDeviceGroups: DeviceGroup[] = [
         "label": "ST7701S 4.0\" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator)",
         "width": 480,
         "height": 480
+      },
+      {
+        "value": "lcd.ek9716_800x480",
+        "label": "EK9716 7.0\" IPS LCD 800x480 (ESP32 RGB, Sunton ESP32-8048S070)",
+        "width": 800,
+        "height": 480
       }
     ]
   }

@@ -2,6 +2,7 @@
   "_doc": "What a board's console does not say. `key` is the board's short name, what a booking names (framebench/bookings.py). Optional: an unknown board is benched and recorded from `usb_api status` alone (records.board_identity); an entry adds its name, panel size and chip features. Keys: `boards` by module id (fos_board.c), `panels` by display id, `chips` by target. See tools/frame-bench/SCORES.md.",
   "boards": {
     "seeed_sensecap_indicator_d1": {"key": "sensecap", "name": "SenseCAP Indicator D1", "target": "esp32-s3", "display": "LCD_ST7701S_480x480", "psram_bytes": 8388608, "flash_bytes": 8388608},
+    "sunton_esp32_8048s070": {"key": "sunton", "name": "Sunton ESP32-8048S070", "target": "esp32-s3", "display": "LCD_EK9716_800x480", "psram_bytes": 8388608, "flash_bytes": 16777216},
     "seeed_reterminal_sticky": {"key": "sticky", "name": "reTerminal Sticky", "target": "esp32-s3", "display": "EPD_3in97", "psram_bytes": 8388608, "flash_bytes": 33554432},
     "seeed_reterminal_e1002": {"key": "e1002", "name": "reTerminal E1002", "target": "esp32-s3", "display": "EPD_7in3e", "psram_bytes": 8388608, "flash_bytes": 8388608},
     "seeed_reterminal_e1003": {"key": "e1003", "name": "reTerminal E1003", "target": "esp32-s3", "display": "EPD_10in3", "psram_bytes": 8388608, "flash_bytes": 33554432},
@@ -10,6 +11,7 @@
   },
   "panels": {
     "LCD_ST7701S_480x480": {"width": 480, "height": 480, "kind": "lcd", "colors": "rgb565"},
+    "LCD_EK9716_800x480": {"width": 800, "height": 480, "kind": "lcd", "colors": "rgb565"},
     "EPD_3in97": {"width": 800, "height": 480, "kind": "epaper", "colors": "bw"},
     "EPD_7in3e": {"width": 800, "height": 480, "kind": "epaper", "colors": "spectra6"},
     "EPD_10in3": {"width": 1872, "height": 1404, "kind": "epaper", "colors": "grey16"},

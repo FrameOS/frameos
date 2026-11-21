@@ -233,6 +233,7 @@ describe("bindings and rules", () => {
     expect(frameOffersEdgeGestures(true, "embedded", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "pimoroni.hyperpixel4sq_touch", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.st7701s_480x480", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "lcd.ek9716_800x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "waveshare.EPD_7in5_V2", presetRules)).toBe(false);
     // A map that binds an edge already shows it as a row, whatever the device.
     expect(frameOffersEdgeGestures(null, null, [{ event: "edgeSwipe", match: { edge: "left" }, emit: "render", as: {} }])).toBe(true);

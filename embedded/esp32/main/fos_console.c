@@ -729,6 +729,17 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "38:BUTTON",
               -1, 2.0f, -1, 0, 0 },
+            /* Sunton (GUITION) ESP32-8048S070 (ESP32-S3-WROOM-1, 16 MB flash,
+             * 8 MB PSRAM): the 7" 800x480 EK9716 IPS glass on the chip's RGB
+             * interface, its wiring the LCD driver's own board table
+             * (lcd_st7701s_rgb.c), so no EPD pins; the BOOT key on GPIO0;
+             * the GT911 touch controller on the chip's I2C pins
+             * (fos_board_touch_pins); the microSD slot on its own SPI bus
+             * (fos_board_sd_pins). USB is a CH340 on UART0. */
+            { "sunton_esp32_8048s070", "LCD_EK9716_800x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT",
+              -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
              * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
              * UP/DOWN GPIO5/6 (Seeed's porting specification). The buzzer
