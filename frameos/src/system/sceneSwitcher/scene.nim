@@ -78,6 +78,11 @@ type
     ## is a row `headingH` tall above its tiles.
     cols*, rows*: int
     tileW*, tileH*, gap*, x0*, y0*, pad*, headerH*, headingH*: int
+    ## Inside a tile: the picture's box (`boxW` x `boxH`: the scene's last
+    ## snapshot at 4:3, else a square for its icon), its name's letters
+    ## (`text`, two lines at most), and the room around them (`inner`).
+    pictures*: bool
+    boxW*, boxH*, text*, inner*: int
     listX*, listY*, listW*, listH*: int
     ## A round panel (frameos/panel_shape): the list is the square inside
     ## the circle `radius` px around (cx, cy) (`RoundInset` in from the rim),
@@ -100,12 +105,11 @@ const
     ## + 1`): the root's first child. Its scroll is kept by that key.
   IdleSecondsFast* = 60.0
   IdleSecondsSlow* = 300.0
-  MaxCols = 12
-  MaxRows = 12
-  GridUnitMax = 480
+  MaxCols = 32
+  GridUnitMax = 400
     ## The most a grid's sizes are a share of: a tile is as large on a bigger
-    ## screen as on a 480 px one, and the bigger screen shows more of them
-    ## (the render scale is what makes them larger).
+    ## screen as on a 400 px one (and in a desktop's window), and the bigger
+    ## screen shows more of them (the render scale is what makes them larger).
   # A gear, 48 units square: the teeth clockwise, the hole the other way.
   GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
     "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
@@ -247,27 +251,24 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
 proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
-  ## The tile grid on a `width` x `height` canvas: the densest one whose
-  ## tiles stay big enough to read, whatever the number of scenes, so a tile
-  ## is the same size with three scenes as with thirty (the owner's rule,
-  ## 2026-11-10: tiles that grew to fill the screen looked odd, and on an
-  ## ESP32 each picture's pixels are what the switcher's render costs). Among
-  ## grids as dense, the one whose pictures (at the canvas's own aspect) or
-  ## name cards come out largest. More rows than fit scroll.
+  ## The tile grid on a `width` x `height` canvas, as the Scene store lays
+  ## out its own (docs/scene-switcher.md "The tiles"): a scene is its picture
+  ## (the host's last snapshot of it, at 4:3) or its icon over its name, and
+  ## a tile is one size whatever the room, so a bigger screen or window shows
+  ## more of them, never larger ones (the owner's rule, 2026-11-20). As many
+  ## tiles across as fit, stretched to fill the row; more rows than fit
+  ## scroll, and `rows` is how many show.
   ## On a round panel the list is the square inscribed in the circle that
   ## stays `RoundInset` in from the rim, so no tile shows a corner off the
   ## glass.
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
-  ## UI laid out at its render scale); the canvas's shorter edge without it.
-  ## Never more than `GridUnitMax`: past a 480 px screen the tiles, the
-  ## header and the gaps keep their size and a page holds more (the owner's
-  ## rule, 2026-11-20: tiles that grew with the screen showed a 10" panel
-  ## twelve scenes as large as a 4" one), up to `MaxCols` x `MaxRows`.
+  ## UI laid out at its render scale; 400 in a desktop's window); the
+  ## canvas's shorter edge without it, and never more than `GridUnitMax`.
   let unit = min(if unit > 0: unit else: min(width, height), GridUnitMax)
-  result.pad = clamp(permille(unit, 35), 4, 24)
-  result.gap = clamp(permille(unit, 25), 3, 16)
+  result.pad = clamp(permille(unit, 30), 4, 24)
+  result.gap = clamp(permille(unit, 20), 3, 16)
   result.headerH = clamp(permille(unit, 110), 18, 64)
-  result.headingH = clamp(permille(unit, 70), 16, 48)
+  result.headingH = clamp(permille(unit, 80), 16, 48)
   result.x0 = result.pad
   result.y0 = result.headerH + result.gap
   # Under the header to the bottom edge, the whole width, so a finger
@@ -277,7 +278,7 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   result.listH = max(height - result.headerH, 1)
   var
     gw = max(width - 2 * result.pad, 1)
-    gh = max(height - result.y0 - result.pad, 1)
+    gh = max(height - result.y0, 1) # the rows in sight: the list runs to the bottom edge
   when not defined(frameosEmbedded):
     if round:
       result.round = true
@@ -294,42 +295,25 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
       result.listH = result.side
       gw = result.side
       gh = result.side
-  let
-    minW = min(clamp(permille(unit, 233), 48, 200), gw)
-    minH = min(clamp(permille(unit, 175), 36, 160), gh)
-  var
-    best = -1.0
-    bestCapacity = 0
-  for cols in 1 .. MaxCols:
-    for rows in 1 .. MaxRows:
-      let
-        tw = (gw - result.gap * (cols - 1)) div cols
-        th = (gh - result.gap * (rows - 1)) div rows
-      if tw < minW or th < minH:
-        continue
-      let capacity = cols * rows
-      # A card with a name: as large as it gets, not much taller than wide.
-      var quality = float(min(tw, th * 11 div 5) * min(th, tw * 6 div 5))
-      when not defined(frameosEmbedded):
-        if thumbnails:
-          # The picture: what is left under the title, at the canvas's aspect.
-          let
-            aspect = width.float / max(height, 1).float
-            titleH = clamp(th.float * 0.2, 14, 44)
-            pw = min(tw.float * 0.9, max(th.float - titleH, 1) * 0.9 * aspect)
-          quality = pw * pw / aspect
-      if capacity > bestCapacity or (capacity == bestCapacity and quality > best):
-        best = quality
-        bestCapacity = capacity
-        result.cols = cols
-        result.rows = rows
-        result.tileW = tw
-        result.tileH = th
-  if result.cols == 0:
-    result.cols = 1
-    result.rows = 1
-    result.tileW = gw
-    result.tileH = gh
+  # At a 400 unit (a desktop's window): a tile 96 px wide with a 52 px icon
+  # and 12 px letters, or 120 with a 120x90 picture, as the store's.
+  when defined(frameosEmbedded):
+    result.pictures = false
+  else:
+    result.pictures = thumbnails
+  result.text = clamp(permille(unit, 30), 10, 24)
+  result.inner = clamp(permille(unit, 15), 3, 12)
+  let least = min(clamp(permille(unit, if result.pictures: 330 else: 240), 48, 200), gw)
+  result.cols = clamp((gw + result.gap) div (least + result.gap), 1, MaxCols)
+  result.tileW = max((gw - result.gap * (result.cols - 1)) div result.cols, 1)
+  if result.pictures:
+    result.boxW = least - 2 * result.inner
+    result.boxH = result.boxW * 3 div 4
+  else:
+    result.boxW = max(min(clamp(permille(unit, 130), 16, 104), result.tileW - 4 * result.inner), 8)
+    result.boxH = result.boxW
+  result.tileH = 2 * result.inner + result.boxH + result.inner + 2 * (result.text * 5 div 4)
+  result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
 
 proc isRound*(frameConfig: FrameConfig): bool =
   ## Whether the frame's panel shows only the circle inside it
@@ -724,139 +708,87 @@ proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: s
 type TileLook = object
   ## What every tile in the list shares, and the one at hand.
   paper, lit, showing: bool
-  unit, border, inner, radius: int
+  radius: int
 
-proc mute(c: var string, look: TileLook) =
-  ## A tile's quieter text, on an LCD.
-  if look.paper: discard
-  elif look.lit: c.add " text-sky-200"
-  else: c.add " text-zinc-400"
-
-proc titleRow(look: TileLook, index, size: int, height = 0): SvgNode =
-  ## The tile's number, and a dot when it is the scene it was opened from.
-  var c = "flex items-center leading-none"
-  c.px("gap", max(2, size div 3))
-  c.px("text", size)
-  if height > 0:
-    c.px("h", height)
-  var n = "shrink-0 font-bold"
-  n.mute(look)
-  var number: string
-  number.addInt(index + 1)
-  result = el("div", c, el("span", n, txt(number)).role("muted"))
+proc tileBox(self: SceneSwitcherScene, look: TileLook, index: int, grid: SwitcherGrid): SvgNode =
+  ## A tile's picture: the scene's last snapshot where the host keeps one
+  ## (Linux), else its icon (or its first letter) on a square in the tile's
+  ## role, and a dot at its corner when it is the scene the list was opened
+  ## from.
+  var c = "relative shrink-0"
+  c.px("w", grid.boxW)
+  c.px("h", grid.boxH)
+  result = el("div", c)
+  var picture: Image
+  when not defined(frameosEmbedded):
+    # An ESP32 shows icons only: loading, scaling and drawing a picture per
+    # tile made the drawer take seconds to open on a 10" e-paper panel (the
+    # owner's call, 2026-11-10), and writing them cost seconds of flash after
+    # renders. The preview keeps no picture of a scene it is not showing
+    # either.
+    if grid.pictures and not sceneSwitcherThumbnail.isNil:
+      try:
+        picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, grid.boxW, grid.boxH)
+      except Exception:
+        picture = nil
+  var b = "absolute left-0 top-0"
+  b.px("w", grid.boxW)
+  b.px("h", grid.boxH)
+  b.px("rounded", look.radius)
+  if not picture.isNil:
+    result.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", b)])
+  else:
+    b.add " flex items-center justify-center font-bold"
+    if not look.paper: b.add(if look.lit: " bg-sky-700 text-white" else: " bg-zinc-800 text-zinc-200")
+    elif look.lit: b.add " bg-black text-white"
+    else: b.add " border-2 border-black"
+    let side = min(grid.boxW, grid.boxH)
+    b.px("text", clamp(side * 2 div 5, 10, 64))
+    let icon = self.entries[index].icon
+    var name = self.entries[index].name
+    if name.len == 0: name = self.entries[index].id
+    var letter = 1 # the first letter, its UTF-8 continuation bytes too
+    while letter < name.len and (ord(name[letter]) and 0xC0) == 0x80:
+      inc letter
+    let mark = if icon.len > 0: iconNode(icon, max(side * 11 div 20, 8)) else: txt(name[0 ..< letter])
+    result.children.add el("div", b, mark).role(if look.lit: "tileLit" else: "tile")
   if look.showing:
-    var d = "shrink-0 rounded-full"
-    d.square(max(4, look.unit div 18))
+    var d = "absolute rounded-full"
+    let dot = max(6, grid.text * 2 div 3)
+    d.px("top", -2)
+    d.px("left", grid.boxW - dot + 2)
+    d.square(dot)
     if not look.paper: d.add " bg-sky-400"
-    elif look.lit: d.add " bg-white"
+    elif look.lit: d.add " bg-white border-2 border-black"
     else: d.add " bg-black"
     result.children.add el("div", d).role("accent")
 
-proc pictureTile(self: SceneSwitcherScene, tile: SvgNode, look: TileLook, index: int,
-    grid: SwitcherGrid, title: string): bool =
-  ## A tile's picture and the title under it: the scene's last snapshot,
-  ## where the host keeps one, else its number in the picture's place. Linux
-  ## only: an ESP32's tiles are name cards (see `tile`).
-  let
-    titleH = clamp(permille(grid.tileH, 200), 14, 44)
-    pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
-    ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
-    size = clamp(min(permille(titleH, 620), permille(grid.tileW, 130)), 10, 28)
-  var picture: Image
-  try:
-    picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
-  except Exception:
-    picture = nil
-  var c = "shrink-0"
-  c.px("rounded", max(look.radius - look.inner, 2))
-  c.px("w", pw)
-  c.px("h", ph)
-  if not picture.isNil:
-    tile.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", c)])
-  else:
-    # No picture yet (a scene not shown since the card was made): its icon,
-    # else its number.
-    c.add " flex items-center justify-center font-bold"
-    c.add(if not look.paper: " bg-zinc-700" elif look.lit: " border-2 border-white" else: " border-2 border-black")
-    c.px("text", clamp(ph div 3, 12, 64))
-    c.mute(look)
-    let icon = self.entries[index].icon
-    let mark = if icon.len > 0: iconNode(icon, clamp(min(pw, ph) * 45 div 100, 12, 160)) else: txt($(index + 1))
-    tile.children.add el("div", c, mark).role("field")
-  let row = look.titleRow(index, size, titleH)
-  row.children.add el("span", if look.paper: "truncate font-bold" else: "truncate", txt(title))
-  tile.children.add row
-  true
-
-proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid: SwitcherGrid,
-    button: string): SvgNode =
-  ## The scene at `index`, at its `spot` in the list.
+proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid: SwitcherGrid): SvgNode =
+  ## The scene at `index`, at its `spot` in the list: its picture or icon
+  ## over its name, as the Scene store's tiles (and a desktop's apps) are.
+  ## Lit for the keys: inverted on e-paper, ringed on an LCD.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
-  c.px("border", look.border)
+  c.px("pt", grid.inner)
+  c.px("px", grid.inner div 2)
+  c.px("gap", grid.inner)
   c.px("rounded", look.radius)
-  c.px("p", look.inner)
-  c.add " flex flex-col"
-  # On e-paper the page's colors, inverted for the highlight; on an LCD a
-  # button, ringed for it.
+  c.add " flex flex-col items-center"
   if look.paper:
-    c.add " border-black"
     if look.lit: c.add " bg-black text-white"
+  elif look.lit:
+    c.add " border-2 border-sky-400"
   else:
-    c.add button
-    if look.lit: c.add " border-sky-400"
-    else: c.add " border-zinc-800"
-  result = el("div", c).onClick(index)
+    c.add " active:bg-zinc-800"
+  result = el("div", c, self.tileBox(look, index, grid)).onClick(index)
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
-  # An ESP32 shows names only: loading, scaling and drawing a picture per tile
-  # made the drawer take seconds to open on a 10" e-paper panel (the owner's
-  # call, 2026-11-10), and writing them cost seconds of flash after renders.
-  # The preview keeps no picture of a scene it is not showing either.
-  when not defined(frameosEmbedded):
-    if not sceneSwitcherThumbnail.isNil and self.pictureTile(result, look, index, grid, title):
-      return result.role(if look.lit: "tileLit" else: "tile")
-  let size = clamp(min(permille(grid.tileH, 180), permille(grid.tileW, 140)), 12, 40)
-  result.children.add look.titleRow(index, size, size)
-  # Its icon above the name where the card has room for both (the number
-  # row, the name's lines, the gap), up to three letters tall. The name
-  # takes two lines when it looks too long for one (a letter is about half
-  # as wide as it is tall), each line `leading-tight` (5/4 of the size: the
-  # budget here is the line the layout draws, or a second line ran over the
-  # card's border), and is cut to what it was given. A third of the room the
-  # name leaves (up to the number row's height) goes under the icon and the
-  # name, the rest to the icon, so the two sit in the middle of the card
-  # rather than on its bottom edge under the number row.
-  let
-    icon = self.entries[index].icon
-    inner = 2 * look.border + 2 * look.inner
-    gap = max(2, size div 4)
-    line = size * 5 div 4
-    room = grid.tileH - inner - size - gap
-    fit = max(1, room div line)
-    lines = min(fit, if title.len * size * 11 div 20 > grid.tileW - inner: 2 else: 1)
-    spare = room - lines * line - gap
-    under = if icon.len == 0: 0 else: min(size, max(0, spare - 12) div 3)
-    side = if icon.len == 0: 0
-      else: min(min(spare - under, (grid.tileW - inner) * 2 div 3), size * 3)
-    shown = if side >= 12: side + gap + lines * line else: min(fit, 3) * line
-  var name = "grow min-h-0 flex items-center justify-center text-center font-bold leading-tight"
-  name.px("text", size)
-  name.px("pb", clamp(room - shown, 0, size))
-  if side >= 12:
-    name.add " flex-col"
-    name.px("gap", gap)
-    let column = el("div", name, iconNode(icon, side))
-    column.children.add el("div", if lines == 1: "text-center line-clamp-1 max-w-full" else: "text-center line-clamp-2 max-w-full",
-      txt(title))
-    result.children.add column
-  else:
-    var cut = " line-clamp-"
-    cut.addInt(min(fit, 3))
-    name.add cut
-    result.children.add el("div", name, txt(title))
-  result = result.role(if look.lit: "tileLit" else: "tile")
+  var n = "w-full text-center line-clamp-2 leading-tight"
+  n.px("text", grid.text)
+  if look.paper: n.add " font-bold"
+  result.children.add el("span", n, txt(title))
+  result = result.role(if look.lit: "picked" else: "option")
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
     width, size, small: int, button: string) =
@@ -982,10 +914,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     result.children.add el("div", c, txt("No scenes installed yet."))
   # No `return` for that: the loop below ends at once, and one way out keeps
   # one clean-up.
-  var look = TileLook(paper: paper, unit: min(grid.tileW, grid.tileH))
-  look.border = max(2, look.unit div (if paper: 40 else: 45))
-  look.inner = max(3, look.unit div 22)
-  look.radius = clamp(look.unit div 12, 3, 16)
+  var look = TileLook(paper: paper, radius: clamp(grid.boxH div 7, 3, 16))
   let opener = self.opener()
   let spots = self.spots(grid)
   for index in 0 ..< self.entries.len:
@@ -993,7 +922,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
       list.children.add heading(grid, spots[index].top, self.entries[index].category, paper, small)
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
-    list.children.add self.tile(look, index, spots[index], grid, button)
+    list.children.add self.tile(look, index, spots[index], grid)
 
 const
   PaperWhite = color(1, 1, 1, 1)

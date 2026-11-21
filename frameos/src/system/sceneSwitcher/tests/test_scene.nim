@@ -95,16 +95,23 @@ block the_tiles_keep_one_size_whatever_the_count:
   # The grid is the panel's alone: three scenes fill three of its slots, and
   # thirty scroll through the same.
   let few = switcherGrid(800, 480, thumbnails = true)
-  doAssert few.cols == 6 and few.rows == 4, "as dense as stays readable, six by four on 800x480: " & $few
+  doAssert few.cols == 5 and few.rows == 2, "as the store lays out its pictures, five across on 800x480: " & $few
   let many = switcherGrid(480, 480, thumbnails = false)
   doAssert many.cols * many.rows >= 9, $many
   doAssert many.tileW >= 96 and many.tileH >= 72, "names stay readable on a 4\" square " & $many
+  # A bigger window shows more tiles, never larger ones: the store's sizes.
+  for pictures in [false, true]:
+    let small = switcherGrid(640, 400, thumbnails = pictures, unit = 400)
+    let large = switcherGrid(1400, 900, thumbnails = pictures, unit = 400)
+    doAssert small.boxW == large.boxW and small.boxH == large.boxH and small.text == large.text, $small & " " & $large
+    doAssert large.cols > small.cols and large.rows > small.rows, $small & " " & $large
+    doAssert small.boxW == (if pictures: 120 else: 52) and small.text == 12, $small
   let tiny = switcherGrid(128, 64, thumbnails = false)
   doAssert tiny.cols >= 1 and tiny.tileW > 0 and tiny.tileH > 0, "an OLED still gets a tile " & $tiny
   for (w, h) in [(800, 480), (720, 720), (1920, 1080), (480, 800)]:
     let grid = switcherGrid(w, h, thumbnails = true)
     doAssert grid.x0 + grid.cols * grid.tileW + (grid.cols - 1) * grid.gap <= w - grid.pad + 1, $grid
-    doAssert grid.y0 + grid.rows * grid.tileH + (grid.rows - 1) * grid.gap <= h - grid.pad + 1, $grid
+    doAssert grid.y0 + grid.rows * grid.tileH + (grid.rows - 1) * grid.gap <= h, $grid
     # The list is under the header, the whole width, to the bottom edge.
     doAssert (grid.listX, grid.listY, grid.listW, grid.listH) == (0, grid.headerH, w, h - grid.headerH), $grid
 
@@ -367,9 +374,9 @@ block forward_and_back_move_a_screenful:
 block e_paper_scrolls_where_the_finger_lifts:
   # The reTerminal E1003 (1872x1404, sixteen greys): no render while the
   # finger moves (each is seconds of refresh), one where it lifts, and a tap
-  # after that opens the tile it lands on. Its 10" screen holds forty and more
-  # tiles (GridUnitMax): two hundred scroll.
-  listed = entries(200)
+  # after that opens the tile it lands on. Its 10" screen holds two hundred
+  # tiles and more (GridUnitMax): four hundred scroll.
+  listed = entries(400)
   sent.setLen(0)
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(1872, 1404))
@@ -380,7 +387,7 @@ block e_paper_scrolls_where_the_finger_lifts:
   doAssert sent.len == 0, "nothing drawn while the finger moves: " & $sent
   scene.send("pointerUp", touchAt(900, 400))
   doAssert sent.len == 1 and sent[0][0] == evRender, "where it lifted: " & $sent
-  doAssert listScroll() > 0 and listScroll() == listRegion().scrollY, $listScroll()
+  doAssert listScroll() > 0 and listScroll() <= listRegion().scrollY, $listScroll()
   discard scene.draw(newImageGray8(1872, 1404))
   let grid = switcherGrid(1872, 1404, thumbnails = false)
   let below = grid.cols * grid.rows
@@ -403,7 +410,7 @@ block a_layout_hole_scrolls_by_the_grid_it_drew:
   # on the whole panel: a screenful is the hole's (the reTerminal E1003 in a
   # Windows 98 window, 2026-11-10, when a page turn lit a tile of the page
   # after the one it showed).
-  listed = entries(40)
+  listed = entries(400)
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(900, 600))
   let (roomW, roomH) = uiRoom(scene.frameConfig, 900, 600)

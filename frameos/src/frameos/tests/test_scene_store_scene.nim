@@ -45,6 +45,7 @@ var
   requests: seq[string] ## what the workers were asked, guarded by requestsLock
   page = "" ## the store's answer to a listing (set before the workers are asked)
   realStore = false ## answer as a store holding the repo's samples does (storeAnswer)
+  thumbsOn = true ## that store lists its scenes' covers
 initLock(requestsLock)
 
 const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("clocks", "Clocks & time"),
@@ -77,10 +78,11 @@ proc repoStore(): seq[JsonNode] =
       var row = %*{"id": align($i, 8, '0') & "-0000-4000-8000-" & align($i, 12, '0'), "name": name,
         "category": slug, "version": 1, "by": "FrameOS", "about": name & ", from the repo's samples.",
         "image": nil, "thumb": nil}
-      if settings{"icon"}.getStr("").len == 0:
-        row["image"] = %coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308"][i mod 4])
-      else:
+      if settings{"icon"}.getStr("").len > 0:
         row["icon"] = settings["icon"]
+      # Its cover: the sample's own picture, from the "CDN" (jsIoHook).
+      if fileExists(dir / "image.jpg") and copy == 1:
+        row["thumb"] = %("https://thumbs.test/" & encodeUrl(dir.lastPathPart) & ".jpg")
       result.add row
 
 let storeText = $(%repoStore()) ## text: the request workers parse their own (refs do not cross threads)
@@ -97,6 +99,7 @@ proc storeAnswer(url: string): string =
     if params.hasKey("category") and category != params["category"]: continue
     if category in exclude: continue
     if params.hasKey("q") and params["q"].toLowerAscii notin row["name"].getStr().toLowerAscii: continue
+    if not thumbsOn and row.hasKey("thumb"): row.delete("thumb")
     rows.add row
   let limit = parseInt(params.getOrDefault("limit", "12"))
   let pageNumber = parseInt(params.getOrDefault("page", "1"))
@@ -116,6 +119,9 @@ jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
       requests.add request.url
     if "/api/store/device/scenes?" in request.url:
       return JsIoResult(code: 200, body: if realStore: storeAnswer(request.url) else: page)
+    if request.url.startsWith("https://thumbs.test/"):
+      let name = decodeUrl(request.url["https://thumbs.test/".len .. ^5])
+      return JsIoResult(code: 200, body: readFile(Samples / name / "image.jpg"))
     sleep(150)
     JsIoResult(code: 200, body: coverPng)
 
@@ -496,8 +502,8 @@ suite "the Scene store scene":
     let scene = load(config)
     scene.state["spot"] = spot
     var image = draw(scene, config, name & "-loading", width, height)
-    for _ in 0 ..< 4:
-      if settle() == 0: break
+    for round in 0 ..< 8:
+      if settle() == 0 and round >= 3: break
       image = draw(scene, config, name, width, height)
     (scene, image)
 
@@ -511,7 +517,10 @@ suite "the Scene store scene":
     for (w, h) in [(480, 320), (800, 480), (1280, 800), (1920, 1080)]:
       discard opened(frame(w, h), "full-" & $w & "x" & $h, %*{})
     # Windows of a desktop on a 1920x1080 screen, dragged bigger: the tiles
-    # stay the size they were, and more of them show.
+    # stay the size they were, and more of them show (measured on their
+    # icons' boxes, the pictures left out).
+    thumbsOn = false
+    defer: thumbsOn = true
     var widths, counts: seq[int]
     for (w, h) in [(640, 400), (960, 600), (1400, 900)]:
       let (_, image) = opened(frame(1920, 1080), "window-" & $w & "x" & $h, %*{}, w, h)
@@ -549,7 +558,9 @@ suite "the Scene store scene":
     discard draw(scene, config, "featured-scrolled")
     # A scene opened, and the store started again (a preview, a reboot): it
     # opens on that scene.
-    scene.tap(64, 200)
+    for y in countup(80, 420, 20):
+      scene.tap(64, y)
+      if scene.state{"spot"}{"detail"}.kind == JObject: break
     discard draw(scene, config, "featured-detail")
     let spot = scene.state{"spot"}
     check spot{"detail"}{"name"}.getStr().len > 0
@@ -591,8 +602,8 @@ suite "the Scene store scene":
       let scene = init("scene-store".SceneId, config, logger, %*{})
       scene.state["spot"] = %*{}
       var image = draw(scene, config, "desktop-" & name & "-loading")
-      for _ in 0 ..< 4:
-        if settle() == 0: break
+      for round in 0 ..< 8:
+        if settle() == 0 and round >= 3: break
         image = draw(scene, config, "desktop-" & name)
       checkpoint name
       check icons(image, 400).len > 0 or true # drawn; the pictures are for a person to look at

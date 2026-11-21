@@ -254,18 +254,30 @@ kept.
 
 ## The Scene store app
 
-- **Tiles at one size.** A scene is a tile as a desktop shows an app: its
-  icon (on its category's color) over its name, a mark at the corner for one
-  the frame holds (a check), one with an update (an arrow) and the preview (a
-  play sign). One without an icon shows its cover's thumbnail there, decoded
-  at the icon's size, else its first letter. The grid is laid out from the
-  room the app has, so a bigger window shows more tiles, never bigger ones
-  (until 2026-11-20 everything was zoomed by the window's shorter side, and
-  a window dragged bigger drew nine bigger cards a page). How big a tile is
-  follows the panel instead, by the square root of its shorter side over 480
-  in quarters: 0.75 below about 370 px, 1.25 from about 600, 1.5 from about 900
-  (a 1080p screen across a room), and at most 1 in a window of a
-  desktop (a box smaller than the panel), the desktop's own size.
+- **Tiles at one size.** A scene is its picture over its name: the cover's
+  `thumb` at 4:3 (120x90 at zoom 1), decoded at the size it is drawn, on its
+  category's color until it is in, with the scene's icon as a badge at its
+  corner; a scene with no cover shows its icon there instead (else its first
+  letter). A mark at the corner says what the frame holds: a check, an arrow
+  for an update, a play sign for the preview. E-paper and other slow panels
+  get icon tiles instead (the icon on a square over the name, as a desktop
+  shows an app): every picture there is a download inside the render before
+  its one refresh, and a 120 px photo dithers to mush. The grid is laid out
+  from the room the app has, so a bigger window shows more tiles, never
+  bigger ones (until 2026-11-20 everything was zoomed by the window's shorter
+  side, and a window dragged bigger drew nine bigger cards a page). How big a
+  tile is follows the panel instead, by the square root of its shorter side
+  over 480 in quarters: 0.75 below about 370 px, 1.25 from about 600, 1.5 from
+  about 900 (a 1080p screen across a room), and at most 1 in a window of a
+  desktop (a box smaller than the panel), the desktop's own size. The
+  built-in scene switcher's tiles, every desktop's window of every scene, are
+  these same tiles (docs/scene-switcher.md "The tiles").
+- **What the pictures cost.** Only tiles near the screen are built, so only
+  they ask for their picture; each is kept by the runtime at its drawn size
+  (`docs/jsx-ui.md` "Photos that stay": 48 small pictures at most, the oldest
+  let go first, fewer when render memory is short). At zoom 1 a picture is
+  120x90, 21 KB in an ESP32 LCD's RGB565, so the store holds about a megabyte
+  of them at the very most, and an 800x480 screen shows about eighteen.
 - **Scenes | Layouts, by category.** The front has the two sides as tabs.
   Where a few rows of tiles fit (five columns and three rows, on a fast
   panel), each category is a section: its heading (tap it, or All, for all of

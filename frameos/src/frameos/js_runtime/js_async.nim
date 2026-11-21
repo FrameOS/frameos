@@ -227,6 +227,17 @@ when jsAsyncOn:
             if answer.code >= 400:
               raise newException(IOError, "HTTP " & $answer.code)
             image = decodeFetchedImage(answer.body)
+            # Kept at the size it is drawn, as an ESP32 decodes it, when it is
+            # many times that: a page of 512 px store thumbnails kept whole is
+            # more pixels than the app's kept pictures may hold, and they
+            # pushed each other out (the Scene store's grid, 2026-11-21).
+            if not image.isNil and wait.width >= 32 and wait.height >= 32 and
+                image.width * image.height > 4 * wait.width * wait.height:
+              let target = runtime.keptTargetFor(wait.owner, wait.like, wait.width, wait.height,
+                wait.fit)(image.width, image.height)
+              if not target.isNil:
+                scaleAndDrawImage(target, image, scaledFitPlacement(wait.fit))
+                image = target
           if image.isNil:
             error = "the response was not an image this frame can decode"
       except CatchableError as e:

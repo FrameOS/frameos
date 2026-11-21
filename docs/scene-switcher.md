@@ -110,8 +110,8 @@ together under a heading with its name, the categories sorted by name with
 case aside (the raw name breaking a tie), each trimmed, and the scenes without
 one, or in a category named "Other" in any case, last under "Other". Within a
 group the scenes keep the list's order. Where no scene has a category there
-are no headings, and the list is as the host gave it. The tiles are numbered,
-and the keys walk them, in the order shown. JavaScript lowers every letter
+are no headings, and the list is as the host gave it. The keys walk the
+tiles in the order shown. JavaScript lowers every letter
 for the comparison and the Nim lowers A to Z and the Latin-1 capitals
 (`folded`): two categories that differ only in another script's capitals can
 sort the other way round.
@@ -127,17 +127,27 @@ app's UI. It is laid out at the
 frame's render scale, sized from the panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
-`switcherGrid` picks the densest grid whose tiles stay big enough to read (at
-least 23% of the shorter side across and 17.5% of it high, up to twelve by
-twelve on a screen), and among grids as dense the one whose pictures (at the
-frame's aspect) or name cards come out largest. The tiles keep that size
-whatever the number of scenes: three scenes fill three slots of the same grid
-that thirty scroll through, rather than growing to fill the screen. **Nor do
-they grow with the screen** (`GridUnitMax`, 2026-11-20): the shorter side they
-are a share of is 480 px at most, so a tile, the header and the gaps are as
-large on a 10" panel as on a 7.5" one (112 x 84 px at least), and the bigger
-panel shows more of them at once. The frame's render scale is what makes them
-larger.
+### The tiles
+
+The tiles are the Scene store's (docs/scene-store.md "The Scene store
+app"), in the frame's own look or the desktop's: a scene is its picture over
+its name, or its icon over its name, as a desktop shows an app. Every desktop
+of windows opens this switcher as its window of every scene (Windows 98's
+Programs, macOS's Launchpad, the others' Scenes), so that window is this one
+grid in each desktop's theme (2026-11-21; it was cards of a number and a
+name, a few to a row).
+
+`switcherGrid` lays them out from the room it has: a tile is one size, as many
+across as fit, stretched to fill the row, and the rows that do not fit scroll
+(`rows` is how many show: a screenful for the keys). With pictures (a host
+that keeps them, Linux) a tile is at least 33% of the unit across with a 4:3
+picture; without, 24% with a square for the icon 13% of the unit. The name is
+3% of the unit, two lines at most. The unit is the panel's shorter side, **400
+px at most** (`GridUnitMax`): in a desktop's window, on a 480 px square and on
+a 10" panel alike a tile is 96 px across with a 52 px icon, or 120 with a
+120x90 picture, as the store's in a window, and a bigger panel or window shows
+more of them, never larger ones (the owner's rule, 2026-11-20). The frame's
+render scale is what makes them larger.
 
 The tiles are one list under the header, a box with `overflow-y-auto` from
 the header to the bottom edge, the whole width (ui/layout.nim; docs/jsx-ui.md
@@ -161,16 +171,21 @@ would open nothing. The device's unlock (docs/scene-settings.md "Turned off by
 the control plane") brings it back with the page.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
-  gets a dark grid: each tile its picture when the host has one (Linux), its number
-  and title under it, the highlighted tile ringed, and a tile lighter while a
-  finger is on it (`active:`).
+  gets a dark grid: each tile its picture when the host has one (Linux), else
+  its icon on a dark square, its name under it, the highlighted tile ringed,
+  and a tile lighter while a finger is on it (`active:`).
 - **A scene's icon** (`settings.icon`, docs/scene-icons.md) is drawn in the
-  text color: on a name card above the name (the name then cut to one line, or
-  two when it looks long), up to three letters tall where the card has room;
-  on a Pi's picture tile in the picture's place until the scene has a snapshot,
-  where the number was. A tile without one is drawn as before.
+  text color on its square (the theme's `tile` role in a desktop), and its
+  first letter where it has none; on a Pi's picture tile in the picture's
+  place until the scene has a snapshot. A dot at the square's corner marks the
+  scene it was opened from.
+- **In a desktop** the tile takes the theme's roles: `option` (`picked` while
+  the keys are on it) for the tile, `tile` (`tileLit`) for the icon's square,
+  `muted` for the headings, so Windows 98 draws raised grey squares and macOS
+  white rounded ones (`test_desktop_switcher.nim` renders every desktop's
+  window, small and large, `FRAMEOS_DESKTOP_SHOTS=<dir>`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
-  `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
+  `pimoroni.inky*`) gets black on white, outlined squares, the highlighted tile
   inverted, and no press feedback: a refresh to show a finger is down would
   be seconds of flashing for nothing. A tap counts, and a finger dragging
   the list is drawn once, where it let go (ui/events.nim keeps quiet until
@@ -195,7 +210,7 @@ minute after (`render:sceneImage:saved`), once the panel has the picture
 switch back), and never for the switcher or the settings themselves.
 `scene_switcher_linux.nim` fits it to the tile (halved by pixie's box
 filter, then drawn), and keeps it until the file changes. A scene not shown
-since the card was made has its number in the picture's place.
+since the card was made has its icon (or its first letter) in the picture's place.
 
 Opening it is fast on a Pi Zero (a 720x720 PNG is a few hundred ms to decode
 there):
@@ -272,8 +287,8 @@ The button layer (`frameos/input_state.nim`) makes one event of each press:
 two quick taps are one `doublePress` and a third starts over, so "five taps"
 is not something a key can say, and counting `gpio` edges would need a
 timeout the dispatcher does not keep. The switcher counts instead: every
-press of a `next` key is a step (a double press two), the tiles are
-numbered, and a press of the primary key opens the highlighted one. Open
+press of a `next` key is a step (a double press two), the tiles are in
+order, and a press of the primary key opens the highlighted one. Open
 the switcher, press NEXT n times, press OK: the scene n after the one
 showing.
 
@@ -308,4 +323,9 @@ and an insertion sort of the category names), the tiles' places (`spots`)
 and the scroll to the highlight; the scrolling itself is the JSX layer's,
 already in the image. That change was not measured on the ESP32-S3 image:
 no image was built for it. The firmware-size comment on its pull request is
+the number.
+
+The tiles as the store's (2026-11-21) replaced the number row, the
+name-card layout and the densest-grid search with one fixed tile size and a
+row's worth of columns: the firmware-size comment on that pull request is
 the number.
