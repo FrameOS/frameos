@@ -3,11 +3,12 @@ import pixie
 import pixie/fileformats/svg as pixie_svg
 import locks
 import algorithm
+import std/monotimes
+import std/times
 import tables
 import strutils
 import assets/fonts as fontAssets
 import frameos/channels
-import frameos/utils/memory
 import frameos/utils/paths
 import json
 const defaultFont = "Ubuntu-Regular.ttf" # its name; compiled in as an indexed font
@@ -64,102 +65,77 @@ proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
       if not typeface.hasFallbackTypeface(fallback):
         typeface.fallbacks.add(fallback)
 
-when defined(frameosEmbedded):
-  ## Custom fonts on an ESP32 come off the SD card, one at a time.
-  ##
-  ## This used to hand back the built-in face unconditionally, because a scene
-  ## authored on a desktop names fonts that were never going to be there and
-  ## parsing a TTF is the kind of allocation that ends a render. Now that the
-  ## backend can sync a project's fonts onto the card ("Sync fonts", which
-  ## refuses on a frame with no card), the file usually IS there, and silently
-  ## drawing in the wrong face made the sync a lie.
-  ##
-  ## Three guards keep it honest without keeping it dangerous:
-  ##
-  ## * exactly ONE custom face is cached, and asking for a different one drops
-  ##   the previous — the same one-typeface rule the SVG bridge already
-  ##   follows, for the same reason (internal heap, not PSRAM, is what runs
-  ##   out);
-  ## * a font file over EmbeddedMaxFontBytes is refused unparsed, because a
-  ##   CJK face is tens of megabytes and the failure mode of trying is a reset,
-  ##   not an exception;
-  ## * the parse is skipped when the device is already short of render
-  ##   headroom, and any failure falls back to the built-in face rather than
-  ##   losing the drawing. Text in the wrong face still says what it says.
-  const EmbeddedMaxFontBytes = 1024 * 1024
-  ## Headroom demanded before parsing, over and above the file itself: pixie
-  ## builds glyph tables well past the file size, and a render that is already
-  ## scraping by must not be the thing that pays for a nicer typeface.
-  const EmbeddedFontParseHeadroomBytes = 3 * 1024 * 1024
+proc fontNameOk(font: string): bool =
+  font.len > 0 and "/" notin font and ".." notin font and "~" notin font
 
-  var embeddedCustomFontName = ""
-  var embeddedCustomTypeface: Typeface = nil
-  var embeddedRefusedFonts: Table[string, bool] = initTable[string, bool]()
+const FileFacesMax = 128
+  ## How many faces read in place (pixie/fontformats/filefont.nim) are kept
+  ## open, by name: each is its tables' places and its path, a few hundred
+  ## bytes; the one used longest ago goes first.
 
-  proc embeddedRefuse(font: string, reason: string, extra: JsonNode = nil) =
-    ## Say why exactly once per font name: a scene that names a missing font
-    ## renders every interval, and one line per render is a log that cannot be
-    ## read.
-    if embeddedRefusedFonts.hasKey(font):
-      return
-    embeddedRefusedFonts[font] = true
-    var payload = %*{"event": "font:embedded:fallback", "font": font,
-                     "reason": reason}
-    if extra != nil:
-      for key, value in extra.pairs:
-        payload[key] = value
-    log(payload)
+var fileFaces: OrderedTable[string, Typeface]
+var refusedFonts: Table[string, bool] = initTable[string, bool]()
 
-  proc embeddedTypeface(font: string, assetsPath: string): Typeface =
-    if assetsPath.len == 0 or "/" in font or ".." in font or "~" in font:
-      return getDefaultTypeface()
-    if font == embeddedCustomFontName and embeddedCustomTypeface != nil:
-      return embeddedCustomTypeface
+proc refuseFont(font: string, reason: string, extra: JsonNode = nil) =
+  ## Say why exactly once per font name: a scene that names a missing font
+  ## renders every interval, and one line per render is a log that cannot be
+  ## read.
+  if refusedFonts.hasKey(font):
+    return
+  refusedFonts[font] = true
+  var payload = %*{"event": "font:fallback", "font": font, "reason": reason}
+  if extra != nil:
+    for key, value in extra.pairs:
+      payload[key] = value
+  log(payload)
 
-    let fontPath = assetsPath & "/fonts/" & font
-    if not fileExists(fontPath):
-      embeddedRefuse(font, "not on this frame")
-      return getDefaultTypeface()
-
-    var fileBytes = 0
-    try:
-      fileBytes = int(getFileSize(fontPath))
-    except CatchableError:
-      fileBytes = 0
-    if fileBytes <= 0 or fileBytes > EmbeddedMaxFontBytes:
-      embeddedRefuse(font, "font file too large to parse on this device",
-                     %*{"bytes": fileBytes, "maxBytes": EmbeddedMaxFontBytes})
-      return getDefaultTypeface()
-
-    let headroom = availableRenderHeadroomBytes()
-    if headroom > 0 and headroom < fileBytes + EmbeddedFontParseHeadroomBytes:
-      # Not remembered: headroom is a moment, not a property of the font, and
-      # the next render may well have room.
-      log(%*{"event": "font:embedded:fallback", "font": font,
-             "reason": "not enough free memory to parse a font right now",
-             "headroomBytes": headroom, "bytes": fileBytes})
-      return getDefaultTypeface()
-
+proc fileTypeface*(font: string, assetsPath: string): Typeface =
+  ## The font file `font` in the frame's fonts folder, read where it lies
+  ## (docs/esp32-fonts.md): its table directory now, a page at a time after
+  ## that through the render thread's page cache, so any number of faces cost
+  ## next to nothing until they draw. nil when there is no such font or it is
+  ## not a TrueType file pixie reads in place (a CFF .otf, an emoji bitmap
+  ## font: frameos/tools/font_for_card.py converts the first).
+  if assetsPath.len == 0 or not fontNameOk(font):
+    return nil
+  withLock typefaceLock:
+    let kept = fileFaces.getOrDefault(font)
+    if kept != nil and not kept.isStale:
+      # Used now: to the end of the order, the last to go.
+      fileFaces.del(font)
+      fileFaces[font] = kept
+      return kept
+  let fontPath = assetsPath & "/fonts/" & font
+  if not fileExists(fontPath):
+    refuseFont(font, "not on this frame")
+    return nil
+  try:
+    let face = openTypefaceFile(fontPath)
     withLock typefaceLock:
-      if font == embeddedCustomFontName and embeddedCustomTypeface != nil:
-        return embeddedCustomTypeface
-      # Drop the previous custom face BEFORE parsing the new one: two parsed
-      # typefaces alive at once is the allocation this whole dance avoids.
-      embeddedCustomFontName = ""
-      embeddedCustomTypeface = nil
-      try:
-        embeddedCustomTypeface = parseTtf(readFile(fontPath))
-        embeddedCustomFontName = font
-        embeddedRefusedFonts.del(font)
-        log(%*{"event": "font:embedded:loaded", "font": font,
-               "bytes": fileBytes})
-      except CatchableError as error:
-        embeddedCustomTypeface = nil
-        embeddedCustomFontName = ""
-        embeddedRefuse(font, "could not be parsed", %*{"error": error.msg})
-    if embeddedCustomTypeface != nil:
-      return embeddedCustomTypeface
-    return getDefaultTypeface()
+      fileFaces.del(font)
+      while fileFaces.len >= FileFacesMax:
+        for oldest in fileFaces.keys:
+          fileFaces.del(oldest)
+          break
+      fileFaces[font] = face
+    refusedFonts.del(font)
+    return face
+  except CatchableError as error:
+    refuseFont(font, "could not be read in place", %*{"error": error.msg})
+    return nil
+
+when defined(frameosEmbedded):
+  ## Fonts on an ESP32 come off the SD card ("Sync fonts" puts FrameOS's
+  ## collection there; any TrueType file a user adds counts), and every one
+  ## of them is read where it lies (fileTypeface): a face open costs a few
+  ## hundred bytes and drawing with it the render thread's page cache, so a
+  ## scene may use as many as it likes. They used to be parsed whole, one at
+  ## a time, a file of at most 1 MB with 3 MB of headroom: "never inflate a
+  ## face whole into RAM on a device" holds for the card's fonts too.
+  proc embeddedTypeface(font: string, assetsPath: string): Typeface =
+    result = fileTypeface(font, assetsPath)
+    if result.isNil:
+      result = getDefaultTypeface()
 
 proc getTypeface*(font: string, assetsPath: string,
     withEmoji = true): Typeface =
@@ -226,21 +202,26 @@ proc getAvailableFonts*(assetsPath: string): seq[string] =
 #
 # Two rules shape the answer. It never fails: an SVG naming a font the frame has
 # never heard of renders in the default face rather than losing the drawing —
-# text in the wrong face still says what it says. And it never loads much: the
-# ESP32 has room for exactly one parsed typeface, so there it always answers
-# with the built-in one, and even on a Pi the number of faces an SVG can pull
-# into memory is capped.
+# text in the wrong face still says what it says. And it never loads much: on
+# an ESP32 every face is read where it lies on the card (fileTypeface), and on
+# a Pi the faces an SVG may parse whole are capped, the rest read in place.
+# The JSX layer's `font-[Name]` asks the same hook (ui/layout.nim).
 
-const svgTypefaceBudget =
-  when defined(frameosEmbedded): 1
-  else: 8
-  ## How many fonts SVG text may pull into memory. Past it, further families
-  ## answer with the default face instead of parsing another font: a scene that
-  ## names a dozen fonts must not be the thing that runs a frame out of heap.
+const svgTypefaceBudget = 8
+  ## How many fonts SVG text may parse whole on a Pi. Past it, further
+  ## families are read in place (fileTypeface): a scene that names a dozen
+  ## fonts (the Fonts sample names every one) must not be the thing that runs
+  ## a frame out of heap.
   ##
   ## Counted per font SVG itself caused to be parsed, not per entry in the
   ## shared cache: a face a text app already loaded is free to reuse, and one
   ## app's font list must not decide whether another's text renders.
+
+const svgFontListingSeconds = 30
+  ## How long the fonts folder's listing (and the family choices made from
+  ## it) is kept: a font synced onto the frame is found within this, and a
+  ## scene naming forty families does not list the folder forty times (on an
+  ## ESP32 a listing of the card's 61 fonts is a directory read, not free).
 
 const genericFontFamilies = [
   "sansserif", "serif", "monospace", "cursive", "fantasy", "systemui",
@@ -257,6 +238,8 @@ var svgFontChoices: Table[string, string] = initTable[string, string]()
   ## alternative is walking the fonts directory once per text run.
 var svgFontsParsed = 0
   ## How many fonts SVG text has caused to be parsed, against svgTypefaceBudget.
+var svgFontListing: seq[string]
+var svgFontListedAt: MonoTime
 
 proc setSvgFontAssetsPath*(assetsPath: string) =
   ## Points SVG font resolution at this frame's assets. Called once at config
@@ -266,6 +249,7 @@ proc setSvgFontAssetsPath*(assetsPath: string) =
     if svgFontAssetsPath != assetsPath:
       svgFontAssetsPath = assetsPath
       svgFontChoices.clear()
+      svgFontListing = @[]
 
 proc normalizedFontKey(name: string): string =
   ## CSS family names and font file names spell the same font differently:
@@ -303,6 +287,14 @@ proc svgFontFileFor*(family: string, weight = 400, italic = false): string =
   if key.len == 0 or key in genericFontFamilies:
     return ""
 
+  let now = getMonoTime()
+  if svgFontListing.len == 0 or (now - svgFontListedAt).inSeconds >= svgFontListingSeconds:
+    let listing = getAvailableFonts(svgFontAssetsPath)
+    withLock typefaceLock:
+      svgFontListing = listing
+      svgFontListedAt = now
+      svgFontChoices.clear()
+
   let cacheKey = key & "|" & $weight & "|" & $italic
   if svgFontChoices.hasKey(cacheKey):
     return svgFontChoices[cacheKey]
@@ -311,7 +303,7 @@ proc svgFontFileFor*(family: string, weight = 400, italic = false): string =
   var
     best = ""
     bestRank = variants.len
-  for file in getAvailableFonts(svgFontAssetsPath):
+  for file in svgFontListing:
     if file.len == 0:
       continue
     let base = normalizedFontKey(file.changeFileExt(""))
@@ -331,17 +323,16 @@ proc svgTypeface(family: string, weight: int, italic: bool): Typeface {.gcsafe.}
     try:
       if family.len == 0:
         return getDefaultTypeface()
-      when defined(frameosEmbedded):
-        # One typeface, always. Parsing a second font would come out of the
-        # internal heap the renderer needs, and the frame must still render.
+      let file = svgFontFileFor(family, weight, italic)
+      if file.len == 0:
         return nil
+      when defined(frameosEmbedded):
+        # Read where it lies on the card, as every face there is.
+        return fileTypeface(file, svgFontAssetsPath)
       else:
-        let file = svgFontFileFor(family, weight, italic)
-        if file.len == 0:
-          return nil
         let alreadyParsed = typefaces.hasKey(file)
         if not alreadyParsed and svgFontsParsed >= svgTypefaceBudget:
-          return nil
+          return fileTypeface(file, svgFontAssetsPath)
         result = getTypeface(file, svgFontAssetsPath, withEmoji = false)
         if not alreadyParsed:
           withLock typefaceLock:

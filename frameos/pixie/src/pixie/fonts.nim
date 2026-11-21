@@ -1,5 +1,6 @@
 import bumpy, chroma, common, os, fileformats/png, fontformats/opentype,
-    fontformats/indexedfont, fontformats/svgfont, images, paints, paths,
+    fontformats/indexedfont, fontformats/filefont, fontformats/svgfont, images,
+    paints, paths,
     strutils, unicode, vmath
 
 const
@@ -12,6 +13,7 @@ type
     ## Acyclic as a GlyphSource is (paths.nim): `fallbacks` never leads back.
     opentype: OpenType
     indexed: IndexedFont ## read where it lies (fontformats/indexedfont.nim)
+    file: FileFont ## a TrueType file read where it lies (fontformats/filefont.nim)
     svgFont: SvgFont
     filePath*: string
     fallbacks*: seq[Typeface]
@@ -63,6 +65,8 @@ proc scale*(typeface: Typeface): float32 {.inline, raises: [].} =
     typeface.opentype.head.unitsPerEm.float32
   elif typeface.indexed != nil:
     typeface.indexed.unitsPerEm.float32
+  elif typeface.file != nil:
+    typeface.file.unitsPerEm.float32
   else:
     typeface.svgFont.unitsPerEm
 
@@ -72,6 +76,8 @@ proc ascent*(typeface: Typeface): float32 {.raises: [].} =
     typeface.opentype.hhea.ascender.float32
   elif typeface.indexed != nil:
     typeface.indexed.ascender.float32
+  elif typeface.file != nil:
+    typeface.file.ascender.float32
   else:
     typeface.svgFont.ascent
 
@@ -81,6 +87,8 @@ proc descent*(typeface: Typeface): float32 {.raises: [].} =
     typeface.opentype.hhea.descender.float32
   elif typeface.indexed != nil:
     typeface.indexed.descender.float32
+  elif typeface.file != nil:
+    typeface.file.descender.float32
   else:
     typeface.svgFont.descent
 
@@ -90,6 +98,8 @@ proc lineGap*(typeface: Typeface): float32 {.raises: [].} =
     result = typeface.opentype.hhea.lineGap.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.lineGap.float32
+  elif typeface.file != nil:
+    result = typeface.file.lineGap.float32
 
 proc lineHeight*(typeface: Typeface): float32 {.inline, raises: [].} =
   ## The default line height in font units.
@@ -102,36 +112,46 @@ proc capHeight*(typeface: Typeface): float32 {.raises: [].} =
     result = typeface.opentype.os2.sCapHeight.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.capHeight.float32
+  elif typeface.file != nil:
+    result = typeface.file.capHeight.float32
 
 proc underlinePosition(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.post.underlinePosition.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.underlinePosition.float32
+  elif typeface.file != nil:
+    result = typeface.file.underlinePosition.float32
 
 proc underlineThickness(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.post.underlineThickness.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.underlineThickness.float32
+  elif typeface.file != nil:
+    result = typeface.file.underlineThickness.float32
 
 proc strikeoutPosition(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.os2.yStrikeoutPosition.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.strikeoutPosition.float32
+  elif typeface.file != nil:
+    result = typeface.file.strikeoutPosition.float32
 
 proc strikeoutThickness(typeface: Typeface): float32 =
   if typeface.opentype != nil:
     result = typeface.opentype.os2.yStrikeoutSize.float32
   elif typeface.indexed != nil:
     result = typeface.indexed.strikeoutSize.float32
+  elif typeface.file != nil:
+    result = typeface.file.strikeoutSize.float32
 
 proc isCCW(typeface: Typeface): bool {.inline.} =
   ## Returns the expected winding order of a font.
   if typeface.opentype != nil:
     return typeface.opentype.isCCW()
-  if typeface.indexed != nil:
+  if typeface.indexed != nil or typeface.file != nil:
     return true # TrueType outlines
 
 proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
@@ -140,6 +160,8 @@ proc hasGlyph*(typeface: Typeface, rune: Rune): bool {.inline.} =
     typeface.opentype.hasGlyph(rune)
   elif typeface.indexed != nil:
     typeface.indexed.hasGlyph(rune.int32)
+  elif typeface.file != nil:
+    typeface.file.hasGlyph(rune.int32)
   else:
     typeface.svgFont.hasGlyph(rune)
 
@@ -170,6 +192,8 @@ proc getGlyphPath*(
     result = typeface2.opentype.getGlyphPath(rune)
   elif typeface2.indexed != nil:
     result = typeface2.indexed.getGlyphPath(rune.int32)
+  elif typeface2.file != nil:
+    result = typeface2.file.getGlyphPath(rune.int32)
   else:
     result.addPath(typeface2.svgFont.getGlyphPath(rune))
 
@@ -189,6 +213,8 @@ proc getAdvance*(typeface: Typeface, rune: Rune): float32 {.inline, raises: [].}
     result = typeface2.opentype.getAdvance(rune)
   elif typeface2.indexed != nil:
     result = typeface2.indexed.advance(max(typeface2.indexed.glyphIdOf(rune.int32), 0)).float32
+  elif typeface2.file != nil:
+    result = typeface2.file.advance(max(typeface2.file.glyphIdOf(rune.int32), 0)).float32
   else:
     result = typeface2.svgFont.getAdvance(rune)
 
@@ -211,6 +237,9 @@ proc getKerningAdjustment*(
       result = typefaceRight.opentype.getKerningAdjustment(left, right)
     elif typefaceRight.indexed != nil:
       let font = typefaceRight.indexed
+      result = font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
+    elif typefaceRight.file != nil:
+      let font = typefaceRight.file
       result = font.kerning(font.glyphIdOf(left.int32), font.glyphIdOf(right.int32)).float32
     else:
       result = typefaceRight.svgfont.getKerningAdjustment(left, right)
@@ -577,6 +606,24 @@ proc parseIndexedTypeface*(data: sink string): Typeface {.raises: [PixieError].}
   result = newTypeface()
   result.indexed = parseIndexedFont(data)
 
+proc openTypefaceFile*(filePath: string): Typeface {.raises: [PixieError].} =
+  ## A TrueType file read where it lies (fontformats/filefont.nim): its table
+  ## directory now, and from then on what a lookup or a glyph asks for, a
+  ## page at a time through the thread's page cache. Nothing of the file is
+  ## held but its tables' places.
+  var size: int64
+  try:
+    size = getFileSize(filePath)
+  except OSError as e:
+    raise newException(PixieError, e.msg, e)
+  result = newTypeface()
+  result.file = openFileFont(filePath, size.int)
+  result.filePath = filePath
+
+proc isStale*(typeface: Typeface): bool {.raises: [].} =
+  ## A typeface read from a file that changed since it was opened.
+  typeface.file != nil and typeface.file.stale
+
 proc parseSvgFont*(buf: string): Typeface {.raises: [PixieError].} =
   result = newTypeface()
   result.svgFont = svgfont.parseSvgFont(buf)
@@ -603,7 +650,8 @@ proc glyphPath*(typeface: Typeface, rune: Rune, size: float32): Path {.raises: [
     box: Rect
     bounds: Rect
   if (face.opentype != nil and face.opentype.glyphBox(rune, box)) or
-      (face.indexed != nil and face.indexed.glyphBox(face.indexed.glyphIdOf(rune.int32), box)):
+      (face.indexed != nil and face.indexed.glyphBox(face.indexed.glyphIdOf(rune.int32), box)) or
+      (face.file != nil and face.file.glyphBox(max(face.file.glyphIdOf(rune.int32), 0), box)):
     let s = size / face.scale
     bounds = rect(box.x * s, box.y * s, box.w * s, box.h * s)
   else:

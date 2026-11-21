@@ -13,6 +13,7 @@
 
 import std/[json, math, monotimes, options, strformat, times]
 import pixie
+from pixie/fontformats/filefont import fileFontPages, releaseFontFiles
 
 import embedded_scene
 import embedded_runtime
@@ -623,8 +624,13 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     # E1003, whose layout and scene drew 69-83 KB of letters, 128 KB). A
     # render that needs more keeps what fits and draws the rest from masks
     # it lets go (the pass begun before each render). Let go with the rest
-    # when render memory is short (utils/memory.nim).
-    glyphCacheBudget = clamp(sceneMemoryBytes() div 32, 64 * 1024, 128 * 1024)
+    # when render memory is short (utils/memory.nim). A 16 MB board's
+    # ceiling is higher (512 KB, 1 MB on 32 MB): it draws with many faces
+    # from the SD card (docs/esp32-fonts.md), each glyph of each its own.
+    glyphCacheBudget = glyphCacheBudgetBytes()
+    # Fonts on the card are read where they lie, a 512-byte page at a time
+    # through a cache made when one first draws (pixie's filefont.nim).
+    fileFontPages = fontPageSlots()
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &
@@ -781,6 +787,7 @@ proc fos_nim_render_impl(
     let cacheAtStart = probeBegin()
     let start = getMonoTime()
     let rendered = renderFrameImage()
+    releaseFontFiles() # no file on the card held open between renders
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
@@ -926,6 +933,7 @@ proc fos_nim_render_alloc_impl(
       outBuf = borrowed # the error paths below hand it back
     let start = getMonoTime()
     let rendered = renderKeptFrameImage()
+    releaseFontFiles() # no file on the card held open between renders
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
