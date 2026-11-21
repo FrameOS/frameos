@@ -31,7 +31,7 @@ export interface DeviceLimits {
    * device's own bytes — the ones its logs report. */
   previewOverheadBytes: number
   /** Bytes per pixel of the canvas the device keeps (esp32CanvasBytesPerPixel:
-   * 2 RGB565, 1 luma, 4 RGBX; a Pi's is RGBX). A runtime that runs as an
+   * 2 RGB565, 1 luma, 0.5 sixteen greys; a Pi's is RGBX). A runtime that runs as an
    * ESP32 draws every render into one canvas of it, as the frame does; the
    * bytes it saves against RGBX stay charged, so `memoryBytes` and
    * `previewOverheadBytes` read the same with a runtime that predates it. */
@@ -64,10 +64,6 @@ export interface DevicePreset {
 
 /** FOS_NIM_EMERGENCY_RESERVE_BYTES: armed at boot, outside the render budget. */
 const ESP32_EMERGENCY_RESERVE_BYTES = 1024 * 1024
-/** FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE (frameos_display.h): the canvas is
- * RGBX only while two of it fit the PSRAM heap; past that it is one byte of
- * luma on a grey panel, RGB565 on any other. */
-const ESP32_RGBX_MAX_PSRAM_SHARE = 2
 /** What the boards report as `hardware.memory.psramBytes`. Both are the whole
  * chip: a 16 MB module registers all of it with the heap. */
 const ESP32_PSRAM_BYTES = 8 * 1024 * 1024
@@ -110,7 +106,7 @@ export const devicePresets: DevicePreset[] = [
   {
     key: 'esp32_16mb',
     label: 'ESP32 · 16 MB PSRAM',
-    description: 'A 16 MB ESP32-S3 frame: room for a full RGBX canvas and several megabytes on top.',
+    description: 'A 16 MB ESP32-S3 frame: several megabytes more than an 8 MB one.',
   },
   {
     key: 'esp32',
@@ -132,12 +128,10 @@ export const ESP32_PIXEL_RGB565 = 9
 /** Bytes per canvas pixel on an ESP32 (fos_render_canvas_bits_per_pixel, over 8),
  * decided by the panel's format first (the frame's `hardware.pixelFormat`;
  * null when unknown): half a byte on a sixteen-grey panel, one byte of luma
- * on another grey or black-and-white panel, RGB565 on an RGB565 LCD, whatever
- * the PSRAM. A colour e-paper panel gets
- * RGBX while two of it fit PSRAM, RGB565 beyond — which is where a 13.3"
- * panel on an 8 MB board lands, and a 16 MB board does not (verified against
- * a live 16 MB frame: 6,537 KB free PSRAM mid-scene at 1200x1600 is exactly
- * an RGBX canvas plus the panel buffer and the reserve). */
+ * on another grey or black-and-white panel, RGB565 on any other (an RGB565
+ * LCD, a colour e-paper), whatever the PSRAM. Up to 2026.11.13 a colour
+ * e-paper panel got RGBX while two of it fitted PSRAM; `psramBytes` no longer
+ * decides. */
 export function esp32CanvasBytesPerPixel(
   width: number,
   height: number,
@@ -149,13 +143,6 @@ export function esp32CanvasBytesPerPixel(
   }
   if (esp32PixelFormatIsGrey(pixelFormat)) {
     return 1
-  }
-  if (pixelFormat === ESP32_PIXEL_RGB565) {
-    return 2
-  }
-  const pixels = Math.max(1, width) * Math.max(1, height)
-  if (pixels * 4 * ESP32_RGBX_MAX_PSRAM_SHARE <= psramBytes) {
-    return 4
   }
   return 2
 }

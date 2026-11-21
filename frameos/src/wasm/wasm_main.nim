@@ -101,8 +101,8 @@ var
   boardRotate = 0
   # Running as an ESP32, every render draws into one canvas kept for the
   # runtime's life, in the format that frame keeps it in (embedded_runtime
-  # `renderCanvas`): RGB565 on a 13.3" colour panel with 8 MB of PSRAM, luma
-  # on a grey one, RGBX where two of it fit. Before this the preview made a
+  # `renderCanvas`): RGB565 on a colour panel or an LCD, luma or sixteen
+  # greys on a grey one. Before this the preview made a
   # fresh RGBX canvas every render while the page still held the last one, so
   # at 1200x1600 under 8 MB even a blank scene's second render was refused
   # 7.3 MB: an out-of-memory the frame never has.

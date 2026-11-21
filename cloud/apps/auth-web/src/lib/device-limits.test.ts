@@ -47,16 +47,11 @@ describe("device presets", () => {
 });
 
 describe("the ESP32 canvas format", () => {
-  it("stays RGBX while two canvases fit the PSRAM heap", () => {
-    // 800x480 RGBX is 1.5 MB; two of those fit 8 MB easily.
-    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB)).toBe(4);
-    // 1200x1600 RGBX is 7.68 MB — two fit 16 MB, and a live 16 MB frame
-    // confirms it: 6,537 KB free PSRAM mid-scene is exactly 16 MB less an
-    // RGBX canvas, the packed panel buffer and the emergency reserve.
-    expect(esp32CanvasBytesPerPixel(1200, 1600, PSRAM_16MB)).toBe(4);
-  });
-
-  it("falls back to RGB565 on a 13.3 inch panel with only 8 MB", () => {
+  it("is RGB565 on a colour panel whatever the PSRAM", () => {
+    // RGBX where two of it fitted until 2026.11.13 (the 800x480 boards, a
+    // 13.3 inch panel on 16 MB); 565 with its stores dithered since.
+    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB)).toBe(2);
+    expect(esp32CanvasBytesPerPixel(1200, 1600, PSRAM_16MB)).toBe(2);
     expect(esp32CanvasBytesPerPixel(1200, 1600, PSRAM_8MB)).toBe(2);
   });
 
@@ -71,7 +66,7 @@ describe("the ESP32 canvas format", () => {
     expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 4)).toBe(1);
     expect(esp32CanvasBytesPerPixel(1872, 1404, PSRAM_8MB, 8)).toBe(0.5);
     // A two-colour panel with red or yellow needs its colour.
-    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 2)).toBe(4);
+    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 2)).toBe(2);
   });
 
   it("is RGB565 on an RGB565 LCD, whose canvas is its own frame buffer", () => {
@@ -105,7 +100,7 @@ describe("the ESP32 memory ceiling", () => {
 
   it("leaves a 16 MB frame far more room than an 8 MB one", () => {
     const big =
-      esp32DeviceHeapBytes(1200, 1600, PSRAM_16MB) - 1200 * 1600 * 4;
+      esp32DeviceHeapBytes(1200, 1600, PSRAM_16MB) - 1200 * 1600 * 2;
     const small =
       esp32DeviceHeapBytes(1200, 1600, PSRAM_8MB) - 1200 * 1600 * 2;
     expect(big).toBeGreaterThan(6 * MB);
@@ -119,13 +114,14 @@ describe("the ESP32 memory ceiling", () => {
     expect(esp32PreviewMemoryBytes(1200, 1600, PSRAM_8MB)).toBe(
       esp32DeviceHeapBytes(1200, 1600, PSRAM_8MB) + pixels * 2,
     );
-    // 16 MB, RGBX on both sides: nothing to convert.
-    expect(esp32PreviewOverheadBytes(1200, 1600, PSRAM_16MB)).toBe(0);
+    // 16 MB: RGB565 on the device as well (a colour panel draws in 565
+    // whatever the PSRAM), so the same canvas of difference.
+    expect(esp32PreviewOverheadBytes(1200, 1600, PSRAM_16MB)).toBe(pixels * 2);
     expect(esp32PreviewMemoryBytes(1200, 1600, PSRAM_16MB)).toBe(
-      esp32DeviceHeapBytes(1200, 1600, PSRAM_16MB),
+      esp32DeviceHeapBytes(1200, 1600, PSRAM_16MB) + pixels * 2,
     );
-    // Small panel, RGBX on both sides.
-    expect(esp32PreviewOverheadBytes(800, 480, PSRAM_8MB)).toBe(0);
+    // A small panel, the same.
+    expect(esp32PreviewOverheadBytes(800, 480, PSRAM_8MB)).toBe(800 * 480 * 2);
   });
 });
 
