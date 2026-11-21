@@ -1060,8 +1060,19 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     if context.hasImage and not context.image.isNil:
       self.drawForm(context.image)
   of "button":
-    if payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press":
-      self.back()
+    # The frame's buttons as the keys (ui/events.nim "keys"): next and prev
+    # walk the form, the green key presses what is ringed. Back (and menu)
+    # goes back, once a list, the keyboard or the ring is gone.
+    acted = -1
+    let goesBack = payload{"role"}.getStr() in ["back", "menu"] and payload{"action"}.getStr() == "press"
+    if (if goesBack: not uiKeys([self.uiId], "Escape") else: not uiButtonKeys([self.uiId], payload)):
+      if goesBack:
+        self.back()
+    else:
+      if acted >= 0:
+        self.acting()
+      self.touch()
+      sendEvent(evRender, newJObject(), eoScene)
   of evBack:
     # The frame's back (a swipe in from the left), as on a phone: the
     # keyboard goes away first, then the frame page, then the form, unsaved.
@@ -1074,7 +1085,12 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     # The pointer, and keys for a field (ui/events.nim hit-tests them). A slow
     # panel shows no press: what only moves the press waits for a tap.
     acted = -1
-    let changed = dispatchUiEvent(self.uiId, context.event, context.payload)
+    var changed = false
+    when not defined(frameosEmbedded):
+      if context.event == "keyDown":
+        changed = uiTypedKeys([self.uiId], context.payload) # Tab walks the form, Enter presses
+    if not changed:
+      changed = dispatchUiEvent(self.uiId, context.event, context.payload)
     if acted >= 0:
       self.acting()
     if changed or acted >= 0:

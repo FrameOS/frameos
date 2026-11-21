@@ -682,7 +682,8 @@ suite "jsx fields":
     discard ui.render()
     check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
     check target.input.focus == 0
-    check not uiListens(id, "keyDown")
+    # Its rows are still there to Tab to (docs/jsx-ui.md "Keys").
+    check uiListens(id, "keyDown")
     forgetTypedKeys()
 
   test "Enter is heard once, and what its onKeyDown did is drawn":

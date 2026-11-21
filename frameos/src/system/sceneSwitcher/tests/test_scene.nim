@@ -161,6 +161,14 @@ block the_keys_walk_the_tiles_and_every_press_counts:
   sent.setLen(0)
   scene.send("keyDown", %*{"code": "Enter", "key": "Enter"})
   doAssert sent.len == 1 and sent[0][0] == evSetCurrentScene
+  # Tab walks the tiles one by one, as the buttons do: a tile is one stop, its
+  # icon and its name no stops of their own (docs/jsx-ui.md "Keys").
+  let at = scene.highlightedId
+  scene.send("keyDown", %*{"code": "Tab", "key": "Tab"})
+  scene.send("keyDown", %*{"code": "Tab", "key": "Tab", "shift": true})
+  doAssert scene.highlightedId == at, scene.highlightedId
+  scene.send("keyDown", %*{"code": "Tab", "key": "Tab", "shift": true})
+  doAssert scene.highlightedId != at
 
 block a_tap_shows_the_scene_under_the_finger:
   listed = entries(5)

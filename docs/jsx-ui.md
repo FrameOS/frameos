@@ -910,6 +910,65 @@ keyboard's look) on top, from them. Their handlers are numbered from
 the handles, which a press grabs (`ui/events.nim`, the other end made the
 anchor), + `EditCut` ... the items.
 
+## Keys
+
+Every UI can be used without touching it: from a keyboard (Linux, the
+preview), and from a frame's buttons, which are the same keys. **Tab** walks
+every element there is to press, in the order of the tree: a field, a
+`<select>`, an element with an `onClick`, a link. One stop per element,
+however much is inside it: a tile's icon and its name are one tile.
+**Shift+Tab** goes back; either goes around past the end. The element the
+keys are on is **ringed**: two pixels out from it, sky on an LCD, black and
+thicker on e-paper, and its `focus:` classes apply (an element that has any
+draws its own focus and gets no ring). A box that scrolls brings it into
+sight. **Enter** presses it, as a tap in its middle would (its `onClick`
+hears `tap`, with `key: "Enter"`), opens a `<select>`'s list (Tab then walks
+the options, Enter picks one and the ring goes back to the select) or gives
+a field the keyboard. **Escape** closes a list or a link's card, lets go of
+a field, and then takes the ring away. A tap or a click anywhere takes it
+away too: the ring is for the keys, as a browser's focus ring is.
+
+A keyboard's Tab gives a field the keys at once (its `onKeyDown` hears the
+Tab that leaves it); Ctrl, Alt or Cmd with any of the three is the scene's.
+The on-screen keyboard has a Tab key of its own (an arrow to a bar, left of
+the comma or the space), which goes to the next field down the tree, around
+past the last, the keyboard staying up; held, to the one before. A
+`<select>` is passed over there: its list is no place to type.
+
+**A frame's buttons** are the keys, by role (docs/events.md "Buttons"):
+`next` and `down` are Tab, `prev` and `up` Shift+Tab, `primary` Enter (a
+reTerminal's green key), `back` and `menu` Escape: a menu key is a way out,
+as on a remote. `refresh` is Enter too, for a frame that gave a key that
+role by hand. A press is one, a
+double press two, so every tap counts however quickly they come, and taps
+made while e-paper refreshes all land: each moves the ring from where the one
+before left it, on what the last render drew, and the next refresh shows
+where they got to. A long press stays the frame's event map's (a reTerminal's
+arrows held walk the scenes, its green key held talks). A UI with nothing to
+press hears neither keys nor buttons.
+
+**The scene's own code hears them first.** A scene or a layout with an event
+node for `keyDown` or `button` keeps every one of them. A JS app subscribed to
+them (`"events"` in its config.json) hears each one before the keys move,
+and one its `onEvent` returns `true` for is its own: a desktop's Alt+Tab, the
+Commander's Tab between its panels, a game's Enter. What it returns `false`
+for is the keys'. The UIs never act on it twice: a key the keys take is not
+also typed into a field (`interpreter.keysPlanned` decides before anything
+hears it, `keysTo` applies it after).
+
+The UIs of the scene showing and of the layout it wears are **one walk with
+one ring** (`interpreter.keysTo`, `ui_events.uiKeys`): Tab goes on from the
+scene's last element to the layout's first, and a ring in one is never a
+second ring in the other. The built-in scenes keep their own: the scene
+switcher's highlight is its focus (Tab moves it a tile), and the scene
+settings' form walks alone, without the layout around it.
+
+The ring is `UiInput.ring` (the element's key + 1, kept with the UI's input
+like a field's focus), drawn by `ui/layout.nim` `ring` over the UI and under
+the keyboard; an element gone from the next render takes the ring with it and
+Tab starts over from the top. `ui/tests/test_ui_keys.nim` and
+`tests/test_frame_keys.nim` are where a rule gets its test.
+
 ## Select boxes
 
 `<select>` holds its options, controlled as in React: it shows the `<option>`

@@ -316,6 +316,19 @@ template typesIn(r: UiRegion): bool =
   ## A field that holds text: an <input> or a <textarea>, not a <select>.
   r.field > 0 and r.field < 4
 
+template stop(r: UiRegion, list: bool): bool =
+  ## An element Tab stops at; with a <select>'s list up, its options alone.
+  if list: r.handlers[ueClick] - 1 >= OptionBase
+  else: r.field > 0 or r.handlers[ueClick] > 0 and r.handlers[ueClick] - 1 <= LinkOpen
+
+proc walkable(target: UiTarget): bool =
+  ## Whether the keys have somewhere to go in the UI.
+  if target.input.ring > 0 or target.input.focus > 0 or target.input.open > 0 or target.input.link.len > 0:
+    return true
+  for r in target.regions:
+    if r.stop(false):
+      return true
+
 proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
   case event
   of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0 or r.scrolls
@@ -356,6 +369,8 @@ proc uiListens*(sceneId, event: string): bool =
         return true # a selection's handle may be dragged
       if event == "uiTimer" and target.timerPending:
         return true
+      if event in ["keyDown", "button"] and target.walkable:
+        return true # Tab, Enter and Escape, and the frame's buttons as them
       for r in target.regions:
         if r.wants(event, target.input.slow):
           return true
@@ -722,6 +737,30 @@ proc flashKey(target: UiTarget, code: int) =
   target.input.flashDrawn = false
   target.flashSeen = false
 
+proc nextField(target: UiTarget, back = false) =
+  ## The on-screen keyboard's Tab: the focus goes to the next field down the
+  ## tree (the one before with `back`: Tab held), around past the last, the
+  ## keyboard staying up. A <select> is passed over: its list is no place to
+  ## type. A keyboard's Tab walks everything there is to press (`uiKeys`).
+  var
+    at = -1
+    fields: seq[int]
+  for i in 0 ..< target.regions.len:
+    if target.regions[i].typesIn:
+      if target.regions[i].key == target.input.focus - 1:
+        at = fields.len
+      fields.add i
+  if fields.len == 0:
+    return
+  let next =
+    if at < 0: (if back: fields.len - 1 else: 0)
+    elif back: (at + fields.len - 1) mod fields.len
+    else: (at + 1) mod fields.len
+  let r = target.regions[fields[next]]
+  target.input.ring = r.key + 1
+  if r.key + 1 != target.input.focus:
+    target.focusField(r, r.x + r.w - 1, r.y + r.h / 2)
+
 proc pressKey(target: UiTarget, code: int) =
   ## A key of the on-screen keyboard (ui/keyboard.nim): a character typed,
   ## or what its byte stands for.
@@ -736,6 +775,7 @@ proc pressKey(target: UiTarget, code: int) =
     target.keyDown("Backspace")
     target.erase(false)
   elif code == ord(kEnter): target.enter()
+  elif code == ord(kTab): target.nextField()
   elif code == ord(kLetters): i.page = kpLetters
   elif code == ord(kSymbols): i.page = kpSymbols
   elif code == ord(kMore): i.page = kpMore
@@ -775,6 +815,9 @@ proc holdKey(target: UiTarget, code, pointer: int, lx: float32) =
   ## and goes on erasing until the finger lifts (`uiTimer`). A key with
   ## neither has no long-press handler, so this never sees one.
   template i: untyped = target.input
+  if code == ord(kTab):
+    target.nextField(back = true)
+    return
   if code == ord(kBackspace):
     target.pressKey(code)
     if i.slow:
@@ -1036,6 +1079,239 @@ when not defined(frameosEmbedded):
     wheelScrolled = true
     true
 
+# ------------------------------------------------------------------ keys
+#
+# Tab, Enter and Escape, from a keyboard or the frame's buttons (docs/jsx-ui.md
+# "Keys"): Tab walks every element there is to press (a field, a <select>, an
+# onClick, a link), Shift+Tab back, around past either end; the element it is
+# on is ringed (`input.ring`, drawn by ui/layout.nim) and Enter presses it, opens
+# its list or gives it the keyboard; Escape closes a list, lets go of a field,
+# then takes the ring away. The UIs of a scene and of the layout it wears are
+# one walk, so there is one ring on the frame, never one in each.
+
+proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
+  ## Tab once: the ring to the next element of the UIs in `list` (the one
+  ## before with `back`), from where it is, else from the focused field, else
+  ## from the top (or the bottom). One stop per element, however many regions
+  ## it drew. Typed on a keyboard, a field it lands on takes the keys too; a
+  ## frame's button only rings it, and Enter gives it the keyboard. `dry`:
+  ## whether it would, and nothing done.
+  var at = -1
+  for i, t in list:
+    if t.input.open > 0:
+      at = i
+      break
+  let listUp = at >= 0
+  if not listUp:
+    for i, t in list:
+      if t.input.ring > 0 or t.input.focus > 0:
+        at = i
+        break
+  var
+    stops: seq[(int, int)] # (UI, region)
+    current = -1
+  for i, t in list:
+    if listUp and i != at:
+      continue
+    let here = if i != at: -1 elif t.input.ring > 0: t.input.ring - 1 else: t.input.focus - 1
+    for j, r in t.regions:
+      if not r.stop(listUp):
+        continue
+      var seen = false
+      for (u, k) in stops:
+        if u == i and t.regions[k].key == r.key:
+          seen = true
+          break
+      if not seen:
+        if r.key == here:
+          current = stops.len
+        stops.add (i, j)
+  if stops.len == 0 or dry:
+    return stops.len > 0
+  let next =
+    if current < 0: (if back: stops.len - 1 else: 0)
+    elif back: (current + stops.len - 1) mod stops.len
+    else: (current + 1) mod stops.len
+  let (u, k) = stops[next]
+  for i, t in list:
+    if i != u:
+      if t.input.ring > 0:
+        t.input.ring = 0
+        t.inputOnly = true
+      if t.input.focus > 0:
+        t.blurField()
+  let
+    t = list[u]
+    r = t.regions[k]
+  if typed and t.input.focus > 0:
+    t.keyDown("Tab") # the field's onKeyDown hears it go
+  if t.input.focus > 0 and t.input.focus != r.key + 1:
+    t.blurField()
+  t.input.ring = r.key + 1
+  t.input.reveal = true
+  t.inputOnly = true
+  if typed and not listUp and r.typesIn and t.input.focus != r.key + 1:
+    t.focusField(r, r.x + r.w - 1, r.y + r.h / 2)
+  true
+
+proc pressRing(list: seq[UiTarget], typed, dry: bool): bool =
+  ## Enter: a link's card goes; with a list up, the option ringed is picked
+  ## and the ring goes back to its <select>; a field with the keys is done
+  ## (one typed on a keyboard is the field's own, `typedKey`); else the
+  ## element ringed is pressed, as a tap in its middle would.
+  for t in list:
+    if t.input.link.len > 0:
+      if not dry:
+        t.input.link = ""
+        t.inputOnly = true
+      return true
+  for t in list:
+    if t.input.open > 0:
+      let
+        select = t.input.open
+        i = t.regionOf(t.input.ring - 1)
+      if t.input.ring > 0 and i >= 0 and t.regions[i].handlers[ueClick] - 1 >= OptionBase:
+        if not dry:
+          t.pickOption(t.regions[i].handlers[ueClick] - 1 - OptionBase)
+          t.input.ring = select
+        return true
+      return false
+    if t.input.focus > 0:
+      if typed:
+        return false
+      if not dry:
+        t.enter()
+      return true
+  for t in list:
+    if t.input.ring == 0:
+      continue
+    let i = t.regionOf(t.input.ring - 1)
+    if i < 0:
+      return false
+    let
+      r = t.regions[i]
+      handler = r.handlers[ueClick] - 1
+    if r.field == 0 and (handler < 0 or handler > LinkOpen or handler < LinkOpen and t.call.isNil):
+      return false
+    if dry:
+      return true
+    if r.field == 4:
+      t.input.open = r.key + 1
+      t.input.fresh = true
+      t.input.ring = 0
+      t.inputOnly = true
+    elif r.typesIn:
+      t.focusField(r, r.x + r.w - 1, r.y + r.h / 2)
+    elif handler == LinkOpen:
+      t.openLink(r.key)
+    else:
+      let
+        scale = if t.scale > 0: t.scale else: 1'f32
+        lx = (max(r.visible[0], r.x) + min(r.visible[2], r.x + r.w)) / 2
+        ly = (max(r.visible[1], r.y) + min(r.visible[3], r.y + r.h)) / 2
+        event = newJObject()
+      event["x"] = newJFloat(t.offsetX + lx * scale)
+      event["y"] = newJFloat(t.offsetY + ly * scale)
+      event["pointerId"] = newJInt(0)
+      event["key"] = newJString("Enter")
+      t.call(handler, "tap", event, [lx - r.x, ly - r.y, r.w, r.h])
+      t.inputOnly = false # whatever the handler changed, get() shows it
+    return true
+
+proc escape(list: seq[UiTarget], typed, dry: bool): bool =
+  ## Escape: a link's card or a <select>'s list goes (the ring back on the
+  ## select), else a field lets go of the keys (one typed on a keyboard is the
+  ## field's own, `typedKey`), else the ring goes.
+  for t in list:
+    if t.input.link.len > 0 or t.input.open > 0:
+      if not dry:
+        if t.input.open > 0:
+          t.input.ring = t.input.open
+        t.input.open = 0
+        t.input.link = ""
+        t.inputOnly = true
+      return true
+  for t in list:
+    if t.input.focus > 0:
+      if typed:
+        return false
+      if not dry:
+        t.blurField()
+      return true
+  for t in list:
+    if t.input.ring > 0:
+      if not dry:
+        t.input.ring = 0
+        t.inputOnly = true
+      return true
+
+proc uiKeys*(sceneIds: openArray[string], key: string, back = false, typed = false, dry = false): bool =
+  ## Tab (back: Shift+Tab), Enter or Escape for the UIs of `sceneIds` as one:
+  ## the scene showing and the layout it wears. True when it did something,
+  ## and a new picture is due; with `dry`, whether it would, nothing done.
+  ## `typed`: on a keyboard, whose Tab gives a field the keys at once.
+  var list: seq[UiTarget]
+  for id in sceneIds:
+    for target in targets:
+      if target.sceneId == id and target.regions.len > 0:
+        list.add target
+  if typed:
+    physicalKeyboard = true
+  case key
+  of "Tab": tabStep(list, back, typed, dry)
+  of "Enter": pressRing(list, typed, dry)
+  of "Escape": escape(list, typed, dry)
+  else: false
+
+proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, times: int] =
+  ## The key an event is to a UI, and how many times; none (0) for any other.
+  ## A frame's button, by its role: next and down are Tab, prev and up
+  ## Shift+Tab, primary (a reTerminal's green key) Enter, back and menu
+  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one and a double press two, so every tap counts
+  ## however quickly they come, and a long press is the frame's event map's
+  ## (walk the scenes, talk), never a key. A keyboard's Tab, Shift+Tab, Enter
+  ## and Escape, once; with Ctrl, Alt or Cmd held, the scene's own.
+  if payload.isNil or payload.kind != JObject:
+    return
+  if event == "button":
+    result.times = case payload{"action"}.getStr()
+      of "press", "": 1
+      of "doublePress": 2
+      else: 0
+    case payload{"role"}.getStr()
+    of "next", "down": result.key = "Tab"
+    of "prev", "up": (result.key, result.back) = ("Tab", true)
+    of "primary", "refresh": result.key = "Enter"
+    of "back", "menu": result.key = "Escape"
+    else: result.times = 0
+  else:
+    when not defined(frameosEmbedded):
+      result.key = payload{"key"}.getStr()
+      if event == "keyDown" and result.key in ["Tab", "Enter", "Escape"] and not payload{"ctrl"}.getBool() and
+          not payload{"alt"}.getBool() and not payload{"meta"}.getBool():
+        result.back = payload{"shift"}.getBool()
+        result.times = 1
+
+proc uiKeysFor*(sceneIds: openArray[string], event: string, payload: JsonNode, dry = false): bool =
+  ## A frame's button, or a key typed on a keyboard, as the keys
+  ## (`uiKeyOf`), as many times as it says. True when any of them did
+  ## something (with `dry`, would).
+  let (key, back, times) = uiKeyOf(event, payload)
+  for _ in 1 .. times:
+    if uiKeys(sceneIds, key, back, typed = event == "keyDown", dry = dry):
+      result = true
+      if dry:
+        return
+
+proc uiButtonKeys*(sceneIds: openArray[string], payload: JsonNode): bool =
+  ## A frame's button as the keys (`uiKeyOf`).
+  uiKeysFor(sceneIds, "button", payload)
+
+when not defined(frameosEmbedded):
+  proc uiTypedKeys*(sceneIds: openArray[string], payload: JsonNode): bool =
+    ## A keyboard's Tab, Shift+Tab, Enter and Escape as the keys (`uiKeyOf`).
+    uiKeysFor(sceneIds, "keyDown", payload)
+
 # ------------------------------------------------------------------ dispatch
 
 proc uiOverScene*(sceneId, event: string; x, y: float32; pointer: int): bool =
@@ -1210,6 +1486,15 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
       if target.sceneId == sceneId and target.timePassed(now):
         result = true
     return
+  if placed and not keysOnly and (down or kind == ord(ueClick)):
+    # A finger or a mouse: the keys' ring goes, on every UI (docs/jsx-ui.md
+    # "Keys"), as a browser's focus ring does after a click.
+    for target in targets:
+      if target.input.ring > 0:
+        target.input.ring = 0
+        target.inputOnly = true
+        if target.sceneId == sceneId:
+          result = true
   for target in targets:
     if target.sceneId != sceneId or keysOnly and not (target.input.keyboard and target.input.focus > 0):
       continue

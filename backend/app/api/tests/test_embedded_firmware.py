@@ -206,10 +206,10 @@ def test_embedded_firmware_layout_tracks_flash_and_ram():
     assert layout['ram']['width'] == 1200
     assert layout['ram']['height'] == 1600
     assert layout['ram']['pixelFormat'] == FOS_PIXEL_4BPP_SPECTRA6
-    # 1200x1600 on a 16 MB module: a full RGBX canvas (7.3 MB) takes under
-    # half the PSRAM, so the canvas is 4 B/px; the old key name stays for the UI.
-    assert layout['ram']['canvasBytesPerPixel'] == 4
-    assert layout['ram']['canvasBufferBytes'] == 1200 * 1600 * 4
+    # 1200x1600 on a 16 MB module: a colour panel draws in 565 whatever the
+    # PSRAM, so the canvas is 2 B/px; the old key name stays for the UI.
+    assert layout['ram']['canvasBytesPerPixel'] == 2
+    assert layout['ram']['canvasBufferBytes'] == 1200 * 1600 * 2
     assert layout['ram']['rgbaBufferBytes'] == layout['ram']['canvasBufferBytes']
     assert layout['ram']['packedBufferBytes'] == 960_000
     assert layout['ram']['renderWorkingBytes'] > layout['ram']['canvasBufferBytes']
@@ -333,22 +333,23 @@ def test_embedded_panel_formats_and_buffer_sizes():
 
 def test_embedded_render_canvas_bytes_per_pixel():
     mb = 1024 * 1024
-    # RGBX whenever a full canvas is at most half the module's PSRAM.
-    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb) == 4      # 1.5 MB of 8
-    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 16 * mb) == 4   # 7.3 MB of 16
-    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb) == 2    # 7.3 MB of 8
+    # A colour panel draws in 565 whatever the PSRAM (RGBX where two of it fit,
+    # until 2026.11.13).
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb) == 2
+    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 16 * mb) == 2
+    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb) == 2
     assert embedded_render_canvas_bytes_per_pixel(0, 0, 8 * mb) == 0
     # A grey or black-and-white panel draws in luma whatever fits: a quarter
     # of the bytes in every pass (and the reTerminal E1003 fits at all: 2.5 MB
-    # where 565 was 5.0). A colour one past RGBX stays 565.
+    # where 565 was 5.0). A colour one is 565.
     assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_SPECTRA6) == 2
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 0.5
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_1BPP) == 1
     assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_2BPP_GRAY) == 1
     assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb, FOS_PIXEL_1BPP) == 1
-    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_DUAL_1BPP_RED) == 4
-    # An RGB565 LCD's canvas is its own frame buffer: 565 though RGBX fits.
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_DUAL_1BPP_RED) == 2
+    # An RGB565 LCD's canvas is its own frame buffer.
     assert embedded_render_canvas_bytes_per_pixel(480, 480, 8 * mb, FOS_PIXEL_RGB565) == 2
 
 
@@ -358,9 +359,9 @@ def test_embedded_render_psram_estimate():
     # buffer + the 1.5 MB reserve is ~2.0 MB.
     need = embedded_render_psram_bytes(800, 480)
     assert 1_950_000 < need < 2_050_000
-    # The same size in colour on 8 MB: RGBX (1.5 MB) + 192 KB packed + the reserve.
+    # The same size in colour on 8 MB: 565 (768 KB) + 192 KB packed + the reserve.
     need = embedded_render_psram_bytes(800, 480, FOS_PIXEL_4BPP_SPECTRA6, 8 * mb)
-    assert 3_250_000 < need < 3_350_000
+    assert need == 800 * 480 * 2 + 400 * 480 + 1536 * 1024
     # The SenseCAP Indicator's 480x480 LCD: a 565 canvas, the packed buffer and
     # the three frame buffers it scans, each 460.8 KB, plus the reserve.
     need = embedded_render_psram_bytes(480, 480, FOS_PIXEL_RGB565, 8 * mb)
@@ -369,10 +370,8 @@ def test_embedded_render_psram_estimate():
     need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 8 * mb)
     assert 6_300_000 < need < 6_400_000
     assert need < 8 * mb
-    # The same panel on 16 MB gets the RGBX canvas: 7.68MB + 960KB + 1.5MB, under 16MB.
-    need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 16 * mb)
-    assert 10_100_000 < need < 10_300_000
-    assert need < 16 * mb
+    # The same panel on 16 MB draws in 565 as well: the same need.
+    assert embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 16 * mb) == need
 
 
 def test_panel_fits_default_8mb_module():
@@ -383,7 +382,7 @@ def test_panel_fits_default_8mb_module():
 
 
 def test_panel_too_large_for_small_psram_is_rejected():
-    # 800x480 black and white draws in a luma canvas past RGBX: 0.4 MB of
+    # 800x480 black and white draws in a luma canvas: 0.4 MB of
     # canvas, the packed buffer and the 1.5 MB reserve fit 2 MB, not 1.
     frame = Frame(device="waveshare.EPD_7in5_V2", device_config={"psramMB": 2})
     check_embedded_panel_fits_memory(frame)  # must not raise

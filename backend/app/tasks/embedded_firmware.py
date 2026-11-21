@@ -1239,17 +1239,16 @@ def embedded_release_firmware_for_frame(
 # Memory guardrail (M4): the on-device renderer composites into a pixie canvas
 # (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
 # selected panel format, and needs headroom for the Nim heap + QuickJS. The
-# canvas is RGBX (4 B/px) when a full canvas takes at most half the module's
-# PSRAM, else 8-bit luma (1 B/px) for a greyscale or black-and-white panel
-# and 16-bit RGB 5/6/5 (2 B/px) for a colour one — the 800x480 boards and a
-# 1200x1600 panel on a 16 MB module render in full colour, 1200x1600 Spectra 6
-# on 8 MB needs 565, and the 1872x1404 sixteen-grey reTerminal E1003 draws in
-# grey. Keep the rule and the reserve in sync with
+# canvas is 4-bit grey (0.5 B/px) on a sixteen-grey panel (the 1872x1404
+# reTerminal E1003), 8-bit luma (1 B/px) on another greyscale or
+# black-and-white one, and 16-bit RGB 5/6/5 (2 B/px, stores dithered) on an
+# LCD and on every colour e-paper, whatever the PSRAM (until 2026.11.13 a
+# colour panel drew in RGBX where two of it fitted the module's PSRAM: the
+# 800x480 boards). Keep the rule and the reserve in sync with
 # fos_render_canvas_bits_per_pixel / FOS_RENDER_PSRAM_RESERVE in
 # components/frameos_display (the firmware's boot-time fit check),
 # sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
 # frameos/src/frameos/utils/memory.nim.
-EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE = 2
 EMBEDDED_RENDER_PSRAM_RESERVE_BYTES = 1536 * 1024
 EMBEDDED_QUICKJS_HEAP_LIMIT_BYTES = 4 * 1024 * 1024
 EMBEDDED_PREVIEW_SNAPSHOT_RESERVE_BYTES = 1024 * 1024
@@ -1654,20 +1653,15 @@ def embedded_render_canvas_bytes_per_pixel(
     """Bytes per pixel of the scene canvas (fos_render_canvas_bits_per_pixel):
     0.5 for a sixteen-grey panel, 1 (luma) for another grey or black-and-white
     panel format and 2 (RGB 5/6/5) for
-    an RGB565 LCD, whose canvas is its own frame buffer, whatever the PSRAM;
-    for a colour e-paper panel 4 (RGBX) when a full canvas takes at most half
-    of ``psram_bytes``, else 2."""
+    an RGB565 LCD, whose canvas is its own frame buffer, and 2 for a colour
+    e-paper panel too (RGBX where it fitted until 2026.11.13), whatever the
+    PSRAM: ``psram_bytes`` no longer decides."""
     if width <= 0 or height <= 0:
         return 0
     if pixel_format == FOS_PIXEL_4BPP_GRAY:
         return 0.5
     if embedded_pixel_format_is_grey(pixel_format):
         return 1
-    if pixel_format == FOS_PIXEL_RGB565:
-        return 2
-    rgbx = width * height * 4
-    if psram_bytes > 0 and rgbx * EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
-        return 4
     return 2
 
 

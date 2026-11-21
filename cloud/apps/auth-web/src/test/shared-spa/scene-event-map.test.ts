@@ -64,7 +64,7 @@ describe("sceneButtonListeners", () => {
 describe("frameButtons", () => {
   it("gives every button its configured role, else the contract's default for its label", () => {
     expect(frameButtons(frame)).toEqual([
-      { pin: 3, label: "REFRESH", role: "refresh" },
+      { pin: 3, label: "REFRESH", role: "primary" },
       { pin: 4, label: "LEFT", role: "prev" },
       { pin: 5, label: "RIGHT", role: "menu" },
     ]);

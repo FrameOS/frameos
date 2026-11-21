@@ -597,6 +597,14 @@ var yieldScene {.threadvar.}: FrameScene
   ## The scene the layout on the way here wraps; nil outside a layout.
 
 var
+  uiKeyTaken {.threadvar.}: bool
+    ## The key or button the frame is handling is the keys' (keysPlanned): no
+    ## UI it reaches does anything more with it (runEventInner).
+  keysClaimed {.threadvar.}: bool
+    ## A JS app's onEvent took that key or button (returned true): the keys'
+    ## walk is not applied.
+
+var
   keysShown {.threadvar.}: array[2, array[4, float32]]
     ## The frame's keyboard (ui/layout.nim KeyboardDock) as the last pass drew
     ## it on the frame's canvas: its keys, and a held key's row (x, y, w, h).
@@ -2266,6 +2274,8 @@ proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
         inc eventListenersRun
         if onEventDynamicJsApp(app, context):
           wantsRender = true
+          if context.event in ["keyDown", "button"]:
+            keysClaimed = true # its own: no Tab, Enter or Escape of the UI's (keysPlanned)
       except Exception as e:
         scene.logListenerError(context.event, nodeId, e)
   if wantsRender:
@@ -2338,8 +2348,10 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         # Due, as for a tap: the scene's own `render` asks for no fresh pass,
         # so a scene drawn into a layout's <yield />, a window or a split
         # would otherwise put back its last picture until its interval ran
-        # out (the Terminal's typed line showed only after a click).
-        if dispatchUiEvent(self.id.string, context.event, context.payload):
+        # out (the Terminal's typed line showed only after a click). A Tab,
+        # Enter or Escape the keys took (keysPlanned) is no field's.
+        if not (uiKeyTaken and context.event == "keyDown") and
+            dispatchUiEvent(self.id.string, context.event, context.payload):
           rhythmMarkDue(self)
           sendEvent("render", %*{}, eoScene)
       else:
@@ -2553,6 +2565,33 @@ proc builtInLayout(self: FrameScene, inWindow: bool): FrameScene =
   ## inside the window.
   if inWindow: self.wornLayout else: ensureBuiltInLayout(self)
 
+proc keyIds(self, layout: FrameScene): seq[string] =
+  ## The UIs the keys walk as one: the scene's, then its layout's.
+  result = @[self.id.string]
+  if not layout.isNil:
+    result.add layout.id.string
+
+proc keysPlanned(self, layout: FrameScene, context: ExecutionContext): bool =
+  ## Before anything hears it: whether this key or button is the keys' (Tab,
+  ## Enter, Escape; ui/events.nim "keys", docs/jsx-ui.md "Keys"), for the
+  ## scene's UIs and its layout's as one walk with one ring. A scene or a
+  ## layout with an event node for it keeps it. The UIs then do nothing more
+  ## with it (`uiKeyTaken`), and it is applied once the scene's and the
+  ## layout's own code has heard it, unless that code took it (`keysClaimed`).
+  for scene in [self, layout]:
+    if not scene.isNil and scene of InterpretedFrameScene and
+        InterpretedFrameScene(scene).listensFor(context.event):
+      return false
+  uiKeysFor(keyIds(self, layout), context.event, context.payload, dry = true)
+
+proc keysTo(self, layout: FrameScene, context: ExecutionContext) =
+  ## The keys' walk, applied: a new picture when it moved anything.
+  if uiKeysFor(keyIds(self, layout), context.event, context.payload):
+    rhythmMarkDue(self)
+    if not layout.isNil:
+      rhythmMarkDue(layout)
+    sendEvent("render", %*{}, eoScene)
+
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   ## Every run of a scene — a render, an event, a child scene's init — enters
   ## here on every host (runner.nim, embedded_runtime.nim, wasm_main.nim), so
@@ -2578,6 +2617,12 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         (if passStarted: ensureLayoutScene(InterpretedFrameScene(self)) else: self.wornLayout)
       elif self.ownRun.isNil: nil
       else: builtInLayout(self, not yieldScene.isNil)
+    # The frame's scene, before any UI hears a key or a button: is it the
+    # keys'? A built-in scene walks its own (its highlight, its form).
+    let keys = yieldScene.isNil and context.event in ["keyDown", "button"]
+    if keys:
+      uiKeyTaken = self of InterpretedFrameScene and self.ownRun.isNil and keysPlanned(self, layout, context)
+      keysClaimed = false
     if layout.isNil:
       if rendering:
         renderChrome(self, context)
@@ -2623,6 +2668,8 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         # What is said to the scene's state is the scene's alone.
         if context.event != "setCurrentScene" and context.event != "setSceneState" and context.event != "uiTimer":
           runEvent(layout, context)
+    if keys and uiKeyTaken and not keysClaimed:
+      keysTo(self, layout, context)
   finally:
     yieldScene = outerYield
     if rendering:

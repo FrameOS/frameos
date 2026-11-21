@@ -475,6 +475,15 @@ branches on `action` if it cares; one that must count every tap listens for
 dispatcher still takes such a `button` as the `gpio` edge it is. Until
 2026.10.16 a `button` listener with no `action` filter heard `press` only.
 
+**A JSX UI takes the buttons as keys** (docs/jsx-ui.md "Keys"): a `press`
+or `doublePress` of a `next` / `down` key is Tab (once or twice), of `prev` /
+`up` Shift+Tab, of `primary` (and `refresh`) Enter and of `back` / `menu` Escape,
+over the elements
+its UI and its layout's have to press, unless the scene's own code took it
+first (an event node for `button`, or a JS app whose `onEvent` returned `true`
+for it). A scene with nothing to press hears its buttons as before, and a long
+press is never a key.
+
 Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on every `up`, and a higher click
 for the second `down` of a `doublePress`. While a key is held a short falling pair sounds at every whole

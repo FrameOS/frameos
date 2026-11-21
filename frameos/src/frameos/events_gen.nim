@@ -573,5 +573,5 @@ proc buttonRoleForLabel*(upperLabel: string): string =
   of "LEFT": "prev"
   of "UP": "up"
   of "DOWN": "down"
-  of "REFRESH": "refresh"
+  of "REFRESH": "primary"
   else: ""
