@@ -56,9 +56,9 @@ suite "the frame page on a Linux frame":
     check not facts.isNil
     check facts["rotate"].getInt(-1) == 0
     check facts["renderScale"].getFloat(-1) == 0
-    # No control plane holds it and it has no panel to show a code on: a cloud
-    # link code, no adoption.
-    check facts["actions"] == %*["restart", "linkCloud"]
+    # No control plane holds it, but it has no panel to show a code on: no
+    # plane is offered.
+    check facts["actions"] == %*["restart"]
     check facts["version"].getStr().len > 0
     # Before the worker has read anything there is a Wi-Fi block to fill.
     check facts["wifi"]["password"].getBool(true) == false
@@ -118,7 +118,7 @@ suite "the frame page on a Linux frame":
     check saved["rotate"].getInt() == 90
     check saved["renderScale"].getFloat() == 1.5
 
-  test "a frame no plane holds offers both links, with a panel to show the code":
+  test "a frame no plane holds offers both planes, with a panel to show the code on":
     writeConfig(true, device = "waveshare.EPD_7in5_V2")
     check actions() == %*["restart", "linkCloud", "adopt"]
     # Waiting for a backend (the portal's "backend" mode): the cloud refuses
@@ -129,24 +129,26 @@ suite "the frame page on a Linux frame":
     writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5", serverApiKey = "k")
     check actions() == %*["restart"]
 
-  test "Adopt by a backend: the code goes on the panel, never into the page's facts":
+  test "a backend's code: on the frame page, with the address and what the QR code says":
     writeConfig(true, device = "waveshare.EPD_7in5_V2")
     sent.setLen(0)
     linuxFrameSettingsAction("adopt")
     check pendingLocalAccessScope() == LocalAccessScopeAdopt
     let code = activeLocalAccessCode()
     check code.len == 6
-    check localAccessPanelText() == "Adoption code\n" & code
-    let facts = linuxFrameSettingsRead()
-    check facts["adopt"]["address"].getStr().endsWith(":8787")
-    check facts["adopt"]["seconds"].getInt() > 0
-    check code notin $facts
+    # The page draws it, never the runner's overlay.
+    check localAccessPanelText() == ""
+    let link = linuxFrameSettingsRead()["link"]
+    check link["to"].getStr() == "backend"
+    check link["code"].getStr() == code
+    check link["where"].getStr().endsWith(":8787")
+    check link["qr"].getStr() == link["where"].getStr() & " " & code
     # While it shows, nothing else to start; Cancel takes it off.
-    check facts["actions"] == %*["restart"]
+    check actions() == %*["restart"]
     check sent.len == 1 and sent[0][0] == evRender
     linuxFrameSettingsAction("cancelLink")
     check pendingLocalAccessScope() == ""
-    check linuxFrameSettingsRead(){"adopt"}.isNil
+    check linuxFrameSettingsRead(){"link"}.isNil
 
   test "Cancel never ends a local network access code":
     writeConfig(true, device = "waveshare.EPD_7in5_V2")
@@ -155,20 +157,28 @@ suite "the frame page on a Linux frame":
     check pendingLocalAccessScope() == LocalAccessScopeLocalNetwork
     clearLocalAccessChallenge()
 
-  test "Link to FrameOS Cloud queues a link code for the hub thread, and Cancel drops it":
+  test "the cloud: a link code queued for the hub thread, one plane at a time, and Cancel drops it":
     writeConfig(true, device = "waveshare.EPD_7in5_V2")
+    linuxFrameSettingsAction("adopt")
     linuxFrameSettingsAction("linkCloud")
+    # Asking for the cloud ended the backend's code.
+    check pendingLocalAccessScope() == ""
     let pending = parseFile(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
     check pending["provider_url"].getStr() == DEFAULT_CLOUD_PROVIDER_URL
     let facts = linuxFrameSettingsRead()
     # No code until the provider gave one; the page says a link is under way.
-    check not facts{"cloudLink"}.isNil
+    check facts["link"]["to"].getStr() == "cloud"
+    check facts["link"]["code"].getStr() == ""
     check facts["actions"] == %*["restart"]
     linuxFrameSettingsAction("cancelLink")
     check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
-    check linuxFrameSettingsRead(){"cloudLink"}.isNil
+    check linuxFrameSettingsRead(){"link"}.isNil
 
-  test "a frame waiting for a backend is never offered to the cloud":
+  test "a frame that is only a picture, or waits for a backend, is not offered the cloud":
+    writeConfig(true)
+    check actions() == %*["restart"]
+    linuxFrameSettingsAction("linkCloud")
+    check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))
     writeConfig(true, device = "waveshare.EPD_7in5_V2", serverHost = "10.0.0.5")
     linuxFrameSettingsAction("linkCloud")
     check not fileExists(getEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH"))

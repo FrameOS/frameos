@@ -227,35 +227,40 @@ proc cloudLinkFacts(): tuple[managed, connecting, connected: bool, providerUrl: 
     result.providerUrl = DEFAULT_CLOUD_PROVIDER_URL
 
 proc linkFacts(config: FrameConfig, f: WifiFacts, result: JsonNode) =
-  ## The frame page's "Link to FrameOS Cloud" and "Adopt by a backend"
-  ## (docs/scene-settings.md "Linking the frame"): offered to a frame no
-  ## control plane holds, and what to do while one is being linked. The
-  ## adoption code itself is never a fact: the runner draws it over the
-  ## panel after the image is stored (local_access.nim), like the local
-  ## network access code.
+  ## Connecting a control plane from the frame page (docs/scene-settings.md
+  ## "Connecting the frame"): offered to a frame no plane holds and that has a
+  ## panel to show the code on (it is a presence code: the runner keeps no
+  ## picture while one shows, so a frame that is only a picture could never
+  ## show it), and, while one is under way, its code, where it is entered and
+  ## what the page's QR code says: the cloud's page with the code in it, or
+  ## the frame's address and code, which the backend's Adopt frame form takes
+  ## pasted.
   let
     cloud = cloudLinkFacts()
     code = activeLinkCode()
-    adopting = pendingLocalAccessScope() == LocalAccessScopeAdopt
+    adoptCode = if pendingLocalAccessScope() == LocalAccessScopeAdopt: activeLocalAccessCode() else: ""
     linking = code.active or cloud.connecting or pendingLinkCodeQueued()
-  if linking:
-    result["cloudLink"] = %*{"code": code.userCode,
-      "uri": if code.verificationUri.len > 0: code.verificationUri else: code.verificationUriComplete}
-  if adopting:
-    let host = if f.connected and f.ip.len > 0: f.ip else: config.frameHost
-    let port = if config.framePort > 0: config.framePort else: 8787
-    result["adopt"] = %*{"address": host & ":" & $port,
-      "seconds": int(localAccessChallengeSecondsLeft())}
-  if linking or adopting or cloud.managed or cloud.connected or f.hotspot or managedBy(config).len > 0 or
-      loadPendingEnrollment() != nil:
+  if adoptCode.len > 0:
+    let
+      host = if f.connected and f.ip.len > 0: f.ip else: config.frameHost
+      where = if config.framePort in [0, 80]: host else: host & ":" & $config.framePort
+    result["link"] = %*{"to": "backend", "code": adoptCode, "where": where, "qr": where & " " & adoptCode}
+  elif linking:
+    var where = code.verificationUri
+    if where.len == 0: where = code.verificationUriComplete.split('?')[0]
+    let scheme = where.find("://")
+    if scheme >= 0: where = where[scheme + 3 .. ^1]
+    result["link"] = %*{"to": "cloud", "code": code.userCode, "where": where,
+      "qr": if code.verificationUriComplete.len > 0: code.verificationUriComplete else: code.verificationUri}
+  if linking or adoptCode.len > 0 or cloud.managed or cloud.connected or f.hotspot or
+      managedBy(config).len > 0 or loadPendingEnrollment() != nil or not localAccessPanelDevice(config.device):
     return
   # A serverHost alone is a frame waiting to be adopted (the setup portal's
   # "backend" mode), which only the backend's adoption finishes; the cloud
   # refuses to enroll it (enrollment.nim otherControlPlaneActive).
   if not otherControlPlaneActive(config):
     result["actions"].add %"linkCloud"
-  if localAccessPanelDevice(config.device):
-    result["actions"].add %"adopt"
+  result["actions"].add %"adopt"
 
 proc linuxFrameSettingsRead*(): JsonNode {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
@@ -312,25 +317,13 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
       of "close":
         withLock factsLock:
           pageOpen = false
-      of "linkCloud":
-        # The hub thread starts the device flow on its next pass and polls it
-        # (device_flow.nim deviceFlowTick): no network on the runner. The
-        # runner draws the code over the panel, and this page shows it too.
-        let config = runnerConfig()
-        let cloud = cloudLinkFacts()
-        if not cloud.managed and not otherControlPlaneActive(config) and
-            writePendingLinkCode(cloud.providerUrl):
-          log(%*{"event": "settings:frame:linkCloud", "origin": "panel"})
-          sendEvent(evRender, newJObject(), eoSystem)
-      of "adopt":
-        let config = runnerConfig()
-        if config != nil and localAccessPanelDevice(config.device) and not cloudLinkFacts().managed:
-          discard startLocalAccessChallenge(LocalAccessScopeAdopt)
-          log(%*{"event": "settings:frame:adopt", "origin": "panel"})
-          sendEvent(evRender, newJObject(), eoSystem)
-      of "cancelLink":
-        # A link under way, never one made: a device flow still waiting for
-        # its code to be approved, and the adoption code.
+      of "linkCloud", "adopt", "cancelLink":
+        # Connecting a control plane (docs/scene-settings.md "Connecting the
+        # frame"): whatever was under way ends (a device flow still waiting
+        # for its code to be approved, an adoption code; never a link made or
+        # a local network access code), and the one asked for starts. The hub
+        # thread runs the device flow (device_flow.nim deviceFlowTick): no
+        # network on the runner. The page shows either code.
         clearPendingLinkCode()
         withLock cloudLinkLock:
           let state = loadCloudLinkState()
@@ -338,6 +331,15 @@ proc linuxFrameSettingsAction*(action: string) {.nimcall, gcsafe, raises: [].} =
             resetLinkState(state)
             saveCloudLinkState(state)
         clearLocalAccessChallenge(LocalAccessScopeAdopt)
+        let config = runnerConfig()
+        let cloud = cloudLinkFacts()
+        if action != "cancelLink" and config != nil and localAccessPanelDevice(config.device) and
+            not cloud.managed:
+          if action == "adopt":
+            discard startLocalAccessChallenge(LocalAccessScopeAdopt)
+          elif otherControlPlaneActive(config) or not writePendingLinkCode(cloud.providerUrl):
+            return
+          log(%*{"event": "settings:frame:" & action, "origin": "panel"})
         sendEvent(evRender, newJObject(), eoSystem)
       else:
         discard

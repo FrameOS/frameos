@@ -158,7 +158,7 @@ void fos_cloud_add_device_report(cJSON *msg);
 void fos_cloud_request_state(void);
 
 /* The link code (flow B, docs/cloud-frames.md "B. Link code on the device"),
- * asked for by the frame page's "Link to FrameOS Cloud": the cloud task
+ * asked for by the frame page's Managed by → FrameOS Cloud: the cloud task
  * starts the device flow against cloud_url (else https://cloud.frameos.net),
  * polls it and enrolls with its Bearer token once the owner approves; a
  * window that lapses unclaimed just ends. Start and cancel from any task
@@ -166,8 +166,8 @@ void fos_cloud_request_state(void);
 void fos_cloud_link_start(void);
 void fos_cloud_link_cancel(void);
 /* True while a link is pending, from the start until it ends; `code` and
- * `uri` get the code to enter and where (verification_uri, else
- * verification_uri_complete), "" while the provider has not answered yet
+ * `uri` get the code to enter and the page with it in
+ * (verification_uri_complete), "" while the provider has not answered yet
  * and after the approval. */
 bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len);
 /* How long a pending link holds the frame awake, 0 when none. */

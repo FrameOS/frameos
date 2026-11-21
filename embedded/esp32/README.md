@@ -539,10 +539,12 @@ opens the settings panel, whose gear opens the frame page with the Wi-Fi
 status, the networks in range by name and a password field, the rotation, the
 scale, and Render again and Reboot (`fos_frame_settings.c`,
 docs/scene-settings.md "The frame page"). A frame no plane holds, online,
-also offers "Link to FrameOS Cloud" (a link code, flow B below) and, with a
-panel, "Adopt by a backend": an adoption code, the local network access
-ceremony's six digits in the `adopt` scope, drawn over the panel as "Adoption
-code" and never in the page's facts or any image. The backend reads
+also offers Connect (docs/scene-settings.md "Connecting the frame"): FrameOS
+Cloud (a link code, flow B below) or a backend (an adoption code, the local
+network access ceremony's six digits in the `adopt` scope), either shown on
+the page with a QR code, and while one is under way the preview snapshot
+stays empty (`fos_frame_settings_code_pending`), so no image carries it; the
+overlay draws only the local network access code. The backend reads
 `GET /api/adopt` (whether a code shows, then the platform, panel, preset and
 size) and posts `{code, backend, apiKey, frameId}` to `POST /api/adopt`: no
 login (the code is the credential; a malformed body costs no attempt, a
@@ -765,7 +767,7 @@ use — and `status` shows `cloud: error` plus a `cloud_error:` detail line
 until a fresh token is set. Transient failures retry with exponential backoff
 (10 s → 15 min).
 
-Flow B, the link code, is the frame page's "Link to FrameOS Cloud": the
+Flow B, the link code, is the frame page's Managed by → FrameOS Cloud: the
 cloud task POSTs `{provider}/api/device/start` (`cloud_url`, else
 `https://cloud.frameos.net`; `client_kind: "frame"`, scopes `frame:link` and
 `frame:managed`), the page shows the code and where to enter it, the task

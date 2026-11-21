@@ -52,7 +52,7 @@ import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 import { apiFetch } from '../../utils/apiFetch'
 import { framesModel } from '../../models/framesModel'
 import { useState } from 'react'
-import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptRequestBody } from './adoptFrame'
+import { AdoptFields, AdoptMethod, adoptCanSubmit, adoptCodeInput, adoptPaste, adoptRequestBody } from './adoptFrame'
 
 function isLocalServer(host?: string | null): boolean {
   const localHostRegex = /^(localhost|0\.0\.0\.0|127\.0\.0\.1|\[::1\])(:\d+)?$/
@@ -1828,7 +1828,16 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
             className={inputClass}
             placeholder="frame.local or 10.0.0.42"
             value={host}
-            onChange={(e) => setHost(e.target.value)}
+            onChange={(e) => {
+              // What the frame's QR code says: its address, port and code at once.
+              const pasted = adoptPaste(e.target.value)
+              if (pasted) {
+                setMethod('code')
+                setPort(pasted.port)
+                setCode(pasted.code)
+              }
+              setHost(pasted ? pasted.host : e.target.value)
+            }}
           />
         </div>
         <div className="sm:col-span-1">
@@ -1858,8 +1867,8 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
               onChange={(e) => setCode(adoptCodeInput(e.target.value))}
             />
             <p className="frameos-muted mt-1 text-xs text-slate-500">
-              On the frame: Settings → gear → Adopt by a backend. The frame shows the six-digit code and the address to
-              enter here.
+              On the frame: Settings → gear → Managed by → Your backend. It shows its address and a six-digit
+              code; what its QR code says, pasted into the address, fills both.
             </p>
           </div>
         ) : (

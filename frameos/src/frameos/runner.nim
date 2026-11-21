@@ -19,6 +19,7 @@ import frameos/panel_canvas
 import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
+from frameos/events_gen import SceneSettingsId
 import frameos/loading_mark_panel
 import frameos/cursor_panel
 import frameos/cloud/device_flow
@@ -381,8 +382,11 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # the presence code — reading it off the panel is the ownership proof.
     # The status screen (system/index) draws the code itself, beside its
     # rows; painting it over that screen too covered the very facts it shows.
+    # The frame page draws it too (docs/scene-settings.md "Connecting the
+    # frame"), as large as it can, with where to enter it.
     let linkCode = activeLinkCode()
-    if linkCode.active and scene.id.string != "system/index":
+    let pageShowsLink = scene.id.string == SceneSettingsId and scene.state{"page"}.getStr() == "frame"
+    if linkCode.active and scene.id.string != "system/index" and not pageShowsLink:
       let qrPayload = if linkCode.verificationUriComplete.len > 0:
           linkCode.verificationUriComplete
         else:
@@ -415,7 +419,12 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     applyGlobalColorCorrection(outImage)
     if outImage.isPanelCanvas and frameColorSettings.global.hasAdjustments():
       notePanelCanvasWritten()
-    setLastImage(outImage)
+    # A link code on the panel (the cloud's, or an adoption code on the frame
+    # page) is a presence code too: while one shows on a panel, no picture of
+    # it is kept, and `GET /image` keeps the one from before.
+    if not (localAccessPanelDevice(self.frameConfig.device) and
+        (linkCode.active or pendingLocalAccessScope() == LocalAccessScopeAdopt)):
+      setLastImage(outImage)
     # The local network access code, if one is pending. Drawn AFTER the render is stored
     # (setLastImage copies), so it reaches the panel only: the whole point is
     # that it is readable from in front of the frame, by someone the admin API

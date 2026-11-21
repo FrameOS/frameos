@@ -191,25 +191,17 @@ bool fos_lan_access_rate_limited(int64_t now_s)
     return spent;
 }
 
-uint32_t fos_lan_access_panel_code(int64_t now_s, char *code_out)
+uint32_t fos_lan_access_panel_code(int64_t now_s, fos_lan_access_scope_t scope, char *code_out)
 {
     uint32_t generation = 0;
     LAN_LOCK();
-    if (live_locked(now_s)) {
+    if (live_locked(now_s) && s_scope == (uint8_t)scope) {
         generation = s_generation;
         if (code_out != NULL) memcpy(code_out, s_code, sizeof(s_code));
     }
     LAN_UNLOCK();
     if (generation == 0 && code_out != NULL) code_out[0] = '\0';
     return generation;
-}
-
-fos_lan_access_scope_t fos_lan_access_scope(int64_t now_s)
-{
-    LAN_LOCK();
-    fos_lan_access_scope_t scope = live_locked(now_s) ? (fos_lan_access_scope_t)s_scope : FOS_LAN_ACCESS_SCOPE_NONE;
-    LAN_UNLOCK();
-    return scope;
 }
 
 uint32_t fos_lan_access_seconds_left(int64_t now_s)
