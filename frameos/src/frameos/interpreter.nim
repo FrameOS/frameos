@@ -2,7 +2,8 @@ import frameos/types
 import frameos/values
 import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
-from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
+from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage,
+  renderSvgIntoTarget
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
   availableRenderHeadroomBytes, runsAsEmbedded, roomForImage
 when defined(testing):
@@ -28,6 +29,10 @@ import frameos/scene_rhythm
 import frameos/layout_choice
 import frameos/scene_icon
 import frameos/ui/events as ui_events
+from frameos/ui/layout import frameKeyboard, KeyboardDock
+from frameos/ui/keyboard import keyboardHeight, keyboardBox
+when not defined(frameosEmbedded):
+  from frameos/panel_shape import panelIsRound
 when not defined(frameosEmbedded):
   import frameos/cursor_shape
   export cursor_shape
@@ -534,6 +539,23 @@ proc diagnosticKeyword(node: DiagramNode): string =
 var yieldScene {.threadvar.}: FrameScene
   ## The scene the layout on the way here wraps; nil outside a layout.
 
+var
+  keysShown {.threadvar.}: array[2, array[4, float32]]
+    ## The frame's keyboard (ui/layout.nim KeyboardDock) as the last pass drew
+    ## it on the frame's canvas: its keys, and a held key's row (x, y, w, h).
+  keysSeen {.threadvar.}: array[5, float32] ## what the canvas holds of it: its box and the held key
+  keysPointer {.threadvar.}: int            ## the press that went down on it, + 1; 0 for none ...
+  gripPointer {.threadvar.}: int            ## ... dragging a window of it by its bar, + 1 ...
+  gripFrom {.threadvar.}: array[2, float32] ## ... holding it this far from its corner
+  keysAt {.threadvar.}: array[2, float32]   ## where a window of it was dragged to, once one was
+  keysMoved {.threadvar.}: bool
+
+proc onKeys(x, y: float32): bool =
+  ## Whether (x, y), the frame canvas's pixels, is on the frame's keyboard.
+  for box in keysShown:
+    if box[2] > 0 and x >= box[0] and y >= box[1] and x < box[0] + box[2] and y < box[1] + box[3]:
+      return true
+
 proc layoutTheme(): JsonNode {.nimcall, gcsafe, raises: [].} =
   ## The `theme` of the layout around the frame's scene, during its pass:
   ## what the UIs built in Nim are drawn in (ui/theme.nim).
@@ -777,11 +799,11 @@ proc wearLayout*(scene: FrameScene) =
   elif not scene.isNil and not scene.ownRun.isNil:
     discard ensureBuiltInLayout(scene)
 
-proc translatedPayload(payload: JsonNode, slot: SceneSlot): JsonNode =
+proc translatedPayload(payload: JsonNode, dx, dy: float32): JsonNode =
   result = copy(payload)
   for i, key in ["x", "y", "startX", "startY"]:
     if result.hasKey(key):
-      result[key] = %(result[key].getFloat() - (if (i and 1) == 0: slot.x else: slot.y))
+      result[key] = %(result[key].getFloat() - (if (i and 1) == 0: dx else: dy))
 
 var uiPresses {.threadvar.}: seq[(string, int)]
   ## (layout, pointer) for each press a layout's UI took over a scene it
@@ -845,7 +867,7 @@ proc routePointer(self: InterpretedFrameScene, context: ExecutionContext): bool 
     return false
   let child = self.slots[slot].child
   let inner = ExecutionContext(scene: child, event: event,
-    payload: translatedPayload(payload, self.slots[slot]), parent: context,
+    payload: translatedPayload(payload, self.slots[slot].x, self.slots[slot].y), parent: context,
     loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1)
   runEvent(child, inner)
   # The layout's own handler on that <Scene> (`onPointerDown`) hears that the
@@ -872,6 +894,11 @@ else:
 
 proc drawIntoHole(host, child: FrameScene, canvas: Image, x, y, w, h: int, context: ExecutionContext, addSlot: bool) =
   ## `child`, on its own schedule, straight into a hole in `host`'s canvas.
+  if child == yieldScene and frameKeyboard.sceneId == child.id.string:
+    # Where the frame's keyboard finds the scene's canvas.
+    frameKeyboard.sceneX = x.float32
+    frameKeyboard.sceneY = y.float32
+    frameKeyboard.placed = true
   let view = canvas.view(x, y, w, h)
   let inner = renderContext(child, view, context)
   let saved = rhythmEnterHole()
@@ -996,6 +1023,10 @@ proc renderEmbeddedScene(owner: FrameScene, nodeId: NodeId, index: int, sceneId,
     drawIntoHole(owner, child, context.image, x.int, y.int, width, height, context, addSlot = true)
     return context.image
   owner.slots.add(SceneSlot(child: child, x: x, y: y, visible: visible))
+  if yielded and frameKeyboard.sceneId == child.id.string:
+    frameKeyboard.sceneX = x
+    frameKeyboard.sceneY = y
+    frameKeyboard.placed = true
   var due = rhythmEmbedDue(child)
   let like {.cursor.} = if context.hasImage: context.image else: nil
   let format = if like.isNil: pfRgbx else: like.format
@@ -2019,12 +2050,16 @@ proc listensThrough(scene: FrameScene, event: string, wearer: FrameScene): bool 
 proc sceneListensTo*(scene: FrameScene, event: string): bool =
   ## Whether the scene has an event node for `event`. The dispatcher builds an
   ## input event's payload only when this is true; a scene that is not
-  ## interpreted keeps every event, because nothing here can tell.
-  listensThrough(scene, event, nil)
+  ## interpreted keeps every event, because nothing here can tell. A press on
+  ## the frame's keyboard hears its pointer to the end (a window of it dragged).
+  (keysPointer > 0 and event in ["pointerMove", "pointerUp", "pointerCancel"]) or listensThrough(scene, event, nil)
 
 proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
   ## Whether the scene's keyboard on the screen (a JSX field's) is under
-  ## (x, y), scene pixels: the hosts' `EventHost.keyboardAt`.
+  ## (x, y), scene pixels: the hosts' `EventHost.keyboardAt`. The frame's
+  ## keyboard while it is up, in the frame's.
+  if frameKeyboard.sceneId.len > 0 and keysShown[0][2] > 0:
+    return onKeys(x.float32, y.float32)
   ui_events.keyboardAt(sceneId.string, x.float32, y.float32)
 
 proc takesPresses(scene: InterpretedFrameScene): bool =
@@ -2074,15 +2109,16 @@ when not defined(frameosEmbedded):
     ## the layout and the scenes it shows, as the last render drew them; the
     ## arrow where nothing asks. What the Linux runner draws
     ## (frameos/cursor_panel.nim) and the browser preview shows.
-    cursorIn(scene, x.float32, y.float32, nil, 0)
+    if onKeys(x.float32, y.float32): csArrow
+    else: cursorIn(scene, x.float32, y.float32, nil, 0)
 
 proc pressTakenAt*(scene: FrameScene; x, y: int): bool =
   ## Whether something on the frame does something with a press at (x, y), the
   ## scene's pixels. Asked at the moment of the press, of what the last render
   ## drew: an element with only an onClick hears no pointerDown, and a press
   ## near the edge of a touch panel is not delivered until it is known not to
-  ## be a swipe.
-  pressTakenIn(scene, x.float32, y.float32, nil, 0)
+  ## be a swipe. The frame's keyboard takes every press on it.
+  onKeys(x.float32, y.float32) or pressTakenIn(scene, x.float32, y.float32, nil, 0)
 
 type PressRect* = object
   ## One entry of a press map: x0, y0, x1, y1 in the scene's pixels, and
@@ -2128,6 +2164,9 @@ proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   ## a taken one before it, or after one that covers the canvas, says nothing
   ## and is left out.
   var all: seq[PressRect]
+  for box in keysShown:
+    if box[2] > 0:
+      all.add PressRect(box: [box[0], box[1], box[0] + box[2], box[1] + box[3]], taken: true)
   pressMapIn(scene, 0, 0, [0'f32, 0, width.float32, height.float32], nil, 0, all)
   for entry in all:
     var said = true
@@ -2278,6 +2317,161 @@ proc renderChrome(host: FrameScene, context: ExecutionContext) =
 
 {.pop.}
 
+# -------------------------
+# The frame's keyboard
+# -------------------------
+
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
+
+proc placeKeys(self, layout: FrameScene, canvas: Image): int =
+  ## Before the pass of the layout `self` wears: the frame's keyboard
+  ## (ui/layout.nim KeyboardDock) while a field of `self`, or of the layout,
+  ## has the keyboard on the screen up, docked at the bottom of the panel or,
+  ## on a desktop, a window over every other, at the bottom of the desktop
+  ## unless that covers the field, and where it was dragged to once it was.
+  ## The docked one's top is returned, where the layout's canvas ends; -1 for
+  ## none.
+  result = -1
+  template k: untyped = frameKeyboard
+  var
+    scale = 1'f32
+    accents = 0
+    field: array[4, float32]
+    seen: array[5, float32]
+  let floating = desktopShown()
+  k.front = self.id.string
+  k.around = layout.id.string
+  k.desktop = floating
+  # The scene's field, else the layout's own (a launcher's search), whose
+  # canvas is the frame's.
+  let owner =
+    if canvas.isNil: ""
+    elif keyboardState(self.id.string, scale, accents, field): self.id.string
+    elif keyboardState(layout.id.string, scale, accents, field): layout.id.string
+    else: ""
+  if owner.len == 0:
+    k.sceneId = ""
+    k.svg = nil
+    keysPointer = 0 # a press on it that outlived it is nobody's
+    gripPointer = 0
+  else:
+    let
+      w = canvas.width.float32
+      h = canvas.height.float32
+      opening = k.sceneId != owner or (k.grip > 0) != floating
+    if opening:
+      k.svg = nil
+    k.sceneId = owner
+    k.frameW = w
+    k.frameH = h
+    when not defined(frameosEmbedded):
+      k.round = not floating and panelIsRound(self.frameConfig.device)
+    if floating:
+      let rows = keyboardHeight(int(h / scale)).float32 * scale
+      k.grip = round(clamp(rows / scale / 10, 12, 24)) * scale
+      k.w = round(min(w - 16 * scale, rows * 5 / 2))
+      k.h = rows + k.grip
+      if keysMoved:
+        k.x = keysAt[0]
+        k.y = keysAt[1]
+      elif opening:
+        k.x = round((w - k.w) / 2)
+        k.y = h - k.h - 8 * scale
+        var fieldY = field[1] + field[3]
+        if owner == self.id.string:
+          for slot in layout.slots:
+            if slot.child == self:
+              fieldY += slot.y
+        if field[2] > 0 and fieldY > k.y:
+          k.y = 8 * scale # the field is under it there
+      k.x = clamp(k.x, 0, max(w - k.w, 0))
+      k.y = clamp(k.y, 0, max(h - k.h, 0))
+    else:
+      let (top, tall) = keyboardBox(int(w / scale), int(h / scale), k.round)
+      k.grip = 0
+      k.x = 0
+      k.y = round(top.float32 * scale)
+      k.w = w
+      k.h = if k.round: tall.float32 * scale else: h - k.y
+      result = int(k.y)
+    seen = [k.x, k.y, k.w, k.h, accents.float32]
+  # The layout's canvas is the frame's; the scene's is placed as it is drawn.
+  k.placed = owner.len > 0 and owner != self.id.string
+  if k.placed:
+    k.sceneX = 0
+    k.sceneY = 0
+  if seen != keysSeen:
+    # It came, went or moved, or a key's row did: what the canvas holds where
+    # it was is no scene's, and everything there draws again; the field's UI
+    # lays it out where it is now.
+    keysSeen = seen
+    rhythmForgetCanvases()
+    rhythmMarkDue(self)
+    rhythmMarkDue(layout)
+
+proc drawKeys(canvas: Image) =
+  ## After the layout's pass: the frame's keyboard over all of it, as the
+  ## field's UI laid it out.
+  template k: untyped = frameKeyboard
+  keysShown = default(array[2, array[4, float32]])
+  if k.sceneId.len > 0 and not k.svg.isNil and not canvas.isNil:
+    keysShown[0] = [k.x, k.y, k.w, k.h]
+    keysShown[1] = k.accents
+    discard renderSvgIntoTarget(k.svg, canvas)
+
+proc keysTake(self, layout: FrameScene, context: ExecutionContext): bool =
+  ## A pointer event on the frame's keyboard is the keyboard's: a window of it
+  ## is dragged by its bar, and anything else goes to the field's UI in its
+  ## scene's pixels, past the layout, so the focus, the order of the windows
+  ## and the field stay as they are. A press that went down on it keeps it to
+  ## the end.
+  template k: untyped = frameKeyboard
+  let payload = context.payload
+  let owner = if k.sceneId == self.id.string: self elif k.sceneId == layout.id.string: layout else: nil
+  if owner.isNil or payload.isNil or payload.kind != JObject:
+    return false
+  let
+    event = context.event
+    pid = payload{"pointerId"}.getInt(0) + 1
+    # A gesture goes where it began.
+    x = payload{"startX"}.getFloat(payload{"x"}.getFloat(-1)).float32
+    y = payload{"startY"}.getFloat(payload{"y"}.getFloat(-1)).float32
+    follows = event in ["pointerMove", "pointerUp", "pointerCancel"]
+    lifted = event in ["pointerUp", "pointerCancel"]
+    onBar = k.grip > 0 and y < k.y + k.grip and onKeys(x, y)
+  if (if follows: keysPointer != pid else: not onKeys(x, y)):
+    return false
+  if event == "pointerDown":
+    keysPointer = pid
+    if onBar:
+      gripPointer = pid
+      gripFrom = [x - k.x, y - k.y]
+  if lifted:
+    keysPointer = 0
+  if gripPointer == pid:
+    if event == "pointerMove":
+      keysAt = [payload{"x"}.getFloat().float32 - gripFrom[0], payload{"y"}.getFloat().float32 - gripFrom[1]]
+      keysMoved = true
+      sendEvent("render", %*{}, eoScene)
+    elif lifted:
+      gripPointer = 0
+    return true
+  if onBar or event == "wheel":
+    return true # its bar is for dragging alone
+  let inner = translatedPayload(payload, k.sceneX, k.sceneY)
+  if owner.ownRun.isNil:
+    if dispatchUiEvent(owner.id.string, event, inner, keysOnly = true):
+      rhythmMarkDue(owner)
+      sendEvent("render", %*{}, eoScene)
+  else:
+    # A built-in scene's form: its own run hit-tests it.
+    rhythmMarkDue(owner)
+    owner.ownRun(owner, ExecutionContext(scene: owner, event: event, payload: inner, parent: context,
+      loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1))
+  true
+
+{.pop.}
+
 proc builtInLayout(self: FrameScene, inWindow: bool): FrameScene =
   ## The layout a built-in scene wears on this run. In a window (a run
   ## inside the layout of the frame's scene, drawn or clicked), none, as no
@@ -2298,6 +2492,8 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   # whether they are due (scene_rhythm.nim).
   let rendering = context.event == "render"
   let passStarted = rendering and rhythmEnterRender(self, if context.hasImage: context.image else: nil)
+  if passStarted:
+    frameKeyboard.desktop = false # until a desktop's pass says so (placeKeys)
   let outerYield = yieldScene
   try:
     # The layout wraps the frame's own scene and nothing else, so it comes to
@@ -2324,15 +2520,30 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         if typing != layout.typing:
           layout.typing = typing
           rhythmMarkDue(layout)
+        # The keyboard is the frame's then (KeyboardDock): docked, the layout
+        # is laid out in what it leaves above it.
+        let
+          canvas = context.image
+          top = placeKeys(self, layout, canvas)
+        if top > 0:
+          context.image = canvas.view(0, 0, canvas.width, top)
+        let view = context.image
         let saved = rhythmEnterHole()
         context.nextSleep = -1
         runEvent(layout, context)
         rhythmLeaveChild(saved)
         context.nextSleep = parentSleep
+        if top > 0:
+          if context.image != view:
+            canvas.draw(context.image) # an image of its own, nothing written through
+          context.image = canvas
+        drawKeys(context.image)
       elif context.event in PointerEvents:
         # Over the chrome it is the layout's; over the content it comes
-        # back here through the layout's slots.
-        runEvent(layout, context)
+        # back here through the layout's slots. On the frame's keyboard, the
+        # keyboard's.
+        if not keysTake(self, layout, context):
+          runEvent(layout, context)
       else:
         runEventInner(self, context)
         # What is said to the scene's state is the scene's alone.

@@ -701,6 +701,12 @@
   and `<Scene>`s their taps, in their own coordinates); yield goes through
   `runSceneNodeRender`. The frame's next wake is `syncRefreshInterval`'s, never a
   host's. Anything added to a layout pass goes in `interpreter.nim`, not in a host.
+  A field's keyboard in the scene a layout wraps is the frame's (`KeyboardDock`,
+  docs/jsx-ui.md "The frame's keyboard"): docked under the layout, which is laid
+  out above it, or on a desktop a window over every other whose presses go to
+  the field's UI past the layout (`keysTake`), so the focus and the windows stay.
+  Its UI lays it out (`layoutUiDocked`), the interpreter draws it last and
+  forgets the canvas when it comes, goes or moves.
 - `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
   (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
   `hole` set): `renderSvgAround` draws the chrome, each scene goes through

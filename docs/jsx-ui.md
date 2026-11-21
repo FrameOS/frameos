@@ -656,9 +656,11 @@ export function get(app) {
   its keys narrower where the circle is, on no band of its own; the UI is
   laid out above it (`keyboardBox`, `UiInput.round`). Not on an ESP32: no
   board of it is round.
-- **Inside a layout** the keyboard is as wide as the scene's `<yield />`; a
-  layout that returns a bare `<yield />` while `app.frame.typing` is true
-  gives it the whole panel (docs/scene-layouts.md, "While a scene types").
+- **Inside a layout** the keyboard is the frame's, not the scene's
+  ([The frame's keyboard](#the-frames-keyboard)): on a small screen it takes
+  the bottom of the panel and the whole layout, its bars included, is laid
+  out above it; on a desktop of windows it is a window of its own over every
+  other.
 - **The keyboard reaches the screen's edges**, so a press on it is a key and
   never an edge swipe (docs/events.md "Edge swipes"): a finger on its outer
   keys types instead of changing the scene. A key is typed where the finger
@@ -786,6 +788,49 @@ is the dispatcher's tick asking `uiTimerDue` and sending the scene showing
 scene listens for it), which `dispatchUiEvent` turns into the next erase or
 a render. A host that ticks only while input is held (the preview) also
 ticks while `uiTimersPending`; the Pi's message loop wakes every 20 ms then.
+
+### The frame's keyboard
+
+A field of the scene a layout wraps (docs/scene-layouts.md), or of the layout
+itself (a launcher's search), types on a keyboard the frame draws, not one
+inside the scene's `<yield />`:
+
+- **On a small screen** (a layout that is no desktop) it is docked: as tall
+  as the panel's keyboard would be, across the whole width at the bottom, and
+  the layout is laid out in what it leaves above it, so its bars move up or
+  shrink with the scene and the focused field is scrolled into sight there. A
+  layout that returns a bare `<yield />` while `app.frame.typing` is true
+  gives the scene all of it (docs/scene-layouts.md, "While a scene types").
+  The layout has the whole panel again when the field lets go.
+- **On a desktop** (a layout with scenes open in windows,
+  docs/scene-layouts.md "Windows") it is a window of its own over every other
+  window and the desktop's bars, at the bottom of the desktop (at its top
+  when that would cover the field), with a bar to drag it by; it stays where
+  it was dragged. Its keys type into the field of the window in front: a tap
+  on it never reaches the layout or a window under it, so nothing comes
+  forward, nothing moves and the field keeps the keyboard. It comes up when
+  a field there gets the keyboard on the screen (none once a key was typed on
+  a real keyboard) and goes when no field has it, or when another window comes
+  forward: a window behind keeps its field's caret and draws no keyboard of its
+  own, and has the frame's again when it comes back to the front.
+- **Everything else is the keyboard's as before**: its look (the layout's
+  theme), a held key's accents (drawn over the layout), the space bar dragged,
+  backspace held, e-paper's look. A press on it is never an edge swipe, and a
+  board its plane renders hands it the press map with the keyboard taken.
+
+How: the interpreter places it before the layout's pass (`placeKeys`,
+`ui/layout.nim` `KeyboardDock`, `frameKeyboard`), in the frame canvas's
+pixels, and docked gives the layout a view of the canvas above it. The
+field's UI lays the keyboard out there (`layoutUiDocked`, from `imageFromJsx`
+and the built-in scenes' `drawUi`): its keys are regions of that UI like any
+key, at places outside the UI's own image, and what it draws is a picture of
+the frame's size that the interpreter draws last (`drawKeys`). A pointer
+event on it (`keysTake`) goes to that UI alone (`dispatchUiEvent`'s
+`keysOnly`) in its scene's pixels, before the layout sees it. When it comes,
+goes or moves, or a key's row does, the canvas is forgotten
+(`rhythmForgetCanvases`) and everything under where it was draws again: a
+frame buffer kept between renders holds its pixels there. One rule for every
+host: the Pi, the ESP32 and the preview run it from `interpreter.runEvent`.
 
 ### Selecting, copying and pasting
 

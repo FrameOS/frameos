@@ -9,6 +9,7 @@ import ../layout_choice
 import ../scene_rhythm
 import ../types
 import ../ui/events as ui_events
+from ../ui/keyboard import keyboardBox
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
@@ -499,7 +500,7 @@ suite "layouts":
     let green = pass(scene)
     check green.color(5, 35) == colored("#22c55e")
 
-  test "a layout knows when the scene it wraps has the keyboard up, and can give it the whole panel":
+  test "a layout knows when the scene it wraps has the keyboard up, and can give it all the keyboard leaves":
     forgetTypedKeys()
     let scene = newScene("tests/typing")
     discard pass(scene)
@@ -512,7 +513,9 @@ suite "layouts":
     rhythmClockOverride = 1000.01
     discard pass(scene)
     check scene.layoutOf.typing
-    check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == H
+    # The keyboard is the frame's, at the bottom of the panel: the layout is
+    # laid out above it (test_frame_keyboard.nim).
+    check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == keyboardBox(W, H)[0]
 
   test "a layout is told the name of the scene it wraps":
     let scene = newScene("tests/inTaskbar")

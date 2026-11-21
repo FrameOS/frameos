@@ -112,14 +112,16 @@ runs through the same pass as any scene wearing one (`FrameScene.ownRun`,
 `builtInRunner`). `app.frame.systemScene` is true in the layout's app meanwhile:
 `if (app.frame.systemScene) return <yield />` gives them the whole panel.
 
-**While a scene types.** The keyboard on the screen is laid out in the canvas of
-the scene that has the field, so inside a layout it is only as wide as the
-`<yield />`. `app.frame.typing` is true in the layout's app while that scene has
-the keyboard up (`FrameScene.typing`, read off `ui/events.keyboardShown` at the
-start of each layout pass, which runs the layout again when it changes):
-`if (app.frame.typing) return <yield />` gives the scene the whole panel, and
-the keyboard reaches across the rail or bar beside it. The reTerminal layouts
-do this.
+**While a scene types.** The keyboard on the screen of a field in the scene a
+layout wraps is the frame's (docs/jsx-ui.md "The frame's keyboard"): docked at
+the bottom of the panel, the layout laid out in what it leaves above it, its
+bars and the `<yield />` with them; on a desktop of windows, a window of its own
+over every other, whose keys type into the window in front without moving the
+focus or the windows. `app.frame.typing` is true in the layout's app while that
+scene has the keyboard up (`FrameScene.typing`, read off
+`ui/events.keyboardShown` at the start of each layout pass, which runs the
+layout again when it changes): `if (app.frame.typing) return <yield />` gives
+the scene all the panel the keyboard leaves. The reTerminal layouts do this.
 Its `app.state.openedOver` then holds the name of the scene the built-in scene
 opened over (a layout is made afresh around it), for a taskbar to keep that
 scene's button.
