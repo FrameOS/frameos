@@ -936,8 +936,10 @@ past the last, the keyboard staying up; held, to the one before. A
 `<select>` is passed over there: its list is no place to type.
 
 **A frame's buttons** are the keys, by role (docs/events.md "Buttons"):
-`next` and `down` are Tab, `prev` and `up` Shift+Tab, `primary`, `refresh`
-and `menu` Enter (a reTerminal's green key), `back` Escape. A press is one, a
+`next` and `down` are Tab, `prev` and `up` Shift+Tab, `primary` Enter (a
+reTerminal's green key), `back` and `menu` Escape: a menu key is a way out,
+as on a remote. `refresh` is Enter too, for a frame that gave a key that
+role by hand. A press is one, a
 double press two, so every tap counts however quickly they come, and taps
 made while e-paper refreshes all land: each moves the ring from where the one
 before left it, on what the last render drew, and the next refresh shows

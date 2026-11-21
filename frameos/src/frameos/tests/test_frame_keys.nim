@@ -138,7 +138,14 @@ proc send(scene: FrameScene, event: string, payload: JsonNode): seq[string] =
   settle()
 
 proc button(scene: FrameScene, role: string, action = "press"): seq[string] =
-  scene.send("button", %*{"label": role.toUpperAscii, "role": role, "action": action, "pin": 1})
+  # The reTerminal's keys, as their labels name them (the green one is
+  # REFRESH, its role primary).
+  let label = case role
+    of "next": "RIGHT"
+    of "prev": "LEFT"
+    of "primary": "REFRESH"
+    else: role.toUpperAscii
+  scene.send("button", %*{"label": label, "role": role, "action": action, "pin": 1})
 
 proc ringedText(sceneId: string): int =
   ## Which row is ringed in the scene's UI (node 2): 1, 2, 3; 0 for none.
@@ -173,7 +180,7 @@ suite "the keys on a frame":
     check ringedText("keys/list") == 3
     discard scene.button("prev")
     check ringedText("keys/list") == 2 # a row whose icon and name are inside it: one stop
-    discard scene.button("refresh")
+    discard scene.button("primary")
     check scene.state{"pressed"}.getStr() == "b"
     # Held, a button is the frame's event map's: no key.
     discard scene.button("next", "longPress")
@@ -209,7 +216,7 @@ suite "the keys on a frame":
     check ringedText("keys/listed") == 0 # on to the layout's Start
     check uiTarget("keys/chrome", 2).input.ring > 0
     pass(scene).shot("layout-ringed")
-    discard scene.button("refresh")
+    discard scene.button("primary")
     check layout.state{"menu"}.getStr() == "open"
     check scene.state{"pressed"}.getStr() == ""
     discard scene.button("next")

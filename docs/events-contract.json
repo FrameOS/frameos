@@ -850,7 +850,7 @@
       "KEY3": "next", "BUTTON": "primary", "AI": "primary",
       "POWER": "primary", "OK": "primary", "ENTER": "primary",
       "SELECT": "primary", "HOME": "menu", "MENU": "menu", "EXIT": "back", "BACK": "back", "NEXT": "next",
-      "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "refresh"
+      "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "primary"
     },
     "edges": ["down", "up"],
     "actions": ["press", "doublePress", "longPress"],

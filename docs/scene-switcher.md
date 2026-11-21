@@ -268,8 +268,9 @@ The preview lists names only.
   scrolls as little as it takes to show the tile they land on, its heading
   with it where it starts a group: on e-paper the keys are all there is to
   follow;
-  `primary`, `refresh` and `menu` (OK, REFRESH, BOOT, HOME) show the
-  highlighted scene, or open the frame page on the gear; `back` goes back. A press is one step and a double press
+  `primary` (OK, the reTerminal's green REFRESH, BOOT; `refresh` too, for a
+  key given it by hand) shows the highlighted scene, or opens the frame page
+  on the gear; `back` and `menu` (HOME, MENU) go back. A press is one step and a double press
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.

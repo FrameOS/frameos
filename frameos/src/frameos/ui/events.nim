@@ -1266,8 +1266,8 @@ proc uiKeys*(sceneIds: openArray[string], key: string, back = false, typed = fal
 proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, times: int] =
   ## The key an event is to a UI, and how many times; none (0) for any other.
   ## A frame's button, by its role: next and down are Tab, prev and up
-  ## Shift+Tab, primary, refresh and menu (a reTerminal's green key) Enter,
-  ## back Escape; a press is one and a double press two, so every tap counts
+  ## Shift+Tab, primary (a reTerminal's green key) Enter, back and menu
+  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one and a double press two, so every tap counts
   ## however quickly they come, and a long press is the frame's event map's
   ## (walk the scenes, talk), never a key. A keyboard's Tab, Shift+Tab, Enter
   ## and Escape, once; with Ctrl, Alt or Cmd held, the scene's own.
@@ -1281,8 +1281,8 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
     case payload{"role"}.getStr()
     of "next", "down": result.key = "Tab"
     of "prev", "up": (result.key, result.back) = ("Tab", true)
-    of "primary", "refresh", "menu": result.key = "Enter"
-    of "back": result.key = "Escape"
+    of "primary", "refresh": result.key = "Enter"
+    of "back", "menu": result.key = "Escape"
     else: result.times = 0
   else:
     when not defined(frameosEmbedded):
