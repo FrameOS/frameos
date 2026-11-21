@@ -8,16 +8,24 @@ import { FrameOSPreview, type PreviewFileRequest } from "frameos-wasm";
 // files picked go back to the worker, which writes them into the preview's
 // folder (frameos/tools/wasm/preview-worker.js).
 
+/** What the page posts the worker. */
+interface Posted {
+  type?: string;
+  id?: number;
+  files?: Array<{ name: string; data: ArrayBuffer }>;
+  [key: string]: unknown;
+}
+
 class FakeWorker {
   static instances: FakeWorker[] = [];
-  messages: Array<Record<string, any>> = [];
+  messages: Posted[] = [];
   transfers: Array<Transferable[] | undefined> = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   constructor(readonly url: string | URL) {
     FakeWorker.instances.push(this);
   }
-  postMessage(message: Record<string, any>, transfer?: Transferable[]) {
+  postMessage(message: Posted, transfer?: Transferable[]) {
     this.messages.push(message);
     this.transfers.push(transfer);
   }
@@ -115,10 +123,11 @@ describe("FrameOSPreview files to and from the computer", () => {
     await settled();
     const upload = worker.messages.at(-1)!;
     expect(upload).toMatchObject({ id: 7, type: "fileUpload" });
-    expect(upload.files.map((file: { name: string }) => file.name)).toEqual(["beach.jpg", "notes.txt"]);
-    expect(new Uint8Array(upload.files[0].data)).toEqual(new Uint8Array([1, 2, 3]));
+    const files = upload.files ?? [];
+    expect(files.map((file) => file.name)).toEqual(["beach.jpg", "notes.txt"]);
+    expect(new Uint8Array(files[0]!.data)).toEqual(new Uint8Array([1, 2, 3]));
     // The bytes are transferred, not copied.
-    expect(worker.transfers.at(-1)).toEqual(upload.files.map((file: { data: ArrayBuffer }) => file.data));
+    expect(worker.transfers.at(-1)).toEqual(files.map((file) => file.data));
     expect(input.isConnected).toBe(false);
   });
 
