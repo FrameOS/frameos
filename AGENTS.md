@@ -221,12 +221,13 @@
   a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, grouped by category as
-  the desktops group theirs, in one list that scrolls (no pages), and on
-  Linux shows each scene's last snapshot (`sceneSwitcherThumbnail`,
-  `frameos/scene_switcher_linux.nim`); its tiles are the Scene store's (a
-  picture or an icon over the name, one size, more of them in a bigger room:
-  `switcherGrid`), and every desktop of windows opens it as its window of
-  every scene, in its theme; fast panels get a dark grid, e-paper
+  the desktops group theirs, in one list that scrolls (no pages); the Linux
+  host still keeps each scene's last snapshot (`sceneSwitcherThumbnail`,
+  `frameos/scene_switcher_linux.nim`, no longer drawn); it is a folder's icon
+  view (Explorer's, Finder's: an icon over its name, one size, more of them
+  in a bigger room, compact category groups: `switcherGrid`), and every
+  desktop of windows opens it as its window of every scene, in its theme;
+  fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight that the list
   scrolls to.
 - Both built-in scenes are drawn in the layout of the scene they were opened

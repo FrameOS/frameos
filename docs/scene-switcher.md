@@ -129,35 +129,55 @@ panel keeps (docs/scene-settings.md, "At the frame's scale").
 
 ### The tiles
 
-The tiles are the Scene store's (docs/scene-store.md "The Scene store
-app"), in the frame's own look or the desktop's: a scene is its picture over
-its name, or its icon over its name, as a desktop shows an app. Every desktop
-of windows opens this switcher as its window of every scene (Windows 98's
-Programs, macOS's Launchpad, the others' Scenes), so that window is this one
-grid in each desktop's theme (2026-11-21; it was cards of a number and a
-name, a few to a row).
+A folder's icon view, as Windows Explorer's large icons or the macOS
+Finder's: each scene its icon with its name centred under it, wrapping to two
+lines, and nothing around it (no card, no button). Every desktop of windows
+opens this switcher as its window of every scene (Windows 98's Programs,
+macOS's Launchpad, the others' Scenes), so that window is this view in each
+desktop's theme. It was cards of a number and a name (until 2026-11-21), and
+for a day the Scene store's tiles, which the owner found a bunch of square
+buttons with unlimited whitespace.
 
-`switcherGrid` lays them out from the room it has: a tile is one size, as many
-across as fit, stretched to fill the row, and the rows that do not fit scroll
-(`rows` is how many show: a screenful for the keys). With pictures (a host
-that keeps them, Linux) a tile is at least 33% of the unit across with a 4:3
-picture; without, 24% with a square for the icon 13% of the unit. The name is
-3% of the unit, two lines at most. The unit is the panel's shorter side, **400
-px at most** (`GridUnitMax`): in a desktop's window, on a 480 px square and on
-a 10" panel alike a tile is 96 px across with a 52 px icon, or 120 with a
-120x90 picture, as the store's in a window, and a bigger panel or window shows
-more of them, never larger ones (the owner's rule, 2026-11-20). The frame's
-render scale is what makes them larger.
+`switcherGrid` lays the cells out from the room it has, from the left, as many
+across as fit, close together, and the rows that do not fit scroll (`rows` is
+how many show: a screenful for the keys). The cells are a share of a unit
+that is the panel's shorter side, 400 px at most (`CellUnitMax`; the header
+keeps its 480, `GridUnitMax`): in a desktop's window, on a 480 px square and
+on a 10" panel alike a cell is 84 px wide (Explorer's is about 75 to 90 at
+100%, Finder's 80 to 100), 4 px apart, with a 40 px icon and 12 px letters,
+90 px tall with room under the names. A bigger panel or window shows more of them, never larger ones
+(the owner's rule, 2026-11-20); the frame's render scale is what makes them
+larger.
 
-The tiles are one list under the header, a box with `overflow-y-auto` from
+- **The icon** is the scene's own (`settings.icon`, docs/scene-icons.md) in
+  its category's color, or its first letter on a rounded square of that
+  color. The colors are eight, by the category's place in the list, so two
+  categories side by side differ. On e-paper the icon is black, the letter
+  outlined.
+- **Selected** (the keys' highlight, the scene it was opened from at first)
+  as a file manager shows it: a tint behind the icon and the name on a filled
+  label, in the theme's `picked` role (Explorer's navy label in Windows 98,
+  Finder's blue pill in macOS). A dot at the icon's corner marks the scene it
+  was opened from. On e-paper the whole cell is inverted.
+- **Categories** are compact, as Finder's groups: a small name over the first
+  cells of each category with a thin rule under it as far as they go, the
+  next category straight after in the same row, so a category of one takes
+  one cell, not a row. A row keeps a strip for its headings. Where headings
+  would be most of the list (fewer than a dozen scenes, or fewer than two a
+  category: `headed`) there are none, and the scenes keep the order by
+  category in one flow.
+- **No pictures.** A host's snapshots of its scenes
+  (`sceneSwitcherThumbnail`, the Linux runner's) are no longer drawn: the
+  icon view is the owner's call (2026-11-21). The hook stays for now.
+
+The cells are one list under the header, a box with `overflow-y-auto` from
 the header to the bottom edge, the whole width (ui/layout.nim; docs/jsx-ui.md
-"Scrolling and clipping"): rows of tiles, and where the scenes have
-categories a heading across the list over each group, whose first tile
-starts a row of its own (`spots`). A list longer than the screen scrolls,
-with the layer's thin bar at its right edge; the rows cut by the bottom edge
-say there is more. Its scroll is the layer's, kept by the list's place in the
-tree (the root's first child, `ListKey`), which is how the keys move it too.
-Opened, the list starts at its top and scrolls to the highlighted tile.
+"Scrolling and clipping"), each placed by `spots`. A list longer than the
+screen scrolls, with the layer's thin bar at its right edge; the rows cut by
+the bottom edge say there is more. Its scroll is the layer's, kept by the
+list's place in the tree (the root's first child, `ListKey`), which is how
+the keys move it too. Opened, the list starts at its top and scrolls to the
+highlighted cell.
 
 The header ends with the gear and Close. **A frame that takes no taps has
 neither**: e-paper whose event map binds its keys and nothing else
@@ -171,22 +191,14 @@ would open nothing. The device's unlock (docs/scene-settings.md "Turned off by
 the control plane") brings it back with the page.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
-  gets a dark grid: each tile its picture when the host has one (Linux), else
-  its icon on a dark square, its name under it, the highlighted tile ringed,
-  and a tile lighter while a finger is on it (`active:`).
-- **A scene's icon** (`settings.icon`, docs/scene-icons.md) is drawn in the
-  text color on its square (the theme's `tile` role in a desktop), and its
-  first letter where it has none; on a Pi's picture tile in the picture's
-  place until the scene has a snapshot. A dot at the square's corner marks the
-  scene it was opened from.
-- **In a desktop** the tile takes the theme's roles: `option` (`picked` while
-  the keys are on it) for the tile, `tile` (`tileLit`) for the icon's square,
-  `muted` for the headings, so Windows 98 draws raised grey squares and macOS
-  white rounded ones (`test_desktop_switcher.nim` renders every desktop's
-  window, small and large, `FRAMEOS_DESKTOP_SHOTS=<dir>`).
+  gets the icons on a dark page, and a cell tinted while a finger is on it
+  (`active:`).
+- **In a desktop** the header, Close and the gear take the theme's roles as
+  before, the headings `muted`, the selected name `picked`
+  (`test_desktop_switcher.nim` renders every desktop's window with twenty-five
+  scenes, small and large, `FRAMEOS_DESKTOP_SHOTS=<dir>`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
-  `pimoroni.inky*`) gets black on white, outlined squares, the highlighted tile
-  inverted, and no press feedback: a refresh to show a finger is down would
+  `pimoroni.inky*`) gets black on white, the highlighted cell inverted, and no press feedback: a refresh to show a finger is down would
   be seconds of flashing for nothing. A tap counts, and a finger dragging
   the list is drawn once, where it let go (ui/events.nim keeps quiet until
   then).
@@ -203,7 +215,8 @@ the control plane") brings it back with the page.
 
 ### Pictures
 
-On Linux each tile shows the scene's last snapshot: the PNG the runner writes
+*Not drawn since 2026-11-21 (the icon view, "The tiles"); the hook and the
+Linux host's copies stay for now.* On Linux each tile showed the scene's last snapshot: the PNG the runner writes
 under `<assets>/.frameos/scene_images/` on every switch and at most once a
 minute after (`render:sceneImage:saved`), once the panel has the picture
 (the encode is most of a second on a Pi Zero, and it used to hold every
@@ -325,7 +338,7 @@ already in the image. That change was not measured on the ESP32-S3 image:
 no image was built for it. The firmware-size comment on its pull request is
 the number.
 
-The tiles as the store's (2026-11-21) replaced the number row, the
-name-card layout and the densest-grid search with one fixed tile size and a
-row's worth of columns: the firmware-size comment on that pull request is
-the number.
+The icon view (2026-11-21) replaced the number row, the name-card layout,
+the densest-grid search and the picture tiles with one fixed cell, a category
+color table and headings that flow with the cells: the firmware-size comment
+on that pull request (#940) is the number.

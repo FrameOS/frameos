@@ -1,10 +1,10 @@
 ## Every desktop's "all scenes" window: the built-in scene switcher
 ## (system/sceneSwitcher, docs/scene-switcher.md "The tiles"), which each
 ## desktop of windows opens as its Programs, Launchpad or Scenes window, drawn
-## in that desktop's theme. The tiles keep one size whatever the panel or the
-## window, and a bigger one shows more of them; a Pi shows each scene's last
-## snapshot, an ESP32 and the browser its icon. FRAMEOS_DESKTOP_SHOTS=<dir>
-## writes each desktop's window there, small and large.
+## in that desktop's theme: a folder's icon view, a cell one size whatever the
+## panel or the window, so a bigger one shows more of them.
+## FRAMEOS_DESKTOP_SHOTS=<dir> writes each desktop's window there, small and
+## large.
 
 import std/[json, os, strutils, tables, unittest]
 import pixie
@@ -26,11 +26,13 @@ const Desktops = [("Windows 98 layout", "layout-windows-98"), ("Tiling layout", 
   ("NeXTSTEP layout", "layout-nextstep"), ("OS2 Warp layout", "layout-os2-warp"),
   ("Omarchy layout", "layout-omarchy"), ("Commander layout", "layout-commander")]
 
-# Eighteen of the repo's samples, as the frame lists them: their names, icons
-# and categories.
-const Picked = ["Analog clock face", "Word clock", "Pomodoro", "Calendar", "Day agenda", "Weather",
-  "Google Photos", "Unsplash image", "Gallery", "Cuteness Overload", "2048", "Solitaire", "Sudoku", "Snake",
-  "To-do", "Sketchbook", "Chart", "Counter"]
+# Twenty-five of the repo's samples, as a frame lists them (their names, icons
+# and categories): ten games, four clocks, three photo scenes, two each of
+# calendars and tools, one each of weather, art, AI and dashboards.
+const Picked = ["2048", "Analog clock face", "Blackjack", "Google Photos", "Block drop", "Calendar",
+  "Brick breaker", "Word clock", "Weather", "Cave flyer", "Checkers", "Immich", "Pomodoro", "Connect four",
+  "Gallery", "Minesweeper", "Day agenda", "Mahjong", "Calculator", "MiniGPT", "Memory match", "Rainbow clock",
+  "Unsplash image", "Pixel art", "Map"]
 
 proc picked(): seq[SwitcherEntry] =
   for name in Picked:
@@ -44,16 +46,6 @@ var entries = picked()
 sceneSwitcherListing = proc(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   {.cast(gcsafe).}:
     entries
-
-proc samplePicture(frameConfig: FrameConfig, sceneId: string, width, height: int): Image {.nimcall, gcsafe.} =
-  ## A Pi's last snapshot of the scene: the sample's own picture, at the size asked.
-  {.cast(gcsafe).}:
-    let path = Samples / sceneId.split('/', 1)[1] / "image.jpg"
-    if not fileExists(path): return nil
-    try:
-      result = readImage(path).resize(width, height)
-    except CatchableError:
-      result = nil
 
 proc panel(id, hex, layout: string): JsonNode =
   %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 600,
@@ -136,17 +128,16 @@ proc settle() =
 let shots = getEnv("FRAMEOS_DESKTOP_SHOTS")
 
 suite "every desktop's window of every scene (the switcher)":
-  test "opens in each desktop's look, its tiles one size, small and large":
+  test "opens in each desktop's look, a folder's icons, small and large":
     windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
       {.cast(gcsafe).}:
         result = newJArray()
         for entry in entries: result.add %*{"id": entry.id, "name": entry.name, "icon": entry.icon,
           "category": entry.category}
-    for (width, height, pictures) in [(800, 480, false), (1280, 800, true)]:
+    for (width, height) in [(800, 480), (1280, 800)]:
       config = FrameConfig(name: "desktop", mode: "rpios", device: "framebuffer", width: width, height: height,
         rotate: 0, scalingMode: "cover", debug: false, settings: %*{}, saveAssets: %*false,
         assetsPath: getTempDir() / "frameos-desktop-switcher-test")
-      sceneSwitcherThumbnail = if pictures: samplePicture else: nil
       for (folder, layoutId) in Desktops:
         checkpoint folder & " " & $width
         problems = @[]
@@ -170,4 +161,3 @@ suite "every desktop's window of every scene (the switcher)":
         check problems.len == 0
         if problems.len > 0: echo problems
     chooseLayout("")
-    sceneSwitcherThumbnail = nil

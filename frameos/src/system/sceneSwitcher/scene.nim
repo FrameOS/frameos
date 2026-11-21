@@ -13,9 +13,10 @@
 ##
 ## It is drawn with the JSX layout (ui/layout.nim): the tree is built here, in
 ## Nim, so it needs no QuickJS, and its taps and the list's scrolling are
-## ui/events.nim's, as for a JS app's UI. A fast panel gets a dark grid with
-## each scene's last picture where the host keeps one
-## (`sceneSwitcherThumbnail`: the Linux runner's scene snapshots); e-paper
+## ui/events.nim's, as for a JS app's UI. Each scene is an icon with its
+## name under it, as in a folder's icon view; a fast panel gets them on a
+## dark page (a host's pictures, `sceneSwitcherThumbnail`, are no longer
+## drawn: 2026-11-21); e-paper
 ## gets black on white with the highlighted tile inverted, so it reads on a
 ## one-bit panel and follows the keys, and the list scrolls to the tile they
 ## are on. The scene list is the host's (`sceneSwitcherListing`): the order
@@ -78,11 +79,10 @@ type
     ## is a row `headingH` tall above its tiles.
     cols*, rows*: int
     tileW*, tileH*, gap*, x0*, y0*, pad*, headerH*, headingH*: int
-    ## Inside a tile: the picture's box (`boxW` x `boxH`: the scene's last
-    ## snapshot at 4:3, else a square for its icon), its name's letters
-    ## (`text`, two lines at most), and the room around them (`inner`).
-    pictures*: bool
-    boxW*, boxH*, text*, inner*: int
+    ## Inside a cell: the icon (`icon` px square), its name's letters
+    ## (`text`, two lines at most, centred under it), and the room around
+    ## them (`inner`). The cells are `tileW` apart, `gap` between them.
+    icon*, text*, inner*: int
     listX*, listY*, listW*, listH*: int
     ## A round panel (frameos/panel_shape): the list is the square inside
     ## the circle `radius` px around (cx, cy) (`RoundInset` in from the rim),
@@ -96,6 +96,7 @@ type
     slow*: bool ## a press cost a refresh last time (panelLook): taps alone
     gear*: bool ## the frame offers its page (frameSettingsRead): the header's gear, after the tiles for the keys
     keysOnly*: bool ## nothing on the frame takes a tap (takesNoTaps): no Close or gear to draw
+    headed*: bool ## the categories have headings (heads): a dozen scenes and more, two a category
     roomW, roomH, unit: int ## what the last render laid out in (tree): 0 before one
 
 const
@@ -106,10 +107,12 @@ const
   IdleSecondsFast* = 60.0
   IdleSecondsSlow* = 300.0
   MaxCols = 32
-  GridUnitMax = 400
-    ## The most a grid's sizes are a share of: a tile is as large on a bigger
-    ## screen as on a 400 px one (and in a desktop's window), and the bigger
-    ## screen shows more of them (the render scale is what makes them larger).
+  GridUnitMax = 480
+    ## The most the header's sizes are a share of, and `CellUnitMax` the
+    ## cells': an icon is as large on a bigger screen as on a 400 px one (and
+    ## in a desktop's window), and the bigger screen shows more of them (the
+    ## render scale is what makes them larger).
+  CellUnitMax = 400
   # A gear, 48 units square: the teeth clockwise, the hole the other way.
   GearPath = "M20 9L21 3L27 3L28 9L32 11L36 7L41 12L37 16L39 20L45 21L45 27L39 28L37 32L41 36L36 41L32 37" &
     "L28 39L27 45L21 45L20 39L16 37L12 41L7 36L11 32L9 28L3 27L3 21L9 20L11 16L7 12L12 7L16 11Z" &
@@ -251,26 +254,27 @@ proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
 proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0): SwitcherGrid =
-  ## The tile grid on a `width` x `height` canvas, as the Scene store lays
-  ## out its own (docs/scene-switcher.md "The tiles"): a scene is its picture
-  ## (the host's last snapshot of it, at 4:3) or its icon over its name, and
-  ## a tile is one size whatever the room, so a bigger screen or window shows
-  ## more of them, never larger ones (the owner's rule, 2026-11-20). As many
-  ## tiles across as fit, stretched to fill the row; more rows than fit
-  ## scroll, and `rows` is how many show.
+  ## Where the cells go on a `width` x `height` canvas: a folder's icon view
+  ## (docs/scene-switcher.md "The tiles"), each scene an icon with its name
+  ## centred under it, the cells close together from the left, as many across
+  ## as fit; the rows that do not fit scroll, and `rows` is how many show.
+  ## A cell is one size whatever the room (84 px at a 400 px unit, as a file
+  ## manager's at 100%), so a bigger screen or window shows more of them,
+  ## never larger ones. `thumbnails` is no longer drawn (2026-11-21).
   ## On a round panel the list is the square inscribed in the circle that
-  ## stays `RoundInset` in from the rim, so no tile shows a corner off the
+  ## stays `RoundInset` in from the rim, so no cell shows a corner off the
   ## glass.
   ## `unit`: what the sizes are a share of (the panel's shorter edge, for a
   ## UI laid out at its render scale; 400 in a desktop's window); the
-  ## canvas's shorter edge without it, and never more than `GridUnitMax`.
+  ## canvas's shorter edge without it.
   let unit = min(if unit > 0: unit else: min(width, height), GridUnitMax)
-  result.pad = clamp(permille(unit, 30), 4, 24)
-  result.gap = clamp(permille(unit, 20), 3, 16)
+  let cu = min(unit, CellUnitMax)
+  result.pad = clamp(permille(unit, 35), 4, 24)
+  result.gap = clamp(permille(cu, 10), 2, 8)
   result.headerH = clamp(permille(unit, 110), 18, 64)
-  result.headingH = clamp(permille(unit, 80), 16, 48)
+  result.headingH = clamp(permille(cu, 55), 14, 36)
   result.x0 = result.pad
-  result.y0 = result.headerH + result.gap
+  result.y0 = result.headerH + clamp(permille(unit, 25), 3, 16)
   # Under the header to the bottom edge, the whole width, so a finger
   # anywhere below the header scrolls it.
   result.listY = result.headerH
@@ -295,24 +299,15 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
       result.listH = result.side
       gw = result.side
       gh = result.side
-  # At a 400 unit (a desktop's window): a tile 96 px wide with a 52 px icon
-  # and 12 px letters, or 120 with a 120x90 picture, as the store's.
-  when defined(frameosEmbedded):
-    result.pictures = false
-  else:
-    result.pictures = thumbnails
-  result.text = clamp(permille(unit, 30), 10, 24)
-  result.inner = clamp(permille(unit, 15), 3, 12)
-  let least = min(clamp(permille(unit, if result.pictures: 330 else: 240), 48, 200), gw)
-  result.cols = clamp((gw + result.gap) div (least + result.gap), 1, MaxCols)
-  result.tileW = max((gw - result.gap * (result.cols - 1)) div result.cols, 1)
-  if result.pictures:
-    result.boxW = least - 2 * result.inner
-    result.boxH = result.boxW * 3 div 4
-  else:
-    result.boxW = max(min(clamp(permille(unit, 130), 16, 104), result.tileW - 4 * result.inner), 8)
-    result.boxH = result.boxW
-  result.tileH = 2 * result.inner + result.boxH + result.inner + 2 * (result.text * 5 div 4)
+  result.text = clamp(permille(cu, 30), 10, 24)
+  result.inner = clamp(permille(cu, 10), 2, 8)
+  result.icon = clamp(permille(cu, 100), 20, 64)
+  result.tileW = min(clamp(permille(cu, 210), 56, 120), gw)
+  # The icon's tinted box (the icon and `inner` around it), `inner` over and
+  # under it, the name's two lines, and `inner` under them: a row's names
+  # never touch the next row's headings.
+  result.tileH = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
+  result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
 
 proc isRound*(frameConfig: FrameConfig): bool =
@@ -419,34 +414,40 @@ proc grouped*(entries: seq[SwitcherEntry]): seq[SwitcherEntry] =
         result.add entry
 
 proc list(self: SceneSwitcherScene) =
-  ## The host's scenes, in the order they are drawn and numbered.
+  ## The host's scenes, in the order they are drawn, and whether their
+  ## categories get headings.
   self.entries = grouped(listEntries())
+  var groups = 0
+  for i in 0 ..< self.entries.len:
+    if i == 0 or self.entries[i].category != self.entries[i - 1].category:
+      inc groups
+  self.headed = self.entries.len >= 12 and self.entries[0].category.len > 0 and 2 * groups <= self.entries.len
 
 proc heads*(self: SceneSwitcherScene, index: int): bool =
-  ## Whether the tile at `index` starts a category, a heading above it: never
-  ## where no scene has one.
-  self.entries.len > 0 and self.entries[0].category.len > 0 and
+  ## Whether the cell at `index` starts a category, a heading above it: never
+  ## where no scene has one, nor where headings would be most of the list
+  ## (`headed`: fewer than a dozen scenes, or fewer than two a category),
+  ## which keeps the order by category without them.
+  self.headed and
     (index == 0 or self.entries[index].category != self.entries[index - 1].category)
 
 type Spot* = tuple[col, top: int]
   ## Where a tile goes in the list: its column, and its top from the list's.
 
+proc rowH(self: SceneSwitcherScene, grid: SwitcherGrid): int =
+  ## A row's height: its cells, and over them the strip its categories'
+  ## headings sit in where there are any.
+  grid.tileH + grid.gap + (if self.headed: grid.headingH else: 0)
+
 proc spots*(self: SceneSwitcherScene, grid: SwitcherGrid): seq[Spot] =
-  ## Every tile's place in the list, row after row, a category's tiles from
-  ## a row of their own under its heading.
-  var col = 0
-  var top = grid.y0 - grid.listY
+  ## Every cell's place in the list, row after row, one category's straight
+  ## after another's: a heading sits over its category's first cells in the
+  ## row it starts in (Finder's groups, but no row left half empty for a
+  ## category of one).
+  let row = self.rowH(grid)
+  let first = grid.y0 - grid.listY + (if self.headed: grid.headingH else: 0)
   for i in 0 ..< self.entries.len:
-    if self.heads(i):
-      if col > 0:
-        top += grid.tileH + grid.gap
-        col = 0
-      top += grid.headingH
-    result.add (col, top)
-    inc col
-    if col == grid.cols:
-      col = 0
-      top += grid.tileH + grid.gap
+    result.add (i mod grid.cols, first + (i div grid.cols) * row)
 
 # ------------------------------------------------------------------ the model
 
@@ -491,7 +492,7 @@ proc reveal(self: SceneSwitcherScene, index: int) =
   let spot = self.spots(grid)[index]
   let margin = grid.y0 - grid.listY
   var top = spot.top - margin
-  if self.heads(index):
+  if self.headed:
     top -= grid.headingH
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
@@ -521,7 +522,7 @@ proc screenful(self: SceneSwitcherScene, delta: int) =
   let n = self.entries.len
   if n > 0:
     let grid = self.grid()
-    let step = max(grid.cols * grid.rows, 1)
+    let step = max(grid.cols * max((grid.rows * (grid.tileH + grid.gap)) div self.rowH(grid), 1), 1)
     let lit = min(self.highlighted(), n) # n: the gear
     if delta > 0:
       self.highlight(if lit >= n - 1: 0 else: min(lit + step, n - 1))
@@ -706,89 +707,91 @@ proc gearButton(self: SceneSwitcherScene, size: int, paper, lit: bool, button: s
   result = result.role(if lit: "selected" else: "button").onClick(self.entries.len + 1)
 
 type TileLook = object
-  ## What every tile in the list shares, and the one at hand.
+  ## What every cell in the list shares, and the one at hand.
   paper, lit, showing: bool
-  radius: int
+  hue: int ## its category's place in the list: its color
 
-proc tileBox(self: SceneSwitcherScene, look: TileLook, index: int, grid: SwitcherGrid): SvgNode =
-  ## A tile's picture: the scene's last snapshot where the host keeps one
-  ## (Linux), else its icon (or its first letter) on a square in the tile's
-  ## role, and a dot at its corner when it is the scene the list was opened
-  ## from.
-  var c = "relative shrink-0"
-  c.px("w", grid.boxW)
-  c.px("h", grid.boxH)
+const Hues = ["#2563eb", "#d97706", "#059669", "#dc2626", "#7c3aed", "#0891b2", "#db2777", "#65a30d"]
+  ## A category's color for its icons, by its place in the list: icons in a
+  ## folder are not all one color, and two categories side by side differ.
+
+proc cellIcon(self: SceneSwitcherScene, look: TileLook, index: int, grid: SwitcherGrid): SvgNode =
+  ## The icon of the cell: the scene's own (docs/scene-icons.md) in its
+  ## category's color, else its first letter on a rounded square of that
+  ## color; black on e-paper. Lit, a tint behind it, as a file manager's
+  ## selected icon; a dot at its corner when it is the scene the list was
+  ## opened from.
+  let side = grid.icon + 2 * grid.inner
+  var c = "relative shrink-0 flex items-center justify-center"
+  c.square(side)
+  c.px("rounded", grid.inner * 2)
+  if look.lit and not look.paper: c.add " bg-sky-400/25"
   result = el("div", c)
-  var picture: Image
-  when not defined(frameosEmbedded):
-    # An ESP32 shows icons only: loading, scaling and drawing a picture per
-    # tile made the drawer take seconds to open on a 10" e-paper panel (the
-    # owner's call, 2026-11-10), and writing them cost seconds of flash after
-    # renders. The preview keeps no picture of a scene it is not showing
-    # either.
-    if grid.pictures and not sceneSwitcherThumbnail.isNil:
-      try:
-        picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, grid.boxW, grid.boxH)
-      except Exception:
-        picture = nil
-  var b = "absolute left-0 top-0"
-  b.px("w", grid.boxW)
-  b.px("h", grid.boxH)
-  b.px("rounded", look.radius)
-  if not picture.isNil:
-    result.children.add SvgNode(tag: "img", image: picture, attrs: @[("class", b)])
+  let hue = Hues[look.hue mod Hues.len]
+  let icon = self.entries[index].icon
+  if icon.len > 0:
+    var g = "flex items-center justify-center"
+    if not look.paper:
+      g.add " text-["
+      g.add hue
+      g.add "]"
+    let mark = el("div", g, iconNode(icon, grid.icon))
+    result.children.add mark
   else:
-    b.add " flex items-center justify-center font-bold"
-    if not look.paper: b.add(if look.lit: " bg-sky-700 text-white" else: " bg-zinc-800 text-zinc-200")
-    elif look.lit: b.add " bg-black text-white"
-    else: b.add " border-2 border-black"
-    let side = min(grid.boxW, grid.boxH)
-    b.px("text", clamp(side * 2 div 5, 10, 64))
-    let icon = self.entries[index].icon
     var name = self.entries[index].name
     if name.len == 0: name = self.entries[index].id
     var letter = 1 # the first letter, its UTF-8 continuation bytes too
     while letter < name.len and (ord(name[letter]) and 0xC0) == 0x80:
       inc letter
-    let mark = if icon.len > 0: iconNode(icon, max(side * 11 div 20, 8)) else: txt(name[0 ..< letter])
-    result.children.add el("div", b, mark).role(if look.lit: "tileLit" else: "tile")
+    var b = "flex items-center justify-center font-bold"
+    b.square(grid.icon * 9 div 10)
+    b.px("rounded", grid.icon div 5)
+    b.px("text", grid.icon div 2)
+    if not look.paper:
+      b.add " text-white bg-["
+      b.add hue
+      b.add "]"
+    elif look.lit: b.add " border-2 border-white"
+    else: b.add " border-2 border-black"
+    result.children.add el("div", b, txt(name[0 ..< letter]))
   if look.showing:
     var d = "absolute rounded-full"
     let dot = max(6, grid.text * 2 div 3)
-    d.px("top", -2)
-    d.px("left", grid.boxW - dot + 2)
+    d.px("top", 0)
+    d.px("left", side - dot)
     d.square(dot)
     if not look.paper: d.add " bg-sky-400"
-    elif look.lit: d.add " bg-white border-2 border-black"
+    elif look.lit: d.add " bg-white"
     else: d.add " bg-black"
     result.children.add el("div", d).role("accent")
 
 proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid: SwitcherGrid): SvgNode =
-  ## The scene at `index`, at its `spot` in the list: its picture or icon
-  ## over its name, as the Scene store's tiles (and a desktop's apps) are.
-  ## Lit for the keys: inverted on e-paper, ringed on an LCD.
+  ## The scene at `index`, at its `spot`: a folder's icon, its name centred
+  ## under it on two lines at most. No box around it: lit for the keys, the
+  ## icon gets a tint and the name a filled label in the theme's `picked`
+  ## (Explorer's blue label, Finder's pill); on e-paper the cell is inverted.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
   c.px("pt", grid.inner)
-  c.px("px", grid.inner div 2)
   c.px("gap", grid.inner)
-  c.px("rounded", look.radius)
+  c.px("rounded", grid.inner * 2)
   c.add " flex flex-col items-center"
   if look.paper:
     if look.lit: c.add " bg-black text-white"
-  elif look.lit:
-    c.add " border-2 border-sky-400"
   else:
-    c.add " active:bg-zinc-800"
-  result = el("div", c, self.tileBox(look, index, grid)).onClick(index)
+    c.add " active:bg-sky-400/15"
+  result = el("div", c, self.cellIcon(look, index, grid)).onClick(index)
   var title = self.entries[index].name
   if title.len == 0:
     title = self.entries[index].id
-  var n = "w-full text-center line-clamp-2 leading-tight"
+  var n = "max-w-full text-center line-clamp-2 leading-tight"
   n.px("text", grid.text)
+  n.px("px", grid.inner)
+  n.px("rounded", grid.inner)
   if look.paper: n.add " font-bold"
-  result.children.add el("span", n, txt(title))
-  result = result.role(if look.lit: "picked" else: "option")
+  elif look.lit: n.add " bg-sky-600 text-white"
+  let label = el("span", n, txt(title))
+  result.children.add(if look.lit and not look.paper: label.role("picked") else: label)
 
 proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
     width, size, small: int, button: string) =
@@ -828,9 +831,10 @@ when not defined(frameosEmbedded):
     ## (6). Every box is cut to the chord it sits on, so no corner leaves the
     ## circle `RoundInset` in from the rim.
     let
+      gap = grid.gap * 3 # the cells' gap is a file manager's, the chrome's three of it
       arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
-      rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - grid.gap), 8)
-      top = grid.y0 - grid.gap div 2 - rowH
+      rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - gap), 8)
+      top = grid.y0 - gap div 2 - rowH
       titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
     var c: string
     c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
@@ -838,10 +842,10 @@ when not defined(frameosEmbedded):
     c.px("text", size)
     root.children.add el("div", c, txt("Scenes"))
     let
-      closeTop = grid.y0 + grid.side + grid.gap div 2
+      closeTop = grid.y0 + grid.side + gap div 2
       closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
       # The gear left of Close, the two centred on the chord together.
-      gearW = if self.gear: rowH + grid.gap else: 0
+      gearW = if self.gear: rowH + gap else: 0
       closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
       left = grid.cx - (closeW + gearW) div 2
     c = ""
@@ -857,13 +861,17 @@ when not defined(frameosEmbedded):
       gear.attrs[0][1].px("top", closeTop)
       root.children.add gear
 
-proc heading(grid: SwitcherGrid, top: int, title: string, paper: bool, small: int): SvgNode =
-  ## A category's name over its tiles, across the list.
+proc heading(grid: SwitcherGrid, spot: Spot, span: int, title: string, paper: bool): SvgNode =
+  ## A category's name over its first cells, small, with a rule under it as
+  ## far as they go: a file manager's groups.
   var c: string
-  c.at(grid.x0 - grid.listX, top - grid.headingH, grid.cols * (grid.tileW + grid.gap) - grid.gap,
-    grid.headingH)
-  c.add " flex items-center"
-  c.px("text", small)
+  c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top - grid.headingH,
+    span * (grid.tileW + grid.gap) - grid.gap, grid.headingH - grid.gap)
+  c.add " flex items-end"
+  c.px("px", grid.inner)
+  c.px("pb", grid.inner div 2)
+  c.px("text", max(grid.text - 1, 10))
+  c.add(if paper: " border-b-2 border-black" else: " border-b border-zinc-500/40")
   var t = "truncate font-bold"
   if not paper: t.add " text-zinc-400"
   result = el("div", c, el("span", t, txt(if title.len > 0: title else: "Other")).role("muted"))
@@ -914,12 +922,28 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     result.children.add el("div", c, txt("No scenes installed yet."))
   # No `return` for that: the loop below ends at once, and one way out keeps
   # one clean-up.
-  var look = TileLook(paper: paper, radius: clamp(grid.boxH div 7, 3, 16))
+  var look = TileLook(paper: paper)
   let opener = self.opener()
   let spots = self.spots(grid)
+  var group = -1
   for index in 0 ..< self.entries.len:
+    if index == 0 or self.entries[index].category != self.entries[index - 1].category:
+      inc group
     if self.heads(index):
-      list.children.add heading(grid, spots[index].top, self.entries[index].category, paper, small)
+      # Over its cells in this row: as far as the category goes, and on over
+      # the empty places after the list's last cell while its name needs the
+      # room (a letter is about 0.55 of the size, bold); no further, so it
+      # never runs over another category's: there it is cut short.
+      var span = 1
+      while index + span < self.entries.len and spots[index + span].top == spots[index].top and
+          self.entries[index + span].category == self.entries[index].category:
+        inc span
+      let need = self.entries[index].category.len * max(grid.text - 1, 10) * 11 div 20 + 2 * grid.inner
+      while index + span >= self.entries.len and spots[index].col + span < grid.cols and
+          span * (grid.tileW + grid.gap) - grid.gap < need:
+        inc span
+      list.children.add heading(grid, spots[index], span, self.entries[index].category, paper)
+    look.hue = group
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
     list.children.add self.tile(look, index, spots[index], grid)
@@ -994,24 +1018,10 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
   # of flashing for nothing. `pointer` hands it taps alone, which leave the
   # target's input (what is hovered, what is pressed) empty. Back by itself
   # once nobody has touched it for a while.
-  var more = false
-  when not defined(frameosEmbedded):
-    # Pictures that would have kept the panel waiting come in the next
-    # render (the Linux host's decode budget, scene_switcher_linux.nim). Not
-    # on a slow panel, where each render is a refresh: it waits for all of them.
-    let pass = if self.slow: nil else: sceneSwitcherThumbnailPass
-    if not pass.isNil:
-      try: discard pass(true) except Exception: discard
   let (roomW, roomH) = uiRoom(self.frameConfig, image.width, image.height)
   let tree = self.tree(roomW, roomH, self.paper, self.sizeUnit(image))
-  when not defined(frameosEmbedded):
-    if not pass.isNil:
-      try: more = pass(false) except Exception: more = false
   if self.drawUi(SceneSwitcherId, tree, image, self.paper, self.slow, onTap, idleSeconds(self.slow), roomW, roomH):
     leave()
-  elif more:
-    rhythmMarkDue(self)
-    sendEvent(evRender, newJObject(), eoScene)
 
 # ------------------------------------------------------------ the scene
 

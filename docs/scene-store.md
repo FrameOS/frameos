@@ -269,9 +269,7 @@ kept.
   tile is follows the panel instead, by the square root of its shorter side
   over 480 in quarters: 0.75 below about 370 px, 1.25 from about 600, 1.5 from
   about 900 (a 1080p screen across a room), and at most 1 in a window of a
-  desktop (a box smaller than the panel), the desktop's own size. The
-  built-in scene switcher's tiles, every desktop's window of every scene, are
-  these same tiles (docs/scene-switcher.md "The tiles").
+  desktop (a box smaller than the panel), the desktop's own size.
 - **What the pictures cost.** Only tiles near the screen are built, so only
   they ask for their picture; each is kept by the runtime at its drawn size
   (`docs/jsx-ui.md` "Photos that stay": 48 small pictures at most, the oldest
