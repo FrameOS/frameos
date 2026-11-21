@@ -61,5 +61,7 @@ suite "glyph cache budget":
   test "the page cache for fonts on the card grows from 16 MB":
     board(8 * MB - 200 * KB, 2 * MB)
     check fontPageSlots() == 16
+    check fontMemoEntries() == 256
     board(16 * MB - 300 * KB, 2 * MB)
     check fontPageSlots() == 64
+    check fontMemoEntries() == 1024

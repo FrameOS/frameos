@@ -161,12 +161,17 @@ proc glyphCacheBudgetBytes*(): int =
 
 proc fontPageSlots*(): int =
   ## Page slots of the render thread's cache for fonts read where they lie
-  ## (pixie/fontformats/filefont.nim, 512 bytes each, and the tables that
-  ## remember a rune's glyph, a glyph's box and a pair's kerning, 896 bytes
-  ## more a slot): 16 (22 KB) on an 8 MB board, 64 (88 KB) from 16 MB, where
-  ## the bigger glyph cache invites more faces at once. Made when a font from
-  ## the card first draws, never otherwise.
+  ## (pixie/fontformats/filefont.nim, 1 KB each: on an SD card a read costs
+  ## its latency, about 12 ms on SPI, whatever its size): 16 (16 KB) on an
+  ## 8 MB board, 64 (64 KB) from 16 MB, where the bigger glyph cache invites
+  ## more faces at once. Made when a font from the card first draws.
   if deviceMemoryBytes() > LargeDeviceBytes: 64 else: 16
+
+proc fontMemoEntries*(): int =
+  ## Entries of each of the tables beside those pages that remember a rune's
+  ## glyph, a glyph's advance and box (and twice that, a pair's kerning), two
+  ## ways each: 256 (14 KB) on an 8 MB board, 1024 (56 KB) from 16 MB.
+  if deviceMemoryBytes() > LargeDeviceBytes: 1024 else: 256
 
 when defined(memProbe):
   proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}

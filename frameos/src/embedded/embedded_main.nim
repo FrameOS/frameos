@@ -13,7 +13,7 @@
 
 import std/[json, math, monotimes, options, strformat, times]
 import pixie
-from pixie/fontformats/filefont import fileFontPages, releaseFontFiles
+from pixie/fontformats/filefont import fileFontPages, fileFontMemos, releaseFontFiles
 
 import embedded_scene
 import embedded_runtime
@@ -635,6 +635,7 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
     # Fonts on the card are read where they lie, a 512-byte page at a time
     # through a cache made when one first draws (pixie's filefont.nim).
     fileFontPages = fontPageSlots()
+    fileFontMemos = fontMemoEntries()
     initScene()
     when defined(memProbe): memProbe("INIT after initScene")
     log(&"nim runtime initialized: {frameWidth}x{frameHeight} rotate={frameRotate} " &

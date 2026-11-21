@@ -3399,6 +3399,10 @@ proc clearGlyphCache*() {.raises: [].} =
   glyphLive = 0
   glyphCacheBytes = 0
 
+proc glyphCachePass*(): uint32 {.raises: [].} =
+  ## The pass the render drawing now began (newGlyphCachePass); 0 for none.
+  glyphPass
+
 proc newGlyphCachePass*() {.raises: [].} =
   ## A render begins: what it draws from now on is kept over what an earlier
   ## render drew, and never put out for a glyph drawn later in it.

@@ -11,6 +11,7 @@
 
 import std/[monotimes, times, strutils]
 import pixie/paths
+from pixie/fontformats/filefont import fileFontPageReads, fileFontReadNs, fileFontOpens, fileFontClears
 
 type RenderPhase* = enum
   phRuntime = "runtime" ## a QuickJS runtime and context made (a cold start)
@@ -37,6 +38,8 @@ type RenderPhase* = enum
   phRaster = "raster"  ## pixie's render into the panel
   phFit = "fit"        ## the automatic fit of a drawn image into the panel's range (utils/asset_colors)
 
+var cardAtStart: (int, int64, int, int)
+  ## Fonts read from the card so far (filefont.nim): pages, their time, opens, clears.
 var probeOn* = false
 var
   inputNs*: int64 ## events dispatched since the last render line (single_scene_host.send)
@@ -89,6 +92,7 @@ proc probeBegin*(): (int, int, int, int) =
     pathProbeCount[kind] = 0
   for reason in CacheSkip:
     cacheSkips[reason] = 0
+  cardAtStart = (fileFontPageReads, fileFontReadNs, fileFontOpens, fileFontClears)
   (coverageCacheHits, coverageCacheMisses, glyphCacheHits, glyphCacheMisses)
 
 proc probeLine*(cacheAtStart: (int, int, int, int)): string =
@@ -102,6 +106,12 @@ proc probeLine*(cacheAtStart: (int, int, int, int)): string =
     $(coverageCacheMisses - cacheAtStart[1]) & " " & $(coverageCacheUsedBytes() div 1024) & "K" &
     " glyphs " & $(glyphCacheHits - cacheAtStart[2]) & "/" & $(glyphCacheMisses - cacheAtStart[3]) &
     " " & $(glyphCacheUsedBytes() div 1024) & "K |"
+  let pages = fileFontPageReads - cardAtStart[0]
+  if pages > 0 or fileFontClears > cardAtStart[3]:
+    # Fonts read where they lie on the card (docs/esp32-fonts.md): pages
+    # read and what they took, files opened, page caches let go.
+    result.add " card " & $pages & "p" & ms1(fileFontReadNs - cardAtStart[1]) &
+      " " & $(fileFontOpens - cardAtStart[2]) & "o " & $(fileFontClears - cardAtStart[3]) & "c |"
   for kind in PathProbeKind:
     if pathProbeCount[kind] > 0:
       result.add " " & $kind & " " & $pathProbeCount[kind] & "x" & ms1(pathProbeNs[kind])

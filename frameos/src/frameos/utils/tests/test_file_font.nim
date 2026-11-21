@@ -163,8 +163,8 @@ suite "TrueType fonts read where they lie":
     GC_fullCollect()
     # Every face drew text, and what stays is the faces, the page cache and
     # its three tables (a rune's glyph, a glyph's advance and box, a pair's
-    # kerning: 14 KB at 16 pages): no outline, no font table.
-    check fontPagesHeldBytes() < 24 * 1024
+    # kerning: 14 KB beside 16 pages of 1 KB): no outline, no font table.
+    check fontPagesHeldBytes() < 32 * 1024
     check getOccupiedMem() - before < opened + (fontPagesHeldBytes() - pagesBefore) + 8192
     releaseFontFiles()
 
@@ -299,6 +299,26 @@ suite "colour emoji from a bitmap font read in place":
     check colorGlyphCacheBytes() <= 16 * 1024
     clearColorGlyphCache()
     check colorGlyphCacheBytes() == 0
+
+  test "a render that needs more than the budget keeps what fits, as the glyph cache does":
+    let previousBudget = colorGlyphCacheBudget
+    defer: colorGlyphCacheBudget = previousBudget
+    clearColorGlyphCache()
+    colorGlyphCacheBudget = 40 * 1024 # about four of these at 36 px
+    let font = newFont(emojiFace(true))
+    font.size = 36
+    let image = newImage(800, 60)
+    const line = "😀🎉👍❤🍎🚀🐱🌈⚡🍕🎵☀"
+    newGlyphCachePass()
+    colorGlyphDecodes = 0
+    image.fillText(font.typeset(line))
+    check colorGlyphDecodes == 12
+    newGlyphCachePass()
+    colorGlyphDecodes = 0
+    image.fillText(font.typeset(line))
+    # Plain LRU put out each emoji just before it was drawn again: 12 of 12.
+    check colorGlyphDecodes <= 9
+    check colorGlyphCacheBytes() <= 40 * 1024
 
   test "an emoji's PNG and its decode are let go once it is drawn":
     let previousBudget = colorGlyphCacheBudget

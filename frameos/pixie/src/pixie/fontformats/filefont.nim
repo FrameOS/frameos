@@ -34,7 +34,8 @@
 ## turns the first three into a TrueType file this reads; a variable font
 ## draws its default instance, as pixie's whole parse does.
 
-import bumpy, vmath, ../common, ../paths, opentype
+import std/monotimes, bumpy, vmath, ../common, ../paths, opentype
+from std/times import inNanoseconds
 
 type
   FileFont* = ref object
@@ -78,17 +79,24 @@ type
     value: int32
 
 const
-  PageShift = 9
+  PageShift {.intdefine: "fileFontPageShift".} = 10 ## 1 KB pages: on a card the read is the cost, not its size
   FontPageBytes* = 1 shl PageShift
   DefaultPages = 16
+  DefaultMemos = 256
   MaxRecordBytes = 64 * 1024 ## a glyf record larger than this is refused
   MaxPngBytes = 512 * 1024 ## and a colour glyph's PNG
 
 var
   fileFontIds: int
   fileFontPages* {.threadvar.}: int
-    ## Page slots of the cache on this thread (512 bytes each); 0 = 16.
+    ## Page slots of the cache on this thread; 0 = 16.
+  fileFontMemos* {.threadvar.}: int
+    ## Entries of each memo table (a rune's glyph, a glyph's advance and
+    ## box; twice that for a pair's kerning), two ways each; 0 = 256.
   fileFontPageReads* {.threadvar.}: int ## pages this thread read from a file
+  fileFontReadNs* {.threadvar.}: int64 ## and the time those reads took
+  fileFontOpens* {.threadvar.}: int ## files it opened for them
+  fileFontClears* {.threadvar.}: int ## times its page cache was let go
   pagesMade {.threadvar.}: int
   pageFont {.threadvar.}: seq[uint32]
   pageIndex {.threadvar.}: seq[int]
@@ -123,6 +131,8 @@ proc releaseFontFiles*() {.raises: [].} =
 
 proc clearFontPages*() {.raises: [].} =
   ## Lets go of this thread's page cache (and its open file).
+  if pagesMade > 0:
+    inc fileFontClears
   releaseFontFiles()
   pageFont = @[]
   pageIndex = @[]
@@ -144,14 +154,36 @@ proc fontPagesHeldBytes*(): int {.raises: [].} =
 proc memoSlot(font: FileFont, key: uint32, wider = 0): int {.inline.} =
   ## The entry `key` of `font` goes in: sixteen a page slot, a power of two.
   if memoBits == 0:
-    let pages = if fileFontPages > 0: fileFontPages else: DefaultPages
+    let entries = if fileFontMemos > 0: fileFontMemos else: DefaultMemos
     memoBits = 4
-    while (1 shl memoBits) < pages * 16 and memoBits < 16:
+    while (1 shl memoBits) < entries and memoBits < 16:
       inc memoBits
     runeMemo = newSeq[RuneMemo](1 shl memoBits)
     glyphMemo = newSeq[GlyphMemo](1 shl memoBits)
     kernMemo = newSeq[KernMemo](2 shl memoBits)
-  int(((key + font.id * 0x9E3779B1'u32) * 0x85EBCA6B'u32) shr (32 - memoBits - wider))
+  # The first of a pair: two ways, the one used last first (`memoPair`).
+  int(((key + font.id * 0x9E3779B1'u32) * 0x85EBCA6B'u32) shr (32 - memoBits - wider)) and not 1
+
+template memoPair(memo: untyped, slot: int, hit: untyped): int =
+  ## Which of the pair at `slot` holds the entry `hit` says (`it` is the
+  ## entry), moved to the first way when it was the second; -1 for none.
+  var found = -1
+  block:
+    template it: untyped = memo[slot]
+    if hit:
+      found = slot
+  if found < 0:
+    block:
+      template it: untyped = memo[slot + 1]
+      if hit:
+        swap(memo[slot], memo[slot + 1])
+        found = slot
+  found
+
+template memoPut(memo: untyped, slot: int, entry: untyped) =
+  ## A new entry in the first way; what was there goes to the second.
+  memo[slot + 1] = memo[slot]
+  memo[slot] = entry
 
 proc readPage(font: FileFont, slot, page: int) =
   ## Reads `page` of the file into `slot`; what the file does not have is 0.
@@ -163,9 +195,12 @@ proc readPage(font: FileFont, slot, page: int) =
   if want <= 0:
     return
   inc fileFontPageReads
+  let started = getMonoTime()
+  defer: fileFontReadNs += (getMonoTime() - started).inNanoseconds
   try:
     if heldFont != font.id or heldFile == nil:
       releaseFontFiles()
+      inc fileFontOpens
       if not open(heldFile, font.path, fmRead, bufSize = 0):
         heldFile = nil
         font.stale = true
@@ -424,10 +459,10 @@ proc lookupGlyph(font: FileFont, rune: int32): int =
 proc glyphIdOf*(font: FileFont, rune: int32): int {.raises: [].} =
   ## The glyph `rune` maps to, -1 for none.
   let slot = font.memoSlot(rune.uint32)
-  if runeMemo[slot].font == font.id and runeMemo[slot].rune == rune:
+  if memoPair(runeMemo, slot, it.font == font.id and it.rune == rune) >= 0:
     return runeMemo[slot].glyph
   result = font.lookupGlyph(rune)
-  runeMemo[slot] = RuneMemo(font: font.id, rune: rune, glyph: result.int32)
+  memoPut(runeMemo, slot, RuneMemo(font: font.id, rune: rune, glyph: result.int32))
 
 proc hasGlyph*(font: FileFont, rune: int32): bool {.raises: [].} =
   font.glyphIdOf(rune) >= 0
@@ -435,9 +470,9 @@ proc hasGlyph*(font: FileFont, rune: int32): bool {.raises: [].} =
 proc glyphMemoOf(font: FileFont, glyph: int): int =
   ## The glyph's memo entry, made (its advance read) if it was not there.
   result = font.memoSlot(glyph.uint32 xor 0x5bd1e995'u32)
-  if glyphMemo[result].font != font.id or glyphMemo[result].glyph != glyph:
-    glyphMemo[result] = GlyphMemo(font: font.id, glyph: glyph.int32,
-      advance: font.u16(font.hmtxAt + min(glyph, font.numHMetrics - 1) * 4).uint16)
+  if memoPair(glyphMemo, result, it.font == font.id and it.glyph == glyph) < 0:
+    memoPut(glyphMemo, result, GlyphMemo(font: font.id, glyph: glyph.int32,
+      advance: font.u16(font.hmtxAt + min(glyph, font.numHMetrics - 1) * 4).uint16))
 
 proc advance*(font: FileFont, glyph: int): int {.raises: [].} =
   if glyph < 0 or glyph >= font.numGlyphs:
@@ -663,10 +698,10 @@ proc kerning*(font: FileFont, left, right: int): int {.raises: [].} =
   let
     pair = (left.uint32 shl 16) or (right.uint32 and 0xFFFF)
     slot = font.memoSlot(pair, 1)
-  if kernMemo[slot].font == font.id and kernMemo[slot].pair == pair:
+  if memoPair(kernMemo, slot, it.font == font.id and it.pair == pair) >= 0:
     return kernMemo[slot].value.int
   result = font.lookupKerning(left, right)
-  kernMemo[slot] = KernMemo(font: font.id, pair: pair, value: result.int32)
+  memoPut(kernMemo, slot, KernMemo(font: font.id, pair: pair, value: result.int32))
 
 
 proc bitmapRecord(font: FileFont, strike, glyph: int,

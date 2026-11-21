@@ -762,6 +762,7 @@ type ColorGlyphEntry = object
   size: int32 ## the font size in 1/64 px
   image: Image ## the bitmap at the size it is drawn
   offset: Vec2 ## its top left from the pen
+  pass: uint32 ## the render pass that last drew it (paths.nim glyphCachePass)
 
 var
   colorGlyphCacheBudget* {.threadvar.}: int
@@ -792,7 +793,8 @@ proc fileColorGlyph(
   for i in 0 ..< colorGlyphs.len:
     if colorGlyphs[i].face == typeface.serial and colorGlyphs[i].rune == rune.int32 and
         colorGlyphs[i].size == key:
-      let entry = colorGlyphs[i]
+      var entry = colorGlyphs[i]
+      entry.pass = glyphCachePass()
       colorGlyphs.delete(i)
       colorGlyphs.add entry # drawn now: the last to go
       offset = entry.offset
@@ -810,11 +812,17 @@ proc fileColorGlyph(
   let bytes = result.width * result.height * 4
   if bytes * 4 > colorGlyphCacheBudget:
     return # too big to keep: drawn from this copy and let go
+  let pass = glyphCachePass()
   while colorGlyphs.len > 0 and colorGlyphBytes + bytes > colorGlyphCacheBudget:
+    if pass != 0 and colorGlyphs[0].pass == pass:
+      # The oldest was drawn by this render too: keep what fits, as the
+      # glyph cache does, and draw this one from its copy (plain LRU put
+      # out each emoji of a line just before the next render drew it).
+      return
     colorGlyphBytes -= colorGlyphs[0].image.width * colorGlyphs[0].image.height * 4
     colorGlyphs.delete(0)
   colorGlyphs.add ColorGlyphEntry(face: typeface.serial, rune: rune.int32, size: key,
-    image: result, offset: offset)
+    image: result, offset: offset, pass: pass)
   colorGlyphBytes += bytes
 
 proc drawColorGlyphs(

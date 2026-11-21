@@ -102,7 +102,7 @@ block:
   doAssert differing(ia, ib) == 0
   # The page cache and its tables are all a file font holds, and a small one
   # still sets text (it reads pages again).
-  doAssert fontPagesHeldBytes() > 0 and fontPagesHeldBytes() < 24 * 1024
+  doAssert fontPagesHeldBytes() > 0 and fontPagesHeldBytes() < 32 * 1024
   clearFontPages()
   fileFontPages = 2
   let ic = newImage(320, 200)
