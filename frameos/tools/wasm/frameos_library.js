@@ -2,9 +2,10 @@
 // (src/wasm/wasm_main.nim, built by tools/build_wasm.sh).
 //
 // Provides the host hooks the Nim side imports:
-//  - frameos_wasm_js_log / frameos_wasm_js_event / frameos_wasm_js_open_link:
-//    forwarded to the embedding script through Module.onFrameosLog /
-//    Module.onFrameosEvent / Module.onFrameosOpenLink.
+//  - frameos_wasm_js_log / frameos_wasm_js_event / frameos_wasm_js_open_link /
+//    frameos_wasm_js_file_request: forwarded to the embedding script through
+//    Module.onFrameosLog / Module.onFrameosEvent / Module.onFrameosOpenLink /
+//    Module.onFrameosFileRequest.
 //  - fos_nim_http_request / fos_nim_http_free: the same hook the ESP32
 //    firmware implements in C (see src/frameos/utils/http_client.nim),
 //    implemented here with synchronous XHR. Synchronous requests with a
@@ -139,6 +140,14 @@ addToLibrary({
       return 1
     }
     return 0
+  },
+
+  // An Upload or a Download the Files scene asked for (frameos/file_transfer_preview.nim):
+  // {id, op, path} as JSON, to the worker, which hands it to the page.
+  frameos_wasm_js_file_request: function (requestPtr) {
+    if (Module['onFrameosFileRequest']) {
+      Module['onFrameosFileRequest'](UTF8ToString(requestPtr))
+    }
   },
 
   // Why the preview's proxy would not fetch `host`, in words a scene can

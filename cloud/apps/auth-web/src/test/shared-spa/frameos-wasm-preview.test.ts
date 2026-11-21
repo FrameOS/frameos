@@ -133,6 +133,7 @@ describe("FrameOSPreview init", () => {
     // a worker that names none reports null rather than an absent field.
     expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets, {
       cursor: false,
+      fileTransfer: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -144,6 +145,7 @@ describe("FrameOSPreview init", () => {
     expect(preview.currentSceneId).toBe("scene-1");
     expect(preview.runtimeInfo).toEqual({
       cursor: false,
+      fileTransfer: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -159,6 +161,7 @@ describe("FrameOSPreview init", () => {
     worker.reply({ runtimeVersion: "2026.9.2", type: "ready" });
     expect(onReady).toHaveBeenLastCalledWith(undefined, null, {
       cursor: false,
+      fileTransfer: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,
@@ -168,6 +171,7 @@ describe("FrameOSPreview init", () => {
     });
     expect(preview.runtimeInfo).toEqual({
       cursor: false,
+      fileTransfer: false,
       gpioEvents: false,
       inputEvents: false,
       pointerEvents: false,

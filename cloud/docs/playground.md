@@ -52,6 +52,12 @@ visitor's own browser.
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),
   which accepts the playground's origin by name. The playground is no app
   origin otherwise (`getAppOrigins`): no sign-in, no return-to, no passkeys.
+- **Files from the computer**: the Files scene's Upload and Download open the
+  browser's file picker or save the file (docs/scene-store.md "The Files
+  app"); when the tap's gesture ran out before the request came, the page asks
+  with a bar of its own ("Choose files" / "Save", `onFileRequest` in
+  `startPlayground`). What is uploaded stays in the visitor's browser, in the
+  preview's IndexedDB folder. A release from before has neither button.
 - **The keyboard** is the frame's while the canvas has the focus: every key's
   default is prevented (`startPlayground`), so a desktop's Super bindings get
   Cmd+L, Cmd+F or Cmd+1 instead of the address bar, the find bar or a tab.
