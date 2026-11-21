@@ -231,7 +231,10 @@ rule allows a manual update.
 
 1. **Trigger:** the frame hub's hourly sweep (`cloud/apps/frame-hub/src/auto-update.ts`).
 2. **Asks:** itself: the rule (TS port) with `current` = the frame's reported
-   version, `frameKey` = `cloud:<uuid>`.
+   version, `frameKey` = `cloud:<uuid>`, `target` = the release slug the hello
+   reports (`hardware.upgradeTarget`, from 2026.11.14; empty before, when only
+   `linux/*` patterns match). A frame a self-hosted backend owns is that
+   backend's to update, never the sweep's.
 3. **Installs:** it enqueues `notify_update_available` with `{"version": "…",
    "auto": true}`. A runtime from 2026.11.14 on upgrades to exactly that
    version (`scheduleFrameOSUpgrade(version)`: the release by tag from GitHub,
@@ -292,7 +295,11 @@ rule allows a manual update.
 ### ESP32 under the cloud
 
 1. **Trigger:** the hub's sweep enqueues `notify_update_available` with
-   `{"version", "auto": true}` (the firmware ignores the payload).
+   `{"version", "auto": true}` (the firmware ignores the payload). The hello
+   does not name the board's OTA layout, so the sweep decides for
+   `<chip>-generic` (or `hardware.otaPlatform` if a board ever reports one);
+   the manifest route below is asked with the real layout and has the last
+   word.
 2. **Asks:** the board fetches `/api/frames/{id}/firmware/manifest`, which now
    answers by the rule: `manual` unless the newest `notify_update_available`
    was the sweep's (`auto: true`); a board whose switch is off is answered its
