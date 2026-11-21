@@ -1,5 +1,6 @@
 import std/[math, options, os, sequtils, unittest]
 import pixie
+import pixie/blends
 import ../font
 import ../text
 
@@ -121,3 +122,69 @@ suite "text layout helpers":
       check solidMismatch * 20 < solidStamped
       # The corners the rings skipped: a thin share, never a different shape.
       check extra < inked div 4
+
+suite "the text border's grey scratch":
+  test "the outline is the RGBA scratch's, a byte a pixel instead of six":
+    # The reference: the outline as it was drawn from an RGBA scratch filled
+    # in the border color, its alpha dilated into two planes.
+    proc referenceOutline(image: Image, arrangement: Arrangement, origin: Vec2, strokeWidth: float, color: Color) =
+      let radius = max(1, ceil(strokeWidth).int)
+      let
+        baseX = floor(origin.x)
+        baseY = floor(origin.y)
+        fracX = origin.x - baseX
+        fracY = origin.y - baseY
+        bounds = arrangement.computeBounds(translate(vec2(fracX, fracY)))
+        margin = 1 + radius
+        x0 = floor(bounds.x).int - margin
+        y0 = floor(bounds.y).int - margin
+        w = ceil(bounds.x + bounds.w).int + margin - x0
+        h = ceil(bounds.y + bounds.h).int + margin - y0
+      let scratch = newImage(w, h)
+      scratch.fillText(arrangement, translate(vec2(fracX - x0.float32, fracY - y0.float32)))
+      var rows = newSeq[uint8](w * h)
+      for y in 0 ..< h:
+        for x in 0 ..< w:
+          var m = 0'u8
+          for k in max(0, x - radius) .. min(w - 1, x + radius):
+            m = max(m, scratch.unsafe[k, y].a)
+          rows[y * w + x] = m
+      let c = color.rgbx()
+      for y in 0 ..< h:
+        for x in 0 ..< w:
+          var m = 0'u8
+          for k in max(0, y - radius) .. min(h - 1, y + radius):
+            m = max(m, rows[k * w + x])
+          let (tx, ty) = (baseX.int + x0 + x, baseY.int + y0 + y)
+          if m == 0 or tx < 0 or ty < 0 or tx >= image.width or ty >= image.height: continue
+          let sa = min(m.uint32, c.a.uint32)
+          let src = rgbx(uint8((c.r.uint32 * sa + c.a.uint32 div 2) div c.a.uint32),
+            uint8((c.g.uint32 * sa + c.a.uint32 div 2) div c.a.uint32),
+            uint8((c.b.uint32 * sa + c.a.uint32 div 2) div c.a.uint32), uint8(sa))
+          image.unsafe[tx, ty] = blendNormal(image.unsafe[tx, ty], src)
+
+    let background = rgbx(240, 224, 192, 255)
+    for (hex, alpha) in [("#2050c0", 1.0), ("#000000", 1.0), ("#ffffff", 1.0), ("#c02020", 0.6)]:
+      var color = parseHtmlColor(hex)
+      color.a = alpha
+      let font = newFont(getDefaultTypeface(), 30, color)
+      let arranged = typeset(@[newSpan("Stamp\nonce, Wg!", font)], vec2(220, 110), CenterAlign, MiddleAlign)
+      for strokeWidth in [1.0, 2.0, 3.0]:
+        let origin = vec2(7.35, 4.6)
+        let reference = newImage(240, 130)
+        reference.fill(background)
+        referenceOutline(reference, arranged, origin, strokeWidth, color)
+        let grey = newImage(240, 130)
+        grey.fill(background)
+        fillTextApproxStroke(grey, arranged, origin, strokeWidth)
+        check lastApproxStroke.path == "dilated"
+        # The arrangement keeps its own paints.
+        check arranged.fonts[0].paints[0].color == color
+        var worst = 0
+        for i in 0 ..< reference.width * reference.height:
+          let (a, b) = (reference.getPixel(i), grey.getPixel(i))
+          worst = max(worst, max(max(abs(a.r.int - b.r.int), abs(a.g.int - b.g.int)),
+            max(abs(a.b.int - b.b.int), abs(a.a.int - b.a.int))))
+        if worst > 1:
+          checkpoint hex & " alpha " & $alpha & " stroke " & $strokeWidth & ": off by " & $worst
+          fail()
