@@ -284,17 +284,37 @@ suite "the frame's automatic fit":
             return false
       true
 
-    proc makers(): seq[proc(): Image] =
-      result.add(proc(): Image = newImage(61, 37))
+    proc makers(w, h: int): seq[proc(): Image] =
+      result.add(proc(): Image = newImage(w, h))
       result.add(proc(): Image =
-        let image = newImage565(61, 37)
+        let image = newImage565(w, h)
         image.ditherStores = true
         image)
-      result.add(proc(): Image = newImage565(61, 37))
-      result.add(proc(): Image = newImageGray8(61, 37))
-      result.add(proc(): Image = newImageGray4(61, 37))
+      result.add(proc(): Image = newImage565(w, h))
+      result.add(proc(): Image = newImageGray8(w, h))
+      result.add(proc(): Image = newImageGray4(w, h))
 
-    for make in makers():
+    # Rows split between two workers, as on an ESP32 (fos_rows.c): blocks
+    # handed to worker 0 and 1 in turn, so both histograms fill and are added.
+    proc alternate(fn: RowsProc, ctx: pointer, rows, blockRows: int32) {.cdecl, gcsafe, raises: [].} =
+      var first = 0'i32
+      while first < rows:
+        let last = min(rows, first + max(1'i32, blockRows))
+        fn(ctx, (first div max(1'i32, blockRows)) and 1, first, last)
+        first = last
+    var cases: seq[proc(): Image]
+    for make in makers(61, 37): cases.add make
+    let savedRunner = rowsRunner
+    let savedWorkers = rowsWorkers
+    rowsRunner = alternate
+    rowsWorkers = 2
+    defer:
+      rowsRunner = savedRunner
+      rowsWorkers = savedWorkers
+    # Big enough to be shared between the workers (64 K pixels).
+    for make in makers(331, 211): cases.add make
+
+    for make in cases:
       # The whole image, a rectangle of it, and a view of it.
       let (fast, slow) = (make(), make())
       photoInto(fast)

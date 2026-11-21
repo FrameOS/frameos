@@ -251,9 +251,68 @@ const
 proc luminanceBin*(r, g, b: uint8): int =
   binOf(r.int, g.int, b.int)
 
+# The fit's two passes over a drawn rectangle (a histogram, then the table)
+# were 0.75 to 1.45 s of every photo render on the reTerminal E1004, whose
+# drawn rectangle is often the whole 1200x1600 canvas (the hardware bench,
+# 2026-11-21): compiled for size, on one core. On a 565 or RGBX canvas they
+# are row jobs both cores take (pixie's `rowsRunner`, fos_rows.c), each
+# compiled at -O2 as the packers are; the histogram is one per worker, added
+# up after. The pixels and the counts are the same as one loop's.
+when defined(frameosEmbedded):
+  {.pragma: hotLoop, codegenDecl: "__attribute__((optimize(\"O2\"))) $# $#$#".}
+else:
+  {.pragma: hotLoop.}
+
+const fitRowsSharedPixels = 64 * 1024 ## a smaller rectangle is not worth waking the other core for
+
+type FitRowsJob = object
+  data16: ptr UncheckedArray[uint16]
+  rgbx: ptr UncheckedArray[ColorRGBX]
+  base, step: int ## dataIndex(xStart, yStart + r) = base + step * r
+  width: int
+  histograms: ptr array[2, array[256, int]]
+  lut: ptr array[256, uint8]
+  t5: ptr array[16, array[32, uint16]]
+  t6: ptr array[16, array[64, uint16]]
+  dither: bool
+
+proc histogramRows565(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [], hotLoop.} =
+  let job = cast[ptr FitRowsJob](ctx)
+  let px = job.data16
+  {.cast(gcsafe).}:
+    for r in first.int ..< last.int:
+      if worker == 0: breathe()
+      let rowStart = job.base + job.step * r
+      for index in rowStart ..< rowStart + job.width:
+        let p = px[index].int
+        inc job.histograms[worker][binOf(Expand5[p shr 11].int, Expand6[(p shr 5) and 63].int, Expand5[p and 31].int)]
+
+proc histogramRowsRgbx(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [], hotLoop.} =
+  let job = cast[ptr FitRowsJob](ctx)
+  let px = job.rgbx
+  for r in first.int ..< last.int:
+    if worker == 0: breathe()
+    let rowStart = job.base + job.step * r
+    for index in rowStart ..< rowStart + job.width:
+      inc job.histograms[worker][binOf(px[index].r.int, px[index].g.int, px[index].b.int)]
+
 proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
     histogram: var array[256, int]) =
   let width = xEnd - xStart
+  if image.format in {pfRgb565, pfRgbx}:
+    var
+      counts: array[2, array[256, int]]
+      job = FitRowsJob(
+        data16: (if image.format == pfRgb565: image.data16 else: nil),
+        rgbx: (if image.format == pfRgbx: image.data else: nil),
+        base: image.dataIndex(xStart, yStart),
+        step: image.dataIndex(xStart, yStart + 1) - image.dataIndex(xStart, yStart),
+        width: width, histograms: counts.addr)
+    runRows((if image.format == pfRgb565: histogramRows565 else: histogramRowsRgbx), job.addr,
+      yEnd - yStart, 16, width * (yEnd - yStart) >= fitRowsSharedPixels)
+    for level in 0 .. 255:
+      histogram[level] += counts[0][level] + counts[1][level]
+    return
   for y in yStart ..< yEnd:
     breathe()
     let rowStart = image.dataIndex(xStart, y)
@@ -271,6 +330,31 @@ proc fitHistogram(image: Image, xStart, yStart, xEnd, yEnd: int,
       for index in rowStart ..< rowStart + width:
         let p = image.getPixel(index)
         inc histogram[binOf(p.r.int, p.g.int, p.b.int)]
+
+proc lutRows565(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [], hotLoop.} =
+  let job = cast[ptr FitRowsJob](ctx)
+  let
+    px = job.data16
+    dither = job.dither
+  for r in first.int ..< last.int:
+    if worker == 0: breathe()
+    let rowStart = job.base + job.step * r
+    for index in rowStart ..< rowStart + job.width:
+      let
+        p = px[index].int
+        cell = if dither: ((index.uint32 * 0x9E3779B1'u32) shr 28).int else: 0
+      px[index] = (job.t5[cell][p shr 11] shl 11) or (job.t6[cell][(p shr 5) and 63] shl 5) or job.t5[cell][p and 31]
+
+proc lutRowsRgbx(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [], hotLoop.} =
+  let job = cast[ptr FitRowsJob](ctx)
+  let px = job.rgbx
+  for r in first.int ..< last.int:
+    if worker == 0: breathe()
+    let rowStart = job.base + job.step * r
+    for index in rowStart ..< rowStart + job.width:
+      px[index].r = job.lut[px[index].r]
+      px[index].g = job.lut[px[index].g]
+      px[index].b = job.lut[px[index].b]
 
 proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: int) =
   let width = xEnd - xStart
@@ -303,25 +387,20 @@ proc applyLut(image: Image, lut: array[256, uint8], xStart, yStart, xEnd, yEnd: 
         t5[cell][v] = pack(lut[Expand5[v]]) shr 11
       for v in 0 ..< 64:
         t6[cell][v] = (pack(lut[Expand6[v]]) shr 5) and 63
-    let px = image.data16
-    let dither = image.ditherStores
-    for y in yStart ..< yEnd:
-      breathe()
-      let rowStart = image.dataIndex(xStart, y)
-      for index in rowStart ..< rowStart + width:
-        let
-          p = px[index].int
-          cell = if dither: ((index.uint32 * 0x9E3779B1'u32) shr 28).int else: 0
-        px[index] = (t5[cell][p shr 11] shl 11) or (t6[cell][(p shr 5) and 63] shl 5) or t5[cell][p and 31]
+    var job = FitRowsJob(
+      data16: image.data16,
+      base: image.dataIndex(xStart, yStart),
+      step: image.dataIndex(xStart, yStart + 1) - image.dataIndex(xStart, yStart),
+      width: width, t5: t5.addr, t6: t6.addr, dither: image.ditherStores)
+    runRows(lutRows565, job.addr, yEnd - yStart, 16, width * (yEnd - yStart) >= fitRowsSharedPixels)
   of pfRgbx:
-    let px = image.data
-    for y in yStart ..< yEnd:
-      breathe()
-      let rowStart = image.dataIndex(xStart, y)
-      for index in rowStart ..< rowStart + width:
-        px[index].r = lut[px[index].r]
-        px[index].g = lut[px[index].g]
-        px[index].b = lut[px[index].b]
+    var lutCopy = lut
+    var job = FitRowsJob(
+      rgbx: image.data,
+      base: image.dataIndex(xStart, yStart),
+      step: image.dataIndex(xStart, yStart + 1) - image.dataIndex(xStart, yStart),
+      width: width, lut: lutCopy.addr)
+    runRows(lutRowsRgbx, job.addr, yEnd - yStart, 16, width * (yEnd - yStart) >= fitRowsSharedPixels)
   else:
     for y in yStart ..< yEnd:
       breathe()

@@ -152,3 +152,98 @@ suite "a colour picture packed into its own canvas":
     let grey = canvasOver(pfGray4, 16, 16, greyMemory)
     check packsInPlace(grey, 7, 16, 16, 0)
     check not packsInPlace(grey, 17, 16, 16, 0)
+
+# ------------------------------------------------------------- on two threads
+#
+# The pack's rows run on both cores of an ESP32 (palette_pack.nim, "on both
+# cores"). Here pixie's `rowsRunner` is two real threads claiming rows one at
+# a time as fos_rows.c hands them out, one of them stalling at random so the
+# rows meet in every order the wait rule allows: the bytes must be the
+# one-core loop's every time.
+
+import std/atomics
+
+var
+  runnerNext: Atomic[int32]
+  runnerFn: RowsProc
+  runnerCtx: pointer
+  runnerRows, runnerBlock: int32
+  stallWorker: Atomic[int32] ## which worker stalls: 0, 1, or -1 for neither
+
+proc stall(seed: var uint32) =
+  seed = seed * 1664525'u32 + 1013904223'u32
+  if (seed shr 28) < 5:
+    var spin = 0
+    for i in 0 ..< int((seed shr 16) and 2047):
+      spin += i
+    if spin == -1: echo spin
+
+proc claimRows(worker: int32) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    var seed = uint32(worker + 1) * 2654435761'u32
+    while true:
+      let first = runnerNext.fetchAdd(runnerBlock)
+      if first >= runnerRows:
+        return
+      if stallWorker.load == worker:
+        stall(seed)
+      runnerFn(runnerCtx, worker, first, min(runnerRows, first + runnerBlock))
+
+proc helperMain(worker: int32) {.thread.} =
+  claimRows(worker)
+
+proc twoThreads(fn: RowsProc, ctx: pointer, rows, blockRows: int32) {.cdecl, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    runnerFn = fn
+    runnerCtx = ctx
+    runnerRows = rows
+    runnerBlock = max(1'i32, blockRows)
+    runnerNext.store(0)
+    var helper: Thread[int32]
+    try:
+      createThread(helper, helperMain, 1'i32)
+    except CatchableError:
+      claimRows(0)
+      return
+    claimRows(0)
+    joinThread(helper)
+
+suite "a colour picture packed on two cores":
+  test "the bytes are the one-core loop's, whoever is slower":
+    let savedRunner = rowsRunner
+    let savedWorkers = rowsWorkers
+    rowsRunner = twoThreads
+    rowsWorkers = 2
+    defer:
+      rowsRunner = savedRunner
+      rowsWorkers = savedWorkers
+      ditherJitterAmp = DitherJitterDefaultAmp
+    var checked = 0
+    for (name, palette) in palettes:
+      for format in [pfRgb565, pfRgbx, pfGray8, pfGray4]:
+        # Big enough to be shared (64 K pixels), and odd sizes around it.
+        for (width, height) in [(320, 205), (257, 256), (1201, 57), (64, 1031), (2, 40000)]:
+          for amp in [0, DitherJitterDefaultAmp]:
+            for who in [-1'i32, 0, 1]:
+              stallWorker.store(who)
+              ditherJitterAmp = amp
+              var memory: seq[uint8]
+              let canvas = canvasOver(format, width, height, memory)
+              canvas.paint(uint32(width * 31 + height * 7 + amp + who + 1))
+              let expected = referencePack(canvas, palette, width, height, 0)
+              var own = newSeq[uint8](expected.len)
+              for i in 0 ..< own.len: own[i] = 0x5a
+              check packPalette(canvas, cast[ptr UncheckedArray[uint8]](own[0].addr), own.len,
+                palette, width, height, 0)
+              if own != expected:
+                checkpoint name & " " & $format & " " & $width & "x" & $height & " amp " & $amp & " stall " & $who
+                fail()
+              # In place, where the canvas can hold it.
+              if packsInPlace(canvas, palette.len, width, height, 0):
+                check packPalette(canvas, cast[ptr UncheckedArray[uint8]](memory[0].addr), expected.len,
+                  palette, width, height, 0)
+                if memory[0 ..< expected.len] != expected:
+                  checkpoint "in place: " & name & " " & $format & " " & $width & "x" & $height & " stall " & $who
+                  fail()
+              inc checked
+    check checked > 0
