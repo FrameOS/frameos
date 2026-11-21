@@ -12,7 +12,9 @@
 # the dev Postgres on 55432; fill it once with `DATABASE_URL=...
 # node scripts/import-store-scenes.mjs` while a dev server runs). The key may
 # also live in cloud/.env.local (evals/run.ts reads it). `--compare` is added
-# unless you pass one: the newest evals/results/**/report.json there is.
+# unless you pass one: the newest evals/results/**/report.json there is. From a
+# worktree, point FRAMEOS_OBJECT_STORE_DIR at the main checkout's
+# db/object-storage: the imported store scenes' zips live there.
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -37,6 +39,9 @@ if [ "$smoke" = 0 ] && [ -z "${OPENAI_API_KEY:-}" ] && ! grep -qs '^OPENAI_API_K
 fi
 
 cd "$APP"
+# The evals import frameos-wasm's TypeScript (its dist/, built here when absent;
+# the runtime itself is the release's, installed by predev).
+[ -f node_modules/frameos-wasm/dist/index.js ] || pnpm --filter frameos-wasm run build >/dev/null
 log="$(mktemp "${TMPDIR:-/tmp}/frameos-evals-dev.XXXXXX")"
 echo "dev server on $URL (log: $log)"
 pnpm run predev >"$log" 2>&1

@@ -1782,7 +1782,8 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     entry.drawnAt = at
     entry.drawn = drawn[first .. ^1]
     for node in entry.drawn:
-      node.path.share() # never changed again: its bounds and shapes are kept
+      if not node.path.isNil: # an emoji's <image> has none
+        node.path.share() # never changed again: its bounds and shapes are kept
 
 proc caretAt(arrangement: Arrangement, x, y: float32): int =
   ## The rune a tap at (x, y) in the text puts the caret before: the nearest

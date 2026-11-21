@@ -21,6 +21,16 @@ the result with deterministic checks plus a vision judge.
 
 ## Running
 
+`evals/local.sh` does all of it on this machine: a dev server of the checkout
+on its own port (3107), the suite, `--compare` against the newest earlier
+report, the server stopped. `--smoke` checks the server, the store and one
+render without a key.
+
+```
+OPENAI_API_KEY=... cloud/apps/auth-web/evals/local.sh
+cloud/apps/auth-web/evals/local.sh --smoke
+```
+
 ```
 pnpm --filter @frameos-cloud/auth-web ai:eval                 # everything
 pnpm --filter @frameos-cloud/auth-web ai:eval --filter modify # by tag

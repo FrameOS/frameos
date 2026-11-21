@@ -121,11 +121,14 @@ fonts are not.
 
 ## Emoji
 
-When `NotoColorEmoji.ttf` is on the card (it is in the collection "Sync
-fonts" copies), an ESP32 draws emoji in colour where a Pi does: a text's face
-falls back to it for the runes it lacks (`withEmojiFallback` in
-`utils/font.nim`: the Text app's text, pixie's `fillText`). Whether the card
-has it is asked at most every 30 s.
+When `NotoColorEmoji.ttf` is in the frame's fonts folder (it is in the
+collection "Sync fonts" copies to an ESP32's card and a deploy copies to a
+Pi), emoji draw in colour on every host: a text's face falls back to it for
+the runes it lacks (`withEmojiFallback` in `utils/font.nim`), in the Text
+app's text, JSX text and SVG `<text>` alike. Whether the folder has it is
+asked at most every 30 s. On every host it is read in place (a Pi held the
+10.7 MB font parsed whole until 2026-11-21), so the three draw the same
+emoji the same way; the browser preview has it when its Files hold it.
 
 It is a file face like the others (`filefont.nim`): opening it reads its
 directory and headers; its glyph for a rune comes from its format 12 `cmap`;
@@ -157,9 +160,17 @@ the ESP32's kept copy lands on a whole one: `test_file_font.nim` compares the
 two at 18 and 32 px. Neither combines a skin tone, a flag or a ZWJ sequence
 (pixie has no GSUB): 👍🏽 is a thumb and a swatch on both.
 
-JSX and SVG text draw no emoji on either: their glyphs are paths, and a
-colour glyph has none (`glyphPath` gives nil for one). That is pixie's text in
-an SVG tree, the same on every runtime.
+**JSX and SVG text.** Their glyphs are paths (`glyphPath`), and a colour
+glyph has none, so each emoji is an `<image>` where the pen puts it (pixie's
+`colorGlyphImage`: the face the rune falls back to, its bitmap at the size,
+the colour glyph cache): the JSX layer's `emitColorGlyph` (`ui/layout.nim`)
+and the SVG reader's `addColorGlyphs` (`fileformats/svg.nim`). They are
+elements of the same SVG tree, drawn by the one rasterizer pass with the
+rest: their boxes are damage like any element's, so a repaint over them stays
+exact (`test_emoji_text.nim` repaints two LCD buffers in turn around a line
+of emoji), and the layout measured them with their advance (`measureText`
+too), since the face falls back to the emoji face for them. SVG text's fill,
+stroke and gradient do not apply to an emoji: it is a picture.
 
 ## Flash
 
@@ -240,9 +251,7 @@ the JSX layer now keeps up to 128 family names (it was 16).
   not either): Peralta's Greek draws nothing.
 - Kerning in GPOS extension lookups (pixie's whole parse skips them too).
 - The browser preview has no fonts but the built-in face.
-- A card read waits for an e-paper refresh on the shared bus (below).
-- Emoji in JSX and SVG text (a Pi draws none there either), and sbix or COLR
-  colour fonts (CBDT is what the shipped emoji font is).
+- sbix or COLR colour fonts (CBDT is what the shipped emoji font is).
 
 ## On a board (2026-11-21)
 
