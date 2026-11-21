@@ -276,30 +276,35 @@ kept.
   let go first, fewer when render memory is short). At zoom 1 a picture is
   120x90, 21 KB in an ESP32 LCD's RGB565, so the store holds about a megabyte
   of them at the very most, and an 800x480 screen shows about eighteen.
-- **Scenes | Layouts, by category.** The front has the two sides as tabs.
-  Where a few rows of tiles fit (five columns and three rows, on a fast
-  panel), each category is a section: its heading (tap it, or All, for all of
-  it) and its first row or two; Scenes starts with Featured. Smaller, and on
-  e-paper, the categories are a list to open. A category, Featured or a search
-  is one grid that scrolls.
-- **Back** in the header goes up one step and says where to: a scene's page
-  to its category (or the search, or the store), a category to the store's
-  front.
+- **Scenes | Layouts, by category.** The two sides are tabs in the header.
+  A wide window (600 layout pixels and more) lists the side's categories down
+  its left, always on the screen (Scenes starts with Featured, open at
+  first), beside the category picked, its name over its grid; a scene's page
+  opens in the same place, with Back at its top, and the header keeps the tabs
+  and the search. A narrow one lists the categories as its front, and a
+  category opens in a step of its own. A category, Featured or a search is
+  one grid that scrolls. Until 2026-11-22 a wide front was a section per
+  category, its first row or two and an All to open the rest, which nobody
+  saw: the owner asked for every category on the screen at once.
+- **Covers** are nearly square in the corners (4 px; an icon tile keeps an
+  app's rounder corners).
+- **Back** goes up one step and says where to: a scene's page to its category
+  (or the search, or the store), and on a narrow window a category to the
+  store's front.
 - **It scrolls, and builds only what shows.** A box that scrolls
-  (`docs/jsx-ui.md` "Scrolling and clipping") holds the sections or the rows,
-  `onScroll` keeps where it is, and only the sections or rows within a third
+  (`docs/jsx-ui.md` "Scrolling and clipping") holds the rows,
+  `onScroll` keeps where it is, and only the rows within a third
   of a screen of what shows are built; spacers stand for the
   rest. A category's pages are 24 scenes (the most the store gives, the same
   at any window size, so a resize asks for nothing again) and are fetched,
   together, down to a screen and a quarter below what shows, with a row of
-  placeholders while they come. A section asks for its category's first page
-  when it nears the screen, which is the page the category opens on. E-paper
+  placeholders while they come. E-paper
   never scrolls a grid: a page is a screenful (`limit` the grid), turned by
   the arrows or a swipe, one refresh each. This needs `scrollTop` and
   `onScroll`, 2026.11.12 (the template's `frameosVersion`).
 - **Where it is** is the private `spot` field (`persist: disk`): the side
   (`tab`), the category or search open (`cat`, `q`), the scene open
-  (`detail`), how far the front and the list were scrolled (`scroll`, written
+  (`detail`), how far the front, the list and the side panel were scrolled (`scroll`, written
   at each step, not each scroll), e-paper's page, what it last asked, and the
   shelves. It is written when it changes, so the scene that opens after a
   preview, a reboot or a deep sleep draws the same spot before any answer
