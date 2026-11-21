@@ -43,6 +43,7 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_framebuffer.h"
+#include "fos_frame_settings.h"
 #include "fos_http.h"
 #include "fos_lan_access.h"
 #include "fos_mem.h"
@@ -844,8 +845,11 @@ static uint32_t keep_awake_remaining_seconds(void)
     /* A local network access code on the panel holds the deep sleep until it is
      * answered or expires: the person walking to the frame to read it must
      * find the code there, and its end must repaint the panel. Not a
-     * keep_awake_ms() window, which an answered code could not shorten. */
+     * keep_awake_ms() window, which an answered code could not shorten.
+     * So does a link code (fos_cloud.c): the cloud task polls for it. */
     uint32_t lan_s = fos_lan_access_seconds_left(fos_lan_access_now());
+    uint32_t link_s = fos_cloud_link_seconds_left();
+    if (link_s > lan_s) lan_s = link_s;
     uint32_t hold_s = 0;
     if (until_us > now_us) hold_s = (uint32_t)((until_us - now_us + 999999) / 1000000);
     return lan_s > hold_s ? lan_s : hold_s;
@@ -1018,7 +1022,10 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
                            int64_t render_ms, bool borrow)
 {
     if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
-    if (borrow || fos_framebuffer_is_reserved(buf)) {
+    /* A link code on the frame page (fos_frame_settings.c): no picture of it
+     * is kept, as a presence code is never in one (docs/lan-access.md). */
+    const bool hide = fos_frame_settings_code_pending();
+    if (!hide && (borrow || fos_framebuffer_is_reserved(buf))) {
         /* The packed bytes stay put in the reservation (or the panel's
          * buffer) until the next borrower; point at them instead of
          * copying. */
@@ -1036,7 +1043,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
         free(old);
         return;
     }
-    if (!should_keep_packed_snapshot(len)) {
+    if (hide || !should_keep_packed_snapshot(len)) {
         xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
         uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
         s_last_frame = NULL;
@@ -1049,6 +1056,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
         s_last_frame_render_ms = render_ms;
         xSemaphoreGive(s_snapshot_lock);
         free(old);
+        if (hide) return;
         ESP_LOGW(TAG, "preview snapshot kept as hash only: need %u bytes, psram free=%u largest=%u",
                  (unsigned)len,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
@@ -2242,7 +2250,7 @@ static uint32_t s_lan_seen_gen = 0;
 static bool lan_access_panel_changed(void)
 {
     if (!fos_display_present()) return false;
-    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), NULL);
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL);
     if (generation == s_lan_seen_gen) return false;
     s_lan_seen_gen = generation;
     return true;
@@ -2264,7 +2272,7 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
 {
     memset(ov, 0, sizeof(*ov));
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
-    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), code);
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, code);
     s_lan_seen_gen = generation;
     if (generation == 0) return;
     if (s_last_frame == buf) {
@@ -2503,7 +2511,7 @@ static bool notice_expired(void)
 
 static bool panel_overlay_pending(void)
 {
-    return fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0 || s_notice_pending;
+    return fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL) != 0 || s_notice_pending;
 }
 
 /* An overlay drawn into an LCD buffer that the panel now shows: it stays on

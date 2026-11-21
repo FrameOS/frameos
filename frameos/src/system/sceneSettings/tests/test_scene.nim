@@ -1,5 +1,6 @@
-import std/[json, options, os, sequtils]
+import std/[json, options, os, sequtils, strutils]
 import pixie
+import pixie/fileformats/svg
 import frameos/channels
 import frameos/types
 import frameos/events_gen
@@ -635,8 +636,12 @@ block the_frame_page:
   scene.tap(regionWith(1))
   doAssert applied.len == 2 and applied[1] == %*{"renderScale": 0.0}, $applied
   discard scene.draw()
-  # Render again at once; Restart and Reboot only on a second tap.
-  scene.scrollToEnd()
+  # Render again at once; Restart and Reboot only on a second tap. The
+  # buttons sit right under the card, above the fields.
+  scene.scrollTo(0)
+  block buttons_under_the_card:
+    let network = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)[0]
+    doAssert regionWith(20000 + 3).y < network.y, $regionWith(20000 + 3) & " " & $network
   scene.tap(regionWith(20000 + 1))
   doAssert panelSent == @[evRender], $panelSent
   discard scene.draw()
@@ -700,6 +705,112 @@ block the_frame_page:
   scene.send("close", %*{})
   frameSettingsRead = nil
   frameSettingsApply = nil
+  frameSettingsAction = nil
+
+proc texts(node: SvgNode): string =
+  ## Every word the page's tree holds, one after the other.
+  if node.isNil: return
+  result.add node.text & "\n"
+  for child in node.children:
+    result.add texts(child)
+
+block the_frame_page_links_a_control_plane:
+  # One way to a control plane (docs/scene-settings.md "Connecting the
+  # frame"): under "Managed by: Nobody", where the host offers one, a button
+  # for each plane, and for either the same page: its code, a QR code of what
+  # to share, where it goes, Cancel.
+  var
+    actions: seq[string]
+    facts = %*{"wifi": {"state": "connected", "ssid": "Home", "ip": "192.168.1.20", "rssi": -52, "networks": [], "scanning": false, "password": true}, "rotate": 0, "renderScale": 0, "version": "2026.11.5",
+      "actions": ["linkCloud", "adopt"]}
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: copy(facts)
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: actions.add action
+  proc qrIn(node: SvgNode): Image =
+    if node.isNil: return nil
+    if node.tag == "img" and not node.image.isNil: return node.image
+    for child in node.children:
+      result = qrIn(child)
+      if not result.isNil: return
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "", "opened": "frame"}})
+  doAssert scene.state["page"].getStr() == "frame"
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-connect-offered.png")
+  let page = SceneSettingsScene(scene)
+  var words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Nobody" in words, words
+  doAssert "FrameOS Cloud" in words and "Your backend" in words, words
+  scene.tap(regionWith(20000 + 7))
+  doAssert actions[^1] == "linkCloud", $actions
+  discard scene.draw()
+  scene.tap(regionWith(20000 + 8))
+  doAssert actions[^1] == "adopt", $actions
+  # Only the plane the host offers; none, and the card says who manages it.
+  facts["actions"] = %*["adopt"]
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Your backend" in words and "FrameOS Cloud" notin words, words
+  facts["actions"] = %*[]
+  facts["managedBy"] = %"FrameOS Cloud"
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Nobody" notin words and "Your backend" notin words and "FrameOS Cloud" in words, words
+  # The cloud, asked and not answered yet.
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": ""}}
+  words = texts(page.tree(480, 480, false, "", info = facts))
+  doAssert "Waiting for FrameOS Cloud" in words and "Cancel" in words, words
+  doAssert qrIn(page.tree(480, 480, false, "", info = facts)).isNil
+  # A cloud code: the code, where it goes, a QR code of the page with the
+  # code in it, and Cancel.
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "cloud", "code": "ABCD-1234",
+    "where": "cloud.frameos.net/device", "qr": "https://cloud.frameos.net/device?user_code=ABCD-1234"}}
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-cloud-code.png")
+  var tree = page.tree(480, 480, false, "", info = facts)
+  words = texts(tree)
+  doAssert "ABCD-1234" in words and "cloud.frameos.net/device" in words, words
+  doAssert "Scan the QR code" in words and "Connect" in words and "Save" notin words, words
+  doAssert not qrIn(tree).isNil, "a QR code where there is room"
+  scene.tap(regionWith(20000 + 9))
+  doAssert actions[^1] == "cancelLink", $actions
+  # No room for a QR code that scans: the words alone, and they say so.
+  tree = page.tree(150, 150, false, "", info = facts)
+  doAssert qrIn(tree).isNil
+  doAssert "Scan" notin texts(tree) and "Open the page above" in texts(tree), texts(tree)
+  # A backend: the same page, the frame's address and its code.
+  facts = %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": "backend", "code": "123456",
+    "where": "192.168.1.20:8787", "qr": "192.168.1.20:8787 123456"}}
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-frame-backend-code.png")
+  tree = page.tree(480, 480, false, "", info = facts)
+  words = texts(tree)
+  doAssert "Your FrameOS backend" in words and "123456" in words and "192.168.1.20:8787" in words, words
+  doAssert "Adopt frame" in words and "Cancel" in words, words
+  doAssert not qrIn(tree).isNil
+  # Tall: the QR code over the words.
+  if previews.len > 0:
+    let tall = SceneSettingsScene(scene).tree(480, 800, false, "", info = facts)
+    doAssert not qrIn(tall).isNil
+  scene.send("close", %*{})
+  # The same page on e-paper, black and white and in color, landscape.
+  if previews.len > 0:
+    for (device, name) in [("waveshare.EPD_7in5_V2", "bw"), ("waveshare.EPD_7in3e", "color")]:
+      let paperConfig = FrameConfig(width: 800, height: 480, device: device, scalingMode: "cover",
+        saveAssets: %*false)
+      let paperScene = settings.exportedScene.init(SceneSettingsId.SceneId, paperConfig, logger, %*{})
+      paperScene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "", "opened": "frame"}})
+      for (to, code, where, qr) in [("offered", "", "", ""), ("cloud", "ABCD-1234", "cloud.frameos.net/device",
+          "https://cloud.frameos.net/device?user_code=ABCD-1234"),
+          ("backend", "123456", "192.168.1.20:8787", "192.168.1.20:8787 123456")]:
+        facts = if code.len == 0: %*{"wifi": {"state": "connected", "ssid": "Home", "ip": "192.168.1.20", "rssi": -52, "networks": [], "scanning": false, "password": true}, "rotate": 0, "renderScale": 0, "version": "2026.11.5",
+            "actions": ["linkCloud", "adopt"]}
+          else: %*{"rotate": 0, "renderScale": 0, "actions": [], "link": {"to": to, "code": code,
+            "where": where, "qr": qr}}
+        let shot = settings.exportedScene.render(paperScene, ExecutionContext(scene: paperScene, event: "render",
+          payload: %*{}, image: newImage(800, 480), hasImage: true))
+        shot.writeFile(previews / ("settings-frame-" & to & "-" & name & ".png"))
+      paperScene.send("close", %*{})
+  frameSettingsRead = nil
   frameSettingsAction = nil
 
 echo "scene settings: ok"
@@ -844,20 +955,21 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
   scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
-  # Installing restarts the frame: it asks twice, like Reboot.
+  # Installing restarts the frame: it asks twice, like Reboot. The buttons
+  # are at the top, under the card.
   scene.tap(regionWith(20006))
   doAssert "installUpdate" notin actions, $actions
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
   scene.tap(regionWith(20006))
   doAssert "installUpdate" in actions, $actions
   # With nothing to install it offers to look again, and not while it looks.
   updateState = 2
   discard scene.draw()
-  scene.scrollTo(2000)
+  scene.scrollTo(0)
   discard scene.draw()
   scene.tap(regionWith(20005))
   doAssert "checkUpdate" in actions, $actions

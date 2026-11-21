@@ -158,6 +158,13 @@ The Pi's own admin API, with an admin session: `GET /api/network/local-access`,
 `POST /api/network/local-access/challenge` `{scope?}`,
 `POST /api/network/local-access` `{enabled, code?, scope?}`. `scope:
 "shellApps"` is the same ceremony for running Chromium unsandboxed as root.
+The frame page's **Managed by → Your backend** shows the same kind of
+code with the scope `adopt`, which only the frame page starts, only the frame
+page draws (never the overlay) and only `POST /api/adopt` takes
+(`docs/scene-settings.md` "Connecting the frame"); neither the admin API's
+challenge nor a control plane's verb can ask for one. It and the page's cloud
+link code are presence codes too, kept out of every image the other way
+round: while one is under way the frame keeps no picture at all.
 
 `set_settings` never carries local network access
 (`docs/cloud-frames-fixtures.json` pins it), and the bulk settings save on the

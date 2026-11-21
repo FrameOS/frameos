@@ -404,9 +404,15 @@ class FrameAdoptRequest(BaseModel):
     """Adopt a running standalone frame: read its canonical local API, import
     its config and scenes, and write this backend's server credentials back."""
     frame_host: str
-    frame_port: int = 8787
-    admin_username: str
-    admin_password: str
+    # None: 8787 (a Pi), and with a code also 80 when 8787 does not answer
+    # (an ESP32). A port in `frame_host` wins.
+    frame_port: Optional[int] = None
+    # The adoption code the frame draws on its panel (Settings → gear →
+    # Managed by → Your backend). With it the frame hands over what adoption needs
+    # (`POST /api/adopt` on the frame) and no admin login is asked for.
+    code: Optional[str] = None
+    admin_username: Optional[str] = None
+    admin_password: Optional[str] = None
     # The address the FRAME will use to reach this backend (logs, deploys) —
     # the browser knows it, the backend behind a proxy may not.
     server_host: str

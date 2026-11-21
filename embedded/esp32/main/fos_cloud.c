@@ -444,7 +444,7 @@ static bool b64_encode(const uint8_t *data, size_t len, char *out, size_t out_le
 
 /* Canonical dashed platform names, matching the backend's platform enum.
  * Cloud capability gating prefix-matches "esp32", so both forms gate alike. */
-static const char *fos_platform_name(void)
+const char *fos_platform_name(void)
 {
 #if CONFIG_IDF_TARGET_ESP32S3
     return "esp32-s3";
@@ -618,13 +618,15 @@ static void add_hardware_json(cJSON *parent)
     }
 }
 
-/* Build the /api/frames/enroll body. Caller frees with cJSON_free(). */
+/* Build the /api/frames/enroll body: flow A's carries the claim token, flow
+ * B's (claim_token NULL) rides on the device-flow Bearer token instead.
+ * Caller frees with cJSON_free(). */
 static char *build_enroll_json(const char *claim_token, const char *public_key_b64)
 {
     const fos_config_t *config = fos_config();
     cJSON *root = cJSON_CreateObject();
     if (!root) return NULL;
-    cJSON_AddStringToObject(root, "claim_token", claim_token);
+    if (claim_token) cJSON_AddStringToObject(root, "claim_token", claim_token);
     cJSON_AddStringToObject(root, "public_key", public_key_b64);
     add_hardware_json(root);
     cJSON_AddStringToObject(root, "frameos_version", esp_app_get_description()->version);
@@ -675,16 +677,66 @@ static bool json_field_str(const cJSON *root, const char *key, char *out, size_t
     return false;
 }
 
-/* One enrollment attempt. Returns ESP_OK on success. Sets *permanent when
- * retrying is pointless (the claim token is dead). */
-static esp_err_t enroll_once(bool *permanent)
+/* POST a JSON body to {base}{path}, with `Authorization: Bearer <bearer>`
+ * when `bearer` is not NULL, and read the answer into `response`
+ * (FOS_CLOUD_RESPONSE_MAX bytes, NUL-terminated, cut short past that). The
+ * HTTP status, 0 when the provider was not reached. The caller has held
+ * `base` to fos_cloud_url_transport_ok(): a claim token, a device code and a
+ * Bearer token all ride on this. */
+static int provider_post(const char *base, const char *path, const char *body, const char *bearer,
+                         char *response)
+{
+    response[0] = '\0';
+    char url[FOS_URL_LEN + 32];
+    snprintf(url, sizeof(url), "%s%s", base, path);
+    esp_http_client_config_t http_config = {
+        .url = url,
+        .method = HTTP_METHOD_POST,
+        .timeout_ms = FOS_CLOUD_HTTP_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 2048,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&http_config);
+    if (!client) return 0;
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    char auth[FOS_CLOUD_TOKEN_LEN + 8];
+    if (bearer) {
+        snprintf(auth, sizeof(auth), "Bearer %s", bearer);
+        esp_http_client_set_header(client, "Authorization", auth); /* copied */
+        crypto_wipe(auth, sizeof(auth));
+    }
+    size_t body_len = strlen(body);
+    int status = 0;
+    if (esp_http_client_open(client, body_len) == ESP_OK &&
+        esp_http_client_write(client, body, body_len) == (int)body_len) {
+        esp_http_client_fetch_headers(client);
+        status = esp_http_client_get_status_code(client);
+        int total = 0;
+        while (total < FOS_CLOUD_RESPONSE_MAX - 1) {
+            int r = esp_http_client_read(client, response + total, FOS_CLOUD_RESPONSE_MAX - 1 - total);
+            if (r <= 0) break;
+            total += r;
+        }
+        response[total] = '\0';
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return status > 0 ? status : 0;
+}
+
+/* One enrollment attempt with the provider at `base`: flow A by the
+ * configured claim token (`bearer` NULL), flow B by the device-flow Bearer
+ * token, which stays the link's access token (the enroll answer carries none
+ * for it). Returns ESP_OK on success. Sets *permanent when retrying is
+ * pointless (the claim token is dead, the link token refused). */
+static esp_err_t enroll_once(const char *base, const char *bearer, bool *permanent)
 {
     *permanent = false;
     fos_config_t *config = fos_config();
 
     /* Refuse to hand the claim token to a cleartext provider. */
     const char *why = NULL;
-    if (!fos_cloud_url_transport_ok(config->cloud_url, &why)) {
+    if (!fos_cloud_url_transport_ok(base, &why)) {
         char detail[sizeof(s_last_error)];
         snprintf(detail, sizeof(detail), "cloud_url refused: %s", why ? why : "invalid");
         set_last_error(detail);
@@ -710,56 +762,20 @@ static esp_err_t enroll_once(bool *permanent)
         return ESP_FAIL;
     }
 
-    char *body = build_enroll_json(config->claim_token, public_key_b64);
+    char *body = build_enroll_json(bearer ? NULL : config->claim_token, public_key_b64);
     if (!body) {
         set_last_error("request build failed");
         return ESP_ERR_NO_MEM;
     }
 
-    char url[FOS_URL_LEN + 32];
-    snprintf(url, sizeof(url), "%s/api/frames/enroll", config->cloud_url);
-    ESP_LOGI(TAG, "enrolling with %s", url);
-
-    esp_http_client_config_t http_config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = FOS_CLOUD_HTTP_TIMEOUT_MS,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 2048,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&http_config);
-    if (!client) {
-        cJSON_free(body);
-        set_last_error("http client init failed");
+    ESP_LOGI(TAG, "enrolling with %s", base);
+    char response[FOS_CLOUD_RESPONSE_MAX];
+    int status = provider_post(base, "/api/frames/enroll", body, bearer, response);
+    cJSON_free(body);
+    if (status == 0) {
+        set_last_error("provider unreachable");
         return ESP_FAIL;
     }
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-
-    size_t body_len = strlen(body);
-    err = esp_http_client_open(client, body_len);
-    if (err == ESP_OK) {
-        int written = esp_http_client_write(client, body, body_len);
-        if (written != (int)body_len) err = ESP_FAIL;
-    }
-    cJSON_free(body);
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        set_last_error("provider unreachable");
-        return err;
-    }
-
-    esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    char response[FOS_CLOUD_RESPONSE_MAX];
-    int total = 0;
-    while (total < (int)sizeof(response) - 1) {
-        int r = esp_http_client_read(client, response + total, sizeof(response) - 1 - total);
-        if (r <= 0) break;
-        total += r;
-    }
-    response[total] = '\0';
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
 
     if (status == 200) {
         cJSON *json = cJSON_Parse(response);
@@ -774,7 +790,8 @@ static esp_err_t enroll_once(bool *permanent)
         char frame_id[FOS_CLOUD_FRAME_ID_LEN] = "";
         char ws_path[FOS_CLOUD_WS_PATH_LEN] = "";
         const char *missing = NULL;
-        if (!json_field_str(json, "access_token", token, sizeof(token))) {
+        if (bearer ? strlcpy(token, bearer, sizeof(token)) >= sizeof(token)
+                   : !json_field_str(json, "access_token", token, sizeof(token))) {
             missing = "access_token";
         } else if (!json_field_str(json, "frame_id", frame_id, sizeof(frame_id))) {
             missing = "frame_id";
@@ -806,6 +823,18 @@ static esp_err_t enroll_once(bool *permanent)
             crypto_wipe(token, sizeof(token));
             return ESP_FAIL;
         }
+        /* A link code taken on the default provider: the socket, the update
+         * check and the next boot all find the provider in cloud_url, and
+         * it goes first, so a token is never stored without it. */
+        if (base != config->cloud_url) {
+            strlcpy(config->cloud_url, base, sizeof(config->cloud_url));
+            if (fos_config_save() != ESP_OK) {
+                config->cloud_url[0] = '\0';
+                set_last_error("nvs write failed");
+                crypto_wipe(token, sizeof(token));
+                return ESP_FAIL;
+            }
+        }
         if (nvs_store_str("cloud_token", token) != ESP_OK ||
             nvs_store_str("cloud_fid", frame_id) != ESP_OK ||
             nvs_store_str("cloud_ws", ws_path) != ESP_OK ||
@@ -824,15 +853,17 @@ static esp_err_t enroll_once(bool *permanent)
         crypto_wipe(token, sizeof(token));
         erase_claim_token();
         set_last_error("");
-        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s%s%s (claim token erased)",
+        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s%s%s",
                  s_frame_id[0] ? s_frame_id : "?", s_ws_path,
                  s_ws_url[0] ? " ws_url=" : "", s_ws_url);
         return ESP_OK;
     }
 
     /* Claim tokens are single use, success or failure: any 400 means this
-     * token is dead (invalid/expired/used/bad key) and retrying cannot help. */
-    if (status == 400) {
+     * token is dead (invalid/expired/used/bad key) and retrying cannot help.
+     * A link token the provider refuses (401 invalid, 403 scope, 409 another
+     * key) is just as dead. */
+    if (status == 400 || (bearer && status > 400 && status < 500 && status != 429)) {
         char reason[48] = "";
         const char *reason_str = "rejected";
         cJSON *json = cJSON_Parse(response);
@@ -843,7 +874,7 @@ static esp_err_t enroll_once(bool *permanent)
         char detail[sizeof(s_last_error)];
         snprintf(detail, sizeof(detail), "enroll rejected: %s", reason_str);
         set_last_error(detail);
-        ESP_LOGW(TAG, "%s; claim token erased, get a new one from the provider", detail);
+        ESP_LOGW(TAG, "%s", detail);
         erase_claim_token();
         *permanent = true;
         return ESP_FAIL;
@@ -854,6 +885,232 @@ static esp_err_t enroll_once(bool *permanent)
     set_last_error(detail);
     ESP_LOGW(TAG, "%s; will retry", detail);
     return ESP_FAIL;
+}
+
+/* ------------------------------------------------ link code (device flow) */
+
+/* Flow B (docs/cloud-frames.md "B. Link code on the device"), from the frame
+ * page's Connect: the provider hands out a code, the page shows it with a QR
+ * code of where to enter it (fos_frame_settings.c), the owner enters it in
+ * their account, and the frame enrolls with the Bearer token the approval
+ * gives it. Requests run on the cloud task; the render task only asks
+ * (start, cancel) and reads the code. Nothing of it outlives a reboot, and a
+ * window that lapses unclaimed just ends. */
+#define LINK_DEFAULT_PROVIDER "https://cloud.frameos.net"
+
+typedef enum { LINK_IDLE = 0, LINK_STARTING, LINK_POLLING, LINK_ENROLLING } link_phase_t;
+
+/* The phase, the code and its window: written by the cloud task and by the
+ * render task (start, cancel), read by the render task. */
+static portMUX_TYPE s_link_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint8_t s_link_phase = LINK_IDLE;
+/* Bumped by every start and cancel: an answer for an older attempt is dropped. */
+static uint32_t s_link_gen = 0;
+static char s_link_user_code[16];
+static char s_link_uri[192]; /* verification_uri_complete: the page's QR code */
+static int64_t s_link_expires_us = 0;
+/* Cloud task only. The approval's token waits in s_access_token, which
+ * nothing reads before the state is FOS_CLOUD_ENROLLED. */
+static char s_link_device_code[128];
+static uint32_t s_link_interval_ms = 5000;
+static uint8_t s_link_tries = 0;
+
+/* With the lock held: back to idle, the code off the page. */
+static void link_clear_locked(void)
+{
+    s_link_gen++;
+    s_link_phase = LINK_IDLE;
+    s_link_user_code[0] = '\0';
+    s_link_uri[0] = '\0';
+    s_link_expires_us = 0;
+}
+
+void fos_cloud_link_start(void)
+{
+    if (s_state == FOS_CLOUD_ENROLLED || fos_config()->backend_url[0]) return;
+    portENTER_CRITICAL(&s_link_lock);
+    link_clear_locked();
+    s_link_phase = LINK_STARTING;
+    portEXIT_CRITICAL(&s_link_lock);
+    if (s_task != NULL) xTaskNotifyGive(s_task);
+}
+
+void fos_cloud_link_cancel(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    link_clear_locked();
+    portEXIT_CRITICAL(&s_link_lock);
+}
+
+bool fos_cloud_link_code(char *code, size_t code_len, char *uri, size_t uri_len)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const bool pending = s_link_phase != LINK_IDLE;
+    strlcpy(code, s_link_user_code, code_len);
+    strlcpy(uri, s_link_uri, uri_len);
+    portEXIT_CRITICAL(&s_link_lock);
+    return pending;
+}
+
+uint32_t fos_cloud_link_seconds_left(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const bool pending = s_link_phase != LINK_IDLE;
+    const int64_t left_us = s_link_expires_us - esp_timer_get_time();
+    portEXIT_CRITICAL(&s_link_lock);
+    if (!pending) return 0;
+    /* Starting or enrolling: a minute's grace, the requests' own timeouts. */
+    return left_us > 0 ? (uint32_t)(left_us / 1000000) + 1 : 60;
+}
+
+/* End attempt `gen`, unless a newer one replaced it, and show the page again. */
+static void link_end(uint32_t gen, const char *why)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const bool ours = s_link_gen == gen;
+    if (ours) link_clear_locked();
+    portEXIT_CRITICAL(&s_link_lock);
+    crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
+    if (why) ESP_LOGW(TAG, "link: %s", why);
+    if (ours && fos_scenes_settings_shown()) fos_client_render_now();
+}
+
+static uint32_t link_begin(const char *base, uint32_t gen)
+{
+    /* The approval page shows the frame's name: what JSON would have to
+     * escape in it becomes a space. */
+    char name[FOS_STR_LEN];
+    strlcpy(name, fos_config()->hostname[0] ? fos_config()->hostname : "FrameOS frame", sizeof(name));
+    for (char *c = name; *c; c++) {
+        if (*c == '"' || *c == '\\' || (unsigned char)*c < 0x20) *c = ' ';
+    }
+    char body[FOS_STR_LEN + 160];
+    snprintf(body, sizeof(body),
+             "{\"public_display_name\":\"%s\",\"reported_frameos_version\":\"%s\",\"client_kind\":\"frame\","
+             "\"scopes\":[\"frame:link\",\"frame:managed\"]}",
+             name, esp_app_get_description()->version);
+    char response[FOS_CLOUD_RESPONSE_MAX];
+    const int status = provider_post(base, "/api/device/start", body, NULL, response);
+    cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
+    char code[sizeof(s_link_user_code)];
+    char uri[sizeof(s_link_uri)];
+    /* The device code goes back to the provider inside a JSON string. */
+    const bool ok = json_field_str(json, "device_code", s_link_device_code, sizeof(s_link_device_code)) &&
+                    s_link_device_code[strcspn(s_link_device_code, "\"\\")] == '\0' &&
+                    json_field_str(json, "user_code", code, sizeof(code)) &&
+                    json_field_str(json, "verification_uri_complete", uri, sizeof(uri));
+    const cJSON *interval = cJSON_GetObjectItem(json, "interval");
+    const cJSON *window = cJSON_GetObjectItem(json, "expires_in");
+    s_link_interval_ms = cJSON_IsNumber(interval) && interval->valueint >= 1 && interval->valueint <= 60
+                             ? (uint32_t)interval->valueint * 1000
+                             : 5000;
+    const int64_t window_s = cJSON_IsNumber(window) && window->valueint >= 30 ? window->valueint : 600;
+    cJSON_Delete(json);
+    if (!ok) {
+        link_end(gen, "no code");
+        return 0;
+    }
+    portENTER_CRITICAL(&s_link_lock);
+    const bool ours = s_link_gen == gen;
+    if (ours) {
+        strlcpy(s_link_user_code, code, sizeof(s_link_user_code));
+        strlcpy(s_link_uri, uri, sizeof(s_link_uri));
+        s_link_expires_us = esp_timer_get_time() + window_s * 1000000;
+        s_link_phase = LINK_POLLING;
+    }
+    portEXIT_CRITICAL(&s_link_lock);
+    if (!ours) {
+        crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
+        return 0;
+    }
+    if (fos_scenes_settings_shown()) fos_client_render_now();
+    return s_link_interval_ms;
+}
+
+/* A code whose window has run out ends here, Wi-Fi or not. */
+static bool link_lapsed(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const uint32_t gen = s_link_gen;
+    const bool lapsed = s_link_phase == LINK_POLLING && esp_timer_get_time() >= s_link_expires_us;
+    portEXIT_CRITICAL(&s_link_lock);
+    if (lapsed) link_end(gen, "lapsed");
+    return lapsed;
+}
+
+static uint32_t link_poll(const char *base, uint32_t gen)
+{
+    if (link_lapsed()) return 0;
+    char body[sizeof(s_link_device_code) + 24];
+    snprintf(body, sizeof(body), "{\"device_code\":\"%s\"}", s_link_device_code);
+    char response[FOS_CLOUD_RESPONSE_MAX];
+    const int status = provider_post(base, "/api/device/poll", body, NULL, response);
+    cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
+    crypto_wipe(response, sizeof(response)); /* the token, on approval */
+    const bool approved = json_field_str(json, "access_token", s_access_token, sizeof(s_access_token));
+    cJSON_Delete(json);
+    if (approved) {
+        portENTER_CRITICAL(&s_link_lock);
+        const bool ours = s_link_gen == gen;
+        if (ours) {
+            s_link_phase = LINK_ENROLLING;
+            s_link_user_code[0] = '\0'; /* used: off the page */
+            s_link_uri[0] = '\0';
+            s_link_expires_us = 0;
+        }
+        portEXIT_CRITICAL(&s_link_lock);
+        crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
+        if (!ours) crypto_wipe(s_access_token, sizeof(s_access_token));
+        s_link_tries = 0;
+        return 0;
+    }
+    /* Not approved yet (428), unreachable or busy: the window decides. */
+    if (status == 0 || status == 428 || status == 429 || status >= 500) return s_link_interval_ms;
+    link_end(gen, "refused"); /* denied, expired, ... */
+    return 0;
+}
+
+static uint32_t link_enroll(const char *base, uint32_t gen)
+{
+    bool permanent = false;
+    if (enroll_once(base, s_access_token, &permanent) == ESP_OK) {
+        s_state = FOS_CLOUD_ENROLLED;
+        link_end(gen, NULL);
+        return 0;
+    }
+    if (permanent || ++s_link_tries >= 3) {
+        crypto_wipe(s_access_token, sizeof(s_access_token));
+        link_end(gen, s_last_error);
+        return 0;
+    }
+    return 10000;
+}
+
+/* One step of a pending link, on the cloud task: how long to wait before the
+ * next (ms). */
+static uint32_t link_step(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const uint32_t gen = s_link_gen;
+    const uint8_t phase = s_link_phase;
+    portEXIT_CRITICAL(&s_link_lock);
+    const fos_config_t *config = fos_config();
+    const char *base = config->cloud_url[0] ? config->cloud_url : LINK_DEFAULT_PROVIDER;
+    const char *why = NULL;
+    if (config->backend_url[0]) {
+        /* Adopted by a backend meanwhile: the cloud does not take a frame
+         * another plane holds (the Pi's otherControlPlaneActive). */
+        link_end(gen, "the frame has a backend");
+        return 0;
+    }
+    if (!fos_cloud_url_transport_ok(base, &why)) {
+        link_end(gen, why);
+        return 0;
+    }
+    if (phase == LINK_STARTING) return link_begin(base, gen);
+    if (phase == LINK_POLLING) return link_poll(base, gen);
+    if (phase == LINK_ENROLLING) return link_enroll(base, gen);
+    return 0;
 }
 
 /* --------------------------------------------------- management WebSocket */
@@ -3039,7 +3296,7 @@ static void ws_handle_lan_access_challenge(const cJSON *id)
     const char *refused = NULL;
     if (!fos_display_present()) {
         refused = "no_panel"; /* headless: nowhere to show it */
-    } else if (fos_lan_access_start(fos_lan_access_now(), esp_random) == 0) {
+    } else if (fos_lan_access_start(fos_lan_access_now(), esp_random, FOS_LAN_ACCESS_SCOPE_LAN) == 0) {
         refused = "rate_limited";
     }
     lan_access_log(refused ? "refused" : "challenge", refused);
@@ -3060,7 +3317,8 @@ static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id)
     if (want) {
         const cJSON *code = cJSON_GetObjectItem(root, "code");
         fos_lan_access_result_t result = fos_lan_access_consume(
-            cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now());
+            cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now(),
+            FOS_LAN_ACCESS_SCOPE_LAN);
         if (result != FOS_LAN_ACCESS_OK) {
             const char *token = fos_lan_access_result_token(result);
             lan_access_log("refused", token);
@@ -3070,7 +3328,7 @@ static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id)
             return;
         }
         fos_client_wake_for_events(); /* answered: off the panel */
-    } else if (fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0) {
+    } else if (fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL)) {
         /* Turned off: a code still showing has nothing left to unlock. */
         fos_lan_access_clear();
         fos_client_wake_for_events();
@@ -3880,6 +4138,7 @@ static void cloud_task(void *arg)
 
         if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
             ws_stall_since_us = 0; /* no WiFi is not a WS stall */
+            link_lapsed();
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -3955,7 +4214,7 @@ static void cloud_task(void *arg)
         if (config->cloud_url[0] && config->claim_token[0]) {
             if (s_state != FOS_CLOUD_PENDING) s_state = FOS_CLOUD_PENDING;
             bool permanent = false;
-            if (enroll_once(&permanent) == ESP_OK) {
+            if (enroll_once(config->cloud_url, NULL, &permanent) == ESP_OK) {
                 s_state = FOS_CLOUD_ENROLLED;
                 backoff_ms = FOS_CLOUD_BACKOFF_MIN_MS;
                 continue;
@@ -3972,7 +4231,15 @@ static void cloud_task(void *arg)
             continue;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        /* A link code the frame page asked for (flow B). The waits end
+         * early on a new start (fos_cloud_link_start notifies). */
+        uint32_t wait_ms = 5000;
+        if (s_link_phase != LINK_IDLE) {
+            wait_ms = link_step();
+        } else if (s_access_token[0]) {
+            crypto_wipe(s_access_token, sizeof(s_access_token)); /* an approval cancelled before its enroll */
+        }
+        if (wait_ms) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
     }
 }
 
