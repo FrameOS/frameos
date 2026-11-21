@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { FrameOSPreviewOptions } from "frameos-wasm";
+import type { FrameOSPreviewOptions, PreviewFileRequest } from "frameos-wasm";
 import {
   excludedTemplates,
   leadingTemplates,
@@ -36,6 +36,12 @@ class FakePreview {
   attachKeyboardInput() {
     return () => {};
   }
+  answerFileRequest() {
+    this.calls.push(["answerFileRequest"]);
+  }
+  cancelFileRequest() {
+    this.calls.push(["cancelFileRequest"]);
+  }
   destroy() {
     this.destroyed = true;
   }
@@ -44,6 +50,7 @@ class FakePreview {
 function start(viewport = { height: 900, width: 1440 }) {
   const previews: FakePreview[] = [];
   const statuses: PlaygroundStatus[] = [];
+  const fileRequests: Array<PreviewFileRequest | null> = [];
   const listeners: Record<string, Array<(event: KeyboardEvent) => void>> = {};
   const canvas = {
     focus: vi.fn(),
@@ -71,11 +78,12 @@ function start(viewport = { height: 900, width: 1440 }) {
       return preview;
     }) as never,
     fetchScenes: async () => [{ id: "first" }, { id: playgroundLayoutId, settings: { isLayout: true } }],
+    onFileRequest: (request) => fileRequests.push(request),
     onStatus: (status) => statuses.push(status),
     storeUrl: "https://playground.frameos.net",
     viewport: () => size,
   });
-  return { canvas, key, listeners, playground, previews, size, statuses };
+  return { canvas, fileRequests, key, listeners, playground, previews, size, statuses };
 }
 
 describe("the playground", () => {
@@ -121,6 +129,19 @@ describe("the playground", () => {
 
     playground.destroy();
     expect(previews[1]!.destroyed).toBe(true);
+  });
+
+  it("asks with its own button for the Files scene's Upload, and forgets the ask on a restart", async () => {
+    const { fileRequests, playground, previews } = start();
+    await vi.waitFor(() => expect(previews).toHaveLength(1));
+    const request = { id: 1, name: "photos", op: "upload" } as const;
+    previews[0]!.options.onFileRequest?.(request);
+    expect(fileRequests).toEqual([request]);
+    playground.answerFileRequest();
+    playground.cancelFileRequest();
+    expect(previews[0]!.calls).toEqual([["answerFileRequest"], ["cancelFileRequest"]]);
+    previews[0]!.options.onSceneEvent?.("restart", {});
+    expect(fileRequests.at(-1)).toBeNull();
   });
 
   it("starts again for a resize the runtime cannot take in place", async () => {

@@ -365,3 +365,32 @@ kept.
 - It asks for `"permissions": ["assets", "assets-write"]`: making a folder is
   a write, so it shows as "reads & writes files" (until 2026-11-16 it read
   only).
+- **Upload and Download, in the browser preview** (2026.11.14): where the frame
+  is shown on a computer, Upload (the header's last button) puts files from
+  that computer into the folder showing, and Download (the picture's bar, or
+  a tap on a file that is no picture) saves one there. Both are
+  `frameos.transfer(op, args)` (`frameos/file_transfer_hooks.nim`, bridged in
+  `js_runtime/app_runtime.nim`, which resolves the path against the app's own
+  asset sandbox first): `read` is the host's facts and null with no host, so a
+  Pi, an ESP32 (whose image has no bridge at all) and a plane rendering a
+  board show neither button. The one host is the preview's
+  (`frameos/file_transfer_preview.nim`, turned on by the worker for a page
+  that says it answers, `fileTransfer` in its `init`).
+- **The gesture.** A file picker opens, and a download starts, only from a
+  person's gesture in the page, and the tap on Upload is a pointer event the
+  page forwarded to the worker. The runtime hands the request to the worker
+  (`onFrameosFileRequest`), the worker to the page (`fileRequest`), a round
+  trip of a few milliseconds; the page still has the tap's transient
+  activation then (`navigator.userActivation.isActive`: about five seconds in
+  Chrome and Firefox), and opens the picker or saves the file at once
+  (`frameos/wasm/src/files.ts`). When it has none left (a long render in
+  between, a browser that cannot say) the page asks with a button of its own
+  (`onFileRequest`: the editor's preview and the playground show "Choose
+  files" / "Save" and Cancel), whose click is the gesture. The files picked go
+  back to the worker (`fileUpload`), which writes them into the folder the
+  runtime named, never one the page names: no folders or dot first in a
+  name, and a name that is there gets " (2)". They are in the preview's
+  folder, IndexedDB through emscripten's IDBFS, so they stay across reloads
+  and every scene in that browser sees them, within its 128 MB. The scene that
+  asked is drawn again (`frameos_wasm_file_transfer_done`, a `render`) and
+  lists the folder again on the facts' `seq`.

@@ -24,6 +24,8 @@ let networkApps = toHashSet([
   "lichessPuzzlePanel",
   # the Scene store sample's own JS app: the store's listing, with no host
   "sceneStore",
+  # the Browser sample's own JS app: Hacker News, its home page
+  "browser",
   # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
   # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
   "weatherOpenMeteoJS", "birdJournal", "flightRadar"

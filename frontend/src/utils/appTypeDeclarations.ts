@@ -137,6 +137,23 @@ interface FrameOSCodeFacts {
   /** The browser preview's host: it reads scenes and saves or asks nothing. */
   previewOnly?: boolean;
 }
+/** What frameos.transfer("read") says: files between the assets and the computer showing the frame. */
+interface FrameOSTransferFacts {
+  /** Files can be picked on the computer and added (op "upload"). */
+  upload: boolean;
+  /** A file can be saved to the computer (op "download"). */
+  download: boolean;
+  /** "upload" or "download" while the person at the computer has not answered yet, else "". */
+  busy: string;
+  /** The last one that worked ("upload", "download"), else "". */
+  done: string;
+  /** How many files the last one moved. */
+  count: number;
+  /** Why the last one did not: "cancelled", "too_big", "failed", else "". */
+  error: string;
+  /** Moves by one at every answer: compare it with the last you saw to know one came. */
+  seq: number;
+}
 /** What frameos.store() says: the scene store as this frame's host knows it (docs/scene-store.md). */
 interface FrameOSStore {
   /** The store this frame browses: its cloud provider, else FrameOS Cloud. The app fetches its listing for frames
@@ -458,6 +475,15 @@ declare const frameos: {
   code(op: "save", args: { scene: Record<string, any>; show?: boolean }): boolean;
   /** Forgets the draft and the last error. */
   code(op: "clear"): boolean;
+  /** Files between the assets and the computer the frame is shown on: the browser preview has it, a frame never (null
+   * there, and before FrameOS 2026.11.14). "read" is what the host can do and the last answer. */
+  transfer(op: "read"): FrameOSTransferFacts | null;
+  /** Asks the person at the computer for files and puts them into dir ("" the top) of the assets, storage as in the
+   * asset calls; a name that is there gets " (2)". It returns at once, and this scene renders again when the files
+   * are in (read().done, read().count): list the folder again then. Needs "assets-write" for the frame's folder. */
+  transfer(op: "upload", args: { dir?: string; storage?: string }): boolean;
+  /** Saves the asset at path to the computer; renders again when it is saved (read().done). */
+  transfer(op: "download", args: { path: string; storage?: string }): boolean;
   /** How tall each text is, in pixels, set in className's text classes (font-*, text-*, leading-*) into width, as a
    * <textarea> sets its text: wrapped at spaces, spaces kept, an empty text one line. For a list whose rows are text
    * that wraps (a code editor's lines), measured before they are laid out (FrameOS 2026.11.12+). */
