@@ -20,7 +20,7 @@ CORPUS = json.loads((REPO / "docs" / "voice-action-fixtures.json").read_text())
 NOW = datetime.fromisoformat(CORPUS["now"].replace("Z", "+00:00"))
 
 
-def screen(name: str) -> dict:
+def screen(name: str) -> dict | None:
     return va.read_screen(json.dumps(CORPUS["screens"][name]))
 
 

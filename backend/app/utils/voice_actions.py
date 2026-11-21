@@ -774,7 +774,8 @@ class VoiceScreenTools:
             if action in ("back", "forward"):
                 payload = {}
             else:
-                text = args.get("text") if isinstance(args.get("text"), str) and args["text"].strip() else self.transcript
+                given = args.get("text")
+                text = given if isinstance(given, str) and given.strip() else self.transcript
                 payload = {"text": text.strip()[:MAX_EVENT_TEXT], "at": _at(self.now)}
             self.events.append({"name": action, "payload": payload})
             return {"ok": True, "action": action}
