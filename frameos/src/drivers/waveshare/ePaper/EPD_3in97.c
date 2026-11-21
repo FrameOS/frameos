@@ -26,12 +26,16 @@ parameter:
 ******************************************************************************/
 static void EPD_3in97_Reset(void)
 {
+    // The controller wants RST low for tens of microseconds and is ready
+    // when BUSY falls, which every caller waits for next. The reference
+    // driver's 100 ms on each side were 200 ms of every wake from a park and
+    // of every full refresh (the reTerminal Sticky, 2026-11-21).
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(100);
+    DEV_Delay_ms(10);
     DEV_Digital_Write(EPD_RST_PIN, 0);
     DEV_Delay_ms(2);
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(100);
+    DEV_Delay_ms(10);
 }
 
 /******************************************************************************
@@ -75,19 +79,21 @@ parameter:
 static void EPD_3in97_ReadBusy(void)
 {
     Debug("e-Paper busy\r\n");
-    UDOUBLE busy_wait_ms = 0;
+    // Polled at the finest the delay gives (a tick on an ESP32, a
+    // millisecond on a Pi), and nothing after: BUSY low is the controller
+    // ready. 20 ms steps and 20 ms more after were up to 40 ms of every tap's
+    // update and of each wait in an init.
+    UDOUBLE start = DEV_Millis();
     while(1)
     {
         if(DEV_Digital_Read(EPD_BUSY_PIN)==0)
             break;
-        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+        if (DEV_Millis() - start >= EPD_BUSY_TIMEOUT_MS) {
             Debug("e-Paper busy timeout\r\n");
             break;
         }
-        DEV_Delay_ms(20);
-        busy_wait_ms += 20;
+        DEV_Delay_ms(1);
     }
-    DEV_Delay_ms(20);
     Debug("e-Paper busy release\r\n");
 }
 
@@ -214,7 +220,6 @@ void EPD_3in97_Init(void)
     EPD_3in97_WaitPending();
     EPD_3in97_AnalogOn = 0;
     EPD_3in97_Reset();
-    DEV_Delay_ms(100);
 
     EPD_3in97_ReadBusy();
     EPD_3in97_SendCommand(0x12);  //SWRESET

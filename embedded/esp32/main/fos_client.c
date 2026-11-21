@@ -104,6 +104,8 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
 /* The two ADC bursts behind one pass-start reading are this far apart; a
  * Wi-Fi TX burst that sagged the first one has moved on by the second. */
 #define FOS_BATTERY_RESAMPLE_GAP_MS 60
+/* How old a battery and charger reading a pass that answers input may reuse. */
+#define FOS_POWER_READING_REUSE_US (60 * 1000000LL)
 
 /* How long a deep sleep waits for the cloud task to finish streaming the
  * frame's image (an `image_get` the provider queued on this pass's `render`
@@ -3577,31 +3579,56 @@ static void client_task(void *arg)
              * reading, never inflate it); fos_power_decide then weighs it
              * against the state carried in RTC memory — see fos_power.h for the
              * log this replays. */
+            /* A pass that answers somebody (a tap, a key, an event) reuses a
+             * reading under a minute old: the two samples and the gap between
+             * them, then the charger and the gauge over I2C, were 65-80 ms in
+             * front of every tap's render on the reTerminal Sticky (2026-11-21). */
+            static int64_t s_power_read_us = 0;
+            static int s_power_mv = 0, s_power_pct = -1;
+            static bool s_power_charger_known = false;
+            static fos_charger_status_t s_power_charger;
+            int64_t power_now_us = esp_timer_get_time();
+            bool answering = input_hold_on() || s_asked_us > s_render_began_us;
+            bool power_fresh = s_power_read_us != 0 &&
+                               power_now_us - s_power_read_us < FOS_POWER_READING_REUSE_US;
             int battery_pct = -1, battery_mv = 0;
-            if (fos_battery_present()) {
-                fos_battery_read(&battery_mv, &battery_pct);
-                vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
-                int again_mv = 0, again_pct = -1;
-                fos_battery_read(&again_mv, &again_pct);
-                if (again_mv > battery_mv) {
-                    battery_mv = again_mv;
-                    battery_pct = again_pct;
+            fos_charger_status_t charger;
+            bool charger_known;
+            if (answering && power_fresh) {
+                battery_mv = s_power_mv;
+                battery_pct = s_power_pct;
+                charger = s_power_charger;
+                charger_known = s_power_charger_known;
+            } else {
+                if (fos_battery_present()) {
+                    fos_battery_read(&battery_mv, &battery_pct);
+                    vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
+                    int again_mv = 0, again_pct = -1;
+                    fos_battery_read(&again_mv, &again_pct);
+                    if (again_mv > battery_mv) {
+                        battery_mv = again_mv;
+                        battery_pct = again_pct;
+                    }
                 }
+                /* The charger, where the board has one (fos_charger.c): USB in means
+                 * not on battery, whatever the divider reads of a charging cell. */
+                charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+                fos_gauge_status_t gauge;
+                if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+                    memset(&charger, 0, sizeof(charger));
+                    charger.usb_power = !gauge.discharging;
+                    charger.charging = gauge.charging;
+                    charger.charge_done = gauge.full;
+                    charger_known = true;
+                }
+                s_power_read_us = power_now_us;
+                s_power_mv = battery_mv;
+                s_power_pct = battery_pct;
+                s_power_charger = charger;
+                s_power_charger_known = charger_known;
             }
             /* A clock write SNTP could not land yet (fos_rtc.c). */
             fos_rtc_retry_pending();
-            /* The charger, where the board has one (fos_charger.c): USB in means
-             * not on battery, whatever the divider reads of a charging cell. */
-            fos_charger_status_t charger;
-            bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
-            fos_gauge_status_t gauge;
-            if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
-                memset(&charger, 0, sizeof(charger));
-                charger.usb_power = !gauge.discharging;
-                charger.charging = gauge.charging;
-                charger.charge_done = gauge.full;
-                charger_known = true;
-            }
             fos_power_input_t power_in = {
                 .mv = battery_mv,
                 .deep_sleep = config->deep_sleep,
