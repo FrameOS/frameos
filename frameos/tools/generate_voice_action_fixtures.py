@@ -81,6 +81,10 @@ CASES = [
     ("todo switch", "to-do", TODO, "Show me the calendar."),
     ("todo several", "to-do", TODO, "Add eggs and bread."),
     ("todo question", "to-do", TODO, "What's the weather like?"),
+    ("todo tick off what is not there", "to-do", TODO, "Tick off the plumber."),
+    ("todo delete what is not there", "to-do", TODO, "Delete the swimming lesson."),
+    ("todo tick off two", "to-do", TODO, "Tick off the dentist and the recycling."),
+    ("todo add, not on screen yet", "to-do", TODO, "Add call the plumber."),
     ("todo dictation", "to-do-keyboard", TODO, "and new brakes too"),
     ("todo enter", "to-do-keyboard", TODO, "Send it."),
     ("todo hidden row", "to-do-keyboard", TODO, "Delete the dentist."),
@@ -97,7 +101,7 @@ CASES = [
 SYNTHETIC = [
     ("unsure kind goes to the chat", "to-do", TODO, "Milk.",
      {"kind": {"type": "choice", "choice": "fill", "confidence": 0.2, "probabilities": {"fill": 0.4, "press": 0.35, "other": 0.25}}}),
-    ("none of these goes to the chat", "to-do", TODO, "Tick off the plumber.",
+    ("none of these goes to the chat", "to-do", TODO, "Tick off the swimming lesson.",
      {"kind": {"type": "choice", "choice": "press", "confidence": 0.9, "probabilities": {"press": 0.95}},
       "press": {"type": "choice", "choice": "none", "confidence": 0.9, "probabilities": {"none": 0.97}}}),
 ]

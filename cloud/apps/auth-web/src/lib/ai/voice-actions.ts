@@ -38,6 +38,8 @@ const MIN_TARGET_PROBABILITY = 0.35;
 const SUBMIT_PROBABILITY = 0.5;
 const DICTATION_SUBMIT_PROBABILITY = 0.8;
 const REPLACE_PROBABILITY = 0.5;
+const SEVERAL_PROBABILITY = 0.5;
+const ABSENT_PROBABILITY = 0.5;
 
 export const KIND_TYPE = "type";
 export const KIND_ENTER = "enter";
@@ -76,6 +78,12 @@ const QUESTION_SUBMIT =
   "dictating words into a field to go on editing.";
 const NONE_OPTION = "none";
 const NONE_WORDS = "None of these";
+const QUESTION_SEVERAL =
+  "Does the request ask for more than one separate thing to be done: two or more items to add, tick off" +
+  " or delete, or two different actions?";
+const QUESTION_ABSENT =
+  "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, " +
+  "rename or change it) that none of the things on the screen is about?";
 const QUESTION_REPLACE =
   "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?";
 
@@ -420,7 +428,11 @@ export function buildDecision({
     kinds[KIND_FALLBACK] = `None of the above fits, so: ${eventWords(fallback)}`;
   }
 
-  const questions: JsonObject = { kind: choice(QUESTION_KIND, kinds) };
+  const questions: JsonObject = {
+    absent: { instructions: QUESTION_ABSENT, type: "noul" },
+    kind: choice(QUESTION_KIND, kinds),
+    several: { instructions: QUESTION_SEVERAL, type: "noul" },
+  };
   if (presses.length > 1) {
     const criteria: Record<string, string> = {};
     presses.forEach((target, i) => {
@@ -539,6 +551,13 @@ export function planFromAnswers(
   const [kind, sure] = pick(answers, "kind", kinds);
   const log: JsonObject = { kind, p: round3(sure) };
   if (kind === null || kind === KIND_SEVERAL || kind === KIND_OTHER || sure < MIN_KIND_PROBABILITY) {
+    return null;
+  }
+  // Several things, or an item that is not on the screen: the chat's.
+  if (noul(answers, "several") >= SEVERAL_PROBABILITY) {
+    return null;
+  }
+  if (noul(answers, "absent") >= ABSENT_PROBABILITY && (kind === KIND_FILL || kind === KIND_PRESS)) {
     return null;
   }
   const said = transcript.trim().slice(0, MAX_EVENT_TEXT);
