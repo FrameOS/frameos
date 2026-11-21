@@ -104,6 +104,8 @@ type
     open*: int           ## the <select> whose list is up: its key + 1; 0 for none
     fresh*: bool         ## it just opened: the next layout scrolls to what it holds
     link*: string        ## the link whose QR code is up over the UI ("Links"); "" for none
+    ring*: int           ## where Tab and the frame's keys are (ui/events.nim "Keys"): the element's
+                         ## key + 1, drawn ringed and with its `focus:` classes; 0 for none
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -433,7 +435,7 @@ proc statesOf(n: UiNode, input: UiInput, groupHover: bool): set[UiState] =
   if groupHover: result.incl usGroupHover
   if n.hover and n.key in input.hovered: result.incl usHover
   if n.active and n.key in input.pressed: result.incl usActive
-  if n.key == input.focus - 1: result.incl usFocus
+  if n.key == input.focus - 1 or n.key == input.ring - 1: result.incl usFocus
 
 proc samePointer(n: UiNode, input: UiInput, groupHover: bool): bool =
   ## Whether the pointer leaves `n` and what is in it as they were built:
@@ -684,7 +686,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
   if result.active and key in input.pressed: states.incl usActive
-  if key == input.focus - 1: states.incl usFocus
+  if key == input.focus - 1 or key == input.ring - 1: states.incl usFocus
   result.states = states
   result.box.readClasses(result.text, classes, rootW, rootH, states)
   if result.box.overflowX != ovVisible or result.box.overflowY != ovVisible:
@@ -2165,7 +2167,7 @@ proc reveal(n: UiNode, key: int, r: var array[4, float32]): bool =
   ## Whether the field at `key` is in `n`: then `r` is its box from n's
   ## corner as n shows it, every box on the way that scrolls scrolled so it
   ## is in sight, a little room around it.
-  if n.key == key and n.field > 0:
+  if n.key == key and (n.field > 0 or key == ui.ring - 1):
     r = [0'f32, 0, n.size.x, n.size.y]
     revealLine = [0'f32, n.size.y]
     if n.field == 2 and n.children.len > 0 and not n.children[0].arrangement.isNil:
@@ -2218,6 +2220,32 @@ proc fieldIn(n: UiNode, key: int): UiNode =
     result = c.fieldIn(key)
     if not result.isNil:
       return
+
+proc ring(top: UiNode, input: var UiInput, regions: seq[UiRegion], w, h: float32, drawn: var seq[SvgNode]) =
+  ## The element the keys went to (`input.ring`), ringed over everything but
+  ## a link's card and the keyboard: two pixels out from what shows of it,
+  ## sky on an LCD, black and thicker on e-paper. An element whose classes say
+  ## how it looks with the focus (`focus:`) draws itself. Gone from this
+  ## layout, the keys start over from the top.
+  for r in regions:
+    if r.key != input.ring - 1:
+      continue
+    let n = top.fieldIn(r.key)
+    if not n.isNil and not n.src.isNil and n.src.attr("class").contains("focus:"):
+      return
+    let
+      t = if input.paper: 3'f32 else: 2'f32
+      x0 = clamp(r.visible[0] - 2, t / 2, w - t / 2)
+      y0 = clamp(r.visible[1] - 2, t / 2, h - t / 2)
+      x1 = clamp(r.visible[2] + 2, t / 2, w - t / 2)
+      y1 = clamp(r.visible[3] + 2, t / 2, h - t / 2)
+    if x1 > x0 and y1 > y0:
+      let node = SvgNode(tag: "rect", attrs: @[("x", num(x0)), ("y", num(y0)), ("width", num(x1 - x0)),
+        ("height", num(y1 - y0)), ("rx", "4"), ("fill", "none"), ("stroke-width", num(t))])
+      node.paint(if input.paper: rgba(0, 0, 0, 255) else: rgba(14, 165, 233, 255), 1, "stroke") # sky-500
+      drawn.add node
+    return
+  input.ring = 0
 
 proc measureText*(texts: openArray[string], classes: string, width: float32): seq[float32] =
   ## `frameos.measureText`: how tall each text is, set in `classes` into
@@ -2605,9 +2633,10 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     top.size = top.layout(rw, rh, true, true)
     top.x = max(top.box.margin[3].resolve(w), 0)
     top.y = max(top.box.margin[0].resolve(h), 0)
-  if input.reveal and input.focus > 0:
+  if input.reveal and (input.focus > 0 or input.ring > 0):
+    # The focused field in sight, else the element the keys went to.
     var r: array[4, float32]
-    discard top.reveal(input.focus - 1, r)
+    discard top.reveal((if input.focus > 0: input.focus else: input.ring) - 1, r)
   revealCaret = input.reveal or input.place or input.lineStep != 0
   input.reveal = false
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
@@ -2631,6 +2660,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
           break
     if not shown:
       input.open = 0
+  if input.ring > 0:
+    top.ring(input, regions, w, h, result.children)
   if input.link.len == 0:
     linkQr = nil # no card up: its picture goes
   if input.link.len > 0:

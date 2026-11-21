@@ -643,11 +643,15 @@ when not defined(frameosEmbedded):
       i += (if down: 1 else: -1)
 
   proc keyed(self: SceneSwitcherScene, payload: JsonNode) =
-    ## A keyboard (Linux, the preview): the arrows walk the grid, Page Down
-    ## and Up a screenful, Enter shows, Escape goes back.
+    ## A keyboard (Linux, the preview): the arrows walk the grid, Tab the
+    ## tiles one by one (Shift+Tab back) through the gear, as the frame's
+    ## buttons do, Page Down and Up a screenful, Enter shows, Escape goes
+    ## back. The highlight is the switcher's one focus: Tab never rings a
+    ## tile's icon and its name apart, nor the layout around it.
     if self.entries.len == 0:
       self.list()
     case payload{"code"}.getStr()
+    of "Tab": self.highlight(self.highlighted() + (if payload{"shift"}.getBool(): -1 else: 1))
     of "ArrowRight": self.highlight(self.highlighted() + 1)
     of "ArrowLeft": self.highlight(self.highlighted() - 1)
     of "ArrowDown": self.highlight(self.row(true))
