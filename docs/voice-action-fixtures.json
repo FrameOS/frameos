@@ -707,6 +707,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -774,19 +782,27 @@
         "kind": {
           "type": "choice",
           "choice": "fill",
-          "confidence": 0.98,
+          "confidence": 0.96,
           "probabilities": {
-            "fill": 0.98,
-            "press": 0.02,
+            "fill": 0.97,
+            "press": 0.03,
             "switch": 0.0,
             "several": 0.0,
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.05
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.17
+        },
         "press": {
           "type": "choice",
           "choice": "p12",
-          "confidence": 0.9,
+          "confidence": 0.96,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
@@ -800,8 +816,8 @@
             "p9": 0.0,
             "p10": 0.0,
             "p11": 0.0,
-            "p12": 0.91,
-            "none": 0.09
+            "p12": 0.96,
+            "none": 0.04
           }
         },
         "field": {
@@ -842,11 +858,11 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.94
+          "noul": 0.93
         },
         "replace": {
           "type": "noul",
-          "noul": 0.15
+          "noul": 0.16
         }
       },
       "plan": {
@@ -937,6 +953,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -1006,19 +1030,27 @@
         "kind": {
           "type": "choice",
           "choice": "fill",
-          "confidence": 0.96,
+          "confidence": 0.94,
           "probabilities": {
-            "fill": 0.97,
-            "press": 0.02,
+            "fill": 0.95,
+            "press": 0.03,
             "switch": 0.0,
-            "several": 0.01,
+            "several": 0.02,
             "other": 0.0
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.16
         },
         "press": {
           "type": "choice",
           "choice": "p12",
-          "confidence": 0.48,
+          "confidence": 0.56,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
@@ -1032,23 +1064,23 @@
             "p9": 0.0,
             "p10": 0.0,
             "p11": 0.0,
-            "p12": 0.52,
-            "none": 0.48
+            "p12": 0.59,
+            "none": 0.41
           }
         },
         "field": {
           "type": "choice",
           "choice": "f6",
-          "confidence": 0.95,
+          "confidence": 0.99,
           "probabilities": {
-            "f0": 0.01,
+            "f0": 0.0,
             "f1": 0.0,
             "f2": 0.0,
             "f3": 0.0,
             "f4": 0.0,
-            "f5": 0.01,
-            "f6": 0.96,
-            "none": 0.02
+            "f5": 0.0,
+            "f6": 0.99,
+            "none": 0.01
           }
         },
         "scene": {
@@ -1076,11 +1108,11 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.94
+          "noul": 0.95
         },
         "replace": {
           "type": "noul",
-          "noul": 0.53
+          "noul": 0.6
         }
       },
       "plan": {
@@ -1171,6 +1203,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -1238,22 +1278,30 @@
         "kind": {
           "type": "choice",
           "choice": "fill",
-          "confidence": 0.89,
+          "confidence": 0.87,
           "probabilities": {
-            "fill": 0.91,
-            "press": 0.08,
+            "fill": 0.9,
+            "press": 0.09,
             "switch": 0.0,
             "several": 0.0,
             "other": 0.01
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.09
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.23
+        },
         "press": {
           "type": "choice",
           "choice": "p12",
-          "confidence": 0.53,
+          "confidence": 0.52,
           "probabilities": {
-            "p0": 0.1,
-            "p1": 0.04,
+            "p0": 0.08,
+            "p1": 0.03,
             "p2": 0.0,
             "p3": 0.0,
             "p4": 0.0,
@@ -1264,23 +1312,23 @@
             "p9": 0.0,
             "p10": 0.0,
             "p11": 0.0,
-            "p12": 0.56,
-            "none": 0.3
+            "p12": 0.55,
+            "none": 0.34
           }
         },
         "field": {
           "type": "choice",
           "choice": "f6",
-          "confidence": 0.71,
+          "confidence": 0.83,
           "probabilities": {
-            "f0": 0.22,
+            "f0": 0.13,
             "f1": 0.01,
             "f2": 0.0,
             "f3": 0.0,
             "f4": 0.0,
             "f5": 0.0,
-            "f6": 0.75,
-            "none": 0.02
+            "f6": 0.85,
+            "none": 0.01
           }
         },
         "scene": {
@@ -1298,19 +1346,19 @@
         "words": {
           "type": "choice",
           "choice": "w1",
-          "confidence": 0.94,
+          "confidence": 0.9,
           "probabilities": {
-            "w0": 0.03,
-            "w1": 0.97
+            "w0": 0.05,
+            "w1": 0.95
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.6
+          "noul": 0.68
         },
         "replace": {
           "type": "noul",
-          "noul": 0.52
+          "noul": 0.53
         }
       },
       "plan": {
@@ -1401,6 +1449,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -1460,14 +1516,22 @@
         "kind": {
           "type": "choice",
           "choice": "press",
-          "confidence": 1.0,
+          "confidence": 0.99,
           "probabilities": {
-            "fill": 0.0,
-            "press": 1.0,
+            "fill": 0.01,
+            "press": 0.99,
             "switch": 0.0,
             "several": 0.0,
             "other": 0.0
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.03
         },
         "press": {
           "type": "choice",
@@ -1493,16 +1557,16 @@
         "field": {
           "type": "choice",
           "choice": "f2",
-          "confidence": 0.85,
+          "confidence": 0.89,
           "probabilities": {
-            "f0": 0.01,
+            "f0": 0.02,
             "f1": 0.0,
-            "f2": 0.87,
-            "f3": 0.01,
+            "f2": 0.9,
+            "f3": 0.0,
             "f4": 0.0,
             "f5": 0.0,
-            "f6": 0.02,
-            "none": 0.09
+            "f6": 0.04,
+            "none": 0.04
           }
         },
         "scene": {
@@ -1608,6 +1672,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -1676,6 +1748,14 @@
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.04
+        },
         "press": {
           "type": "choice",
           "choice": "p11",
@@ -1699,17 +1779,17 @@
         },
         "field": {
           "type": "choice",
-          "choice": "none",
-          "confidence": 0.45,
+          "choice": "f5",
+          "confidence": 0.26,
           "probabilities": {
-            "f0": 0.02,
-            "f1": 0.0,
+            "f0": 0.03,
+            "f1": 0.01,
             "f2": 0.0,
-            "f3": 0.0,
-            "f4": 0.0,
-            "f5": 0.1,
-            "f6": 0.36,
-            "none": 0.52
+            "f3": 0.01,
+            "f4": 0.01,
+            "f5": 0.35,
+            "f6": 0.28,
+            "none": 0.31
           }
         },
         "scene": {
@@ -1726,11 +1806,11 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.19
+          "noul": 0.17
         },
         "replace": {
           "type": "noul",
-          "noul": 0.06
+          "noul": 0.07
         }
       },
       "plan": {
@@ -1815,6 +1895,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -1891,17 +1979,25 @@
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.03
+        },
         "press": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.81,
+          "confidence": 0.77,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
             "p2": 0.0,
             "p3": 0.0,
-            "p4": 0.16,
-            "p5": 0.02,
+            "p4": 0.2,
+            "p5": 0.01,
             "p6": 0.0,
             "p7": 0.0,
             "p8": 0.0,
@@ -1909,7 +2005,7 @@
             "p10": 0.0,
             "p11": 0.0,
             "p12": 0.0,
-            "none": 0.82
+            "none": 0.79
           }
         },
         "field": {
@@ -1942,15 +2038,15 @@
         "words": {
           "type": "choice",
           "choice": "w1",
-          "confidence": 1.0,
+          "confidence": 0.98,
           "probabilities": {
-            "w0": 0.0,
-            "w1": 1.0
+            "w0": 0.01,
+            "w1": 0.99
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.26
+          "noul": 0.2
         },
         "replace": {
           "type": "noul",
@@ -2044,6 +2140,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -2112,16 +2216,24 @@
             "other": 0.01
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.08
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.19
+        },
         "press": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.97,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
-            "p2": 0.04,
+            "p2": 0.03,
             "p3": 0.0,
-            "p4": 0.01,
+            "p4": 0.0,
             "p5": 0.0,
             "p6": 0.0,
             "p7": 0.0,
@@ -2130,43 +2242,43 @@
             "p10": 0.0,
             "p11": 0.0,
             "p12": 0.0,
-            "none": 0.95
+            "none": 0.97
           }
         },
         "field": {
           "type": "choice",
           "choice": "f6",
-          "confidence": 0.55,
+          "confidence": 0.59,
           "probabilities": {
             "f0": 0.02,
-            "f1": 0.02,
+            "f1": 0.01,
             "f2": 0.0,
             "f3": 0.0,
             "f4": 0.0,
             "f5": 0.0,
-            "f6": 0.61,
-            "none": 0.35
+            "f6": 0.64,
+            "none": 0.33
           }
         },
         "scene": {
           "type": "choice",
           "choice": "s1",
-          "confidence": 0.79,
+          "confidence": 0.85,
           "probabilities": {
             "s0": 0.0,
-            "s1": 0.83,
+            "s1": 0.88,
             "s2": 0.0,
             "s3": 0.0,
-            "none": 0.17
+            "none": 0.12
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.14
+          "noul": 0.17
         },
         "replace": {
           "type": "noul",
-          "noul": 0.26
+          "noul": 0.21
         }
       },
       "plan": {
@@ -2251,6 +2363,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -2318,19 +2438,27 @@
         "kind": {
           "type": "choice",
           "choice": "several",
-          "confidence": 0.42,
+          "confidence": 0.47,
           "probabilities": {
-            "fill": 0.45,
+            "fill": 0.41,
             "press": 0.01,
             "switch": 0.0,
-            "several": 0.54,
+            "several": 0.58,
             "other": 0.0
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.96
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.08
         },
         "press": {
           "type": "choice",
           "choice": "p12",
-          "confidence": 0.9,
+          "confidence": 0.97,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
@@ -2344,23 +2472,23 @@
             "p9": 0.0,
             "p10": 0.0,
             "p11": 0.0,
-            "p12": 0.91,
-            "none": 0.09
+            "p12": 0.97,
+            "none": 0.03
           }
         },
         "field": {
           "type": "choice",
           "choice": "f6",
-          "confidence": 0.97,
+          "confidence": 0.98,
           "probabilities": {
-            "f0": 0.01,
+            "f0": 0.02,
             "f1": 0.0,
             "f2": 0.0,
             "f3": 0.0,
             "f4": 0.0,
-            "f5": 0.01,
-            "f6": 0.97,
-            "none": 0.01
+            "f5": 0.0,
+            "f6": 0.98,
+            "none": 0.0
           }
         },
         "scene": {
@@ -2378,15 +2506,15 @@
         "words": {
           "type": "choice",
           "choice": "w1",
-          "confidence": 0.98,
+          "confidence": 1.0,
           "probabilities": {
-            "w0": 0.01,
-            "w1": 0.99
+            "w0": 0.0,
+            "w1": 1.0
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.93
+          "noul": 0.96
         },
         "replace": {
           "type": "noul",
@@ -2460,6 +2588,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -2528,10 +2664,18 @@
             "other": 0.94
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.1
+        },
         "press": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.99,
+          "confidence": 1.0,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
@@ -2545,47 +2689,917 @@
             "p9": 0.0,
             "p10": 0.0,
             "p11": 0.0,
-            "p12": 0.01,
-            "none": 0.99
+            "p12": 0.0,
+            "none": 1.0
           }
         },
         "field": {
           "type": "choice",
           "choice": "f6",
-          "confidence": 0.71,
+          "confidence": 0.76,
           "probabilities": {
-            "f0": 0.02,
+            "f0": 0.01,
             "f1": 0.0,
             "f2": 0.0,
             "f3": 0.0,
             "f4": 0.0,
             "f5": 0.0,
-            "f6": 0.75,
-            "none": 0.23
+            "f6": 0.79,
+            "none": 0.2
           }
         },
         "scene": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.8,
+          "confidence": 0.57,
           "probabilities": {
             "s0": 0.0,
-            "s1": 0.0,
-            "s2": 0.0,
-            "s3": 0.16,
-            "none": 0.84
+            "s1": 0.01,
+            "s2": 0.01,
+            "s3": 0.32,
+            "none": 0.66
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.2
+          "noul": 0.18
         },
         "replace": {
           "type": "noul",
-          "noul": 0.32
+          "noul": 0.34
         }
       },
       "plan": null
+    },
+    {
+      "name": "todo tick off what is not there",
+      "screen": "to-do",
+      "scene": {
+        "id": "to-do",
+        "name": "To-do",
+        "customEvents": [],
+        "nodes": [
+          {
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          }
+        ],
+        "apps": {
+          "jsxUi": {
+            "sources": {
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+            }
+          }
+        }
+      },
+      "said": "Tick off the plumber.",
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "said": "Tick off the plumber.",
+          "scene": "To-do",
+          "keyboard": "down",
+          "screen": [
+            "“Mark not done”, on the row “Water the plants”",
+            "Text field that says “Water the plants”",
+            "“Delete”, on the row “Water the plants”",
+            "“Mark done”, on the row “Call grandma about Sunday”",
+            "Text field that says “Call grandma about Sunday”",
+            "“Delete”, on the row “Call grandma about Sunday”",
+            "“Mark done”, on the row “Book the dentist”",
+            "Text field that says “Book the dentist”",
+            "“Delete”, on the row “Book the dentist”",
+            "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+            "Text field that says “Oat milk, coffee beans, lemons”",
+            "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+            "“Mark done”, on the row “Take the recycling out”",
+            "Text field that says “Take the recycling out”",
+            "“Delete”, on the row “Take the recycling out”",
+            "“Mark done”, on the row “Fix the bike light”",
+            "Text field that says “Fix the bike light”",
+            "“Delete”, on the row “Fix the bike light”",
+            "Text field “Add a to-do”, on the row “Add”",
+            "“Add”"
+          ]
+        },
+        "questions": {
+          "kind": {
+            "type": "choice",
+            "instructions": "What does the person want the frame to do with what they said?",
+            "criteria": {
+              "fill": "Put words into a text field on the screen: add an item by typing it in, or change what a field says",
+              "press": "Press something on the screen: a button, an icon, a checkbox, an item in a list",
+              "switch": "Show another scene or app, or bring an open window to the front",
+              "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
+              "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
+            }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
+          "press": {
+            "type": "choice",
+            "instructions": "Which element on the screen should be pressed to do what they asked?",
+            "criteria": {
+              "p0": "“Mark not done”, on the row “Water the plants”",
+              "p1": "“Delete”, on the row “Water the plants”",
+              "p2": "“Mark done”, on the row “Call grandma about Sunday”",
+              "p3": "“Delete”, on the row “Call grandma about Sunday”",
+              "p4": "“Mark done”, on the row “Book the dentist”",
+              "p5": "“Delete”, on the row “Book the dentist”",
+              "p6": "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+              "p7": "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+              "p8": "“Mark done”, on the row “Take the recycling out”",
+              "p9": "“Delete”, on the row “Take the recycling out”",
+              "p10": "“Mark done”, on the row “Fix the bike light”",
+              "p11": "“Delete”, on the row “Fix the bike light”",
+              "p12": "“Add”",
+              "none": "None of these"
+            }
+          },
+          "field": {
+            "type": "choice",
+            "instructions": "Which text field should the words go into?",
+            "criteria": {
+              "f0": "Text field that says “Water the plants”",
+              "f1": "Text field that says “Call grandma about Sunday”",
+              "f2": "Text field that says “Book the dentist”",
+              "f3": "Text field that says “Oat milk, coffee beans, lemons”",
+              "f4": "Text field that says “Take the recycling out”",
+              "f5": "Text field that says “Fix the bike light”",
+              "f6": "Text field “Add a to-do”, on the row “Add”",
+              "none": "None of these"
+            }
+          },
+          "scene": {
+            "type": "choice",
+            "instructions": "Which scene or window should the frame show?",
+            "criteria": {
+              "s0": "Voice memos",
+              "s1": "Calendar",
+              "s2": "Clock",
+              "s3": "Weather",
+              "none": "None of these"
+            }
+          },
+          "submit": {
+            "type": "noul",
+            "instructions": "Should the words be entered right away, as pressing Enter does: an item added to a list, a message sent, a search run? Yes when they asked to add, send, save, search or enter something; no when they are only dictating words into a field to go on editing."
+          },
+          "replace": {
+            "type": "noul",
+            "instructions": "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?"
+          }
+        }
+      },
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "fill",
+          "confidence": 0.62,
+          "probabilities": {
+            "fill": 0.7,
+            "press": 0.19,
+            "switch": 0.01,
+            "several": 0.01,
+            "other": 0.09
+          }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.08
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "press": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.85,
+          "probabilities": {
+            "p0": 0.0,
+            "p1": 0.0,
+            "p2": 0.0,
+            "p3": 0.0,
+            "p4": 0.0,
+            "p5": 0.0,
+            "p6": 0.01,
+            "p7": 0.0,
+            "p8": 0.0,
+            "p9": 0.0,
+            "p10": 0.01,
+            "p11": 0.0,
+            "p12": 0.12,
+            "none": 0.86
+          }
+        },
+        "field": {
+          "type": "choice",
+          "choice": "f6",
+          "confidence": 0.94,
+          "probabilities": {
+            "f0": 0.01,
+            "f1": 0.0,
+            "f2": 0.0,
+            "f3": 0.0,
+            "f4": 0.0,
+            "f5": 0.0,
+            "f6": 0.95,
+            "none": 0.04
+          }
+        },
+        "scene": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 1.0,
+          "probabilities": {
+            "s0": 0.0,
+            "s1": 0.0,
+            "s2": 0.0,
+            "s3": 0.0,
+            "none": 1.0
+          }
+        },
+        "submit": {
+          "type": "noul",
+          "noul": 0.3
+        },
+        "replace": {
+          "type": "noul",
+          "noul": 0.16
+        }
+      },
+      "plan": null
+    },
+    {
+      "name": "todo delete what is not there",
+      "screen": "to-do",
+      "scene": {
+        "id": "to-do",
+        "name": "To-do",
+        "customEvents": [],
+        "nodes": [
+          {
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          }
+        ],
+        "apps": {
+          "jsxUi": {
+            "sources": {
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+            }
+          }
+        }
+      },
+      "said": "Delete the swimming lesson.",
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "said": "Delete the swimming lesson.",
+          "scene": "To-do",
+          "keyboard": "down",
+          "screen": [
+            "“Mark not done”, on the row “Water the plants”",
+            "Text field that says “Water the plants”",
+            "“Delete”, on the row “Water the plants”",
+            "“Mark done”, on the row “Call grandma about Sunday”",
+            "Text field that says “Call grandma about Sunday”",
+            "“Delete”, on the row “Call grandma about Sunday”",
+            "“Mark done”, on the row “Book the dentist”",
+            "Text field that says “Book the dentist”",
+            "“Delete”, on the row “Book the dentist”",
+            "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+            "Text field that says “Oat milk, coffee beans, lemons”",
+            "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+            "“Mark done”, on the row “Take the recycling out”",
+            "Text field that says “Take the recycling out”",
+            "“Delete”, on the row “Take the recycling out”",
+            "“Mark done”, on the row “Fix the bike light”",
+            "Text field that says “Fix the bike light”",
+            "“Delete”, on the row “Fix the bike light”",
+            "Text field “Add a to-do”, on the row “Add”",
+            "“Add”"
+          ]
+        },
+        "questions": {
+          "kind": {
+            "type": "choice",
+            "instructions": "What does the person want the frame to do with what they said?",
+            "criteria": {
+              "fill": "Put words into a text field on the screen: add an item by typing it in, or change what a field says",
+              "press": "Press something on the screen: a button, an icon, a checkbox, an item in a list",
+              "switch": "Show another scene or app, or bring an open window to the front",
+              "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
+              "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
+            }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
+          "press": {
+            "type": "choice",
+            "instructions": "Which element on the screen should be pressed to do what they asked?",
+            "criteria": {
+              "p0": "“Mark not done”, on the row “Water the plants”",
+              "p1": "“Delete”, on the row “Water the plants”",
+              "p2": "“Mark done”, on the row “Call grandma about Sunday”",
+              "p3": "“Delete”, on the row “Call grandma about Sunday”",
+              "p4": "“Mark done”, on the row “Book the dentist”",
+              "p5": "“Delete”, on the row “Book the dentist”",
+              "p6": "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+              "p7": "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+              "p8": "“Mark done”, on the row “Take the recycling out”",
+              "p9": "“Delete”, on the row “Take the recycling out”",
+              "p10": "“Mark done”, on the row “Fix the bike light”",
+              "p11": "“Delete”, on the row “Fix the bike light”",
+              "p12": "“Add”",
+              "none": "None of these"
+            }
+          },
+          "field": {
+            "type": "choice",
+            "instructions": "Which text field should the words go into?",
+            "criteria": {
+              "f0": "Text field that says “Water the plants”",
+              "f1": "Text field that says “Call grandma about Sunday”",
+              "f2": "Text field that says “Book the dentist”",
+              "f3": "Text field that says “Oat milk, coffee beans, lemons”",
+              "f4": "Text field that says “Take the recycling out”",
+              "f5": "Text field that says “Fix the bike light”",
+              "f6": "Text field “Add a to-do”, on the row “Add”",
+              "none": "None of these"
+            }
+          },
+          "scene": {
+            "type": "choice",
+            "instructions": "Which scene or window should the frame show?",
+            "criteria": {
+              "s0": "Voice memos",
+              "s1": "Calendar",
+              "s2": "Clock",
+              "s3": "Weather",
+              "none": "None of these"
+            }
+          },
+          "submit": {
+            "type": "noul",
+            "instructions": "Should the words be entered right away, as pressing Enter does: an item added to a list, a message sent, a search run? Yes when they asked to add, send, save, search or enter something; no when they are only dictating words into a field to go on editing."
+          },
+          "replace": {
+            "type": "noul",
+            "instructions": "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?"
+          }
+        }
+      },
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "press",
+          "confidence": 0.4,
+          "probabilities": {
+            "fill": 0.35,
+            "press": 0.52,
+            "switch": 0.0,
+            "several": 0.0,
+            "other": 0.13
+          }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "press": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 0.98,
+          "probabilities": {
+            "p0": 0.0,
+            "p1": 0.0,
+            "p2": 0.0,
+            "p3": 0.0,
+            "p4": 0.0,
+            "p5": 0.0,
+            "p6": 0.0,
+            "p7": 0.0,
+            "p8": 0.0,
+            "p9": 0.0,
+            "p10": 0.0,
+            "p11": 0.0,
+            "p12": 0.02,
+            "none": 0.98
+          }
+        },
+        "field": {
+          "type": "choice",
+          "choice": "f6",
+          "confidence": 0.58,
+          "probabilities": {
+            "f0": 0.13,
+            "f1": 0.04,
+            "f2": 0.02,
+            "f3": 0.01,
+            "f4": 0.0,
+            "f5": 0.01,
+            "f6": 0.63,
+            "none": 0.16
+          }
+        },
+        "scene": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 1.0,
+          "probabilities": {
+            "s0": 0.0,
+            "s1": 0.0,
+            "s2": 0.0,
+            "s3": 0.0,
+            "none": 1.0
+          }
+        },
+        "submit": {
+          "type": "noul",
+          "noul": 0.22
+        },
+        "replace": {
+          "type": "noul",
+          "noul": 0.33
+        }
+      },
+      "plan": null
+    },
+    {
+      "name": "todo tick off two",
+      "screen": "to-do",
+      "scene": {
+        "id": "to-do",
+        "name": "To-do",
+        "customEvents": [],
+        "nodes": [
+          {
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          }
+        ],
+        "apps": {
+          "jsxUi": {
+            "sources": {
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+            }
+          }
+        }
+      },
+      "said": "Tick off the dentist and the recycling.",
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "said": "Tick off the dentist and the recycling.",
+          "scene": "To-do",
+          "keyboard": "down",
+          "screen": [
+            "“Mark not done”, on the row “Water the plants”",
+            "Text field that says “Water the plants”",
+            "“Delete”, on the row “Water the plants”",
+            "“Mark done”, on the row “Call grandma about Sunday”",
+            "Text field that says “Call grandma about Sunday”",
+            "“Delete”, on the row “Call grandma about Sunday”",
+            "“Mark done”, on the row “Book the dentist”",
+            "Text field that says “Book the dentist”",
+            "“Delete”, on the row “Book the dentist”",
+            "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+            "Text field that says “Oat milk, coffee beans, lemons”",
+            "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+            "“Mark done”, on the row “Take the recycling out”",
+            "Text field that says “Take the recycling out”",
+            "“Delete”, on the row “Take the recycling out”",
+            "“Mark done”, on the row “Fix the bike light”",
+            "Text field that says “Fix the bike light”",
+            "“Delete”, on the row “Fix the bike light”",
+            "Text field “Add a to-do”, on the row “Add”",
+            "“Add”"
+          ]
+        },
+        "questions": {
+          "kind": {
+            "type": "choice",
+            "instructions": "What does the person want the frame to do with what they said?",
+            "criteria": {
+              "fill": "Put words into a text field on the screen: add an item by typing it in, or change what a field says",
+              "press": "Press something on the screen: a button, an icon, a checkbox, an item in a list",
+              "switch": "Show another scene or app, or bring an open window to the front",
+              "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
+              "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
+            }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
+          "press": {
+            "type": "choice",
+            "instructions": "Which element on the screen should be pressed to do what they asked?",
+            "criteria": {
+              "p0": "“Mark not done”, on the row “Water the plants”",
+              "p1": "“Delete”, on the row “Water the plants”",
+              "p2": "“Mark done”, on the row “Call grandma about Sunday”",
+              "p3": "“Delete”, on the row “Call grandma about Sunday”",
+              "p4": "“Mark done”, on the row “Book the dentist”",
+              "p5": "“Delete”, on the row “Book the dentist”",
+              "p6": "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+              "p7": "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+              "p8": "“Mark done”, on the row “Take the recycling out”",
+              "p9": "“Delete”, on the row “Take the recycling out”",
+              "p10": "“Mark done”, on the row “Fix the bike light”",
+              "p11": "“Delete”, on the row “Fix the bike light”",
+              "p12": "“Add”",
+              "none": "None of these"
+            }
+          },
+          "field": {
+            "type": "choice",
+            "instructions": "Which text field should the words go into?",
+            "criteria": {
+              "f0": "Text field that says “Water the plants”",
+              "f1": "Text field that says “Call grandma about Sunday”",
+              "f2": "Text field that says “Book the dentist”",
+              "f3": "Text field that says “Oat milk, coffee beans, lemons”",
+              "f4": "Text field that says “Take the recycling out”",
+              "f5": "Text field that says “Fix the bike light”",
+              "f6": "Text field “Add a to-do”, on the row “Add”",
+              "none": "None of these"
+            }
+          },
+          "scene": {
+            "type": "choice",
+            "instructions": "Which scene or window should the frame show?",
+            "criteria": {
+              "s0": "Voice memos",
+              "s1": "Calendar",
+              "s2": "Clock",
+              "s3": "Weather",
+              "none": "None of these"
+            }
+          },
+          "submit": {
+            "type": "noul",
+            "instructions": "Should the words be entered right away, as pressing Enter does: an item added to a list, a message sent, a search run? Yes when they asked to add, send, save, search or enter something; no when they are only dictating words into a field to go on editing."
+          },
+          "replace": {
+            "type": "noul",
+            "instructions": "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?"
+          }
+        }
+      },
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "press",
+          "confidence": 0.66,
+          "probabilities": {
+            "fill": 0.0,
+            "press": 0.73,
+            "switch": 0.0,
+            "several": 0.27,
+            "other": 0.0
+          }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.11
+        },
+        "press": {
+          "type": "choice",
+          "choice": "p4",
+          "confidence": 0.88,
+          "probabilities": {
+            "p0": 0.0,
+            "p1": 0.0,
+            "p2": 0.0,
+            "p3": 0.0,
+            "p4": 0.89,
+            "p5": 0.01,
+            "p6": 0.0,
+            "p7": 0.0,
+            "p8": 0.05,
+            "p9": 0.0,
+            "p10": 0.0,
+            "p11": 0.0,
+            "p12": 0.0,
+            "none": 0.05
+          }
+        },
+        "field": {
+          "type": "choice",
+          "choice": "f6",
+          "confidence": 0.61,
+          "probabilities": {
+            "f0": 0.01,
+            "f1": 0.0,
+            "f2": 0.11,
+            "f3": 0.0,
+            "f4": 0.02,
+            "f5": 0.0,
+            "f6": 0.66,
+            "none": 0.2
+          }
+        },
+        "scene": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 1.0,
+          "probabilities": {
+            "s0": 0.0,
+            "s1": 0.0,
+            "s2": 0.0,
+            "s3": 0.0,
+            "none": 1.0
+          }
+        },
+        "submit": {
+          "type": "noul",
+          "noul": 0.23
+        },
+        "replace": {
+          "type": "noul",
+          "noul": 0.13
+        }
+      },
+      "plan": null
+    },
+    {
+      "name": "todo add, not on screen yet",
+      "screen": "to-do",
+      "scene": {
+        "id": "to-do",
+        "name": "To-do",
+        "customEvents": [],
+        "nodes": [
+          {
+            "type": "event",
+            "data": {
+              "keyword": "render"
+            }
+          }
+        ],
+        "apps": {
+          "jsxUi": {
+            "sources": {
+              "config.json": "{\n  \"name\": \"To-do\",\n  \"category\": \"data\",\n  \"description\": \"A to-do list: tick, edit, delete and add to-dos. The list scrolls and is kept.\",\n  \"version\": \"1.2.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}"
+            }
+          }
+        }
+      },
+      "said": "Add call the plumber.",
+      "request": {
+        "model": "jev-latest",
+        "state": {
+          "said": "Add call the plumber.",
+          "scene": "To-do",
+          "keyboard": "down",
+          "screen": [
+            "“Mark not done”, on the row “Water the plants”",
+            "Text field that says “Water the plants”",
+            "“Delete”, on the row “Water the plants”",
+            "“Mark done”, on the row “Call grandma about Sunday”",
+            "Text field that says “Call grandma about Sunday”",
+            "“Delete”, on the row “Call grandma about Sunday”",
+            "“Mark done”, on the row “Book the dentist”",
+            "Text field that says “Book the dentist”",
+            "“Delete”, on the row “Book the dentist”",
+            "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+            "Text field that says “Oat milk, coffee beans, lemons”",
+            "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+            "“Mark done”, on the row “Take the recycling out”",
+            "Text field that says “Take the recycling out”",
+            "“Delete”, on the row “Take the recycling out”",
+            "“Mark done”, on the row “Fix the bike light”",
+            "Text field that says “Fix the bike light”",
+            "“Delete”, on the row “Fix the bike light”",
+            "Text field “Add a to-do”, on the row “Add”",
+            "“Add”"
+          ]
+        },
+        "questions": {
+          "kind": {
+            "type": "choice",
+            "instructions": "What does the person want the frame to do with what they said?",
+            "criteria": {
+              "fill": "Put words into a text field on the screen: add an item by typing it in, or change what a field says",
+              "press": "Press something on the screen: a button, an icon, a checkbox, an item in a list",
+              "switch": "Show another scene or app, or bring an open window to the front",
+              "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
+              "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
+            }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
+          "press": {
+            "type": "choice",
+            "instructions": "Which element on the screen should be pressed to do what they asked?",
+            "criteria": {
+              "p0": "“Mark not done”, on the row “Water the plants”",
+              "p1": "“Delete”, on the row “Water the plants”",
+              "p2": "“Mark done”, on the row “Call grandma about Sunday”",
+              "p3": "“Delete”, on the row “Call grandma about Sunday”",
+              "p4": "“Mark done”, on the row “Book the dentist”",
+              "p5": "“Delete”, on the row “Book the dentist”",
+              "p6": "“Mark done”, on the row “Oat milk, coffee beans, lemons”",
+              "p7": "“Delete”, on the row “Oat milk, coffee beans, lemons”",
+              "p8": "“Mark done”, on the row “Take the recycling out”",
+              "p9": "“Delete”, on the row “Take the recycling out”",
+              "p10": "“Mark done”, on the row “Fix the bike light”",
+              "p11": "“Delete”, on the row “Fix the bike light”",
+              "p12": "“Add”",
+              "none": "None of these"
+            }
+          },
+          "field": {
+            "type": "choice",
+            "instructions": "Which text field should the words go into?",
+            "criteria": {
+              "f0": "Text field that says “Water the plants”",
+              "f1": "Text field that says “Call grandma about Sunday”",
+              "f2": "Text field that says “Book the dentist”",
+              "f3": "Text field that says “Oat milk, coffee beans, lemons”",
+              "f4": "Text field that says “Take the recycling out”",
+              "f5": "Text field that says “Fix the bike light”",
+              "f6": "Text field “Add a to-do”, on the row “Add”",
+              "none": "None of these"
+            }
+          },
+          "scene": {
+            "type": "choice",
+            "instructions": "Which scene or window should the frame show?",
+            "criteria": {
+              "s0": "Voice memos",
+              "s1": "Calendar",
+              "s2": "Clock",
+              "s3": "Weather",
+              "none": "None of these"
+            }
+          },
+          "words": {
+            "type": "choice",
+            "instructions": "Exactly which words should be typed into the field? Leave out command words (add, type, write, put) and where to put them (to the list, into the field).",
+            "criteria": {
+              "w0": "“Add call the plumber”",
+              "w1": "“Call the plumber”"
+            }
+          },
+          "submit": {
+            "type": "noul",
+            "instructions": "Should the words be entered right away, as pressing Enter does: an item added to a list, a message sent, a search run? Yes when they asked to add, send, save, search or enter something; no when they are only dictating words into a field to go on editing."
+          },
+          "replace": {
+            "type": "noul",
+            "instructions": "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?"
+          }
+        }
+      },
+      "answers": {
+        "kind": {
+          "type": "choice",
+          "choice": "fill",
+          "confidence": 0.95,
+          "probabilities": {
+            "fill": 0.96,
+            "press": 0.02,
+            "switch": 0.0,
+            "several": 0.02,
+            "other": 0.0
+          }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.08
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.07
+        },
+        "press": {
+          "type": "choice",
+          "choice": "p12",
+          "confidence": 0.95,
+          "probabilities": {
+            "p0": 0.0,
+            "p1": 0.0,
+            "p2": 0.0,
+            "p3": 0.0,
+            "p4": 0.0,
+            "p5": 0.0,
+            "p6": 0.0,
+            "p7": 0.0,
+            "p8": 0.0,
+            "p9": 0.0,
+            "p10": 0.0,
+            "p11": 0.0,
+            "p12": 0.95,
+            "none": 0.05
+          }
+        },
+        "field": {
+          "type": "choice",
+          "choice": "f6",
+          "confidence": 0.97,
+          "probabilities": {
+            "f0": 0.01,
+            "f1": 0.0,
+            "f2": 0.0,
+            "f3": 0.0,
+            "f4": 0.0,
+            "f5": 0.01,
+            "f6": 0.97,
+            "none": 0.01
+          }
+        },
+        "scene": {
+          "type": "choice",
+          "choice": "none",
+          "confidence": 1.0,
+          "probabilities": {
+            "s0": 0.0,
+            "s1": 0.0,
+            "s2": 0.0,
+            "s3": 0.0,
+            "none": 1.0
+          }
+        },
+        "words": {
+          "type": "choice",
+          "choice": "w1",
+          "confidence": 0.98,
+          "probabilities": {
+            "w0": 0.01,
+            "w1": 0.99
+          }
+        },
+        "submit": {
+          "type": "noul",
+          "noul": 0.95
+        },
+        "replace": {
+          "type": "noul",
+          "noul": 0.19
+        }
+      },
+      "plan": {
+        "kind": "fill",
+        "events": [
+          {
+            "name": "uiAction",
+            "payload": {
+              "target": "2:125",
+              "do": "type",
+              "text": "Call the plumber",
+              "submit": true
+            }
+          }
+        ],
+        "reply": "Added “Call the plumber”.",
+        "log": {
+          "kind": "fill",
+          "target": "2:125",
+          "text": "Call the plumber",
+          "submit": true,
+          "replace": false
+        }
+      }
     },
     {
       "name": "todo dictation",
@@ -2646,6 +3660,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -2696,41 +3718,49 @@
         "kind": {
           "type": "choice",
           "choice": "type",
-          "confidence": 0.78,
+          "confidence": 0.71,
           "probabilities": {
-            "type": 0.81,
-            "enter": 0.06,
-            "fill": 0.1,
+            "type": 0.75,
+            "enter": 0.11,
+            "fill": 0.11,
             "press": 0.01,
             "switch": 0.0,
             "several": 0.02,
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.25
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.17
+        },
         "press": {
           "type": "choice",
           "choice": "p6",
-          "confidence": 0.74,
+          "confidence": 0.7,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
             "p2": 0.0,
             "p3": 0.0,
-            "p4": 0.15,
+            "p4": 0.2,
             "p5": 0.02,
-            "p6": 0.77,
-            "none": 0.06
+            "p6": 0.74,
+            "none": 0.04
           }
         },
         "field": {
           "type": "choice",
           "choice": "f2",
-          "confidence": 0.96,
+          "confidence": 0.92,
           "probabilities": {
             "f0": 0.0,
             "f1": 0.0,
-            "f2": 0.97,
-            "f3": 0.03,
+            "f2": 0.94,
+            "f3": 0.06,
             "none": 0.0
           }
         },
@@ -2748,11 +3778,11 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.48
+          "noul": 0.62
         },
         "replace": {
           "type": "noul",
-          "noul": 0.39
+          "noul": 0.43
         }
       },
       "plan": {
@@ -2835,6 +3865,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -2885,41 +3923,49 @@
         "kind": {
           "type": "choice",
           "choice": "enter",
-          "confidence": 0.88,
+          "confidence": 0.84,
           "probabilities": {
-            "type": 0.05,
-            "enter": 0.9,
+            "type": 0.07,
+            "enter": 0.86,
             "fill": 0.01,
-            "press": 0.04,
+            "press": 0.06,
             "switch": 0.0,
             "several": 0.0,
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.12
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.12
+        },
         "press": {
           "type": "choice",
           "choice": "p6",
-          "confidence": 0.81,
+          "confidence": 0.82,
           "probabilities": {
-            "p0": 0.04,
+            "p0": 0.06,
             "p1": 0.02,
-            "p2": 0.01,
+            "p2": 0.0,
             "p3": 0.0,
             "p4": 0.04,
-            "p5": 0.02,
-            "p6": 0.83,
-            "none": 0.04
+            "p5": 0.01,
+            "p6": 0.84,
+            "none": 0.03
           }
         },
         "field": {
           "type": "choice",
           "choice": "f2",
-          "confidence": 0.79,
+          "confidence": 0.66,
           "probabilities": {
-            "f0": 0.01,
+            "f0": 0.02,
             "f1": 0.0,
-            "f2": 0.83,
-            "f3": 0.16,
+            "f2": 0.73,
+            "f3": 0.25,
             "none": 0.0
           }
         },
@@ -2937,11 +3983,11 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.77
+          "noul": 0.86
         },
         "replace": {
           "type": "noul",
-          "noul": 0.34
+          "noul": 0.38
         }
       },
       "plan": {
@@ -3024,6 +4070,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -3074,42 +4128,50 @@
         "kind": {
           "type": "choice",
           "choice": "press",
-          "confidence": 0.73,
+          "confidence": 0.67,
           "probabilities": {
-            "type": 0.11,
+            "type": 0.13,
             "enter": 0.01,
-            "fill": 0.07,
-            "press": 0.77,
+            "fill": 0.11,
+            "press": 0.72,
             "switch": 0.0,
             "several": 0.0,
-            "other": 0.04
+            "other": 0.03
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.34
         },
         "press": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.91,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.01,
             "p2": 0.0,
             "p3": 0.0,
             "p4": 0.0,
-            "p5": 0.01,
-            "p6": 0.02,
-            "none": 0.96
+            "p5": 0.02,
+            "p6": 0.05,
+            "none": 0.92
           }
         },
         "field": {
           "type": "choice",
           "choice": "f2",
-          "confidence": 0.56,
+          "confidence": 0.45,
           "probabilities": {
-            "f0": 0.02,
+            "f0": 0.03,
             "f1": 0.0,
-            "f2": 0.65,
-            "f3": 0.29,
-            "none": 0.04
+            "f2": 0.56,
+            "f3": 0.35,
+            "none": 0.06
           }
         },
         "scene": {
@@ -3130,7 +4192,7 @@
         },
         "replace": {
           "type": "noul",
-          "noul": 0.4
+          "noul": 0.42
         }
       },
       "plan": null
@@ -3212,6 +4274,14 @@
               "fallback": "None of the above fits, so: Save what was said as a voice memo (also said as: take a note, note this down, remember this, new memo)"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -3262,16 +4332,24 @@
         "kind": {
           "type": "choice",
           "choice": "press",
-          "confidence": 0.86,
+          "confidence": 0.91,
           "probabilities": {
             "fill": 0.02,
-            "press": 0.88,
-            "action": 0.01,
-            "switch": 0.07,
+            "press": 0.92,
+            "action": 0.0,
+            "switch": 0.05,
             "several": 0.0,
-            "other": 0.02,
+            "other": 0.01,
             "fallback": 0.0
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.06
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.13
         },
         "press": {
           "type": "choice",
@@ -3288,11 +4366,11 @@
         },
         "field": {
           "type": "choice",
-          "choice": "f0",
-          "confidence": 0.04,
+          "choice": "none",
+          "confidence": 0.06,
           "probabilities": {
-            "f0": 0.52,
-            "none": 0.48
+            "f0": 0.47,
+            "none": 0.53
           }
         },
         "action": {
@@ -3319,7 +4397,7 @@
         },
         "submit": {
           "type": "noul",
-          "noul": 0.22
+          "noul": 0.18
         }
       },
       "plan": {
@@ -3416,6 +4494,14 @@
               "fallback": "None of the above fits, so: Save what was said as a voice memo (also said as: take a note, note this down, remember this, new memo)"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -3466,16 +4552,24 @@
         "kind": {
           "type": "choice",
           "choice": "press",
-          "confidence": 0.99,
+          "confidence": 1.0,
           "probabilities": {
-            "fill": 0.01,
-            "press": 0.99,
+            "fill": 0.0,
+            "press": 1.0,
             "action": 0.0,
             "switch": 0.0,
             "several": 0.0,
             "other": 0.0,
             "fallback": 0.0
           }
+        },
+        "several": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.05
         },
         "press": {
           "type": "choice",
@@ -3493,10 +4587,10 @@
         "field": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.3,
+          "confidence": 0.36,
           "probabilities": {
-            "f0": 0.35,
-            "none": 0.65
+            "f0": 0.32,
+            "none": 0.68
           }
         },
         "action": {
@@ -3512,18 +4606,18 @@
         "scene": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.54,
+          "confidence": 0.4,
           "probabilities": {
-            "s0": 0.36,
+            "s0": 0.48,
             "s1": 0.0,
-            "s2": 0.01,
+            "s2": 0.0,
             "s3": 0.0,
-            "none": 0.63
+            "none": 0.52
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.1
+          "noul": 0.12
         }
       },
       "plan": {
@@ -3620,6 +4714,14 @@
               "fallback": "None of the above fits, so: Save what was said as a voice memo (also said as: take a note, note this down, remember this, new memo)"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -3689,17 +4791,25 @@
             "fallback": 0.72
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.1
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.05
+        },
         "press": {
           "type": "choice",
           "choice": "p4",
-          "confidence": 0.7,
+          "confidence": 0.64,
           "probabilities": {
             "p0": 0.0,
             "p1": 0.0,
             "p2": 0.0,
             "p3": 0.0,
-            "p4": 0.75,
-            "none": 0.25
+            "p4": 0.7,
+            "none": 0.3
           }
         },
         "field": {
@@ -3724,22 +4834,22 @@
         "scene": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.61,
+          "confidence": 0.55,
           "probabilities": {
-            "s0": 0.24,
-            "s1": 0.07,
-            "s2": 0.0,
+            "s0": 0.26,
+            "s1": 0.09,
+            "s2": 0.01,
             "s3": 0.0,
-            "none": 0.69
+            "none": 0.64
           }
         },
         "words": {
           "type": "choice",
           "choice": "w0",
-          "confidence": 0.78,
+          "confidence": 0.64,
           "probabilities": {
-            "w0": 0.89,
-            "w1": 0.11
+            "w0": 0.82,
+            "w1": 0.18
           }
         },
         "submit": {
@@ -3842,6 +4952,14 @@
               "fallback": "None of the above fits, so: Save what was said as a voice memo (also said as: take a note, note this down, remember this, new memo)"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -3903,17 +5021,25 @@
             "fallback": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.17
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.09
+        },
         "press": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.94,
           "probabilities": {
-            "p0": 0.0,
-            "p1": 0.01,
-            "p2": 0.0,
-            "p3": 0.01,
-            "p4": 0.02,
-            "none": 0.96
+            "p0": 0.01,
+            "p1": 0.0,
+            "p2": 0.01,
+            "p3": 0.02,
+            "p4": 0.01,
+            "none": 0.95
           }
         },
         "field": {
@@ -3938,18 +5064,18 @@
         "scene": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.96,
+          "confidence": 0.9,
           "probabilities": {
-            "s0": 0.02,
+            "s0": 0.01,
             "s1": 0.0,
-            "s2": 0.01,
+            "s2": 0.07,
             "s3": 0.0,
-            "none": 0.97
+            "none": 0.92
           }
         },
         "submit": {
           "type": "noul",
-          "noul": 0.24
+          "noul": 0.16
         }
       },
       "plan": {
@@ -4000,6 +5126,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -4032,22 +5166,30 @@
         "kind": {
           "type": "choice",
           "choice": "switch",
-          "confidence": 0.59,
+          "confidence": 0.45,
           "probabilities": {
-            "press": 0.31,
-            "switch": 0.69,
+            "press": 0.41,
+            "switch": 0.59,
             "several": 0.0,
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.04
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.11
+        },
         "press": {
           "type": "choice",
           "choice": "p2",
-          "confidence": 0.93,
+          "confidence": 0.96,
           "probabilities": {
-            "p0": 0.03,
+            "p0": 0.01,
             "p1": 0.01,
-            "p2": 0.94,
+            "p2": 0.96,
             "p3": 0.0,
             "p4": 0.0,
             "p5": 0.0,
@@ -4059,13 +5201,13 @@
         "scene": {
           "type": "choice",
           "choice": "s0",
-          "confidence": 0.95,
+          "confidence": 0.94,
           "probabilities": {
-            "s0": 0.96,
+            "s0": 0.95,
             "s1": 0.0,
             "s2": 0.0,
             "s3": 0.0,
-            "none": 0.04
+            "none": 0.05
           }
         }
       },
@@ -4119,6 +5261,14 @@
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
           },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
+          },
           "press": {
             "type": "choice",
             "instructions": "Which element on the screen should be pressed to do what they asked?",
@@ -4159,6 +5309,14 @@
             "other": 0.0
           }
         },
+        "several": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "absent": {
+          "type": "noul",
+          "noul": 0.06
+        },
         "press": {
           "type": "choice",
           "choice": "p6",
@@ -4178,13 +5336,13 @@
         "scene": {
           "type": "choice",
           "choice": "none",
-          "confidence": 0.95,
+          "confidence": 0.98,
           "probabilities": {
-            "s0": 0.04,
+            "s0": 0.02,
             "s1": 0.0,
             "s2": 0.0,
             "s3": 0.0,
-            "none": 0.96
+            "none": 0.98
           }
         }
       },
@@ -4269,6 +5427,14 @@
               "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
           },
           "press": {
             "type": "choice",
@@ -4362,11 +5528,11 @@
           }
         }
       },
-      "said": "Tick off the plumber.",
+      "said": "Tick off the swimming lesson.",
       "request": {
         "model": "jev-latest",
         "state": {
-          "said": "Tick off the plumber.",
+          "said": "Tick off the swimming lesson.",
           "scene": "To-do",
           "keyboard": "down",
           "screen": [
@@ -4403,6 +5569,14 @@
               "several": "Several different things to do in one request (two items to add, or a change and then a switch)",
               "other": "Something else: a question, making a new scene or picture, a setting of the frame or of the scene, or nothing on this screen fits"
             }
+          },
+          "several": {
+            "type": "noul",
+            "instructions": "Does the request ask for more than one separate thing to be done: two or more items to add, tick off or delete, or two different actions?"
+          },
+          "absent": {
+            "type": "noul",
+            "instructions": "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, rename or change it) that none of the things on the screen is about?"
           },
           "press": {
             "type": "choice",

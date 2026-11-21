@@ -59,6 +59,11 @@ const CASES: [string, string, Expect][] = [
   ["to-do", "Rotate the frame.", { chat: true }],
   ["to-do", "Tick off the plumber.", { chat: true }],
   ["to-do", "Delete the swimming lesson.", { chat: true }],
+  ["to-do", "Mark the swimming lesson as done.", { chat: true }],
+  ["to-do", "Open the gym note.", { chat: true }],
+  ["to-do", "Delete the dentist and the bike light.", { chat: true }],
+  ["to-do", "Add milk, eggs and bread.", { chat: true }],
+  ["to-do", "Add call the plumber.", { submit: true, text: "Call the plumber", type: "Add a to-do" }],
   // The To-do with the keyboard up on a row.
   ["to-do-keyboard", "and new brakes too", { text: "and new brakes too", type: "Fix the bike brakes" }],
   ["to-do-keyboard", "Send it.", { enter: true }],

@@ -56,6 +56,12 @@ SUBMIT_PROBABILITY = 0.5
 # it is clearly asked for (or the kind is `enter`).
 DICTATION_SUBMIT_PROBABILITY = 0.8
 REPLACE_PROBABILITY = 0.5
+# Two yes / no checks ride with every request: "several things" (two items to
+# tick off is the chat's, never the first of them alone) and "an item that is
+# not on the screen" (ticking off what is not there is never typing it in as
+# a new one). Either at this or above and the chat decides.
+SEVERAL_PROBABILITY = 0.5
+ABSENT_PROBABILITY = 0.5
 
 # The kinds of thing a person asks for, as Jev's first question offers them.
 KIND_TYPE = "type"        # dictating into the field that has the keyboard
@@ -99,6 +105,14 @@ QUESTION_SUBMIT = (
 NONE_OPTION = "none"
 NONE_WORDS = "None of these"
 
+QUESTION_SEVERAL = (
+    "Does the request ask for more than one separate thing to be done: two or more items to add, tick off"
+    " or delete, or two different actions?"
+)
+QUESTION_ABSENT = (
+    "Does the request ask to act on a particular existing item (tick it off, mark it done, open, delete, "
+    "rename or change it) that none of the things on the screen is about?"
+)
 QUESTION_REPLACE = (
     "Should what the field says now be replaced by the new words (renaming or correcting it), rather than added to?"
 )
@@ -385,7 +399,11 @@ def build_decision(
     if fallback is not None:
         kinds[KIND_FALLBACK] = "None of the above fits, so: " + _event_words(fallback)
 
-    questions: JsonObject = {"kind": _choice(QUESTION_KIND, kinds)}
+    questions: JsonObject = {
+        "kind": _choice(QUESTION_KIND, kinds),
+        "several": {"type": "noul", "instructions": QUESTION_SEVERAL},
+        "absent": {"type": "noul", "instructions": QUESTION_ABSENT},
+    }
     if len(presses) > 1:
         criteria = {}
         for i, target in enumerate(presses):
@@ -487,6 +505,13 @@ def plan_from_answers(decision: VoiceDecision, answers: JsonObject, *, transcrip
     kind, sure = _pick(answers, "kind", kinds)
     log: JsonObject = {"kind": kind, "p": round(sure, 3)}
     if kind is None or kind in (KIND_SEVERAL, KIND_OTHER) or sure < MIN_KIND_PROBABILITY:
+        return None
+    several, absent = _noul(answers, "several"), _noul(answers, "absent")
+    if several >= SEVERAL_PROBABILITY:
+        log["several"] = round(several, 3)
+        return None
+    if absent >= ABSENT_PROBABILITY and kind in (KIND_FILL, KIND_PRESS):
+        log["absent"] = round(absent, 3)
         return None
     said = transcript.strip()[:MAX_EVENT_TEXT]
 
