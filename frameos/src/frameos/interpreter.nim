@@ -261,7 +261,11 @@ when not defined(frameosEmbedded):
       ## While a scene instance is made (init): the JSON file its apps read
       ## their files from, read and inflated once.
 
-proc appSourcesFromFiles*(files: SceneFiles, sceneId: SceneId, keyword: string): JsonNode
+proc appSourcesInJson*(text, sceneId, keyword: string): JsonNode
+var sceneFileReader*: proc (sceneId: SceneId): string {.nimcall, gcsafe.}
+  ## The host's text of a scene (sfHost); "" for none. An ESP32's slot file
+  ## (embedded_runtime.nim, from the slot cache when it has it), the browser
+  ## preview's payload (wasm_main.nim).
 
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
@@ -273,15 +277,36 @@ proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   nil
 
 proc appSourcesFromSceneFiles(scene: FrameScene, keyword: string): JsonNode =
-  ## The app's files read again from where its scene's JSON lives.
-  if scene of InterpretedFrameScene:
-    # Only for an app the scene names (a built-in one is in no file).
-    let interpreted = InterpretedFrameScene(scene)
-    let source = interpreted.source
-    if not source.isNil and source.files.kind != sfResident and
-        not interpreted.apps.isNil and interpreted.apps.kind == JObject and interpreted.apps.hasKey(keyword):
-      return appSourcesFromFiles(source.files, scene.id, keyword)
-  nil
+  ## The app's files ({file: text}) read now from where its scene's JSON
+  ## lives; nil when they are not there. Nothing of them stays: an
+  ## interpreter compiles them and lets them go (app_runtime.ensureReady).
+  if not (scene of InterpretedFrameScene):
+    return nil
+  # Only for an app the scene names (a built-in one is in no file).
+  let interpreted = InterpretedFrameScene(scene)
+  let source = interpreted.source
+  if source.isNil or interpreted.apps.isNil or interpreted.apps.kind != JObject or
+      not interpreted.apps.hasKey(keyword):
+    return nil
+  let files = source.files
+  try:
+    case files.kind
+    of sfResident:
+      return nil
+    of sfJson:
+      when not defined(frameosEmbedded):
+        if sceneFilesText.path != files.path:
+          let raw = readFile(files.path)
+          let text = if files.path.endsWith(".gz"): uncompress(raw) else: raw
+          if sceneInitDepth == 0:
+            return appSourcesInJson(text, scene.id.string, keyword)
+          sceneFilesText = (files.path, text)
+        return appSourcesInJson(sceneFilesText.text, scene.id.string, keyword)
+    of sfHost:
+      if not sceneFileReader.isNil:
+        return appSourcesInJson(sceneFileReader(scene.id), scene.id.string, keyword)
+  except CatchableError:
+    return nil
 
 proc appSourcesFor(scene: FrameScene, node: DiagramNode, keyword: string): JsonNode =
   ## Where an app's files are, in order: the node's own (an inline app), the
@@ -2883,19 +2908,29 @@ proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.n
       if openValue(s, i, '{'):
         result.add(read(s, i))
 
-proc readAppsWithoutFiles(s: string, i: var int): JsonNode =
-  ## `apps` as the keywords the scene carries the source of, each one an
-  ## empty object: the runtime asks nothing else of a scene's apps (their
-  ## config, fields and defaults are each app's config.json), and their
-  ## files are read again from where the scene's JSON lives when an
-  ## interpreter starts. Nothing of them is built.
+proc readApps(s: string, i: var int, keyword: string): JsonNode =
+  ## A scene's `apps`, two ways, nothing else of them built:
+  ## - `keyword` "": the keywords the scene carries the source of, each an
+  ##   empty object. The runtime asks nothing else of a scene's apps (their
+  ##   config, fields and defaults are each app's config.json), and their
+  ##   files are read again from where the scene's JSON lives when an
+  ##   interpreter starts.
+  ## - a keyword: that app's `sources`, nil without them.
   if not openValue(s, i, '{'):
     return nil
-  result = newJObject()
+  if keyword.len == 0:
+    result = newJObject()
   while moreItems(s, i, '}'):
-    let keyword = readKey(s, i)
-    skipValue(s, i)
-    result[keyword] = newJObject()
+    let key = readKey(s, i)
+    if keyword.len == 0:
+      skipValue(s, i)
+      result[key] = newJObject()
+    elif key == keyword and openValue(s, i, '{'):
+      while moreItems(s, i, '}'):
+        if readKey(s, i) == "sources": result = readJson(s, i)
+        else: skipValue(s, i)
+    else:
+      skipValue(s, i)
 
 proc readScene(s: string, i: var int, withFiles: bool): FrameSceneInput =
   ## `withFiles`: the apps' files stay in `apps` (sfResident).
@@ -2906,7 +2941,7 @@ proc readScene(s: string, i: var int, withFiles: bool): FrameSceneInput =
     of "name": result.name = readText(s, i)
     of "nodes": result.nodes = readList(s, i, readNode)
     of "edges": result.edges = readList(s, i, readEdge)
-    of "apps": result.apps = if withFiles: readJson(s, i) else: readAppsWithoutFiles(s, i)
+    of "apps": result.apps = if withFiles: readJson(s, i) else: readApps(s, i, "")
     of "fields": result.fields = readList(s, i, readField)
     of "settings": result.settings = if openValue(s, i, '{'): readSettings(s, i) else: nil
     of "origin": result.origin = readJson(s, i)
@@ -2930,14 +2965,8 @@ proc appSourcesInObject(s: string, i: var int, sceneId, keyword: string, found: 
       while moreItems(s, i, ']'):
         if openValue(s, i, '{') and appSourcesInObject(s, i, sceneId, keyword, found):
           return true
-    elif key == "apps" and openValue(s, i, '{'):
-      while moreItems(s, i, '}'):
-        if readKey(s, i) == keyword and openValue(s, i, '{'):
-          while moreItems(s, i, '}'):
-            if readKey(s, i) == "sources": sources = readJson(s, i)
-            else: skipValue(s, i)
-        else:
-          skipValue(s, i)
+    elif key == "apps":
+      sources = readApps(s, i, keyword)
     else:
       skipValue(s, i)
   if id == sceneId and not sources.isNil:
@@ -2959,35 +2988,6 @@ proc appSourcesInJson*(text, sceneId, keyword: string): JsonNode =
   elif text[i] == '{':
     inc i
     discard appSourcesInObject(text, i, sceneId, keyword, result)
-
-var sceneFileReader*: proc (sceneId: SceneId): string {.nimcall, gcsafe.}
-  ## The host's text of a scene (sfHost); "" for none. An ESP32's slot file
-  ## (embedded_runtime.nim, from the slot cache when it has it), the browser
-  ## preview's payload (wasm_main.nim).
-
-proc appSourcesFromFiles*(files: SceneFiles, sceneId: SceneId, keyword: string): JsonNode =
-  ## One app's files ({file: text}) read now from where its scene came from;
-  ## nil when they are not there. Nothing of them stays: an interpreter
-  ## compiles them and lets them go (app_runtime.ensureReady).
-  try:
-    case files.kind
-    of sfResident:
-      return nil
-    of sfJson:
-      when not defined(frameosEmbedded):
-        if sceneFilesText.path != files.path:
-          let raw = readFile(files.path)
-          let text = if files.path.endsWith(".gz"): uncompress(raw) else: raw
-          if sceneInitDepth == 0:
-            return appSourcesInJson(text, sceneId.string, keyword)
-          sceneFilesText = (files.path, text)
-        return appSourcesInJson(sceneFilesText.text, sceneId.string, keyword)
-    of sfHost:
-      if sceneFileReader.isNil:
-        return nil
-      return appSourcesInJson(sceneFileReader(sceneId), sceneId.string, keyword)
-  except CatchableError:
-    return nil
 
 # -------------------------
 # Scene registry (loader)
