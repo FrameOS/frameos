@@ -1,6 +1,6 @@
 import chroma, pixie, pixie/blends, pixie/paths, vmath
 
-# A gradient blended normally into a grey or 565 image over a box of whole
+# A gradient blended normally into an image of any format over a box of whole
 # pixels is filled row by row from the gradient, without the coverage mask
 # every other shape goes through (paths.nim, fillGradientBox): a page's
 # background. It must land exactly the picture the mask lands. The same
@@ -72,12 +72,13 @@ proc gradient(kind: Kind, w, h: float32, translucent: bool, opacity: float32): P
     else: stops(translucent)
   result.opacity = opacity
 
-type Target = enum gray4, gray8, rgb565, rgb565Dithered
+type Target = enum gray4, gray8, rgb565, rgb565Dithered, rgbx
 
 proc canvas(target: Target, w, h: int): Image =
   result = case target
     of gray4: newImageGray4(w, h)
     of gray8: newImageGray8(w, h)
+    of rgbx: newImage(w, h)
     else: newImage565(w, h)
   result.ditherStores = target == rgb565Dithered
   # Something under the gradient for it to blend with.
@@ -149,7 +150,7 @@ for target in Target:
     # A small image's gradient has no table: a grey target's goes through the
     # mask unless one row or one colour a row says it all.
     check(target, 40, 30, kind, true, 0.6, 3, 2, 31, 25,
-      boxed = target in {rgb565, rgb565Dithered} or kind in {horizontal, vertical})
+      boxed = target in {rgb565, rgb565Dithered, rgbx} or kind in {horizontal, vertical})
 
 # Any other shape goes through a mask of its coverage, a byte a pixel, and
 # the same rows. Against the composite spelled out: the shape as a mask's
@@ -249,6 +250,40 @@ for target in Target:
       proc(image: Image, paint: Paint) = image.fillPath("M -30 20 L 330 90 L 120 300 z", paint))
     checkShape(target, kind, true, 1, "a stroke",
       proc(image: Image, paint: Paint) = image.strokePath(disc(), paint, strokeWidth = 9))
+
+# An RGBX canvas may be transparent where the gradient lands (a layer, a
+# sprite): blended normally, a pixel with no alpha takes the colour as it is
+# and a translucent one its alpha too, as the paint image's composite does.
+block transparentBackdrop:
+  for kind in [vertical, radial, glow, vignette]:
+    for opacity in [1'f32, 0.55'f32]:
+      let
+        paint = gradient(kind, W.float32, H.float32, true, opacity)
+        backdrop = proc(): Image =
+          result = newImage(W, H)
+          let half = newPaint(SolidPaint)
+          half.color = color(0.2, 0.7, 0.3, 0.45)
+          result.fillPath("M 0 0 L 300 0 L 0 240 z", half)
+        drawn = backdrop()
+        expected = backdrop()
+        colors = newImage(W, H)
+        before = gradientBoxFills
+      drawn.fillPath(box(0, 0, W, H), paint)
+      doAssert gradientBoxFills - before == 1, "a transparent RGBX page is a box"
+      let whole = round(255 * opacity).uint8
+      paint.opacity = 1
+      colors.fillGradient(paint, pixels = W * H)
+      paint.opacity = opacity
+      for y in 0 ..< H:
+        for x in 0 ..< W:
+          var c = colors[x, y]
+          if whole != 255:
+            c = blendMask(c, rgbx(whole, whole, whole, whole))
+          if c.a != 0:
+            expected[x, y] = blendNormal(expected[x, y], c)
+      let d = differing(drawn, expected)
+      doAssert d == 0, $kind & " opacity " & $opacity & ": " & $d & " pixels differ over a transparent backdrop"
+      inc cases
 
 # The rows shared between two workers, as a host with a second core for them
 # runs the job: blocks in turn, each worker with its own scratch.
