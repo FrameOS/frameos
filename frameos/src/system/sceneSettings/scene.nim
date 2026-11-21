@@ -45,7 +45,9 @@ import frameos/scene_store_hooks
 import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
+import frameos/utils/qr
 import frameos/utils/svg_frames
+from frameos/utils/asset_colors import panelShowsColor
 import system/sceneSwitcher/scene as switcher
 
 {.push overflowChecks: off, rangeChecks: off, boundChecks: off, fieldChecks: off, stackTrace: off,
@@ -580,12 +582,9 @@ proc press(self: SceneSettingsScene, action: int) =
     frameAction("scan")
   elif action == ACheckUpdate:
     frameAction("checkUpdate")
-  elif action == ALinkCloud:
-    frameAction("linkCloud")
-  elif action == AAdopt:
-    frameAction("adopt")
-  elif action == ACancelLink:
-    frameAction("cancelLink")
+  elif action >= ALinkCloud and action <= ACancelLink:
+    # The host's own words for them, in the order of the numbers.
+    frameAction(["linkCloud", "adopt", "cancelLink"][action - ALinkCloud])
   elif action == ALayout:
     self.openLayoutPage()
   elif action == ARender:
@@ -696,6 +695,7 @@ proc on(node: sink SvgNode, attr: string, handler: int): SvgNode =
 
 type Look = object
   paper: bool
+  color: bool ## the panel shows colors (utils/asset_colors.panelShowsColor): an accent for a code
   size, pad, gap, line: int
 
 proc button(look: Look, label: string, handler: int, primary: bool): SvgNode =
@@ -893,9 +893,89 @@ proc pressButton(look: Look, label: string, action: int, asking = -1): SvgNode =
   if asking == action:
     result.attrs[0][1].add(if look.paper: " bg-black text-white" else: " bg-red-600 active:bg-red-500")
 
-proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit: int): SvgNode =
-  ## The frame page: how it is doing (a card of label and text rows), what
-  ## can be changed (the same rows as a scene's fields), and its buttons.
+proc note(list: SvgNode, look: Look, text: string) =
+  ## A smaller grey line under what it is about.
+  var c = look.grey
+  c.px("text", look.size * 3 div 4)
+  list.children.add el("div", move c, SvgNode(text: text)).role("muted")
+
+proc offers(actions: seq[JsonNode], action: string): bool =
+  ## Whether the host lists `action` among what the page may do.
+  for a in actions:
+    if a.getStr() == action:
+      return true
+
+var
+  linkQr {.threadvar.}: Image ## the QR code of the link under way, while one is ...
+  linkQrText {.threadvar.}: string ## ... and what it says
+
+const LinkHints = [
+  "Open the page above on your phone or computer and enter the code.",
+  "Scan the QR code with your phone, or open the page above and enter the code.",
+  "In your FrameOS backend, add a frame with Adopt frame and enter the address and code above.",
+  "In your FrameOS backend, add a frame with Adopt frame and enter the address and code above, or paste " &
+    "what the QR code says into its address."]
+  ## What to do, by plane (cloud, backend) and whether a QR code shows.
+
+proc linkPage(look: Look, link: JsonNode, width, height: int): SvgNode =
+  ## A control plane being connected (docs/scene-settings.md "Connecting the
+  ## frame"): the same page for the cloud and a backend, a QR code of what
+  ## the person has to share beside its code, where it goes and Cancel. The
+  ## host draws neither code anywhere else and keeps no picture while one
+  ## shows. The QR code is black on white, as a camera reads it best, on
+  ## every panel, and left out where there is no room for one that scans.
+  let
+    backend = link{"to"}.getStr() == "backend"
+    code = link{"code"}.getStr()
+    side = min(height * 45 div 100, width * 2 div 5)
+    text = link{"qr"}.getStr()
+  if code.len == 0 or side < 96 or text.len == 0:
+    linkQr = nil
+  elif linkQr.isNil or linkQrText != text or linkQr.width != side:
+    # What the host hands over always fits a code (192 bytes at most).
+    linkQrText = text
+    linkQr = qrImage(qrEncode(text), side, padding = 2)
+  var c = "flex items-center"
+  c.px("p", look.pad)
+  c.px("gap", look.gap)
+  result = el("div", move c)
+  if not linkQr.isNil:
+    var q = "shrink-0"
+    q.px("w", side)
+    q.px("h", side)
+    let picture = el("img", move q)
+    picture.image = linkQr
+    result.children.add picture
+  c = "flex-1 min-w-0 flex flex-col"
+  c.px("gap", look.gap div 2)
+  let words = el("div", move c,
+    el("div", "font-bold", SvgNode(text: if backend: "Your FrameOS backend" else: "FrameOS Cloud")))
+  result.children.add words
+  if code.len == 0:
+    # Asked for, and not answered yet; or approved, and enrolling.
+    words.note(look, "Waiting for FrameOS Cloud\xe2\x80\xa6")
+  else:
+    # The code as large as the page lets it be, in the panel's accent where it
+    # shows colors (red is an ink of every color e-paper).
+    var k = "font-bold"
+    k.px("text", look.size * 2)
+    if look.color: k.add(if look.paper: " text-red-600" else: " text-sky-400")
+    words.children.add el("div", move k, SvgNode(text: code))
+    words.children.add el("div", look.grey, SvgNode(text: link{"where"}.getStr())).role("muted")
+    words.note(look, LinkHints[ord(backend) * 2 + ord(not linkQr.isNil)])
+  words.children.add el("div", "flex", look.pressButton("Cancel", ACancelLink))
+
+proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: string, unit, width,
+    height: int): SvgNode =
+  ## The frame page: how it is doing (a card of label and text rows), its
+  ## buttons, what can be changed (the same rows as a scene's fields); or,
+  ## while a control plane is being connected, that.
+  let
+    actions = arrayOf(info{"actions"}).elems
+    link = info{"link"}
+  if not link.isNil and link.kind == JObject:
+    return look.linkPage(link, width, height)
+  linkQr = nil
   var c = "flex flex-col"
   c.px("p", look.pad)
   c.px("gap", look.gap)
@@ -922,7 +1002,19 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   card.line(look, "Not saved", info{"note"}.getStr())
   if self.state{"restarting"}.getBool():
     card.line(look, "Rotation", "Restarting to turn the screen")
-  card.line(look, "Managed by", info{"managedBy"}.getStr())
+  # Who manages it; where nobody does and the host offers a plane, the way to
+  # one right under it, each opening the same page (linkPage).
+  let
+    cloud = actions.offers("linkCloud")
+    backend = actions.offers("adopt")
+  card.line(look, "Managed by", if cloud or backend: "Nobody" else: info{"managedBy"}.getStr())
+  if cloud or backend:
+    c = "flex flex-wrap justify-end"
+    c.px("gap", look.gap div 2)
+    let connect = el("div", move c)
+    if cloud: connect.children.add look.pressButton("FrameOS Cloud", ALinkCloud)
+    if backend: connect.children.add look.pressButton("Your backend", AAdopt)
+    card.children.add connect
   card.line(look, "Version", info{"version"}.getStr())
   let update = info{"updateState"}.getInt(-1)
   if update == UpdateAvailable:
@@ -937,22 +1029,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Scenes", UpdateWords[2])
   elif scenes.listed > 0:
     card.line(look, "Scenes", $scenes.listed & (if scenes.listed == 1: " update" else: " updates"))
-  # A control plane being linked: the cloud's code is the page's to show, an
-  # adoption's never is (a presence code, drawn over the panel by the host
-  # and kept out of every image), so its line says where to look.
-  let
-    cloudCode = info{"cloudLink", "code"}.getStr()
-    adoptAt = info{"adopt", "address"}.getStr()
-  card.line(look, "FrameOS Cloud", cloudCode)
-  card.line(look, "Adopt at", adoptAt)
   result.children.add card.role("card")
-  proc note(list: SvgNode, look: Look, text: string) =
-    var c = look.grey
-    c.px("text", look.size * 3 div 4)
-    list.children.add el("div", move c, SvgNode(text: text)).role("muted")
-  let
-    actions = arrayOf(info{"actions"}).elems
-    asking = self.state{"confirm"}.getInt(-1)
+  let asking = self.state{"confirm"}.getInt(-1)
   # What the frame can do, right under how it is doing: the fields below can
   # run longer than the panel.
   c = "flex flex-wrap"
@@ -965,28 +1043,10 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
   if scenes.movable > 0 and not scenes.busy:
     buttons.children.add look.pressButton("Update scenes", AUpdateScenes, asking)
-  if %"restart" in actions:
+  if actions.offers("restart"):
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
-  if cloudCode.len > 0 or adoptAt.len > 0:
-    buttons.children.add look.pressButton("Cancel link", ACancelLink)
-  else:
-    if %"linkCloud" in actions:
-      buttons.children.add look.pressButton("Link to FrameOS Cloud", ALinkCloud)
-    if %"adopt" in actions:
-      buttons.children.add look.pressButton("Adopt by a backend", AAdopt)
   result.children.add buttons
-  if cloudCode.len > 0:
-    # The page to type the code in, as a person types it: no scheme.
-    var uri = info{"cloudLink", "uri"}.getStr()
-    for scheme in ["https://", "http://"]:
-      if uri.startsWith(scheme): uri = uri[scheme.len .. ^1]
-    result.note(look, "Enter the code " & cloudCode &
-      (if uri.len > 0: " at " & uri else: " in your FrameOS Cloud account") &
-      " to link this frame to your account.")
-  elif adoptAt.len > 0:
-    result.note(look, "In your FrameOS backend, add a frame with Adopt frame: enter " & adoptAt &
-      " and the code on this screen.")
   let
     fields = self.frameFields(info, autoScale, unit)
     edits = self.objectAt("frameValues")
@@ -1069,7 +1129,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   ## what its sizes are a share of, the panel's shorter edge for a UI laid out
   ## at its render scale (sceneSwitcher's uiRoom); the canvas's without it.
   let unit = if sizeUnit > 0: sizeUnit else: min(width, height)
-  var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28))
+  var look = Look(paper: paper, size: clamp(unit * 4 div 100, 14, 28),
+    color: panelShowsColor(if self.frameConfig.isNil: "" else: self.frameConfig.device))
   look.pad = clamp(unit * 4 div 100, 8, 32)
   look.gap = look.size
   look.line = look.size * 23 div 10
@@ -1088,7 +1149,7 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
       let edits = self.state{"frameValues"}
       self.roundTree(look, result, width, height, "Frame settings", min(keyboardTop, height),
         gear = false, self.frameList(look, info,
-          scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit),
+          scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit, width, height),
         cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
     else:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height),
@@ -1102,10 +1163,12 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let
     header = el("div", move c)
     frame = not info.isNil and self.onFrame()
+    # Connecting a control plane: its own title and nothing to save.
+    connecting = frame and not info{"link"}.isNil
     layoutPage = self.onLayoutPage()
   header.children.add look.button(if frame or layoutPage: "Back" else: "Cancel", HCancel, false)
   header.children.add el("span", "grow truncate text-center font-bold",
-    SvgNode(text: if frame: "Frame settings" else: title))
+    SvgNode(text: if connecting: "Connect" elif frame: "Frame settings" else: title))
   # The scene's code (on the layout's page the layout's), where the frame
   # holds the code editor (not the editor's own: it is open on it already).
   let code = self.codeOf(codeEditor()).len > 0
@@ -1120,9 +1183,11 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # Lit while there is something to save: after a Save it goes quiet, which
   # is how the frame page says it took it.
   let edits = if frame: self.state{"frameValues"} else: self.form(){"edited"}
-  header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
+  if not connecting:
+    header.children.add look.button("Save", HSave, not edits.isNil and edits.len > 0)
   result.children.add header.role("bar")
-  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit)
+  let body = if frame: self.frameList(look, info, scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit,
+      width, height)
     else: self.fieldList(look, look.pad, look.pad)
   result.children.add el("div", "flex-1 overflow-y-auto", body)
 

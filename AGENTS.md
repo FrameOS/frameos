@@ -284,11 +284,12 @@
   built-in scenes go through `isBuiltInScene`; a third goes the same way.
 - A gear left of Save opens the **frame page** (doc section "The frame page"):
   Wi-Fi, rotation, scale, Render again / Restart FrameOS / Reboot (under the
-  card), and on a frame no plane holds Link to FrameOS Cloud (the device
-  flow) and Adopt by a backend (a presence code, scope `adopt`, that the
-  backend's Adopt form exchanges at the frame's `POST /api/adopt`; doc section
-  "Linking the frame": keep the Pi's `adopt_routes.nim` and the ESP32's
-  `fos_http.c` alike). The page is
+  card), and on a frame no plane holds a button per plane under "Managed by: Nobody":
+  one page for FrameOS Cloud (the device flow) or a backend (scope `adopt`,
+  exchanged at the frame's `POST /api/adopt`), each its code, a QR code and
+  Cancel (doc section "Connecting the frame": both codes are presence codes,
+  shown on the page, and no picture is kept while one shows; keep the
+  Pi's `adopt_routes.nim` and the ESP32's `fos_http.c` alike). The page is
   built in the scene from FACTS a host hands over through three hooks
   (`frameSettingsRead` / `Apply` / `Action`): the ESP32's
   `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's

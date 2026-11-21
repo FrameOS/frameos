@@ -52,10 +52,11 @@ const
   ## chromiumScreenshot run Chromium unsandboxed where FrameOS runs as root.
   LocalAccessScopeLocalNetwork* = "localNetwork"
   LocalAccessScopeShellApps* = "shellApps"
-  ## Not a fact but a handover: the frame page's "Adopt by a backend" shows a
-  ## code, and `POST /api/adopt` takes it (server/routes/adopt_routes.nim,
-  ## docs/scene-settings.md "Linking the frame"). Only the frame page starts
-  ## one, never a control plane's challenge: `isLocalAccessScope` leaves it out.
+  ## Not a fact but a handover: the frame page's Managed by → Your backend shows a code for a
+  ## backend, and `POST /api/adopt` takes it (server/routes/adopt_routes.nim,
+  ## docs/scene-settings.md "Connecting the frame"). Only the frame page
+  ## starts one and only the page draws it, never a control plane's
+  ## challenge: `isLocalAccessScope` leaves it out.
   LocalAccessScopeAdopt* = "adopt"
 
   LocalAccessStatePath* = "./state/local_access.json"
@@ -396,11 +397,12 @@ proc localAccessPanelText*(): string =
   ## drew, which is how every end of a challenge — the right code, the fifth
   ## wrong one, expiry, a new challenge — takes the old code off the panel
   ## without anyone having to ask for a render.
+  ## An adoption code is the frame page's to show, never the runner's.
   withLock localAccessLock:
-    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
+    if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime() and
+        localAccessChallenge.scope != LocalAccessScopeAdopt:
       let label =
         if localAccessChallenge.scope == LocalAccessScopeShellApps: "Shell apps code"
-        elif localAccessChallenge.scope == LocalAccessScopeAdopt: "Adoption code"
         else: "Local network access code"
       result = label & "\n" & localAccessChallenge.code
     else:

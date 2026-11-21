@@ -1,8 +1,9 @@
 ## A backend adopts this frame with the code its frame page shows
-## (docs/scene-settings.md "Linking the frame", docs/api-triality.md): "Adopt
-## by a backend" puts six digits on the panel (local_access.nim, scope
-## `adopt`, drawn after the image is stored, so no image the frame serves
-## carries them), and the backend's Adopt form sends them here. A right code
+## (docs/scene-settings.md "Connecting the frame", docs/api-triality.md):
+## Managed by → Your backend puts six digits on the frame page
+## (local_access.nim, scope `adopt`; no picture is kept while they show, so
+## no image the frame serves carries them), and the backend's Adopt form
+## sends them here. A right code
 ## is exchanged for the frame's admin login, minted when it has none, and the
 ## backend goes on as an adoption with a password does: it logs in, reads
 ## `GET /api/frames/1` and writes its own address back.
@@ -19,6 +20,7 @@ import mummy/routers
 import httpcore
 import locks
 import frameos/channels
+import frameos/events_gen
 import frameos/local_access
 import frameos/types
 import frameos/cloud/link_state
@@ -102,5 +104,7 @@ proc addAdoptRoutes*(router: var Router) =
           jsonResponse(request, Http500, %*{"error": "write_failed", "detail": "Could not save the admin login"})
           return
       log(%*{"event": "adopt:handover", "mintedLogin": minted})
+      # The code is spent: the frame page draws without it.
+      sendEvent(evRender, newJObject(), eoSystem)
       jsonResponse(request, Http200, %*{"username": user, "password": pass})
   )

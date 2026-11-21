@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include <stdbool.h>
+
 /* At boot, before Wi-Fi starts: the panel follows the network's changes.
  * (Also what links this file in: the Nim runtime's calls alone come too late
  * in the link to pull it out of main's library.) */
@@ -19,6 +21,8 @@ char *fos_frame_settings_json(void);
 void fos_frame_settings_apply(const char *json);
 /* "scan", or "open" when the page comes up (a scan when off Wi-Fi);
  * "checkUpdate", "installUpdate"; "linkCloud" (a FrameOS Cloud link code,
- * fos_cloud.c), "adopt" (an adoption code over the panel, for a backend's
- * POST /api/adopt, fos_http.c), "cancelLink" (either, while pending). */
+ * fos_cloud.c), "adopt" (a code for a backend's POST /api/adopt,
+ * fos_http.c), "cancelLink" (either, while pending). */
 void fos_frame_settings_action(const char *action);
+/* A link code is on the frame page (or on its way): no picture is kept. */
+bool fos_frame_settings_code_pending(void);

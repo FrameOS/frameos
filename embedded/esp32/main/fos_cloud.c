@@ -865,9 +865,9 @@ static esp_err_t enroll_once(const char *base, const char *bearer, bool *permane
         crypto_wipe(token, sizeof(token));
         erase_claim_token();
         set_last_error("");
-        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s%s%s (%s)",
+        ESP_LOGI(TAG, "enrolled: frame_id=%s ws_path=%s%s%s",
                  s_frame_id[0] ? s_frame_id : "?", s_ws_path,
-                 s_ws_url[0] ? " ws_url=" : "", s_ws_url, bearer ? "link code" : "claim token erased");
+                 s_ws_url[0] ? " ws_url=" : "", s_ws_url);
         return ESP_OK;
     }
 
@@ -886,7 +886,7 @@ static esp_err_t enroll_once(const char *base, const char *bearer, bool *permane
         char detail[sizeof(s_last_error)];
         snprintf(detail, sizeof(detail), "enroll rejected: %s", reason_str);
         set_last_error(detail);
-        ESP_LOGW(TAG, "%s%s", detail, bearer ? "" : "; claim token erased, get a new one from the provider");
+        ESP_LOGW(TAG, "%s", detail);
         erase_claim_token();
         *permanent = true;
         return ESP_FAIL;
@@ -901,16 +901,14 @@ static esp_err_t enroll_once(const char *base, const char *bearer, bool *permane
 
 /* ------------------------------------------------ link code (device flow) */
 
-/* Flow B (docs/cloud-frames.md "B. Link code on the device"), started from
- * the frame page's "Link to FrameOS Cloud": the provider hands out a code,
- * the page shows it (fos_frame_settings.c), the owner enters it in their
- * account, and the frame enrolls with the Bearer token the approval gives it.
- * Every request runs on the cloud task; the render task only asks
- * (fos_cloud_link_start) and reads the code. Nothing of it outlives a
- * reboot, and a window that lapses unclaimed just ends: the person taps
- * again. */
+/* Flow B (docs/cloud-frames.md "B. Link code on the device"), from the frame
+ * page's Connect: the provider hands out a code, the page shows it with a QR
+ * code of where to enter it (fos_frame_settings.c), the owner enters it in
+ * their account, and the frame enrolls with the Bearer token the approval
+ * gives it. Requests run on the cloud task; the render task only asks
+ * (start, cancel) and reads the code. Nothing of it outlives a reboot, and a
+ * window that lapses unclaimed just ends. */
 #define LINK_DEFAULT_PROVIDER "https://cloud.frameos.net"
-#define LINK_ENROLL_TRIES 5
 
 typedef enum { LINK_IDLE = 0, LINK_STARTING, LINK_POLLING, LINK_ENROLLING } link_phase_t;
 
@@ -918,16 +916,15 @@ typedef enum { LINK_IDLE = 0, LINK_STARTING, LINK_POLLING, LINK_ENROLLING } link
  * render task (start, cancel), read by the render task. */
 static portMUX_TYPE s_link_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile uint8_t s_link_phase = LINK_IDLE;
-/* Bumped by every start and cancel: an answer that comes back for an older
- * attempt is dropped. */
+/* Bumped by every start and cancel: an answer for an older attempt is dropped. */
 static uint32_t s_link_gen = 0;
 static char s_link_user_code[16];
-static char s_link_uri[192];
+static char s_link_uri[192]; /* verification_uri_complete: the page's QR code */
 static int64_t s_link_expires_us = 0;
 /* Cloud task only. The approval's token waits in s_access_token, which
  * nothing reads before the state is FOS_CLOUD_ENROLLED. */
 static char s_link_device_code[128];
-static uint32_t s_link_interval_s = 5;
+static uint32_t s_link_interval_ms = 5000;
 static uint8_t s_link_tries = 0;
 
 /* With the lock held: back to idle, the code off the page. */
@@ -978,12 +975,7 @@ uint32_t fos_cloud_link_seconds_left(void)
     return left_us > 0 ? (uint32_t)(left_us / 1000000) + 1 : 60;
 }
 
-static void link_redraw(void)
-{
-    if (fos_scenes_settings_shown()) fos_client_render_now();
-}
-
-/* End attempt `gen`, unless a newer one replaced it. */
+/* End attempt `gen`, unless a newer one replaced it, and show the page again. */
 static void link_end(uint32_t gen, const char *why)
 {
     portENTER_CRITICAL(&s_link_lock);
@@ -991,66 +983,43 @@ static void link_end(uint32_t gen, const char *why)
     if (ours) link_clear_locked();
     portEXIT_CRITICAL(&s_link_lock);
     crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
-    if (why) ESP_LOGW(TAG, "link code ended: %s", why);
-    if (ours) link_redraw();
-}
-
-/* A code whose window has run out ends here, Wi-Fi or not. */
-static bool link_lapsed(void)
-{
-    portENTER_CRITICAL(&s_link_lock);
-    const uint32_t gen = s_link_gen;
-    const bool lapsed = s_link_phase == LINK_POLLING && esp_timer_get_time() >= s_link_expires_us;
-    portEXIT_CRITICAL(&s_link_lock);
-    if (lapsed) link_end(gen, "the window lapsed unclaimed");
-    return lapsed;
+    if (why) ESP_LOGW(TAG, "link: %s", why);
+    if (ours && fos_scenes_settings_shown()) fos_client_render_now();
 }
 
 static uint32_t link_begin(const char *base, uint32_t gen)
 {
-    const fos_config_t *config = fos_config();
-    char name[FOS_STR_LEN + 24] = "FrameOS frame";
-    if (config->hostname[0]) snprintf(name, sizeof(name), "FrameOS frame (%s)", config->hostname);
-    static const char *const scopes[] = {"frame:link", "frame:managed"};
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "public_display_name", name);
-    cJSON_AddStringToObject(root, "reported_frameos_version", esp_app_get_description()->version);
-    cJSON_AddStringToObject(root, "client_kind", "frame");
-    cJSON_AddItemToObject(root, "scopes", cJSON_CreateStringArray(scopes, 2));
-    char *body = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!body) {
-        link_end(gen, "out of memory");
-        return 0;
+    /* The approval page shows the frame's name: what JSON would have to
+     * escape in it becomes a space. */
+    char name[FOS_STR_LEN];
+    strlcpy(name, fos_config()->hostname[0] ? fos_config()->hostname : "FrameOS frame", sizeof(name));
+    for (char *c = name; *c; c++) {
+        if (*c == '"' || *c == '\\' || (unsigned char)*c < 0x20) *c = ' ';
     }
+    char body[FOS_STR_LEN + 160];
+    snprintf(body, sizeof(body),
+             "{\"public_display_name\":\"%s\",\"reported_frameos_version\":\"%s\",\"client_kind\":\"frame\","
+             "\"scopes\":[\"frame:link\",\"frame:managed\"]}",
+             name, esp_app_get_description()->version);
     char response[FOS_CLOUD_RESPONSE_MAX];
     const int status = provider_post(base, "/api/device/start", body, NULL, response);
-    cJSON_free(body);
     cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
     char code[sizeof(s_link_user_code)];
     char uri[sizeof(s_link_uri)];
     /* The device code goes back to the provider inside a JSON string. */
-    bool ok = json_field_str(json, "device_code", s_link_device_code, sizeof(s_link_device_code)) &&
-              s_link_device_code[strcspn(s_link_device_code, "\"\\")] == '\0' &&
-              json_field_str(json, "user_code", code, sizeof(code));
-    /* The page a person types the code into; the one with the code in it
-     * only when the provider gives no other. */
-    if (ok && !json_field_str(json, "verification_uri", uri, sizeof(uri))) {
-        json_field_str(json, "verification_uri_complete", uri, sizeof(uri));
-    }
+    const bool ok = json_field_str(json, "device_code", s_link_device_code, sizeof(s_link_device_code)) &&
+                    s_link_device_code[strcspn(s_link_device_code, "\"\\")] == '\0' &&
+                    json_field_str(json, "user_code", code, sizeof(code)) &&
+                    json_field_str(json, "verification_uri_complete", uri, sizeof(uri));
     const cJSON *interval = cJSON_GetObjectItem(json, "interval");
-    const cJSON *expires = cJSON_GetObjectItem(json, "expires_in");
-    s_link_interval_s = cJSON_IsNumber(interval) && interval->valuedouble >= 1 && interval->valuedouble <= 60
-                            ? (uint32_t)interval->valuedouble
-                            : 5;
-    const int64_t window_s = cJSON_IsNumber(expires) && expires->valuedouble >= 30 && expires->valuedouble <= 1800
-                                 ? (int64_t)expires->valuedouble
-                                 : 600;
+    const cJSON *window = cJSON_GetObjectItem(json, "expires_in");
+    s_link_interval_ms = cJSON_IsNumber(interval) && interval->valueint >= 1 && interval->valueint <= 60
+                             ? (uint32_t)interval->valueint * 1000
+                             : 5000;
+    const int64_t window_s = cJSON_IsNumber(window) && window->valueint >= 30 ? window->valueint : 600;
     cJSON_Delete(json);
     if (!ok) {
-        char detail[48];
-        snprintf(detail, sizeof(detail), "the provider answered HTTP %d", status);
-        link_end(gen, detail);
+        link_end(gen, "no code");
         return 0;
     }
     portENTER_CRITICAL(&s_link_lock);
@@ -1066,22 +1035,31 @@ static uint32_t link_begin(const char *base, uint32_t gen)
         crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
         return 0;
     }
-    ESP_LOGW(TAG, "link code from %s, waiting for the owner", base);
-    link_redraw();
-    return s_link_interval_s * 1000;
+    if (fos_scenes_settings_shown()) fos_client_render_now();
+    return s_link_interval_ms;
+}
+
+/* A code whose window has run out ends here, Wi-Fi or not. */
+static bool link_lapsed(void)
+{
+    portENTER_CRITICAL(&s_link_lock);
+    const uint32_t gen = s_link_gen;
+    const bool lapsed = s_link_phase == LINK_POLLING && esp_timer_get_time() >= s_link_expires_us;
+    portEXIT_CRITICAL(&s_link_lock);
+    if (lapsed) link_end(gen, "lapsed");
+    return lapsed;
 }
 
 static uint32_t link_poll(const char *base, uint32_t gen)
 {
+    if (link_lapsed()) return 0;
     char body[sizeof(s_link_device_code) + 24];
     snprintf(body, sizeof(body), "{\"device_code\":\"%s\"}", s_link_device_code);
     char response[FOS_CLOUD_RESPONSE_MAX];
     const int status = provider_post(base, "/api/device/poll", body, NULL, response);
-    cJSON *json = cJSON_Parse(response);
+    cJSON *json = status == 200 ? cJSON_Parse(response) : NULL;
     crypto_wipe(response, sizeof(response)); /* the token, on approval */
-    char error[32];
-    json_field_str(json, "error", error, sizeof(error));
-    const bool approved = status == 200 && json_field_str(json, "access_token", s_access_token, sizeof(s_access_token));
+    const bool approved = json_field_str(json, "access_token", s_access_token, sizeof(s_access_token));
     cJSON_Delete(json);
     if (approved) {
         portENTER_CRITICAL(&s_link_lock);
@@ -1096,18 +1074,11 @@ static uint32_t link_poll(const char *base, uint32_t gen)
         crypto_wipe(s_link_device_code, sizeof(s_link_device_code));
         if (!ours) crypto_wipe(s_access_token, sizeof(s_access_token));
         s_link_tries = 0;
-        link_redraw();
         return 0;
     }
-    if (strcmp(error, "slow_down") == 0 && s_link_interval_s < 60) s_link_interval_s += 5;
-    /* Unreachable, or busy: the window decides, not one answer. */
-    if (status == 0 || status == 429 || status >= 500 || strcmp(error, "authorization_pending") == 0 ||
-        strcmp(error, "slow_down") == 0) {
-        return s_link_interval_s * 1000;
-    }
-    char detail[48];
-    snprintf(detail, sizeof(detail), "%s (HTTP %d)", error[0] ? error : "refused", status);
-    link_end(gen, detail); /* access_denied, expired_token, ... */
+    /* Not approved yet (428), unreachable or busy: the window decides. */
+    if (status == 0 || status == 428 || status == 429 || status >= 500) return s_link_interval_ms;
+    link_end(gen, "refused"); /* denied, expired, ... */
     return 0;
 }
 
@@ -1117,10 +1088,9 @@ static uint32_t link_enroll(const char *base, uint32_t gen)
     if (enroll_once(base, s_access_token, &permanent) == ESP_OK) {
         s_state = FOS_CLOUD_ENROLLED;
         link_end(gen, NULL);
-        ESP_LOGW(TAG, "linked to FrameOS Cloud with a link code");
         return 0;
     }
-    if (permanent || ++s_link_tries >= LINK_ENROLL_TRIES) {
+    if (permanent || ++s_link_tries >= 3) {
         crypto_wipe(s_access_token, sizeof(s_access_token));
         link_end(gen, s_last_error);
         return 0;
@@ -1150,7 +1120,7 @@ static uint32_t link_step(void)
         return 0;
     }
     if (phase == LINK_STARTING) return link_begin(base, gen);
-    if (phase == LINK_POLLING) return link_lapsed() ? 0 : link_poll(base, gen);
+    if (phase == LINK_POLLING) return link_poll(base, gen);
     if (phase == LINK_ENROLLING) return link_enroll(base, gen);
     return 0;
 }
@@ -3381,7 +3351,7 @@ static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id)
             return;
         }
         fos_client_wake_for_events(); /* answered: off the panel */
-    } else if (fos_lan_access_scope(fos_lan_access_now()) == FOS_LAN_ACCESS_SCOPE_LAN) {
+    } else if (fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL)) {
         /* Turned off: a code still showing has nothing left to unlock. */
         fos_lan_access_clear();
         fos_client_wake_for_events();

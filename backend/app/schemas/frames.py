@@ -408,7 +408,7 @@ class FrameAdoptRequest(BaseModel):
     # (an ESP32). A port in `frame_host` wins.
     frame_port: Optional[int] = None
     # The adoption code the frame draws on its panel (Settings → gear →
-    # Adopt by a backend). With it the frame hands over what adoption needs
+    # Managed by → Your backend). With it the frame hands over what adoption needs
     # (`POST /api/adopt` on the frame) and no admin login is asked for.
     code: Optional[str] = None
     admin_username: Optional[str] = None

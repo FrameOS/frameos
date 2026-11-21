@@ -707,6 +707,9 @@ proc jsFrame(ctx: ptr JSContext, op: JSValue, arg: JSValue): JSValue {.nimcall.}
     if facts.isNil:
       answer = if what == "read": "" else: SettingsOffCode
     elif what == "read":
+      # A link code is a presence code (docs/scene-settings.md "Connecting
+      # the frame"): read off the panel, never by an app that could send it on.
+      facts.fields.del("link")
       answer = $facts
     elif what == "action":
       if text in [evRender, evRestart, evReboot]:

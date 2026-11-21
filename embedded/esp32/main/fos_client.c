@@ -43,6 +43,7 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_framebuffer.h"
+#include "fos_frame_settings.h"
 #include "fos_http.h"
 #include "fos_lan_access.h"
 #include "fos_mem.h"
@@ -1108,7 +1109,10 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
                            int64_t render_ms, bool borrow)
 {
     if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
-    if (borrow || fos_framebuffer_is_reserved(buf)) {
+    /* A link code on the frame page (fos_frame_settings.c): no picture of it
+     * is kept, as a presence code is never in one (docs/lan-access.md). */
+    const bool hide = fos_frame_settings_code_pending();
+    if (!hide && (borrow || fos_framebuffer_is_reserved(buf))) {
         /* The packed bytes stay put in the reservation (or the panel's
          * buffer) until the next borrower; point at them instead of
          * copying. */
@@ -1126,7 +1130,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
         free(old);
         return;
     }
-    if (!should_keep_packed_snapshot(len)) {
+    if (hide || !should_keep_packed_snapshot(len)) {
         xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
         uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
         s_last_frame = NULL;
@@ -1139,6 +1143,7 @@ static void store_snapshot(const uint8_t *buf, size_t len, int width, int height
         s_last_frame_render_ms = render_ms;
         xSemaphoreGive(s_snapshot_lock);
         free(old);
+        if (hide) return;
         ESP_LOGW(TAG, "preview snapshot kept as hash only: need %u bytes, psram free=%u largest=%u",
                  (unsigned)len,
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
@@ -2588,7 +2593,7 @@ static uint32_t s_lan_seen_gen = 0;
 static bool lan_access_panel_changed(void)
 {
     if (!fos_display_present()) return false;
-    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), NULL);
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL);
     if (generation == s_lan_seen_gen) return false;
     s_lan_seen_gen = generation;
     return true;
@@ -2608,7 +2613,7 @@ typedef struct {
  * was then lent to the preview with the code in it. */
 static bool lan_overlay_due(char code[FOS_LAN_ACCESS_CODE_LEN + 1])
 {
-    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), code);
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, code);
     s_lan_seen_gen = generation;
     return generation != 0;
 }
@@ -2621,11 +2626,6 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
                               fos_pixel_format_t format)
 {
     memset(ov, 0, sizeof(*ov));
-    /* Read apart from the code: a challenge replaced in between has a new
-     * generation, so the next pass draws it again with its own label. */
-    const char *label = fos_lan_access_scope(fos_lan_access_now()) == FOS_LAN_ACCESS_SCOPE_ADOPT
-                            ? "Adoption code"
-                            : "Local network access code";
     if (s_last_frame == buf) {
         /* The lend hook could not drop the preview snapshot (a stream stalled
          * past 30 s) so this buffer is still served as the frame's image. */
@@ -2635,11 +2635,12 @@ static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf,
             .buf = buf, .width = width, .height = height, .format = format,
             .rotate = fos_config()->rotate,
         };
-        if (fos_panel_code_box(&ov->surface, label, FOS_LAN_ACCESS_CODE_LEN, &ov->box)) {
+        if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
+                               &ov->box)) {
             size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
             ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
             if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
-            fos_panel_draw_code(&ov->surface, &ov->box, label, code);
+            fos_panel_draw_code(&ov->surface, &ov->box, "Local network access code", code);
             ov->drawn = true;
             frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
         }
@@ -3247,7 +3248,7 @@ static bool notice_expired(void)
 
 static bool panel_overlay_pending(void)
 {
-    return fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0 || s_notice_pending;
+    return fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_LAN, NULL) != 0 || s_notice_pending;
 }
 
 /* An overlay drawn into an LCD buffer that the panel now shows: it stays on

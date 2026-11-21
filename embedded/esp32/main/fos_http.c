@@ -2062,19 +2062,19 @@ static esp_err_t restart_post_handler(httpd_req_t *req)
 
 /* --------------------------------------------------------------- adoption */
 
-/* GET and POST /api/adopt (docs/scene-settings.md "Linking the frame"): a
- * backend adopts a frame no plane holds with the code the frame page drew
- * over the panel (fos_frame_settings.c, scope `adopt`). No login: the code
- * is the credential, single use, five tries, under the wrong-code budget it
- * shares with the local network access code (fos_lan_access.c). GET says
- * whether a code is showing and, only then, what the backend needs for the
- * frame's row; POST {code, backend, apiKey, frameId} gives the frame its
- * backend and restarts it, after which it talks to the backend like a frame
- * provisioned over USB. */
-static esp_err_t adopt_answer(httpd_req_t *req, const char *status, const char *error, const char *detail)
+/* GET and POST /api/adopt (docs/scene-settings.md "Connecting the frame"): a
+ * backend adopts a frame no plane holds with the code the frame page shows
+ * (fos_frame_settings.c, scope `adopt`). No login: the code is the
+ * credential, single use, five tries, under the wrong-code budget it shares
+ * with the local network access code (fos_lan_access.c). GET says whether a
+ * code is showing and, only then, what the backend needs for the frame's
+ * row; POST {code, backend, apiKey, frameId} gives the frame its backend and
+ * restarts it, after which it talks to the backend like a frame provisioned
+ * over USB. A refusal is its token alone: the backend has the words. */
+static esp_err_t adopt_answer(httpd_req_t *req, const char *status, const char *error)
 {
-    char body[192];
-    snprintf(body, sizeof(body), "{\"error\":\"%s\",\"detail\":\"%s\"}", error, detail);
+    char body[64];
+    snprintf(body, sizeof(body), "{\"error\":\"%s\"}", error);
     httpd_resp_set_status(req, status);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
@@ -2084,7 +2084,7 @@ static esp_err_t adopt_get(httpd_req_t *req)
 {
     fos_config_t *config = fos_config();
     httpd_resp_set_type(req, "application/json");
-    if (fos_lan_access_scope(fos_lan_access_now()) != FOS_LAN_ACCESS_SCOPE_ADOPT) {
+    if (!fos_lan_access_panel_code(fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT, NULL)) {
         return httpd_resp_send(req, "{\"adopting\":false}", HTTPD_RESP_USE_STRLEN);
     }
     cJSON *root = cJSON_CreateObject();
@@ -2118,45 +2118,31 @@ static esp_err_t adopt_post(httpd_req_t *req)
     char origin[FOS_URL_LEN];
     const char *status = "400 Bad Request";
     const char *error = NULL;
-    const char *detail = "Send code, backend (an http(s) origin), apiKey and frameId";
     /* The body first: a malformed one costs no attempt. */
-    if (!cJSON_IsObject(root)) {
-        error = "invalid_request";
-    } else if (!cJSON_IsString(code) || !code->valuestring[0]) {
-        error = "code_required";
-        detail = "Enter the code shown on the frame";
-    } else if (!cJSON_IsString(backend) || strncasecmp(backend->valuestring, "http", 4) != 0 ||
-               !fos_url_origin(backend->valuestring, origin, sizeof(origin)) ||
-               origin[strcspn(origin, " \"\\")] != '\0' || !cJSON_IsString(api_key) ||
-               !api_key->valuestring[0] || strlen(api_key->valuestring) >= sizeof(config->api_key) ||
-               !cJSON_IsNumber(frame_id) || frame_id->valuedouble < 1 || frame_id->valuedouble > 4294967295.0) {
+    if (!cJSON_IsString(backend) || strncasecmp(backend->valuestring, "http", 4) != 0 ||
+        !fos_url_origin(backend->valuestring, origin, sizeof(origin)) ||
+        origin[strcspn(origin, " \"\\")] != '\0' || !cJSON_IsString(api_key) || !api_key->valuestring[0] ||
+        strlen(api_key->valuestring) >= sizeof(config->api_key) || !cJSON_IsNumber(frame_id) ||
+        frame_id->valuedouble < 1 || frame_id->valuedouble > 4294967295.0) {
         error = "invalid_request";
     } else if (config->backend_url[0] || fos_cloud_state() == FOS_CLOUD_ENROLLED) {
         status = "409 Conflict";
         error = "managed";
-        detail = "This frame already has a control plane";
     } else {
-        fos_lan_access_result_t result =
-            fos_lan_access_consume(code->valuestring, fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT);
+        fos_lan_access_result_t result = fos_lan_access_consume(
+            cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now(), FOS_LAN_ACCESS_SCOPE_ADOPT);
         if (result != FOS_LAN_ACCESS_OK) {
-            /* In fos_lan_access_result_t order, from CODE_EXPIRED on. */
-            static const char *const statuses[] = {"410 Gone", "403 Forbidden", "403 Forbidden",
+            /* In fos_lan_access_result_t order, from CODE_REQUIRED on. */
+            static const char *const statuses[] = {"400 Bad Request", "410 Gone", "403 Forbidden", "403 Forbidden",
                                                    "429 Too Many Requests"};
-            static const char *const details[] = {
-                "No adoption code is showing on the frame; ask for a new one",
-                "That code does not match the one on the frame",
-                "Too many wrong codes; ask for a new one",
-                "Too many wrong codes; try again in an hour",
-            };
-            const unsigned i = (unsigned)result - FOS_LAN_ACCESS_CODE_EXPIRED;
+            const unsigned i = (unsigned)result - FOS_LAN_ACCESS_CODE_REQUIRED;
             error = fos_lan_access_result_token(result);
-            status = i < 4 ? statuses[i] : status;
-            detail = i < 4 ? details[i] : detail;
+            if (i < 5) status = statuses[i];
         }
     }
     if (error) {
         cJSON_Delete(root);
-        return adopt_answer(req, status, error, detail);
+        return adopt_answer(req, status, error);
     }
     char old_key[sizeof(config->api_key)];
     strlcpy(old_key, config->api_key, sizeof(old_key));
@@ -2168,7 +2154,7 @@ static esp_err_t adopt_post(httpd_req_t *req)
         config->backend_url[0] = '\0';
         strlcpy(config->api_key, old_key, sizeof(config->api_key));
         config->frame_id = 0;
-        return adopt_answer(req, "500 Internal Server Error", "persist_failed", "The frame could not save its backend");
+        return adopt_answer(req, "500 Internal Server Error", "persist_failed");
     }
     frameos_nim_log_hook("{\"event\":\"settings:adopted\",\"source\":\"esp32\"}");
     httpd_resp_set_type(req, "application/json");

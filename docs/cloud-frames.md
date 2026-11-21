@@ -261,13 +261,14 @@ closes, and the code comes down the moment the flow resolves or its window
 lapses.
 
 **From the frame's own screen.** The settings panel's frame page offers
-**Link to FrameOS Cloud** on a frame no control plane holds
-(`docs/scene-settings.md` "Linking the frame"): a Pi queues the same panel link
-code as the portal below, and an ESP32 runs the flow on its cloud task
+**Managed by → FrameOS Cloud** on a frame no control plane holds
+(`docs/scene-settings.md` "Connecting the frame"): a Pi queues the same panel
+link code as the portal below, and an ESP32 runs the flow on its cloud task
 (`fos_cloud.c`, scopes `frame:link` + `frame:managed`, then
 `/api/frames/enroll` with the flow's Bearer token; nothing survives a reboot,
-and an unclaimed window just ends). The page shows the code and the page to
-enter it in.
+and an unclaimed window just ends). The page shows the code, where to enter
+it and a QR code of `verification_uri_complete`, which `/device` fills in;
+it is a presence code, and the frame keeps no picture while it shows.
 
 **Starting one without a browser.** The setup portal's cloud option no
 longer requires a claim code: saved without one, it queues
