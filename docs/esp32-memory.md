@@ -355,7 +355,7 @@ SD card was still a TTF parsed whole (≤ 1 MB, one at a time, 3 MB headroom)
 until 2026-11-20: now each is read in place, a 512-byte page at a time, its
 kerning searched in GPOS where it lies, any number of them at once, with
 nothing from either control plane, which sync raw TTFs (docs/esp32-fonts.md:
-a few hundred bytes a face open, a 22.5 KB page cache made when the first
+a few hundred bytes a face open, a 30.5 KB page cache made when the first
 card font draws, and the whole OpenType parser out of the image, −32.7 KB).
 
 ## Gradient fills paint in strips (2026-08-24)

@@ -36,37 +36,45 @@ answered from the file:
 | kerning | the GPOS pair subtables in lookup order, by pixie's rule: coverage searched, then the pair set (format 1) or the two class definitions and the class record (format 2); the `kern` table's pairs in a font without GPOS |
 
 The bytes come through a **page cache** on the render thread: `fileFontPages`
-slots of 512 bytes (a card's sector), the least recently used going first,
-and three small direct-mapped tables beside it that remember the answers a
-typesetter asks again and again (a rune's glyph, a glyph's advance and box, a
-pair's kerning; 16, 16 and 32 entries a page slot). The thread keeps one file
-open between page reads and closes it after each render (`releaseFontFiles`),
-so nothing holds a file on the card between renders (FatFs is mounted with 8
-descriptors). The cache is made the first time a card font draws and let go
-with the glyph cache when render memory runs short (`clearFontPages`).
+slots of 1 KB, the least recently used going first, and three tables beside
+it that remember the answers a typesetter asks again and again (a rune's
+glyph, a glyph's advance and box, a pair's kerning; `fileFontMemos` entries
+each, twice that for kerning, two ways each: the one used last first). The
+thread keeps one file open between page reads and closes it after each
+render (`releaseFontFiles`), so nothing holds a file on the card between
+renders (FatFs is mounted with 8 descriptors). The cache is made the first
+time a card font draws and let go with the glyph cache when render memory
+runs short (`clearFontPages`). `set debug 1` puts the card on the render
+line: `card 65p1560.6 1o 0c` is pages read, their time, files opened and page
+caches let go.
 
 | Board | Page slots | Pages | Tables | In all |
 | --- | --- | --- | --- | --- |
-| 8 MB PSRAM | 16 | 8 KB | 14 KB | 22.5 KB |
-| 16 MB and more | 64 | 32 KB | 56 KB | 88 KB |
+| 8 MB PSRAM | 16 | 16 KB | 256 entries: 14 KB | 30.5 KB |
+| 16 MB and more | 64 | 64 KB | 1,024 entries: 56 KB | 121 KB |
 
-Measured on the host (`fileFontPageReads`, a paragraph of 150 characters at
-20 px, a 16-slot cache):
+**A read from a card costs its latency, not its size**: about 24 ms for a
+1 KB page on the E1002's SPI card ("On a board"), so the page is chosen to
+make few reads, not to waste few bytes. Pages read on the host
+(`fileFontPageReads`) by a paragraph of 150 characters at 20 px, and by sixty
+faces each setting a line, with 256-entry tables:
 
-| | First typeset + draw | Set and drawn again |
-| --- | --- | --- |
-| Ubuntu (9 kerning subtables) | 464 + 105 pages | 76 + 7 |
-| … without the three tables | 819 + 90 | 816 + 65 |
-| FiraGO (its kerning is in extension lookups, which pixie does not read) | 20 + 173 | 0 + 0 |
+| Pages | Paragraph, first time | Set again | 60 faces |
+| --- | ---: | ---: | ---: |
+| 16 × 512 B (8 KB) | 179 | 0 | 5,237 |
+| **16 × 1 KB (16 KB)** | **127** | **0** | **2,657** |
+| 8 × 2 KB (16 KB) | 123 | 0 | 5,048 |
+| 16 × 2 KB (32 KB) | 89 | 0 | 1,560 |
+| 16 × 4 KB (64 KB) | 41 | 0 | 995 |
 
 Without the tables a 16-page cache thrashed on Ubuntu's GPOS (every pair walks
-its subtables' coverage) and on FiraGO's glyph headers (every glyph drawn asks
-its box, a page each); with them a text drawn again reads next to nothing.
-Bigger pages were worse for the same bytes (256 bytes: 2,048 reads a re-set;
-128 bytes: 2,797), since the lookups are binary searches that land far apart.
-Sixty faces each drawing a line need about 45 pages each the first time and
-do not fit any cache of this size, so a scene that shows many faces shows a
-page of them at a time (the Fonts sample does).
+its subtables' coverage: 816 pages to set a paragraph again) and on FiraGO's
+glyph headers (every glyph drawn asks its box, a page each). With one-way
+tables, two runes sharing a slot put each other out at every render: on the
+board, 28 reads a render of a paragraph set before. Two ways, none. Sixty
+faces each drawing a line need about 45 pages each the first time and do not
+fit any cache of this size, so a scene that shows many faces shows a page of
+them at a time (the Fonts sample does).
 
 Nothing per glyph stays in memory outside the glyph cache (pixie's
 `paths.nim`, docs/jsx-ui.md "The glyph cache"), which keeps coverage, not
@@ -130,7 +138,10 @@ the emoji is drawn. pixie's PNG decoder (already in the image) decodes it,
 go. What is kept is the scaled copy, in a colour glyph cache of its own
 (`colorGlyphCacheBudget` in pixie's `fonts.nim`, half the glyph budget on an
 ESP32: 64 KB on an 8 MB board, a 24 px emoji 2.3 KB), the one drawn longest
-ago going first, emptied with the glyph cache when render memory is short.
+ago going first but never one the same render drew (the glyph cache's pass
+rule: a line of emoji bigger than the budget keeps what fits, where plain LRU
+read every PNG at every render, 2 s on the E1002), emptied with the glyph
+cache when render memory is short.
 Nothing else stays: a face open, its glyph memo entries (a `colorKind` byte
 beside a glyph's advance and box, in padding that was there), and while one
 is drawn its PNG (5-10 KB) and the decode (70 KB), let go before the next
@@ -229,33 +240,53 @@ the JSX layer now keeps up to 128 family names (it was 16).
   not either): Peralta's Greek draws nothing.
 - Kerning in GPOS extension lookups (pixie's whole parse skips them too).
 - The browser preview has no fonts but the built-in face.
-- On a board, so far only the release before this (below): this firmware
-  has not run on one yet.
+- A card read waits for an e-paper refresh on the shared bus (below).
 - Emoji in JSX and SVG text (a Pi draws none there either), and sbix or COLR
   colour fonts (CBDT is what the shipped emoji font is).
 
 ## On a board (2026-11-21)
 
-The reTerminal E1002 (8 MB PSRAM, 7.3" Spectra, a 64 GB card), on the
-release before this, 2026.11.13, with "Sync fonts" run from the bench
-backend: all 61 files landed in `fonts/` (`{"uploaded": 61}`), and the Fonts
-sample lists 60 (the emoji font is left out of its list). On that release:
+The reTerminal E1002 (8 MB PSRAM, 7.3" Spectra, a 64 GB card on the panel's
+SPI bus), with "Sync fonts" run from the bench backend (all 61 files) and
+`set debug 1`, this branch's image against main at 9afaa9ac8 built the same
+way, each render started with the panel's refresh of the one before finished:
 
-- Every name in the list is drawn in Ubuntu: the JSX layer never asked the
-  card for a face on an ESP32.
-- A Text app scene in `LiberationSerif-Regular.ttf` (393 KB) fresh after a
-  boot drew in Ubuntu instead: `font:embedded:fallback` "not enough free
-  memory to parse a font right now" (3.41 MB of headroom; the whole parse
-  asks for the file and 3 MB more, 3.54 MB). Its render was 985 ms cold (133 glyph misses), 124
-  ms warm. In an earlier session on the same board, the face had been parsed
-  and held: about 366 KB of PSRAM for as long as it stayed the one custom
-  face, and 99 ms warm.
-- The built-in face on the same paragraph: 648 ms cold, 166 ms warm.
+| Scene (Text app unless said) | main cold | main warm | this branch cold | this branch warm |
+| --- | ---: | ---: | ---: | ---: |
+| A paragraph in the built-in face | 535 ms | 95 ms | 527 ms | 95 ms |
+| The same in `LiberationSerif-Regular.ttf` from the card | 1,266 ms (parsed whole, about 300 KB held) | 91 ms | 2,100 ms (65 pages, 1.56 s of reads) | 87-137 ms |
+| A line of 12 emoji and the paragraph | 410 ms, no emoji drawn | 79 ms | 2,667 ms (53 pages, 12 PNGs) | 324 ms |
+| A page of the Fonts sample (nine faces and the specimen) | 1,619 ms, every name in Ubuntu | 323 ms | 14,679 ms (495 pages, 31 opens, 12.5 s of reads) | 320 ms |
+| Its next page (`setCurrentScene` with the page) | 23,778 ms | 317 ms | 29,793 ms (233 pages, 6.0 s) | 310 ms |
 
-This branch's image was built for that board (generic S3, 3,181,504 bytes),
-but flashing it was not permitted in that session, so the per-font run, the
-cold and warm renders of a page of faces, the emoji scene and `heapinfo` on
-this firmware are still to do: flash it, run the Fonts sample a page at a
-time (`setCurrentScene {"sceneId": ..., "state": {"page": n}}` on a copy whose
-`page` is public), a Text app scene in one card font and one with emoji, with
-`set debug 1`.
+- **Every face draws in its own face**: all 60 TrueType files, page by page
+  through the Fonts sample, no `font:fallback` logged; the release before
+  (2026.11.13) and main draw every name in Ubuntu. `Inter-Bold.otf` (CFF)
+  copied onto the card and named by a Text app is refused, logged once:
+  `font:fallback` "could not be read in place", "CFF outlines (convert it
+  with frameos/tools/font_for_card.py)".
+- **Emoji** draw in colour on the Spectra, dithered to its six inks like a
+  picture; main draws the line without them.
+- **A read from the card costs about 24 ms** (a 1 KB page, its file opened
+  when another was), so a cold render is what it reads: on a page of nine
+  new faces most of the time. Warm, nothing is read, and renders match
+  main's. The first image built here, with 512-byte pages and one-way memos,
+  read 28 pages at every warm render of the LiberationSerif paragraph (two
+  runes sharing a slot, 450 ms a render) and 71 at every emoji render (a line
+  of emoji larger than the colour cache, 2 s); 1 KB pages, two-way memos and
+  the pass rule for kept emoji made both 0 to 1.
+- **The panel holds the bus for its whole refresh** (`DEV_SPI_Acquire` in
+  `frameos_display.c`: the vendor drivers drive CS by hand), so a card read
+  during a Spectra's 30 s refresh waits for it: two pages read right after a
+  render that refreshed took 28 s. Timed renders wait for the refresh
+  anyway (`fos_display_refreshing()`); a render asked for meanwhile (a tap,
+  a switch, the console) that has to read the card waits too. Main reads a
+  card font once, whole, and then never; this reads what a render misses.
+- **Memory**: internal heap `min_free` after the run 19,907 bytes (main
+  25,511): FatFs opens files on the internal heap. PSRAM: the page cache
+  and memos, 30.5 KB, against main's parsed face of about 300 KB.
+- The same next-page time on both (24-30 s) is the switch, not the fonts.
+
+The image measured is 3,182,816 bytes (main 3,209,584): the probe on the
+render line (`card 65p1560.6 1o 0c`: pages, their time, files opened, page
+caches let go) and the memo changes cost 1.3 KB over the build before.
