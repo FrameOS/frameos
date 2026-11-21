@@ -211,6 +211,106 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-event-shape", "tap", at(25, 23))
     check ui.scene.state{"seen"}.getStr() == "tap mouse 5,3 80x40 undefined"
 
+  test "signal(): a handler that sets one runs the components that read it, and no get()":
+    # Three cards, each reading its own signal; a header reading all three.
+    # A tap sets one: that card and the header run again, get() does not,
+    # and the picture is the one a whole render draws.
+    let ui = newUi("""
+      const on = [signal(false), signal(false), signal(false)]
+      let gets = 0, cards = 0, headers = 0
+      const Card = memo(({ i }) => {
+        cards++
+        return <div className={`w-10 h-10 ${on[i].value ? 'bg-green-500' : 'bg-red-500'}`}
+          onClick={() => { on[i].value = !on[i].value }} />
+      })
+      const Header = memo(() => {
+        headers++
+        return <div className={`w-40 h-2 ${on.some((s) => s.value) ? 'bg-green-500' : 'bg-red-500'}`} />
+      })
+      export function get(app) {
+        gets++
+        return (
+          <div className="flex flex-col gap-1 p-5 bg-white">
+            <Header />
+            <div className="flex gap-5">{on.map((_, i) => <Card i={i} />)}</div>
+          </div>
+        )
+      }
+      globalThis.counts = () => `${gets} ${cards} ${headers}`
+    """, "tests/jsx-signal")
+    ui.scene.refreshInterval = 3600
+    let red = rgbx(0xef, 0x44, 0x44, 255)
+    let green = rgbx(0x22, 0xc5, 0x5e, 255)
+    proc counts(): string =
+      let context = ExecutionContext(scene: ui.scene, event: "field", payload: %*{}, loopKey: ".", nextSleep: -1)
+      ui.runtime.callAppGlobalForText(ui.owner, %*{}, context, "counts")
+    var image = ui.render()
+    check counts() == "1 3 1"
+    check image[85, 33] == red and image[25, 21] == red
+    check dispatchUiEvent("tests/jsx-signal", "tap", at(85, 33)) # the second card
+    image = ui.render()
+    check counts() == "1 4 2" # that card and the header: no get()
+    check image[25, 33] == red and image[85, 33] == green and image[145, 33] == red
+    check image[25, 21] == green
+    # The tap reaches the card drawn by the partial render, and back it goes.
+    check dispatchUiEvent("tests/jsx-signal", "tap", at(85, 33))
+    image = ui.render()
+    check counts() == "1 5 3"
+    check image[85, 33] == red and image[25, 21] == red
+    # A whole render after them: nothing dirty, nothing runs but get().
+    ui.scene.refreshInterval = 0.001
+    image = ui.render()
+    check counts() == "2 5 3"
+    check image[85, 33] == red
+
+  test "signal(): a handler that changes anything else is a whole get()":
+    let ui = newUi("""
+      const lit = signal(false)
+      let label = 'a', gets = 0
+      const Dot = memo(() => <div className={`w-10 h-10 ${lit.value ? 'bg-green-500' : 'bg-red-500'}`} />)
+      export function get(app) {
+        gets++
+        frameos.setState('seen', `${gets} ${label}`)
+        return (
+          <div className="flex gap-5 p-5 bg-white">
+            <Dot />
+            <div className="w-10 h-10 bg-black" onClick={() => { label = 'b' }} />
+          </div>
+        )
+      }
+    """, "tests/jsx-signal-full")
+    ui.scene.refreshInterval = 3600
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "1 a"
+    check dispatchUiEvent("tests/jsx-signal-full", "tap", at(85, 25))
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "2 b"
+
+  test "signal(): a memo()'d component around the one that ran shows it at the next whole render":
+    # The outer card reads nothing; the inner dot reads the signal. After the
+    # dot ran alone, a whole render takes the outer card back: it must hold
+    # the dot's new element, not the one it made first.
+    let ui = newUi("""
+      const lit = signal(false)
+      const Dot = memo(() => <div className={`w-10 h-10 ${lit.value ? 'bg-green-500' : 'bg-red-500'}`}
+        onClick={() => { lit.value = !lit.value }} />)
+      const Card = memo(() => <div className="flex p-2 bg-slate-500"><Dot /></div>)
+      export function get(app) {
+        return <div className="flex p-5 bg-white"><Card /></div>
+      }
+    """, "tests/jsx-signal-nested")
+    ui.scene.refreshInterval = 3600
+    let red = rgbx(0xef, 0x44, 0x44, 255)
+    let green = rgbx(0x22, 0xc5, 0x5e, 255)
+    check ui.render()[30, 30] == red
+    check dispatchUiEvent("tests/jsx-signal-nested", "tap", at(30, 30))
+    check ui.render()[30, 30] == green
+    ui.scene.refreshInterval = 0.001
+    check ui.render()[30, 30] == green # the whole render agrees
+    ui.scene.refreshInterval = 3600
+    check dispatchUiEvent("tests/jsx-signal-nested", "tap", at(30, 30))
+    check ui.render()[30, 30] == red
+
   test "a render only the pointer asked for lays the last tree out again":
     # hover: changed and no handler ran: the new picture without get(), as
     # CSS restyles :hover. A handler, any other event, or the scene's own
