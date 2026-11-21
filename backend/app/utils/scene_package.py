@@ -18,6 +18,7 @@ import io
 import json
 import re
 import zipfile
+from collections.abc import Mapping
 from typing import Any
 
 SCENE_FILE = "scene.json"
@@ -130,8 +131,9 @@ def scene_folder_names(scenes: list[dict]) -> list[str]:
     taken: set[str] = set()
     names: list[str] = []
     for scene in scenes:
-        scene_id = scene.get("id") if isinstance(scene.get("id"), str) else ""
-        name = scene.get("name") if isinstance(scene.get("name"), str) else ""
+        raw_id, raw_name = scene.get("id"), scene.get("name")
+        scene_id = raw_id if isinstance(raw_id, str) else ""
+        name = raw_name if isinstance(raw_name, str) else ""
         id_base = _folder_base(scene_id) or "scene"
         folder = _folder_base(name) or id_base
 
@@ -251,7 +253,7 @@ def set_from_package_files(files: dict[str, str], root: str | None = None) -> tu
 # ---- zips -------------------------------------------------------------------
 
 
-def zip_bytes(files: dict[str, str | bytes], *, prefix: str = "", stored: frozenset[str] = frozenset()) -> bytes:
+def zip_bytes(files: Mapping[str, str | bytes], *, prefix: str = "", stored: frozenset[str] = frozenset()) -> bytes:
     """`files` as a zip, deflated, each under `prefix`; the paths in `stored`
     are kept as they are (a device package's scene.json, which a frame reads
     in place). In the order given: a device package's scene.json goes first."""
