@@ -599,7 +599,7 @@ declare const frameos: {
    * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
    * A slice over the frame's limit (2 MB on an ESP32) is null: read it in parts with offset and length
    * (entry and text: FrameOS 2026.11.11+). inflate reads the slice as a zlib (or raw deflate) stream and gives what
-   * it holds (a PDF's FlateDecode stream; a damaged one gives what came out before the damage), and bytes gives any
+   * it holds (a PDF's FlateDecode stream; a damaged one is null), and bytes gives any
    * read as a Uint8Array (inflate and bytes: FrameOS 2026.11.14+). */
   readAsset(
     path: string,

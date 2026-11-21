@@ -1821,11 +1821,10 @@ suite "js app runtime":
             length: bytes.length,
             tail: [bytes[bytes.length - 3], bytes[bytes.length - 2], bytes[bytes.length - 1]],
             head: String.fromCharCode(...bytes.slice(0, 8)),
-            text: frameos.readAsset("doc.pdf", { offset: """ & $atZlib & """, length: """ & $(zlibbed.len div 2) & """, inflate: true, text: true }).slice(0, 5),
+            text: frameos.readAsset("doc.pdf", { offset: """ & $atZlib & """, length: """ & $zlibbed.len & """, inflate: true, text: true }).slice(0, 5),
             raw: frameos.readAsset("doc.pdf", { offset: """ & $atDeflate & """, length: """ & $deflated.len & """, inflate: true, text: true }),
             plain: String.fromCharCode(...frameos.readAsset("doc.pdf", { offset: 0, length: 8, bytes: true })),
-            cutStarts: cut.startsWith("BT /F1"),
-            cutShorter: cut.length < """ & $text.len & """,
+            cut,
             notCompressed: frameos.readAsset("doc.pdf", { offset: 0, length: 8, inflate: true }),
             jpeg: jpeg ? [jpeg.width, jpeg.height] : null,
           }
@@ -1839,9 +1838,8 @@ suite "js app runtime":
     check got["text"].getStr() == "BT /F"
     check got["raw"].getStr() == "raw deflate"
     check got["plain"].getStr() == "%PDF-1.7"
-    check got["cutStarts"].getBool()
-    check got["cutShorter"].getBool()
-    check got["notCompressed"].getStr() == ""
+    check got["cut"].kind == JNull # a damaged stream is null
+    check got["notCompressed"].kind == JNull
     check got["jpeg"] == %*[48, 72]
 
     proc picture(options: string): Image =

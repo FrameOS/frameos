@@ -146,7 +146,6 @@ type
     op: int      # Write position; buf[0 ..< op] is not yet emitted
     emitted: int # Total bytes handed to onData so far
     onData: InflateOnData
-    emitting: bool # inside onData: what it raises is its own
 
 template failStream() =
   raise newException(PixieError, "Invalid buffer, unable to uncompress")
@@ -362,18 +361,14 @@ proc flushWindow(s: var InflateStreamState) =
   let emitLen = s.op - inflateWindowSize
   if emitLen <= 0:
     return
-  s.emitting = true
   s.onData(s.buf.toOpenArrayByte(0, emitLen - 1))
-  s.emitting = false
   s.emitted += emitLen
   moveMem(s.buf[0].addr, s.buf[emitLen].addr, inflateWindowSize)
   s.op = inflateWindowSize
 
 proc finishStream(s: var InflateStreamState) =
   if s.op > 0:
-    s.emitting = true
     s.onData(s.buf.toOpenArrayByte(0, s.op - 1))
-    s.emitting = false
     s.emitted += s.op
     s.op = 0
 
@@ -527,8 +522,13 @@ proc inflateNoCompressionStream(
     s.op += take
     len -= take
 
-proc inflateBlocks(s: var InflateStreamState, b: var BitStreamReader) =
-  var finalBlock: bool
+proc inflateStream(
+  onData: InflateOnData,
+  b: var BitStreamReader
+) =
+  var
+    s = InflateStreamState(buf: newString(inflateBufferSize), onData: onData)
+    finalBlock: bool
   while not finalBlock:
     let
       bfinal = b.readBits(1)
@@ -547,27 +547,11 @@ proc inflateBlocks(s: var InflateStreamState, b: var BitStreamReader) =
     else:
       raise newException(PixieError, "Invalid block header")
 
-proc inflateStream(
-  onData: InflateOnData,
-  b: var BitStreamReader,
-  keepPartial = false
-) =
-  var s = InflateStreamState(buf: newString(inflateBufferSize), onData: onData)
-  try:
-    s.inflateBlocks(b)
-  except PixieError as error:
-    # keepPartial: a damaged or cut stream hands over what was inflated
-    # before the damage, then the error goes on (a PDF cut short shows what
-    # it has), unless the error is onData's own.
-    if keepPartial and not s.emitting:
-      s.finishStream()
-    raise error
   s.finishStream()
 
 proc uncompressZlibFrom(
   onData: InflateOnData,
-  b: var BitStreamReader,
-  keepPartial = false
+  b: var BitStreamReader
 ) {.raises: [PixieError].} =
   let
     cmf = b.readBits(8).uint8
@@ -590,7 +574,7 @@ proc uncompressZlibFrom(
   if (flg and 0b00100000) != 0: # FDICT
     raise newException(PixieError, "Preset dictionary is not yet supported")
 
-  inflateStream(onData, b, keepPartial)
+  inflateStream(onData, b)
 
 proc uncompressStreamZlib*(
   onData: InflateOnData,
@@ -612,29 +596,26 @@ proc uncompressStreamZlib*(
 
 proc uncompressStreamZlib*(
   onData: InflateOnData,
-  pull: InflatePull,
-  keepPartial = false
+  pull: InflatePull
 ) {.raises: [PixieError].} =
   ## Uncompresses a zlib stream whose input arrives on demand from `pull`
   ## (e.g. read from a file), emitting output through onData in order as it
   ## is decompressed. Only the pull callback's current segment is held at a
   ## time, so neither the compressed input nor the output ever needs to fit
-  ## in memory. keepPartial: a damaged stream emits what came out of it
-  ## before the error is raised.
+  ## in memory.
   var b = initBitStreamReader(pull)
-  uncompressZlibFrom(onData, b, keepPartial)
+  uncompressZlibFrom(onData, b)
 
 proc uncompressStreamDeflate*(
   onData: InflateOnData,
-  pull: InflatePull,
-  keepPartial = false
+  pull: InflatePull
 ) {.raises: [PixieError].} =
   ## Uncompresses a raw deflate stream (no zlib header or trailer: a ZIP
   ## member's data) whose input arrives on demand from `pull`, as the zlib
   ## overload does. onData may raise to stop early: nothing past the bytes it
   ## has been handed is decompressed.
   var b = initBitStreamReader(pull)
-  inflateStream(onData, b, keepPartial)
+  inflateStream(onData, b)
 
 proc uncompressStreamZlib*(
   onData: InflateOnData,

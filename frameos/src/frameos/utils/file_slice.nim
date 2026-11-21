@@ -3,25 +3,29 @@
 ## keeps its page contents, fonts and pictures this way, each a stream at an
 ## offset of the file (FlateDecode is zlib); `frameos.readAsset` and
 ## `frameos.loadAssetImage` reach them with `offset`, `length` and `inflate`
-## or `pixels`.
+## or `pixels`. A ZIP's member is one too (zip_entry.nim).
 ##
-## Both read the range front to back in 16 KB pieces after one seek (a seek a
-## piece walks a big file's index on an ESP32's SPIFFS, as zip_entry.nim
-## says) and inflate with pixie's streaming inflater, already in every image:
-## the inflated text is kept up to the caller's limit and no further, and
-## pixels go into the picture a row at a time, scaled as they come, so a
-## 4000 x 3000 scan costs one row of it plus the picture asked for.
-##
-## A damaged stream keeps what came out before the damage, as PDF readers do:
-## a file cut short still shows the part of its page it has.
+## A range is read front to back in 16 KB pieces after one seek (a seek a
+## piece walks a big file's index on an ESP32's SPIFFS) and inflated with
+## pixie's streaming inflater, already in every image: inflated text is kept
+## up to the caller's limit and no further, and pixels go into the picture a
+## row at a time (PNG rows unfiltered by the PNG decoder's own unfilterRow),
+## scaled as they come, so a 4000 x 3000 scan costs one row of it plus the
+## picture asked for.
 
 import pixie
 import pixie/inflatestream
+import pixie/fileformats/png
 
 type
   FileSliceError* = object of CatchableError
   FileSliceTooBig* = object of FileSliceError
     ## The inflated bytes run past the caller's limit.
+
+  SliceCoding* = enum
+    scStored  ## the bytes as they are
+    scDeflate ## a raw deflate stream (a ZIP member)
+    scFlate   ## zlib, or raw deflate when there is no zlib header (a PDF's FlateDecode)
 
   RawPixels* = object
     ## Samples as a PDF image's dictionary describes them: `colors` of `bits`
@@ -41,59 +45,51 @@ const
 proc fail(message: string) {.noreturn.} =
   raise newException(FileSliceError, message)
 
-proc isZlibHeader(a, b: uint8): bool =
-  (a and 0x0F) == 8 and (a shr 4) <= 7 and ((a.int * 256 + b.int) mod 31) == 0
-
-proc streamSlice(path: string, offset, length: int, inflate: bool,
-    onData: InflateOnData) =
-  ## Hands the range to onData, inflated when asked (zlib, else a raw deflate
-  ## stream). onData raising PixieError("enough") stops it early.
-  var f: File
-  if not f.open(path):
-    fail("could not open " & path)
-  defer: f.close()
-  let size = f.getFileSize()
-  let start = max(0, offset).int64
-  if start >= size:
-    return
-  var left = min(max(0, length).int64, size - start)
+proc streamRange*(f: File, start, length: int64, coding: SliceCoding,
+    onData: InflateOnData) {.raises: [PixieError].} =
+  ## Bytes start ..< start + length of the file to onData, inflated as
+  ## `coding` says. Raises PixieError for a damaged stream, or what onData
+  ## raises to stop early; a read that fails ends the input.
+  var left = max(0'i64, length)
   var chunk = newString(SliceChunkBytes)
-  f.setFilePos(start)
+  try: f.setFilePos(max(0'i64, start))
+  except IOError, OSError: left = 0
   proc next(): int =
     if left <= 0: return 0
-    let take = int(min(left, SliceChunkBytes.int64))
-    result = try: f.readBuffer(addr chunk[0], take) except IOError, OSError: 0
-    if result > 0: left -= result
-    else: left = 0
-  if not inflate:
+    result = try: f.readBuffer(addr chunk[0], int(min(left, SliceChunkBytes.int64)))
+             except IOError, OSError: 0
+    left = if result > 0: left - result else: 0
+  if coding == scStored:
     while true:
       let got = next()
       if got <= 0: break
       onData(toOpenArray(cast[ptr UncheckedArray[uint8]](addr chunk[0]), 0, got - 1))
     return
-  # The first piece decides zlib or raw deflate; it is handed over again as
-  # the inflater's first segment.
-  var first = next()
-  if first < 2:
-    return
-  let zlib = isZlibHeader(chunk[0].uint8, chunk[1].uint8)
+  # A zlib header is two bytes before a deflate stream (its checksum after
+  # it is never read): skipped, the first piece goes in after them.
+  var got = next()
+  var skip = 0
+  if coding == scFlate and got >= 2:
+    let a = chunk[0].uint8
+    if (a and 0x0F) == 8 and (a shr 4) <= 7 and ((a.int * 256 + chunk[1].int) mod 31) == 0:
+      skip = 2
   let pull = proc (): InflateSegment {.gcsafe, raises: [PixieError].} =
-    var got = first
-    if got > 0:
-      first = 0
-    else:
-      try: got = next()
-      except Exception: got = 0
     if got <= 0:
+      got = try: next() except Exception: 0
+      skip = 0
+    if got <= skip:
       return InflateSegment(data: nil, len: 0)
-    InflateSegment(data: cast[ptr UncheckedArray[uint8]](addr chunk[0]), len: got)
-  if zlib: uncompressStreamZlib(onData, pull, keepPartial = true)
-  else: uncompressStreamDeflate(onData, pull, keepPartial = true)
+    result = InflateSegment(data: cast[ptr UncheckedArray[uint8]](addr chunk[skip]), len: got - skip)
+    got = 0
+  uncompressStreamDeflate(onData, pull)
 
 proc readFileSlice*(path: string, offset, length: int, inflate: bool, limit: int): string =
   ## The range's bytes, inflated with `inflate`. Raises FileSliceTooBig when
-  ## the inflated bytes run past `limit`; a damaged stream gives what came
-  ## out of it before the damage.
+  ## they run past `limit`, FileSliceError when the stream is damaged.
+  var f: File
+  if not f.open(path):
+    fail("could not open " & path)
+  defer: f.close()
   var output = ""
   var over = false
   let onData = proc (data: openArray[uint8]) {.gcsafe, raises: [PixieError].} =
@@ -105,27 +101,21 @@ proc readFileSlice*(path: string, offset, length: int, inflate: bool, limit: int
     if data.len > 0:
       copyMem(addr output[at], unsafeAddr data[0], data.len)
   try:
-    streamSlice(path, offset, length, inflate, onData)
+    streamRange(f, offset, length, if inflate: scFlate else: scStored, onData)
   except PixieError:
-    discard # damaged: what came out so far, or over the limit below
-  if over:
-    raise newException(FileSliceTooBig, "the inflated slice is over the " & $limit & " byte limit")
+    if over:
+      raise newException(FileSliceTooBig, "the inflated slice is over the " & $limit & " byte limit")
+    fail("the stream at " & $offset & " could not be inflated")
   output
-
-proc paeth(a, b, c: int): int {.inline.} =
-  let p = a + b - c
-  let pa = abs(p - a)
-  let pb = abs(p - b)
-  let pc = abs(p - c)
-  if pa <= pb and pa <= pc: a elif pb <= pc: b else: c
 
 type RawDecoder = object
   spec: RawPixels
   image: Image
-  w, h, width, height, rowBytes, rowLen, bpp, maxSample: int
+  w, h, width, height, rowBytes, bpp, maxSample: int
   png, indexed: bool
   row, prev: seq[uint8]
-  filled, y, ty, rowN: int ## bytes of the row in, the source row coming, the picture's row being made
+  filter: uint8 ## the PNG row's filter
+  filled, y, ty, rowN: int ## bytes of the row in (-1: its filter byte next), the source row coming, the picture's row being made
   colStart: seq[int32]
   acc, cur: seq[uint32] ## the picture's row so far, and this source row with its columns averaged
 
@@ -200,41 +190,30 @@ proc emitRow(d: var RawDecoder, data: openArray[uint8]) =
       for i in 0 ..< d.acc.len: d.acc[i] = 0
       d.rowN = 0
 
-proc unfilter(d: var RawDecoder) =
-  ## The row's samples undone from its predictor, prev the row above.
-  if d.png:
-    let kind = d.row[0]
-    let bpp = d.bpp
-    for i in 0 ..< d.rowBytes:
-      let left = if i >= bpp: d.row[1 + i - bpp].int else: 0
-      let up = d.prev[i].int
-      let upLeft = if i >= bpp: d.prev[i - bpp].int else: 0
-      let v = d.row[1 + i].int
-      d.row[1 + i] = uint8((case kind
-        of 1: v + left
-        of 2: v + up
-        of 3: v + (left + up) div 2
-        of 4: v + paeth(left, up, upLeft)
-        else: v) and 0xFF) # 0 and anything unknown: as it is
-      d.prev[i] = d.row[1 + i]
-  elif d.spec.predictor == 2 and d.spec.bits == 8:
-    let colors = d.spec.colors
-    for i in colors ..< d.rowBytes:
-      d.row[i] = d.row[i] + d.row[i - colors]
-
 proc feed(d: var RawDecoder, data: openArray[uint8]): bool =
-  ## Takes the bytes in; true once every row is in.
+  ## Takes the bytes in; true once every row is in. A PNG row's filter it
+  ## does not know raises PixieError: the rows before it stay.
   var i = 0
   while i < data.len:
-    let take = min(d.rowLen - d.filled, data.len - i)
+    if d.filled < 0:
+      d.filter = data[i]
+      inc i
+      d.filled = 0
+      continue
+    let take = min(d.rowBytes - d.filled, data.len - i)
     copyMem(addr d.row[d.filled], unsafeAddr data[i], take)
     d.filled += take
     i += take
-    if d.filled == d.rowLen:
-      d.filled = 0
-      d.unfilter()
-      if d.png: d.emitRow(toOpenArray(d.row, 1, d.rowLen - 1))
-      else: d.emitRow(d.row)
+    if d.filled == d.rowBytes:
+      if d.png:
+        unfilterRow(d.row, d.prev, d.filter, d.rowBytes, d.bpp)
+      elif d.spec.predictor == 2 and d.spec.bits == 8:
+        for k in d.spec.colors ..< d.rowBytes:
+          d.row[k] = d.row[k] + d.row[k - d.spec.colors]
+      d.emitRow(d.row)
+      if d.png:
+        swap(d.row, d.prev)
+      d.filled = if d.png: -1 else: 0
       inc d.y
       if d.y >= d.h:
         return true
@@ -255,11 +234,11 @@ proc decodeRawPixels*(path: string, offset, length: int, inflate: bool,
   d.rowBytes = (spec.width * spec.colors * spec.bits + 7) div 8
   d.png = spec.predictor >= 10
   d.bpp = max(1, spec.colors * spec.bits div 8) # PNG's filter distance
-  d.rowLen = d.rowBytes + (if d.png: 1 else: 0)
+  d.filled = if d.png: -1 else: 0
   d.indexed = spec.colors == 1 and spec.palette.len >= 3
   d.maxSample = (1 shl min(spec.bits, 8)) - 1
   d.image = newImage(width, height)
-  d.row = newSeq[uint8](d.rowLen)
+  d.row = newSeq[uint8](d.rowBytes)
   d.prev = newSeq[uint8](d.rowBytes)
   d.colStart = newSeq[int32](width + 1)
   d.acc = newSeq[uint32](width * 3)
@@ -269,8 +248,12 @@ proc decodeRawPixels*(path: string, offset, length: int, inflate: bool,
   let onData = proc (data: openArray[uint8]) {.gcsafe, raises: [PixieError].} =
     if d.feed(data):
       raise newException(PixieError, "enough")
+  var f: File
+  if not f.open(path):
+    fail("could not open " & path)
+  defer: f.close()
   try:
-    streamSlice(path, offset, length, inflate, onData)
+    streamRange(f, offset, length, if inflate: scFlate else: scStored, onData)
   except PixieError:
     discard # done, or damaged: the rows that came
   # Rows a short stream never gave stay white.

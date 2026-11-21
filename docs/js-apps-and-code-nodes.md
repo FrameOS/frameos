@@ -124,7 +124,7 @@ From 2026.11.14 a slice of a file can be what it holds rather than its bytes
 (`frameos/src/frameos/utils/file_slice.nim`; the PDF viewer sample reads its
 documents so): `readAsset(path, {offset, length, inflate: true})` inflates a
 zlib (or raw deflate) stream that starts at `offset`, never more than the read
-limit of it, and a damaged stream gives what came out before the damage;
+limit of it (a damaged stream is null);
 `{bytes: true}` gives any read as a `Uint8Array` instead of base64.
 `loadAssetImage(path, {offset, length, width, height})` decodes the picture
 file at that slice (a PDF's JPEG), and with `pixels: {width, height, colors,
