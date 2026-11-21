@@ -5,6 +5,7 @@ import { assetsLogic, AssetNode } from './assetsLogic'
 import { frameLogic } from '../../frameLogic'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { DEFAULT_ASSET_STORAGE } from '../../../../utils/frameAssetsApi'
+import { extensionsForFrame } from '../../../../utils/pathExtensions'
 import { Button } from '../../../../components/Button'
 import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
@@ -276,7 +277,7 @@ export function PathInput({
           root={root}
           sdScheme={sdScheme}
           pick={pick}
-          extensions={extensions}
+          extensions={extensionsForFrame(extensions, sdScheme)}
           initialPath={stringValue || root}
           onSelect={(absolutePath) => {
             onChange(absolutePath)

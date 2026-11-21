@@ -179,7 +179,7 @@ the same way, 2026-11-21): **−28,080 bytes** (3,209,584 → 3,181,504), emoji
 included. Nothing on an ESP32 parses a font whole any more, so pixie's
 OpenType parser leaves the image: −35.4 KB of its code (CFF charstrings, the
 cmap, hmtx, name, OS/2, GPOS pair building, the colour and bitmap tables) and
-−6.2 KB of its constants (CFF's standard strings). What came in, by symbol
+−6.2 KB of its constants (CFF's standard strings). (The accessors' OpenType branches still held 14 KB of it in the image until `-d:pixieNoOpenType`, 2026-11-21: docs/esp32-image-size.md.) What came in, by symbol
 (`nm -S`):
 
 | | Flash |

@@ -17,7 +17,16 @@ import frameos/apps
 import frameos/types
 import frameos/hal/entropy
 
-let imageExtensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".qoi", ".ppm", ".svg"]
+# What the runtime decodes: the ESP32 firmware is built without pixie's QOI
+# and PPM codecs (-d:pixieNoQoi, -d:pixieNoPpm), so a folder there offers
+# neither.
+const imageExtensions = block:
+  var exts = @[".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"]
+  when not defined(pixieNoQoi):
+    exts.add ".qoi"
+  when not defined(pixieNoPpm):
+    exts.add ".ppm"
+  exts
 
 type
   AppConfig* = object

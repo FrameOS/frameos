@@ -2,7 +2,14 @@ import
   std/[os, strutils],
   bumpy, chroma, flatty/binny, vmath,
   pixie/[common, contexts, fonts, imagebase64, images, internal, paints, paths],
-  pixie/fileformats/[bmp, gif, jpeg, png, qoi, svg, webp]
+  pixie/fileformats/[bmp, gif, jpeg, png, svg, webp]
+
+when not defined(pixieNoQoi):
+  # The same for QOI: FrameOS' ESP32 firmware is never handed one (a web
+  # fetch, a scene asset or an upload does not produce it). `-d:pixieNoQoi`
+  # drops the codec, `QoiFormat` stays in the enum, and a QOI file is
+  # "Unsupported".
+  import pixie/fileformats/qoi
 
 when not defined(pixieNoPpm):
   # Netpbm (P3/P6) is a rarity next to the other formats, and on a
@@ -43,13 +50,14 @@ proc decodeImageDimensions*(
     equalMem(data, gifSignatures[1].cstring, 6)
   ):
     decodeGifDimensions(data, len)
-  elif len > (14 + 8) and equalMem(data, qoiSignature.cstring, 4):
-    decodeQoiDimensions(data, len)
   elif len > 12 and
       equalMem(data, WebpRiffSignature.cstring, 4) and
       equalMem(cast[pointer](cast[uint](data) + 8), WebpSignature.cstring, 4):
     decodeWebpDimensions(data, len)
   else:
+    when not defined(pixieNoQoi):
+      if len > (14 + 8) and equalMem(data, qoiSignature.cstring, 4):
+        return decodeQoiDimensions(data, len)
     # PPM last: its two-byte signature cannot collide with the formats above.
     when not defined(pixieNoPpm):
       if len > 9 and (
@@ -78,12 +86,13 @@ proc decodeImage*(data: string): Image {.raises: [PixieError].} =
     newImage(parseSvg(data))
   elif data.len > 6 and data.readStr(0, 6) in gifSignatures:
     newImage(decodeGif(data))
-  elif data.len > (14+8) and data.readStr(0, 4) == qoiSignature:
-    decodeQoi(data).convertToImage()
   elif data.len > 12 and data.readStr(0, 4) == WebpRiffSignature and
       data.readStr(8, 4) == WebpSignature:
     decodeWebp(data)
   else:
+    when not defined(pixieNoQoi):
+      if data.len > (14+8) and data.readStr(0, 4) == qoiSignature:
+        return decodeQoi(data).convertToImage()
     # PPM last: its two-byte signature cannot collide with the formats above.
     when not defined(pixieNoPpm):
       if data.len > 9 and data.readStr(0, 2) in ppmSignatures:
@@ -291,7 +300,10 @@ proc encodeImage*(
   of BmpFormat:
     image.encodeBmp()
   of QoiFormat:
-    image.encodeQoi()
+    when defined(pixieNoQoi):
+      raise newException(PixieError, "Unsupported file format")
+    else:
+      image.encodeQoi()
   of GifFormat:
     raise newException(PixieError, "Unsupported file format")
   of PpmFormat:
