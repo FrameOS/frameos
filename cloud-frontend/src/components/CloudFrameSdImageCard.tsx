@@ -4,6 +4,8 @@ import type { ReactElement } from 'react'
 
 import { normalizeBuildrootPlatform } from '../../../frontend/src/devices'
 import type { FrameType } from '../../../frontend/src/types'
+import { FlashLayoutPicker } from '../../../frontend/src/scenes/workspace/FlashLayoutPicker'
+import { saveFrameFlashLayout } from '../../../frontend/src/scenes/workspace/flashLayoutApply'
 import { cloudOrigin } from '../cloudConfig'
 import { SdImageBuilder } from './SdImageBuilder'
 
@@ -31,6 +33,7 @@ import { SdImageBuilder } from './SdImageBuilder'
  */
 export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactElement {
   const [open, setOpen] = useState(false)
+  const layoutPickerKey = `${frame.id}-cloud-sd-card`
 
   // Only seed the board when the frame actually records one — normalize on a
   // missing value would hand back the raspberry-pi-64 default, which is a
@@ -62,6 +65,9 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
   // build rather than cached, because one code can only ever key one card.
   // The lifetime is the builder's choice, as for a new frame's image.
   async function mintClaimToken(opts: { ttlDays?: number | 'forever' }): Promise<string> {
+    // The layout picked above goes on this frame the way its Settings save
+    // one: the card comes back as this frame, and its scenes follow.
+    await saveFrameFlashLayout(layoutPickerKey, frame.id)
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify({
         frame_id: String(frame.id),
@@ -96,22 +102,30 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
           {open ? 'Hide SD card image' : 'Write another SD card'}
         </button>
         {open ? (
-          <SdImageBuilder
-            cloudOrigin={cloudOrigin()}
-            mintClaimToken={mintClaimToken}
-            reenrollFrame={{
-              id: String(frame.id),
-              name: frame.name || 'this frame',
-              // Seed the display picker from what the frame already runs —
-              // "pick the display later" is the wrong default for hardware
-              // that is already configured. All still editable in the form.
-              device: seededDevice,
-              width: seededWidth,
-              height: seededHeight,
-              rotate: frame.rotate,
-              buildrootPlatform,
-            }}
-          />
+          <>
+            <FlashLayoutPicker
+              pickerKey={layoutPickerKey}
+              frameScenes={frame.scenes}
+              labelClassName="frame-tool-muted text-xs font-semibold uppercase tracking-wide"
+              hint="Saved on this frame when the image is built, and drawn around every scene."
+            />
+            <SdImageBuilder
+              cloudOrigin={cloudOrigin()}
+              mintClaimToken={mintClaimToken}
+              reenrollFrame={{
+                id: String(frame.id),
+                name: frame.name || 'this frame',
+                // Seed the display picker from what the frame already runs —
+                // "pick the display later" is the wrong default for hardware
+                // that is already configured. All still editable in the form.
+                device: seededDevice,
+                width: seededWidth,
+                height: seededHeight,
+                rotate: frame.rotate,
+                buildrootPlatform,
+              }}
+            />
+          </>
         ) : (
           <div className="frame-tool-muted text-xs leading-4">
             Build another card for this frame — a replacement Pi, a dead card, different hardware. It comes back as this

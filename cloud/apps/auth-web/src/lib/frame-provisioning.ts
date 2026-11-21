@@ -1,6 +1,7 @@
-// "Start this frame with the scenes from <that frame>", chosen while building
-// the SD image or flashing the board and carried on the frame row
-// (frames.scene_source_frame_id).
+// "Start this frame with the scenes from <that frame>" and the layout it
+// starts with, chosen while building the SD image or flashing the board and
+// carried on the frame row (frames.scene_source_frame_id,
+// frames.provisioning_layout; docs/scene-layouts.md "Chosen at the flash").
 //
 // Runs when the frame turns active: at the owner's Confirm click for every
 // multi-use-token enrollment (an SD image can be copied, so its first
@@ -21,9 +22,15 @@ import { type createDb, frames } from "@frameos-cloud/db";
 import {
   assignScenesToFrame,
   currentSceneAssignments,
+  type RequestedScene,
 } from "./frame-scenes";
-import { frameForAccount } from "./frames";
+import { buildScenesPayloadForFrame, frameForAccount } from "./frames";
 import { reportError } from "./log";
+import {
+  provisioningLayoutOf,
+  runtimeScenesByStoreScene,
+  withProvisioningLayout,
+} from "./provisioning-layout";
 
 export async function applyProvisioningScenes(
   db: ReturnType<typeof createDb>,
@@ -34,22 +41,41 @@ export async function applyProvisioningScenes(
   },
 ) {
   const sourceFrameId = input.frame.sceneSourceFrameId;
-  if (!sourceFrameId) {
+  // The layout chosen beside the flash (provisioning-layout.ts): installed
+  // after the copied scenes, and worn by each of them.
+  const layout = provisioningLayoutOf(input.frame.provisioningLayout);
+  if (!sourceFrameId && !layout) {
     return;
   }
   try {
     await db
       .update(frames)
-      .set({ sceneSourceFrameId: null })
+      .set({ provisioningLayout: null, sceneSourceFrameId: null })
       .where(eq(frames.id, input.frame.id));
-    // Re-check ownership at use time, not just at mint time: the source frame
-    // may have been deleted, or the account may have changed hands, in the
-    // days between building the card and booting it.
-    const source = await frameForAccount(db, input.accountId, sourceFrameId);
-    if (!source || source.id === input.frame.id) {
-      return;
+    let requested: RequestedScene[] = [];
+    let sourceScenes: unknown[] = [];
+    if (sourceFrameId) {
+      // Re-check ownership at use time, not just at mint time: the source
+      // frame may have been deleted, or the account may have changed hands,
+      // in the days between building the card and booting it.
+      const source = await frameForAccount(db, input.accountId, sourceFrameId);
+      if (source && source.id !== input.frame.id) {
+        requested = await currentSceneAssignments(db, source.id);
+        if (layout && requested.length > 0) {
+          // Which runtime scenes each copied assignment holds, to put the
+          // layout on them: read off what the source frame is sent. A source
+          // that cannot be built (a pulled scene) still gets its copy, then
+          // refused by the gates below like any other push.
+          const built = await buildScenesPayloadForFrame(db, source.id);
+          if (!("error" in built)) {
+            sourceScenes = built.scenes;
+          }
+        }
+      }
     }
-    const requested = await currentSceneAssignments(db, source.id);
+    if (layout) {
+      requested = withProvisioningLayout(requested, runtimeScenesByStoreScene(sourceScenes), layout);
+    }
     if (requested.length === 0) {
       return;
     }

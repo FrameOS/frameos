@@ -18,16 +18,27 @@ import {
   takeStashedLinkCode,
 } from "../../../../../../cloud-frontend/src/components/LinkRunningFrameForm";
 
+// What the panel hands the flashing paths, to drive their claim codes.
+const flashProps = vi.hoisted(() => ({
+  esp32: undefined as undefined | { claimFields?: () => Promise<Record<string, unknown>> },
+  sd: undefined as undefined | { mintClaimToken: (opts: { multiUse: boolean }) => Promise<string> },
+}));
 vi.mock(
   "../../../../../../cloud-frontend/src/components/SdImageBuilder",
   () => ({
-    SdImageBuilder: () => <div data-testid="sd-builder" />,
+    SdImageBuilder: (props: { mintClaimToken: (opts: { multiUse: boolean }) => Promise<string> }) => {
+      flashProps.sd = props;
+      return <div data-testid="sd-builder" />;
+    },
   }),
 );
 vi.mock(
   "../../../../../../cloud-frontend/src/components/Esp32CloudFlasher",
   () => ({
-    Esp32CloudFlasher: () => <div data-testid="esp32-flasher" />,
+    Esp32CloudFlasher: (props: { claimFields?: () => Promise<Record<string, unknown>> }) => {
+      flashProps.esp32 = props;
+      return <div data-testid="esp32-flasher" />;
+    },
   }),
 );
 
@@ -523,6 +534,78 @@ describe("AddFramePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  // docs/scene-layouts.md "Chosen at the flash": the SD card and the ESP32
+  // offer the layout the new frame starts with, and their claim codes carry
+  // the chosen starter itself, which the cloud saves as the account's scene.
+  describe("the layout a new frame starts with", () => {
+    function answerSavesAndMints(): void {
+      fetchMock.mockImplementation(async () =>
+        Response.json({ claim_token: "FRCT_from_server", expires_at: "2030-01-01T00:00:00Z" }),
+      );
+    }
+
+    it("is offered where a card or a board is flashed, and not on the install script", () => {
+      renderPanel();
+      openPath(/install script/i);
+      expect(screen.queryByRole("combobox", { name: "Layout" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: /all ways to add a frame/i }));
+      openPath(/sd card/i);
+      const select = screen.getByRole("combobox", { name: "Layout" }) as HTMLSelectElement;
+      expect(select.value).toBe("");
+      expect(screen.getByRole("option", { name: "No layout" })).toBeDefined();
+      expect(screen.getByRole("option", { name: "Windows 98" })).toBeDefined();
+      // No layout, no gear.
+      expect(screen.queryByRole("button", { name: "Layout settings" })).toBeNull();
+    });
+
+    it("rides the SD card's claim code, and a new choice mints a new one", async () => {
+      answerSavesAndMints();
+      renderPanel();
+      openPath(/sd card/i);
+      const plain = await flashProps.sd!.mintClaimToken({ multiUse: true });
+      expect(plain).toBe("FRCT_from_server");
+      const firstBody = JSON.parse(String((mintCalls().at(-1)![1] as RequestInit).body));
+      expect(firstBody).not.toHaveProperty("layout");
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Layout" }), {
+        target: { value: "starter:Windows 98" },
+      });
+      // The chosen layout's settings are behind the gear.
+      fireEvent.click(screen.getByRole("button", { name: "Layout settings" }));
+      expect(await screen.findByText(/Layout settings: Windows 98/)).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+      await act(async () => {
+        await flashProps.sd!.mintClaimToken({ multiUse: true });
+      });
+      // The claim code carries the starter; the browser saves no scene itself.
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/account/scenes"))).toBe(false);
+      const body = JSON.parse(String((mintCalls().at(-1)![1] as RequestInit).body)) as {
+        layout: { scene: { id?: string; name: string; settings?: { isLayout?: boolean } } };
+        multi_use: boolean;
+      };
+      expect(body.multi_use).toBe(true);
+      expect(body.layout.scene.name).toBe("Windows 98");
+      expect(body.layout.scene.settings?.isLayout).toBe(true);
+      expect(body.layout.scene).not.toHaveProperty("id");
+    });
+
+    it("rides the ESP32's claim code", async () => {
+      answerSavesAndMints();
+      renderPanel();
+      openPath(/esp32/i);
+      expect(await flashProps.esp32!.claimFields!()).toEqual({});
+      fireEvent.change(screen.getByRole("combobox", { name: "Layout" }), {
+        target: { value: "starter:Windows 98" },
+      });
+      let fields: Record<string, unknown> = {};
+      await act(async () => {
+        fields = await flashProps.esp32!.claimFields!();
+      });
+      expect(fields).toMatchObject({ layout: { scene: { name: "Windows 98" } } });
+    });
   });
 
   // "Reconnect a board to an existing frame" used to be a fifth path here.

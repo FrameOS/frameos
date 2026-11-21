@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -11,6 +11,7 @@ import {
   frameSceneAssignments,
   linkedClients,
   sessions,
+  storeSceneImports,
   storeScenes,
   storeSceneVersions,
   upsertAccountFromIdentity,
@@ -278,6 +279,28 @@ function sceneZip(sceneId: string) {
       ),
     }),
   );
+}
+
+// A layout starter as the SPA sends it in a claim code (no id: the cloud
+// gives the copy one): one JSX app with a <yield />, the layout rule's
+// smallest scene (docs/scene-layout-fixtures.json).
+function layoutStarter(name: string): Record<string, unknown> {
+  return {
+    apps: {
+      ui: { sources: { "app.tsx": "export function get(app) { return <div><yield /></div> }", "config.json": "{}" } },
+    },
+    edges: [
+      { id: "1", source: "e", sourceHandle: "next", target: "d", targetHandle: "prev" },
+      { id: "2", source: "a", sourceHandle: "fieldOutput", target: "d", targetHandle: "fieldInput/image" },
+    ],
+    name,
+    nodes: [
+      { data: { keyword: "render" }, id: "e", type: "event" },
+      { data: { config: {}, keyword: "ui" }, id: "a", type: "app" },
+      { data: { config: { placement: "stretch" }, keyword: "render/image" }, id: "d", type: "app" },
+    ],
+    settings: { execution: "interpreted", isLayout: true },
+  };
 }
 
 // Mirrors what store-publish.ts writes: risk flags live on the version, and
@@ -2441,6 +2464,193 @@ describe("frame management API", () => {
     expect(copied.map((row) => row.sceneId)).toEqual([scene.id]);
     // Consumed exactly once.
     expect((await frameRow(newFrameId)).sceneSourceFrameId).toBeNull();
+  });
+
+  it("installs the layout chosen beside the flash, worn by every copied scene", async () => {
+    // docs/scene-layouts.md "Chosen at the flash": the claim code carries the
+    // chosen starter, the cloud saves it as the account's own scene, and the
+    // frame installs it after its other scenes and dresses each of them in
+    // it, as the frame's own Layout select would.
+    const source = await enrolledFrame();
+    const scene = await createStoreScene(source.accountId, { name: "Porch clock" });
+    const assigned = await assignFrameScenes(
+      postJson(
+        `/api/frames/${source.frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id }] },
+        { origin: baseUrl },
+      ),
+      routeParams(source.frame_id),
+    );
+    expect(assigned.status).toBe(200);
+
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        {
+          scene_source_frame_id: source.frame_id,
+          layout: { scene: layoutStarter("Windows 98 desktop"), state: { look: "contrast" } },
+        },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const [layoutScene] = await db
+      .select()
+      .from(storeScenes)
+      .where(and(eq(storeScenes.accountId, source.accountId), eq(storeScenes.name, "Windows 98 desktop")));
+    expect(layoutScene?.visibility).toBe("private");
+    // The id the copy runs under, derived from its content (the ledger keeps it).
+    const [ledger] = await db.select().from(storeSceneImports).where(eq(storeSceneImports.sceneId, layoutScene!.id));
+    const layoutRuntimeId = ledger!.deviceSceneId;
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    expect(enrolled.status).toBe(200);
+    const { frame_id: newFrameId, status } = (await enrolled.json()) as {
+      frame_id: string;
+      status: string;
+    };
+    expect(status).toBe("active");
+    const rows = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId))
+      .orderBy(asc(frameSceneAssignments.position));
+    // The frame's own scene first, the layout after it.
+    expect(rows.map((row) => row.sceneId)).toEqual([scene.id, layoutScene!.id]);
+    expect(rows[0]?.layouts).toEqual({
+      [scene.id]: { sceneId: layoutRuntimeId, state: { look: "contrast" } },
+    });
+    expect(rows[1]?.layouts).toBeNull();
+    // The push carries it on the scene, the shape the device reads.
+    const [queued] = await db
+      .select()
+      .from(frameCommands)
+      .where(and(eq(frameCommands.frameId, newFrameId), eq(frameCommands.type, "set_scenes")));
+    const pushed = (queued?.payload as { scenes?: { id: string; layout?: unknown }[] }).scenes ?? [];
+    expect(pushed.find((entry) => entry.id === scene.id)?.layout).toEqual({
+      sceneId: layoutRuntimeId,
+      state: { look: "contrast" },
+    });
+    // And the layout itself, under the id every scene names.
+    expect(pushed.some((entry) => entry.id === layoutRuntimeId)).toBe(true);
+    // Consumed exactly once.
+    expect((await frameRow(newFrameId)).provisioningLayout).toBeNull();
+  });
+
+  it("keeps one copy of a starter flashed again with the same settings, and a new one for new settings", async () => {
+    // Each flash of "Add frame" mints a code; the copy is the account's scene
+    // of that content, so the second flash reuses it ("Windows 98", never
+    // "Windows 98 2"), and only a different choice is another scene.
+    const accountId = await signIn();
+    // The SPA's copy takes the settings as its fields' defaults (installedLayoutCopy).
+    const mint = async (state: { look: string }) => {
+      const scene = {
+        ...layoutStarter("Windows 98"),
+        fields: [{ access: "public", label: "Look", name: "look", type: "string", value: state.look }],
+      };
+      const response = await mintClaimToken(
+        postJson("/api/frames/claim-tokens", { layout: { scene, state } }, { origin: baseUrl }),
+      );
+      expect(response.status).toBe(200);
+    };
+    const copies = async () =>
+      db
+        .select({ id: storeScenes.id, name: storeScenes.name })
+        .from(storeScenes)
+        .where(eq(storeScenes.accountId, accountId));
+
+    await mint({ look: "contrast" });
+    await mint({ look: "contrast" });
+    expect((await copies()).map((row) => row.name)).toEqual(["Windows 98"]);
+    const tokens = await db
+      .select({ layout: frameEnrollmentTokens.provisioningLayout })
+      .from(frameEnrollmentTokens)
+      .where(eq(frameEnrollmentTokens.accountId, accountId));
+    expect(tokens).toHaveLength(2);
+    expect(tokens[0]!.layout).toEqual(tokens[1]!.layout);
+
+    await mint({ look: "classic" });
+    expect((await copies()).map((row) => row.name).sort()).toEqual(["Windows 98", "Windows 98 2"]);
+
+    // A copy the owner deleted is not handed out again: a new one is made.
+    await db.update(storeScenes).set({ status: "deleted" }).where(eq(storeScenes.accountId, accountId));
+    await mint({ look: "contrast" });
+    const live = await db
+      .select({ id: storeScenes.id })
+      .from(storeScenes)
+      .where(and(eq(storeScenes.accountId, accountId), eq(storeScenes.status, "active")));
+    expect(live).toHaveLength(1);
+  });
+
+  it("installs a chosen layout on a frame that starts with no scenes, at the owner's confirmation", async () => {
+    const accountId = await signIn();
+    const minted = await mintClaimToken(
+      postJson(
+        "/api/frames/claim-tokens",
+        { multi_use: true, layout: { scene: layoutStarter("Tiling desktop") } },
+        { origin: baseUrl },
+      ),
+    );
+    expect(minted.status).toBe(200);
+    const [layoutScene] = await db.select().from(storeScenes).where(eq(storeScenes.accountId, accountId));
+    const [ledger] = await db.select().from(storeSceneImports).where(eq(storeSceneImports.sceneId, layoutScene!.id));
+    const { claim_token: claimToken } = (await minted.json()) as {
+      claim_token: string;
+    };
+    const enrolled = await enroll(claimToken, deviceKeypair().publicKeyBase64);
+    const { frame_id: newFrameId } = (await enrolled.json()) as { frame_id: string };
+    // Pending: nothing is sent before the owner confirms.
+    expect(
+      await db
+        .select()
+        .from(frameSceneAssignments)
+        .where(eq(frameSceneAssignments.frameId, newFrameId)),
+    ).toHaveLength(0);
+    expect((await frameRow(newFrameId)).provisioningLayout).toEqual({
+      layout: { sceneId: ledger!.deviceSceneId },
+      storeSceneId: layoutScene!.id,
+    });
+
+    await confirmFrame(
+      postJson(`/api/frames/${newFrameId}/confirm`, {}, { origin: baseUrl }),
+      routeParams(newFrameId),
+    );
+    const rows = await db
+      .select()
+      .from(frameSceneAssignments)
+      .where(eq(frameSceneAssignments.frameId, newFrameId));
+    expect(rows.map((row) => row.sceneId)).toEqual([layoutScene!.id]);
+    expect((await frameRow(newFrameId)).provisioningLayout).toBeNull();
+  });
+
+  it("refuses a layout that is not one, one the layout rule refuses, and one on a re-enrollment", async () => {
+    const owner = await enrolledFrame();
+    const refusedWith = async (body: Record<string, unknown>) => {
+      const response = await mintClaimToken(postJson("/api/frames/claim-tokens", body, { origin: baseUrl }));
+      return { error: ((await response.json()) as { error: string }).error, status: response.status };
+    };
+    const notALayout = { ...layoutStarter("Clock"), settings: {} };
+    expect(await refusedWith({ layout: { scene: notALayout } })).toEqual({ error: "invalid_layout", status: 400 });
+    expect(await refusedWith({ layout: { scene_id: "0b4f5c2e-8d7a-4a51-9a51-8a7f3c1d2e10" } })).toEqual({
+      error: "invalid_layout",
+      status: 400,
+    });
+    expect(await refusedWith({ frame_id: owner.frame_id, layout: { scene: layoutStarter("My desktop") } })).toEqual({
+      error: "invalid_layout",
+      status: 400,
+    });
+    // The save path judges what it holds: a layout without a <yield />.
+    const noYield = layoutStarter("Broken desktop");
+    (noYield.apps as { ui: { sources: Record<string, string> } }).ui.sources["app.tsx"] =
+      "export function get(app) { return <div /> }";
+    expect((await refusedWith({ layout: { scene: noYield } })).status).toBe(400);
+    // And nothing was saved for any of them.
+    expect(
+      await db.select().from(storeScenes).where(eq(storeScenes.accountId, owner.accountId)),
+    ).toHaveLength(0);
   });
 
   it("refuses a scene source that is not the caller's frame", async () => {

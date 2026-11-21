@@ -38,6 +38,9 @@ export default tseslint.config(
       "**/src/test/shared-spa/embedded-flash-shared.test.ts",
       // Same exclusion, same reason: mounts EmbeddedReleaseFlasher.
       "**/src/test/shared-spa/embedded-release-flasher.test.tsx",
+      // Same exclusion, same reason: the add-frame panel's Layout select
+      // opens StateFieldEdit, whose inputs reach the legacy workspace models.
+      "**/src/test/shared-spa/cloud-add-frame-panel.test.tsx",
       // The USB board classifier type-imports embeddedUsbLogsModel; the
       // scene-execution corpus runner imports frameDeployUtils. Both are in
       // the tsconfig exclude for the same strict-compiler reason.

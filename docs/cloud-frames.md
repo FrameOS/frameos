@@ -233,6 +233,27 @@ intent is then cleared — it fires once and never fights the owner's own later
 edits. A source frame deleted in the meantime simply means there is nothing
 left to copy.
 
+The layout the frame starts with travels the same way
+(docs/scene-layouts.md "Chosen at the flash"): the SD image builder and the
+ESP32 flasher mint the code with the chosen starter in it
+
+```http
+POST {provider}/api/frames/claim-tokens
+{"layout": {"scene": {…the starter, the settings as its fields' defaults…}, "state": {"look": "contrast"}}}
+```
+
+(not a layout, malformed, or beside a `frame_id`: `400 invalid_layout`). The
+route saves it as a private scene of the account through the one save path
+(moderation, quotas; its refusal is the answer), or reuses the copy an
+earlier flash made of exactly that content: the copy's runtime id is derived
+from its content, and the `store_scene_imports` ledger the device-scene
+import dedupes on remembers which draft holds it, so the same choice flashed
+again adds no "Windows 98 2" and a different one is a new copy. The
+reference is kept in `provisioning_layout` on the token and then the frame
+(migration 0085), and applied by the same activation step: the layout is
+assigned after the copied scenes, each of which wears it (`layouts` on its
+row), and the column is cleared (`src/lib/provisioning-layout.ts`).
+
 ### B. Link code on the device (RFC 8628)
 
 The device-authorization flow from `docs/cloud-link.md`, initiated from the
@@ -1437,7 +1458,7 @@ These are the endpoints the management UI uses; they are provider-internal
 but documented so the shared frontend's cloud adapter is reimplementable:
 
 ```http
-POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes; {"timezone": "Europe/Brussels"} seeds the enrolled frame's time zone (and queues the set_settings push)
+POST {provider}/api/frames/claim-tokens        # mint a claim token ("Add frame"); {"frame_id": …} binds it to an existing frame (re-enrollment); {"scene_source_frame_id": …} starts every frame it enrolls with that frame's scenes; {"layout": {"scene", "state"}} starts it with that layout starter on every scene (saved as, or reusing, the account's copy); {"timezone": "Europe/Brussels"} seeds the enrolled frame's time zone (and queues the set_settings push)
 GET  {provider}/api/frames                     # list the account's frames
 GET  {provider}/api/frames/{id}                # one frame, state + sync status
 GET  {provider}/api/frames/{id}/metrics        # retained metrics + `reboots` markers (telemetry:metrics)

@@ -24,6 +24,12 @@ import { accountLimits } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
+import {
+  provisioningLayoutColumn,
+  provisioningLayoutScene,
+  readProvisioningLayoutBody,
+  type ProvisioningLayout,
+} from "../../../../src/lib/provisioning-layout";
 
 export const runtime = "nodejs";
 
@@ -125,6 +131,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // The layout the frames this token enrolls start with, chosen beside the
+  // flash: the starter itself, made the account's scene (or the copy an
+  // earlier flash made of it) just before the token is written, and
+  // installed at activation (provisioning-layout.ts). A re-enrollment keeps
+  // its frame's own scenes and layouts: the SPA saves a layout chosen there
+  // on the frame itself.
+  const layoutRequest = readProvisioningLayoutBody(body.layout);
+  if (layoutRequest === false || (layoutRequest && boundFrame)) {
+    return jsonError("invalid_layout", 400);
+  }
+
   // Multi-use tokens back the SD-image download: one image, many cards,
   // each boot enrolls a distinct pending frame. Budget capped at the frame
   // quota — a leaked image can never enroll more than the account could
@@ -212,6 +229,20 @@ export async function POST(request: NextRequest) {
     ttlMs = body.ttl_days * 24 * 60 * 60 * 1000;
   }
 
+  // Last, so a refused code leaves no scene behind.
+  let provisioningLayout: ProvisioningLayout | undefined;
+  if (layoutRequest) {
+    const saved = await provisioningLayoutScene(db, {
+      accountId: session.accountId,
+      actor: { accountId: session.accountId, providerSubject: session.providerSubject },
+      request: layoutRequest,
+    });
+    if (saved instanceof NextResponse) {
+      return saved;
+    }
+    provisioningLayout = saved;
+  }
+
   const token = createSecretToken(claimTokenPrefix, 24);
   // A frame-bound token hands a device the identity of an EXISTING frame —
   // worth more than an ordinary code, and it sits on media anyone can read
@@ -230,6 +261,9 @@ export async function POST(request: NextRequest) {
       maxUses,
       name: name ?? null,
       sceneSourceFrameId: sceneSourceFrame?.id ?? null,
+      provisioningLayout: provisioningLayout
+        ? provisioningLayoutColumn(provisioningLayout)
+        : null,
       timezone,
       tokenHash: hashSecret(token),
     })

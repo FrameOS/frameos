@@ -12,6 +12,8 @@ import {
 } from '../../../frontend/src/models/embeddedUsbLogsModel'
 import { embeddedUsbConnectLogic } from '../../../frontend/src/scenes/workspace/embeddedUsbConnectLogic'
 import type { FrameType } from '../../../frontend/src/types'
+import { FlashLayoutPicker } from '../../../frontend/src/scenes/workspace/FlashLayoutPicker'
+import { saveFrameFlashLayout } from '../../../frontend/src/scenes/workspace/flashLayoutApply'
 import { cloudOrigin } from '../cloudConfig'
 import { Esp32CloudFlasher, type Esp32CloudFlasherPortHandoff } from './Esp32CloudFlasher'
 
@@ -30,6 +32,7 @@ export function CloudFrameUsbRelink({ frame }: { frame: FrameType }): ReactEleme
   const { identityKnown, identity } = useValues(logic)
   const { setFlasherBusy, recheck } = useActions(logic)
   const [open, setOpen] = useState(false)
+  const layoutPickerKey = `${frame.id}-cloud-usb`
 
   // The connect card sends people here when the board it read is not this
   // frame (blank, other firmware, another frame's). Open then, so the next
@@ -97,9 +100,19 @@ export function CloudFrameUsbRelink({ frame }: { frame: FrameType }): ReactEleme
               <span className="font-semibold text-[color:var(--tool-strong)]">{frame.name || 'this frame'}</span>. Its
               scenes, assets and logs stay. You need to enter the Wi-Fi details again.
             </div>
+            <FlashLayoutPicker
+              pickerKey={layoutPickerKey}
+              frameScenes={frame.scenes}
+              labelClassName="frame-tool-muted text-xs font-semibold uppercase tracking-wide"
+              hint="Saved on this frame when the board is flashed, and drawn around every scene."
+            />
             <Esp32CloudFlasher
               cloudOrigin={cloudOrigin()}
               reenrollFrame={{ id: String(frame.id), name: frame.name || 'this frame' }}
+              claimFields={async () => {
+                await saveFrameFlashLayout(layoutPickerKey, frame.id)
+                return {}
+              }}
               portHandoff={portHandoff}
             />
           </>
