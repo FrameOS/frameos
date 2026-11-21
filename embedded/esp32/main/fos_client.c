@@ -104,8 +104,10 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
 /* The two ADC bursts behind one pass-start reading are this far apart; a
  * Wi-Fi TX burst that sagged the first one has moved on by the second. */
 #define FOS_BATTERY_RESAMPLE_GAP_MS 60
-/* How old a battery and charger reading a pass that answers input may reuse. */
-#define FOS_POWER_READING_REUSE_US (60 * 1000000LL)
+/* How old a battery and charger reading a pass that answers input may reuse:
+ * an idle frame runs no pass to refresh it, and the pass after the input hold
+ * releases reads a new one. */
+#define FOS_POWER_READING_REUSE_US (600 * 1000000LL)
 
 /* How long a deep sleep waits for the cloud task to finish streaming the
  * frame's image (an `image_get` the provider queued on this pass's `render`
@@ -3580,7 +3582,7 @@ static void client_task(void *arg)
              * against the state carried in RTC memory — see fos_power.h for the
              * log this replays. */
             /* A pass that answers somebody (a tap, a key, an event) reuses a
-             * reading under a minute old: the two samples and the gap between
+             * reading up to ten minutes old: the two samples and the gap between
              * them, then the charger and the gauge over I2C, were 65-80 ms in
              * front of every tap's render on the reTerminal Sticky (2026-11-21). */
             static int64_t s_power_read_us = 0;
