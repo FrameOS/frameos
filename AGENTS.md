@@ -240,6 +240,28 @@
   from the ESP32 or the preview, and `fos_scenes.c` applies one without a
   slot. A new built-in scene goes the same way, not into a host.
 
+## Scene packages: `docs/scene-packages.md`
+
+- A scene stays a JSON object at every API (the SPA, MCP, iOS, the AI tools);
+  a **scene package** is its file form: `scene.json` (the scene, every app's
+  `sources` taken out) and `apps/<keyword>/<file>`, and a set (a template zip,
+  a Pi's `scenes.zip`) is `template.json` plus a folder per scene. One rule in
+  three ports (`frontend/src/utils/scenePackage.ts`,
+  `backend/app/utils/scene_package.py`, the runtime's reader
+  `frameos/scene_package.nim`), pinned by `docs/scene-package-fixtures.json`:
+  change them and the corpus together. Readers take the form before packages
+  (template.json naming a `scenes.json`) too; immutable store versions stay so.
+- **A loaded scene keeps none of its apps' files.** The scene reader takes a
+  `SceneFiles` (where they can be read again: a JSON file on disk, a package,
+  an ESP32's slot by id through `sceneFileReader`) and passes over `sources`;
+  an app reads them when its interpreter starts and drops them after the
+  compile (`JsAppRuntime.reload`). A new place that parses scenes says where
+  their files are, or passes `sfResident`, which keeps them.
+- A frame's package has `scene.json` first and stored (an ESP32 reads its
+  index entry in place); app tests (`*.test.*`) never reach any frame
+  (`scenes_for_frame` / `scenesForFrame`), and a code editor's save keeps the
+  plane's (`keep_app_test_files` / `keepAppTestFiles`).
+
 ## Scene icons: `docs/scene-icons.md`
 
 - `settings.icon` is ONE SVG path in a `0 0 24 24` box, filled (nonzero) with
