@@ -74,7 +74,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 /** Packing options. `withoutTests`: leave every app's test files out (what a
  * frame is sent). */
 export interface PackOptions {
-  withoutTests?: boolean
+  withoutTests?: boolean | undefined
 }
 
 /** One scene's files: `scene.json` (2-space JSON) and every app file. An app
