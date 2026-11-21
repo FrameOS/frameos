@@ -9,6 +9,7 @@ import {
   devicePresets,
   ESP32_PIXEL_RGB565,
   esp32CanvasBytesPerPixel,
+  esp32CanvasIsPanelBuffer,
   esp32CanvasRotation,
   esp32DeviceHeapBytes,
   esp32DeviceLimits,
@@ -249,6 +250,21 @@ describe("esp32DeviceLimits", () => {
       expect(esp32CanvasRotation(entry.rotate, entry.firmwareVersion, entry.pixelFormat ?? null)).toBe(entry.expected);
     },
   );
+
+  it("charges a colour panel's buffer wherever it fits beside the canvas in half the PSRAM", () => {
+    // main.c canvas_holds_panel_picture packs in the canvas only where memory
+    // needs it: the canvas is the display's for the whole refresh, and the
+    // E1002 waited out its panel's (37.9 s from a render's start, 2026-11-21).
+    expect(esp32CanvasIsPanelBuffer(7, 0, 2, 1200, 1600, PSRAM_8MB)).toBe(true);
+    expect(esp32CanvasIsPanelBuffer(7, 0, 2, 800, 480, PSRAM_8MB)).toBe(false);
+    expect(esp32CanvasIsPanelBuffer(7, 0, 2, 1200, 1600, PSRAM_16MB)).toBe(false);
+    expect(esp32CanvasIsPanelBuffer(7, 90, 2, 1200, 1600, PSRAM_8MB)).toBe(false);
+    // Sixteen greys: the canvas is the panel buffer whatever the size.
+    expect(esp32CanvasIsPanelBuffer(8, 0, 0.5, 800, 480, PSRAM_16MB)).toBe(true);
+    // The E1002 is charged its 192 KB buffer beside the 565 canvas.
+    expect(esp32DeviceHeapBytes(800, 480, PSRAM_8MB, 7, 0)).toBe(PSRAM_8MB - 192_000 - EMERGENCY_RESERVE);
+    expect(esp32DeviceHeapBytes(1200, 1600, PSRAM_8MB, 7, 0)).toBe(PSRAM_8MB - EMERGENCY_RESERVE);
+  });
 
   it("is what the ESP32 presets use", () => {
     expect(deviceLimitsFor("esp32", 1200, 1600)).toEqual(esp32DeviceLimits(1200, 1600, PSRAM_8MB));

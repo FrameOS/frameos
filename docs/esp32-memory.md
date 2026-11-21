@@ -35,8 +35,8 @@ bench of 2026-11-21). The E1004's pictures, drawn in dithered 565 since
 2026.8.31, showed the store dither is enough, so on the owner's word every
 colour e-paper panel now draws in 565 whatever the PSRAM (every copy of the
 rule and `docs/device-limits-fixtures.json` together): 0.77 MB of canvas
-on an 800×480 board, its picture packed into the canvas where it is unturned
-(no panel buffer of its own), and the 565 paths. A board on 2026.11.13 or
+on an 800×480 board with its 192 KB panel buffer beside it (packing in the
+canvas is for where memory needs it, below), and the 565 paths. A board on 2026.11.13 or
 older still draws in RGBX; both planes count it as 565, which overstates its
 room by about 0.9 MB until it takes the release.
 
@@ -78,6 +78,16 @@ canvas"), byte for byte the picture it packed before:
 | canvas | 3,840,000 | 3,840,000 |
 | panel buffer (reserved at boot) | 960,000 | 0 |
 | refresh copy while the glass refreshes (when it fitted) | 960,000 – 1,920,000 | 0 |
+
+Only where memory needs it (2026-11-21): where the canvas and a panel buffer
+apart take more than half the module's PSRAM (`PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR`
+in `main.c`; the E1004's 4.8 MB of 8). The canvas is lent to the display's
+task for the whole refresh, so the next render waits for the glass: when
+every colour canvas became 565 the rule reached the 800×480 E1002 too, and a
+render there took 37.9 s from its start to its picture (7.4 s of it the
+render, the rest the 7.3" Spectra's refresh it waited out; hardware bench
+2026-11-21). An 800×480 board (0.96 MB) and a 1200×1600 panel on 16 MB keep
+a panel buffer of their own and render while the panel refreshes.
 | idle free PSRAM | ~676 KB (measured) | ~1.6 MB (arithmetic, not yet measured) |
 
 The refresh copy had seldom fitted (676 KB free for a 960 KB copy), so the

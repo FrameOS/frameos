@@ -281,20 +281,33 @@ static bool canvas_is_panel_picture(const fos_config_t *config)
 }
 
 /* A colour panel's packed picture (palette indices, 2 or 4 bits) is packed
- * into the first bytes of its own 565 canvas when nothing turns it: the
- * dither has read every canvas row it writes over (utils/palette_pack.nim), so
- * the panel buffer is the head of the canvas and the 960 KB a reTerminal
- * E1004 reserved beside its 3.84 MB canvas goes back to the renders, and the
- * display's task refreshes from it without a copy (fos_display_lend). The
- * canvas no longer holds the scene after a pack, so this is for panels that
- * keep no picture of their own: no partial waveform. */
+ * into the first bytes of its own 565 canvas when nothing turns it and memory
+ * needs it: the dither has read every canvas row it writes over
+ * (utils/palette_pack.nim), so the panel buffer is the head of the canvas and
+ * the 960 KB a reTerminal E1004 reserved beside its 3.84 MB canvas goes back
+ * to the renders, and the display's task refreshes from it without a copy
+ * (fos_display_lend). The canvas no longer holds the scene after a pack, so
+ * this is for panels that keep no picture of their own: no partial waveform.
+ *
+ * It costs a render during a refresh: the canvas is lent to the display's
+ * task until the glass is done (some 25 s on a 7.3" Spectra 6), and the next
+ * render waits for it. So only where the canvas and a panel buffer apart
+ * would take more than this share of the module's PSRAM (the E1004 on 8 MB:
+ * 3.84 + 0.96 MB of 8); an 800x480 board (0.77 + 0.19 MB, the reTerminal
+ * E1002) or a 1200x1600 panel on 16 MB keeps a buffer of its own and renders
+ * the next picture while the panel refreshes (bench 2026-11-21: 37.9 s from
+ * a render's start to its picture on an E1002 that packed in place). The
+ * planes' esp32CanvasIsPanelBuffer / esp32_canvas_is_panel_buffer follow. */
+#define PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR 2 /* more than half the PSRAM */
 static bool canvas_holds_panel_picture(const fos_config_t *config)
 {
     fos_pixel_format_t format = fos_display_format();
     return (format == FOS_PIXEL_2BPP_BWYR || format == FOS_PIXEL_4BPP_7COLOR ||
             format == FOS_PIXEL_4BPP_SPECTRA6) &&
            fos_display_canvas_bits_per_pixel() == 16 && config->rotate == 0 &&
-           !fos_display_supports_partial() && fos_display_buffer_size() <= fos_display_canvas_bytes();
+           !fos_display_supports_partial() && fos_display_buffer_size() <= fos_display_canvas_bytes() &&
+           fos_display_canvas_bytes() + fos_display_buffer_size() >
+               heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR;
 }
 
 /* The stored Wi-Fi came back while the provisioning portal was serving.

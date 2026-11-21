@@ -107,6 +107,14 @@ def test_only_an_unturned_colour_panel_with_a_565_canvas_packs_in_it():
         "fos_display_buffer_size() <= fos_display_canvas_bytes()",
     ):
         assert condition in rule, f"main.c: canvas_holds_panel_picture no longer checks {condition}"
+    # Only where memory needs it: the canvas is the display's for the whole
+    # refresh, so the next render waits for the glass (37.9 s from a render's
+    # start to its picture on an E1002 that packed in place, 2026-11-21).
+    assert re.search(
+        r"fos_display_canvas_bytes\(\) \+ fos_display_buffer_size\(\) >\s*"
+        r"heap_caps_get_total_size\(MALLOC_CAP_SPIRAM\) / PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR",
+        rule,
+    ), "main.c: canvas_holds_panel_picture packs in the canvas where a panel buffer of its own fits"
     assert "if (!canvas_holds_panel_picture(config)) fos_framebuffer_reserve(fos_display_buffer_size());" in main, (
         "main.c: a panel whose picture is packed in its canvas still reserves a panel buffer of its own"
     )
@@ -173,3 +181,15 @@ def test_the_scene_draws_in_the_panel_buffer_only_once_it_holds_it():
     assert "if borrowed != sharedCanvas:" in refused and "return 1" in refused, (
         "embedded_main.nim: a render goes ahead while the panel buffer is lent to something else"
     )
+
+
+def test_the_planes_charge_the_panel_buffer_by_the_same_share():
+    """esp32_canvas_is_panel_buffer (and its TS copies, pinned by
+    docs/device-limits-fixtures.json) reads the share main.c packs in place by."""
+    from app.utils.device_limits import ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR
+
+    divisor = re.search(r"#define PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR (\d+)", MAIN_C.read_text())
+    assert divisor is not None, "main.c: no PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR"
+    assert int(divisor.group(1)) == ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR
+    for ts in (REPO_ROOT / "frameos" / "wasm" / "src" / "devices.ts", REPO_ROOT / "frontend" / "src" / "utils" / "deviceLimits.ts"):
+        assert f"ESP32_PACK_IN_CANVAS_PSRAM_SHARE_DIVISOR = {divisor.group(1)}" in ts.read_text(), ts

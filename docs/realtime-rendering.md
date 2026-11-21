@@ -390,10 +390,18 @@ rhythm's floor) is the panel the firmware names at init
 
 ### The picture in the canvas (a colour panel's 565 canvas)
 
-A colour e-paper panel whose canvas is 565 (a 1200x1600 Spectra 6 on an 8 MB
-board: the reTerminal E1004, the XIAO EE02) packs its picture into the first
-bytes of that canvas, unrotated, and holds no panel buffer of its own
-(`canvas_holds_panel_picture` in `main.c`, `utils/palette_pack.nim`). It can
+A colour e-paper panel whose 565 canvas and a panel buffer apart would take
+more than half the module's PSRAM (a 1200x1600 Spectra 6 on an 8 MB board:
+the reTerminal E1004, the XIAO EE02) packs its picture into the first bytes
+of that canvas, unrotated, and holds no panel buffer of its own
+(`canvas_holds_panel_picture` in `main.c`, `utils/palette_pack.nim`). Only
+there, because the canvas is the display task's until the glass is done, and
+the next render waits out the refresh: on an 800x480 board (the reTerminal
+E1002, 0.77 + 0.19 MB of 8) that was 37.9 s from a render's start to its
+picture (bench 2026-11-21), so it keeps a buffer of its own and renders the
+next picture while the panel refreshes, as does a 1200x1600 panel on 16 MB.
+The device-limits ports charge the panel buffer by the same rule
+(`esp32CanvasIsPanelBuffer`, given the panel size and PSRAM). It can
 because of the order the dither reads in: canvas row y + 1 is read into the
 error row before the first pixel of row y is handed out, so while packed row
 y (bytes `R*y ..< R*(y+1)`, R the picture's bytes a row) is written, every
