@@ -153,15 +153,17 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * - 16 (its RGB 5/6/5 surface) for an RGB565 LCD, always: the canvas
  *   is then the panel's own frame buffer (fos_display_render_target), drawn
  *   in place, with nothing to pack or copy.
- * - For a colour e-paper panel, 32 (RGBX) when a full canvas takes at most
- *   half the module's PSRAM, else 16. The 800x480 boards (1.5 MB of 8 MB)
- *   and a 1200x1600 panel on a 16 MB module (7.3 MB) get RGBX; 1200x1600
- *   Spectra 6 on an 8 MB module gets 565, which is what makes it fit at all
- *   (3.7 MB). Rendering into 565 costs colour: the dither keeps its error
- *   rows at full precision, but the 5/6-bit rounding of every stored pixel
- *   turns a smooth gradient into plateaus the diffusion then prints as
- *   visible bands — so 565 canvases store with a per-pixel dither (pixie
- *   `ditherStores`) and RGBX is used wherever it fits.
+ * - 16 for a colour e-paper panel too, whatever the PSRAM. Up to 2026.11.13
+ *   a colour panel got RGBX wherever a full canvas took at most half the
+ *   module's PSRAM (the 800x480 boards: 1.5 MB of 8 MB) and 565 only where it
+ *   did not (1200x1600 Spectra 6 on 8 MB, the reTerminal E1004, 3.7 MB). The
+ *   5/6-bit rounding of every stored pixel would turn a smooth gradient into
+ *   plateaus the diffusion prints as bands, which is why 565 canvases store
+ *   with a per-pixel dither (pixie `ditherStores`); the E1004's pictures
+ *   showed that dither is enough, so every colour panel draws in 565 (the
+ *   owner, 2026-11-21): half the canvas (0.77 MB on an 800x480 board), the
+ *   picture packed in the canvas's own bytes where it is unturned (main.c
+ *   canvas_holds_panel_picture), and pixie's 565 fast paths.
  *
  * The same rule lives, in bytes (0.5 for 4 bits), in
  * `embedded_render_canvas_bytes_per_pixel`
@@ -175,7 +177,6 @@ fos_pixel_format_t fos_display_panel_format(size_t index);
  * charge no second buffer (`esp32CanvasIsPanelBuffer`), and so where a colour
  * panel's picture is packed in the first bytes of its 565 canvas (main.c
  * canvas_holds_panel_picture: unturned, no partial waveform). */
-#define FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE 2u
 /* The grey panel formats: 1-bit black and white, 2- and 4-bit grey. */
 bool fos_pixel_format_is_grey(fos_pixel_format_t format);
 size_t fos_render_canvas_bits_per_pixel(int width, int height, size_t psram_total_bytes,

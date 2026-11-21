@@ -59,7 +59,7 @@ main/                     boot orchestration + platform modules
   fos_assets_sd.c         SD card mount/probe/format for the assets root
   fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
-  fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
+  fos_framebuffer.c       canvas allocation (RGB565, luma or 4-bit grey by panel) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
                           aware: the status screen and the local network access code box (host-tested)
@@ -1769,11 +1769,12 @@ draws: free space over the scene list, each scene's size on its tile.
 A sixteen-grey panel has a 4-bit canvas in its own buffer's layout, each
 store dithered (docs/realtime-rendering.md); the other formats follow.
 The canvas format is decided per board (`fos_render_canvas_bits_per_pixel`
-in `components/frameos_display`): **RGBX when a full canvas takes at most
-half the module's PSRAM, else 16-bit RGB 5/6/5.** The 800×480 boards (1.5 MB
-of 8 MB) and a 1200×1600 panel on a 16 MB module (7.3 MB) render in full
-colour; **1200×1600 on an 8 MB module is the one that needs 565** — RGBA is
-7.3 MiB and does not fit, 565 is 3.7 MiB and does
+in `components/frameos_display`): **16-bit RGB 5/6/5 on every colour panel,
+whatever the PSRAM** (since 2026-11-21, docs/esp32-memory.md "Every colour
+canvas is 565"). Until then a colour panel got RGBX where a full canvas took
+at most half the module's PSRAM (the 800×480 boards, a 1200×1600 panel on
+16 MB) and 565 only where it had to: 1200×1600 on an 8 MB module, where RGBA
+is 7.3 MiB and does not fit and 565 is 3.7 MiB and does
 (`fos_display_render_psram_bytes`: canvas + packed + 1.5 MiB reserve =
 6.1 MiB). 565 is not free of cost even though the dither keeps its error
 rows at full precision (`forEachPaletteDithered` / `forEachGrayDithered` in
