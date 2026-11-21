@@ -3605,6 +3605,8 @@ const appJsPrelude* = compactJs("""
     if (name === "get") {
       globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
       if (typeof __frameosNextRender === "function") __frameosNextRender();
+      // A whole render runs whatever is dirty (memo() runs a dirty call again).
+      globalThis.__frameosDirty = [];
     }
     if (typeof fn === "function") {
       const r = fn(a.app, globalThis.__frameosContext);
@@ -4050,11 +4052,21 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     if name in ["change", "input", "keyDown", "scroll"]:
       discard JS_SetPropertyStr(ctx, e, "target", eventObject())
     var returned: JSValue
+    let marks = signalMarks()
     withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
         context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))):
       returned = JS_Call(ctx, fn, jsUndefined(ctx), 1, addr e)
     JS_FreeValue(ctx, e)
     JS_FreeValue(ctx, fn)
+    if not owner.scene.isNil:
+      let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+      if not target.isNil:
+        # Signals set: the components that read them may do (partialRender).
+        # Nothing set: what changed is anyone's guess, get() runs.
+        if JS_IsException(returned) == 0 and signalMarks() != marks:
+          target.partial = true
+        else:
+          target.full = true
     if JS_IsException(returned) != 0:
       frameos_apps.logError(owner, "JS app handler failed: " &
         runtime.appText(mappedJsExceptionDetails(ctx).message))
@@ -4729,11 +4741,45 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
 
+proc partialRender(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Image =
+  ## Only the memo()'d components the handlers' signals dirtied run again,
+  ## their elements spliced into the tree read last (jsx.nim jsxSplice): no
+  ## get(), no walk of what did not change. nil when a whole get() is needed.
+  let ctx = runtime.js.context
+  var root = runtime.lastJsx
+  runtime.midCall:
+    var pairs: JSValue
+    withAppEnv(ctx, JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)):
+      probe(phGet):
+        pairs = callGlobalFunction(ctx, "__frameosPartial", [])
+    probe(phWalk):
+      let entry = runtime.appEntry()
+      root = jsxSplicePairs(ctx, root, pairs, addr runtime.images, entry, addr runtime.jsxMemo)
+      JS_FreeValue(ctx, entry)
+    JS_FreeValue(ctx, pairs)
+  if root.isNil:
+    return nil
+  runtime.lastJsx = root
+  result = runtime.imageFromJsx(owner, context, root)
+
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   probe(phInit):
     runtime.init(owner, configJson)
   if not owner.scene.isNil:
     let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+    if not target.isNil and (target.partial or target.full):
+      # Handlers ran since the last render: when every one set signals and
+      # nothing else asks for a new tree (the same config, a render sooner
+      # than the scene's own interval), the components that read them alone.
+      let partial = target.partial and not target.full
+      target.partial = false
+      target.full = false
+      if partial and not target.inputOnly and not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
+          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
+        let image = runtime.partialRender(owner, configJson, context)
+        if not image.isNil:
+          runtime.lastJsxAt = getMonoTime()
+          return VImage(image)
     if not target.isNil and target.inputOnly:
       target.inputOnly = false
       # Only the pointer asked for this render: the last tree with the new

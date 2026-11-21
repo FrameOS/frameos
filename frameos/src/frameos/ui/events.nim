@@ -51,6 +51,7 @@ type
     inputOnly*: bool            ## the pointer changed what it is over or
                                 ## pressing, and no handler ran: the next
                                 ## render needs no new tree (app_runtime.get)
+    partial*, full*: bool       ## since the last render: a handler set signals (and only that) / did not
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
     heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
