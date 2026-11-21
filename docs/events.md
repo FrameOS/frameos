@@ -477,7 +477,7 @@ dispatcher still takes such a `button` as the `gpio` edge it is. Until
 
 **A JSX UI takes the buttons as keys** (docs/jsx-ui.md "Keys"): a `press`
 or `doublePress` of a `next` / `down` key is Tab (once or twice), of `prev` /
-`up` Shift+Tab, of `primary` / `refresh` / `menu` Enter and of `back` Escape,
+`up` Shift+Tab, of `primary` (and `refresh`) Enter and of `back` / `menu` Escape,
 over the elements
 its UI and its layout's have to press, unless the scene's own code took it
 first (an event node for `button`, or a JS app whose `onEvent` returned `true`

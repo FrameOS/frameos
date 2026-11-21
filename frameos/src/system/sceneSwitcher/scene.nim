@@ -593,9 +593,9 @@ proc opened(self: SceneSwitcherScene) =
 proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## A key, by its role (the input state gives every `button` one): next /
   ## down and prev / up walk the tiles, a press one step and a double press
-  ## two, so every tap counts; primary, refresh and menu (OK, REFRESH, BOOT)
-  ## show the highlighted scene (open the frame page on the gear), back goes
-  ## back. A long press is the frame's where its event map binds it (walk the
+  ## two, so every tap counts; primary (OK, the reTerminal's green REFRESH,
+  ## BOOT) shows the highlighted scene (opens the frame page on the gear),
+  ## back and menu go back. A long press is the frame's where its event map binds it (walk the
   ## scenes, talk); one it leaves free goes back from the key that opens or
   ## from back, so a board of keys alone (the E1004's REFRESH) has a way out.
   # One way out (no early `return`): each one repeats the clean-up of what
@@ -609,8 +609,8 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
     case payload{"role"}.getStr()
     of "next", "down": self.highlight(self.highlighted() + steps)
     of "prev", "up": self.highlight(self.highlighted() - steps)
-    of "primary", "refresh", "menu": self.choose(self.highlighted())
-    of "back": leave()
+    of "primary", "refresh": self.choose(self.highlighted())
+    of "back", "menu": leave()
     else: acted = false
     if acted:
       self.touch()
