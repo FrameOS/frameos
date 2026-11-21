@@ -15,6 +15,17 @@ import { inFlightSpendMicros } from "../../../../../../src/lib/ai/spend-reservat
 import type { ToolContext } from "../../../../../../src/lib/ai/tools";
 import { buildSceneByVoice } from "../../../../../../src/lib/ai/voice-scene-builder";
 import {
+  askJev,
+  decideVoiceAction,
+  MAX_SCREEN_BYTES,
+  readScreen,
+  screenContextBlock,
+  VOICE_ACTION_TOOL,
+  VoiceScreenTools,
+  type VoiceDeviceEvent,
+  type VoiceScreen,
+} from "../../../../../../src/lib/ai/voice-actions";
+import {
   buildVoiceSystemPrompt,
   imageSourcesForSettings,
   MAX_VOICE_HISTORY_TURNS,
@@ -102,6 +113,15 @@ export const maxDuration = 300;
 //                        "chat_failed" | "ai_unavailable", "detail"}
 //   -> 409 seq_mismatch / unknown_session, 413 over the caps, 429 too many
 //
+// Before its audio a frame sends what is on its screen: `?screen=1&seq=99999`,
+// a JSON body (frameos/voice_screen.nim) -> 202. The seq is out of range on
+// purpose, so a plane that does not read it refuses it untouched. The turn
+// then first asks TypeSafe's Jev which of the things on that screen was meant
+// (voice-actions.ts, docs/voice-chat.md "Voice actions"): a sure answer is done
+// by the frame itself, the events in the reply's `events`, with no chat turn;
+// otherwise the chat gets the same screen as its press / type_text /
+// scene_action tools.
+//
 // The chunks are held in this process's memory until `done` (voiceSessions);
 // the audio is kept nowhere after the turn. The turn is the AI chat's loop
 // with the voice prompt, the frame's context and ONLY the voice tools, each
@@ -163,6 +183,25 @@ export async function POST(
   if (!VOICE_SESSION_ID_PATTERN.test(sessionId)) {
     return jsonError("invalid_session_id", 400);
   }
+  if (request.nextUrl.searchParams.get("screen") === "1") {
+    const screenLimited = await identityRateLimitResponse(frame.id, "frames:voice-screen", {
+      limit: VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (screenLimited) {
+      return screenLimited;
+    }
+    const raw = new Uint8Array(await request.arrayBuffer());
+    if (raw.length > MAX_SCREEN_BYTES) {
+      return jsonError("screen_too_large", 413);
+    }
+    // One that cannot be read is dropped, and the turn goes on without it.
+    const digest = readScreen(raw);
+    if (digest) {
+      voiceSessions.setScreen(frame.id, sessionId, digest);
+    }
+    return NextResponse.json({ ok: true, screen: digest !== null }, { status: 202 });
+  }
   const seqRaw = request.nextUrl.searchParams.get("seq") ?? "0";
   const seq = /^\d{1,5}$/.test(seqRaw) ? Number(seqRaw) : -1;
   if (seq < 0) {
@@ -193,6 +232,7 @@ export async function POST(
   if (!done) {
     return NextResponse.json({ bytes: appended.received, ok: true }, { status: 202 });
   }
+  const screen: VoiceScreen | undefined = voiceSessions.screenOf(frame.id, sessionId);
   const pcm = voiceSessions.take(frame.id, sessionId);
   if (!pcm) {
     return jsonError("unknown_session", 409);
@@ -262,6 +302,54 @@ export async function POST(
 
   const startedAt = Date.now();
   const now = new Date();
+  const permissions = readVoicePermissions(frame.voicePermissions);
+  // What the frame was sent, by its runtime ids: the scene the screen belongs
+  // to (its custom events) and the scenes a switch can name. The frame
+  // dispatches what comes back itself, so the ids are the device's.
+  const screenScenes = screen ? await deviceScenesForVoice(db, frame.id) : null;
+  let screenScene: JsonObject | null =
+    screen && screenScenes ? (screenScenes.find((scene) => scene.id === screen.scene) ?? null) : null;
+  if (screen && !screenScene) {
+    // The standing preview (docs/scene-previews.md) rides along with every push.
+    const shown = (await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined;
+    screenScene = shown && shown.id === screen.scene ? shown : null;
+  }
+  const jevKey = process.env.TYPESAFE_API_KEY?.trim();
+  if (screen && screenScenes && jevKey && permissions.use_scenes) {
+    // The fast path: Jev picks from the screen, the frame acts. Only on the
+    // owner's "use installed scenes" (what it does is a use of the scene
+    // showing), only with a TypeSafe key, only with a screen.
+    const decided = await decideVoiceAction({
+      ask: (request) => askJev(request, { apiKey: jevKey }),
+      now,
+      scene: screenScene,
+      scenes: screenScenes.map((scene) => ({ id: String(scene.id), name: String(scene.name ?? scene.id) })),
+      screen,
+      transcript,
+    });
+    if (decided.error) {
+      logWarn("frames.voice_action_jev_failed", { error: decided.error, frameId: frame.id });
+    }
+    if (decided.plan) {
+      const plan = decided.plan;
+      const chat = await ensureChat(db, accountId, { chatId: voiceChatId(frame.id), contextType: "frame", frameId: frame.id });
+      if (chat) {
+        await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
+        await appendChatMessage(db, chat.id, {
+          content: voiceTurnLog(
+            [{ args: { did: plan.log, ms: decided.ms }, name: VOICE_ACTION_TOOL, result: { ok: true } }],
+            { at: new Date(), seconds: (Date.now() - startedAt) / 1000, sessionId },
+          ),
+          role: "assistant",
+          tool: VOICE_LOG_TOOL,
+        });
+        await appendChatMessage(db, chat.id, { content: plan.reply, role: "assistant", tool: VOICE_TURN_TOOL });
+      }
+      logInfo("frames.voice_action", { frameId: frame.id, kind: plan.kind, ms: decided.ms });
+      return NextResponse.json({ events: plan.events, ok: true, reply: plan.reply, tools: plan.tools, transcript });
+    }
+  }
+
   const chat = await ensureChat(db, accountId, {
     chatId: voiceChatId(frame.id),
     contextType: "frame",
@@ -568,7 +656,7 @@ export async function POST(
     });
   };
 
-  const permissions = readVoicePermissions(frame.voicePermissions);
+  const screenTools = screen ? new VoiceScreenTools(screen, screenScene, { now, transcript }) : undefined;
   const tools = voiceTools({
     activeSceneId: showing?.id,
     albums,
@@ -580,6 +668,7 @@ export async function POST(
     queue,
     sceneContent,
     scenes,
+    screenTools,
     updateSettings,
   });
   const toolContext: ToolContext = {
@@ -608,7 +697,7 @@ export async function POST(
           permissions,
           preview,
           now,
-        ),
+        ) + (screen ? `\n${screenContextBlock(screen, screenScene)}` : ""),
         history,
         prompt: transcript,
       }),
@@ -653,5 +742,31 @@ export async function POST(
     seconds: Math.round(seconds * 10) / 10,
     tools: result.toolCalls.join(","),
   });
-  return NextResponse.json({ ok: true, reply, tools: result.toolCalls, transcript });
+  const events: VoiceDeviceEvent[] = tools.events();
+  return NextResponse.json({
+    ok: true,
+    reply,
+    tools: result.toolCalls,
+    transcript,
+    // Done by the frame itself, in order, from the origin `voice`.
+    ...(events.length > 0 ? { events } : {}),
+  });
+}
+
+/** The scenes the frame was sent (the assigned bundle), by runtime id, that a
+ * voice request can switch to: no layouts (docs/scene-layouts.md). */
+async function deviceScenesForVoice(
+  db: Parameters<typeof buildScenesPayloadForFrame>[0],
+  frameId: string,
+): Promise<JsonObject[]> {
+  const built = await buildScenesPayloadForFrame(db, frameId);
+  if ("error" in built) {
+    return [];
+  }
+  return built.scenes.filter(
+    (scene): scene is JsonObject =>
+      Boolean(scene) &&
+      typeof scene === "object" &&
+      !((scene as JsonObject).settings as JsonObject | undefined)?.isLayout,
+  );
 }

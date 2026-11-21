@@ -31,11 +31,15 @@ export const voiceToolPermissions: Record<string, VoicePermissionKey> = {
   change_scene: "create_scenes",
   create_scene: "create_scenes",
   list_albums: "use_albums",
+  // The screen's (voice-actions.ts): a use of the scene showing.
+  press: "use_scenes",
   render_now: "use_scenes",
   rotate_frame: "change_settings",
+  scene_action: "use_scenes",
   set_scene_state: "use_scenes",
   show_album: "use_albums",
   show_image: "create_scenes",
+  type_text: "use_scenes",
 };
 
 // How the context names each switch to the model, on and off.
@@ -44,7 +48,7 @@ export const voicePermissionDescriptions: Record<VoicePermissionKey, string> = {
   create_scenes: "put new scenes on the frame (show_image, create_scene, change_scene)",
   use_albums: "play the photo albums: list them, show one on the frame (list_albums, show_album)",
   use_scenes:
-    "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
+    "use the installed scenes: switch between them, set their fields, redraw, press and type on the screen (activate_scene, set_scene_state, render_now, press, type_text, scene_action)",
 };
 
 /** The stored column (or a request body) as permissions: a key that is not a

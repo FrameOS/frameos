@@ -28,6 +28,7 @@ import ./js_runtime/run_budget
 import ./render_probe
 import ./ui/layout
 import ./ui/tree
+import ./voice_screen
 from ./utils/image import renderSvgIntoTarget
 from ./utils/svg_frames import forgetPanelFrames
 import pixie/fileformats/svg
@@ -778,6 +779,14 @@ proc tick*(host: SingleSceneHost): bool =
     return false
   discard host.events.drain()
   true
+
+proc voiceScreen*(host: SingleSceneHost, state: string): string =
+  ## The voice key's screen digest (frameos/voice_screen.nim): the resident
+  ## scene's UIs, the windows beside it, `state` (its public state).
+  var open: seq[string]
+  for id in host.windows.ids:
+    open.add id.string
+  voiceScreen(host.scene, open, state)
 
 proc drainQueued*(host: SingleSceneHost): bool =
   ## What the scene's async code dispatched between renders (a `render` when

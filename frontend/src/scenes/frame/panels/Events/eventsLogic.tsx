@@ -9,6 +9,23 @@ import type { FrameType } from '../../../../types'
 import type { DeepPartialMap, ValidationErrorType } from 'kea-forms/lib/index'
 
 export type EventsTab = 'listen' | 'dispatch' | 'custom'
+export type CustomEventVoice = 'match' | 'fallback' | 'never'
+
+/** How a custom event may be named by the voice key (docs/voice-chat.md "Voice actions"). */
+export const customEventVoiceOptions: { value: CustomEventVoice; label: string }[] = [
+  { value: 'match', label: 'When what is said matches its description or aliases' },
+  { value: 'fallback', label: 'Whatever is said that nothing on the screen matches' },
+  { value: 'never', label: 'Never' },
+]
+
+/** "take a note, memo" as the aliases list: comma-separated, trimmed, at most 12. */
+export function aliasesFromText(text: string): string[] {
+  return text
+    .split(',')
+    .map((alias) => alias.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+}
 
 export interface EventsLogicProps {
   frameId: FrameId
@@ -123,6 +140,20 @@ export interface eventsLogicActions {
     eventIndex: number
     origin: EventOrigin
   }
+  setCustomEventAliases: (
+    eventIndex: number,
+    text: string
+  ) => {
+    eventIndex: number
+    text: string
+  }
+  setCustomEventVoice: (
+    eventIndex: number,
+    voice: CustomEventVoice
+  ) => {
+    eventIndex: number
+    voice: CustomEventVoice
+  }
   setCustomEvents: (customEvents: FrameEvent[]) => {
     customEvents: FrameEvent[]
   }
@@ -194,6 +225,8 @@ export const eventsLogic = kea<eventsLogicType>([
       origin,
       enabled,
     }),
+    setCustomEventAliases: (eventIndex: number, text: string) => ({ eventIndex, text }),
+    setCustomEventVoice: (eventIndex: number, voice: CustomEventVoice) => ({ eventIndex, voice }),
     addCustomEventField: (eventIndex: number) => ({ eventIndex }),
     editCustomEventField: (eventIndex: number, fieldIndex: number) => ({ eventIndex, fieldIndex }),
     closeCustomEventField: (eventIndex: number, fieldIndex: number) => ({ eventIndex, fieldIndex }),
@@ -395,6 +428,25 @@ export const eventsLogic = kea<eventsLogicType>([
         values.customEvents.map((event, index) =>
           index === eventIndex ? withCustomEventOrigin(event, origin, enabled) : event
         )
+      )
+    },
+    setCustomEventAliases: ({ eventIndex, text }) => {
+      const aliases = aliasesFromText(text)
+      actions.setCustomEvents(
+        values.customEvents.map((event, index) => {
+          if (index !== eventIndex) return event
+          const { aliases: _old, ...rest } = event
+          return aliases.length > 0 ? { ...rest, aliases } : rest
+        })
+      )
+    },
+    setCustomEventVoice: ({ eventIndex, voice }) => {
+      actions.setCustomEvents(
+        values.customEvents.map((event, index) => {
+          if (index !== eventIndex) return event
+          const { voice: _old, ...rest } = event
+          return voice === 'match' ? rest : { ...rest, voice }
+        })
       )
     },
     addCustomEventField: ({ eventIndex }) => {

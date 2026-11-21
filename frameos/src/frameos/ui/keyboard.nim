@@ -48,7 +48,7 @@ type
   Key* = enum
     ## The keys that are not a character, by the byte that stands for them
     ## in a page.
-    kNone, kShift, kBackspace, kEnter, kLetters, kSymbols, kMore, kCapsLock
+    kNone, kShift, kBackspace, kEnter, kLetters, kSymbols, kMore, kCapsLock, kTab
 
   KeyboardPage* = enum
     kpLetters, kpSymbols, kpMore, kpNumbers
@@ -78,15 +78,17 @@ const
     ## page has no ! or ? key of its own. A key named twice holds both, in
     ## that order.
   Pages: array[KeyboardPage, string] = [
-    "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05, .\x03",
-    "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04 \x03",
-    "[]{}#%^*+=\n_\\|~<>`$&@\n\x05.,?!'\x02\n\x04 \x03",
-    "123-\n456.\n789\x02\n,0\x03",
+    "qwertyuiop\nasdfghjkl\n\x01zxcvbnm\x02\n\x05\x08, .\x03",
+    "1234567890\n-/:;()$&@\"\n\x06.,?!'\x02\n\x04\x08 \x03",
+    "[]{}#%^*+=\n_\\|~<>`$&@\n\x05.,?!'\x02\n\x04\x08 \x03",
+    "123-\n456.\n789\x02\n\x08,0\x03",
   ]
   # The drawn keys, in a 24-unit box: shift's arrow, backspace and enter.
   ShiftPath = "M12 4 3.5 12.5H8V20h8v-7.5h4.5z"
   BackspacePath = "M9 5h11a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-6-7zm3 4 6 6m0-6-6 6"
   EnterPath = "M20 5v6a3 3 0 0 1-3 3H5m4-4-4 4 4 4"
+  TabPath = "M4 12h13m-4-4 4 4-4 4M20 6v12"
+    ## Tab: the next field (ui/events.nim `nextField`), held the one before.
 
 proc keyboardHeight*(height: int): int =
   ## How tall the keyboard is on a UI `height` px tall: four rows of keys a
@@ -302,6 +304,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     if code == ord(kShift): label = icon(ShiftPath, lit, size)
     elif code == ord(kBackspace): label = icon(BackspacePath, false, size)
     elif code == ord(kEnter): label = icon(EnterPath, false, size)
+    elif code == ord(kTab): label = icon(TabPath, false, size)
     elif code < 32:
       var t = "font-bold"
       t.px("text", size * 3 div 4)
@@ -326,7 +329,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
       key.attrs.add(("on-double-click", $(KeyBase + ord(kCapsLock))))
-    elif formCount(code, page) > 0 or code == ord(kBackspace):
+    elif formCount(code, page) > 0 or code == ord(kBackspace) or code == ord(kTab):
       # Held: its accents (ui/events.nim opens them, ui/layout.nim draws
       # them), or backspace erasing again and again.
       key.attrs.add(("on-long-press", $(KeyBase + code)))

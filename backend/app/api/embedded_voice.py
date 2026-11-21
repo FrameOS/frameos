@@ -20,6 +20,13 @@ has the scene the previous turn built to refer to (voice_history_for_model).
 `create_scene` and `change_scene` run the scene AI as a sub-turn
 (app/utils/voice_scene_builder.py) and push what it built as a preview.
 
+Before its audio the frame sends what is on its screen (`?screen=1`, JSON:
+frameos/voice_screen.nim), and the turn first asks TypeSafe's Jev which of
+the things on that screen was meant (app/utils/voice_actions.py, docs/
+voice-chat.md "Voice actions"): a sure answer is done by the frame itself,
+the events in the reply's `events`, with no chat turn; the chat gets the
+same screen as its press / type_text / scene_action tools otherwise.
+
 The cloud's twin is cloud/apps/auth-web/app/api/frames/[frameId]/voice/[sessionId]/route.ts."""
 from __future__ import annotations
 
@@ -75,6 +82,16 @@ from app.utils.voice_chat import (
     voice_turn_log,
 )
 from app.utils.voice_scene_builder import build_scene_by_voice
+from app.utils.voice_actions import (
+    MAX_SCREEN_BYTES,
+    VOICE_ACTION_TOOL,
+    VoiceScreenTools,
+    ask_jev,
+    decide_voice_action,
+    read_screen,
+    screen_context_block,
+)
+from app.utils.voice_chat import VoiceAction
 from . import api_public
 
 __all__ = ["api_embedded_device_voice"]
@@ -141,13 +158,25 @@ async def api_embedded_device_voice(
     id: int,
     request: Request,
     session_id: str = Path(pattern=SESSION_ID_PATTERN),
-    seq: int = Query(0, ge=0, le=10_000),
+    seq: int = Query(0, ge=0, le=99_999),
     done: int = Query(0, ge=0, le=1),
+    screen: int = Query(0, ge=0, le=1),
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     authorization: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    if screen:
+        # The screen digest, before the audio (docs/voice-chat.md "Voice
+        # actions"). It comes with seq=99999 so that a plane that does not
+        # read it refuses it untouched; one that cannot be read is dropped
+        # and the turn goes on without it.
+        digest = read_screen(await read_body_limited(request, MAX_SCREEN_BYTES, "Screen digest too large"))
+        if digest is not None:
+            _sessions.set_screen(int(frame.id), session_id, digest)
+        return JSONResponse({"ok": True, "screen": digest is not None}, status_code=HTTPStatus.ACCEPTED)
+    if seq > 10_000:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="seq out of range")
     if seq == 0 and await hit_rate_limit(
         redis, "embedded_voice", str(frame.id), limit=VOICE_SESSIONS_PER_FRAME_PER_15_MIN, window_seconds=900
     ):
@@ -331,6 +360,20 @@ async def api_embedded_device_voice(
     # The owner's switches (Settings -> Voice chat): a tool they turned off is
     # not offered to the model, and refused if named anyway.
     permissions = VoicePermissions.from_frame(frame)
+    # What was on the frame's screen as the key went down, and the scene it
+    # belongs to: the voice action's options and the chat's screen tools.
+    screen_digest = session.screen
+    screen_scene = None
+    if screen_digest is not None:
+        showing = screen_digest.get("scene") or active_scene_id
+        screen_scene = next(
+            (s for s in [*(frame.scenes or []), *([preview_scene] if preview_scene else [])]
+             if isinstance(s, dict) and s.get("id") == showing),
+            None,
+        )
+    screen_tools = (
+        VoiceScreenTools(screen=screen_digest, scene=screen_scene, now=now) if screen_digest is not None else None
+    )
     tools = VoiceTools(
         frame=frame,
         active_scene_id=active_scene_id,
@@ -343,18 +386,57 @@ async def api_embedded_device_voice(
         install_album=install_album,
         build_scene=build_scene,
         preview_scene=preview_scene,
+        screen_tools=screen_tools,
     )
+    jev_key = typesafe_api_key(settings)
+
+    async def decide(transcript: str) -> VoiceTurnResult | None:
+        # The fast path: Jev picks from the screen, the frame acts. Only on
+        # the owner's "use installed scenes" (what it does is a use of the
+        # scene showing), only with a TypeSafe key, only with a screen.
+        if screen_tools is not None:
+            screen_tools.transcript = transcript
+        if screen_digest is None or not jev_key or not permissions.use_scenes:
+            return None
+        decided = await decide_voice_action(
+            transcript=transcript,
+            screen=screen_digest,
+            scene=screen_scene,
+            scenes=voice_scenes(frame.scenes),
+            ask=lambda request: ask_jev(request, api_key=jev_key),
+            now=now,
+        )
+        if decided.error:
+            await new_log(db, redis, int(frame.id), "stderr", f"Voice action: Jev failed: {decided.error}")
+        if decided.plan is None:
+            return None
+        plan = decided.plan
+        return VoiceTurnResult(
+            transcript=transcript,
+            reply=plan.reply,
+            tools=list(plan.tools),
+            # What it did goes in the args: the log line keeps them whole, and the
+            # next turn reads it ("undo that").
+            actions=[VoiceAction(name=VOICE_ACTION_TOOL, args={"did": plan.log, "ms": round(decided.seconds * 1000)},
+                                 result={"ok": True})],
+            events=plan.events,
+        )
+
+    context_block = voice_frame_context(
+        frame, active_scene_id, frame_context_block(frame), image_sources, permissions, preview=preview_info, now=now
+    )
+    if screen_digest is not None:
+        context_block += "\n" + screen_context_block(screen_digest, screen_scene)
     outcome = await transcribe_and_answer(
         pcm=pcm,
         api_key=api_key.strip(),
         model=model,
         reasoning_effort=reasoning_effort,
         scene_names=scene_names,
-        context_block=voice_frame_context(
-            frame, active_scene_id, frame_context_block(frame), image_sources, permissions, preview=preview_info, now=now
-        ),
+        context_block=context_block,
         history=history,
         tools=tools,
+        decide=decide,
     )
     if not isinstance(outcome, VoiceTurnResult):
         error, detail = outcome
@@ -388,7 +470,21 @@ async def api_embedded_device_voice(
         json.dumps({"event": "voice:turn", "transcript": outcome.transcript[:300], "reply": outcome.reply[:300],
                     "tools": outcome.tools, "seconds": round(time.monotonic() - started, 1)}),
     )
-    return {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
+    answer: dict[str, Any] = {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
+    if outcome.events:
+        # Done by the frame itself, in order, from the origin `voice`.
+        answer["events"] = outcome.events
+    return answer
+
+
+def typesafe_api_key(settings: dict[str, Any]) -> str | None:
+    """The TypeSafe key the voice action asks Jev with: Settings -> TypeSafe,
+    else the backend's TYPESAFE_API_KEY. None: no fast path, the chat does it all."""
+    import os
+
+    configured = (settings.get("typeSafe") or {}).get("apiKey") if isinstance(settings.get("typeSafe"), dict) else None
+    key = configured if isinstance(configured, str) and configured.strip() else os.environ.get("TYPESAFE_API_KEY")
+    return key.strip() if isinstance(key, str) and key.strip() else None
 
 
 # The session id pattern, exported for the test that pins the wire contract.

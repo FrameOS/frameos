@@ -14,6 +14,7 @@ type
     eoSystem = "system"
     eoEventMap = "eventMap"
     eoPanel = "panel"
+    eoVoice = "voice"
   EventClass* = enum
     ecLifecycle = "lifecycle"
     ecInput = "input"
@@ -130,9 +131,10 @@ const
   evRestart* = "restart"
   evReboot* = "reboot"
   evUploadScenes* = "uploadScenes"
+  evUiAction* = "uiAction"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[39, string] = [
+  ContractEventNames*: array[40, string] = [
     evInit,
     evRender,
     evOpen,
@@ -171,10 +173,11 @@ const
     evRestart,
     evReboot,
     evUploadScenes,
+    evUiAction,
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[39, EventPolicy] = [
+  ContractEventPolicies*: array[40, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -365,19 +368,19 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap, eoVoice},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setCurrentScene
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap, eoVoice},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # sceneSwitcher
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap, eoVoice},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -389,14 +392,14 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # back
       class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap, eoVoice},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       heardByAll: true,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # forward
       class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap, eoVoice},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       heardByAll: true,
@@ -433,6 +436,12 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
+    EventPolicy( # uiAction
+      class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
+      origins: {eoVoice, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # voiceChat
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoEventMap},
@@ -443,7 +452,7 @@ const
 
   CustomEventPolicy* = EventPolicy(
     class: ecCustom, device: edNone, listen: true, dispatch: true,
-    origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem},
+    origins: {eoDriver, eoPreview, eoScene, eoHttpWrite, eoHttpAdmin, eoSystem, eoVoice},
     renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
     aliasOfIndex: -1, heardByAll: true,
     linux: true, esp32: true, wasm: true)
@@ -493,7 +502,8 @@ proc contractEventIndex*(name: string): int =
   of evRestart: 35
   of evReboot: 36
   of evUploadScenes: 37
-  of evVoiceChat: 38
+  of evUiAction: 38
+  of evVoiceChat: 39
   else: -1
 
 proc eventAliasCount*(name: string): int =

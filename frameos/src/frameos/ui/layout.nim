@@ -2821,4 +2821,106 @@ proc indexAt*(holes: UiHoles, x, y: float32): int =
       return i
   -1
 
+
+# -------- What a person could do here, in words (docs/voice-chat.md "Voice actions")
+
+type
+  UiSpot* = object
+    ## An element of the last layout a person could press, type into or
+    ## scroll, with what it says: the voice key's screen digest
+    ## (ui/events.uiScreen) offers each to the control plane by its key.
+    key*: int
+    field*: uint8      ## UiRegion.field: 1 input, 2 textarea, 3 number, 4 select
+    tap*, scroll*: bool
+    text*: string      ## what it shows: its text, a field's value
+    label*: string     ## aria-label, title or alt; a field's placeholder
+    near*: string      ## the text of the smallest box around it that says more (a row)
+
+const
+  SpotText = 80   ## a spot's text and label are cut here ...
+  SpotNear = 160  ## ... and a box saying more than this is the page, not a row
+
+proc spaced(into: var string, text: string, cap: int) =
+  ## `text` added with its white space folded to single spaces, up to `cap`
+  ## bytes (one more says it was cut: `spotsOf` reads that as too long).
+  for c in text:
+    if into.len > cap:
+      return
+    if c in Whitespace:
+      if into.len > 0 and into[^1] != ' ':
+        into.add ' '
+    else:
+      into.add c
+
+proc cutAt(text: var string, cap: int) =
+  ## `text` at most `cap` bytes, cut where a rune starts, its end trimmed.
+  if text.len > cap:
+    var stop = cap
+    while stop > 0 and (ord(text[stop]) and 0xC0) == 0x80:
+      dec stop
+    text.setLen(stop)
+  while text.len > 0 and text[^1] == ' ':
+    text.setLen(text.len - 1)
+
+proc spotsOf(n: UiNode, spots: var seq[UiSpot], most: int): string =
+  ## The spots under `n`, in tree order, and the text it holds (cut past
+  ## SpotNear). A spot without a box around it that says more than it does
+  ## gets that box's text as `near`, the smallest such box first.
+  let first = spots.len
+  var own = false
+  if n.kind == ukText:
+    if n.handlers[ueClick] > 0 and spots.len < most:
+      spots.add UiSpot(key: n.key, tap: true)
+      own = true
+    for run in n.runs:
+      result.spaced(if run.tag == "br": " " else: run.text, SpotNear)
+  else:
+    let src = n.src
+    if (n.handlers[ueClick] > 0 or n.field > 0 or n.maxY > 0 and n.box.overflowY != ovVisible) and
+        spots.len < most and (n.handlers[ueClick] == 0 or n.handlers[ueClick] - 1 < KeyBase or
+        n.handlers[ueClick] - 1 == LinkOpen):
+      var spot = UiSpot(key: n.key, field: n.field, tap: n.handlers[ueClick] > 0,
+        scroll: n.maxY > 0 and n.box.overflowY != ovVisible)
+      if not src.isNil:
+        for name in ["aria-label", "title", "alt", "placeholder"]:
+          let said = src.attr(name)
+          if said.len > 0:
+            spot.label.spaced(said, SpotText)
+            break
+      spots.add spot
+      own = true
+    if n.field > 0 and n.field != 4:
+      # A password's text is never said.
+      if src.isNil or src.attr("type") != "password":
+        result.spaced(n.value, SpotNear)
+    elif n.kind == ukBox:
+      for c in n.children:
+        # Every child is walked for its spots; its text counts only while
+        # this box's still could be a row's.
+        let said = c.spotsOf(spots, most)
+        if said.len > 0 and result.len <= SpotNear:
+          if result.len > 0 and result[^1] != ' ':
+            result.add ' '
+          result.add said
+  if own:
+    spots[first].text = result
+    spots[first].text.cutAt(SpotText)
+    spots[first].label.cutAt(SpotText)
+  var row = result
+  row.cutAt(SpotNear + 1)
+  if row.len > 0 and row.len <= SpotNear:
+    for i in (if own: first + 1 else: first) ..< spots.len:
+      # An icon takes a row of what it is next to; what says something itself
+      # only a short one (a label beside it), never a list it is one line of.
+      if spots[i].near.len == 0 and row != spots[i].text and
+          (spots[i].text.len == 0 or row.len <= SpotText):
+        spots[i].near = row
+
+proc uiSpots*(memo: UiMemo, most = 64): seq[UiSpot] =
+  ## What a person could do in the UI the last layout drew, in tree order:
+  ## the elements that take a tap, the fields, the boxes with more to scroll
+  ## to. The keyboard and a select's list are not the UI's, and not here.
+  if not memo.isNil and not memo.root.isNil:
+    discard memo.root.spotsOf(result, most)
+
 {.pop.}
