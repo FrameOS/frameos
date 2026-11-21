@@ -1285,6 +1285,13 @@
         "template.json": "{\"scenes\": \"./scenes.json\"}"
       },
       "code": "missing_scenes"
+    },
+    {
+      "name": "a legacy scenes.json that is no list",
+      "files": {
+        "s/scenes.json": "{\"not\": \"a list\"}"
+      },
+      "code": "invalid_scenes"
     }
   ]
 }

@@ -226,11 +226,11 @@ proc scenesOfPackage*(pkg: ScenePackage): JsonNode =
   for scene in pkg.packagedScenes():
     if scene.legacy:
       let parsed = parseJson(scene.sceneJson)
-      if parsed.kind == JArray:
-        for item in parsed.elems: result.add item
-      elif parsed.kind == JObject:
-        result.add parsed
-      else:
+      if parsed.kind != JArray:
         refuse("invalid_scenes", "scenes.json is not a list of scenes")
+      for item in parsed.elems:
+        if item.kind != JObject:
+          refuse("invalid_scenes", "scenes.json is not a list of scenes")
+        result.add item
     else:
       result.add pkg.sceneOfPackage(scene)

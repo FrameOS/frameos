@@ -227,7 +227,7 @@ def set_from_package_files(files: dict[str, str], root: str | None = None) -> tu
             parsed_scenes = json.loads(text)
         except ValueError as error:
             raise ScenePackageError("invalid_scenes", f"{path} is not JSON: {error}") from error
-        scenes = parsed_scenes if isinstance(parsed_scenes, list) else [parsed_scenes] if isinstance(parsed_scenes, dict) else None
+        scenes = parsed_scenes if isinstance(parsed_scenes, list) else None
         if scenes is None or not all(isinstance(scene, dict) for scene in scenes):
             raise ScenePackageError("invalid_scenes", f"{path} is not a list of scenes")
         return scenes, manifest

@@ -292,7 +292,7 @@ export function setFromPackageFiles(files: PackageFiles, root: string = packageR
     } catch (error) {
       throw new ScenePackageError('invalid_scenes', `${path} is not JSON: ${(error as Error).message}`)
     }
-    const scenes = Array.isArray(parsed) ? parsed : isObject(parsed) ? [parsed] : null
+    const scenes = Array.isArray(parsed) ? parsed : null
     if (!scenes || !scenes.every(isObject)) {
       throw new ScenePackageError('invalid_scenes', `${path} is not a list of scenes`)
     }
