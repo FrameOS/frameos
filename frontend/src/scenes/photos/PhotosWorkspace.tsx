@@ -45,7 +45,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { FrameId, FrameType } from '../../types'
-import { inHassioIngress } from '../../utils/inHassioIngress'
+import { publicBackendOrigin } from '../../utils/backendAddress'
 import { isCloudMode } from '../../utils/cloudMode'
 import { formatFrameRelativeTime, frameIsActive } from '../../decorators/frame'
 import { photosLogic, type PhotoShowTarget, type PhotoUpload } from './photosLogic'
@@ -1976,15 +1976,15 @@ function ShareDialog(): JSX.Element | null {
       ? 'Anyone with the link'
       : frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`
   // The backend answers a path: a frame's own link gets that frame's address
-  // for the backend, the others the page's origin. Behind Home Assistant the
-  // page's origin is not that address.
+  // for the backend, the others the backend's public origin (behind Home
+  // Assistant's ingress, the add-on's frames port, not the page's origin).
   const linkFor = (share: PhotoShare): string => {
     if (/^https?:\/\//.test(share.url)) {
       return share.url
     }
     const frame = share.frame_id === null ? null : frames[share.frame_id]
     const fromFrame = frame ? shareUrlForFrame(share, frame) : null
-    return fromFrame ?? (inHassioIngress() ? share.url : `${window.location.origin}${share.url}`)
+    return fromFrame ?? `${publicBackendOrigin()}${share.url}`
   }
   const lastUsed = (share: PhotoShare): string => {
     const ago = share.last_used_at ? formatFrameRelativeTime(share.last_used_at * 1000) : null

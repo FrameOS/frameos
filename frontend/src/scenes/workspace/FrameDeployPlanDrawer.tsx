@@ -73,6 +73,7 @@ import type {
 } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
+import { publicBackendOrigin } from '../../utils/backendAddress'
 import { secureToken } from '../../utils/secureToken'
 import { Button } from '../../components/Button'
 import { getDefaultSshKeyIds, normalizeSshKeys } from '../../utils/sshKeys'
@@ -2476,7 +2477,9 @@ function EmbeddedFirmwareSection({
   // Virtual frames have no hardware at all: the backend renders them, so
   // instead of firmware the section shows the image and kiosk page URLs.
   const isVirtualPlatform = platformLabel === EMBEDDED_VIRTUAL
-  const virtualUrlOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  // Behind Home Assistant's ingress the page's origin is not where a kiosk
+  // reaches the backend: the add-on's frames port is.
+  const virtualUrlOrigin = publicBackendOrigin()
   // View-only credential, never the device API key: leaking a kiosk URL
   // grants nothing but the picture.
   const virtualUrlToken = frame.device_config?.viewToken || '<view-token>'

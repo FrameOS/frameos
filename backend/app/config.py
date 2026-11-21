@@ -98,6 +98,27 @@ def resolve_secret_key(path: str | None = None) -> tuple[str, str]:
         )
     return generated, 'generated'
 
+# The container port of the add-on's public uvicorn (docker-entrypoint.sh),
+# the one frames, kiosks and share links reach.
+ADDON_PUBLIC_CONTAINER_PORT = "8989/tcp"
+
+
+def addon_public_port(info: dict) -> int | None:
+    """The HOST port Home Assistant maps the add-on's frames port to
+    (`/addons/self/info` → `data.network["8989/tcp"]`), which the owner can
+    change in the add-on's Network settings. None when it is not mapped (or
+    the Supervisor did not say)."""
+    network = (info.get("data") or {}).get("network") or {}
+    value = network.get(ADDON_PUBLIC_CONTAINER_PORT) if isinstance(network, dict) else None
+    if not isinstance(value, (int, str)):
+        return None
+    try:
+        port = int(value)
+    except ValueError:
+        return None
+    return port if 0 < port < 65536 else None
+
+
 def normalize_ingress_path(value: str | None) -> str:
     if not value:
         return ""
@@ -169,6 +190,9 @@ class Config:
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)
     ingress_path = ''
+    # The host port the add-on's frames port is published on (None = not
+    # known: the UI assumes 8989). Read from the Supervisor with ingress_path.
+    public_port: int | None = None
 
     def load_secret_key(self) -> tuple[str, str]:
         return resolve_secret_key()
@@ -186,7 +210,8 @@ class Config:
                 info = response.json()
                 ingress_url = info.get("data", {}).get("ingress_url")
                 self.ingress_path = normalize_ingress_path(ingress_url)
-                print(f"🟢 Fetched HA ingress URL: {self.ingress_path}")
+                self.public_port = addon_public_port(info)
+                print(f"🟢 Fetched HA ingress URL: {self.ingress_path} (frames port: {self.public_port})")
             except Exception as e:
                 print(f"🔴 Failed to get HA ingress URL: {e}")
 

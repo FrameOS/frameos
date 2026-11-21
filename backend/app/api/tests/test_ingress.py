@@ -5,7 +5,7 @@ from starlette.testclient import TestClient
 from unittest.mock import patch
 
 from app.conftest import MockResponse
-from app.config import normalize_ingress_path
+from app.config import addon_public_port, normalize_ingress_path
 from app.utils.request_ip import HASSIO_INGRESS_PROXY
 
 HASSIO_ENV_KEYS = ("HASSIO_RUN_MODE", "HASSIO_TOKEN", "SUPERVISOR_TOKEN")
@@ -151,11 +151,15 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
         assert url == "http://supervisor/addons/self/info"
         assert headers["Authorization"] == "Bearer token"
         assert headers["Content-Type"] == "application/json"
-        return MockResponse(200, content='{"data": {"ingress_url": "/hostname/ingress/"}}')
+        return MockResponse(
+            200,
+            content='{"data": {"ingress_url": "/hostname/ingress/", "network": {"8989/tcp": 18989, "8990/tcp": null}}}',
+        )
 
     with patch("app.config.requests.get", side_effect=mock_requests_get):
         app, conf = _reload_app_and_config()
 
+    assert conf.public_port == 18989
     assert conf.HASSIO_TOKEN == "token"
     assert conf.HASSIO_RUN_MODE == "ingress"
     assert conf.ingress_path == custom_ingress, f"Expected conf.ingress_path={custom_ingress}, got '{conf.ingress_path}'"
@@ -202,6 +206,20 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     assert '"ingress_path": "/api/hassio_ingress/runtime"' in resp_root_with_header.text
     # Plain HTTP on the frames' port: the UI is not told a scheme.
     assert "public_scheme" not in resp_root.text
+    # The host port the frames' port is published on: the virtual frame's
+    # kiosk links and share links go there (frameos-home-assistant-addon#5).
+    assert '"public_port": 18989' in resp_root.text
+
+
+def test_addon_public_port():
+    assert addon_public_port({"data": {"network": {"8989/tcp": 8989, "8990/tcp": None}}}) == 8989
+    assert addon_public_port({"data": {"network": {"8989/tcp": "9000"}}}) == 9000
+    # Not published (the owner cleared it), or the Supervisor did not say.
+    assert addon_public_port({"data": {"network": {"8989/tcp": None}}}) is None
+    assert addon_public_port({"data": {"network": None}}) is None
+    assert addon_public_port({"data": {}}) is None
+    assert addon_public_port({}) is None
+    assert addon_public_port({"data": {"network": {"8989/tcp": 0}}}) is None
 
 
 @pytest.mark.asyncio

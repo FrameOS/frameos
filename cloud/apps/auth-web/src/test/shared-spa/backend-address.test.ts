@@ -13,6 +13,7 @@ import type { FrameOSSettings } from "../../../../../../frontend/src/types";
 import {
   defaultNewFrameServerHost,
   detectedBackendAddressParts,
+  publicBackendOrigin,
   splitServerAddress,
 } from "../../../../../../frontend/src/utils/backendAddress";
 
@@ -48,6 +49,7 @@ function browserAt(href: string, appConfig?: Record<string, unknown>): void {
   vi.spyOn(window, "location", "get").mockReturnValue({
     ...window.location,
     href,
+    origin: url.origin,
     protocol: url.protocol,
     hostname: url.hostname,
     port: url.port,
@@ -128,5 +130,36 @@ describe("defaultNewFrameServerHost", () => {
     expect(defaultNewFrameServerHost(settings({ backendHost: "http://ha.example.com" }))).toBe(
       "ha.example.com:8989",
     );
+  });
+});
+
+describe("publicBackendOrigin", () => {
+  it("is the page's origin off Home Assistant", () => {
+    browserAt("http://192.168.1.10:8989/frames");
+    expect(publicBackendOrigin()).toBe("http://192.168.1.10:8989");
+  });
+
+  it("behind the ingress, is the add-on's frames port on the Home Assistant host (addon issue #5)", () => {
+    // Before: http://homeassistant.local/api/frames/1/virtual/image, a 404.
+    browserAt("http://homeassistant.local/app/b7f2d31c_frameos", { HASSIO_RUN_MODE: "ingress" });
+    expect(publicBackendOrigin()).toBe("http://homeassistant.local:8989");
+
+    browserAt("https://homeassistant.local:8123/api/hassio_ingress/abc/", {
+      HASSIO_RUN_MODE: "ingress",
+      public_scheme: "https",
+    });
+    expect(publicBackendOrigin()).toBe("https://homeassistant.local:8989");
+  });
+
+  it("takes the host port the owner published the frames' port on", () => {
+    browserAt("http://homeassistant.local:8123/", { HASSIO_RUN_MODE: "ingress", public_port: 18989 });
+    expect(publicBackendOrigin()).toBe("http://homeassistant.local:18989");
+    expect(defaultNewFrameServerHost()).toBe("homeassistant.local:18989");
+    // A scheme's own port is left out of the origin.
+    browserAt("https://ha.example.com/", { HASSIO_RUN_MODE: "ingress", public_scheme: "https", public_port: 443 });
+    expect(publicBackendOrigin()).toBe("https://ha.example.com");
+    // Nonsense falls back to the add-on's default.
+    browserAt("http://homeassistant.local:8123/", { HASSIO_RUN_MODE: "ingress", public_port: "x" });
+    expect(publicBackendOrigin()).toBe("http://homeassistant.local:8989");
   });
 });

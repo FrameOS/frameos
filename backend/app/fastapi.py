@@ -131,13 +131,18 @@ if serve_html:
                 raise
 
         def frameos_app_config(request: Request | None = None) -> dict:
-            app_config = {}
+            app_config: dict[str, str | int] = {}
             if config.HASSIO_RUN_MODE:
                 app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
             if config.FRAMEOS_PUBLIC_SCHEME == "https":
                 # The frames' port serves TLS (the add-on's ssl option or
                 # FRAMEOS_SSL_CERTFILE): a new frame's server address is https://.
                 app_config["public_scheme"] = "https"
+            if config.HASSIO_RUN_MODE == "ingress" and config.public_port:
+                # The host port Home Assistant publishes the frames' port on
+                # (8989 unless the owner changed it): the UI's links for
+                # frames, kiosks and shares go there, never to the ingress.
+                app_config["public_port"] = config.public_port
             header_ingress_path = (
                 normalize_ingress_path(request.headers.get("x-ingress-path"))
                 if request is not None and config.HASSIO_RUN_MODE == "ingress"
