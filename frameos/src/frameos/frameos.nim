@@ -15,6 +15,7 @@ import frameos/scheduler
 import frameos/scenes
 import frameos/spool
 import frameos/timezone_updater
+import frameos/auto_updater
 import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
@@ -273,6 +274,8 @@ proc newFrameOS*(): FrameOS =
   result.server = newServer(result)
   startScheduler(result)
   startTimezoneUpdater(result)
+  when not defined(testing):
+    startAutoUpdater()
 
 proc start*(self: FrameOS) {.async.} =
   # `version` is what a backend that cannot deploy FrameOS to this frame

@@ -341,6 +341,7 @@ class ReleaseImageFrame:
     scaling_mode: str = "contain"
     render_scale: float = 0.0
     frame_settings_on_screen: bool = True
+    auto_update: bool = True
     rotate: int = 0
     flip: str | None = None
     debug: bool = False

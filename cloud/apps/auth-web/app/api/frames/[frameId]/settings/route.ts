@@ -11,6 +11,7 @@ import {
   enqueueServiceSettingsRefreshIfScoped,
   frameForAccount,
   frameHardwareIsEsp32,
+  frameSettingsForDevice,
   frameSettingsRefusal,
   mergeFrameSettings,
   redeployAssignedScenesToFrame,
@@ -87,8 +88,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // and a device refuses the WHOLE push on the first key it cannot take, so
   // refuse here, up front, with a code the SPA turns into "update the frame
   // first" — nothing is ever half-applied.
+  // A plane-kept key (auto_update, docs/auto-updates.md) is never refused:
+  // the mirror keeps it for any firmware, the device is sent it only when its
+  // firmware takes it.
   const isEsp32 = frameHardwareIsEsp32(frame)
-  const refusal = frameSettingsRefusal(frame, settings)
+  const deviceSettings = frameSettingsForDevice(frame, settings)
+  const refusal = Object.keys(deviceSettings).length > 0 ? frameSettingsRefusal(frame, deviceSettings) : null
   if (refusal) {
     return jsonError(
       refusal.error,
@@ -156,12 +161,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // sync with what the cloud now shows. For ESP32 a name-only payload skips
   // the command: the display name is provider data, and older firmware
   // without the set_settings verb would refuse the push for nothing.
-  const needsDevicePush = !isEsp32 || Object.keys(settings).some((key) => key !== 'name')
+  const needsDevicePush =
+    Object.keys(deviceSettings).length > 0 && (!isEsp32 || Object.keys(deviceSettings).some((key) => key !== 'name'))
   let command: Awaited<ReturnType<typeof enqueueFrameSettingsPush>> | undefined
   if (needsDevicePush) {
     // Builds the device payload (an ESP32 gets its tzdata slice next to the
     // zone name) and supersedes any undelivered set_settings first.
-    command = await enqueueFrameSettingsPush(db, frame, settings, { createdByAccountId: session.accountId })
+    command = await enqueueFrameSettingsPush(db, frame, deviceSettings, { createdByAccountId: session.accountId })
   }
 
   // A board that starts or stops rendering on the server

@@ -170,6 +170,15 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   let board = detectBoard()
   if board.len > 0:
     result["board"] = %board
+  # The release slug this frame upgrades to (`detectUpgradeTarget`), so the
+  # provider's automatic-update sweep can apply a block on one target
+  # (docs/auto-updates.md). Omitted where there is none (a dev box).
+  try:
+    let target = detectUpgradeTarget()
+    if target.len > 0:
+      result["upgradeTarget"] = %target
+  except CatchableError:
+    discard
   # The GPIO button map the runtime binds (frame.json gpio_buttons), so a
   # provider can show what the frame runs with before it ever pushed one.
   # Pin and label only: the role is what a provider sets, not reads back.

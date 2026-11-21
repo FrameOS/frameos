@@ -7,6 +7,7 @@ import locks
 import frameos/channels
 import frameos/local_access
 import frameos/upgrade
+from frameos/privileged import validReleaseVersion
 import frameos/cloud/link_state
 from frameos/cloud/hub_client import refreshLocalNetworkPolicy
 import ../auth
@@ -192,10 +193,17 @@ proc addAdminApiRoutes*(router: var Router) =
         return
 
       try:
+        # `version` pins the release (a backend's automatic update asks for
+        # exactly the version its update decision answered,
+        # docs/auto-updates.md); absent = the latest stable release.
+        let version = if payload.kind == JObject: payload{"version"}.getStr("").strip() else: ""
+        if version.len > 0 and not validReleaseVersion(version):
+          jsonResponse(request, Http400, %*{"detail": "version must be a release version (YYYY.M.N)"})
+          return
         if payload{"dry_run"}.getBool(false):
-          jsonResponse(request, Http200, performFrameOSUpgrade(FrameOSUpgradeOptions(dryRun: true)))
+          jsonResponse(request, Http200, performFrameOSUpgrade(FrameOSUpgradeOptions(dryRun: true, version: version)))
         else:
-          jsonResponse(request, Http202, scheduleFrameOSUpgrade())
+          jsonResponse(request, Http202, scheduleFrameOSUpgrade(version))
       except ValueError as error:
         jsonResponse(request, Http400, %*{"detail": error.msg})
       except CatchableError as error:

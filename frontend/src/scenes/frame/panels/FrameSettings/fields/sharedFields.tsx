@@ -735,6 +735,27 @@ export function FrameSettingsOnScreenField(): JSX.Element | null {
   )
 }
 
+/**
+ * `auto_update` (frame.json `autoUpdate`, docs/auto-updates.md): whether the
+ * frame installs FrameOS updates by itself. Unset is on. Never disabled for
+ * older firmware: whoever manages the frame honours it.
+ */
+export function AutoUpdateField(): JSX.Element | null {
+  const { showAutoUpdate } = useFrameSettings()
+  if (!showAutoUpdate) {
+    return null
+  }
+  return (
+    <Field
+      name="auto_update"
+      label="Update automatically"
+      tooltip="Updates FrameOS by itself when a new release comes out: at night in the frame's time zone, never while a deploy or another update runs. Releases reach frames in stages: some frames get a release the day it comes out, the rest over the following days, and a release with a known problem is held back. Off, the frame stays on its version until you update it."
+    >
+      {({ value, onChange }) => <Switch value={value !== false} onChange={onChange} />}
+    </Field>
+  )
+}
+
 export function MetricsIntervalField(): JSX.Element {
   return (
     <Field name="metrics_interval" label="Metrics reporting interval in seconds, 0 to disable">

@@ -53,6 +53,7 @@ static void load_defaults(void)
     s_config.image_fusion = true;
     s_config.allow_local_network = FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK;
     s_config.frame_settings_on_screen = true;
+    s_config.auto_update = true;
     s_config.settings_unlock = false;
     s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
@@ -233,6 +234,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
     if (nvs_get_u8(nvs, "fs_on_screen", &u8) == ESP_OK) s_config.frame_settings_on_screen = u8 != 0;
+    if (nvs_get_u8(nvs, "auto_update", &u8) == ESP_OK) s_config.auto_update = u8 != 0;
     if (nvs_get_u8(nvs, "settings_unlock", &u8) == ESP_OK) s_config.settings_unlock = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
@@ -416,6 +418,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
     FOS_NVS_SET(nvs_set_u8(nvs, "fs_on_screen", s_config.frame_settings_on_screen ? 1 : 0), "fs_on_screen");
+    FOS_NVS_SET(nvs_set_u8(nvs, "auto_update", s_config.auto_update ? 1 : 0), "auto_update");
     FOS_NVS_SET(nvs_set_u8(nvs, "settings_unlock", s_config.settings_unlock ? 1 : 0), "settings_unlock");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");

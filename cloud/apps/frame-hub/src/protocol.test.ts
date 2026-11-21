@@ -175,6 +175,19 @@ describe("commandMessage", () => {
       commandMessage({ id: "cmd-2", payload: null, type: "notify_update_available" }),
     ).toEqual({ id: "cmd-2", type: "notify_update_available" });
   });
+
+  it("carries the automatic sweep's version beside id and type", () => {
+    // docs/auto-updates.md: the hub's sweep names the release the update
+    // decision chose; a runtime from 2026.11.14 installs exactly that one,
+    // older ones and the ESP32 (which asks its manifest route) ignore it.
+    expect(
+      commandMessage({
+        id: "cmd-3",
+        payload: { auto: true, version: "2026.11.14" },
+        type: "notify_update_available",
+      }),
+    ).toEqual({ auto: true, id: "cmd-3", type: "notify_update_available", version: "2026.11.14" });
+  });
 });
 
 describe("parseJsonMessage", () => {

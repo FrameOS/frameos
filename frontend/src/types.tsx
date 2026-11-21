@@ -441,6 +441,10 @@ export interface FrameType {
   /** The frame page behind the gear of the settings on the frame's own screen
    * (docs/scene-settings.md "The frame page"); unset = on. */
   frame_settings_on_screen?: boolean
+  /** Whether the frame installs FrameOS updates by itself, in stages, from the
+   * update manifest (docs/auto-updates.md); unset = on. A backend column, the
+   * cloud's settings mirror, frame.json `autoUpdate`, the ESP32's NVS. */
+  auto_update?: boolean
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean

@@ -95,7 +95,7 @@ from app.utils.server_render import (
     delta_base,
     take_prerender,
 )
-from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
+from app.api.firmware_release import OTA_ASSETS, latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
     EMBEDDED_IMAGE_FORMAT_BIN,
     FOS_PIXEL_1BPP,
@@ -1828,6 +1828,11 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # (docs/scene-settings.md "The frame page"); the console's
         # `settings_unlock` wins over false. Older firmware ignores the key.
         "frameSettingsOnScreen": frame.frame_settings_on_screen is not False,
+        # Installs updates by itself (docs/auto-updates.md). This backend
+        # decides for the board (the hourly sweep, the OTA manifest route);
+        # the board's copy is what it goes by if it ever leaves. Older
+        # firmware ignores the key.
+        "autoUpdate": frame.auto_update is not False,
         # frame.json's `colors` block (docs/asset-color-profiles.md): kept as
         # compact JSON on the device and applied live, no restart. Older
         # firmware ignores the key.
@@ -1944,15 +1949,70 @@ def _embedded_ota_platform(frame: Frame, platform: str | None) -> str:
     return str(release["asset"])
 
 
+def _ota_up_to_date(platform: str, current: str, reason: str, decision: dict | None = None) -> Response:
+    """Nothing to install: the board's own version in the manifest shape
+    the firmware reads (embedded/esp32/main/fos_ota.c ota_fetch_manifest
+    checks the fields' types, then logs `up-to-date` on the same release),
+    with the decision beside it for a person reading the answer."""
+    body: dict = {
+        "platform": platform,
+        "version": current,
+        "size": 1,
+        "minisig": "",
+        "downloadUrl": "",
+        "sha256": hashlib.sha256(f"{current}:{platform}".encode("utf-8")).hexdigest(),
+        "update": False,
+        "reason": reason,
+    }
+    if decision is not None:
+        body["latest"] = decision.get("latest")
+        body["held"] = decision.get("held")
+    return Response(
+        content=json.dumps(body, separators=(",", ":")),
+        media_type="application/json",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+def _ota_version_param(version: str | None) -> str | None:
+    if version is None or not version.strip():
+        return None
+    cleaned = version.strip().lstrip("v").split("+", 1)[0]
+    if not re.fullmatch(r"\d{1,9}\.\d{1,9}\.\d{1,9}", cleaned):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid_version")
+    return cleaned
+
+
+def _ota_nothing(platform: str, current: str | None, reason: str, decision: dict | None = None) -> Response:
+    """Nothing to install. A board whose version this backend never heard
+    cannot be told "you are on it", so it gets the 404 the firmware already
+    reads as "nothing published" (not a failure)."""
+    if current:
+        return _ota_up_to_date(platform, current, reason, decision)
+    raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
+
+
 @api_public.get("/frames/{id:int}/embedded/ota/manifest")
 async def api_embedded_device_ota_manifest(
     id: int,
     platform: str | None = Query(None),
+    version: str | None = Query(None),
     db: Session = Depends(get_db),
+    redis=Depends(get_redis),
     authorization: str = Header(None),
 ):
-    """The latest release's OTA manifest, relayed (docs/cloud-frames.md
-    "Signed OTA"): ``{platform, version, size, minisig, downloadUrl}``.
+    """The release this board may install, as the OTA manifest it reads
+    (docs/cloud-frames.md "Signed OTA"): ``{platform, version, size,
+    minisig, downloadUrl}``, the release relayed.
+
+    Which release is the update decision's (docs/auto-updates.md,
+    app/utils/update_decision.py): `current` is the board's `version`
+    parameter, else the version it last reported; the check is manual when
+    the owner pressed Update in the last half hour (the rollout is skipped),
+    automatic otherwise (the board's own daily check, the sweep's nudge),
+    and an automatic check of a board whose owner turned automatic updates
+    off is answered with its own version. With no manifest to read, a manual
+    check gets the latest release as before and an automatic one nothing.
 
     Also carries a ``sha256`` identifier for firmware from before the signed
     release OTA (per-frame backend builds): that updater compares it against
@@ -1960,14 +2020,47 @@ async def api_embedded_device_ota_manifest(
     a stable per-release token is what moves those boards onto the release
     image — after which they verify like every other board.
     """
+    from app.utils.frame_updates import decide_for_frame, manual_ota_requested
+    from app.utils.update_manifest import get_update_manifest
+
     frame = _embedded_frame_from_bearer(db, id, authorization)
     platform = _embedded_ota_platform(frame, platform)
-    manifest = await latest_release_ota_manifest(
-        platform, f"/api/frames/{frame.id}/embedded/ota/download?platform={platform}"
-    )
-    legacy_id = hashlib.sha256(f"{manifest['version']}:{platform}".encode("utf-8")).hexdigest()
+    if platform not in OTA_ASSETS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid_platform")
+    current = _ota_version_param(version) or frame_runtime_version(frame)
+    manual = await manual_ota_requested(redis, int(frame.id))
+
+    install: str | None = None
+    decision: dict | None = None
+    if not manual and frame.auto_update is False:
+        return _ota_nothing(platform, current, "disabled")
+    manifest = await get_update_manifest()
+    if manifest is None:
+        if not manual:
+            return _ota_nothing(platform, current, "no_manifest")
+    else:
+        decision = decide_for_frame(
+            frame, manifest, platform="esp32", target=platform, current=current, manual=manual
+        )
+        if decision.get("version"):
+            install = str(decision["version"])
+        elif not (manual and decision.get("reason") == "unknown_version"):
+            # An owner's Update on a board whose version this backend never
+            # heard falls through to the latest, as before; anything else
+            # the rule said no to is "nothing to install".
+            return _ota_nothing(platform, current, str(decision.get("reason")), decision)
+
+    download_url = f"/api/frames/{frame.id}/embedded/ota/download?platform={platform}"
+    if install:
+        download_url += f"&version={install}"
+    manifest_body = await latest_release_ota_manifest(platform, download_url, version=install)
+    legacy_id = hashlib.sha256(f"{manifest_body['version']}:{platform}".encode("utf-8")).hexdigest()
+    body = {**manifest_body, "sha256": legacy_id}
+    if decision is not None:
+        body.update({"update": True, "reason": decision.get("reason"), "latest": decision.get("latest"),
+                     "held": decision.get("held")})
     return Response(
-        content=json.dumps({**manifest, "sha256": legacy_id}, separators=(",", ":")),
+        content=json.dumps(body, separators=(",", ":")),
         media_type="application/json",
         headers={"Cache-Control": "private, max-age=300"},
     )
@@ -1978,10 +2071,13 @@ async def api_embedded_device_ota_manifest(
 async def api_embedded_device_ota_download(
     id: int,
     platform: str | None = Query(None),
+    version: str | None = Query(None),
     db: Session = Depends(get_db),
     authorization: str = Header(None),
     range: str | None = Header(None),
 ):
+    """The release app image the manifest named: ``version`` when it named
+    one, else the latest (what older manifests pointed at)."""
     frame = _embedded_frame_from_bearer(db, id, authorization)
     platform = _embedded_ota_platform(frame, platform)
-    return await stream_latest_release_ota_image(platform, range_header=range)
+    return await stream_latest_release_ota_image(platform, range_header=range, version=_ota_version_param(version))

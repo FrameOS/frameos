@@ -569,6 +569,29 @@
   `enqueueFrameCommand` starts it for `set_scenes`, `notify_update_available`,
   `reboot` and `restart_runtime`; the hub moves it.
 
+## Automatic updates: `docs/auto-updates.md`
+
+- Every frame updates itself by default, in stages. What a frame may install
+  is ONE rule over ONE manifest: `docs/update-manifest.json` (read from
+  `main` on raw.githubusercontent.com by everyone, mirrored by the cloud at
+  `/api/updates/manifest`), decided by `backend/app/utils/update_decision.py`
+  and its ports `cloud/apps/auth-web/src/lib/update-decision.ts` and
+  `frameos/src/frameos/update_decision.nim`, pinned by
+  `docs/update-decision-fixtures.json`. Change the three and the corpus
+  together; an ESP32 never runs the rule, it asks (its plane, or the cloud's
+  public `/api/updates/firmware` when it has none).
+- Blocking a release, pausing a rollout, a stepping stone: an edit of the
+  manifest on `main` (`tools/update_manifest.py block|pause`). The release
+  workflow appends each release after its assets exist; never offer a version
+  by any other list.
+- The switch is `auto_update` (backend column, cloud settings mirror stored
+  for every firmware, frame.json `autoUpdate`, ESP32 NVS `auto_update`),
+  default on. A plane decides for its frames from its own copy and nudges
+  them from an hourly sweep (02:00-05:00 frame time, once per 20 h, never
+  while `deploy_progress` is in flight) through the paths an owner's Update
+  button uses; a frame with no plane checks by itself. A new frame kind gets a
+  row in the doc's "Per frame type", not a second update path.
+
 ## AI scene chat: change the prompt/linter, then run the evals
 
 - The cloud AI (`cloud/apps/auth-web/src/lib/ai/`) builds and edits scenes on

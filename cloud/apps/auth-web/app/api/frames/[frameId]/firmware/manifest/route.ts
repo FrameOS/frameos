@@ -3,12 +3,16 @@ import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flo
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import {
   devFirmwareOverride,
-  fetchLatestRelease,
-  fetchReleaseAssetText,
-  findOtaAsset,
   otaPlatformMatchesHardware,
   streamablePlatforms,
 } from "../../../../../../src/lib/firmware-release";
+import {
+  firmwareOffer,
+  frameAutoUpdateEnabled,
+  frameUpdateCheckIsAutomatic,
+  nothingToInstallResponse,
+  releaseManifestResponse,
+} from "../../../../../../src/lib/firmware-offer";
 import {
   identityRateLimitResponse,
   rateLimitResponse,
@@ -21,8 +25,13 @@ export const runtime = "nodejs";
 // a browser session — after a notify_update_available nudge, on the device's
 // own schedule:
 //
-//   GET /api/frames/{id}/firmware/manifest?platform=esp32-s3-generic
-//   -> { platform, version, size, minisig, downloadUrl }
+//   GET /api/frames/{id}/firmware/manifest?platform=esp32-s3-generic[&version=<running>]
+//   -> { platform, version, size, minisig, downloadUrl, reason?, latest?, held? }
+//
+// The version offered is the update decision's (docs/auto-updates.md,
+// src/lib/firmware-offer.ts): the latest, a stepping stone, an older release
+// while the latest is blocked or still rolling out — or, when there is
+// nothing to install, the board's own version, which it logs as up-to-date.
 //
 // The image behind it is the release's bare APP binary (`…-app.bin`), not the
 // merged flash image the browser flasher writes — an OTA slot accepts nothing
@@ -108,44 +117,30 @@ export async function GET(
     );
   }
 
-  const release = await fetchLatestRelease();
-  if (!release) {
-    return jsonError("release_lookup_failed", 502);
+  // What to offer is the update decision's (docs/auto-updates.md): the
+  // hub's sweep nudged this frame (automatic: the rollout, the owner's
+  // switch) or somebody asked (manual: blocks and stepping stones only).
+  // The board's running version is the one it names, else what it reported.
+  const versionParam = request.nextUrl.searchParams.get("version")?.trim();
+  const current = (versionParam || auth.frame.frameosVersion || "").replace(/^v/, "");
+  const manual = !(await frameUpdateCheckIsAutomatic(db, auth.frame.id));
+  const offer = await firmwareOffer({
+    autoUpdateEnabled: frameAutoUpdateEnabled(auth.frame.settings),
+    current,
+    frameKey: `cloud:${auth.frame.id}`,
+    manual,
+    platform,
+  });
+  if (offer.kind === "error") {
+    return jsonError(offer.error, 502);
   }
-  // The bare app image, never the merged flash image: only the former is a
-  // valid OTA payload (src/lib/firmware-release.ts, otaAssets).
-  const asset = findOtaAsset(release, platform);
-  if (!asset) {
-    return jsonError("ota_image_not_published", 404, {
-      platform,
-      release: release.tag_name ?? null,
-    });
+  if (offer.kind === "none") {
+    return nothingToInstallResponse(platform, current, offer.reason, offer.decision);
   }
-
-  const signatureAsset = release.assets?.find(
-    (candidate) => candidate.name === `${asset.name}.minisig`,
-  );
-  if (!signatureAsset) {
-    return jsonError("unsigned_release", 409, {
-      platform,
-      release: release.tag_name ?? null,
-    });
-  }
-  const minisig = await fetchReleaseAssetText(signatureAsset);
-  if (!minisig) {
-    return jsonError("release_lookup_failed", 502);
-  }
-
-  return NextResponse.json(
-    {
-      platform,
-      // Release tags are v-prefixed ("v2026.8.1"); the device compares
-      // against esp_app_get_description()->version, which is not.
-      version: (release.tag_name ?? "").replace(/^v/, ""),
-      size: asset.size,
-      minisig,
-      downloadUrl: `/api/frames/${auth.frame.id}/firmware/download?platform=${platform}`,
-    },
-    { headers: { "cache-control": "no-store" } },
+  return releaseManifestResponse(
+    offer.release,
+    platform,
+    `/api/frames/${auth.frame.id}/firmware/download`,
+    offer.decision,
   );
 }

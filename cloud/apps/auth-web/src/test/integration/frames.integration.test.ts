@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
@@ -2565,6 +2565,40 @@ describe("frame management API", () => {
     expect(row?.payload).toEqual({ path: "photo.jpg" });
   });
 
+  it("keeps auto_update for any firmware and sends it only to firmware that takes it", async () => {
+    // docs/auto-updates.md: the plane honours the switch itself (the hub's
+    // sweep, the firmware manifest route), so an owner can turn automatic
+    // updates off before the first one reaches a frame too old for the key.
+    const { frame_id } = await enrolledFrame();
+    await confirmFrame(postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }), routeParams(frame_id));
+    await db.update(frames).set({ frameosVersion: "2026.11.13" }).where(eq(frames.id, frame_id));
+    const push = (settings: Record<string, unknown>) =>
+      pushFrameSettings(postJson(`/api/frames/${frame_id}/settings`, { settings }, { origin: baseUrl }), routeParams(frame_id));
+    const settingsPushes = () =>
+      db
+        .select({ payload: frameCommands.payload })
+        .from(frameCommands)
+        .where(and(eq(frameCommands.frameId, frame_id), eq(frameCommands.type, "set_settings")));
+
+    const old = await push({ auto_update: false });
+    expect(old.status).toBe(200);
+    expect(await old.json()).toEqual({ command_id: null, status: "applied" });
+    const [stored] = await db.select({ settings: frames.settings }).from(frames).where(eq(frames.id, frame_id));
+    expect(stored?.settings).toMatchObject({ auto_update: false });
+    expect(await settingsPushes()).toEqual([]);
+
+    // Beside a key the old firmware takes, that key alone goes.
+    const mixed = await push({ auto_update: false, scaling_mode: "cover" });
+    expect(mixed.status).toBe(200);
+    expect((await settingsPushes()).map((row) => row.payload)).toEqual([{ settings: { scaling_mode: "cover" } }]);
+
+    await db.update(frames).set({ frameosVersion: "2026.11.14" }).where(eq(frames.id, frame_id));
+    const current = await push({ auto_update: true });
+    expect(current.status).toBe(200);
+    expect(((await current.json()) as { status: string }).status).toBe("queued");
+    expect((await settingsPushes()).map((row) => row.payload)).toContainEqual({ settings: { auto_update: true } });
+  });
+
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {
     // Authoritative lists: CLOUD_SETTINGS_ALLOWLIST in
     // frameos/src/frameos/cloud/hub_client.nim (the base five plus the
@@ -2597,6 +2631,7 @@ describe("frame management API", () => {
         "colors",
         "render_scale",
         "frame_settings_on_screen",
+        "auto_update",
         "deep_sleep",
         "deep_sleep_on_battery",
         "wake_check_seconds",
@@ -2643,6 +2678,7 @@ describe("frame management API", () => {
         "colors",
         "render_scale",
         "frame_settings_on_screen",
+        "auto_update",
         "palette",
         "voice_chat",
         "mic_clk_pin",

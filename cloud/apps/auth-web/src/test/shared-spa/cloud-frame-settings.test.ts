@@ -82,6 +82,7 @@ import {
   esp32TouchBeepFrameSettingKeys,
   esp32TouchBeepFrameSettingsMinVersion,
   esp32CpuModeFrameSettingKeys,
+  esp32AutoUpdateFrameSettingKeys,
   esp32CpuModeFrameSettingsMinVersion,
   esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
@@ -187,7 +188,8 @@ describe("cloud settings push", () => {
         !esp32MicrophoneFrameSettingKeys.has(key) &&
         !esp32LedFrameSettingKeys.has(key) &&
         !esp32TouchBeepFrameSettingKeys.has(key) &&
-        !esp32CpuModeFrameSettingKeys.has(key),
+        !esp32CpuModeFrameSettingKeys.has(key) &&
+        !esp32AutoUpdateFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);

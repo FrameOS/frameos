@@ -119,7 +119,7 @@ async def test_restart_and_reboot_routes_start_their_own_kind(async_client, db, 
 async def test_the_esp32_ota_route_starts_a_firmware_bar_that_waits_for_a_sleeping_frame(async_client, db, redis):
     frame = db.get(Frame, (await create_embedded_frame(async_client))["id"])
     with patch(
-        "app.api.frames.request_embedded_firmware_update",
+        "app.tasks.embedded_firmware.request_embedded_firmware_update",
         new=AsyncMock(return_value={"applied": False, "status": "pending"}),
     ):
         response = await async_client.post(f"/api/frames/{frame.id}/embedded/firmware/ota")

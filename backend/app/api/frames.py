@@ -183,7 +183,6 @@ from app.tasks.embedded_firmware import (
     ensure_embedded_frame_defaults,
     is_thin_client_frame,
     is_virtual_frame,
-    request_embedded_firmware_update,
 )
 from app.tasks.buildroot_image import (
     buildroot_artifact_dir,
@@ -4301,24 +4300,16 @@ async def api_frame_embedded_firmware_ota(
     if (frame.mode or "rpios") != "embedded":
         _bad_request("OTA updates are only available for embedded frames")
 
-    from app.tasks.embedded_firmware import embedded_release_firmware_for_frame
-    from app.tasks.utils import advance_deploy_progress, begin_deploy_progress, record_task_failure
+    from app.utils.frame_updates import mark_manual_ota, start_embedded_firmware_update
 
-    release = embedded_release_firmware_for_frame(frame)
-    await begin_deploy_progress(
-        db, redis, frame, "firmware",
-        version=str(release.get("version")) if isinstance(release, dict) and release.get("version") else None,
-    )
+    # The owner asked: the board's next manifest check is a manual one (the
+    # rollout is skipped, blocks and stepping stones are not;
+    # docs/auto-updates.md).
+    await mark_manual_ota(redis, int(frame.id))
     try:
-        outcome = await request_embedded_firmware_update(db, redis, frame)
+        outcome = await start_embedded_firmware_update(db, redis, frame)
     except ValueError as exc:
-        await record_task_failure(db, redis, int(frame.id), exc, frame=frame)
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc))
-    # Taken now (the ack, or a pre-queue board's direct poke): the device is
-    # off to its updater. Queued: it takes the check on its next wake.
-    await advance_deploy_progress(
-        db, redis, frame, "downloading" if outcome["applied"] else "waiting", kind="firmware"
-    )
 
     return {
         "message": (
@@ -4407,21 +4398,16 @@ async def api_frame_device_upgrade(
     except Exception:  # noqa: BLE001 - an empty body is "start"
         body = {}
     dry_run = bool(isinstance(body, dict) and body.get("dry_run"))
-    payload = await _relay_device_admin(frame, redis, "/api/upgrade", method="POST", body={"dry_run": dry_run})
-    payload["shell_access"] = frame_has_shell_access(frame)
-    await _record_device_reported_frameos_version(db, redis, frame, payload)
-    if not dry_run and payload.get("status") not in ("up_to_date", "error", "failed"):
-        # The frame upgrades itself: its cloud:upgrade lines, bootup and
-        # first render move the record from here (models/log.py).
-        from app.tasks.utils import begin_deploy_progress
+    version = body.get("version") if isinstance(body, dict) else None
+    if version is not None and (not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version.strip())):
+        _bad_request("version must be a release version (YYYY.M.N)")
+    from app.utils.frame_updates import request_device_upgrade
 
-        latest = payload.get("latest_version")
-        await begin_deploy_progress(
-            db, redis, frame, "upgrade",
-            version=latest if isinstance(latest, str) and latest else None,
-            detail="the frame downloads the release itself",
-        )
-    return payload
+    # A runtime from 2026.11.14 on installs exactly `version`; an older one
+    # ignores it and takes GitHub's latest (docs/auto-updates.md).
+    return await request_device_upgrade(
+        db, redis, frame, version=version.strip() if isinstance(version, str) else None, dry_run=dry_run
+    )
 
 
 @api_project.get("/frames/{id:int}/commands")

@@ -261,6 +261,7 @@ static int cmd_status(int argc, char **argv)
     printf("frame_page:  %s (frame_settings_on_screen=%d settings_unlock=%d)\n",
            fos_config_frame_page_offered() ? "offered" : "off", config->frame_settings_on_screen ? 1 : 0,
            config->settings_unlock ? 1 : 0);
+    printf("auto_update: %d\n", config->auto_update ? 1 : 0);
     printf("time_zone:   %s\n", config->time_zone[0] ? config->time_zone : "(UTC)");
     printf("tz_data:     %s\n", !config->time_zone[0] ? "UTC0"
                                   : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
@@ -538,7 +539,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|render_scale|"
-               "frame_settings_on_screen|settings_unlock|time_zone|"
+               "frame_settings_on_screen|settings_unlock|auto_update|time_zone|"
                "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
@@ -981,6 +982,9 @@ static int cmd_set(int argc, char **argv)
      * it; the next push from one sets it again. */
     else if (strcmp(key, "frame_settings_on_screen") == 0)
         config->frame_settings_on_screen = atoi(value) != 0;
+    /* 0: no automatic updates (docs/auto-updates.md); `ota` still updates. */
+    else if (strcmp(key, "auto_update") == 0)
+        config->auto_update = atoi(value) != 0;
     /* 1: the frame page is offered whatever the control plane says, until
      * set back to 0 here. The way back in for a frame whose page was turned
      * off and whose Wi-Fi then broke (a Pi's is a file on its boot partition). */

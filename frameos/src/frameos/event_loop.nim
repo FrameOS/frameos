@@ -25,7 +25,7 @@
 ## other threads reach it through `channels.eventChannel`, which the runner
 ## empties into `enqueue`.
 
-import std/[deques, hashes, json, monotimes, options, sequtils, tables]
+import std/[atomics, deques, hashes, json, monotimes, options, sequtils, tables]
 import ./events
 import ./event_log
 import ./types
@@ -678,10 +678,26 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
       loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender)
       result = true
 
+var lastInputMonoTicks: Atomic[int64]
+  ## When someone last touched the frame (a pointer, a key, a button), in
+  ## MonoTime ticks; 0 = not since the start. Written on the loop's thread,
+  ## read from any (the auto-updater waits until nobody is at the frame,
+  ## docs/auto-updates.md): a plain value, never a ref.
+
+proc noteInputActivity*(now = getMonoTime()) =
+  lastInputMonoTicks.store(now.ticks)
+
+proc msSinceLastInput*(now = getMonoTime()): int64 =
+  ## Milliseconds since someone last touched the frame; -1 = not since start.
+  let last = lastInputMonoTicks.load()
+  if last == 0: -1'i64 else: max(0'i64, (now.ticks - last) div 1_000_000)
+
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   ## What a person did, through the input state: the position every pointer
   ## event carries, the key a code means, the gestures, the button's role and
   ## action. A `preprocessed` envelope (a tick's `longPress`) is already that.
+  if envelope.origin notin {eoSchedule, eoScene, eoSystem}:
+    noteInputActivity()
   var deliveries: seq[InputDelivery]
   if envelope.preprocessed:
     deliveries.add(InputDelivery(name: envelope.name, payload: envelope.payload, origin: envelope.origin))

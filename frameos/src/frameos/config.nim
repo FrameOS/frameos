@@ -323,6 +323,7 @@ proc newHook*(v: var FrameConfig) =
     saveAssets: %*false,
     gpioButtons: @[],
     frameSettingsOnScreen: true,
+    autoUpdate: true,
   )
   newHook(v.httpsProxy)
   newHook(v.inputSettings)

@@ -58,6 +58,7 @@ import {
   type FrameHubOptions,
 } from "../../hub";
 import { maxHardwareBytes, maxMetricsBytes, maxStateBytes } from "../../protocol";
+import { runAutoUpdateSweep } from "../../auto-update";
 
 const db = createDb();
 let hub: FrameHub;
@@ -4117,5 +4118,78 @@ describe("deploy progress", () => {
     rebooted.send({ active_scene: "clock", id: randomUUID(), type: "render" });
     await waitForStage(frame.id, "done", "done");
     rebooted.ws.close();
+  });
+});
+
+describe("automatic updates (docs/auto-updates.md)", () => {
+  // A zone where it is 03:00 right now: inside every frame's update window.
+  function zoneAtThreeAm(now: Date) {
+    let offset = (3 - now.getUTCHours() + 24) % 24;
+    if (offset > 12) {
+      offset -= 24;
+    }
+    // Etc/GMT's sign is POSIX's: Etc/GMT-2 is two hours AHEAD of UTC.
+    return offset === 0 ? "Etc/GMT" : offset > 0 ? `Etc/GMT-${offset}` : `Etc/GMT+${-offset}`;
+  }
+  const manifest = {
+    releases: [
+      { version: "2026.11.14", at: "2026-01-01T00:00:00Z", rollout: [{ afterHours: 0, percent: 100 }] },
+      { version: "2026.11.15", at: "2026-01-02T00:00:00Z", rollout: [{ afterHours: 0, percent: 100 }] },
+    ],
+  };
+
+  it("nudges a frame behind the latest once, with the version and auto, and starts its bar", async () => {
+    const now = new Date();
+    const { frame, privateKey, token } = await createFrameFixture();
+    const off = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ settings: { timezone: zoneAtThreeAm(now) } })
+      .where(eq(frames.id, frame.id));
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.11.14", settings: { auto_update: false, timezone: zoneAtThreeAm(now) } })
+      .where(eq(frames.id, off.frame.id));
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { frameos_version: "2026.11.14", hardware: { platform: "esp32-s3" } });
+
+    const first = await runAutoUpdateSweep(db, { manifest, now });
+    expect(first.nudged).toEqual([{ frameId: frame.id, reason: "latest", version: "2026.11.15" }]);
+    expect(first.skipped.disabled).toBe(1);
+
+    const notify = await device.next((msg) => msg.type === "notify_update_available", "notify");
+    expect(notify).toMatchObject({ auto: true, version: "2026.11.15" });
+    device.send({ id: notify.id, ok: true, type: "ack" });
+    const [row] = await db
+      .select({ deployProgress: frames.deployProgress })
+      .from(frames)
+      .where(eq(frames.id, frame.id));
+    expect(row?.deployProgress).toMatchObject({ kind: "firmware", version: "2026.11.15" });
+
+    // The next hour's sweep leaves it alone: one nudge per 20 hours.
+    const second = await runAutoUpdateSweep(db, { manifest, now: new Date(now.getTime() + 60_000) });
+    expect(second.nudged).toEqual([]);
+    const nudges = await db
+      .select({ id: frameCommands.id })
+      .from(frameCommands)
+      .where(and(eq(frameCommands.frameId, frame.id), eq(frameCommands.type, "notify_update_available")));
+    expect(nudges).toHaveLength(1);
+    device.ws.close();
+  });
+
+  it("an owner's own Update in the last 20 hours counts: no nudge on top of it", async () => {
+    const now = new Date();
+    const { frame } = await createFrameFixture();
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.11.14", settings: { timezone: zoneAtThreeAm(now) } })
+      .where(eq(frames.id, frame.id));
+    await enqueueFrameCommand(db, { frameId: frame.id, ttlMs: 60_000, type: "notify_update_available" });
+    // Its bar is finished, so only the queue's history holds it back.
+    await db.update(frames).set({ deployProgress: null }).where(eq(frames.id, frame.id));
+
+    const result = await runAutoUpdateSweep(db, { manifest, now });
+    expect(result.nudged).toEqual([]);
+    expect(result.skipped.recently_nudged).toBe(1);
   });
 });

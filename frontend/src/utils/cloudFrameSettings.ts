@@ -186,6 +186,26 @@ export function cloudFrameSupportsFrameSettingsOnScreen(frameosVersion: string |
   return cloudFrameSupportsSettingsFrom(frameSettingsOnScreenCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on keeps `auto_update` (frame.json `autoUpdate`, NVS `auto_update`). */
+export const autoUpdateCloudFrameSettingsMinVersion = '2026.11.14'
+
+/**
+ * `auto_update`: whether the frame installs FrameOS updates by itself
+ * (docs/auto-updates.md). Unlike every other key the PLANE honours it — the
+ * cloud's sweep reads its settings mirror before it nudges a frame — so the
+ * form sends it whatever the firmware (planeHonouredCloudFrameSettingKeys) and
+ * the cloud stores it always, pushing it to the device only from the floor.
+ */
+export const autoUpdateCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  autoUpdateCloudFrameSettingsMinVersion
+).filter((key) => key === 'auto_update')
+export const esp32AutoUpdateCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  autoUpdateCloudFrameSettingsMinVersion
+).filter((key) => key === 'auto_update')
+
+/** Keys the cloud stores and acts on for any firmware: sent with every settings save. */
+export const planeHonouredCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = ['auto_update']
+
 /**
  * The events a rule may `emit`: the contract's, those the `eventMap` origin
  * is allowed to say (docs/events-contract.json `origins`), the same list the
@@ -439,6 +459,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...esp32RenderScaleCloudFrameSettingKeys,
     ...frameSettingsOnScreenCloudFrameSettingKeys,
     ...esp32FrameSettingsOnScreenCloudFrameSettingKeys,
+    ...autoUpdateCloudFrameSettingKeys,
+    ...esp32AutoUpdateCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )

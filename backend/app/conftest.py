@@ -104,6 +104,22 @@ def fictional_hosts_resolve(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_update_manifest_from_the_network(monkeypatch):
+    """The update manifest (app/utils/update_manifest.py) is read from
+    GitHub and the cloud: never in a test. No source answers unless a test
+    patches `get_update_manifest` or `_fetch_manifest` itself."""
+    from app.utils import update_manifest
+
+    async def unreachable(url: str):
+        return None
+
+    update_manifest.clear_update_manifest_cache()
+    monkeypatch.setattr(update_manifest, "_fetch_manifest", unreachable)
+    yield
+    update_manifest.clear_update_manifest_cache()
+
+
+@pytest.fixture(autouse=True)
 def setup_and_teardown_db():
     if not config.TEST:
         raise ValueError("Tests should only be run with TEST=1 (or via bin/tests) as doing otherwise may wipe your database")

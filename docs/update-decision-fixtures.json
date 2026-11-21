@@ -1,0 +1,1589 @@
+{
+  "$comment": [
+    "The update decision's conformance corpus (docs/auto-updates.md). Runners:",
+    "backend/app/utils/tests/test_update_decision.py,",
+    "cloud/apps/auth-web/src/lib/update-decision.test.ts,",
+    "frameos/src/frameos/tests/test_update_decision.nim.",
+    "`decisions[].expect` pins version, reason, latest and held.{version, why};",
+    "held.detail is prose and not pinned. `rollout` uses `defaultRollout` below",
+    "for a release without stages of its own. A null `manifest` is no manifest."
+  ],
+  "defaultRollout": [
+    {
+      "afterHours": 0,
+      "percent": 10
+    },
+    {
+      "afterHours": 24,
+      "percent": 25
+    },
+    {
+      "afterHours": 48,
+      "percent": 50
+    },
+    {
+      "afterHours": 96,
+      "percent": 100
+    }
+  ],
+  "versions": [
+    {
+      "input": "2026.11.13",
+      "version": "2026.11.13"
+    },
+    {
+      "input": "v2026.11.13",
+      "version": "2026.11.13"
+    },
+    {
+      "input": "2026.11.13+7e4c16b11c0b",
+      "version": "2026.11.13"
+    },
+    {
+      "input": " 2026.11.13 ",
+      "version": "2026.11.13"
+    },
+    {
+      "input": "2026.11",
+      "version": null
+    },
+    {
+      "input": "2026.11.13.1",
+      "version": null
+    },
+    {
+      "input": "dev",
+      "version": null
+    },
+    {
+      "input": "unknown",
+      "version": null
+    },
+    {
+      "input": "",
+      "version": null
+    },
+    {
+      "input": "2026.x.1",
+      "version": null
+    },
+    {
+      "input": "2026.011.03",
+      "version": "2026.11.3"
+    }
+  ],
+  "buckets": [
+    {
+      "frameKey": "frame-a",
+      "version": "2026.12.3",
+      "bucket": 808
+    },
+    {
+      "frameKey": "frame-b",
+      "version": "2026.12.3",
+      "bucket": 8365
+    },
+    {
+      "frameKey": "frame-c",
+      "version": "2026.12.1",
+      "bucket": 665
+    },
+    {
+      "frameKey": "cloud:6f1c2a90-3c1e-4c55-9b55-0f5a1c2d3e4f",
+      "version": "2026.11.14",
+      "bucket": 1577
+    },
+    {
+      "frameKey": "",
+      "version": "2026.11.14",
+      "bucket": 2042
+    },
+    {
+      "frameKey": "backend:9f2c:12",
+      "version": "2027.1.1",
+      "bucket": 194
+    }
+  ],
+  "rollout": [
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z"
+      },
+      "now": "2026-12-19T23:59:59Z",
+      "percent": 0
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z"
+      },
+      "now": "2026-12-20T00:00:00Z",
+      "percent": 10
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z"
+      },
+      "now": "2026-12-21T00:00:00Z",
+      "percent": 25
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z"
+      },
+      "now": "2026-12-23T23:59:59Z",
+      "percent": 50
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z"
+      },
+      "now": "2026-12-24T00:00:00Z",
+      "percent": 100
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z",
+        "rollout": []
+      },
+      "now": "2026-12-20T00:00:00Z",
+      "percent": 100
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z",
+        "rollout": [
+          {
+            "afterHours": 0,
+            "percent": 2.5
+          },
+          {
+            "afterHours": 1.5,
+            "percent": 12.5
+          }
+        ]
+      },
+      "now": "2026-12-20T01:30:00Z",
+      "percent": 12.5
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00+01:00",
+        "rollout": [
+          {
+            "afterHours": 0,
+            "percent": 5
+          }
+        ]
+      },
+      "now": "2026-12-19T23:00:00Z",
+      "percent": 5
+    },
+    {
+      "release": {
+        "at": "2026-12-20T00:00:00Z",
+        "pausedAt": "2026-12-21T12:00:00Z"
+      },
+      "now": "2027-01-01T00:00:00Z",
+      "percent": 25
+    },
+    {
+      "release": {
+        "at": "not a time"
+      },
+      "now": "2027-01-01T00:00:00Z",
+      "percent": 0
+    }
+  ],
+  "manifests": {
+    "staged": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-10T00:00:00Z"
+        },
+        {
+          "version": "2026.12.3",
+          "at": "2026-12-20T00:00:00Z"
+        }
+      ]
+    },
+    "blocked": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "blocked": "bricks the 7.5in v2 panel"
+        },
+        {
+          "version": "2026.12.3",
+          "at": "2026-12-03T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "blockedTargets": {
+            "esp32/esp32-c3-*": "C3 boot loop"
+          }
+        }
+      ]
+    },
+    "stones": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.11.13",
+          "at": "2026-11-20T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "steppingStone": true
+        },
+        {
+          "version": "2026.12.3",
+          "at": "2026-12-03T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        }
+      ]
+    },
+    "minFrom": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.11.13",
+          "at": "2026-11-20T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "minFrom": "2026.12.1"
+        }
+      ]
+    },
+    "stoneInRollout": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-20T00:00:00Z",
+          "steppingStone": true
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-20T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        }
+      ]
+    },
+    "missingStone": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.11.13",
+          "at": "2026-11-20T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "minFrom": "2026.12.1"
+        }
+      ]
+    },
+    "channels": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "channels": [
+            "early"
+          ]
+        }
+      ]
+    },
+    "targets": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.2",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ],
+          "targets": [
+            "linux/*"
+          ]
+        }
+      ]
+    },
+    "paused": {
+      "paused": "investigating reports of a boot loop",
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        }
+      ]
+    },
+    "pausedAt": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.11.13",
+          "at": "2026-11-20T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-20T00:00:00Z",
+          "pausedAt": "2026-12-20T06:00:00Z"
+        }
+      ]
+    },
+    "messy": {
+      "defaultRollout": [
+        {
+          "afterHours": 0,
+          "percent": 10
+        },
+        {
+          "afterHours": 24,
+          "percent": 25
+        },
+        {
+          "afterHours": 48,
+          "percent": 50
+        },
+        {
+          "afterHours": 96,
+          "percent": 100
+        }
+      ],
+      "releases": [
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "dev",
+          "at": "2026-12-02T00:00:00Z",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.3",
+          "rollout": [
+            {
+              "afterHours": 0,
+              "percent": 100
+            }
+          ]
+        },
+        {
+          "version": "2026.12.1",
+          "at": "2026-12-01T00:00:00Z",
+          "blocked": "a duplicate is ignored"
+        },
+        "not a release"
+      ]
+    }
+  },
+  "decisions": [
+    {
+      "name": "in the first tenth: straight to the latest",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "not yet in the latest's cohort: the newest fully out release",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "on the newest it may have: held by the rollout",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "the early channel skips the rollout",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "early",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "an owner's request skips the rollout",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": true,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "an unknown channel is stable",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "nightly",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "up to date",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.3",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "a build suffix and a v are read past",
+      "manifest": "staged",
+      "request": {
+        "current": "v2026.12.3+7e4c16b",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "newer than anything listed (a dev build of the next release)",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.4",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "a dev build is never updated",
+      "manifest": "staged",
+      "request": {
+        "current": "dev",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "unknown_version",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "no version at all",
+      "manifest": "staged",
+      "request": {
+        "current": "",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "unknown_version",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "the cohort grows: a quarter after a day",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-f",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-21T01:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "the same frame before that day",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-f",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "a frame without a key waits for 100%",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "everyone after the last stage",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-24T00:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "a release whose time has not come",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-19T00:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "scheduled"
+        }
+      }
+    },
+    {
+      "name": "the early channel waits for the time too",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "early",
+        "manual": false,
+        "now": "2026-12-19T00:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "scheduled"
+        }
+      }
+    },
+    {
+      "name": "a ceiling (the backend's own version) hides what is above it",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z",
+        "maxVersion": "2026.12.2"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "latest",
+        "latest": "2026.12.2",
+        "held": null
+      }
+    },
+    {
+      "name": "a ceiling at the frame's own version",
+      "manifest": "staged",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z",
+        "maxVersion": "2026.12.2+abc"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.2",
+        "held": null
+      }
+    },
+    {
+      "name": "blocked for one target: the others go",
+      "manifest": "blocked",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "blocked for one target",
+      "manifest": "blocked",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "esp32",
+        "target": "esp32-c3-generic",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "blocked"
+        }
+      }
+    },
+    {
+      "name": "a blocked release is skipped, never installed",
+      "manifest": "blocked",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "esp32",
+        "target": "esp32-c3-generic",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.1",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "blocked"
+        }
+      }
+    },
+    {
+      "name": "another chip is not that target",
+      "manifest": "blocked",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "esp32",
+        "target": "esp32-s3-generic",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "an owner's request does not lift a block",
+      "manifest": "blocked",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "esp32",
+        "target": "esp32-c3-generic",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": true,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "blocked"
+        }
+      }
+    },
+    {
+      "name": "a stepping stone first",
+      "manifest": "stones",
+      "request": {
+        "current": "2026.11.10",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "stepping_stone",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "from just below the stone",
+      "manifest": "stones",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "stepping_stone",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "past the stone: the latest",
+      "manifest": "stones",
+      "request": {
+        "current": "2026.12.2",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.3",
+        "reason": "latest",
+        "latest": "2026.12.3",
+        "held": null
+      }
+    },
+    {
+      "name": "minFrom names the version to pass through",
+      "manifest": "minFrom",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.1",
+        "reason": "stepping_stone",
+        "latest": "2026.12.2",
+        "held": {
+          "version": "2026.12.2",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "minFrom met",
+      "manifest": "minFrom",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "latest",
+        "latest": "2026.12.2",
+        "held": null
+      }
+    },
+    {
+      "name": "a stone still rolling out, frame not in it: wait",
+      "manifest": "stoneInRollout",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.2",
+        "held": {
+          "version": "2026.12.2",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "a stone still rolling out, frame in it",
+      "manifest": "stoneInRollout",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-c",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.1",
+        "reason": "stepping_stone",
+        "latest": "2026.12.2",
+        "held": {
+          "version": "2026.12.2",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "a minFrom no release satisfies",
+      "manifest": "missingStone",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.2",
+        "held": {
+          "version": "2026.12.2",
+          "why": "needs"
+        }
+      }
+    },
+    {
+      "name": "a release for the early channel only: stable does not see it",
+      "manifest": "channels",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.1",
+        "held": null
+      }
+    },
+    {
+      "name": "a release for the early channel only: early takes it",
+      "manifest": "channels",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "early",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "latest",
+        "latest": "2026.12.2",
+        "held": null
+      }
+    },
+    {
+      "name": "a release for some targets: the others do not see it",
+      "manifest": "targets",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "esp32",
+        "target": "esp32-s3-generic",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.1",
+        "held": null
+      }
+    },
+    {
+      "name": "a release for some targets: those take it",
+      "manifest": "targets",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.2",
+        "reason": "latest",
+        "latest": "2026.12.2",
+        "held": null
+      }
+    },
+    {
+      "name": "paused: nothing moves",
+      "manifest": "paused",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "paused",
+        "latest": "2026.12.1",
+        "held": {
+          "version": "2026.12.1",
+          "why": "paused"
+        }
+      }
+    },
+    {
+      "name": "paused: not even for an owner",
+      "manifest": "paused",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": true,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "paused",
+        "latest": "2026.12.1",
+        "held": {
+          "version": "2026.12.1",
+          "why": "paused"
+        }
+      }
+    },
+    {
+      "name": "paused, but up to date",
+      "manifest": "paused",
+      "request": {
+        "current": "2026.12.1",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": "2026.12.1",
+        "held": null
+      }
+    },
+    {
+      "name": "a paused rollout stays where it was: out",
+      "manifest": "pausedAt",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-b",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-25T00:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "held",
+        "latest": "2026.12.1",
+        "held": {
+          "version": "2026.12.1",
+          "why": "rollout"
+        }
+      }
+    },
+    {
+      "name": "a paused rollout stays where it was: in",
+      "manifest": "pausedAt",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-c",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-25T00:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.1",
+        "reason": "latest",
+        "latest": "2026.12.1",
+        "held": null
+      }
+    },
+    {
+      "name": "junk entries are skipped, a release without a time is not out yet",
+      "manifest": "messy",
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": "2026.12.1",
+        "reason": "held_back",
+        "latest": "2026.12.3",
+        "held": {
+          "version": "2026.12.3",
+          "why": "scheduled"
+        }
+      }
+    },
+    {
+      "name": "no manifest at all",
+      "manifest": null,
+      "request": {
+        "current": "2026.11.13",
+        "platform": "linux",
+        "target": "debian-bookworm-arm64",
+        "frameKey": "frame-a",
+        "channel": "stable",
+        "manual": false,
+        "now": "2026-12-20T12:00:00Z"
+      },
+      "expect": {
+        "version": null,
+        "reason": "up_to_date",
+        "latest": null,
+        "held": null
+      }
+    }
+  ]
+}

@@ -318,6 +318,7 @@ const frameApiKeyMap* = [
   ("scaling_mode", "scalingMode"),
   ("render_scale", "renderScale"),
   ("frame_settings_on_screen", "frameSettingsOnScreen"),
+  ("auto_update", "autoUpdate"),
   ("settings", "settings"),
   ("assets_path", "assetsPath"),
   ("save_assets", "saveAssets"),

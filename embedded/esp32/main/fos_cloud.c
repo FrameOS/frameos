@@ -2451,7 +2451,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * fallback fit, applied live on the next render pass), `render_scale` (what
  * JSX from .tsx/.jsx apps is laid out for, live the same way),
  * `frame_settings_on_screen` (the frame page of the settings on the screen,
- * read when the panel draws), `colors` (the
+ * read when the panel draws), `auto_update` (docs/auto-updates.md: what the
+ * board goes by if it ever has no plane), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
  * way) and `palette` (the colour list the packer dithers to, live the same
  * way; the names ride along in the cloud only). The power keys —
@@ -2598,6 +2599,10 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *on_screen = cJSON_GetObjectItem(settings, "frame_settings_on_screen");
     if (on_screen != NULL) {
         config->frame_settings_on_screen = cJSON_IsTrue(on_screen);
+    }
+    const cJSON *auto_update = cJSON_GetObjectItem(settings, "auto_update");
+    if (auto_update != NULL) {
+        config->auto_update = cJSON_IsTrue(auto_update);
     }
     const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
     if (colors != NULL) {

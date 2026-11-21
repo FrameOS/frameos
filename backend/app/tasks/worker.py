@@ -13,6 +13,7 @@ from arq.cron import cron
 from arq.typing import WorkerCoroutine
 from arq.worker import func
 
+from app.tasks.auto_update import auto_update_frames_task
 from app.tasks.deploy_frame import deploy_frame_task
 from app.tasks.fast_deploy_frame import fast_deploy_frame_task
 from app.tasks.reset_frame import reset_frame_task
@@ -107,6 +108,10 @@ class WorkerSettings:
     cron_jobs = [
         cron(cast(WorkerCoroutine, with_db_session(prune_build_artifacts_task)), name="prune_build_artifacts",
              hour={4}, minute={23}, run_at_startup=True),
+        # Automatic updates (docs/auto-updates.md): every hour, each frame
+        # inside its own 02:00-05:00 local window.
+        cron(cast(WorkerCoroutine, with_db_session(auto_update_frames_task)), name="auto_update_frames",
+             minute={7}, run_at_startup=False, unique=True),
     ]
     on_startup = startup
     on_shutdown = shutdown

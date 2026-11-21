@@ -34,6 +34,7 @@ proc printHelp() =
   echo "  upgrade Upgrade this installed frame to the latest GitHub release"
   echo "          --dry-run to validate and print the upgrade plan without changing files"
   echo "          --no-reboot to stop after staging when the new release needs a reboot"
+  echo "          --version=YYYY.M.N to install exactly that release (what an update decision chose)"
   echo "  privileged-worker"
   echo "          Root side of the privileged door on Buildroot frames: drain"
   echo "          /srv/frameos/privileged/queue and exit (started by frameos-privileged.path)"

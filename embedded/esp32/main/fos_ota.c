@@ -16,6 +16,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -23,6 +24,7 @@
 #include "nvs.h"
 #include "sdkconfig.h"
 
+#include "mbedtls/sha256.h"
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
@@ -67,6 +69,9 @@ _Static_assert(FOS_OTA_DL_HTTP_EAGAIN == ESP_ERR_HTTP_EAGAIN,
  * render (fos_client.c, `render:skipped reason=ota`). */
 #define FOS_OTA_RENDER_WAIT_MAX_MS (10 * 60 * 1000)
 #define FOS_OTA_AUTH_LEN (FOS_CLOUD_TOKEN_LEN + 16)
+/* Where a board with no control plane asks (docs/auto-updates.md,
+ * "Standalone ESP32"), unless `cloud_url` names another cloud. */
+#define FOS_OTA_UPDATES_URL "https://cloud.frameos.net"
 
 static StaticSemaphore_t s_ota_lock_storage;
 static SemaphoreHandle_t s_ota_lock = NULL;
@@ -202,7 +207,7 @@ void fos_ota_mark_boot_valid(void)
 /* Where one run pulls from. Both control planes fill one of these; nothing
  * below knows which plane it serves beyond the log event name. */
 typedef struct {
-    const char *plane;                 /* "backend" | "cloud": the `ota:<plane>` log event */
+    const char *plane;                 /* "backend" | "cloud" | "standalone": the `ota:<plane>` log event */
     char base_url[FOS_URL_LEN];        /* origin for a relative downloadUrl; the bearer goes here only */
     char manifest_url[FOS_URL_LEN + 192];
     char auth[FOS_OTA_AUTH_LEN];       /* "Bearer …" */
@@ -375,7 +380,7 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
     ESP_LOGI(TAG, "ota (%s): checking manifest %s", src->plane, src->manifest_url);
     fos_http_request_t request = {
         .url = src->manifest_url,
-        .auth = src->auth,
+        .auth = src->auth[0] ? src->auth : NULL,
         .timeout_ms = 20000,
         .buffer_size = 4096,
     };
@@ -791,7 +796,7 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
     wait_for_render_idle(src, FOS_OTA_RENDER_WAIT_MAX_MS);
 
     /* Resumes within itself (fos_ota_download.c); one call is the run's download. */
-    err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
+    err = ota_download_verify(src, manifest.download_url, first_party && src->auth[0] ? src->auth : NULL,
                               manifest.sig, manifest.version, manifest.size, &pin);
     if (err == ESP_OK) {
         s_ota_failures = 0;
@@ -833,7 +838,20 @@ static bool backend_source(ota_source_t *src)
     return true;
 }
 
-static esp_err_t ota_check_and_apply_locked(void)
+static bool backend_ready(void);
+static bool standalone_source(ota_source_t *src, bool manual);
+
+/* The board's own plane, or — with neither a backend nor a cloud enrollment —
+ * the cloud's public update route. A cloud-enrolled board updates on the
+ * nudge alone (fos_ota_request_cloud_update). */
+static bool pick_source(ota_source_t *src, bool manual)
+{
+    if (backend_ready()) return backend_source(src);
+    if (fos_cloud_frame_id()[0]) return false;
+    return standalone_source(src, manual);
+}
+
+static esp_err_t ota_check_and_apply_locked(bool manual)
 {
     ESP_LOGI(TAG, "OTA check started");
     if (!ota_supported()) {
@@ -841,7 +859,7 @@ static esp_err_t ota_check_and_apply_locked(void)
         return ESP_ERR_NOT_SUPPORTED;
     }
     ota_source_t src;
-    if (!backend_source(&src)) return ESP_ERR_INVALID_STATE;
+    if (!pick_source(&src, manual)) return ESP_ERR_INVALID_STATE;
     if (!wait_for_wifi_connected(5000)) {
         ESP_LOGW(TAG, "Wi-Fi state=%s; OTA requires connected station mode",
                  wifi_state_name(fos_wifi_state()));
@@ -868,7 +886,7 @@ static esp_err_t ota_check_and_apply_locked(void)
     return err == ESP_ERR_NOT_FOUND ? ESP_OK : err;
 }
 
-esp_err_t fos_ota_check_and_apply(void)
+static esp_err_t check_and_apply(bool manual)
 {
     SemaphoreHandle_t lock = ota_lock();
     if (lock == NULL) {
@@ -881,11 +899,13 @@ esp_err_t fos_ota_check_and_apply(void)
     }
 
     /* Busy only while a download runs (set inside, at the download). */
-    esp_err_t err = ota_check_and_apply_locked();
+    esp_err_t err = ota_check_and_apply_locked(manual);
     s_ota_busy = false;
     xSemaphoreGive(lock);
     return err;
 }
+
+esp_err_t fos_ota_check_and_apply(void) { return check_and_apply(true); }
 
 bool fos_ota_busy(void)
 {
@@ -931,7 +951,7 @@ static void ota_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(250));
         }
         ESP_LOGW(TAG, "%s OTA check waking", manual ? "manual" : "periodic");
-        esp_err_t err = fos_ota_check_and_apply();
+        esp_err_t err = check_and_apply(manual);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s OTA check failed: %s",
                      manual ? "manual" : "periodic", esp_err_to_name(err));
@@ -1023,7 +1043,9 @@ static bool backend_ready(void)
     return config->backend_url[0] && config->frame_id != 0 && config->api_key[0];
 }
 
-bool fos_ota_has_control_plane(void) { return backend_ready() || fos_cloud_frame_id()[0]; }
+/* Every board with an OTA slot has somewhere to ask: its plane, or the
+ * cloud's public route when it has none. */
+bool fos_ota_has_control_plane(void) { return ota_supported(); }
 
 static bool cloud_source(ota_source_t *src);
 
@@ -1036,7 +1058,10 @@ static void ota_check_task(void *arg)
     esp_err_t err = ESP_FAIL;
     SemaphoreHandle_t lock = ota_lock();
     if (lock != NULL && xSemaphoreTake(lock, 0) == pdTRUE) {
-        if (backend_ready() ? backend_source(&src) : cloud_source(&src)) err = ota_fetch_manifest(&src, &manifest, &up_to_date);
+        bool ok = backend_ready() ? backend_source(&src)
+                  : fos_cloud_frame_id()[0] ? cloud_source(&src)
+                  : standalone_source(&src, true);
+        if (ok) err = ota_fetch_manifest(&src, &manifest, &up_to_date);
         xSemaphoreGive(lock);
     }
     if (err == ESP_OK && !up_to_date) strlcpy(s_check_version, manifest.version, sizeof(s_check_version));
@@ -1106,6 +1131,39 @@ static bool cloud_source(ota_source_t *src)
     snprintf(src->manifest_url, sizeof(src->manifest_url),
              "%s/api/frames/%s/firmware/manifest?platform=%s",
              src->base_url, frame_id, fos_ota_platform());
+    src->trust_base_transport = false;
+    return true;
+}
+
+/* ------------------------------------------------------ no plane at all
+ * docs/auto-updates.md "Standalone ESP32": the cloud runs the update decision
+ * for the board (`key` is its cohort, a hash of its station MAC so the MAC
+ * never leaves it) and answers the manifest the planes answer, or the board's
+ * own version when there is nothing to install. No credential: the image is
+ * checked against the release key like every other. The periodic check asks
+ * only while `auto_update` is on; the console and the settings page ask as an
+ * owner (`manual=1`: the rollout does not hold them back). */
+static bool standalone_source(ota_source_t *src, bool manual)
+{
+    const fos_config_t *config = fos_config();
+    if (!manual && !config->auto_update) return false;
+    memset(src, 0, sizeof(*src));
+    src->plane = "standalone";
+    strlcpy(src->base_url, config->cloud_url[0] ? config->cloud_url : FOS_OTA_UPDATES_URL,
+            sizeof(src->base_url));
+    size_t base_len = strlen(src->base_url);
+    while (base_len > 0 && src->base_url[base_len - 1] == '/') src->base_url[--base_len] = '\0';
+    uint8_t mac[6] = {0};
+    uint8_t digest[32];
+    char key[17];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    mbedtls_sha256(mac, sizeof(mac), digest, 0);
+    for (int i = 0; i < 8; i++) snprintf(key + i * 2, 3, "%02x", digest[i]);
+    const char *running = esp_app_get_description()->version;
+    if (running[0] == 'v') running++;
+    snprintf(src->manifest_url, sizeof(src->manifest_url),
+             "%s/api/updates/firmware?platform=%s&version=%s&key=esp32:%s%s", src->base_url,
+             fos_ota_platform(), running, key, manual ? "&manual=1" : "");
     src->trust_base_transport = false;
     return true;
 }
