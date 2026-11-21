@@ -572,10 +572,16 @@ declare const frameos: {
    * ends). entry reads that member of a ZIP file instead (an EPUB's chapter, inflated by the frame a window at a
    * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
    * A slice over the frame's limit (2 MB on an ESP32) is null: read it in parts with offset and length
-   * (entry and text: FrameOS 2026.11.11+). */
+   * (entry and text: FrameOS 2026.11.11+). inflate reads the slice as a zlib (or raw deflate) stream and gives what
+   * it holds (a PDF's FlateDecode stream; a damaged one gives what came out before the damage), and bytes gives any
+   * read as a Uint8Array (inflate and bytes: FrameOS 2026.11.14+). */
   readAsset(
     path: string,
-    options?: { offset?: number; length?: number; text?: boolean; entry?: string; storage?: "assets" | "internal" }
+    options: { offset?: number; length?: number; inflate?: boolean; bytes: true; entry?: string; storage?: "assets" | "internal" }
+  ): Uint8Array | null;
+  readAsset(
+    path: string,
+    options?: { offset?: number; length?: number; text?: boolean; inflate?: boolean; entry?: string; storage?: "assets" | "internal" }
   ): string | null;
   /** Writes the file: data is base64, or with text the string itself, written as UTF-8 (text: FrameOS 2026.11.12+;
    * before, the string is read as base64). */
@@ -603,6 +609,18 @@ declare const frameos: {
       entry?: string;
       /** With entry and a size: the colour under the picture's transparent parts (FrameOS 2026.11.11+). */
       background?: string;
+      /** A picture at a slice of the file (a PDF's JPEG), decoded at the size asked; with inflate the slice is
+       * compressed (FrameOS 2026.11.14+). */
+      offset?: number;
+      length?: number;
+      inflate?: boolean;
+      /** With a size: the slice is raw samples instead (a PDF image's), scaled as they come: colors 1 (grey, or
+       * indexed with a palette of hex RGB), 3 (RGB) or 4 (CMYK), 1 to 16 bits each, rows padded to a byte, predictor
+       * 2 (TIFF) or 10 and up (PNG), invert to read each sample the other way (FrameOS 2026.11.14+). */
+      pixels?: { width: number; height: number; colors?: 1 | 3 | 4; bits?: number; predictor?: number; palette?: string; invert?: boolean };
+      /** With pixels or offset: another slice of grey samples, the picture's opacity (a PDF's soft mask), put over
+       * background (FrameOS 2026.11.14+). */
+      mask?: { offset: number; length: number; inflate?: boolean; pixels: { width: number; height: number; bits?: number; predictor?: number; invert?: boolean } };
       /** Which of app.frame.storages the path is in (FrameOS 2026.11.11+). */
       storage?: "assets" | "internal";
     }

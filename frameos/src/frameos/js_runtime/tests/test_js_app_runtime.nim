@@ -1,5 +1,6 @@
 import std/[base64, json, net, os, sequtils, strutils, tables, unittest]
 import pixie
+import zippy
 
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/burrito
@@ -1763,6 +1764,130 @@ suite "js app runtime":
     check parseJson(uploaded)["image_url"].getStr() == "data:image/jpeg;base64," & encode(picture)
     check payload["noAsset"]["status"].getInt() == 0
     check payload["noAsset"]["error"].getStr().contains("bodyAsset")
+
+  test "readAsset inflates a stream inside a file and hands binary over as bytes; loadAssetImage reads pictures at a slice":
+    let assetsDir = getTempDir() / "frameos-js-slices-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    # A file the way a PDF is one: streams at offsets, compressed or not.
+    var text = ""
+    for i in 1 .. 400:
+      text.add "BT /F1 " & $(i * 7919 mod 1000) & " Tf (Line " & $(i * 104729 mod 99991) & ") Tj ET\n"
+    text.add "\xff\x00\x80"
+    let zlibbed = compress(text, BestCompression, dfZlib)
+    let deflated = compress("raw deflate", BestCompression, dfDeflate)
+    let jpeg = readFile(currentSourcePath().parentDir / ".." / ".." / "tests" / "fixtures" / "progressive-480x720.jpg")
+    # 2 x 2 RGB with PNG's Sub and Up filters (predictor 15): red, green / blue, white.
+    let samples = "\x01\xff\x00\x00\x01\xff\x00" & "\x02\x01\x00\xff\xff\x00\xff"
+    let pixels = compress(samples, BestCompression, dfZlib)
+    # 4 x 1 indexed, 2 bits a pixel, a palette of four, stored as it is.
+    let indexed = "\x1b" # 00 01 10 11
+    var file = "%PDF-1.7\n"
+    let atZlib = file.len
+    file.add zlibbed & "\nendstream\n"
+    let atDeflate = file.len
+    file.add deflated & "\n"
+    let atJpeg = file.len
+    file.add jpeg & "\n"
+    let atPixels = file.len
+    file.add pixels & "\n"
+    let atIndexed = file.len
+    file.add indexed & "\n"
+    let atMask = file.len
+    file.add "\xff\x00\x80\xff" # 2 x 2 grey: opaque, clear / half, opaque
+    let atCut = file.len
+    file.add zlibbed[0 ..< zlibbed.len div 2]
+    writeFile(assetsDir / "doc.pdf", file)
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-slices".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 31.NodeId, nodeName: "jsSlices", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      assetGrant = agRead,
+      source = """export function get(app, context) {
+          const bytes = frameos.readAsset("doc.pdf", { offset: """ & $atZlib & """, length: """ & $zlibbed.len & """, inflate: true, bytes: true })
+          const jpeg = frameos.loadAssetImage("doc.pdf", { offset: """ & $atJpeg & """, length: """ & $jpeg.len & """, width: 48, height: 72 })
+          const cut = frameos.readAsset("doc.pdf", { offset: """ & $atCut & """, length: 100000, inflate: true, text: true })
+          return {
+            isBytes: bytes instanceof Uint8Array,
+            length: bytes.length,
+            tail: [bytes[bytes.length - 3], bytes[bytes.length - 2], bytes[bytes.length - 1]],
+            head: String.fromCharCode(...bytes.slice(0, 8)),
+            text: frameos.readAsset("doc.pdf", { offset: """ & $atZlib & """, length: """ & $(zlibbed.len div 2) & """, inflate: true, text: true }).slice(0, 5),
+            raw: frameos.readAsset("doc.pdf", { offset: """ & $atDeflate & """, length: """ & $deflated.len & """, inflate: true, text: true }),
+            plain: String.fromCharCode(...frameos.readAsset("doc.pdf", { offset: 0, length: 8, bytes: true })),
+            cutStarts: cut.startsWith("BT /F1"),
+            cutShorter: cut.length < """ & $text.len & """,
+            notCompressed: frameos.readAsset("doc.pdf", { offset: 0, length: 8, inflate: true }),
+            jpeg: jpeg ? [jpeg.width, jpeg.height] : null,
+          }
+        }"""
+    )
+    let got = runtime.get(owner, %*{}, context).asJson()
+    check got["isBytes"].getBool()
+    check got["length"].getInt() == text.len
+    check got["tail"] == %*[255, 0, 128]
+    check got["head"].getStr() == text[0 ..< 8]
+    check got["text"].getStr() == "BT /F"
+    check got["raw"].getStr() == "raw deflate"
+    check got["plain"].getStr() == "%PDF-1.7"
+    check got["cutStarts"].getBool()
+    check got["cutShorter"].getBool()
+    check got["notCompressed"].getStr() == ""
+    check got["jpeg"] == %*[48, 72]
+
+    proc picture(options: string): Image =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "image",
+        assetGrant = agRead,
+        source = "export function get() { return frameos.loadAssetImage('doc.pdf', " & options & ") }"
+      )
+      runtime.get(owner, %*{}, context).asImage()
+
+    let rgb = picture("{ offset: " & $atPixels & ", length: " & $pixels.len & ", inflate: true, width: 2, height: 2, " &
+      "pixels: { width: 2, height: 2, colors: 3, bits: 8, predictor: 15 } }")
+    check rgb.width == 2
+    check rgb[0, 0] == rgbx(255, 0, 0, 255)
+    check rgb[1, 0] == rgbx(0, 255, 0, 255)
+    check rgb[0, 1] == rgbx(0, 0, 255, 255)
+    check rgb[1, 1] == rgbx(255, 255, 255, 255)
+    # Scaled down as it comes: one pixel, the mean of the four.
+    let mean = picture("{ offset: " & $atPixels & ", length: " & $pixels.len & ", inflate: true, width: 1, height: 1, " &
+      "pixels: { width: 2, height: 2, colors: 3, bits: 8, predictor: 15 } }")
+    check mean[0, 0] == rgbx(127, 127, 127, 255)
+    # And up: each sample a block.
+    let big = picture("{ offset: " & $atPixels & ", length: " & $pixels.len & ", inflate: true, width: 4, height: 4, " &
+      "pixels: { width: 2, height: 2, colors: 3, bits: 8, predictor: 15 } }")
+    check big[1, 1] == rgbx(255, 0, 0, 255)
+    check big[3, 3] == rgbx(255, 255, 255, 255)
+    check big[0, 2] == rgbx(0, 0, 255, 255)
+    # With a soft mask: over the background where it is clear.
+    let masked = picture("{ offset: " & $atPixels & ", length: " & $pixels.len & ", inflate: true, width: 2, height: 2, " &
+      "pixels: { width: 2, height: 2, colors: 3, bits: 8, predictor: 15 }, background: '#ffffff', " &
+      "mask: { offset: " & $atMask & ", length: 4, pixels: { width: 2, height: 2, colors: 1, bits: 8 } } }")
+    check masked[0, 0] == rgbx(255, 0, 0, 255)
+    check masked[1, 0] == rgbx(255, 255, 255, 255)
+    check masked[0, 1].b == 255 and masked[0, 1].r > 120 and masked[0, 1].r < 135
+    check masked[1, 1] == rgbx(255, 255, 255, 255)
+    let lookedUp = picture("{ offset: " & $atIndexed & ", length: 1, width: 4, height: 1, " &
+      "pixels: { width: 4, height: 1, colors: 1, bits: 2, palette: '000000ff000000ff000000ff' } }")
+    check lookedUp[0, 0] == rgbx(0, 0, 0, 255)
+    check lookedUp[1, 0] == rgbx(255, 0, 0, 255)
+    check lookedUp[2, 0] == rgbx(0, 255, 0, 255)
+    check lookedUp[3, 0] == rgbx(0, 0, 255, 255)
+    let grey = picture("{ offset: " & $atIndexed & ", length: 1, width: 4, height: 1, " &
+      "pixels: { width: 4, height: 1, colors: 1, bits: 2, invert: true } }")
+    check grey[0, 0] == rgbx(255, 255, 255, 255)
+    check grey[3, 0] == rgbx(0, 0, 0, 255)
 
   test "loadAssetImage decodes into the consumer's target when the interpreter offers one":
     # A full-screen photo from the assets folder, as data/localImage draws
