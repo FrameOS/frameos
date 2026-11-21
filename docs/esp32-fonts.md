@@ -107,32 +107,76 @@ does:
   parse does the same); `--axis wght=700` writes another instance;
 - `--subset latin,greek` (or ranges) for a smaller file.
 
-Colour bitmap fonts (Noto Color Emoji, `CBDT`) have no outlines: on an ESP32
-they are refused and the text falls back to the built-in face, logged once
-(`font:fallback`).
+A colour bitmap font (Noto Color Emoji, `CBDT`/`CBLC`) needs nothing: it is
+read in place too, as the emoji face ("Emoji" below). sbix and COLR colour
+fonts are not.
+
+## Emoji
+
+When `NotoColorEmoji.ttf` is on the card (it is in the collection "Sync
+fonts" copies), an ESP32 draws emoji in colour where a Pi does: a text's face
+falls back to it for the runes it lacks (`withEmojiFallback` in
+`utils/font.nim`: the Text app's text, pixie's `fillText`). Whether the card
+has it is asked at most every 30 s.
+
+It is a file face like the others (`filefont.nim`): opening it reads its
+directory and headers; its glyph for a rune comes from its format 12 `cmap`;
+which strike and where its PNG is come from the `CBLC` index subtables
+searched where they lie (formats 1 to 5, image formats 17, 18 and 19, the
+strike pixie would pick: the smallest at least the size drawn, else the
+largest; Noto has one, 109 ppem); and the PNG is read from `CBDT` only when
+the emoji is drawn. pixie's PNG decoder (already in the image) decodes it,
+136 by 128 pixels for Noto, 70 KB, which is scaled to the size drawn and let
+go. What is kept is the scaled copy, in a colour glyph cache of its own
+(`colorGlyphCacheBudget` in pixie's `fonts.nim`, half the glyph budget on an
+ESP32: 64 KB on an 8 MB board, a 24 px emoji 2.3 KB), the one drawn longest
+ago going first, emptied with the glyph cache when render memory is short.
+Nothing else stays: a face open, its glyph memo entries (a `colorKind` byte
+beside a glyph's advance and box, in padding that was there), and while one
+is drawn its PNG (5-10 KB) and the decode (70 KB), let go before the next
+(`test_file_font.nim` checks six drawn leave under 4 KB behind). A
+colour glyph is an image, not coverage, so it cannot go into the four-bit
+glyph cache; it is drawn with pixie's ordinary image draw, so on a 565,
+sixteen-grey or black-and-white canvas it is converted and dithered like any
+picture.
+
+The Pi draws the same emoji from the same PNG (its whole parse of the font,
+`drawColorGlyphs`), scaling it as it draws, at a fraction of a pixel where
+the ESP32's kept copy lands on a whole one: `test_file_font.nim` compares the
+two at 18 and 32 px. Neither combines a skin tone, a flag or a ZWJ sequence
+(pixie has no GSUB): 👍🏽 is a thumb and a swatch on both.
+
+JSX and SVG text draw no emoji on either: their glyphs are paths, and a
+colour glyph has none (`glyphPath` gives nil for one). That is pixie's text in
+an SVG tree, the same on every runtime.
 
 ## Flash
 
-On the ESP32-S3 image (EPD_7in5_V2, `ci_build_image.sh`, against main at
-f257c8244 built the same way, 2026-11-20): **−32.7 KB** (3,207,904 →
-3,175,200 bytes). Nothing on an ESP32 parses a font whole any more, so pixie's
+On the ESP32-S3 image (`ci_build_image.sh`, against main at 9afaa9ac8 built
+the same way, 2026-11-21): **−28,080 bytes** (3,209,584 → 3,181,504), emoji
+included. Nothing on an ESP32 parses a font whole any more, so pixie's
 OpenType parser leaves the image: −35.4 KB of its code (CFF charstrings, the
 cmap, hmtx, name, OS/2, GPOS pair building, the colour and bitmap tables) and
-−6.4 KB of its constants (CFF's standard strings). What came in:
+−6.2 KB of its constants (CFF's standard strings). What came in, by symbol
+(`nm -S`):
 
 | | Flash |
 | --- | --- |
 | `filefont.nim`, the reader | +7.6 KB (the open 1.4 KB, its own `parseCompositeGlyph` instance 1.0 KB, kerning and its index 1.7 KB, the cache and tables 1.4 KB) |
-| `utils/font.nim`, the resolver now on the ESP32 (`svgFontFileFor`, the listing, `fileTypeface`) | +2.2 KB |
-| `fonts.nim`, a `file` branch in each accessor | +0.5 KB |
-| the budget functions | +0.1 KB |
+| … its colour bitmaps (`bitmapRecord`, `bestStrike`, `bitmapGlyph`, `hasColorGlyph`) | +1.4 KB |
+| `fonts.nim`: a `file` branch in each accessor 0.5 KB; the colour glyph cache and its draw (`fileColorGlyph`) 1.4 KB | +1.9 KB |
+| `utils/font.nim`: the resolver now on the ESP32 (`svgFontFileFor`, the listing, `fileTypeface`) 2.2 KB; the emoji fallback 0.4 KB | +2.6 KB |
+| the budget functions | +0.2 KB |
 
-Kept small (−2.6 KB of the image against the first cut): the faces by name
-are a list and not an `OrderedTable`, the names refused a list and not a
-`Table` (a table's code is about a kilobyte an instance), and the table tags
-compile-time constants. `parseCompositeGlyph` is generic, so this is a second
-instance of it beside the indexed font's (docs/esp32-image-size.md: not
-folded yet, about 1 KB).
+Emoji are about **+3.3 KB** of that (the colour bitmaps, the cache, the
+fallback): they reuse pixie's PNG decoder and image draw, which were in the
+image already. The first cut of the fonts was 2.6 KB bigger: the faces by
+name are a list and not an `OrderedTable`, the names refused a list and not
+a `Table` (a table's code is about a kilobyte an instance), and the table
+tags compile-time constants. `parseCompositeGlyph` is generic, so this is a
+second instance of it beside the indexed font's (docs/esp32-image-size.md:
+not folded yet, about 1 KB). Against f257c8244, before emoji, the fonts alone
+were −32,704 bytes.
 
 ## The glyph cache on bigger boards
 
@@ -185,7 +229,33 @@ the JSX layer now keeps up to 128 family names (it was 16).
   not either): Peralta's Greek draws nothing.
 - Kerning in GPOS extension lookups (pixie's whole parse skips them too).
 - The browser preview has no fonts but the built-in face.
-- Measured on the host only: the first card read of a page on the device
-  (SPI SD) and a render of the Fonts sample want the hardware bench on a
-  board with a TF slot (a reTerminal E1001–E1004 or Sticky, the PhotoPainter,
-  the 13.3E6 for 16 MB).
+- On a board, so far only the release before this (below): this firmware
+  has not run on one yet.
+- Emoji in JSX and SVG text (a Pi draws none there either), and sbix or COLR
+  colour fonts (CBDT is what the shipped emoji font is).
+
+## On a board (2026-11-21)
+
+The reTerminal E1002 (8 MB PSRAM, 7.3" Spectra, a 64 GB card), on the
+release before this, 2026.11.13, with "Sync fonts" run from the bench
+backend: all 61 files landed in `fonts/` (`{"uploaded": 61}`), and the Fonts
+sample lists 60 (the emoji font is left out of its list). On that release:
+
+- Every name in the list is drawn in Ubuntu: the JSX layer never asked the
+  card for a face on an ESP32.
+- A Text app scene in `LiberationSerif-Regular.ttf` (393 KB) fresh after a
+  boot drew in Ubuntu instead: `font:embedded:fallback` "not enough free
+  memory to parse a font right now" (3.41 MB of headroom; the whole parse
+  asks for the file and 3 MB more, 3.54 MB). Its render was 985 ms cold (133 glyph misses), 124
+  ms warm. In an earlier session on the same board, the face had been parsed
+  and held: about 366 KB of PSRAM for as long as it stayed the one custom
+  face, and 99 ms warm.
+- The built-in face on the same paragraph: 648 ms cold, 166 ms warm.
+
+This branch's image was built for that board (generic S3, 3,181,504 bytes),
+but flashing it was not permitted in that session, so the per-font run, the
+cold and warm renders of a page of faces, the emoji scene and `heapinfo` on
+this firmware are still to do: flash it, run the Fonts sample a page at a
+time (`setCurrentScene {"sceneId": ..., "state": {"page": n}}` on a copy whose
+`page` is public), a Text app scene in one card font and one with emoji, with
+`set debug 1`.

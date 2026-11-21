@@ -4,7 +4,7 @@
 ## page cache and nothing of the glyphs. FrameOS's own test
 ## (src/frameos/utils/tests/test_file_font.nim) runs every font it ships.
 
-import pixie, pixie/paths, pixie/fontformats/filefont, std/unicode
+import pixie, pixie/paths, pixie/fontformats/filefont, pixie/fontformats/opentype, std/unicode
 
 const fonts = [
   "tests/fonts/Roboto-Regular_1.ttf",
@@ -48,7 +48,7 @@ block:
 block:
   # What is not a TrueType file of glyf outlines is refused, never misread.
   for path in ["tests/fonts/NotoEmoji.otf", "tests/fonts/Inter-Bold.ttf", "tests/fonts/PTSans.ttc",
-      "tests/fonts/EmojiCbdt.ttf", "tests/fonts/Ubuntu.svg"]:
+      "tests/fonts/Ubuntu.svg"]:
     var refused = false
     try:
       discard openTypefaceFile(path)
@@ -56,6 +56,25 @@ block:
       refused = true
     doAssert refused, path
   echo "filefont: refuses what it cannot read in place"
+
+block:
+  # A colour bitmap (CBDT/CBLC) font is read in place too: the same glyphs
+  # have colour, and each one's PNG and where it goes are the whole parse's.
+  let
+    file = openFileFont("tests/fonts/EmojiCbdt.ttf", readFile("tests/fonts/EmojiCbdt.ttf").len)
+    whole = parseOpenType(readFile("tests/fonts/EmojiCbdt.ttf"))
+  var colored = 0
+  for r in 0x20 .. 0x1FAFF:
+    let rune = Rune(r)
+    doAssert file.hasColorGlyph(r.int32) == whole.hasColorGlyph(rune), $r
+    if whole.hasColorGlyph(rune):
+      inc colored
+      for size in [12'f32, 40, 200]:
+        var a, b: BitmapGlyph
+        doAssert file.bitmapGlyph(r.int32, size, a) == whole.getBitmapGlyph(rune, size, b)
+        doAssert a.png == b.png and a.ppem == b.ppem and a.xOffset == b.xOffset and a.yOffset == b.yOffset
+  doAssert colored > 0
+  echo "filefont: colour bitmaps as the whole parse"
 
 block:
   # Text sets and draws exactly as the whole parse, through the glyph cache.

@@ -1223,14 +1223,18 @@ half a minute.
   and the apply's whole-file load. A frame in the field may hold a combined
   file, so the reader stays whatever the writers do.
 
-## Fonts on the card read in place: −32,704
+## Fonts on the card read in place: −32,704, and emoji +3.3 KB back
 
 Every font on the SD card is read where it lies (pixie's
 `fontformats/filefont.nim`, docs/esp32-fonts.md) instead of one at a time
 parsed whole, so nothing on an ESP32 calls pixie's OpenType parser any more
 and it leaves the image: 3,207,904 → 3,175,200 on the S3 (EPD_7in5_V2,
-against main at f257c8244 built the same way, 2026-11-20). By symbol
-(`nm -S`, before the linker's alignment):
+against main at f257c8244 built the same way, 2026-11-20). Colour emoji from
+the card's CBDT font came after, about +3.3 KB by symbol (CBLC searched in
+place 1.4 KB, the colour glyph cache and its draw 1.4 KB, the fallback
+0.4 KB; pixie's PNG decoder and image draw were in the image): the branch
+then stood at 3,209,584 → 3,181,504 against main at 9afaa9ac8 (−28,080). By
+symbol (`nm -S`, before the linker's alignment), the fonts:
 
 | | bytes | what |
 |---|---:|---|

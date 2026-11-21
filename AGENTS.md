@@ -788,7 +788,10 @@
   pixie's whole parse does (`test_file_font.nim` runs every shipped font):
   change a rule in `opentype.nim` and in `filefont.nim` together. What is not
   TrueType outlines is converted off the frame (`tools/font_for_card.py`),
-  never parsed on it. The glyph budget grows with the board's PSRAM
+  never parsed on it. The card's colour emoji font (CBDT) is read the same
+  way, a glyph's PNG decoded when drawn and kept at its drawn size in
+  pixie's colour glyph cache (`colorGlyphCacheBudget`), never the decode
+  or the font. The glyph budget grows with the board's PSRAM
   (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
