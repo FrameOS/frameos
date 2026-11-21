@@ -1,18 +1,30 @@
 // The layout a new frame starts with, chosen where its SD card or ESP32 was
 // flashed (docs/scene-layouts.md "Chosen at the flash").
 //
-// The SPA makes the chosen starter a private scene of the account first (the
-// same POST /api/account/scenes a starter added in the workspace becomes on
-// its first push), so the claim code carries only a reference: that store
-// scene, the runtime id its one scene runs under, and the settings from the
-// gear. It rides the token and the frame row like `scene_source_frame_id`
-// and is applied by frame-provisioning.ts when the frame turns active: the
-// layout is installed after the frame's other scenes and every one of them
-// wears it, which is what the frame's own Layout select would have saved
-// (`layouts` on each assignment row, scene-layouts.ts).
+// The claim code's body carries the chosen starter itself: its scene (the
+// gear's values as its fields' defaults) and those values. The claim route
+// makes it a private scene of the account through the one save path
+// (createAccountScene), or reuses the copy an earlier flash made of exactly
+// that content (provisioningLayoutScene): the copy's runtime id is derived
+// from its content, and the store_scene_imports ledger, the one a
+// re-enrolled frame's import dedupes on, remembers which draft holds it. So
+// flashing the same choice again adds no "Windows 98 2". The token and then
+// the frame row keep a reference, like `scene_source_frame_id`, applied by
+// frame-provisioning.ts when the frame turns active: the layout is installed
+// after the frame's other scenes and every one of them wears it, which is
+// what the frame's own Layout select would have saved (`layouts` on each
+// assignment row, scene-layouts.ts).
 
+import { and, eq } from "drizzle-orm";
+import { storeSceneImports, storeScenes, type createDb } from "@frameos-cloud/db";
+import type { NextResponse } from "next/server";
+import { createAccountScene } from "./account-scene-create";
+import { deviceSceneContentSha256, deviceSceneName } from "./device-scenes";
 import { readSceneLayout, sceneLayoutsOf, type SceneLayoutRef } from "./scene-layouts";
 import type { RequestedScene } from "./frame-scenes";
+import type { PublishActor } from "./store-publish";
+
+type Database = ReturnType<typeof createDb>;
 
 export type ProvisioningLayout = {
   /** The store scene installed as the layout. */
@@ -27,27 +39,94 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/** The claim-tokens body's `layout`: the starter to install and its settings. */
+export type ProvisioningLayoutRequest = {
+  scene: Record<string, unknown>;
+  state?: Record<string, unknown>;
+};
+
 /**
- * The claim-tokens body's `layout` (`{scene_id, layout_scene_id, state?}`):
- * undefined when absent, false when malformed. Whether the scene may be
- * installed is the route's check (it must be the account's own, or public).
+ * The claim-tokens body's `layout` (`{scene, state?}`, the scene a layout):
+ * undefined when absent, false when malformed. What the scene holds is the
+ * save path's to judge (zip validation, the layout rule, moderation).
  */
-export function readProvisioningLayoutBody(value: unknown): ProvisioningLayout | undefined | false {
+export function readProvisioningLayoutBody(value: unknown): ProvisioningLayoutRequest | undefined | false {
   if (value === undefined || value === null) {
     return undefined;
   }
-  if (!plainObject(value)) {
+  if (!plainObject(value) || !plainObject(value.scene) || !plainObject(value.scene.settings)) {
     return false;
   }
-  const storeSceneId = typeof value.scene_id === "string" ? value.scene_id.trim() : "";
-  if (!uuidPattern.test(storeSceneId)) {
+  if (value.scene.settings.isLayout !== true) {
     return false;
   }
-  const layout = readSceneLayout({ sceneId: value.layout_scene_id, state: value.state });
-  if (layout === false) {
+  // The settings are held to what a worn layout's state may be.
+  const ref = readSceneLayout({ sceneId: "layout", state: value.state });
+  if (ref === false) {
     return false;
   }
-  return { layout, storeSceneId: storeSceneId.toLowerCase() };
+  return { scene: value.scene, ...(ref.state ? { state: ref.state } : {}) };
+}
+
+/**
+ * The starter as the account's scene: the draft an earlier flash made of
+ * exactly this content, else a new one through the one save path. Its
+ * runtime id is a function of its content, so the same starter with the
+ * same settings is the same scene and a different choice is a new copy.
+ * The save's own response when it refused.
+ */
+export async function provisioningLayoutScene(
+  db: Database,
+  input: { accountId: string; actor: PublishActor; request: ProvisioningLayoutRequest },
+): Promise<ProvisioningLayout | NextResponse> {
+  const { id: _id, origin: _origin, ...content } = input.request.scene;
+  const hex = deviceSceneContentSha256(content);
+  const id = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  const scene = { ...content, id };
+  const digest = deviceSceneContentSha256(scene);
+  const layout: SceneLayoutRef = input.request.state ? { sceneId: id, state: input.request.state } : { sceneId: id };
+  const [kept] = await db
+    .select({ sceneId: storeSceneImports.sceneId })
+    .from(storeSceneImports)
+    .innerJoin(storeScenes, eq(storeScenes.id, storeSceneImports.sceneId))
+    .where(
+      and(
+        eq(storeSceneImports.accountId, input.accountId),
+        eq(storeSceneImports.contentSha256, digest),
+        eq(storeScenes.accountId, input.accountId),
+        eq(storeScenes.status, "active"),
+      ),
+    )
+    .limit(1);
+  if (kept) {
+    return { layout, storeSceneId: kept.sceneId };
+  }
+  const response = await createAccountScene(db, {
+    accountId: input.accountId,
+    actor: input.actor,
+    name: deviceSceneName(scene),
+    scenes: [scene],
+  });
+  const body = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as { scene?: { id?: string; version?: number } };
+  if (!response.ok || !body.scene?.id || typeof body.scene.version !== "number") {
+    return response;
+  }
+  await db
+    .insert(storeSceneImports)
+    .values({
+      accountId: input.accountId,
+      contentSha256: digest,
+      deviceSceneId: id,
+      sceneId: body.scene.id,
+      sceneVersion: body.scene.version,
+    })
+    // Two flashes at once: the first ledger row stands, the second copy is
+    // merely unrecorded.
+    .onConflictDoNothing();
+  return { layout, storeSceneId: body.scene.id };
 }
 
 /** The column's value, tolerating whatever an older row holds. */

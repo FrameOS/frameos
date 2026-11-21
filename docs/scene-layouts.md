@@ -709,7 +709,7 @@ scene keeps them for the scenes that join it (`layoutForNewScenes`).
 | Backend: SD card (deploy drawer) | the download's frame save carries `scenes` with the layout; the card's setup file carries `frame.scenes` |
 | Backend: ESP32 flash (deploy drawer, "Erase & flash FrameOS again") | `POST /api/frames/{id}` with the scenes before the board is written; the upload over USB after the flash carries them |
 | Backend: Pico (.uf2 download) | saved on the frame with the download; the backend renders a thin client's scenes |
-| Cloud: "Add frame" SD image and ESP32 | the starter is saved as one of the account's scenes and the claim code carries it (`layout`), installed when the frame turns active (docs/cloud-frames.md "A3") |
+| Cloud: "Add frame" SD image and ESP32 | the claim code carries the starter (`layout`); the cloud saves it as one of the account's scenes, or reuses the copy an earlier flash of the same choice made, and installs it when the frame turns active (docs/cloud-frames.md "A3") |
 | Cloud: "Write another SD card", "Redeploy to this board" | the frame exists: the layout goes into its form and the form is saved, as Settings does, before the code is minted |
 
 The install script, the SSH install and linking a running frame flash

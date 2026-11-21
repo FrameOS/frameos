@@ -1,5 +1,4 @@
-import { frameEnrollmentTokens, storeScenes } from "@frameos-cloud/db";
-import { and, eq, or } from "drizzle-orm";
+import { frameEnrollmentTokens } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -27,7 +26,9 @@ import { createSecretToken, hashSecret } from "../../../../src/lib/secrets";
 import { readSession } from "../../../../src/lib/session";
 import {
   provisioningLayoutColumn,
+  provisioningLayoutScene,
   readProvisioningLayoutBody,
+  type ProvisioningLayout,
 } from "../../../../src/lib/provisioning-layout";
 
 export const runtime = "nodejs";
@@ -131,33 +132,14 @@ export async function POST(request: NextRequest) {
   }
 
   // The layout the frames this token enrolls start with, chosen beside the
-  // flash (provisioning-layout.ts): a scene the account already holds (the
-  // SPA saved the chosen starter there first) or a public one, checked here
-  // at mint time like the scene source, and installed at activation. A
-  // re-enrollment keeps its frame's own scenes and layouts: the SPA saves a
-  // layout chosen there on the frame itself.
-  const provisioningLayout = readProvisioningLayoutBody(body.layout);
-  if (provisioningLayout === false || (provisioningLayout && boundFrame)) {
+  // flash: the starter itself, made the account's scene (or the copy an
+  // earlier flash made of it) just before the token is written, and
+  // installed at activation (provisioning-layout.ts). A re-enrollment keeps
+  // its frame's own scenes and layouts: the SPA saves a layout chosen there
+  // on the frame itself.
+  const layoutRequest = readProvisioningLayoutBody(body.layout);
+  if (layoutRequest === false || (layoutRequest && boundFrame)) {
     return jsonError("invalid_layout", 400);
-  }
-  if (provisioningLayout) {
-    const [layoutScene] = await db
-      .select({ id: storeScenes.id })
-      .from(storeScenes)
-      .where(
-        and(
-          eq(storeScenes.id, provisioningLayout.storeSceneId),
-          eq(storeScenes.status, "active"),
-          or(
-            eq(storeScenes.accountId, session.accountId),
-            eq(storeScenes.visibility, "public"),
-          ),
-        ),
-      )
-      .limit(1);
-    if (!layoutScene) {
-      return jsonError("invalid_layout", 404);
-    }
   }
 
   // Multi-use tokens back the SD-image download: one image, many cards,
@@ -245,6 +227,20 @@ export async function POST(request: NextRequest) {
       return jsonError("invalid_ttl_days", 400);
     }
     ttlMs = body.ttl_days * 24 * 60 * 60 * 1000;
+  }
+
+  // Last, so a refused code leaves no scene behind.
+  let provisioningLayout: ProvisioningLayout | undefined;
+  if (layoutRequest) {
+    const saved = await provisioningLayoutScene(db, {
+      accountId: session.accountId,
+      actor: { accountId: session.accountId, providerSubject: session.providerSubject },
+      request: layoutRequest,
+    });
+    if (saved instanceof NextResponse) {
+      return saved;
+    }
+    provisioningLayout = saved;
   }
 
   const token = createSecretToken(claimTokenPrefix, 24);

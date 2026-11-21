@@ -344,7 +344,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
     }
     const sceneSource = {
       ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
-      ...(await cloudFlashLayoutClaimFields(layoutPickerKey)),
+      ...cloudFlashLayoutClaimFields(layoutPickerKey),
     }
     const response = await fetch('/api/frames/claim-tokens', {
       body: JSON.stringify(
@@ -535,7 +535,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
             <Esp32CloudFlasher
               cloudOrigin={cloudOrigin}
               sceneSourceFrameId={sceneSourceFrameId || undefined}
-              claimFields={() => cloudFlashLayoutClaimFields(layoutPickerKey)}
+              claimFields={async () => cloudFlashLayoutClaimFields(layoutPickerKey)}
             />
           </section>
         ) : null}

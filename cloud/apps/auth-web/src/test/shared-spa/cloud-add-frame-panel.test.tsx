@@ -538,13 +538,11 @@ describe("AddFramePanel", () => {
 
   // docs/scene-layouts.md "Chosen at the flash": the SD card and the ESP32
   // offer the layout the new frame starts with, and their claim codes carry
-  // it, the chosen starter saved as the account's own scene first.
+  // the chosen starter itself, which the cloud saves as the account's scene.
   describe("the layout a new frame starts with", () => {
     function answerSavesAndMints(): void {
-      fetchMock.mockImplementation(async (input) =>
-        String(input).includes("/account/scenes")
-          ? Response.json({ scene: { id: "0b4f5c2e-8d7a-4a51-9a51-8a7f3c1d2e10" } })
-          : Response.json({ claim_token: "FRCT_from_server", expires_at: "2030-01-01T00:00:00Z" }),
+      fetchMock.mockImplementation(async () =>
+        Response.json({ claim_token: "FRCT_from_server", expires_at: "2030-01-01T00:00:00Z" }),
       );
     }
 
@@ -582,19 +580,16 @@ describe("AddFramePanel", () => {
       await act(async () => {
         await flashProps.sd!.mintClaimToken({ multiUse: true });
       });
-      const saves = fetchMock.mock.calls.filter(([input]) => String(input).includes("/account/scenes"));
-      expect(saves).toHaveLength(1);
-      const saved = JSON.parse(String((saves[0]![1] as RequestInit).body)) as {
-        name: string;
-        scenes: { id: string; settings?: { isLayout?: boolean } }[];
+      // The claim code carries the starter; the browser saves no scene itself.
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/account/scenes"))).toBe(false);
+      const body = JSON.parse(String((mintCalls().at(-1)![1] as RequestInit).body)) as {
+        layout: { scene: { id?: string; name: string; settings?: { isLayout?: boolean } } };
+        multi_use: boolean;
       };
-      expect(saved.name).toBe("Windows 98");
-      expect(saved.scenes[0]?.settings?.isLayout).toBe(true);
-      const body = JSON.parse(String((mintCalls().at(-1)![1] as RequestInit).body));
-      expect(body).toMatchObject({
-        layout: { layout_scene_id: saved.scenes[0]!.id, scene_id: "0b4f5c2e-8d7a-4a51-9a51-8a7f3c1d2e10" },
-        multi_use: true,
-      });
+      expect(body.multi_use).toBe(true);
+      expect(body.layout.scene.name).toBe("Windows 98");
+      expect(body.layout.scene.settings?.isLayout).toBe(true);
+      expect(body.layout.scene).not.toHaveProperty("id");
     });
 
     it("rides the ESP32's claim code", async () => {
@@ -609,7 +604,7 @@ describe("AddFramePanel", () => {
       await act(async () => {
         fields = await flashProps.esp32!.claimFields!();
       });
-      expect(fields).toMatchObject({ layout: { scene_id: "0b4f5c2e-8d7a-4a51-9a51-8a7f3c1d2e10" } });
+      expect(fields).toMatchObject({ layout: { scene: { name: "Windows 98" } } });
     });
   });
 

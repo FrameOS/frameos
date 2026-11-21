@@ -12,19 +12,18 @@ const packStoreId = "2d6f7e4a-af9c-4c73-9c73-ac9f5e3f4a32";
 
 describe("readProvisioningLayoutBody", () => {
   it("reads the claim code's layout and tells absent from malformed", () => {
+    const desk = { name: "Desk", nodes: [], edges: [], settings: { isLayout: true } };
     expect(readProvisioningLayoutBody(undefined)).toBeUndefined();
     expect(readProvisioningLayoutBody(null)).toBeUndefined();
-    expect(
-      readProvisioningLayoutBody({ scene_id: layoutStoreId.toUpperCase(), layout_scene_id: "desk", state: { look: "x" } }),
-    ).toEqual({ layout: { sceneId: "desk", state: { look: "x" } }, storeSceneId: layoutStoreId });
-    expect(readProvisioningLayoutBody({ scene_id: layoutStoreId, layout_scene_id: "desk", state: {} })).toEqual({
-      layout: { sceneId: "desk" },
-      storeSceneId: layoutStoreId,
+    expect(readProvisioningLayoutBody({ scene: desk, state: { look: "x" } })).toEqual({
+      scene: desk,
+      state: { look: "x" },
     });
+    expect(readProvisioningLayoutBody({ scene: desk, state: {} })).toEqual({ scene: desk });
     expect(readProvisioningLayoutBody("desk")).toBe(false);
-    expect(readProvisioningLayoutBody({ scene_id: "not-a-uuid", layout_scene_id: "desk" })).toBe(false);
-    expect(readProvisioningLayoutBody({ scene_id: layoutStoreId })).toBe(false);
-    expect(readProvisioningLayoutBody({ scene_id: layoutStoreId, layout_scene_id: "desk", state: [] })).toBe(false);
+    expect(readProvisioningLayoutBody({ scene_id: layoutStoreId, layout_scene_id: "desk" })).toBe(false);
+    expect(readProvisioningLayoutBody({ scene: { ...desk, settings: {} } })).toBe(false);
+    expect(readProvisioningLayoutBody({ scene: desk, state: [] })).toBe(false);
   });
 
   it("tolerates whatever the column holds", () => {

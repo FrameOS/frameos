@@ -1,10 +1,8 @@
 import { MakeLogicType, actions, kea, key, listeners, path, props, reducers, selectors } from 'kea'
-import { v4 as uuidv4 } from 'uuid'
 
 import { LAYOUT_STARTERS } from '../../generated/layoutStarters'
 import type { LayoutStarter } from '../../generated/layoutStarters'
 import type { FrameScene, StateField } from '../../types'
-import { createCloudAccountScene } from '../../utils/cloudFrameApi'
 import {
   flashLayoutPick,
   flashLayoutScene,
@@ -14,6 +12,7 @@ import {
 } from '../../utils/flashLayout'
 import type { FlashLayoutPick } from '../../utils/flashLayout'
 import { sceneStateFields } from '../../utils/refreshInterval'
+import { withScenesAppPermissions } from '../../utils/sceneAccess'
 import { isDesktopLayout, layoutGroups, layoutScenes } from '../../utils/sceneLayouts'
 import type { LayoutGroup } from '../../utils/sceneLayouts'
 import { visiblePublicStateFields } from '../../utils/showIf'
@@ -255,32 +254,27 @@ export function flashLayoutSignature(pickerKey: string): string {
   return JSON.stringify(pick.kind === 'frame' ? [pick.sceneId, pick.state] : [pick.scene.name, pick.state])
 }
 
-/** What `POST /api/frames/claim-tokens` takes for a new cloud frame's layout: its scene in the account, the id it runs under, its settings. */
+/** What `POST /api/frames/claim-tokens` takes for a new cloud frame's layout: the starter as installed, and its settings. */
 export interface CloudProvisioningLayout {
-  scene_id: string
-  layout_scene_id: string
+  scene: Partial<FrameScene>
   state?: Record<string, any>
 }
 
 /**
- * FrameOS Cloud, a frame that does not exist yet: the chosen starter becomes
- * a private scene of the account (the same `POST /api/account/scenes` a
- * starter added in the workspace becomes on its first push), and the claim
- * code carries it. The cloud installs it, worn by every scene, when the frame
- * turns active (frame-provisioning.ts). `{}` for no layout.
+ * FrameOS Cloud, a frame that does not exist yet: the claim code carries the
+ * chosen starter, which the cloud saves as a private scene of the account
+ * (or reuses the copy an earlier flash of the same choice made) and installs,
+ * worn by every scene, when the frame turns active (provisioning-layout.ts).
+ * The cloud gives the copy its id. `{}` for no layout.
  */
-export async function cloudFlashLayoutClaimFields(pickerKey: string): Promise<{ layout?: CloudProvisioningLayout }> {
+export function cloudFlashLayoutClaimFields(pickerKey: string): { layout?: CloudProvisioningLayout } {
   const pick = flashLayoutPickFor(pickerKey)
   if (!pick || pick.kind !== 'starter') {
     return {}
   }
-  const copy = installedLayoutCopy(pick.scene, pick.state, uuidv4())
-  const sceneId = await createCloudAccountScene(copy.name || 'Layout', [copy])
+  // Saved the way every save leaves a scene: each JS app's permissions filled from its code.
+  const [{ id: _id, ...scene }] = withScenesAppPermissions([installedLayoutCopy(pick.scene, pick.state, '')])
   return {
-    layout: {
-      scene_id: sceneId,
-      layout_scene_id: copy.id,
-      ...(Object.keys(pick.state).length > 0 ? { state: { ...pick.state } } : {}),
-    },
+    layout: { scene, ...(Object.keys(pick.state).length > 0 ? { state: { ...pick.state } } : {}) },
   }
 }
