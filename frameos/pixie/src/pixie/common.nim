@@ -331,6 +331,11 @@ proc gray4ToRgbx*(level: uint8): ColorRGBX {.inline, raises: [].} =
   ## An opaque grey: 17 times the level, so 0 is black and 15 white.
   gray8ToRgbx(level * 17)
 
+template packRgb565*(r8, g8, b8: uint8): uint16 =
+  ## `rgbxToRgb565`'s arithmetic, for a loop that must not call it.
+  uint16((((r8.uint32 * 249 + 1014) shr 11) shl 11) or
+    (((g8.uint32 * 253 + 505) shr 10) shl 5) or ((b8.uint32 * 249 + 1014) shr 11))
+
 proc rgbxToRgb565*(c: ColorRGBX): uint16 {.inline, raises: [].} =
   ## Packs a premultiplied RGBX colour into 5/6/5, rounding each channel to
   ## nearest. Alpha is dropped; the premultiplied RGB is what survives, so a
@@ -341,22 +346,27 @@ proc rgbxToRgb565*(c: ColorRGBX): uint16 {.inline, raises: [].} =
   ## `round(v * 63 / 255)` for every byte, and they are idempotent with
   ## `rgb565ToRgbx`: expanding then re-packing a 565 value gives it back, so
   ## a read-modify-write that changes nothing changes nothing.
+  packRgb565(c.r, c.g, c.b)
+
+template expandRgb565*(p: uint16, r, g, b: untyped) =
+  ## The three channels `rgb565ToRgbx` gives, as uint32s named `r`, `g`, `b`
+  ## at the call site: for a loop that must not call it (an -O2 row store).
   let
-    r = (c.r.uint32 * 249 + 1014) shr 11
-    g = (c.g.uint32 * 253 + 505) shr 10
-    b = (c.b.uint32 * 249 + 1014) shr 11
-  uint16((r shl 11) or (g shl 5) or b)
+    pp = p.uint32
+    r5 = (pp shr 11) and 31
+    g6 = (pp shr 5) and 63
+    b5 = pp and 31
+    r = (r5 shl 3) or (r5 shr 2)
+    g = (g6 shl 2) or (g6 shr 4)
+    b = (b5 shl 3) or (b5 shr 2)
 
 proc rgb565ToRgbx*(p: uint16): ColorRGBX {.inline, raises: [].} =
   ## Expands a 5/6/5 pixel to an opaque RGBX colour, replicating the top bits
   ## into the low bits so 0 stays 0 and full scale stays 255.
-  let
-    r = (p.uint32 shr 11) and 31
-    g = (p.uint32 shr 5) and 63
-    b = p.uint32 and 31
-  result.r = ((r shl 3) or (r shr 2)).uint8
-  result.g = ((g shl 2) or (g shr 4)).uint8
-  result.b = ((b shl 3) or (b shr 2)).uint8
+  expandRgb565(p, r, g, b)
+  result.r = r.uint8
+  result.g = g.uint8
+  result.b = b.uint8
   result.a = 255
 
 proc readGray*(image: Image, index: int): ColorRGBX {.noinline, raises: [].} =
@@ -371,6 +381,26 @@ template getPixel*(image: Image, index: int): ColorRGBX =
   (if image.format == pfRgbx: image.pixels[index]
    elif image.format >= pfGray8: image.readGray(index)
    else: rgb565ToRgbx(image.pixels16[index]))
+
+template packRgb565Dithered*(r8, g8, b8: uint8, index: int): uint16 =
+  ## `rgbxToRgb565Dithered`'s arithmetic (the reasons are there), for a loop
+  ## that must not call it: the gradient's row store (paths.nim).
+  let
+    cell = (index.uint32 * 0x9E3779B1'u32) shr 28
+    off5 = cell.int - 8
+    off6 = (cell.int - 8) div 2
+  template pack5(v: uint8, off: int, dst: untyped) =
+    var dst = (v.uint32 * 249 + 1014) shr 11
+    if ((dst shl 3) or (dst shr 2)) != v.uint32:
+      dst = (clamp(v.int + off, 0, 255).uint32 * 249 + 1014) shr 11
+  template pack6(v: uint8, off: int, dst: untyped) =
+    var dst = (v.uint32 * 253 + 505) shr 10
+    if ((dst shl 2) or (dst shr 4)) != v.uint32:
+      dst = (clamp(v.int + off, 0, 255).uint32 * 253 + 505) shr 10
+  pack5(r8, off5, r5)
+  pack6(g8, off6, g6)
+  pack5(b8, off5, b5)
+  uint16((r5 shl 11) or (g6 shl 5) or b5)
 
 proc rgbxToRgb565Dithered*(c: ColorRGBX, index: int): uint16 {.inline, raises: [].} =
   ## `rgbxToRgb565` with a per-pixel rounding offset chosen by the pixel
@@ -396,27 +426,7 @@ proc rgbxToRgb565Dithered*(c: ColorRGBX, index: int): uint16 {.inline, raises: [
   # give offsets of -8..+7 eight-bit units (one 5-bit step is 8.2, one
   # 6-bit step 4.05, so the 6-bit offset is halved); the mean offset is
   # -0.5, well inside a step.
-  let
-    cell = (index.uint32 * 0x9E3779B1'u32) shr 28
-    off5 = cell.int - 8
-    off6 = (cell.int - 8) div 2
-  template pack5(v: uint8, off: int): uint32 =
-    let exact = ((v.uint32 * 249 + 1014) shr 11)
-    if ((exact shl 3) or (exact shr 2)) == v.uint32: exact
-    else:
-      let d = clamp(v.int + off, 0, 255).uint32
-      (d * 249 + 1014) shr 11
-  template pack6(v: uint8, off: int): uint32 =
-    let exact = ((v.uint32 * 253 + 505) shr 10)
-    if ((exact shl 2) or (exact shr 4)) == v.uint32: exact
-    else:
-      let d = clamp(v.int + off, 0, 255).uint32
-      (d * 253 + 505) shr 10
-  let
-    r = pack5(c.r, off5)
-    g = pack6(c.g, off6)
-    b = pack5(c.b, off5)
-  uint16((r shl 11) or (g shl 5) or b)
+  packRgb565Dithered(c.r, c.g, c.b, index)
 
 template greyRowStore*(image: Image, start: int, body: untyped) =
   ## Inside `body`, `store(luma)` and `backdrop()` address the pixel at `idx`,
