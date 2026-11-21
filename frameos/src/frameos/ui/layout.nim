@@ -2233,12 +2233,14 @@ proc ring(top: UiNode, input: var UiInput, regions: seq[UiRegion], w, h: float32
     let n = top.fieldIn(r.key)
     if not n.isNil and not n.src.isNil and n.src.attr("class").contains("focus:"):
       return
+    # Whole pixels, one clear of the element: a stroke edge on a half pixel
+    # is grey, which e-paper dithers into a checker.
     let
       t = if input.paper: 3'f32 else: 2'f32
-      x0 = clamp(r.visible[0] - 2, t / 2, w - t / 2)
-      y0 = clamp(r.visible[1] - 2, t / 2, h - t / 2)
-      x1 = clamp(r.visible[2] + 2, t / 2, w - t / 2)
-      y1 = clamp(r.visible[3] + 2, t / 2, h - t / 2)
+      x0 = clamp(round(r.visible[0]) - 1 - t / 2, t / 2, w - t / 2)
+      y0 = clamp(round(r.visible[1]) - 1 - t / 2, t / 2, h - t / 2)
+      x1 = clamp(round(r.visible[2]) + 1 + t / 2, t / 2, w - t / 2)
+      y1 = clamp(round(r.visible[3]) + 1 + t / 2, t / 2, h - t / 2)
     if x1 > x0 and y1 > y0:
       let node = SvgNode(tag: "rect", attrs: @[("x", num(x0)), ("y", num(y0)), ("width", num(x1 - x0)),
         ("height", num(y1 - y0)), ("rx", "4"), ("fill", "none"), ("stroke-width", num(t))])
