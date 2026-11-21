@@ -49,6 +49,29 @@ def test_the_workflow_builds_it():
     workflow = (REPO_ROOT / ".github" / "workflows" / "e2e-docker.yml").read_text()
     assert "tests/test_fos_scene_store.c" in workflow
     assert "tests/test_fos_scene_meta.c" in workflow
+    assert "tests/test_fos_scene_package.c" in workflow
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
+@pytest.mark.skipif(cjson_dir() is None, reason="no ESP-IDF checkout (IDF_PATH) for cJSON")
+def test_scene_package_host_tests_pass(tmp_path: Path):
+    """A scene package's scene whole again (docs/scene-packages.md)."""
+    cjson = cjson_dir()
+    assert cjson is not None
+    binary = tmp_path / "test_fos_scene_package"
+    compile_result = subprocess.run(
+        [
+            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-DFOS_SCENE_PACKAGE_NO_INFLATE",
+            "-I", str(MAIN_DIR), "-I", str(cjson), str(cjson / "cJSON.c"),
+            str(MAIN_DIR / "fos_scene_package.c"), str(MAIN_DIR / "tests" / "test_fos_scene_package.c"),
+            "-lm", "-o", str(binary),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert compile_result.returncode == 0, compile_result.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(shutil.which("cc") is None, reason="no C compiler on PATH")
@@ -59,9 +82,10 @@ def test_scene_store_host_tests_pass(tmp_path: Path):
     binary = tmp_path / "test_fos_scene_store"
     compile_result = subprocess.run(
         [
-            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2",
+            "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O2", "-DFOS_SCENE_PACKAGE_NO_INFLATE",
             "-I", str(MAIN_DIR), "-I", str(cjson),
-            str(cjson / "cJSON.c"), str(GUARD_SOURCE), str(META_SOURCE), str(SOURCE), str(TEST_SOURCE),
+            str(cjson / "cJSON.c"), str(GUARD_SOURCE), str(META_SOURCE), str(MAIN_DIR / "fos_scene_package.c"),
+            str(SOURCE), str(TEST_SOURCE),
             "-lm", "-o", str(binary),
         ],
         capture_output=True,
@@ -152,7 +176,7 @@ def test_a_pushed_payload_is_split_on_the_store_task():
     # asks again once the payload is pending, or it waits for the next pass.
     assert split.index("store_unlock()") < split.index("fos_client_render_now()")
     assert "store_split_stored()" in fns["store_task"]
-    for reader in ("load_scene_slot", "fos_scenes_read_scene_json"):
+    for reader in ("load_scene_slot", "fos_scenes_read_scene_json", "fos_scenes_read_scene_file"):
         body = fns[reader]
         assert body.index("s_store_changing") < body.index("slot"), f"{reader} reads a slot while it changes"
     select = fns["fos_scenes_apply_pending_selection"]

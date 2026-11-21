@@ -749,6 +749,12 @@ proc copyCompressedPayload(releaseDir, oldDir, compressedName, plainName: string
 
 proc copyScenePayloads(releaseDir, oldDir: string) =
   copyCompressedPayload(releaseDir, oldDir, "scenes.json.gz", "scenes.json")
+  # The deployed set as a package (docs/scene-packages.md), read before
+  # scenes.json.gz: carried over as it is.
+  if oldDir.len > 0 and fileExists(oldDir / "scenes.zip"):
+    writeFile(releaseDir / "scenes.zip", readCarriedRuntimeFile(oldDir / "scenes.zip"))
+  elif fileExists(releaseDir / "scenes.zip"):
+    removeFile(releaseDir / "scenes.zip")
 
 proc copyAdminSessionSaltForUpgrade*(releaseDir: string) =
   let targetSalt = releaseDir / "frame.json.admin_session_salt"

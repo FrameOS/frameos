@@ -171,7 +171,7 @@ int frameos_nim_load_scenes(const char *const *scenes, const size_t *lens, int c
  * can list and switch scenes while holding just one in memory. load_scene
  * makes exactly one resident, tearing down the previous one. */
 int frameos_nim_set_scene_catalog(const char *index_json);
-int frameos_nim_load_scene(const char *scene_json);
+int frameos_nim_load_scene(const char *scene, size_t len); /* its JSON, or a scene package */
 /* The next render was asked for (a render verb, the console, a button, the
  * schedule) rather than timed: every scene inside the current one runs, also
  * those whose own interval has not come round (frameos/scene_rhythm.nim).

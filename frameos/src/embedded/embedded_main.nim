@@ -723,15 +723,20 @@ proc fos_nim_request_fresh_pass_impl() {.exportc, cdecl.} =
   ## a button, the schedule): every embedded scene runs, due or not.
   rhythmRequestFreshPass()
 
-proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
+proc fos_nim_load_scene_impl(payload: cstring, len: csize_t): cint {.exportc, cdecl.} =
   ## Lazy path: make ONE scene resident, replacing whatever was live. The
   ## previous scene's QuickJS context and app instances are torn down first,
-  ## so holding twenty JS-heavy scenes costs the memory of one.
+  ## so holding twenty JS-heavy scenes costs the memory of one. `payload` is
+  ## the slot file's bytes: the scene's JSON, or a scene package (a ZIP,
+  ## docs/scene-packages.md), whose bytes are no C string.
   try:
     if payload == nil:
       return 0
     makeRoomForScenes(whole = false)
-    result = (if loadScene($payload): 1 else: 0).cint
+    var bytes = newString(len.int)
+    if len > 0:
+      copyMem(addr bytes[0], payload, len.int)
+    result = (if loadScene(move(bytes)): 1 else: 0).cint
     recoverEmergencyReserve("scene load")
   except Defect as e:
     log("loadScene failed (defect): " & e.msg)

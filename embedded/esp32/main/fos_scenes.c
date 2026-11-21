@@ -27,6 +27,7 @@
 #include "fos_events_gen.h"
 #include "fos_json_guard.h"
 #include "fos_mem.h"
+#include "fos_scene_package.h"
 #include "fos_scene_state.h"
 #include "fos_scene_store.h"
 #include "fos_store_scan.h"
@@ -1053,6 +1054,20 @@ char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
     return json;
 }
 
+/* A scene's file again, for the runtime to read an app's files from when an
+ * interpreter starts (docs/scene-packages.md: the parsed scene keeps none):
+ * fos_scenes_read_scene_json without its log lines, which would be one a JS
+ * app started. On the render task, from the slot cache when it has it. */
+char *fos_scenes_read_scene_file(const char *scene_id, size_t *out_len)
+{
+    if (s_store_changing) return NULL;
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) return NULL;
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    return read_slot_file(slot, path, out_len);
+}
+
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
     if (s_store_changing) return false; /* the apply after it loads the new set */
@@ -1068,7 +1083,7 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
         return false;
     }
     size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    int ok = frameos_nim_load_scene(json);
+    int ok = frameos_nim_load_scene(json, len);
     free(json);
     if (!ok) {
         log_scene_event("scenes:load", "error", origin, scene_id ? scene_id : "",
@@ -2082,8 +2097,16 @@ char *fos_scenes_get_json(const char *scene_id, size_t *out_len)
     if (out_len != NULL) *out_len = 0;
     if (mount_state() != ESP_OK) return NULL;
     store_lock();
-    char *json = fos_scene_store_read_scene(scene_id, out_len);
+    size_t len = 0;
+    char *json = fos_scene_store_read_scene(scene_id, &len);
     store_unlock();
+    if (json != NULL && fos_scene_package_is(json, len)) {
+        /* A package (docs/scene-packages.md): its scene whole, as JSON. */
+        char *whole = fos_scene_package_to_json(json, len, &len);
+        free(json);
+        json = whole;
+    }
+    if (out_len != NULL) *out_len = json != NULL ? len : 0;
     return json;
 }
 

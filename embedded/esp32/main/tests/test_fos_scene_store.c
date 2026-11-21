@@ -1319,6 +1319,86 @@ static void test_a_set_staged_as_it_arrives(void)
     cJSON_free(want_default);
 }
 
+
+/* A ZIP of stored members, as a plane writes a scene package (CRCs left 0:
+ * nothing on a frame checks them). */
+static char *stored_zip(const char *const *names, const char *const *datas, int count, size_t *out_len)
+{
+    size_t cap = 256;
+    for (int i = 0; i < count; i++) cap += 2 * (46 + strlen(names[i])) + strlen(datas[i]);
+    unsigned char *z = calloc(1, cap);
+    size_t at = 0, central = 0, offsets[16];
+    for (int i = 0; i < count; i++) {
+        size_t n = strlen(names[i]), d = strlen(datas[i]);
+        offsets[i] = at;
+        unsigned char h[30] = {0x50, 0x4b, 3, 4, 20};
+        h[18] = h[22] = (unsigned char)(d & 0xff); h[19] = h[23] = (unsigned char)(d >> 8);
+        h[26] = (unsigned char)n;
+        memcpy(z + at, h, 30); at += 30;
+        memcpy(z + at, names[i], n); at += n;
+        memcpy(z + at, datas[i], d); at += d;
+    }
+    central = at;
+    for (int i = 0; i < count; i++) {
+        size_t n = strlen(names[i]), d = strlen(datas[i]);
+        unsigned char h[46] = {0x50, 0x4b, 1, 2, 20, 0, 20};
+        h[20] = h[24] = (unsigned char)(d & 0xff); h[21] = h[25] = (unsigned char)(d >> 8);
+        h[28] = (unsigned char)n;
+        h[42] = (unsigned char)(offsets[i] & 0xff); h[43] = (unsigned char)(offsets[i] >> 8);
+        memcpy(z + at, h, 46); at += 46;
+        memcpy(z + at, names[i], n); at += n;
+    }
+    unsigned char e[22] = {0x50, 0x4b, 5, 6};
+    e[8] = e[10] = (unsigned char)count;
+    e[12] = (unsigned char)((at - central) & 0xff); e[13] = (unsigned char)((at - central) >> 8);
+    e[16] = (unsigned char)(central & 0xff); e[17] = (unsigned char)(central >> 8);
+    memcpy(z + at, e, 22); at += 22;
+    *out_len = at;
+    return (char *)z;
+}
+
+/* A scene package (docs/scene-packages.md) is kept as it came, its index
+ * entry read off its scene.json; one whose scene.json is not its first
+ * member, stored, is refused. */
+static void test_a_scene_package(void)
+{
+    fresh_dir();
+    const char *names[] = {"scene.json", "apps/clock/app.ts"};
+    const char *datas[] = {"{\"id\":\"p\",\"name\":\"Packaged\",\"refreshInterval\":60,\"apps\":{\"clock\":{}}}",
+                           "export function get() { return 1 }\n"};
+    size_t len = 0;
+    char *zip = stored_zip(names, datas, 2, &len);
+    fos_scene_store_put_t put = {zip, len};
+    fos_scene_store_change_t change = {.puts = &put, .put_count = 1};
+    fos_scene_store_result_t result;
+    CHECK(fos_scene_store_apply(&change, &result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(strcmp(result.first_put_id, "p") == 0);
+    cJSON *tree = fos_scene_store_read_index();
+    const cJSON *first = cJSON_GetArrayItem(cJSON_GetObjectItem(tree, "scenes"), 0);
+    CHECK(strcmp(cJSON_GetObjectItem(first, "name")->valuestring, "Packaged") == 0);
+    CHECK(cJSON_GetObjectItem(first, "refreshInterval")->valuedouble == 60);
+    cJSON_Delete(tree);
+    size_t stored_len = 0;
+    char *stored = fos_scene_store_read_scene("p", &stored_len);
+    CHECK(stored != NULL && stored_len == len && memcmp(stored, zip, len) == 0);
+    free(stored);
+
+    /* The same package again, in a whole set: kept, byte for byte. */
+    fos_scene_store_set_result_t set_result;
+    CHECK(fos_scene_store_apply_set(&put, 1, NULL, &set_result, NULL, NULL) == FOS_SCENE_STORE_OK);
+    CHECK(set_result.kept == 1 && set_result.written == 0);
+
+    const char *wrong_names[] = {"apps/clock/app.ts", "scene.json"};
+    const char *wrong_datas[] = {datas[1], datas[0]};
+    size_t wrong_len = 0;
+    char *wrong = stored_zip(wrong_names, wrong_datas, 2, &wrong_len);
+    fos_scene_store_put_t bad = {wrong, wrong_len};
+    fos_scene_store_change_t refused = {.puts = &bad, .put_count = 1};
+    CHECK(fos_scene_store_apply(&refused, &result, NULL, NULL) == FOS_SCENE_STORE_ERR_INVALID);
+    free(wrong);
+    free(zip);
+}
+
 int main(void)
 {
     snprintf(s_dir, sizeof(s_dir), "/tmp/fos_scene_store_%d", (int)getpid());
@@ -1347,6 +1427,7 @@ int main(void)
     test_a_whole_set_one_scene_at_a_time();
     test_a_whole_set_at_once_where_there_is_room();
     test_a_set_staged_as_it_arrives();
+    test_a_scene_package();
 
     fresh_dir();
     rmdir(s_dir);

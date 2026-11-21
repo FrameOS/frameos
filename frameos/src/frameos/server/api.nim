@@ -27,6 +27,8 @@ from frameos/scenes import getLastImagePng, getLastPublicState, getLastPublicSce
     getUploadedScenePayload, getDynamicSceneOptions
 from scenes/scenes import sceneOptions
 import ./embedded_assets
+import frameos/scene_package
+from frameos/utils/zip_entry import fileSource
 import ./state
 from ./auth import frameAdminAuthSnapshot
 
@@ -95,9 +97,13 @@ proc networkConfigJson*(): JsonNode =
   newJObject()
 
 proc activeScenesJsonPath*(): tuple[path: string, compressed: bool] =
+  ## The file the deployed scenes are read from: scenes.zip (a package,
+  ## docs/scene-packages.md) over scenes.json.gz over scenes.json.
   let configuredPath = getEnv("FRAMEOS_SCENES_JSON")
   if configuredPath.len > 0:
     return (path: configuredPath, compressed: configuredPath.endsWith(".gz"))
+  if fileExists(DeployedScenesPackage):
+    return (path: DeployedScenesPackage, compressed: false)
   if fileExists("./scenes.json.gz"):
     return (path: "./scenes.json.gz", compressed: true)
   if fileExists("./scenes.json"):
@@ -105,9 +111,21 @@ proc activeScenesJsonPath*(): tuple[path: string, compressed: bool] =
   (path: "./scenes.json.gz", compressed: true)
 
 proc loadScenePayload*(): JsonNode =
-  ## The frame's own (deployed) scenes as they are on disk; [] without any.
+  ## The frame's own (deployed) scenes as they are on disk, whole (a
+  ## package's app files back in its scenes); [] without any.
   var data = ""
   let source = activeScenesJsonPath()
+  if source.path.endsWith(".zip"):
+    try:
+      if dirExists(source.path):
+        return ScenePackage(folder: source.path).scenesOfPackage()
+      var f: File
+      if f.open(source.path):
+        defer: f.close()
+        return zipPackage(fileSource(f), source.path).scenesOfPackage()
+    except CatchableError:
+      discard
+    return %*[]
   try:
     if source.path.len > 0 and fileExists(source.path):
       data = if source.compressed: uncompress(readFile(source.path)) else: readFile(source.path)
@@ -472,10 +490,17 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
 proc persistScenesPayload*(scenes: JsonNode) =
   if scenes == nil or scenes.kind != JArray:
     return
-  let target = activeScenesJsonPath()
+  var target = activeScenesJsonPath()
+  if target.path.endsWith(".zip"):
+    # Scenes changed here are a scenes.json.gz from now on: the package goes,
+    # or it would go on being read in its place.
+    target = (path: "./scenes.json.gz", compressed: true)
   let prettyScenes = pretty(scenes, indent = 4) & "\n"
   let body = if target.compressed: compress(prettyScenes, dataFormat = dfGzip) else: prettyScenes
   writeTextFileAtomically(target.path, body)
+  if target.path != activeScenesJsonPath().path:
+    try: removeFile(DeployedScenesPackage)
+    except CatchableError: discard
 
 # The settings groups a cloud provider owns on a cloud-managed frame
 # (docs/cloud-frames.md, "Service settings"): exactly the sections of

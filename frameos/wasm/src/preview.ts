@@ -61,6 +61,10 @@ export interface FrameOSPreviewOptions {
   height: number
   /** The scenes to load — the parsed contents of a scenes.json. */
   scenes: FrameOSScene[]
+  /** Or a scene package's bytes (a ZIP of one scene, or a template zip of
+   * several: docs/scene-packages.md), loaded in place of `scenes` by a
+   * bundle that reads them. */
+  scenePackage?: Uint8Array
   /** Scene to select initially; defaults to the runtime's default scene. */
   sceneId?: string
   /** Public field values for that scene, set before its first render: what
@@ -278,6 +282,7 @@ export class FrameOSPreview {
       name: options.name || 'frameos-wasm preview',
       timeZone: options.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       scenesJson: JSON.stringify(options.scenes),
+      ...(options.scenePackage ? { scenePackage: options.scenePackage } : {}),
       settingsJson: JSON.stringify(options.settings ?? {}),
       proxyUrl: options.proxyUrl || '',
       proxyFirst: options.proxyFirst === true,

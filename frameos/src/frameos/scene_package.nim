@@ -18,6 +18,8 @@ when not defined(frameosEmbedded):
 import frameos/utils/zip_entry
 
 const
+  DeployedScenesPackage* = "./scenes.zip"
+    ## A Pi's deployed set as a package, read before scenes.json.gz.
   SceneFile* = "scene.json"
   TemplateFile* = "template.json"
   AppsFolder* = "apps"
@@ -182,12 +184,21 @@ proc appFiles(pkg: ScenePackage, paths: seq[string], folder: string): seq[tuple[
 
 proc appSourcesOf*(pkg: ScenePackage, folder, keyword: string): JsonNode =
   ## One app's files, {file: text}, read now; nil when the package has none.
-  ## What an interpreter is started from: nothing of it stays after.
-  for (owner, file, path) in pkg.appFiles(pkg.names(), folder):
-    if owner == keyword:
+  ## What an interpreter is started from: nothing of it stays after. The
+  ## names are only keys here (nothing is opened by them), so they are not
+  ## checked: a frame reads what its plane wrote.
+  let prefix = joinPath(folder, AppsFolder) & "/" & appFolderName(keyword) & "/"
+  for path in pkg.names():
+    if path.len > prefix.len and path.startsWith(prefix):
       if result.isNil:
         result = newJObject()
-      result[file] = %pkg.read(path)
+      result[path[prefix.len .. ^1]] = %pkg.read(path)
+
+proc storedSceneJson*(bytes: string): string =
+  ## A scene package's scene.json, out of its bytes in memory (an ESP32's
+  ## slot file; main/fos_scene_package.c is the store's half).
+  let src = memorySource(bytes)
+  readWhole(src, findMember(src, SceneFile))
 
 proc sceneOfPackage*(pkg: ScenePackage, scene: PackagedScene): JsonNode =
   ## The whole scene object, its app files back in `apps[*].sources` (files

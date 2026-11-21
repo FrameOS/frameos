@@ -1137,7 +1137,20 @@ async function init(msg) {
     } catch (e) {
       // older bundle without the export
     }
-    const loaded = call('frameos_wasm_load_scenes', 'number', ['string'], [msg.scenesJson])
+    // A scene package (a ZIP: docs/scene-packages.md) when the page has one
+    // and the bundle reads them, else the scenes as JSON.
+    let loaded = 0
+    if (msg.scenePackage instanceof Uint8Array && typeof Module._frameos_wasm_load_scene_package === 'function') {
+      const at = Module._malloc(msg.scenePackage.length)
+      try {
+        Module.HEAPU8.set(msg.scenePackage, at)
+        loaded = call('frameos_wasm_load_scene_package', 'number', ['number', 'number'], [at, msg.scenePackage.length])
+      } finally {
+        Module._free(at)
+      }
+    } else {
+      loaded = call('frameos_wasm_load_scenes', 'number', ['string'], [msg.scenesJson])
+    }
     if (!loaded) {
       throw new Error('no scenes loaded: ' + lastError())
     }

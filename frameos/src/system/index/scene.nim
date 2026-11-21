@@ -4,6 +4,8 @@ import std/monotimes
 import std/times
 import std/uri
 import zippy
+import frameos/scene_package
+from frameos/utils/zip_entry import fileSource
 from frameos/utils/system import systemHostname
 from frameos/cloud/device_flow import activeLinkCode
 
@@ -100,6 +102,24 @@ proc loadInterpretedSceneOptions(): seq[(SceneId, string)] =
         data = readFile(envPath)
     except CatchableError:
       data = ""
+  if data.len == 0 and envPath.len == 0 and fileExists(DeployedScenesPackage):
+    # A package (docs/scene-packages.md): each scene's scene.json, no app files.
+    try:
+      var f: File
+      if f.open(DeployedScenesPackage):
+        defer: f.close()
+        for scene in zipPackage(fileSource(f), DeployedScenesPackage).packagedScenes():
+          if scene.legacy:
+            data = scene.sceneJson
+            break
+          let parsed = parseJson(scene.sceneJson)
+          let idStr = parsed{"id"}.getStr()
+          if idStr.len > 0:
+            result.add((SceneId(idStr), parsed{"name"}.getStr(idStr)))
+        if data.len == 0:
+          return
+    except CatchableError:
+      return
   if data.len == 0:
     try:
       if fileExists("./scenes.json.gz"):
@@ -132,6 +152,7 @@ proc interpretedScenesKey(): string =
   let envPath = getEnv("FRAMEOS_SCENES_JSON")
   if envPath.len > 0:
     candidates.add(envPath)
+  candidates.add(DeployedScenesPackage)
   candidates.add("./scenes.json.gz")
   candidates.add("./scenes.json")
   var parts: seq[string] = @[]

@@ -72,7 +72,7 @@ extern bool fos_nim_set_scene_impl(const char *scene_id);
 extern bool fos_nim_scene_running_impl(const char *scene_id);
 extern int fos_nim_load_scenes_impl(const char *const *scenes, const size_t *lens, int count);
 extern int fos_nim_set_scene_catalog_impl(const char *index_json);
-extern int fos_nim_load_scene_impl(const char *scene_json);
+extern int fos_nim_load_scene_impl(const char *scene, size_t len);
 extern void fos_nim_request_fresh_pass_impl(void);
 extern void fos_nim_set_interactive_impl(int on);
 extern void fos_nim_canvas_forget_impl(void);
@@ -1068,9 +1068,9 @@ int frameos_nim_set_scene_catalog(const char *index_json)
     return result;
 }
 
-int frameos_nim_load_scene(const char *scene_json)
+int frameos_nim_load_scene(const char *scene, size_t len)
 {
-    if (!s_nim_ready || scene_json == NULL) return 0;
+    if (!s_nim_ready || scene == NULL) return 0;
     if (!nim_lock_take()) return 0;
     /* Guarded like the whole set: unguarded, a scene switch that did not fit
      * rebooted the frame from Nim's raiseOutOfMem. */
@@ -1078,7 +1078,7 @@ int frameos_nim_load_scene(const char *scene_json)
     nim_guard_note_free();
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
-        result = fos_nim_load_scene_impl(scene_json);
+        result = fos_nim_load_scene_impl(scene, len);
     } else {
         nim_oom_abort_note("scene load");
         result = 0;

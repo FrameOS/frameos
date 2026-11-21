@@ -13,6 +13,7 @@
 
 #include "fos_json_guard.h"
 #include "fos_scene_meta.h"
+#include "fos_scene_package.h"
 
 #define PATH_LEN 96
 
@@ -805,6 +806,8 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
     for (int i = 0; i < put_count && err == FOS_SCENE_STORE_OK; i++) {
         const char *json;
         size_t len;
+        const char *text = NULL; /* what is parsed: the JSON, or a package's scene.json */
+        size_t text_len = 0;
         const char *end;
         const cJSON *scene;
         cJSON *parsed = NULL;
@@ -817,12 +820,17 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
             len = json ? strlen(json) : 0;
             end = NULL;
         } else {
-            /* One scene parsed at a time: the peak is the largest scene. */
+            /* One scene parsed at a time: the peak is the largest scene. A
+             * package is stored as it came, read through its scene.json. */
             json = change->puts[i].json;
             len = change->puts[i].len;
             end = NULL;
-            if (len <= FOS_SCENE_STORE_MAX_BYTES && fos_json_depth_ok(json, len, FOS_JSON_MAX_DEPTH)) {
-                parsed = cJSON_ParseWithLengthOpts(json, len, &end, false);
+            text = json;
+            text_len = len;
+            if (fos_scene_package_is(json, len)) text = fos_scene_package_scene_json(json, len, &text_len);
+            if (text != NULL && len <= FOS_SCENE_STORE_MAX_BYTES &&
+                fos_json_depth_ok(text, text_len, FOS_JSON_MAX_DEPTH)) {
+                parsed = cJSON_ParseWithLengthOpts(text, text_len, &end, false);
             }
             scene = parsed;
         }
@@ -831,7 +839,7 @@ fos_scene_store_err_t fos_scene_store_apply(const fos_scene_store_change_t *chan
         bool ok = cJSON_IsObject(scene) && id[0] && strlen(id) < FOS_SCENE_STORE_ID_LEN &&
                   fresh_index(fresh, fresh_count, id) < 0;
         /* Only white space after it: one scene, whole. */
-        while (ok && end != NULL && end < json + len) ok = isspace((unsigned char)*end++);
+        while (ok && end != NULL && end < text + text_len) ok = isspace((unsigned char)*end++);
         int slot = pick_slot(&used);
         if (json == NULL) {
             err = FOS_SCENE_STORE_ERR_NO_MEMORY;
@@ -1063,12 +1071,14 @@ fos_scene_store_err_t fos_scene_store_apply_set(const fos_scene_store_put_t *put
         size_t len = puts[i].len;
         const char *end = NULL;
         cJSON *scene = NULL;
-        if (len <= FOS_SCENE_STORE_MAX_BYTES && fos_json_depth_ok(json, len, FOS_JSON_MAX_DEPTH)) {
-            scene = cJSON_ParseWithLengthOpts(json, len, &end, false);
+        size_t text_len = len;
+        const char *text = fos_scene_package_is(json, len) ? fos_scene_package_scene_json(json, len, &text_len) : json;
+        if (text != NULL && len <= FOS_SCENE_STORE_MAX_BYTES && fos_json_depth_ok(text, text_len, FOS_JSON_MAX_DEPTH)) {
+            scene = cJSON_ParseWithLengthOpts(text, text_len, &end, false);
         }
         const char *id = entry_id(scene);
         bool ok = cJSON_IsObject(scene) && id[0] && strlen(id) < FOS_SCENE_STORE_ID_LEN;
-        while (ok && end != NULL && end < json + len) ok = isspace((unsigned char)*end++);
+        while (ok && end != NULL && end < text + text_len) ok = isspace((unsigned char)*end++);
         for (int j = 0; ok && j < i; j++) ok = strcmp(ids[j], id) != 0;
         if (ok) {
             snprintf(ids[i], FOS_SCENE_STORE_ID_LEN, "%s", id);

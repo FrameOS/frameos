@@ -26,6 +26,8 @@ from frameos/ui/layout import uiClipboard, setUiClipboard, uiClipboardChanges
 from frameos/js_runtime/app_runtime import keepAppMemoryAcrossProcesses, keptAppMemory, restoreKeptAppMemory,
   urlImagesOneARender
 import frameos/interpreter
+import frameos/scene_package
+from frameos/utils/zip_entry import memorySource
 from frameos/layout_choice import chooseLayout
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -519,6 +521,20 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
     scenesLoadedCount.cint
   except Exception as e:
     setLastError("loadScenes failed: " & e.msg)
+    0
+
+proc frameos_wasm_load_scene_package(bytes: ptr char, len: cint): cint {.exportc, cdecl.} =
+  ## A scene package, or a set of them (a template zip): docs/scene-packages.md.
+  ## Its scenes whole, loaded as frameos_wasm_load_scenes loads a list: the
+  ## page holds them in memory anyway.
+  try:
+    var data = newString(max(0, len.int))
+    if len > 0:
+      copyMem(addr data[0], bytes, len.int)
+    let scenes = zipPackage(memorySource(data)).scenesOfPackage()
+    frameos_wasm_load_scenes(($scenes).cstring)
+  except Exception as e:
+    setLastError("loadScenePackage failed: " & e.msg)
     0
 
 proc frameos_wasm_set_save_assets(payloadJson: cstring): bool {.exportc, cdecl.} =

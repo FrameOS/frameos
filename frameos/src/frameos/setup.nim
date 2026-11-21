@@ -1,3 +1,5 @@
+import frameos/scene_package
+from frameos/utils/zip_entry import fileSource
 import std/[json, os, sets, strutils]
 import zippy
 import assets/apps as appsAsset
@@ -117,6 +119,13 @@ proc loadScenesPayload*(): JsonNode =
   let scenesPath = getEnv("FRAMEOS_SCENES_JSON")
   if scenesPath.len > 0 and fileExists(scenesPath):
     return readJsonFile(scenesPath)
+
+  if fileExists(DeployedScenesPackage):
+    # A package (docs/scene-packages.md): its scenes whole, apps' files in.
+    var f: File
+    if f.open(DeployedScenesPackage):
+      defer: f.close()
+      return zipPackage(fileSource(f), DeployedScenesPackage).scenesOfPackage()
 
   for path in ["./scenes.json.gz", "./scenes.json"]:
     if fileExists(path):

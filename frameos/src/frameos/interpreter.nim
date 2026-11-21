@@ -38,6 +38,8 @@ when not defined(frameosEmbedded):
   export cursor_shape
 from frameos/ui/theme import themeSource
 import frameos/utils/canvas_log
+import frameos/scene_package
+from frameos/utils/zip_entry import isZip, fileSource, memorySource
 from frameos/utils/svg_frames import takePanelRegion, forgetPanelRegions
 import frameos/events_gen
 import std/hashes
@@ -254,6 +256,15 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
     "path": result.path()
   })
 
+when not defined(frameosEmbedded):
+  var
+    sceneInitDepth {.threadvar.}: int
+    sceneFilesText {.threadvar.}: tuple[path, text: string]
+      ## While a scene instance is made (init): the JSON file its apps read
+      ## their files from, read and inflated once.
+
+proc appSourcesFromFiles*(files: SceneFiles, sceneId: SceneId, keyword: string): JsonNode
+
 proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
   if scene of InterpretedFrameScene:
     let apps = InterpretedFrameScene(scene).apps
@@ -263,17 +274,41 @@ proc appSourcesFromSceneApps(scene: FrameScene, keyword: string): JsonNode =
         return app["sources"]
   nil
 
+proc appSourcesFromSceneFiles(scene: FrameScene, keyword: string): JsonNode =
+  ## The app's files read again from where its scene came from (a package,
+  ## the scene's JSON on disk, an ESP32's slot): docs/scene-packages.md.
+  if scene of InterpretedFrameScene:
+    # Only for an app the scene names (a built-in one is in no file).
+    let interpreted = InterpretedFrameScene(scene)
+    let source = interpreted.source
+    if not source.isNil and source.files.kind != sfResident and
+        not interpreted.apps.isNil and interpreted.apps.kind == JObject and interpreted.apps.hasKey(keyword):
+      return appSourcesFromFiles(source.files, scene.id, keyword)
+  nil
+
+proc appSourcesFor(scene: FrameScene, node: DiagramNode, keyword: string): JsonNode =
+  ## Where an app's files are, in order: the node's own (an inline app), the
+  ## scene's `apps` while it keeps them, the scene's files.
+  result = node.data{"sources"}
+  if not hasJsAppSource(result):
+    result = appSourcesFromSceneApps(scene, keyword)
+  if not hasJsAppSource(result):
+    result = appSourcesFromSceneFiles(scene, keyword)
+
 proc initInterpretedApp(keyword: string, node: DiagramNode, scene: FrameScene): AppRoot =
-  var sources = node.data{"sources"}
-  if not hasJsAppSource(sources):
-    sources = appSourcesFromSceneApps(scene, keyword)
+  var sources = appSourcesFor(scene, node, keyword)
   if not hasJsAppSource(sources):
     # A scene still on disk from before this runtime dropped a built-in app
     # (data/immich): run the JavaScript app that replaced it. Linux only —
     # see frameos/retired_apps.nim.
     sources = retiredAppSources(keyword)
+    if hasJsAppSource(sources):
+      return initDynamicJsApp(keyword, node, scene, sources)
   if hasJsAppSource(sources):
-    return initDynamicJsApp(keyword, node, scene, sources)
+    # Compiled and let go: an interpreter that starts again (after a
+    # teardown, or memory running short) reads its files again.
+    let reload = proc (): JsonNode = appSourcesFor(scene, node, keyword)
+    return initDynamicJsApp(keyword, node, scene, sources, reload)
   initApp(keyword, node, scene)
 
 proc setInterpretedAppField(keyword: string, app: AppRoot, field: string, value: Value) =
@@ -1847,7 +1882,7 @@ proc anInterval(scene: FrameScene, key: string, value: JsonNode): JsonNode {.noi
   else:
     value
 
-proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
+proc initScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     persistedState: JsonNode): FrameScene =
   var exportedScene: ExportedInterpretedScene
   if uploadedScenes.hasKey(sceneId):
@@ -1995,6 +2030,23 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
 # -------------------------
 # Events / rendering
 # -------------------------
+
+
+proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
+    persistedState: JsonNode): FrameScene =
+  ## A scene instance. Its apps read their files as they start; a JSON file
+  ## on disk they share (a Pi's scenes.json.gz) is read once for all of them
+  ## and let go after (sceneFilesText).
+  when not defined(frameosEmbedded):
+    inc sceneInitDepth
+    try:
+      result = initScene(sceneId, frameConfig, logger, persistedState)
+    finally:
+      dec sceneInitDepth
+      if sceneInitDepth == 0:
+        sceneFilesText = ("", "")
+  else:
+    result = initScene(sceneId, frameConfig, logger, persistedState)
 
 proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode) =
   if payload.isNil or payload.kind != JObject: return
@@ -2834,7 +2886,25 @@ proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.n
       if openValue(s, i, '{'):
         result.add(read(s, i))
 
-proc readScene(s: string, i: var int): FrameSceneInput =
+proc readAppsWithoutFiles(s: string, i: var int): JsonNode =
+  ## `apps` with every app's `sources` passed over, never built: the scene
+  ## reads them again from its files when an interpreter starts
+  ## (docs/scene-packages.md).
+  if not openValue(s, i, '{'):
+    return nil
+  result = newJObject()
+  while moreItems(s, i, '}'):
+    let keyword = readKey(s, i)
+    if openValue(s, i, '{'):
+      let app = newJObject()
+      while moreItems(s, i, '}'):
+        let key = readKey(s, i)
+        if key == "sources": skipValue(s, i)
+        else: app[key] = readJson(s, i)
+      result[keyword] = app
+
+proc readScene(s: string, i: var int, withFiles: bool): FrameSceneInput =
+  ## `withFiles`: the apps' files stay in `apps` (sfResident).
   result = FrameSceneInput()
   while moreItems(s, i, '}'):
     case readKey(s, i)
@@ -2842,7 +2912,7 @@ proc readScene(s: string, i: var int): FrameSceneInput =
     of "name": result.name = readText(s, i)
     of "nodes": result.nodes = readList(s, i, readNode)
     of "edges": result.edges = readList(s, i, readEdge)
-    of "apps": result.apps = readJson(s, i)
+    of "apps": result.apps = if withFiles: readJson(s, i) else: readAppsWithoutFiles(s, i)
     of "fields": result.fields = readList(s, i, readField)
     of "settings": result.settings = if openValue(s, i, '{'): readSettings(s, i) else: nil
     of "origin": result.origin = readJson(s, i)
@@ -2850,6 +2920,90 @@ proc readScene(s: string, i: var int): FrameSceneInput =
     of "eventMap", "event_map": result.eventMap = readJson(s, i)
     of "layout": result.layout = readJson(s, i)
     else: skipValue(s, i)
+
+proc appSourcesInObject(s: string, i: var int, sceneId, keyword: string, found: var JsonNode): bool =
+  ## Inside an object of a scene JSON (one scene, or an upload's
+  ## `{"scenes": [...]}`): the `sources` of app `keyword` when this object is
+  ## scene `sceneId`, read and nothing else built. True once found.
+  var id = ""
+  var sources: JsonNode = nil
+  while moreItems(s, i, '}'):
+    let key = readKey(s, i)
+    if key == "id":
+      id = readText(s, i)
+    elif key == "scenes" and openValue(s, i, '['):
+      while moreItems(s, i, ']'):
+        if openValue(s, i, '{') and appSourcesInObject(s, i, sceneId, keyword, found):
+          return true
+    elif key == "apps" and openValue(s, i, '{'):
+      while moreItems(s, i, '}'):
+        if readKey(s, i) == keyword and openValue(s, i, '{'):
+          while moreItems(s, i, '}'):
+            if readKey(s, i) == "sources": sources = readJson(s, i)
+            else: skipValue(s, i)
+        else:
+          skipValue(s, i)
+    else:
+      skipValue(s, i)
+  if id == sceneId and not sources.isNil:
+    found = sources
+    return true
+
+proc appSourcesInJson*(text, sceneId, keyword: string): JsonNode =
+  ## One app's files out of a scene JSON on disk: a list of scenes, one
+  ## scene, or an upload (`{"scenes": [...]}`). nil when it has none.
+  var i = 0
+  eatSpace(text, i)
+  if i >= text.len:
+    return nil
+  if text[i] == '[':
+    inc i
+    while moreItems(text, i, ']'):
+      if openValue(text, i, '{') and appSourcesInObject(text, i, sceneId, keyword, result):
+        return
+  elif text[i] == '{':
+    inc i
+    discard appSourcesInObject(text, i, sceneId, keyword, result)
+
+var sceneFileReader*: proc (sceneId: SceneId): string {.nimcall, gcsafe.}
+  ## The host's file of a scene (sfHost), its bytes; "" for none. An ESP32's
+  ## slot file (embedded_runtime.nim), from the slot cache when it has it.
+
+proc appSourcesFromFiles*(files: SceneFiles, sceneId: SceneId, keyword: string): JsonNode =
+  ## One app's files ({file: text}) read now from where its scene came from;
+  ## nil when they are not there. Nothing of them stays: an interpreter
+  ## compiles them and lets them go (app_runtime.ensureReady).
+  try:
+    case files.kind
+    of sfResident:
+      return nil
+    of sfJson:
+      when not defined(frameosEmbedded):
+        if sceneFilesText.path != files.path:
+          let raw = readFile(files.path)
+          let text = if files.path.endsWith(".gz"): uncompress(raw) else: raw
+          if sceneInitDepth == 0:
+            return appSourcesInJson(text, sceneId.string, keyword)
+          sceneFilesText = (files.path, text)
+        return appSourcesInJson(sceneFilesText.text, sceneId.string, keyword)
+    of sfPackage:
+      when not defined(frameosEmbedded):
+        if dirExists(files.path):
+          return ScenePackage(folder: files.path).appSourcesOf(files.folder, keyword)
+        var f: File
+        if not f.open(files.path):
+          return nil
+        defer: f.close()
+        return zipPackage(fileSource(f), files.path).appSourcesOf(files.folder, keyword)
+    of sfHost:
+      if sceneFileReader.isNil:
+        return nil
+      let bytes = sceneFileReader(sceneId)
+      if bytes.isZip():
+        return zipPackage(memorySource(bytes)).appSourcesOf("", keyword)
+      return appSourcesInJson(bytes, sceneId.string, keyword)
+  except CatchableError:
+    return nil
 
 # -------------------------
 # Scene registry (loader)
@@ -2866,6 +3020,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     nodes: scene.nodes,
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
+    files: scene.files,
     stateFields: refresh.fields,
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
     # The installed copy's rules as they came; nil when there are none, so
@@ -2902,38 +3057,57 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     backgroundColor: settings.backgroundColor
   )
 
-proc parseInterpretedSceneInputs*(data: string): seq[FrameSceneInput] =
-  ## scenes.json, an array of scenes ("Reading scenes.json" above).
+proc parseInterpretedSceneInputs*(data: string, files = SceneFiles()): seq[FrameSceneInput] =
+  ## scenes.json, an array of scenes ("Reading scenes.json" above). `files`:
+  ## where the apps' files are read again; anything but sfResident leaves
+  ## them out of the scenes.
   if data == "":
     return @[]
   var i = 0
   expectChar(data, i, '[') # anything but a list refuses the payload
   while moreItems(data, i, ']'):
     if openValue(data, i, '{'):
-      result.add(readScene(data, i))
+      let scene = readScene(data, i, files.kind == sfResident)
+      scene.files = files
+      result.add(scene)
 
-proc parseInterpretedSceneInput*(data: string): seq[FrameSceneInput] =
+proc parseInterpretedSceneInput*(data: string, files = SceneFiles()): seq[FrameSceneInput] =
   ## ONE scene object, as an ESP32 keeps each scene in a file of its own:
   ## read in place, where wrapping it in brackets for the list reader was a
   ## second copy of the whole scene in one block, at the moment a scene
   ## switch has the least room (the reTerminal E1003's switch storm,
-  ## 2026-11-15). Anything but an object is no scene.
+  ## 2026-11-15). Anything but an object is no scene. A scene package's
+  ## bytes (a ZIP: docs/scene-packages.md) are read through its scene.json.
+  if data.isZip():
+    return parseInterpretedSceneInput(storedSceneJson(data), files)
   var i = 0
   if openValue(data, i, '{'):
-    result.add(readScene(data, i))
+    let scene = readScene(data, i, files.kind == sfResident)
+    scene.files = files
+    result.add(scene)
   eatSpace(data, i)
   if i < data.len:
     raise newException(jsony.JsonError, "Unexpected text after the scene at offset " & $i)
+
+proc parsePackagedSceneInputs*(pkg: ScenePackage, path: string): seq[FrameSceneInput] =
+  ## Every scene of a package (a Pi's scenes.zip or scenes folder), each
+  ## parsed from its scene.json, its apps' files left in the package.
+  for scene in pkg.packagedScenes():
+    if scene.legacy:
+      # A package from before scene folders: its scenes.json, sources in it.
+      result.add parseInterpretedSceneInputs(scene.sceneJson, SceneFiles(kind: sfResident))
+    else:
+      result.add parseInterpretedSceneInput(scene.sceneJson,
+        SceneFiles(kind: sfPackage, path: path, folder: scene.folder))
 
 proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
   result = initTable[SceneId, ExportedInterpretedScene]()
   for scene in scenes:
     result[scene.id] = buildInterpretedSceneExport(scene)
 
-proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedScene] =
-  ## The deployed scenes (scenes.json), and their order (sceneOrderSnapshot).
+proc buildDeployedScenes(scenes: seq[FrameSceneInput]): Table[SceneId, ExportedInterpretedScene] =
+  ## The deployed scenes, and their order (sceneOrderSnapshot).
   result = initTable[SceneId, ExportedInterpretedScene]()
-  let scenes = parseInterpretedSceneInputs(data)
   deployedSceneOrder = @[]
   if scenes.len == 0:
     return
@@ -2943,6 +3117,10 @@ proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedSc
       deployedSceneOrder.add(scene.id)
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
+
+proc parseInterpretedScenes*(data: string, files = SceneFiles()): Table[SceneId, ExportedInterpretedScene] =
+  ## The deployed scenes (scenes.json), and their order (sceneOrderSnapshot).
+  buildDeployedScenes(parseInterpretedSceneInputs(data, files))
 
 type InterpretedScenesLoadError* = object of CatchableError
   ## The scene payload on disk could not be read. Named so the fatal-startup
@@ -2965,8 +3143,13 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
     if configuredFile.endsWith(".gz") and fileExists(configuredFile):
       sourcePath = configuredFile
       compressed = true
-    elif fileExists(configuredFile):
+    elif fileExists(configuredFile) or (configuredFile.endsWith(".zip") and dirExists(configuredFile)):
       sourcePath = configuredFile
+  elif fileExists(DeployedScenesPackage):
+    # The deployed set as a package (docs/scene-packages.md): each scene's
+    # scene.json parsed, its apps' files left in the ZIP until an
+    # interpreter starts.
+    sourcePath = DeployedScenesPackage
   elif fileExists("./scenes.json.gz"):
     sourcePath = "./scenes.json.gz"
     compressed = true
@@ -2977,6 +3160,24 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
     when compileOption("threads"):
       deployedScenesDigest = ""
     return initTable[SceneId, ExportedInterpretedScene]()
+
+  if sourcePath.endsWith(".zip"):
+    try:
+      if dirExists(sourcePath):
+        result = buildDeployedScenes(parsePackagedSceneInputs(ScenePackage(folder: sourcePath), sourcePath))
+      else:
+        var f: File
+        if not f.open(sourcePath):
+          raise newException(IOError, "cannot open it")
+        defer: f.close()
+        result = buildDeployedScenes(parsePackagedSceneInputs(zipPackage(fileSource(f), sourcePath), sourcePath))
+    except CatchableError as e:
+      raise newException(InterpretedScenesLoadError,
+        "The scenes on this frame are corrupt: " & sourcePath & " could not be read: " &
+        e.msg & ". Deploy the frame again.")
+    when compileOption("threads"):
+      deployedScenesDigest = if dirExists(sourcePath): "" else: getMD5(readFile(sourcePath))
+    return
 
   let encoded =
     try:
@@ -2997,7 +3198,9 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
       encoded
 
   try:
-    result = parseInterpretedScenes(decoded)
+    # Each app's files are read again from this file when its interpreter
+    # starts (appSourcesFromFiles): the parsed scenes keep none of them.
+    result = parseInterpretedScenes(decoded, SceneFiles(kind: sfJson, path: sourcePath))
   except CatchableError as e:
     raise newException(InterpretedScenesLoadError,
       "The scenes on this frame are corrupt: " & sourcePath & " could not be parsed: " &

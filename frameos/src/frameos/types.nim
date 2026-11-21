@@ -548,6 +548,19 @@ type
     render*: proc (self: FrameScene, context: ExecutionContext): Image
     init*: proc (sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene
 
+  SceneFilesKind* = enum
+    ## Where a scene's app files are read again when an interpreter starts
+    ## (docs/scene-packages.md): the parsed scene keeps none of them.
+    sfResident ## in the scene's `apps` (nowhere to read them again: the browser preview)
+    sfJson     ## a JSON file at `path`: a scenes.json(.gz), state/uploaded.json
+    sfPackage  ## a scene package: a ZIP or a folder at `path`, the scene in `folder`
+    sfHost     ## the host's file of the scene, by id (an ESP32's slot: sceneFileReader)
+
+  SceneFiles* = object
+    kind*: SceneFilesKind
+    path*: string
+    folder*: string
+
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
   ExportedInterpretedScene* = ref object of ExportedScene
     name*: string
@@ -556,7 +569,8 @@ type
     refreshInterval*: float
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
-    apps*: JsonNode
+    apps*: JsonNode ## its apps without their files, unless `files` is sfResident
+    files*: SceneFiles ## where its apps' files are
     stateFields*: seq[StateField] # all state fields, including private ones
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
     eventMap*: JsonNode ## see FrameScene.eventMap
@@ -624,6 +638,7 @@ type
     nodes*: seq[DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
+    files*: SceneFiles ## where its apps' files are (sfResident: in `apps`)
     fields*: seq[StateField]
     settings*: FrameSceneSettings
     ## Template provenance the editor/cloud writes ({href, storeSceneId, version}); nil when absent.
