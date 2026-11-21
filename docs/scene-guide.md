@@ -814,8 +814,9 @@ SVG"; in a JS app, "No image provided"): `svg` (with a `viewBox`), `g`,
   `CascadiaMono`, `ComicRelief`, `Galindo-Regular`, `Peralta-Regular` (all
   `.ttf`), plus the fonts people upload. A `fontFamily` matches them
   loosely ("PT Sans" finds `PTSans-Regular.ttf`); an unknown one falls back to
-  the default face. On an ESP32, text always uses the built-in Ubuntu
-  face, whatever the family says.
+  the default face. On an ESP32 the fonts are the ones on its SD card, read
+  a page at a time, so naming several costs it little; a board without a
+  card has only the built-in Ubuntu face.
 
 ## Layout and color
 

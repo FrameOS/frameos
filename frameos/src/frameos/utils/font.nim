@@ -73,21 +73,28 @@ const FileFacesMax = 128
   ## open, by name: each is its tables' places and its path, a few hundred
   ## bytes; the one used longest ago goes first.
 
-var fileFaces: OrderedTable[string, Typeface]
-var refusedFonts: Table[string, bool] = initTable[string, bool]()
+var fileFaces: seq[(string, Typeface)]
+  ## By name, the one used last at the end. A list, not a table: there are
+  ## few, and a table's code is a kilobyte of an ESP32's flash.
+var refusedFonts: seq[string] ## the names refuseFont has spoken of
 
 proc refuseFont(font: string, reason: string, extra: JsonNode = nil) =
   ## Say why exactly once per font name: a scene that names a missing font
   ## renders every interval, and one line per render is a log that cannot be
   ## read.
-  if refusedFonts.hasKey(font):
+  if font in refusedFonts:
     return
-  refusedFonts[font] = true
+  if refusedFonts.len >= 64:
+    refusedFonts.delete(0)
+  refusedFonts.add font
   var payload = %*{"event": "font:fallback", "font": font, "reason": reason}
   if extra != nil:
     for key, value in extra.pairs:
       payload[key] = value
-  log(payload)
+  try:
+    log(payload) # the SVG hook that gets here raises nothing (an ESP32's log may)
+  except Exception:
+    discard
 
 proc fileTypeface*(font: string, assetsPath: string): Typeface =
   ## The font file `font` in the frame's fonts folder, read where it lies
@@ -99,12 +106,14 @@ proc fileTypeface*(font: string, assetsPath: string): Typeface =
   if assetsPath.len == 0 or not fontNameOk(font):
     return nil
   withLock typefaceLock:
-    let kept = fileFaces.getOrDefault(font)
-    if kept != nil and not kept.isStale:
-      # Used now: to the end of the order, the last to go.
-      fileFaces.del(font)
-      fileFaces[font] = kept
-      return kept
+    for i in 0 ..< fileFaces.len:
+      if fileFaces[i][0] == font:
+        let kept = fileFaces[i][1]
+        fileFaces.delete(i)
+        if kept.isStale:
+          break # its file changed: open it again
+        fileFaces.add (font, kept) # used now: the last to go
+        return kept
   let fontPath = assetsPath & "/fonts/" & font
   if not fileExists(fontPath):
     refuseFont(font, "not on this frame")
@@ -112,13 +121,12 @@ proc fileTypeface*(font: string, assetsPath: string): Typeface =
   try:
     let face = openTypefaceFile(fontPath)
     withLock typefaceLock:
-      fileFaces.del(font)
-      while fileFaces.len >= FileFacesMax:
-        for oldest in fileFaces.keys:
-          fileFaces.del(oldest)
-          break
-      fileFaces[font] = face
-    refusedFonts.del(font)
+      if fileFaces.len >= FileFacesMax:
+        fileFaces.delete(0)
+      fileFaces.add (font, face)
+    let refused = refusedFonts.find(font)
+    if refused >= 0:
+      refusedFonts.delete(refused)
     return face
   except CatchableError as error:
     refuseFont(font, "could not be read in place", %*{"error": error.msg})

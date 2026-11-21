@@ -779,6 +779,17 @@
   pixie's `fontformats/indexedfont.nim`): after `generate_embedded_font.py`
   run `tools/generate_indexed_font.py` (its `--check` is in the backend
   suite), and never inflate a face whole into RAM on a device again.
+  **The SD card's fonts are TrueType files read where they lie**
+  (`docs/esp32-fonts.md`, pixie's `fontformats/filefont.nim`, `fileTypeface`
+  in `utils/font.nim`): a face open is a few hundred bytes, its bytes come a
+  512-byte page at a time through the render thread's page cache and its
+  three memo tables (`fileFontPages`, `fontPageSlots`), the file is closed
+  after each render (`releaseFontFiles`), and they read, set and draw as
+  pixie's whole parse does (`test_file_font.nim` runs every shipped font):
+  change a rule in `opentype.nim` and in `filefont.nim` together. What is not
+  TrueType outlines is converted off the frame (`tools/font_for_card.py`),
+  never parsed on it. The glyph budget grows with the board's PSRAM
+  (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events

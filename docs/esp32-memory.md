@@ -351,9 +351,12 @@ and bitmap rows (−1.2 KB, a popcount a pair) were measured and left. Text sets
 identically: the reader's advances, kerning and outlines are the TrueType
 font's, command for command (`test_indexed_font.nim`; the generator's
 `--check` replays the same in Python in the backend suite). A face from the
-SD card is still a TTF parsed whole (≤ 1 MB, one at a time, 3 MB headroom):
-reading those in place (by `pread`, the kerning built in RAM) is the next
-step, and needs nothing from either control plane, which sync raw TTFs.
+SD card was still a TTF parsed whole (≤ 1 MB, one at a time, 3 MB headroom)
+until 2026-11-20: now each is read in place, a 512-byte page at a time, its
+kerning searched in GPOS where it lies, any number of them at once, with
+nothing from either control plane, which sync raw TTFs (docs/esp32-fonts.md:
+a few hundred bytes a face open, a 22.5 KB page cache made when the first
+card font draws, and the whole OpenType parser out of the image, −32.7 KB).
 
 ## Gradient fills paint in strips (2026-08-24)
 

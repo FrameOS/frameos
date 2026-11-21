@@ -233,8 +233,12 @@ proc bytes(font: FileFont, at, len: int): string =
 proc tagAt(font: FileFont, at: int): uint32 =
   font.u32(at).uint32
 
-proc tag(s: string): uint32 =
+proc tagOf(s: string): uint32 =
   (s[0].uint32 shl 24) or (s[1].uint32 shl 16) or (s[2].uint32 shl 8) or s[3].uint32
+
+template tag(s: static string): uint32 =
+  const t = tagOf(s) # made by the compiler, not at each comparison
+  t
 
 proc readPairTables(font: FileFont, list: int) =
   ## The pair positioning subtables (lookup type 2, as opentype.nim reads

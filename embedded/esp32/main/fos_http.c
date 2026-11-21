@@ -2147,7 +2147,7 @@ static esp_err_t asset_file_get_handler(httpd_req_t *req)
  * face by fetching it, and "Sync fonts" only makes sense against a device that
  * can say which fonts it now has. Fonts the renderer actually uses are loaded
  * from the same directory (frameos/src/frameos/utils/font.nim, embedded
- * branch), one parsed face at a time.
+ * branch), each read where it lies, any number at once (docs/esp32-fonts.md).
  */
 #define FOS_FONTS_DIR "fonts"
 #define FOS_FONTS_MAX_ENTRIES 200
