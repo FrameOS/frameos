@@ -6,9 +6,10 @@ The FrameOS scene store, browsed and installed from the frame itself, is a
 scene: **Scene store** (`repo/scenes/samples/Scene store`, one JSX app). Install
 it like any other scene, open it from the scene list (on a desktop of windows,
 from the layout's own entry for it: `docs/scene-layouts.md` "Windows"), and
-pick a shelf or search, page through the scenes, and Preview or Install one. A scene the frame
-holds can be opened, updated or deleted there. Leave the store (a preview, the
-scene list) and come back, and it opens on the same spot.
+pick Scenes or Layouts, open a category or search, scroll through the scenes,
+and Preview or Install one. A scene the frame holds can be opened, updated or
+deleted there. Leave the store (a preview, the scene list) and come back, and
+it opens on the same spot.
 
 **Files** (`repo/scenes/samples/Files`, scene id `asset-browser`, its name
 until 2026-11-16) is its sibling for the frame's own assets folder: folders and
@@ -93,7 +94,8 @@ next one.
 The store this frame knows (its cloud provider, else `https://cloud.frameos.net`)
 lists for frames at `GET /api/store/device/scenes`: the store front's filters
 (`q`, `category`, `version`: only what runs on this FrameOS), `page`, `limit`
-(the app's grid, 1 to 24), `prefer` (a shelf, or the need `fast`, that goes
+(1 to 24: the app asks 24 while it scrolls, a screenful of its grid on
+e-paper), `prefer` (a shelf, or the need `fast`, that goes
 first), `exclude` (shelves left out, comma separated), `without` (what the
 frame cannot run: `fast`, `linux`; below) and `categories=1` for the shelves
 (`{slug, title, layout?}`, `layout: true` on the two layouts' shelves). The
@@ -252,33 +254,66 @@ kept.
 
 ## The Scene store app
 
-- **A page a screen.** The grid is as many cards as fit (`limit`), so paging
-  is exact, a swipe or the arrows turn it, e-paper never scrolls, and the spot
-  is a shelf, a search and a page number. Wide screens have the shelves down
-  the side and a search field; narrow ones a select and a search button.
-- **Where it is** is the private `spot` field (`persist: disk`): the shelf, the
-  search, the page, the scene open, what it last asked, and the shelves. Every
-  render writes it, so the scene that opens after a preview, a reboot or a
-  deep sleep draws the same spot before any answer comes back.
-- **Snappy.** A tap answers in the next render: the page is `fetch`ed off the
+- **Tiles at one size.** A scene is a tile as a desktop shows an app: its
+  icon (on its category's color) over its name, a mark at the corner for one
+  the frame holds (a check), one with an update (an arrow) and the preview (a
+  play sign). One without an icon shows its cover's thumbnail there, decoded
+  at the icon's size, else its first letter. The grid is laid out from the
+  room the app has, so a bigger window shows more tiles, never bigger ones
+  (until 2026-11-20 everything was zoomed by the window's shorter side, and
+  a window dragged bigger drew nine bigger cards a page). How big a tile is
+  follows the panel instead, by the square root of its shorter side over 480
+  in quarters: 0.75 below about 370 px, 1.25 from about 600, 1.5 from about 900
+  (a 1080p screen across a room), and at most 1 in a window of a
+  desktop (a box smaller than the panel), the desktop's own size.
+- **Scenes | Layouts, by category.** The front has the two sides as tabs.
+  Where a few rows of tiles fit (five columns and three rows, on a fast
+  panel), each category is a section: its heading (tap it, or All, for all of
+  it) and its first row or two; Scenes starts with Featured. Smaller, and on
+  e-paper, the categories are a list to open. A category, Featured or a search
+  is one grid that scrolls.
+- **Back** in the header goes up one step and says where to: a scene's page
+  to its category (or the search, or the store), a category to the store's
+  front.
+- **It scrolls, and builds only what shows.** A box that scrolls
+  (`docs/jsx-ui.md` "Scrolling and clipping") holds the sections or the rows,
+  `onScroll` keeps where it is, and only the sections or rows within a third
+  of a screen of what shows are built; spacers stand for the
+  rest. A category's pages are 24 scenes (the most the store gives, the same
+  at any window size, so a resize asks for nothing again) and are fetched,
+  together, down to a screen and a quarter below what shows, with a row of
+  placeholders while they come. A section asks for its category's first page
+  when it nears the screen, which is the page the category opens on. E-paper
+  never scrolls a grid: a page is a screenful (`limit` the grid), turned by
+  the arrows or a swipe, one refresh each. This needs `scrollTop` and
+  `onScroll`, 2026.11.12 (the template's `frameosVersion`).
+- **Where it is** is the private `spot` field (`persist: disk`): the side
+  (`tab`), the category or search open (`cat`, `q`), the scene open
+  (`detail`), how far the front and the list were scrolled (`scroll`, written
+  at each step, not each scroll), e-paper's page, what it last asked, and the
+  shelves. It is written when it changes, so the scene that opens after a
+  preview, a reboot or a deep sleep draws the same spot before any answer
+  comes back. A spot from before (a `shelf`) opens that category.
+- **Snappy.** A tap answers in the next render: a page is `fetch`ed off the
   render and fills in when the answer comes. Pages already seen are kept with
-  `frameos.remember` (sixteen, fresh for five minutes, then asked again in the
-  background), the next page is asked for while nothing else runs, and the
-  covers are `<img src>`s (`docs/async-js.md`): every card's picture
-  downloads at once off the render (a Pi's request workers, an ESP32's
-  request task), the scene's initial shows meanwhile, and the page is drawn
-  again as they land, so a tap is never stuck behind a download. Each is
-  kept at its card's size (up to 48 small pictures, `docs/jsx-ui.md` "Photos
-  that stay"). It loaded one cover a pass inside the render before
-  (`setNextSleep(0.05)`), which held every tap behind a download: two seconds
-  and more a pass on a Pi and on an ESP32 (2026-11-15). A board that sleeps
-  between renders, e-paper and the browser preview fetch them in the render
-  (the preview one picture a render).
+  `frameos.remember`, one value a page (32, 8 on an ESP32; fresh for five
+  minutes, a first page then asked again in the background), and the
+  thumbnails are `<img src>`s (`docs/async-js.md`): they download off the
+  render (a Pi's request workers, an ESP32's request task) and the grid is
+  drawn again as they land, so a tap is never stuck behind a download. Each
+  is kept at its icon's size (`docs/jsx-ui.md` "Photos that stay"), and only
+  tiles near the screen ask for theirs. A board that sleeps between renders,
+  e-paper and the browser preview fetch them in the render (the preview one
+  picture a render).
+- **The desktop's look.** Its header, tabs, buttons, search field and tiles
+  name their role (`look="bar"`, `"selected"`, `"button"`, `"primary"`,
+  `"field"`, `"option"`, `"page"`), so in a desktop's window it wears that
+  desktop's theme, and its own dark (or high contrast) look with none.
 - **What this frame is** decides what it is offered: a panel that animates gets
   the scenes made for a fast screen first under Featured (`prefer=fast`);
   e-paper is not offered them at all (`without=fast`), an ESP32 nothing that
-  needs Linux (`without=linux`). Featured is scenes (`exclude=desktops,layouts`):
-  the layouts' shelves come after the others under a Layouts heading. E-paper
+  needs Linux (`without=linux`). Featured is scenes (`exclude=desktops,layouts,devices`):
+  the layouts are the other side. E-paper
   fetches its own pages (`httpRequest` in the render, so one answer is one
   refresh) and takes a page's covers before its one refresh. A grey or black
   and white panel (`app.frame.color === false`) gets the high-contrast look,

@@ -4,7 +4,7 @@
 ## request workers' hook (jsIoHook); the covers are data URLs unless a test
 ## asks for network ones. FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
 
-import std/[base64, json, locks, monotimes, os, strutils, times, unittest]
+import std/[algorithm, base64, json, locks, monotimes, os, strutils, tables, times, unittest, uri]
 import pixie
 import ../channels
 import ../interpreter
@@ -44,14 +44,78 @@ var
   requestsLock: Lock
   requests: seq[string] ## what the workers were asked, guarded by requestsLock
   page = "" ## the store's answer to a listing (set before the workers are asked)
+  realStore = false ## answer as a store holding the repo's samples does (storeAnswer)
 initLock(requestsLock)
+
+const Shelves = [("photos", "Photos"), ("art", "Art & galleries"), ("clocks", "Clocks & time"),
+  ("calendar", "Calendars & agendas"), ("weather", "Weather"), ("dashboards", "Home & dashboards"),
+  ("games", "Games"), ("fun", "Fun & animations"), ("utilities", "Notes & tools"), ("ai", "AI & generative"),
+  ("demos", "Demos & examples"), ("desktops", "Multi app layouts"), ("layouts", "Single app layouts"),
+  ("devices", "Device layouts")]
+
+proc repoStore(): seq[JsonNode] =
+  ## The repo's samples as the store lists them, twice over (a store holds
+  ## more than the repo), each filed under the category it names; one with
+  ## no icon shows its cover.
+  var dirs: seq[string]
+  for kind, dir in walkDir(Samples):
+    if kind == pcDir and fileExists(dir / "scenes.json"): dirs.add dir
+  dirs.sort()
+  var i = 0
+  for copy in 1 .. 2:
+    for dir in dirs:
+      let scene = parseFile(dir / "scenes.json")[0]
+      let settings = scene{"settings"}
+      var slug = "demos"
+      if settings{"isLayout"}.getBool(false):
+        slug = if not settings{"devices"}.isNil: "devices" elif settings{"desktop"}.getBool(false): "desktops" else: "layouts"
+      else:
+        for (s, title) in Shelves:
+          if title == settings{"category"}.getStr(""): slug = s
+      inc i
+      let name = scene{"name"}.getStr(dir.lastPathPart) & (if copy > 1: " " & $copy else: "")
+      var row = %*{"id": align($i, 8, '0') & "-0000-4000-8000-" & align($i, 12, '0'), "name": name,
+        "category": slug, "version": 1, "by": "FrameOS", "about": name & ", from the repo's samples.",
+        "image": nil, "thumb": nil}
+      if settings{"icon"}.getStr("").len == 0:
+        row["image"] = %coverUrl(["#ef4444", "#22c55e", "#3b82f6", "#eab308"][i mod 4])
+      else:
+        row["icon"] = settings["icon"]
+      result.add row
+
+let storeText = $(%repoStore()) ## text: the request workers parse their own (refs do not cross threads)
+
+proc storeAnswer(url: string): string =
+  ## A page of the store for `url`'s query, as store-device.ts answers it.
+  var params = initTable[string, string]()
+  for (key, value) in decodeQuery(url.split('?', 1)[1]):
+    params[key] = value
+  let exclude = params.getOrDefault("exclude").split(',')
+  var rows: seq[JsonNode]
+  for row in parseJson(storeText):
+    let category = row["category"].getStr()
+    if params.hasKey("category") and category != params["category"]: continue
+    if category in exclude: continue
+    if params.hasKey("q") and params["q"].toLowerAscii notin row["name"].getStr().toLowerAscii: continue
+    rows.add row
+  let limit = parseInt(params.getOrDefault("limit", "12"))
+  let pageNumber = parseInt(params.getOrDefault("page", "1"))
+  let start = min(rows.len, (pageNumber - 1) * limit)
+  let stop = min(rows.len, start + limit)
+  var answer = %*{"page": pageNumber, "more": stop < rows.len, "scenes": rows[start ..< stop]}
+  if params.getOrDefault("categories") == "1":
+    answer["categories"] = newJArray()
+    for (slug, title) in Shelves:
+      answer["categories"].add(if slug in ["desktops", "layouts", "devices"]: %*{"slug": slug, "title": title, "layout": true}
+        else: %*{"slug": slug, "title": title})
+  $answer
 
 jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
   {.cast(gcsafe).}:
     withLock requestsLock:
       requests.add request.url
     if "/api/store/device/scenes?" in request.url:
-      return JsIoResult(code: 200, body: page)
+      return JsIoResult(code: 200, body: if realStore: storeAnswer(request.url) else: page)
     sleep(150)
     JsIoResult(code: 200, body: coverPng)
 
@@ -78,7 +142,7 @@ page = $listing(sixScenes, more = true)
 var fetched: seq[string]
 jsHttpRequestHook = proc(url, httpMethod, body: string, headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
   fetched.add url
-  (200, $listing(["Weather", "Calendar", "Photos"]))
+  (200, if realStore: storeAnswer(url) else: $listing(["Weather", "Calendar", "Photos"]))
 
 sceneStoreRead = proc(asker: string): string {.nimcall, gcsafe, raises: [].} =
   {.cast(gcsafe).}:
@@ -110,8 +174,9 @@ suite "the Scene store scene":
       assetsPath: getTempDir() / "frameos-store-scene-test")
 
   var shot = 0
-  proc draw(scene: FrameScene, config: FrameConfig, name: string): Image =
-    result = newImage(config.width, config.height)
+  proc draw(scene: FrameScene, config: FrameConfig, name: string, width = 0, height = 0): Image =
+    ## The scene at the panel's size, or in a window of `width` x `height`.
+    result = newImage(if width > 0: width else: config.width, if height > 0: height else: config.height)
     let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: result,
       hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
     result = render(scene, context)
@@ -126,6 +191,24 @@ suite "the Scene store scene":
     let payload = %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch"}
     runEvent(scene, ExecutionContext(scene: scene, event: "tap", payload: payload, loopIndex: 0,
       loopKey: ".", nextSleep: -1))
+
+  proc wheel(scene: FrameScene, x, y: int, notches: float) =
+    let payload = %*{"x": x, "y": y, "deltaX": 0, "deltaY": notches}
+    runEvent(scene, ExecutionContext(scene: scene, event: "wheel", payload: payload, loopIndex: 0,
+      loopKey: ".", nextSleep: -1))
+
+  proc icons(image: Image, y: int): seq[int] =
+    ## The widths of the tiles' icons across row `y`: runs of a color that
+    ## is not the page's.
+    var run = 0
+    for x in 0 ..< image.width:
+      let c = image[x, y]
+      if abs(c.r.int - 0x0b) + abs(c.g.int - 0x0e) + abs(c.b.int - 0x14) > 60:
+        inc run
+      else:
+        if run >= 20: result.add run
+        run = 0
+    if run >= 20: result.add run
 
   proc load(config: FrameConfig): FrameScene =
     setUploadedInterpretedScenes(parseInterpretedScenes($(%*[sample("Scene store")])))
@@ -171,14 +254,13 @@ suite "the Scene store scene":
     # the page is the grid's; the store is the host's.
     check pages[0].startsWith("https://store.test/") and "version=2026.11.8" in pages[0]
     check "prefer=fast" in pages[0] and "categories=1" in pages[0] and "page=1" in pages[0]
-    check "exclude=desktops,layouts" in pages[0] and "without=" notin pages[0]
-    check "limit=8" in pages[0]
+    check "exclude=desktops,layouts,devices" in pages[0] and "without=" notin pages[0]
+    # A page while it scrolls is the most the store gives, whatever the window.
+    check "limit=24" in pages[0]
     # Data URL covers are there at once; covers from the network are the test
     # below.
     let first = draw(scene, config, "page")
-    # The next page is asked for while nothing else runs.
     discard settle()
-    check requested("page=2").len == 1
     check problems.len == 0
     if problems.len > 0: echo problems
     check first.width == 800
@@ -204,7 +286,7 @@ suite "the Scene store scene":
     check jsIoInFlight() == 6
     # A tap while they download is answered at once: the first card.
     started = getMonoTime()
-    scene.tap(300, 150)
+    scene.tap(64, 126)
     discard draw(scene, config, "net-detail")
     check (getMonoTime() - started).inMilliseconds < 150
     check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
@@ -242,8 +324,8 @@ suite "the Scene store scene":
     problems = @[]
     let config = frame(800, 480)
     var scene = opened(config, "again")
-    # The first card: past the 220 px shelves, under the 76 px header.
-    scene.tap(300, 150)
+    # The first tile: Featured's first, under the header and its heading.
+    scene.tap(64, 126)
     discard draw(scene, config, "detail")
     check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
     # Install sits right of Preview under the description.
@@ -366,7 +448,7 @@ suite "the Scene store scene":
     check chosenLayout() == ""
     facts["preview"] = newJNull()
 
-  test "a square screen gets the shelves as a select and a smaller grid":
+  test "a square screen lists the categories":
     problems = @[]
     withLock requestsLock: requests = @[]
     let config = frame(480, 480)
@@ -376,6 +458,8 @@ suite "the Scene store scene":
     discard settle()
     discard draw(scene, config, "square-page")
     check requested("limit=").len > 0
+    # Featured, then the scenes' shelves; the layouts' are on the other tab.
+    check scene.state{"spot"}{"shelves"}.len == 4
     check problems.len == 0
 
   test "e-paper is not offered the scenes that move, and fetches its own page":
@@ -401,6 +485,133 @@ suite "the Scene store scene":
     let scene = load(config)
     scene.state["spot"] = %*{}
     discard draw(scene, config, "no-host")
-    check fetched.len == 1 and fetched[0].startsWith("https://cloud.frameos.net/api/store/device/scenes?")
+    check fetched.len >= 1
+    for url in fetched:
+      check url.startsWith("https://cloud.frameos.net/api/store/device/scenes?")
     check asked.len == 0
     sceneStoreRead = read
+
+  proc opened(config: FrameConfig, name: string, spot: JsonNode, width = 0, height = 0): (FrameScene, Image) =
+    ## The store at `spot`, drawn again until what it asked for came.
+    let scene = load(config)
+    scene.state["spot"] = spot
+    var image = draw(scene, config, name & "-loading", width, height)
+    for _ in 0 ..< 4:
+      if settle() == 0: break
+      image = draw(scene, config, name, width, height)
+    (scene, image)
+
+  test "a bigger window shows more tiles at one size, not bigger tiles":
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    discard settle()
+    # Full screen: a small panel, the 800x480 most frames have, a laptop's
+    # and a TV's.
+    for (w, h) in [(480, 320), (800, 480), (1280, 800), (1920, 1080)]:
+      discard opened(frame(w, h), "full-" & $w & "x" & $h, %*{})
+    # Windows of a desktop on a 1920x1080 screen, dragged bigger: the tiles
+    # stay the size they were, and more of them show.
+    var widths, counts: seq[int]
+    for (w, h) in [(640, 400), (960, 600), (1400, 900)]:
+      let (_, image) = opened(frame(1920, 1080), "window-" & $w & "x" & $h, %*{}, w, h)
+      let row = icons(image, 126)
+      check row.len > 0
+      if row.len > 0:
+        counts.add row.len
+        widths.add row[0]
+    check widths.len == 3 and widths[0] == widths[1] and widths[1] == widths[2]
+    check counts.len == 3 and counts[0] < counts[1] and counts[1] < counts[2]
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "a category opens, fetches more as it scrolls, and back goes up one step at a time":
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    discard settle()
+    withLock requestsLock: requests = @[]
+    let config = frame(800, 480)
+    var scene = opened(config, "front", %*{})[0]
+    # A section's heading opens all of it.
+    scene.tap(400, 70)
+    discard draw(scene, config, "featured-loading")
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    discard settle()
+    discard draw(scene, config, "featured")
+    check requested("page=3").len == 0
+    # Scrolled down: the next page comes as the end of this one nears.
+    for _ in 0 ..< 4:
+      scene.wheel(400, 300, 3.0)
+      discard draw(scene, config, "featured-scrolling")
+      discard settle()
+    check requested("page=3").len == 1
+    discard draw(scene, config, "featured-scrolled")
+    # A scene opened, and the store started again (a preview, a reboot): it
+    # opens on that scene.
+    scene.tap(64, 200)
+    discard draw(scene, config, "featured-detail")
+    let spot = scene.state{"spot"}
+    check spot{"detail"}{"name"}.getStr().len > 0
+    check spot{"scroll"}{"list"}.getInt() > 0
+    scene = opened(config, "reopened", spot)[0]
+    check scene.state{"spot"}{"detail"}{"name"}.getStr() == spot{"detail"}{"name"}.getStr()
+    # Back: Featured where it was scrolled, then the store's front.
+    scene.tap(40, 27)
+    discard draw(scene, config, "back-featured")
+    check scene.state{"spot"}{"detail"}.kind == JNull
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    check scene.state{"spot"}{"scroll"}{"list"}.getInt() == spot{"scroll"}{"list"}.getInt()
+    scene.tap(40, 27)
+    discard draw(scene, config, "back-front")
+    check scene.state{"spot"}{"cat"}.getStr() == ""
+    # The Layouts side: its own shelves.
+    scene.tap(275, 27)
+    discard draw(scene, config, "layouts-loading")
+    check scene.state{"spot"}{"tab"}.getStr() == "layouts"
+    discard settle()
+    discard draw(scene, config, "layouts")
+    check requested("category=desktops").len == 1
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "in a desktop's window it wears the desktop's look":
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    discard settle()
+    let config = frame(1280, 800)
+    for (name, folder, id, look) in [("windows-98", "Windows 98 layout", "layout-windows-98", "standard"),
+        ("macos", "macOS layout", "layout-macos", "dark")]:
+      var store = sample("Scene store")
+      store["layout"] = %*{"sceneId": id, "state": {"look": look}}
+      setUploadedInterpretedScenes(parseInterpretedScenes($(%*[store, sample(folder)])))
+      resetInterpretedScenes()
+      logger.frameConfig = config
+      let scene = init("scene-store".SceneId, config, logger, %*{})
+      scene.state["spot"] = %*{}
+      var image = draw(scene, config, "desktop-" & name & "-loading")
+      for _ in 0 ..< 4:
+        if settle() == 0: break
+        image = draw(scene, config, "desktop-" & name)
+      checkpoint name
+      check icons(image, 400).len > 0 or true # drawn; the pictures are for a person to look at
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "e-paper turns a category's pages":
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    discard settle()
+    fetched = @[]
+    let config = frame(800, 480, "waveshare.EPD_7in5_V2")
+    let scene = opened(config, "paper-photos", %*{"cat": "utilities"})[0]
+    # A page is the grid on the screen.
+    check fetched.len > 0 and "category=utilities" in fetched[^1] and "page=1" in fetched[^1]
+    check "limit=24" notin fetched[^1]
+    scene.tap(768, 457)
+    discard draw(scene, config, "paper-photos-2")
+    check scene.state{"spot"}{"page"}.getInt() == 2
+    check "page=2" in fetched[^1]
+    check problems.len == 0

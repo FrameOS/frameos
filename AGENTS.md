@@ -327,7 +327,7 @@
   beside the page's scenes, and the page's scene select follows the runtime
   (the worker's `sceneInfo`).
 - Browsing is the app's own `fetch` of the store's listing for frames
-  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer=fast` / `without=fast,linux`
+  (`/api/store/device/scenes`, from the host's `url`; 24 a page while it scrolls and a screenful on e-paper, `prefer=fast` / `without=fast,linux`
   from what the scene needs, `frontend/src/utils/sceneNeeds.ts`, never a category). A layout is tried: a `preview` with
   `show: false` and then the frame's own layout choice (`storeAction('layout')`, `app_runtime.nim`); Keep installs it
   around every scene (doc section "Trying a layout"). The store front's first split is Scenes | Layouts; a layout's
