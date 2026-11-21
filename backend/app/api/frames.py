@@ -1790,9 +1790,9 @@ async def dispatch_frame_event(db: Session, redis: Redis, frame: Frame, event: s
     if event == "uploadScenes" and isinstance(body, dict):
         # Preview-on-frame: the editor's scenes as this frame's runtime reads
         # them (utils/retired_apps.py).
-        from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+        from app.utils.retired_apps import frame_runtime_version, scenes_for_frame
 
-        body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
+        body = {**body, "scenes": scenes_for_frame(scenes, frame_runtime_version(frame))}
     # For a thin client without the queue (the Pico) these only ask it to
     # render now: the change is already in the store its pull reads (above).
     # A board that does not answer (asleep on battery, between networks)
@@ -1909,9 +1909,9 @@ async def api_frame_upload_scenes(
     _validate_upload_scenes_payload(scenes, scene_id)
     # The editor's scenes, as this frame's runtime has to receive them (an
     # older one gets data/immich back: utils/retired_apps.py).
-    from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+    from app.utils.retired_apps import frame_runtime_version, scenes_for_frame
 
-    body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
+    body = {**body, "scenes": scenes_for_frame(scenes, frame_runtime_version(frame))}
     try:
         await _forward_frame_request(
             frame, redis, path="/uploadScenes", method="POST", json_body=body

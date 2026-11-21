@@ -829,7 +829,9 @@ proc loadScene*(payload: string, alongside = false): bool =
   ## Returns false and leaves the runtime scene-less on a bad payload — the
   ## caller (fos_scenes.c) logs and keeps the previous file on flash, so a
   ## corrupt scene cannot take the frame down permanently.
-  let inputs = parseInterpretedSceneInput(payload)
+  # Its apps' files stay in its slot (sfHost): read again from there when an
+  # interpreter starts.
+  let inputs = parseInterpretedSceneInput(payload, SceneFiles(kind: sfHost))
   if inputs.len == 0:
     log("loadScene: payload contained no scene")
     return false
@@ -905,6 +907,22 @@ proc loadEmbeddedScene(sceneId: SceneId): bool {.nimcall.} =
     cFree(json)
 
 sceneLoader = loadEmbeddedScene
+
+proc fos_scenes_read_scene_file(sceneId: cstring, outLen: ptr csize_t): cstring {.importc, cdecl.}
+
+proc readSceneFile(sceneId: SceneId): string {.nimcall, gcsafe.} =
+  ## interpreter.sceneFileReader: a scene's slot file again, for an
+  ## interpreter that starts to read its app's files from.
+  var len: csize_t
+  let bytes = fos_scenes_read_scene_file(sceneId.string.cstring, len.addr)
+  if bytes.isNil:
+    return ""
+  result = newString(len.int)
+  if len > 0:
+    copyMem(addr result[0], bytes, len.int)
+  cFree(bytes)
+
+sceneFileReader = readSceneFile
 
 proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
   ## The scene switcher's tiles: the catalog (names and ids off flash, in

@@ -33,6 +33,7 @@ from fastapi import Depends, Header, Path, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.utils.retired_apps import keep_app_test_files
 from app.api.panel_scenes import PANEL_ACTIONS_PER_15_MIN, _active_scene, _frame_from_bearer, _refused, _save, _show
 from app.database import get_db
 from app.models.frame import Frame
@@ -238,6 +239,8 @@ async def _save_scene(body: dict[str, Any], frame: Frame, db: Session, redis: Re
         for key in KEPT_KEYS:
             if key in old:
                 scene[key] = old[key]
+        # The frame was sent the scene without its apps' tests: they stay.
+        scene = keep_app_test_files(scene, old)
         scenes = [scene if entry is old else entry for entry in saved]
         line = f"Changed on the frame's screen: {scene.get('name') or scene['id']}"
     else:

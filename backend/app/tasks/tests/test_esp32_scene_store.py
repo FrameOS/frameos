@@ -152,7 +152,7 @@ def test_a_pushed_payload_is_split_on_the_store_task():
     # asks again once the payload is pending, or it waits for the next pass.
     assert split.index("store_unlock()") < split.index("fos_client_render_now()")
     assert "store_split_stored()" in fns["store_task"]
-    for reader in ("load_scene_slot", "fos_scenes_read_scene_json"):
+    for reader in ("load_scene_slot", "fos_scenes_read_scene_json", "fos_scenes_read_scene_file"):
         body = fns[reader]
         assert body.index("s_store_changing") < body.index("slot"), f"{reader} reads a slot while it changes"
     select = fns["fos_scenes_apply_pending_selection"]

@@ -36,7 +36,7 @@ import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
-import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
+import { scenesForFrame } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
@@ -2082,7 +2082,7 @@ export async function buildScenesPayloadForFrame(
     // assignment row across versions, never part of the published bytes.
     // ...and the layout that install wears, written on as `layout` the same
     // way (scene-layouts.ts).
-    const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
+    const stamped = scenesForFrame(
       withSceneLayouts(
         withSceneEventMaps(
           withStoreSceneOrigin(
@@ -2185,7 +2185,7 @@ export async function publicStoreSceneForFrame(
   if (extracted.bytes > maxScenesPayloadBytes) {
     return { error: "scenes_payload_too_large" };
   }
-  const scenes = (frameHardwareIsEsp32(frame) ? scenesForEmbeddedRuntime : scenesForRuntime)(
+  const scenes = scenesForFrame(
     withStoreSceneOrigin(
       extracted.scenes,
       { id: storeSceneId, slug: scene.slug, version: versionRow.version },

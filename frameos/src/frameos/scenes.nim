@@ -343,6 +343,10 @@ var
   lastPersistedSceneId: Option[SceneId] = none(SceneId)
   uploadedScenePayloadLock: Lock
   uploadedScenePayload {.guard: uploadedScenePayloadLock.} = ""
+  # The uploaded set is state/uploaded.json's: read from there when asked
+  # for, not held in memory (its apps' files are megabytes, and the scenes
+  # read them from there too).
+  uploadedScenePayloadOnDisk {.guard: uploadedScenePayloadLock.} = false
   # Runtime origin of the uploaded scene set: "cloud" when the payload came in
   # over the provider's set_scenes verb (hub_client stamps it, the payload is
   # persisted verbatim so the stamp survives reboots), "" for local admin
@@ -356,9 +360,11 @@ var
 # hub_client, which imports this module. Registered by startCloudManagement.
 var uploadedScenesChangedHook*: proc() {.gcsafe.} = nil
 
-proc setUploadedScenePayload*(payload: string) =
+proc setUploadedScenePayload*(payload: string, onDisk = false) =
+  ## `onDisk`: the payload is state/uploaded.json's `scenes`, read from there.
   withLock uploadedScenePayloadLock:
-    uploadedScenePayload = payload
+    uploadedScenePayload = if onDisk: "" else: payload
+    uploadedScenePayloadOnDisk = onDisk
 
 proc setUploadedScenesSource(source: string) =
   withLock uploadedScenePayloadLock:
@@ -376,10 +382,20 @@ proc cloudUploadedScenesResident*(): bool =
     isCloud
 
 proc getUploadedScenePayload*(): JsonNode =
+  var onDisk = false
   withLock uploadedScenePayloadLock:
-    if uploadedScenePayload.len == 0:
-      return %*[]
-    return parseJson(uploadedScenePayload)
+    onDisk = uploadedScenePayloadOnDisk
+    if not onDisk:
+      if uploadedScenePayload.len == 0:
+        return %*[]
+      return parseJson(uploadedScenePayload)
+  try:
+    let scenes = parseJson(readTextFile(UPLOADED_SCENES_JSON_PATH)){"scenes"}
+    if not scenes.isNil and scenes.kind == JArray:
+      return scenes
+  except CatchableError:
+    discard
+  %*[]
 
 proc prunePublicStates*(droppedSceneIds: seq[SceneId], mainSceneId: SceneId) =
   ## Forget the public state of scenes the frame no longer holds; the scene
@@ -506,9 +522,18 @@ proc updateUploadedScenesFromPayload*(
   # nim json -> jsony -> FrameSceneInput
   # clunky but works...
   let payloadString = $scenePayload
-  let sceneInputs = parseInterpretedSceneInputs(payloadString)
+  # The apps' files stay in state/uploaded.json, which holds this set from
+  # here on (written below, or read from at boot), and an interpreter reads
+  # them from there when it starts.
+  let sceneInputs = parseInterpretedSceneInputs(payloadString,
+    SceneFiles(kind: sfJson, path: UPLOADED_SCENES_JSON_PATH))
   if sceneInputs.len == 0:
     return (none(SceneId), @[])
+  # On disk before the scenes are registered: their apps read their files
+  # from it.
+  if persistPayload:
+    payload[DEPLOYED_SCENES_KEY] = %deployedScenesFingerprint()
+    writeTextFile(UPLOADED_SCENES_JSON_PATH, $payload)
 
   let newScenes = buildInterpretedScenes(sceneInputs)
   var oldUploaded = initTable[SceneId, ExportedInterpretedScene]()
@@ -516,7 +541,7 @@ proc updateUploadedScenesFromPayload*(
     oldUploaded = uploadedScenes
   updateUploadedScenes(newScenes)
   setUploadedSceneOrder(sceneInputs.mapIt(it.id))
-  setUploadedScenePayload(payloadString)
+  setUploadedScenePayload(payloadString, onDisk = true)
   setUploadedScenesSource(payloadSource)
   # The LAN-deny policy keys on the recorded source; recompute it now rather
   # than on the next hub tick (the hub thread idles on a demoted frame).
@@ -530,10 +555,6 @@ proc updateUploadedScenesFromPayload*(
     if not newScenes.hasKey(sceneId) and not hasExportedScene(sceneId):
       droppedSceneIds.add(sceneId)
       removePersistedState(sceneId)
-  if persistPayload:
-    payload[DEPLOYED_SCENES_KEY] = %deployedScenesFingerprint()
-    writeTextFile(UPLOADED_SCENES_JSON_PATH, $payload)
-
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()
   var mainSceneId = sceneInputs[0].id

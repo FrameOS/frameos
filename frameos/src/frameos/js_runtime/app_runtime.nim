@@ -84,11 +84,14 @@ type
     ## The main module's file name (app.ts, app.tsx, ...). Imports resolve
     ## relative to it, and error locations name it.
     sourceName*: string
-    ## Every file of the app by name, as the scene JSON carries it — the pool
-    ## `import './x'` draws from. Held as the JsonNode rather than copied out:
-    ## on a frame the scene keeps these strings alive anyway, and a second
-    ## copy of every helper file is memory an ESP32 does not have.
+    ## Every file of the app by name — the pool `import './x'` draws from.
+    ## Held only until the module is compiled when `reload` can read them
+    ## again: QuickJS keeps no source, and nor does the runtime.
     sources*: JsonNode
+    ## The app's files read again (from where its scene's JSON lives, or the
+    ## node's own) for an interpreter that starts again; nil keeps `source`
+    ## and `sources` for good (a test harness's app).
+    reload*: proc (): JsonNode
     settingsKeys*: seq[string]
     assetGrant*: JsAssetGrant
     frameGrant*: bool
@@ -2608,8 +2611,15 @@ when not defined(frameosEmbedded):
     for app in liveDynamicJsApps:
       app.takeParkedMemory()
 
+proc haveSources(runtime: JsAppRuntime) =
+  ## The app's files in hand again (a module imported after the app was
+  ## compiled): read once more, kept until the next compile lets them go.
+  if runtime.sources.isNil and not runtime.reload.isNil:
+    runtime.sources = runtime.reload()
+
 proc appFile(runtime: JsAppRuntime, name: string): string =
   ## Contents of one of the app's files, "" when absent.
+  runtime.haveSources()
   if runtime.sources.isNil or runtime.sources.kind != JObject:
     return ""
   runtime.sources{name}.getStr("")
@@ -2653,6 +2663,7 @@ proc resolveModuleName(runtime: JsAppRuntime, name: string): string =
   for ext in JsAppModuleExtensions:
     if name & ext == runtime.sourceName:
       return runtime.sourceName
+  runtime.haveSources()
   resolveAppModule(runtime.sources, name)
 
 proc joinModulePath*(baseName, name: string): string =
@@ -2765,6 +2776,7 @@ proc jsAppModuleLoader(ctx: ptr JSContext, moduleName: cstring, opaque: pointer)
       discard JS_ThrowReferenceError(ctx, "could not load module '%s'", name.cstring)
       return nil
     name = file
+    runtime.haveSources()
     let resolved = resolveAppModule(runtime.sources, name)
     if resolved.len == 0:
       discard JS_ThrowReferenceError(ctx, "%s",
@@ -3123,15 +3135,13 @@ proc jsAppSourceNameFromSources*(sources: JsonNode): string =
   return ""
 
 proc jsAppSourceFromSources*(sources: JsonNode): string =
-  if sources.isNil or sources.kind != JObject:
-    return ""
-  for filename in JsAppSourceNames:
-    if sources.hasKey(filename) and sources[filename].kind == JString:
-      return sources[filename].getStr()
-  return ""
+  let name = jsAppSourceNameFromSources(sources)
+  if name.len > 0: sources[name].getStr() else: ""
 
 proc hasJsAppSource*(sources: JsonNode): bool =
-  jsAppSourceFromSources(sources).len > 0
+  ## Whether the app has a main module, its text not copied to find out.
+  let name = jsAppSourceNameFromSources(sources)
+  name.len > 0 and sources[name].str.len > 0
 
 proc outputTypeFromConfig(config: JsonNode): string =
   if config.isNil or config.kind != JObject:
@@ -3205,7 +3215,10 @@ template assetGrantFromConfig*(config: JsonNode): JsAssetGrant = grantsFromConfi
 template frameGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).frame
 template codeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).code
 
-proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
+proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode,
+    reload: proc (): JsonNode = nil): AppRoot =
+  ## `reload`: the app's files read again, so that its interpreter keeps none
+  ## of them once compiled (JsAppRuntime.reload).
   let source = jsAppSourceFromSources(sources)
   if source.len == 0:
     raise newException(ValueError, "Missing JavaScript app source for keyword: " & keyword)
@@ -3223,6 +3236,7 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
                                 jsAppSourceNameFromSources(sources), sources, grants.assets)
   runtime.frameGrant = grants.frame
   runtime.codeGrant = grants.code
+  runtime.reload = reload
   var byteIterFields: seq[string] = @[]
   let fields = config{"fields"}
   if not fields.isNil and fields.kind == JArray:
@@ -3718,6 +3732,18 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, scene: FrameSc
   ## joins the scene's heap budget (runtime.sceneHeapBudgetFor).
   if runtime.ready:
     return
+  if runtime.source.len == 0 and not runtime.reload.isNil:
+    # Started again (a teardown after a render, memory running short): its
+    # files read again, from where its scene's JSON lives.
+    runtime.sources = runtime.reload()
+    runtime.source = jsAppSourceFromSources(runtime.sources)
+    if runtime.source.len == 0:
+      raise newException(JSException, "The app's files could not be read again: " & runtime.sourceName)
+  defer:
+    # Compiled (or not): QuickJS keeps no source, so neither does the app.
+    if not runtime.reload.isNil:
+      runtime.source = ""
+      runtime.sources = nil
   let sceneId = if scene.isNil: "" else: scene.id.string
   runtime.sceneId = sceneId
   let host = sceneContextFor(scene)
