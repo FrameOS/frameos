@@ -762,7 +762,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync copies a control plane's font store onto the frame, into the
   // fonts/ directory the renderer reads (utils/font.nim: {assets}/fonts/<name>,
-  // one parsed face at a time on embedded).
+  // each read in place on embedded, docs/esp32-fonts.md).
   //
   // A backend syncs the faces bundled with the repo plus the project's own
   // uploads, over SSH. The cloud has no project asset store, so it syncs the

@@ -41,6 +41,7 @@ import lib/tz
 import frameos/version
 import frameos/scene_store_preview
 import frameos/scene_code_preview
+import frameos/file_transfer_preview
 from frameos/utils/http_client import boundedRequestWithHeaders
 
 # ------------------------------------------------------------------ JS hooks
@@ -49,6 +50,7 @@ from frameos/utils/http_client import boundedRequestWithHeaders
 proc jsLogHook(msg: cstring) {.importc: "frameos_wasm_js_log", cdecl.}
 proc jsEventHook(event: cstring, payload: cstring) {.importc: "frameos_wasm_js_event", cdecl.}
 proc jsOpenLinkHook(url: cstring): cint {.importc: "frameos_wasm_js_open_link", cdecl.}
+proc jsFileRequestHook(request: cstring) {.importc: "frameos_wasm_js_file_request", cdecl.}
 
 proc openLinkInPage(url: string): bool {.nimcall, raises: [].} =
   ## A tapped link, to the embedding page: the browser preview opens it in a
@@ -281,6 +283,34 @@ proc frameos_wasm_set_store_preview(storeUrl: cstring): bool {.exportc, cdecl.} 
     setLastError("store preview failed: " & e.msg)
     result = false
 
+# Upload and Download in the Files scene (frameos/file_transfer_preview.nim):
+# a request goes out to the page through the worker, and the page's answer
+# comes back here once the files are in (or saved, or it was cancelled).
+
+proc sendFileRequest(request: string) {.nimcall, gcsafe, raises: [].} =
+  jsFileRequestHook(request.cstring)
+
+proc frameos_wasm_set_file_transfer(enabled: bool) {.exportc, cdecl.} =
+  ## The page can pick files and save them: `frameos.transfer` answers. Only
+  ## the browser's preview worker calls this, for a page that handles its
+  ## `fileRequest` messages.
+  if enabled: enableFileTransferPreview(sendFileRequest)
+  else: disableFileTransferPreview()
+
+proc frameos_wasm_file_transfer_done(id: cint, ok: bool, count: cint, error: cstring): bool {.exportc, cdecl.} =
+  ## The page's answer to request `id`: the scene that asked is drawn again
+  ## (a `render` from outside, which reaches it in a window too). False for
+  ## an answer nobody waits for any more.
+  try:
+    let asker = fileTransferDone(id.int, ok, count.int, $error)
+    if asker.len == 0:
+      return false
+    discard host.send(eoSystem, "render", newJObject())
+    result = true
+  except Exception as e:
+    setLastError("file transfer failed: " & e.msg)
+    result = false
+
 proc restoreBuiltIn() =
   ## A built-in scene the plane kept for a frame it renders for
   ## (docs/server-rendering.md, "Keys, touch and the schedule"): opened again
@@ -327,6 +357,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     timeZone: cstring, settingsJson: cstring): bool {.exportc, cdecl.} =
   coverageCacheBudget = 2 * 1024 * 1024 # pixie keeps shared paths' coverage, as the devices do
   glyphCacheBudget = 512 * 1024 # and glyphs' (paths.nim, the glyph cache)
+  colorGlyphCacheBudget = 256 * 1024 # and emoji, kept at their drawn size (fonts.nim)
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Safe to call repeatedly; every call resets scenes and state.
   ##

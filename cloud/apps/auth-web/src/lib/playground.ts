@@ -3,7 +3,12 @@
 // desktop, the Control Panel is the frame's own page, and the Scene store
 // browses and previews from this origin. Everything here is the wasm runtime
 // the cloud ships (public/frameos-wasm, the release pinned in versions.json).
-import { createFrameOSPreview, type FrameOSPreview, type FrameOSScene } from "frameos-wasm";
+import {
+  createFrameOSPreview,
+  type FrameOSPreview,
+  type FrameOSScene,
+  type PreviewFileRequest,
+} from "frameos-wasm";
 
 export const playgroundScenesUrl = "/playground-assets/scenes.json";
 export const playgroundWorkerUrl = "/frameos-wasm/preview-worker.js";
@@ -36,11 +41,19 @@ export interface PlaygroundOptions {
   createPreview?: typeof createFrameOSPreview;
   /** The store the Scene store browses: the page's own origin by default. */
   storeUrl?: string | undefined;
+  /** The Files scene's Upload or Download came after the tap's gesture ran
+   * out: ask with a button whose click calls `answerFileRequest` (null: it
+   * is over). */
+  onFileRequest?: (request: PreviewFileRequest | null) => void;
 }
 
 export interface Playground {
   /** Fit the frame to the viewport again (a resize of the window). */
   resize(): void;
+  /** Open the picker, or save the file, the Files scene asked for: from a click. */
+  answerFileRequest(): void;
+  /** Give up what the Files scene asked for. */
+  cancelFileRequest(): void;
   destroy(): void;
 }
 
@@ -76,8 +89,12 @@ export function startPlayground(options: PlaygroundOptions): Playground {
       detach();
     }
     detachInput = [];
-    preview?.destroy();
-    preview = null;
+    if (preview) {
+      preview.destroy();
+      preview = null;
+      // An ask of the runtime that is gone goes with it.
+      options.onFileRequest?.(null);
+    }
   };
 
   // A frame's Restart and Reboot start the runtime again; so does a resize
@@ -123,6 +140,7 @@ export function startPlayground(options: PlaygroundOptions): Playground {
           started.setRenderScale(renderScale);
         }
       },
+      ...(options.onFileRequest ? { onFileRequest: options.onFileRequest } : {}),
       onError: (message) => options.onStatus({ kind: "error", message }),
       onOutOfMemory: () =>
         options.onStatus({ kind: "error", message: "The frame ran out of memory. Reload the page to start it again." }),
@@ -163,6 +181,12 @@ export function startPlayground(options: PlaygroundOptions): Playground {
       } else {
         boot();
       }
+    },
+    answerFileRequest() {
+      preview?.answerFileRequest();
+    },
+    cancelFileRequest() {
+      preview?.cancelFileRequest();
     },
     destroy() {
       destroyed = true;

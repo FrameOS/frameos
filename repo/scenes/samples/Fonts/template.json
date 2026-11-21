@@ -1,0 +1,10 @@
+{
+  "name": "Fonts",
+  "description": "The fonts this frame has, a page at a time with each name in its own face, and a specimen of the one you pick: a big Aa, a pangram at three sizes, the alphabet, figures, accents, Greek and Cyrillic. On an ESP32 the fonts are the ones on its SD card (Sync fonts puts FrameOS's collection there), each read where it lies.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

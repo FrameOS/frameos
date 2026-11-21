@@ -110,8 +110,8 @@ together under a heading with its name, the categories sorted by name with
 case aside (the raw name breaking a tie), each trimmed, and the scenes without
 one, or in a category named "Other" in any case, last under "Other". Within a
 group the scenes keep the list's order. Where no scene has a category there
-are no headings, and the list is as the host gave it. The tiles are numbered,
-and the keys walk them, in the order shown. JavaScript lowers every letter
+are no headings, and the list is as the host gave it. The keys walk the
+tiles in the order shown. JavaScript lowers every letter
 for the comparison and the Nim lowers A to Z and the Latin-1 capitals
 (`folded`): two categories that differ only in another script's capitals can
 sort the other way round.
@@ -127,27 +127,57 @@ app's UI. It is laid out at the
 frame's render scale, sized from the panel, within the bounds the settings
 panel keeps (docs/scene-settings.md, "At the frame's scale").
 
-`switcherGrid` picks the densest grid whose tiles stay big enough to read (at
-least 23% of the shorter side across and 17.5% of it high, up to twelve by
-twelve on a screen), and among grids as dense the one whose pictures (at the
-frame's aspect) or name cards come out largest. The tiles keep that size
-whatever the number of scenes: three scenes fill three slots of the same grid
-that thirty scroll through, rather than growing to fill the screen. **Nor do
-they grow with the screen** (`GridUnitMax`, 2026-11-20): the shorter side they
-are a share of is 480 px at most, so a tile, the header and the gaps are as
-large on a 10" panel as on a 7.5" one (112 x 84 px at least), and the bigger
-panel shows more of them at once. The frame's render scale is what makes them
+### The tiles
+
+A folder's icon view, as Windows Explorer's large icons or the macOS
+Finder's: each scene its icon with its name centred under it, wrapping to two
+lines, and nothing around it (no card, no button). Every desktop of windows
+opens this switcher as its window of every scene (Windows 98's Programs,
+macOS's Launchpad, the others' Scenes), so that window is this view in each
+desktop's theme. It was cards of a number and a name (until 2026-11-21), and
+for a day the Scene store's tiles, which the owner found a bunch of square
+buttons with unlimited whitespace.
+
+`switcherGrid` lays the cells out from the room it has, from the left, as many
+across as fit, close together, and the rows that do not fit scroll (`rows` is
+how many show: a screenful for the keys). The cells are a share of a unit
+that is the panel's shorter side, 400 px at most (`CellUnitMax`; the header
+keeps its 480, `GridUnitMax`): in a desktop's window, on a 480 px square and
+on a 10" panel alike a cell is 84 px wide (Explorer's is about 75 to 90 at
+100%, Finder's 80 to 100), 4 px apart, with a 40 px icon and 12 px letters,
+90 px tall with room under the names. A bigger panel or window shows more of them, never larger ones
+(the owner's rule, 2026-11-20); the frame's render scale is what makes them
 larger.
 
-The tiles are one list under the header, a box with `overflow-y-auto` from
+- **The icon** is the scene's own (`settings.icon`, docs/scene-icons.md) in
+  its category's color, or its first letter on a rounded square of that
+  color. The colors are eight, by the category's place in the list, so two
+  categories side by side differ. On e-paper the icon is black, the letter
+  outlined.
+- **Selected** (the keys' highlight, the scene it was opened from at first)
+  as a file manager shows it: a tint behind the icon and the name on a filled
+  label, in the theme's `picked` role (Explorer's navy label in Windows 98,
+  Finder's blue pill in macOS). A dot at the icon's corner marks the scene it
+  was opened from. On e-paper the whole cell is inverted.
+- **Categories** are compact, as Finder's groups: a small name over the first
+  cells of each category with a thin rule under it as far as they go, the
+  next category straight after in the same row, so a category of one takes
+  one cell, not a row. A row keeps a strip for its headings. Where headings
+  would be most of the list (fewer than a dozen scenes, or fewer than two a
+  category: `headed`) there are none, and the scenes keep the order by
+  category in one flow.
+- **No pictures.** A host's snapshots of its scenes
+  (`sceneSwitcherThumbnail`, the Linux runner's) are no longer drawn: the
+  icon view is the owner's call (2026-11-21). The hook stays for now.
+
+The cells are one list under the header, a box with `overflow-y-auto` from
 the header to the bottom edge, the whole width (ui/layout.nim; docs/jsx-ui.md
-"Scrolling and clipping"): rows of tiles, and where the scenes have
-categories a heading across the list over each group, whose first tile
-starts a row of its own (`spots`). A list longer than the screen scrolls,
-with the layer's thin bar at its right edge; the rows cut by the bottom edge
-say there is more. Its scroll is the layer's, kept by the list's place in the
-tree (the root's first child, `ListKey`), which is how the keys move it too.
-Opened, the list starts at its top and scrolls to the highlighted tile.
+"Scrolling and clipping"), each placed by `spots`. A list longer than the
+screen scrolls, with the layer's thin bar at its right edge; the rows cut by
+the bottom edge say there is more. Its scroll is the layer's, kept by the
+list's place in the tree (the root's first child, `ListKey`), which is how
+the keys move it too. Opened, the list starts at its top and scrolls to the
+highlighted cell.
 
 The header ends with the gear and Close. **A frame that takes no taps has
 neither**: e-paper whose event map binds its keys and nothing else
@@ -161,17 +191,14 @@ would open nothing. The device's unlock (docs/scene-settings.md "Turned off by
 the control plane") brings it back with the page.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
-  gets a dark grid: each tile its picture when the host has one (Linux), its number
-  and title under it, the highlighted tile ringed, and a tile lighter while a
-  finger is on it (`active:`).
-- **A scene's icon** (`settings.icon`, docs/scene-icons.md) is drawn in the
-  text color: on a name card above the name (the name then cut to one line, or
-  two when it looks long), up to three letters tall where the card has room;
-  on a Pi's picture tile in the picture's place until the scene has a snapshot,
-  where the number was. A tile without one is drawn as before.
+  gets the icons on a dark page, and a cell tinted while a finger is on it
+  (`active:`).
+- **In a desktop** the header, Close and the gear take the theme's roles as
+  before, the headings `muted`, the selected name `picked`
+  (`test_desktop_switcher.nim` renders every desktop's window with twenty-five
+  scenes, small and large, `FRAMEOS_DESKTOP_SHOTS=<dir>`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
-  `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
-  inverted, and no press feedback: a refresh to show a finger is down would
+  `pimoroni.inky*`) gets black on white, the highlighted cell inverted, and no press feedback: a refresh to show a finger is down would
   be seconds of flashing for nothing. A tap counts, and a finger dragging
   the list is drawn once, where it let go (ui/events.nim keeps quiet until
   then).
@@ -188,14 +215,15 @@ the control plane") brings it back with the page.
 
 ### Pictures
 
-On Linux each tile shows the scene's last snapshot: the PNG the runner writes
+*Not drawn since 2026-11-21 (the icon view, "The tiles"); the hook and the
+Linux host's copies stay for now.* On Linux each tile showed the scene's last snapshot: the PNG the runner writes
 under `<assets>/.frameos/scene_images/` on every switch and at most once a
 minute after (`render:sceneImage:saved`), once the panel has the picture
 (the encode is most of a second on a Pi Zero, and it used to hold every
 switch back), and never for the switcher or the settings themselves.
 `scene_switcher_linux.nim` fits it to the tile (halved by pixie's box
 filter, then drawn), and keeps it until the file changes. A scene not shown
-since the card was made has its number in the picture's place.
+since the card was made has its icon (or its first letter) in the picture's place.
 
 Opening it is fast on a Pi Zero (a 720x720 PNG is a few hundred ms to decode
 there):
@@ -272,8 +300,8 @@ The button layer (`frameos/input_state.nim`) makes one event of each press:
 two quick taps are one `doublePress` and a third starts over, so "five taps"
 is not something a key can say, and counting `gpio` edges would need a
 timeout the dispatcher does not keep. The switcher counts instead: every
-press of a `next` key is a step (a double press two), the tiles are
-numbered, and a press of the primary key opens the highlighted one. Open
+press of a `next` key is a step (a double press two), the tiles are in
+order, and a press of the primary key opens the highlighted one. Open
 the switcher, press NEXT n times, press OK: the scene n after the one
 showing.
 
@@ -309,3 +337,8 @@ and the scroll to the highlight; the scrolling itself is the JSX layer's,
 already in the image. That change was not measured on the ESP32-S3 image:
 no image was built for it. The firmware-size comment on its pull request is
 the number.
+
+The icon view (2026-11-21) replaced the number row, the name-card layout,
+the densest-grid search and the picture tiles with one fixed cell, a category
+color table and headings that flow with the cells: the firmware-size comment
+on that pull request (#940) is the number.

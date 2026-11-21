@@ -8,6 +8,8 @@
 
 import pixie/decodebudget
 from pixie/paths import clearCoverageCache, clearGlyphCache
+from pixie/fontformats/filefont import clearFontPages
+from pixie/fonts import clearColorGlyphCache
 
 var waitingTextDrops* {.threadvar.}: int
   ## Counted up wherever pixie's kept masks and glyphs are let go (memory is
@@ -132,6 +134,44 @@ proc sceneMemoryBytes*(): int =
   if memory <= 0 or panelMemoryBytes.isNil:
     return memory
   max(1, memory - panelMemoryBytes())
+
+const
+  LargeDeviceBytes = 12 * 1024 * 1024
+    ## A device with more PSRAM than this is a 16 MB board (the heap reports
+    ## a little under 16 MiB: what the firmware placed there is not in it).
+  HugeDeviceBytes = 24 * 1024 * 1024 ## and past this, a 32 MB one
+
+proc glyphCacheBudgetBytes*(): int =
+  ## The ESP32's glyph cache budget (pixie's `glyphCacheBudget`, docs/jsx-ui.md
+  ## "The glyph cache"): a 32nd of what the panel leaves the scenes
+  ## (`sceneMemoryBytes`), at least 64 KB, and at most 128 KB on an 8 MB
+  ## board, 512 KB on a 16 MB one and 1 MB on 32 MB, where many faces from
+  ## the SD card are what fills it (docs/esp32-fonts.md). The budget is a
+  ## ceiling the cache fills and keeps, so it is what a board can spare.
+  ## 0 for a host with plenty, which sets its own.
+  let scene = sceneMemoryBytes()
+  if scene <= 0:
+    return 0
+  let device = deviceMemoryBytes()
+  let ceiling =
+    if device > HugeDeviceBytes: 1024 * 1024
+    elif device > LargeDeviceBytes: 512 * 1024
+    else: 128 * 1024
+  clamp(scene div 32, 64 * 1024, ceiling)
+
+proc fontPageSlots*(): int =
+  ## Page slots of the render thread's cache for fonts read where they lie
+  ## (pixie/fontformats/filefont.nim, 1 KB each: on an SD card a read costs
+  ## its latency, about 12 ms on SPI, whatever its size): 16 (16 KB) on an
+  ## 8 MB board, 64 (64 KB) from 16 MB, where the bigger glyph cache invites
+  ## more faces at once. Made when a font from the card first draws.
+  if deviceMemoryBytes() > LargeDeviceBytes: 64 else: 16
+
+proc fontMemoEntries*(): int =
+  ## Entries of each of the tables beside those pages that remember a rune's
+  ## glyph, a glyph's advance and box (and twice that, a pair's kerning), two
+  ## ways each: 256 (14 KB) on an 8 MB board, 1024 (56 KB) from 16 MB.
+  if deviceMemoryBytes() > LargeDeviceBytes: 1024 else: 256
 
 when defined(memProbe):
   proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}
@@ -303,6 +343,8 @@ proc releaseRenderMemoryIfShort() =
     if (headroom > 0 or runsAsEmbedded()) and headroom < RenderMemoryShortBytes:
       clearCoverageCache() # pixie's kept masks: rebuilt by the fills that need them
       clearGlyphCache()
+      clearFontPages() # fonts read in place: their pages and tables
+      clearColorGlyphCache() # and their emoji, kept at the size drawn
       inc waitingTextDrops
       discard renderMemoryReleaseHook(false)
 
@@ -311,6 +353,8 @@ proc releaseRenderMemory*(): bool =
   ## decode was just refused. Whether anything went (then try it again).
   clearCoverageCache()
   clearGlyphCache()
+  clearFontPages() # fonts read in place: their pages and tables
+  clearColorGlyphCache() # and their emoji, kept at the size drawn
   inc waitingTextDrops
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(true)
 
@@ -432,6 +476,8 @@ proc roomForImage*(bytes: int): bool =
     return true
   clearCoverageCache()
   clearGlyphCache()
+  clearFontPages() # fonts read in place: their pages and tables
+  clearColorGlyphCache() # and their emoji, kept at the size drawn
   inc waitingTextDrops
   if not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook(false):
     room = availableRenderBytes()

@@ -14,6 +14,8 @@ import frameos/scene_rhythm
 import frameos/types
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/app_tests
+import frameos/ui/events
+import frameos/ui/layout
 import frameos/values
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -38,6 +40,17 @@ proc longCode(): string =
 let long = %*{"id": "long", "name": "Long", "settings": {"execution": "interpreted"}, "fields": [],
   "nodes": [], "edges": [], "apps": {"face": {"name": "Face", "sources": {"app.tsx": longCode()}}}}
 
+proc wordyCode(): string =
+  ## 400 lines, every other one about 60 characters: on a 480 px screen one
+  ## the field sets on one row, and a guess from its length puts on two.
+  for i in 1 .. 400:
+    if i > 1: result.add '\n'
+    result.add(if i mod 2 == 0: "  const total" & $i & " = compute(" & $i & ", 'some words here') // line " & $i
+      else: "  return line" & $i)
+
+let wordy = %*{"id": "wordy", "name": "Wordy", "settings": {"execution": "interpreted"}, "fields": [],
+  "nodes": [], "edges": [], "apps": {"face": {"name": "Face", "sources": {"app.tsx": wordyCode()}}}}
+
 proc host(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
   ## A host as scene_code_hooks.nim says one answers.
   {.cast(gcsafe).}:
@@ -45,7 +58,7 @@ proc host(asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} =
       return if op == "read": "" else: SettingsOffCode
     case op
     of "read": $(%*{"busy": "", "error": "", "done": "", "draft": nil, "ask": true, "save": true})
-    of "source": (if arg == "clock": $held elif arg == "long": $long else: "")
+    of "source": (if arg == "clock": $held elif arg == "long": $long elif arg == "wordy": $wordy else: "")
     of "draft": draft
     else:
       try: asked.add (op, parseJson(arg))
@@ -248,5 +261,68 @@ suite "the Code editor scene":
     check asked.len == 1 and asked[0][0] == "save"
     let text = asked[0][1]{"scene", "apps", "face", "sources", "app.tsx"}.getStr()
     check text.count('\n') == 1999 and text.contains("typed()") and text != longCode()
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "stays where it is typed into on a small screen, wrapped lines and all":
+    # A 400-line file on a 480x320 screen, scrolled to about line 200 and
+    # typed into: the box stays where it was and the caret on its line. The
+    # lines above the screen were guessed, then measured, and the box scrolled
+    # by the difference once; an edit is no reason to do that again.
+    forgetTypedKeys() # the test before typed on a keyboard: this one starts on the screen's
+    let config = testConfig(480, 320)
+    let scene = load(config, %*{"spot": {"view": "code", "id": "wordy", "file": "face/app.tsx"}})
+    discard draw(scene, config, "wordy-open")
+    discard draw(scene, config, "wordy-top")
+    var ui: UiTarget
+    for node in 0 .. 64:
+      ui = uiTarget("code-editor", node, create = false)
+      if not ui.isNil: break
+    require not ui.isNil
+    proc box(): UiRegion =
+      ## The file's box that scrolls: of those with an onScroll, the one that goes furthest.
+      for r in ui.regions:
+        if r.handlers[ueScroll] > 0 and r.scrollY > result.scrollY: result = r
+    proc top(): float32 = ui.input.scrolled(box().key)[1]
+    proc caretLine(): string =
+      ## The line the caret is on, as the field holds it.
+      let
+        text = ui.input.text
+        at = clamp(ui.input.caret, 0, text.len)
+        a = (if at > 0: text.rfind('\n', last = at - 1) + 1 else: 0)
+        z = text.find('\n', at)
+      text[a ..< (if z < 0: text.len else: z)]
+    check box().scrollY > 380 * 19.0
+    for _ in 0 ..< 26:
+      scene.send("wheel", %*{"x": 300, "y": 160, "deltaX": 0, "deltaY": 2})
+      discard draw(scene, config, "wordy-wheel")
+    let scrolled = top()
+    check scrolled > 150 * 19.0 and scrolled < 260 * 19.0
+    # A tap on a line in the middle of the screen, then typing into it: on
+    # the screen's keyboard (its Q key, bottom left of the line), then on a
+    # keyboard of its own.
+    scene.send("tap", %*{"x": 300, "y": 150, "pointerId": 0, "pointerType": "touch"})
+    discard draw(scene, config, "wordy-focused")
+    let line = caretLine().strip()
+    let at = top()
+    check "line" in line
+    check ui.input.keyboard
+    for i in 1 .. 3:
+      scene.send("tap", %*{"x": 22, "y": 200, "pointerId": 0, "pointerType": "touch"})
+      discard draw(scene, config, "wordy-keyed")
+      checkpoint("key " & $i & ": the box at " & $top() & ", was " & $at & "; the caret on: " & caretLine())
+      check top() == at
+      check line in caretLine()
+    check caretLine().endsWith("qqq")
+    for i in 1 .. 6:
+      scene.send("textInput", %*{"text": "x"})
+      discard draw(scene, config, "wordy-typed")
+      checkpoint("edit " & $i & ": the box at " & $top() & ", was " & $at & "; the caret on: " & caretLine())
+      check top() == at
+      check line in caretLine()
+    # And a line added (Enter) at the caret: still put.
+    scene.send("keyDown", %*{"key": "Enter"})
+    discard draw(scene, config, "wordy-enter")
+    check top() == at
     check problems.len == 0
     if problems.len > 0: echo problems

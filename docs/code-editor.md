@@ -92,8 +92,11 @@ JSX layer's, for any app (`docs/jsx-ui.md` "Fields and the keyboard",
   Where a line starts is the rows above it, summed (`rowSums`). When guessed
   lines above the screen are measured and turn out taller or shorter, the
   box is scrolled by the difference (`scrollTop`), so what shows does not
-  move; a drag scrolls from where the box is, so it keeps that. A line typed
-  into is measured again.
+  move; a drag scrolls from where the box is, so it keeps that. Only the
+  lines an edit changed are measured again (`typed` keeps the rows of the
+  lines before and after them): were the window's other lines guessed again,
+  the next measure would take each guess for a mistake the box was drawn
+  with and scroll by it, and a file on a small screen jumped at every key.
 - **What was typed** is the file's lines in memory (`current`), folded back
   into the file's text when the window moves, the file changes, or the scene
   is saved or sent to the AI; until then it is remembered as the window's

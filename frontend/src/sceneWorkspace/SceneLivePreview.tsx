@@ -16,6 +16,7 @@ import {
   type FrameOSScene,
   type PanelPaletteKey,
   type BeforeDitherHook,
+  type PreviewFileRequest,
   type SceneInfo,
   type StateField,
 } from "frameos-wasm";
@@ -38,6 +39,7 @@ import {
 import {
   Camera,
   CircleDollarSign,
+  Download,
   FolderOpen,
   ImageDown,
   KeyRound,
@@ -49,6 +51,7 @@ import {
   RectangleVertical,
   RotateCw,
   Settings,
+  Upload,
   X,
   Zap,
 } from "lucide-react";
@@ -541,6 +544,10 @@ export function SceneLivePreviewPanel({
   // shown on the real-time toggle; arrival times live in a ref, the figure
   // is published with the batched frame status.
   const frameArrivalsRef = useRef<number[]>([]);
+  // Upload or Download in the Files scene that came after the tap's gesture
+  // ran out: the page asks with a button, whose click opens the picker or
+  // saves the file (frameos-wasm's files.ts).
+  const [fileRequest, setFileRequest] = useState<PreviewFileRequest | null>(null);
   const [measuredFps, setMeasuredFps] = useState<number | null>(null);
 
   // The browser asset folder dialog, and the running preview it manages
@@ -996,6 +1003,11 @@ export function SceneLivePreviewPanel({
             setAssetsVersion((version) => version + 1);
           }
         },
+        onFileRequest: (request) => {
+          if (!cancelled) {
+            setFileRequest(request);
+          }
+        },
         onReady: (info, _assets, runtime) => {
           if (cancelled || !preview) {
             return;
@@ -1090,6 +1102,7 @@ export function SceneLivePreviewPanel({
         }
       }
       preview?.destroy();
+      setFileRequest(null);
       if (previewRef.current === preview) {
         previewRef.current = null;
       }
@@ -1705,6 +1718,36 @@ export function SceneLivePreviewPanel({
           )}
         </div>
       </div>
+      {fileRequest ? (
+        <div className="notice live-preview__file-request" role="status">
+          {fileRequest.op === "upload" ? (
+            <Upload aria-hidden className="live-preview__fast-icon" size={18} />
+          ) : (
+            <Download aria-hidden className="live-preview__fast-icon" size={18} />
+          )}
+          <span className="live-preview__fast-copy">
+            {fileRequest.op === "upload"
+              ? `The scene asks for files from this computer${fileRequest.name ? ` for “${fileRequest.name}”` : ""}. They stay in this browser's preview folder.`
+              : `The scene asks to save “${fileRequest.name}” to this computer.`}
+          </span>
+          <span className="button-row">
+            <button
+              className="button button-primary button--small"
+              onClick={() => previewRef.current?.answerFileRequest()}
+              type="button"
+            >
+              {fileRequest.op === "upload" ? "Choose files" : "Save"}
+            </button>
+            <button
+              className="button button--subtle button--small"
+              onClick={() => previewRef.current?.cancelFileRequest()}
+              type="button"
+            >
+              Cancel
+            </button>
+          </span>
+        </div>
+      ) : null}
       {fastRenderRequest && !fastRenderRequest.answered ? (
         <div className="notice live-preview__fast" role="status">
           <Zap aria-hidden className="live-preview__fast-icon" size={18} />

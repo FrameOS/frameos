@@ -221,9 +221,13 @@
   a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, grouped by category as
-  the desktops group theirs, in one list that scrolls (no pages), and on
-  Linux shows each scene's last snapshot (`sceneSwitcherThumbnail`,
-  `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
+  the desktops group theirs, in one list that scrolls (no pages); the Linux
+  host still keeps each scene's last snapshot (`sceneSwitcherThumbnail`,
+  `frameos/scene_switcher_linux.nim`, no longer drawn); it is a folder's icon
+  view (Explorer's, Finder's: an icon over its name, one size, more of them
+  in a bigger room, compact category groups: `switcherGrid`), and every
+  desktop of windows opens it as its window of every scene, in its theme;
+  fast panels get a dark grid, e-paper
   black on white with the keys walking an inverted highlight that the list
   scrolls to.
 - Both built-in scenes are drawn in the layout of the scene they were opened
@@ -327,7 +331,7 @@
   beside the page's scenes, and the page's scene select follows the runtime
   (the worker's `sceneInfo`).
 - Browsing is the app's own `fetch` of the store's listing for frames
-  (`/api/store/device/scenes`, from the host's `url`; a page the size of the app's grid, `prefer=fast` / `without=fast,linux`
+  (`/api/store/device/scenes`, from the host's `url`; 24 a page while it scrolls and a screenful on e-paper, `prefer=fast` / `without=fast,linux`
   from what the scene needs, `frontend/src/utils/sceneNeeds.ts`, never a category). A layout is tried: a `preview` with
   `show: false` and then the frame's own layout choice (`storeAction('layout')`, `app_runtime.nim`); Keep installs it
   around every scene (doc section "Trying a layout"). The store front's first split is Scenes | Layouts; a layout's
@@ -785,6 +789,20 @@
   pixie's `fontformats/indexedfont.nim`): after `generate_embedded_font.py`
   run `tools/generate_indexed_font.py` (its `--check` is in the backend
   suite), and never inflate a face whole into RAM on a device again.
+  **The SD card's fonts are TrueType files read where they lie**
+  (`docs/esp32-fonts.md`, pixie's `fontformats/filefont.nim`, `fileTypeface`
+  in `utils/font.nim`): a face open is a few hundred bytes, its bytes come a
+  512-byte page at a time through the render thread's page cache and its
+  three memo tables (`fileFontPages`, `fontPageSlots`), the file is closed
+  after each render (`releaseFontFiles`), and they read, set and draw as
+  pixie's whole parse does (`test_file_font.nim` runs every shipped font):
+  change a rule in `opentype.nim` and in `filefont.nim` together. What is not
+  TrueType outlines is converted off the frame (`tools/font_for_card.py`),
+  never parsed on it. The card's colour emoji font (CBDT) is read the same
+  way, a glyph's PNG decoded when drawn and kept at its drawn size in
+  pixie's colour glyph cache (`colorGlyphCacheBudget`), never the decode
+  or the font. The glyph budget grows with the board's PSRAM
+  (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
@@ -903,7 +921,11 @@
   (`refresh_task` in `frameos_display.c`, the picture copied, the newest one
   next, `fos_refresh_queue.c`): a new panel entry point calls `refresh_wait`
   first (`test_esp32_refresh_queue.py` reads every bus taker for it), and a timed
-  render waits while `fos_display_refreshing()`. A touch
+  render waits while `fos_display_refreshing()`. Where an SD card shares the
+  panel's bus (the E-series), the panel lends it for every wait it sleeps
+  through with its chip selects high (`DEV_Delay_ms`, `fos_bus_share.h`): a
+  panel chip select written behind `DEV_Digital_Write` would let a card clock
+  the panel (`test_esp32_bus_share.py` reads for it). A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):

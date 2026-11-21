@@ -11,6 +11,8 @@ import ../js_runtime/app_runtime
 import ../scene_rhythm
 import ../types
 import ../ui/theme
+import ../file_transfer_hooks
+import ../file_transfer_preview
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -342,6 +344,66 @@ suite "the Files scene":
     scene.tap(240, 240)
     discard draw(scene, config, "card")
     check scene.spot{"storage"}.getStr() == "assets"
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "on a frame there is no Upload or Download: the host has none":
+    check fileTransfer.isNil
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "", "page": 1, "view": "list"}
+    discard draw(scene, config, "no-transfer")
+    # notes.txt, the list's last row at the top (fonts, photos, logo.png, notes.txt):
+    # a file it cannot show, and nothing to save it with.
+    scene.tap(200, 60 + 48 * 3 + 24)
+    discard draw(scene, config, "no-transfer-tapped")
+    check scene.spot{"open"}.getStr() == ""
+
+  test "in the browser preview, Upload asks the page for files and lists them once they are in":
+    problems = @[]
+    var sent {.global.}: seq[JsonNode]
+    sent = @[]
+    proc page(request: string) {.nimcall, gcsafe, raises: [].} =
+      {.cast(gcsafe).}:
+        try: sent.add(parseJson(request))
+        except Exception: discard
+    resetFileTransferPreviewForTests()
+    enableFileTransferPreview(page)
+    defer: resetFileTransferPreviewForTests()
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "photos", "page": 1, "view": "list"}
+    discard draw(scene, config, "transfer")
+    # Upload, the header's last button now.
+    scene.tap(750, 30)
+    check sent.len == 1
+    check sent[^1]{"op"}.getStr() == "upload"
+    check sent[^1]{"path"}.getStr() == assets / "photos"
+    discard draw(scene, config, "upload-asked")
+    # The page put a file in: the scene that asked is drawn again, and lists it.
+    writeFile(assets / "photos" / "uploaded.txt", "from the computer")
+    defer: removeFile(assets / "photos" / "uploaded.txt")
+    check fileTransferDone(sent[^1]{"id"}.getInt(), true, 1, "") == "asset-browser"
+    discard draw(scene, config, "uploaded")
+    # Rows: 2024, then beach, forest, sunset, then uploaded.txt.
+    scene.tap(200, 60 + 48 * 4 + 24)
+    check sent.len == 2
+    check sent[^1]{"op"}.getStr() == "download"
+    check sent[^1]{"path"}.getStr() == assets / "photos" / "uploaded.txt"
+    discard fileTransferDone(sent[^1]{"id"}.getInt(), false, 0, "cancelled")
+    # The picture open has Download in its bar, left of the slideshow's button.
+    scene.state["spot"] = %*{"dir": "photos", "page": 1, "view": "list", "open": "photos/beach.png"}
+    discard draw(scene, config, "viewer-transfer")
+    var asked = false
+    for x in countdown(740, 560, 10):
+      scene.tap(x, 28)
+      if sent.len == 3:
+        asked = true
+        break
+    check asked
+    check sent[^1]{"op"}.getStr() == "download"
+    check sent[^1]{"path"}.getStr() == assets / "photos" / "beach.png"
+    check scene.spot{"open"}.getStr() == "photos/beach.png"
     check problems.len == 0
     if problems.len > 0: echo problems
 

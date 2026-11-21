@@ -358,6 +358,13 @@ export function get(app) {
   an ESP32 (2026.11.5+), where a smooth scale takes ~600 ms at 480x480. For a
   picture that follows fingers and is drawn again when they lift, as the Map
   scene's pinch is.
+- **Trails are a canvas never cleared.** The Solitaire sample's win cascade
+  (`cascade.ts`, Windows solitaire's) draws each frame's few new copies of a
+  falling card over the last ones: the trails cost the canvas, the screen's
+  size, however long it runs, and a frame repaints only the copies' box. Its
+  record is the seed and the step, and a fresh canvas gets the steps so far
+  in at most 120 copies. A list of SVG elements that grows each frame would
+  be parsed whole every render instead.
 
 ## Layout
 
@@ -1167,9 +1174,17 @@ On the ESP32-S3 image the walker's part is about 0.4 KB and `app.frame.theme`
 ## Text and fonts
 
 Text is the frame's default face (Ubuntu) unless `font-*` names another. A
-Raspberry Pi frame finds families and bold or italic faces among the fonts in
-its assets folder (`fonts/`), as SVG `<text>` does; an ESP32 has one face,
-and draws a bold weight as its outline thickened. White space collapses as in
+frame finds families and bold or italic faces among the fonts in its assets
+folder (`fonts/`), as SVG `<text>` does: on an ESP32 that is its SD card,
+where every TrueType file is read where it lies (docs/esp32-fonts.md), and
+`font-[File-Name.ttf]` names one file. A bold weight no face has is drawn as
+its outline thickened. A layout keeps up to 128 family names. Emoji draw in
+colour where the frame's fonts folder has the emoji font (Noto Color Emoji):
+a colour glyph is a picture, so each is an `<image>` at the pen in the same
+tree as the glyph paths, drawn by the same pass, its box damage like any
+element's, kept at the size drawn in pixie's colour glyph cache
+(docs/esp32-fonts.md "Emoji"); its advance is in the layout and in
+`frameos.measureText`. SVG `<text>` does the same. White space collapses as in
 HTML; lines wrap at spaces.
 
 ### The glyph cache
@@ -1195,7 +1210,9 @@ LVGL draws its pre-rasterized fonts, with pixie's own rasterizer and blends
   rune, the size under the scale (1/64 px) and the offset's quarter pixel
   each way. The least recently used glyph goes first when the budget is
   full: on an ESP32 a 32nd of the memory the panel leaves the scenes
-  (`memory.sceneMemoryBytes`), 64 to 128 KB: the budget is a ceiling the
+  (`memory.sceneMemoryBytes`, `glyphCacheBudgetBytes`), 64 to 128 KB on an
+  8 MB board, up to 512 KB on 16 MB and 1 MB on 32 MB, where many faces
+  from the SD card fill it (docs/esp32-fonts.md): the budget is a ceiling the
   cache fills and keeps, so it is what a board can spare, not what its
   panel's size suggests (a glyph's mask follows its font size; the 13.3"
   E1004 gets 78 KB, the E1003, whose layout and scene drew 69-83 KB of

@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
@@ -111,6 +111,28 @@ suite "jsx":
     check image[60, 40] == rgbx(0x22, 0xc5, 0x5e, 255)
     check image[100, 40] == rgbx(0x3b, 0x82, 0xf6, 255)
     check image[40, 40] == rgbx(0x0f, 0x17, 0x2a, 255) # a gap
+
+  test "emoji in a UI's text draw in colour, through the layout's memo (an <image> has no path)":
+    # On the reTerminal E1002 the first build kept the memo's nodes by
+    # sharing each one's path, and an emoji's <image> has none: a panic at
+    # every boot into the scene (2026-11-21).
+    let assets = currentSourcePath().parentDir() & "/../../../../assets/copied"
+    setSvgFontAssetsPath(assets)
+    defer: setSvgFontAssetsPath("/srv/assets")
+    colorGlyphCacheBudget = 64 * 1024
+    let image = render("""
+      export const get = () => (
+        <div className="w-full h-full bg-white p-1 flex flex-col">
+          <span className="text-2xl text-black">Hi 😀🎉</span>
+        </div>
+      )
+    """, 160, 60)
+    var colored = 0
+    for y in 0 ..< image.height:
+      for x in 0 ..< image.width:
+        let p = image[x, y]
+        if max(max(p.r, p.g), p.b).int - min(min(p.r, p.g), p.b).int > 60: inc colored
+    check colored > 100
 
   test "text, with the values the app computed":
     let image = render("""

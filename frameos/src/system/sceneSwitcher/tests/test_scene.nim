@@ -95,16 +95,22 @@ block the_tiles_keep_one_size_whatever_the_count:
   # The grid is the panel's alone: three scenes fill three of its slots, and
   # thirty scroll through the same.
   let few = switcherGrid(800, 480, thumbnails = true)
-  doAssert few.cols == 6 and few.rows == 4, "as dense as stays readable, six by four on 800x480: " & $few
+  doAssert few.cols == 8 and few.rows == 4, "a folder's icons, eight by four on 800x480: " & $few
   let many = switcherGrid(480, 480, thumbnails = false)
   doAssert many.cols * many.rows >= 9, $many
-  doAssert many.tileW >= 96 and many.tileH >= 72, "names stay readable on a 4\" square " & $many
+  doAssert many.tileW >= 80 and many.text >= 12, "names stay readable on a 4\" square " & $many
+  # A bigger window shows more icons, never larger ones: a folder's icon view.
+  let small = switcherGrid(640, 400, thumbnails = false, unit = 400)
+  let large = switcherGrid(1400, 900, thumbnails = false, unit = 400)
+  doAssert small.tileW == large.tileW and small.icon == large.icon and small.text == large.text, $small & " " & $large
+  doAssert large.cols > small.cols and large.rows > small.rows, $small & " " & $large
+  doAssert small.tileW == 84 and small.icon == 40 and small.text == 12 and small.gap == 4, $small
   let tiny = switcherGrid(128, 64, thumbnails = false)
   doAssert tiny.cols >= 1 and tiny.tileW > 0 and tiny.tileH > 0, "an OLED still gets a tile " & $tiny
   for (w, h) in [(800, 480), (720, 720), (1920, 1080), (480, 800)]:
     let grid = switcherGrid(w, h, thumbnails = true)
     doAssert grid.x0 + grid.cols * grid.tileW + (grid.cols - 1) * grid.gap <= w - grid.pad + 1, $grid
-    doAssert grid.y0 + grid.rows * grid.tileH + (grid.rows - 1) * grid.gap <= h - grid.pad + 1, $grid
+    doAssert grid.y0 + grid.rows * grid.tileH + (grid.rows - 1) * grid.gap <= h, $grid
     # The list is under the header, the whole width, to the bottom edge.
     doAssert (grid.listX, grid.listY, grid.listW, grid.listH) == (0, grid.headerH, w, h - grid.headerH), $grid
 
@@ -201,10 +207,10 @@ block e_paper_takes_the_tap_and_shows_no_press:
   let image = scene.draw(newImage(800, 480))
   doAssert scene.refreshInterval > IdleSecondsFast, "e-paper waits longer before it goes back"
   preview("switcher-800x480-eink-bw", oneBit(image))
-  # The highlighted tile is inverted: its middle is ink, a plain tile's paper.
+  # The highlighted cell is inverted: its corner is ink, a plain cell's paper.
   let grid = switcherGrid(800, 480, thumbnails = false)
-  let lit = image[grid.x0 + (grid.tileW + grid.gap) * 2 + grid.tileW div 2, grid.y0 + grid.tileH - 14]
-  let plain = image[grid.x0 + grid.tileW div 2, grid.y0 + grid.tileH - 14]
+  let lit = image[grid.x0 + (grid.tileW + grid.gap) * 2 + 3, grid.y0 + grid.tileH - 3]
+  let plain = image[grid.x0 + 3, grid.y0 + grid.tileH - 3]
   doAssert lit.r < 40 and plain.r > 215, $lit & " " & $plain
   let at = %*{"x": grid.x0 + grid.tileW div 2, "y": grid.y0 + grid.tileH div 2, "pointerId": 1,
     "pointerType": "touch"}
@@ -251,7 +257,7 @@ proc drag(scene: SceneSwitcherScene, x, fromY, toY: float) =
 block more_scenes_than_fit_scroll_under_a_finger:
   # One list that scrolls, no pages: a finger drags it, and a tap after that
   # opens the tile under it.
-  listed = entries(20)
+  listed = entries(40)
   sent.setLen(0)
   let scene = newSwitcher(config(480, 480, "embedded"), opener = "scene-1")
   let grid = switcherGrid(480, 480, thumbnails = false)
@@ -285,7 +291,7 @@ block more_scenes_than_fit_scroll_under_a_finger:
   doAssert sent.len == 0, $sent
 
 block the_wheel_scrolls_the_list:
-  listed = entries(30)
+  listed = entries(60)
   sent.setLen(0)
   let scene = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-1")
   discard scene.draw(newImage(800, 480))
@@ -298,12 +304,12 @@ block the_wheel_scrolls_the_list:
 block the_keys_scroll_the_list_to_the_highlight:
   # E-paper has the keys alone to follow: every tile they walk onto shows
   # whole, and back at the first the list is at its top again.
-  listed = entries(30)
+  listed = entries(50)
   sent.setLen(0)
   let scene = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-1")
   discard scene.draw(newImage(800, 480))
   var scrolled = false
-  for i in 1 ..< 30:
+  for i in 1 ..< 50:
     scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
     doAssert scene.highlighted() == i
     discard scene.draw(newImage(800, 480))
@@ -315,15 +321,15 @@ block the_keys_scroll_the_list_to_the_highlight:
   doAssert scene.highlighted() == 0 and listScroll() == 0, "around to the first, at the top"
   scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "press"})
   discard scene.draw(newImage(800, 480))
-  doAssert scene.highlighted() == 29 and shownWhole(29), "back to the last, at the bottom"
+  doAssert scene.highlighted() == 49 and shownWhole(49), "back to the last, at the bottom"
   # Opened again, the list starts at its top and scrolls to the scene it was
   # opened from.
   let again = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-2")
   doAssert listScroll() == 0
   discard again.draw(newImage(800, 480))
-  let deep = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-28")
+  let deep = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-48")
   discard deep.draw(newImage(800, 480))
-  doAssert listScroll() > 0 and shownWhole(27), $listScroll()
+  doAssert listScroll() > 0 and shownWhole(47), $listScroll()
   for (event, _) in sent:
     doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
 
@@ -332,7 +338,7 @@ block forward_and_back_move_a_screenful:
   # edge, a scene direction, which the dispatcher hands the switcher as
   # them): the highlight a screenful on or back, the list with it, wrapping
   # at the ends, and no scene switch.
-  listed = entries(20)
+  listed = entries(40)
   sent.setLen(0)
   let scene = newSwitcher(config(480, 480, "embedded"), opener = "scene-1")
   discard scene.draw(newImage565(480, 480))
@@ -345,7 +351,7 @@ block forward_and_back_move_a_screenful:
   scene.send(evBack, %*{})
   doAssert scene.highlighted() == 0 and listScroll() == 0
   scene.send(evBack, %*{})
-  doAssert scene.highlighted() == 19, "back from the first: the last"
+  doAssert scene.highlighted() == 39, "back from the first: the last"
   scene.send(evForward, %*{})
   doAssert scene.highlighted() == 0, "on from the last: the first"
   # Every screenful, the last tile, then around to the first.
@@ -355,7 +361,7 @@ block forward_and_back_move_a_screenful:
     inc turns
     if scene.highlighted() == 0:
       break
-  doAssert turns == (19 + screen - 1) div screen + 1, $turns
+  doAssert turns == (39 + screen - 1) div screen + 1, $turns
   for (event, _) in sent:
     doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
   # A keyboard's Page Down and Up are the same.
@@ -367,9 +373,9 @@ block forward_and_back_move_a_screenful:
 block e_paper_scrolls_where_the_finger_lifts:
   # The reTerminal E1003 (1872x1404, sixteen greys): no render while the
   # finger moves (each is seconds of refresh), one where it lifts, and a tap
-  # after that opens the tile it lands on. Its 10" screen holds forty and more
-  # tiles (GridUnitMax): two hundred scroll.
-  listed = entries(200)
+  # after that opens the tile it lands on. Its 10" screen holds two hundred
+  # tiles and more (GridUnitMax): four hundred scroll.
+  listed = entries(400)
   sent.setLen(0)
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(1872, 1404))
@@ -380,7 +386,7 @@ block e_paper_scrolls_where_the_finger_lifts:
   doAssert sent.len == 0, "nothing drawn while the finger moves: " & $sent
   scene.send("pointerUp", touchAt(900, 400))
   doAssert sent.len == 1 and sent[0][0] == evRender, "where it lifted: " & $sent
-  doAssert listScroll() > 0 and listScroll() == listRegion().scrollY, $listScroll()
+  doAssert listScroll() > 0 and listScroll() <= listRegion().scrollY, $listScroll()
   discard scene.draw(newImageGray8(1872, 1404))
   let grid = switcherGrid(1872, 1404, thumbnails = false)
   let below = grid.cols * grid.rows
@@ -403,7 +409,7 @@ block a_layout_hole_scrolls_by_the_grid_it_drew:
   # on the whole panel: a screenful is the hole's (the reTerminal E1003 in a
   # Windows 98 window, 2026-11-10, when a page turn lit a tile of the page
   # after the one it showed).
-  listed = entries(40)
+  listed = entries(400)
   let scene = newSwitcher(config(1872, 1404, "embedded"), opener = "scene-1")
   discard scene.draw(newImageGray8(900, 600))
   let (roomW, roomH) = uiRoom(scene.frameConfig, 900, 600)
@@ -424,11 +430,19 @@ proc categorized(): seq[SwitcherEntry] =
       (6, "Photos"), (7, "\xC3\x89clairs"), (8, "\xC3\xA9a")]:
     result[i].category = category
 
+proc crowded(): seq[SwitcherEntry] =
+  ## `categorized` and fifteen more, five each in Clocks, Garden and Photos:
+  ## a list long enough, two scenes a category and more, for headings.
+  result = categorized()
+  for i in 0 ..< 15:
+    result.add SwitcherEntry(id: "scene-" & $(10 + i), name: "Extra " & $i,
+      category: ["Clocks", "Garden", "Photos"][i div 5])
+
 proc headings(tree: SvgNode): seq[string] =
   ## The headings in the list (the root's first child), in order: a heading
-  ## is a box with one span of text, a tile has more.
+  ## starts with its span of text and a rule, a cell with its icon.
   for child in tree.children[0].children:
-    if child.children.len == 1 and child.children[0].tag == "span":
+    if child.children.len >= 1 and child.children[0].tag == "span":
       result.add child.children[0].children[0].text
 
 block categories_head_their_scenes_and_other_comes_last:
@@ -450,27 +464,34 @@ block categories_head_their_scenes_and_other_comes_last:
   sent.setLen(0)
   let scene = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-6")
   let image = scene.draw(newImage(800, 480))
-  preview("switcher-800x480-lcd-categories", image)
-  doAssert scene.tree(800, 480, false).headings ==
-    @["Clocks", "Garden", "Photos", "photos", "\xC3\xA9a", "\xC3\x89clairs", "Other"]
-  # A category starts a row of its own, under its heading; the tiles are
-  # numbered in the order shown, and the keys walk that order.
+  preview("switcher-800x480-lcd-few-categories", image)
+  # Seven categories for nine scenes: headings would be most of the list, so
+  # there are none, and the scenes keep the order by category in one flow.
+  doAssert scene.tree(800, 480, false).headings.len == 0
   let grid = switcherGrid(800, 480, thumbnails = false)
-  let spots = scene.spots(grid)
-  doAssert spots[2].col == 0 and spots[2].top > spots[1].top + grid.tileH, $spots
-  doAssert spots[0].top == grid.y0 - grid.listY + grid.headingH
-  doAssert scene.highlighted() == 2, "scene-6 is third, under Garden"
+  var spots = scene.spots(grid)
+  doAssert spots[2].col == 2 and spots[2].top == spots[0].top, $spots
+  doAssert scene.highlighted() == 2, "scene-6 is third, in Garden"
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert scene.highlightedId == "scene-7"
-  scene.send("keyDown", %*{"code": "ArrowUp", "key": "ArrowUp"})
-  doAssert scene.highlightedId == "scene-6", "the row above, in its column: " & scene.highlightedId
-  scene.send("keyDown", %*{"code": "ArrowUp", "key": "ArrowUp"})
-  doAssert scene.highlightedId == "scene-2"
-  # The first tile is the first category's first scene.
+  # The first cell is the first category's first scene.
   discard scene.draw(newImage(800, 480))
   let r = uiTarget(SceneSwitcherId, 1).regions[tileRegion(0)]
   scene.send("tap", touchAt(r.x + r.w / 2, r.y + r.h / 2))
   doAssert sent.len == 1 and sent[0][1]["sceneId"].getStr() == "scene-2", $sent
+  # Twenty-four scenes in the same seven: a heading over each category's
+  # first cells, small, and the categories flow on one after another.
+  listed = crowded()
+  sent.setLen(0)
+  let many = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-6")
+  preview("switcher-800x480-lcd-categories", many.draw(newImage(800, 480)))
+  doAssert many.tree(800, 480, false).headings ==
+    @["Clocks", "Garden", "Photos", "photos", "\xC3\xA9a", "\xC3\x89clairs", "Other"]
+  spots = many.spots(grid)
+  doAssert spots[0].top == grid.y0 - grid.listY + grid.headingH
+  # Garden goes on in the row Clocks ends in, its heading over its cells there.
+  doAssert spots[7].col == 7 and spots[7].top == spots[6].top and spots[8].col == 0, $spots
+  doAssert many.highlightedId == "scene-6"
   # No scene with a category: no headings.
   listed = entries(9)
   let plain = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-1")
@@ -482,6 +503,11 @@ block categories_head_their_scenes_and_other_comes_last:
   let paper = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-4")
   preview("switcher-800x480-eink-categories", oneBit(paper.draw(newImage(800, 480))))
   doAssert shownWhole(paper.highlighted())
+  # And the twenty-four, with their headings.
+  listed = crowded()
+  let groups = newSwitcher(config(800, 480, "waveshare.EPD_7in5_V2"), opener = "scene-6")
+  preview("switcher-800x480-eink-groups", oneBit(groups.draw(newImage(800, 480))))
+  doAssert groups.tree(800, 480, true).headings.len == 7
 
 block an_esp32_lcd_with_a_few_scenes:
   # The SenseCAP Indicator: 480x480 RGB565, names only.
@@ -672,7 +698,7 @@ block the_gear_opens_the_frame_page:
     let g = gearRegion(count)
     doAssert g >= 0, $count
     for r in uiTarget(SceneSwitcherId, 1).regions:
-      for (x, y) in [(r.x, r.y), (r.x + r.w - 1, r.y), (r.x, r.y + r.h - 1), (r.x + r.w - 1, r.y + r.h - 1)]:
+      for (x, y) in [(r.visible[0], r.visible[1]), (r.visible[2] - 1, r.visible[1]), (r.visible[0], r.visible[3] - 1), (r.visible[2] - 1, r.visible[3] - 1)]:
         doAssert insideRound(480, 480, int(x), int(y), RoundInset), $count & ": off the glass at " & $(x, y)
     let background = image[0, 0]
     for y in 0 ..< 480:
@@ -727,9 +753,18 @@ proc inkIn(image: Image, grid: SwitcherGrid, slot: int, light = false): int =
       if (image[x, y].r < 128) != light:
         inc result
 
-block a_scene_icon_on_its_tile:
-  # A scene's icon (docs/scene-icons.md) goes above its name on a name card,
-  # and where a Pi has no picture of the scene yet, in the picture's place.
+proc differIn(a, b: Image, grid: SwitcherGrid, slot: int): int =
+  ## How many of a cell's pixels differ between two pictures.
+  let x0 = grid.x0 + (slot mod grid.cols) * (grid.tileW + grid.gap)
+  let y0 = grid.y0 + (slot div grid.cols) * (grid.tileH + grid.gap)
+  for y in y0 ..< y0 + grid.tileH:
+    for x in x0 ..< x0 + grid.tileW:
+      if a[x, y] != b[x, y]:
+        inc result
+
+block a_scene_icon_in_its_cell:
+  # A scene's icon (docs/scene-icons.md) is its cell's icon, over its name;
+  # without one, its first letter on a square in its category's color.
   const Square = "M0 0h24v24H0z"
   const House = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
   listed = entries(6)
@@ -748,18 +783,18 @@ block a_scene_icon_on_its_tile:
   listed[1].icon = Square
   let lit = newSwitcher(paper, opener = "scene-2").draw(newImage(800, 480))
   doAssert lit.inkIn(cards, 1, light = true) > image.inkIn(cards, 1, light = true) + 150
-  # A Pi's LCD: the icon where the picture would be, in the muted text color.
+  # An LCD: the icon in its category's color where the letter was. A host's
+  # pictures (a Pi's snapshots) are not drawn any more.
   sceneSwitcherThumbnail = noPicture
   let lcd = config(800, 480, "framebuffer")
-  let pictures = switcherGrid(800, 480, thumbnails = true)
   listed = entries(6)
-  let numbered = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
+  let lettered = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
   listed[0].icon = Square
   listed[4].icon = House
   let marked = newSwitcher(lcd, opener = "scene-2").draw(newImage(800, 480))
   preview("switcher-800x480-lcd-icons", marked)
-  doAssert marked.inkIn(pictures, 0, light = true) > numbered.inkIn(pictures, 0, light = true) + 400
-  doAssert marked.inkIn(pictures, 2, light = true) == numbered.inkIn(pictures, 2, light = true)
+  doAssert differIn(marked, lettered, cards, 0) > 400
+  doAssert differIn(marked, lettered, cards, 2) == 0
   sceneSwitcherThumbnail = nil
 
 

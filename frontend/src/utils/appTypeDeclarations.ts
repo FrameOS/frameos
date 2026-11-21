@@ -137,6 +137,23 @@ interface FrameOSCodeFacts {
   /** The browser preview's host: it reads scenes and saves or asks nothing. */
   previewOnly?: boolean;
 }
+/** What frameos.transfer("read") says: files between the assets and the computer showing the frame. */
+interface FrameOSTransferFacts {
+  /** Files can be picked on the computer and added (op "upload"). */
+  upload: boolean;
+  /** A file can be saved to the computer (op "download"). */
+  download: boolean;
+  /** "upload" or "download" while the person at the computer has not answered yet, else "". */
+  busy: string;
+  /** The last one that worked ("upload", "download"), else "". */
+  done: string;
+  /** How many files the last one moved. */
+  count: number;
+  /** Why the last one did not: "cancelled", "too_big", "failed", else "". */
+  error: string;
+  /** Moves by one at every answer: compare it with the last you saw to know one came. */
+  seq: number;
+}
 /** What frameos.store() says: the scene store as this frame's host knows it (docs/scene-store.md). */
 interface FrameOSStore {
   /** The store this frame browses: its cloud provider, else FrameOS Cloud. The app fetches its listing for frames
@@ -458,6 +475,15 @@ declare const frameos: {
   code(op: "save", args: { scene: Record<string, any>; show?: boolean }): boolean;
   /** Forgets the draft and the last error. */
   code(op: "clear"): boolean;
+  /** Files between the assets and the computer the frame is shown on: the browser preview has it, a frame never (null
+   * there, and before FrameOS 2026.11.14). "read" is what the host can do and the last answer. */
+  transfer(op: "read"): FrameOSTransferFacts | null;
+  /** Asks the person at the computer for files and puts them into dir ("" the top) of the assets, storage as in the
+   * asset calls; a name that is there gets " (2)". It returns at once, and this scene renders again when the files
+   * are in (read().done, read().count): list the folder again then. Needs "assets-write" for the frame's folder. */
+  transfer(op: "upload", args: { dir?: string; storage?: string }): boolean;
+  /** Saves the asset at path to the computer; renders again when it is saved (read().done). */
+  transfer(op: "download", args: { path: string; storage?: string }): boolean;
   /** How tall each text is, in pixels, set in className's text classes (font-*, text-*, leading-*) into width, as a
    * <textarea> sets its text: wrapped at spaces, spaces kept, an empty text one line. For a list whose rows are text
    * that wraps (a code editor's lines), measured before they are laid out (FrameOS 2026.11.12+). */
@@ -572,10 +598,16 @@ declare const frameos: {
    * ends). entry reads that member of a ZIP file instead (an EPUB's chapter, inflated by the frame a window at a
    * time): offset and length are then the member's, and a file that is not a ZIP, or has no such member, is null.
    * A slice over the frame's limit (2 MB on an ESP32) is null: read it in parts with offset and length
-   * (entry and text: FrameOS 2026.11.11+). */
+   * (entry and text: FrameOS 2026.11.11+). inflate reads the slice as a zlib (or raw deflate) stream and gives what
+   * it holds (a PDF's FlateDecode stream; a damaged one is null), and bytes gives any
+   * read as a Uint8Array (inflate and bytes: FrameOS 2026.11.14+). */
   readAsset(
     path: string,
-    options?: { offset?: number; length?: number; text?: boolean; entry?: string; storage?: "assets" | "internal" }
+    options: { offset?: number; length?: number; inflate?: boolean; bytes: true; entry?: string; storage?: "assets" | "internal" }
+  ): Uint8Array | null;
+  readAsset(
+    path: string,
+    options?: { offset?: number; length?: number; text?: boolean; inflate?: boolean; entry?: string; storage?: "assets" | "internal" }
   ): string | null;
   /** Writes the file: data is base64, or with text the string itself, written as UTF-8 (text: FrameOS 2026.11.12+;
    * before, the string is read as base64). */
@@ -603,6 +635,18 @@ declare const frameos: {
       entry?: string;
       /** With entry and a size: the colour under the picture's transparent parts (FrameOS 2026.11.11+). */
       background?: string;
+      /** A picture at a slice of the file (a PDF's JPEG), decoded at the size asked; with inflate the slice is
+       * compressed (FrameOS 2026.11.14+). */
+      offset?: number;
+      length?: number;
+      inflate?: boolean;
+      /** With a size: the slice is raw samples instead (a PDF image's), scaled as they come: colors 1 (grey, or
+       * indexed with a palette of hex RGB), 3 (RGB) or 4 (CMYK), 1 to 16 bits each, rows padded to a byte, predictor
+       * 2 (TIFF) or 10 and up (PNG), invert to read each sample the other way (FrameOS 2026.11.14+). */
+      pixels?: { width: number; height: number; colors?: 1 | 3 | 4; bits?: number; predictor?: number; palette?: string; invert?: boolean };
+      /** With pixels or offset: another slice of grey samples, the picture's opacity (a PDF's soft mask), put over
+       * background (FrameOS 2026.11.14+). */
+      mask?: { offset: number; length: number; inflate?: boolean; pixels: { width: number; height: number; bits?: number; predictor?: number; invert?: boolean } };
       /** Which of app.frame.storages the path is in (FrameOS 2026.11.11+). */
       storage?: "assets" | "internal";
     }

@@ -119,6 +119,9 @@ export interface PreviewRuntimeInfo {
   /** Whether the bundle says what the mouse cursor looks like over the
    * picture (`FrameOSPreview.cursorShape`, the `drawnCursor` option). */
   cursor: boolean
+  /** Whether the bundle has Upload and Download in the Files scene
+   * (`fileTransfer` option, `FrameOSPreview.answerFileRequest`). */
+  fileTransfer: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */

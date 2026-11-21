@@ -161,7 +161,9 @@ const
 
 var fontFamilies* {.threadvar.}: seq[string]
   ## Names for Text.family: the default face, the generic families, and the
-  ## ones `font-[Name]` asked for (at most 16). Per thread, as layouts are.
+  ## ones `font-[Name]` asked for (at most 128: the Fonts sample names every
+  ## font on the frame, and a face read where it lies costs next to nothing).
+  ## Per thread, as layouts are.
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
 
@@ -542,7 +544,7 @@ proc applyClass(box: var Box, text: var Text, s: string, a, b: int, neg: bool) =
       text.family = fontFamilies.find(name)
       if text.family < 0:
         text.family = 0
-        if fontFamilies.len < 16:
+        if fontFamilies.len < 128:
           fontFamilies.add name
           text.family = fontFamilies.high
   of hLeading:

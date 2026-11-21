@@ -6,6 +6,7 @@ import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
 import { attachKeyboardInput, attachPointerInput, writeHostClipboard } from './pointer'
 import { PreviewCursor, type CursorSprite } from './cursor'
+import { pageHasGesture, pickFiles, saveFile, type PreviewFileRequest } from './files'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -136,6 +137,19 @@ export interface FrameOSPreviewOptions {
    * from; defaults to https://cloud.frameos.net. The listing is fetched from
    * the worker, so another origin needs CORS or `proxyUrl`. */
   storeUrl?: string
+  /** Upload and Download in the Files scene (file picker in, a download
+   * out; ./files). On by default; false and the scene shows neither, as on
+   * a frame. A bundle from before (`runtimeInfo.fileTransfer`) has neither. */
+  fileTransfer?: boolean
+  /**
+   * The Files scene asked for files (Upload) or to save one (Download) when
+   * the page had no gesture left to open a picker or a download with: ask
+   * the person with a button of the page's own whose click calls
+   * `answerFileRequest()` (and one for `cancelFileRequest()`). Called with
+   * null when the request is over. Without it the page tries anyway, and a
+   * picker the browser refuses stays shut.
+   */
+  onFileRequest?: (request: PreviewFileRequest | null) => void
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
   onFrame?: (frame: PreviewFrame) => void
   /** The mouse cursor over the picture took another shape (a CSS name):
@@ -208,6 +222,11 @@ export class FrameOSPreview {
   private cursorSprite: CursorSprite | null = null
   /** The mouse cursor's shape over the picture, as CSS names it. */
   cursorShape = 'default'
+  /** What the Files scene asked of the page and the person has not answered yet. */
+  fileRequest: PreviewFileRequest | null = null
+  private fileRequestData: ArrayBuffer | null = null
+  /** Whether `onFileRequest` was told of the request waiting. */
+  private fileRequestShown = false
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
@@ -222,6 +241,7 @@ export class FrameOSPreview {
     sceneStateSeeded: false,
     resize: false,
     cursor: false,
+    fileTransfer: false,
   }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
@@ -271,6 +291,7 @@ export class FrameOSPreview {
       renderScale: options.renderScale ?? 0,
       windowed: options.windowed === true,
       framePage: options.framePage === true,
+      fileTransfer: options.fileTransfer !== false,
       ...(options.storeUrl ? { storeUrl: options.storeUrl } : {}),
     })
   }
@@ -294,6 +315,7 @@ export class FrameOSPreview {
           sceneStateSeeded: msg.sceneStateSeeded === true,
           resize: msg.resize === true,
           cursor: msg.cursor === true,
+          fileTransfer: msg.fileTransfer === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
@@ -374,6 +396,9 @@ export class FrameOSPreview {
       case 'clipboard':
         // A Copy or a Cut in the frame's UI: the computer's clipboard too.
         writeHostClipboard(String(msg.text ?? ''))
+        break
+      case 'fileRequest':
+        this.takeFileRequest(msg)
         break
       case 'appTestsResult': {
         const pending = this.appTestsRequests.get(msg.requestId)
@@ -471,10 +496,85 @@ export class FrameOSPreview {
   }
 
   /** A message the worker answers by calling into the runtime. */
-  private toRuntime(msg: Record<string, unknown>): void {
+  private toRuntime(msg: Record<string, unknown>, transfer: Transferable[] = []): void {
     if (!this.outOfMemory) {
-      this.worker?.postMessage(msg)
+      this.worker?.postMessage(msg, transfer)
     }
+  }
+
+  /** The worker's `fileRequest`: answered now while the page still has the
+   * tap's gesture, else asked of the person (`onFileRequest`). A new one
+   * replaces one still waiting, as it does in the runtime. */
+  private takeFileRequest(msg: Record<string, any>): void {
+    const op = msg.op === 'upload' || msg.op === 'download' ? msg.op : null
+    const id = Number(msg.id) || 0
+    if (!op || !id) {
+      return
+    }
+    this.fileRequest = { id, op, name: String(msg.name ?? '') }
+    this.fileRequestData = op === 'download' && msg.data instanceof ArrayBuffer ? msg.data : null
+    if (pageHasGesture() || !this.options.onFileRequest) {
+      this.answerFileRequest()
+    } else {
+      this.fileRequestShown = true
+      this.options.onFileRequest(this.fileRequest)
+    }
+  }
+
+  private endFileRequest(): void {
+    this.fileRequest = null
+    this.fileRequestData = null
+    if (this.fileRequestShown) {
+      this.fileRequestShown = false
+      this.options.onFileRequest?.(null)
+    }
+  }
+
+  /**
+   * Do what the Files scene asked (`fileRequest`): open the file picker and
+   * put the files picked into the folder it showed, or save the file to the
+   * computer. Call it from a click (a gesture): a picker opened from
+   * anywhere else stays shut. Nothing without a request waiting.
+   */
+  answerFileRequest(): void {
+    const request = this.fileRequest
+    if (!request) {
+      return
+    }
+    const data = this.fileRequestData
+    this.endFileRequest()
+    if (request.op === 'download') {
+      try {
+        saveFile(request.name, data ?? new ArrayBuffer(0))
+        this.toRuntime({ type: 'fileTransferDone', id: request.id, ok: true })
+      } catch {
+        this.toRuntime({ type: 'fileTransferDone', id: request.id, ok: false, error: 'failed' })
+      }
+      return
+    }
+    void pickFiles().then((files) => {
+      if (this.destroyed) {
+        return
+      }
+      if (!files || files.length === 0) {
+        this.toRuntime({ type: 'fileTransferDone', id: request.id, ok: false, error: 'cancelled' })
+        return
+      }
+      this.toRuntime(
+        { type: 'fileUpload', id: request.id, files },
+        files.map((file) => file.data)
+      )
+    })
+  }
+
+  /** Give up what the Files scene asked: the scene says nothing was moved. */
+  cancelFileRequest(): void {
+    const request = this.fileRequest
+    if (!request) {
+      return
+    }
+    this.endFileRequest()
+    this.toRuntime({ type: 'fileTransferDone', id: request.id, ok: false, error: 'cancelled' })
   }
 
   /** Force a render now. */

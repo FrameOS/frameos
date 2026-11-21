@@ -267,6 +267,8 @@ describe("repo sample scenes", () => {
     ["repo/scenes/samples/Files/scenes.json", ["assets", "assets-write"]],
     // Books reads the EPUBs on the card and writes nothing there.
     ["repo/scenes/samples/Books/scenes.json", ["assets"]],
+    // The PDF viewer reads the PDFs on the card, and writes nothing there either.
+    ["repo/scenes/samples/PDF viewer/scenes.json", ["assets"]],
   ])("%s", (path, flags) => {
     expect(sceneAccessFlags(JSON.parse(repoFile(path)))).toEqual(flags);
   });
