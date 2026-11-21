@@ -66,7 +66,7 @@ describe("parseSceneUpload", () => {
       "other/scenes.json": strToU8(JSON.stringify([scene("s1", "Elsewhere")])),
     });
     expect(() => parseSceneUpload(zip, "lonely.zip")).toThrow(SceneUploadError);
-    expect(() => parseSceneUpload(zip, "lonely.zip")).toThrow(/no scenes\.json next to it/);
+    expect(() => parseSceneUpload(zip, "lonely.zip")).toThrow(/no scenes next to it/);
   });
 
   it("accepts a bare scenes array", () => {
@@ -120,5 +120,21 @@ describe("sceneNeedsAutoArrange", () => {
       }),
     ).toBe(false);
     expect(sceneNeedsAutoArrange({ nodes: [], edges: [] })).toBe(false);
+  });
+
+  it("reads a template zip laid out as scene packages (docs/scene-packages.md)", () => {
+    const zip = zipSync({
+      "Packaged/template.json": strToU8(JSON.stringify({ name: "Packaged", scenes: ["./Clock"] })),
+      "Packaged/Clock/scene.json": strToU8(
+        JSON.stringify({ ...scene("c", "Clock"), apps: { face: { name: "Face" } } }),
+      ),
+      "Packaged/Clock/apps/face/app.ts": strToU8("export const a = 1\n"),
+    });
+    const parsed = parseSceneUpload(zip, "packaged.zip");
+    expect(parsed.name).toBe("Packaged");
+    expect(parsed.scenes).toHaveLength(1);
+    expect((parsed.scenes[0] as { apps?: Record<string, { sources?: Record<string, string> }> }).apps?.face?.sources).toEqual({
+      "app.ts": "export const a = 1\n",
+    });
   });
 });

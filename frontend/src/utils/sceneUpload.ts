@@ -1,5 +1,6 @@
 import { unzipSync } from 'fflate'
 import type { FrameScene } from '../types'
+import { type PackageFiles, type ReadSet as PackagedSet, ScenePackageError, packageRoot, setFromPackageFiles } from './scenePackage'
 
 // "Upload scene" in the frame's Add scene drawer. Runs entirely in the
 // browser so it works on every control plane (backend, on-device admin,
@@ -8,8 +9,9 @@ import type { FrameScene } from '../types'
 //
 // Accepted inputs:
 //   .zip   a template export: the shallowest template.json (name/description)
-//          plus its sibling scenes.json — the same layout the backend's
-//          parse_template_zip and the cloud store's validateSceneZip read.
+//          plus its scenes, a folder per scene (docs/scene-packages.md) or the
+//          sibling scenes.json of a zip from before packages — what the
+//          backend's parse_template_zip and the cloud store's validateSceneZip read.
 //          The cover next to them (the manifest's `image`, conventionally
 //          ./image.jpg) comes along as a Blob so the new scene's tile is not
 //          blank until the frame renders it.
@@ -35,7 +37,9 @@ export class SceneUploadError extends Error {
 const maxZipEntries = 200
 const maxZipUncompressedBytes = 32 * 1024 * 1024
 
-const zipEntryPattern = /(^|\/)(template\.json|scenes\.json)$/
+// The manifest and the scenes: a legacy scenes.json, or scene folders (each
+// scene.json and its apps' files, docs/scene-packages.md).
+const zipEntryPattern = /(^|\/)(template\.json|scenes\.json|scene\.json)$|(^|\/)apps\//
 // The cover the interchange format ships next to the manifest. Only the
 // conventional name is inflated up front; a manifest that points elsewhere
 // gets its file inflated in a second, targeted pass.
@@ -167,32 +171,36 @@ function parseZip(bytes: Uint8Array): ParsedSceneUpload {
   const manifestPath = Object.keys(files)
     .filter((name) => /(^|\/)template\.json$/.test(name))
     .sort(byShallowest)[0]
-  // A zip of just a scenes.json (no manifest) is still a scene export worth
-  // installing; the name then comes from the scene itself.
-  const scenesPath = manifestPath
-    ? `${manifestPath.slice(0, manifestPath.length - 'template.json'.length)}scenes.json`
-    : Object.keys(files)
-        .filter((name) => /(^|\/)scenes\.json$/.test(name))
-        .sort(byShallowest)[0]
-  const scenesBytes = scenesPath ? files[scenesPath] : undefined
-  if (!scenesPath || !scenesBytes) {
+  // Scene folders (docs/scene-packages.md), a scenes.json next to the
+  // manifest, or a zip of just a scenes.json or one scene package (no
+  // manifest: the name then comes from the scene itself).
+  const texts: PackageFiles = {}
+  const decoder = new TextDecoder()
+  for (const [name, data] of Object.entries(files)) {
+    if (!zipCoverPattern.test(name)) {
+      texts[name] = decoder.decode(data)
+    }
+  }
+  const root = packageRoot(Object.keys(texts))
+  let read: PackagedSet
+  try {
+    read = setFromPackageFiles(texts, root)
+  } catch (error) {
     throw new SceneUploadError(
-      manifestPath ? 'The zip has a template.json but no scenes.json next to it' : 'No scenes.json found in the zip'
+      error instanceof ScenePackageError && error.code === 'missing_scenes'
+        ? manifestPath
+          ? 'The zip has a template.json but no scenes next to it'
+          : 'No scenes found in the zip'
+        : `This template .zip cannot be read: ${(error as Error).message}`
     )
   }
-
-  const scenes = scenesFromJson(parseJsonBytes(scenesBytes, 'scenes.json'), 'scenes.json')
+  const scenes = scenesFromJson(read.scenes, 'The zip\'s scenes')
   const result: ParsedSceneUpload = { scenes }
-  const folder = scenesPath.slice(0, scenesPath.length - 'scenes.json'.length)
+  const folder = root ? `${root}/` : ''
   // Without a manifest the cover can only be the conventional image.jpg.
   let coverPath: string | undefined = `${folder}image.jpg`
-  const manifestBytes = manifestPath ? files[manifestPath] : undefined
-  if (manifestBytes) {
-    const manifest = parseJsonBytes(manifestBytes, 'template.json')
-    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
-      throw new SceneUploadError('template.json must be a JSON object')
-    }
-    const record = manifest as Record<string, unknown>
+  if (read.manifest) {
+    const record = read.manifest
     if (typeof record.name === 'string' && record.name.trim()) {
       result.name = record.name.trim()
     }

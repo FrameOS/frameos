@@ -515,7 +515,10 @@ async def test_export_template_strips_scene_prompts(async_client, db):
     response = await async_client.get(f'/api/templates/{t.id}/export')
     assert response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        exported = json.loads(zf.read('Prompted/scenes.json'))
+        # A folder per scene (docs/scene-packages.md), in template.json's order.
+        manifest = json.loads(zf.read('Prompted/template.json'))
+        assert manifest['scenes'] == ['./AI scene', './Plain']
+        exported = [json.loads(zf.read('Prompted/AI scene/scene.json')), json.loads(zf.read('Prompted/Plain/scene.json'))]
     assert exported[0]['settings'] == {'refreshInterval': 60}
     assert 'settings' not in exported[1]
     # The stored template is untouched.
@@ -539,3 +542,47 @@ async def test_create_template_refuses_internal_urls(async_client, db, monkeypat
     monkeypatch.setattr(templates_module.httpx, "AsyncClient", fake_http_client({page_url: page}))
     response = await async_client.post("/api/templates", json={"url": page_url})
     assert response.status_code == 403, response.text
+
+
+@pytest.mark.asyncio
+async def test_template_zip_lays_scenes_out_as_packages_and_reads_both_forms(async_client, db):
+    """docs/scene-packages.md: an app's files are files of the zip, and a zip
+    from before packages (template.json naming scenes.json) still imports."""
+    scenes = [{
+        'id': 'w', 'name': 'Weather', 'nodes': [], 'edges': [],
+        'apps': {'card': {'name': 'Card', 'sources': {'app.ts': 'export const a = 1\n', 'lib/b.ts': 'export const b = 2\n'}}},
+    }]
+    t = Template(project_id=async_client.project_id, name='Packaged', scenes=scenes, config={})
+    db.add(t)
+    db.commit()
+    response = await async_client.get(f'/api/templates/{t.id}/export')
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        names = set(zf.namelist())
+        assert {'Packaged/template.json', 'Packaged/Weather/scene.json', 'Packaged/Weather/apps/card/app.ts',
+                'Packaged/Weather/apps/card/lib/b.ts'} <= names
+        assert 'sources' not in json.loads(zf.read('Packaged/Weather/scene.json'))['apps']['card']
+        assert zf.read('Packaged/Weather/apps/card/lib/b.ts') == b'export const b = 2\n'
+    imported = await async_client.post(
+        '/api/templates', files={'file': ('packaged.zip', response.content, 'application/zip')}, data={'format': 'scenes'}
+    )
+    assert imported.status_code == 201, imported.text
+    assert imported.json()[0]['apps']['card']['sources'] == scenes[0]['apps']['card']['sources']
+
+    legacy = io.BytesIO()
+    with zipfile.ZipFile(legacy, 'w') as zf:
+        zf.writestr('Old/template.json', json.dumps({'name': 'Old', 'scenes': './scenes.json'}))
+        zf.writestr('Old/scenes.json', json.dumps(scenes))
+    imported = await async_client.post(
+        '/api/templates', files={'file': ('old.zip', legacy.getvalue(), 'application/zip')}, data={'format': 'scenes'}
+    )
+    assert imported.status_code == 201, imported.text
+    assert imported.json()[0]['apps']['card']['sources'] == scenes[0]['apps']['card']['sources']
+
+    broken = io.BytesIO()
+    with zipfile.ZipFile(broken, 'w') as zf:
+        zf.writestr('Broken/template.json', json.dumps({'name': 'Broken', 'scenes': ['./Gone']}))
+    refused = await async_client.post(
+        '/api/templates', files={'file': ('broken.zip', broken.getvalue(), 'application/zip')}, data={'format': 'scenes'}
+    )
+    assert refused.status_code == 422

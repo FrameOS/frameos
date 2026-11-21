@@ -1,3 +1,4 @@
+import { templateZipScenes } from "./scene-zip";
 import { unzipBounded } from "./zip-bounded";
 
 // A store listing's title and the scene title inside its scenes.json are two
@@ -17,23 +18,8 @@ export const maxSceneNameLength = 128;
  * as "no scenes" rather than thrown, since callers treat it as best-effort.
  */
 export function extractScenesFromZip(content: Buffer): unknown[] | undefined {
-  try {
-    const files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    // The shallowest scenes.json wins, mirroring validateSceneZip.
-    const path = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
-    )[0];
-    const bytes = path ? files[path] : undefined;
-    if (!bytes) {
-      return undefined;
-    }
-    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+  // Scene folders (docs/scene-packages.md) or a legacy scenes.json.
+  return templateZipScenes(content);
 }
 
 /**

@@ -292,10 +292,14 @@ export function stripAppTestFiles<T>(scenes: T[]): T[] {
   return scenes;
 }
 
-// As scenesForRuntime, for an ESP32: also without the apps' test files.
-export function scenesForEmbeddedRuntime<T>(scenes: T[], runtimeVersion: string | null | undefined): T[] {
+// What any frame is sent: scenesForRuntime without the apps' test files,
+// which run in the editor and never on a frame (docs/scene-packages.md; a
+// frame's code editor saving a scene back keeps the store's, panel-code.ts).
+export function scenesForFrame<T>(scenes: T[], runtimeVersion: string | null | undefined): T[] {
   return stripAppTestFiles(scenesForRuntime(scenes, runtimeVersion));
 }
+
+export const scenesForEmbeddedRuntime = scenesForFrame;
 
 // A converted copy, for readers that show, edit or render scenes.
 export function withRetiredAppsReplaced<T>(scenes: T[]): T[] {

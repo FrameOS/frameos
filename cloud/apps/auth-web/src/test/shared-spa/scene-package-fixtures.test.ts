@@ -8,6 +8,7 @@ import {
   type PackageFiles,
   type PackageScene,
   ScenePackageError,
+  keepAppTestFiles,
   sceneFolderNames,
   sceneFromPackageFiles,
   scenePackageFiles,
@@ -84,4 +85,22 @@ describe("docs/scene-package-fixtures.json", () => {
       expect((error as ScenePackageError).code).toBe(kase.code);
     });
   }
+});
+
+describe("keepAppTestFiles", () => {
+  it("puts the plane's app tests back into a scene a frame saved without them", () => {
+    const stored = {
+      id: "s",
+      apps: { a: { sources: { "app.ts": "old", "app.test.ts": "t", "lib.test.ts": "u" } }, gone: { sources: { "x.test.ts": "v" } } },
+    };
+    const saved = {
+      id: "s",
+      apps: { a: { name: "A", sources: { "app.ts": "new", "lib.test.ts": "mine" } }, b: { sources: { "app.ts": "b" } } },
+    };
+    const kept = keepAppTestFiles(saved, stored) as { apps: Record<string, { sources: Record<string, string> }> };
+    expect(kept.apps.a!.sources).toEqual({ "app.ts": "new", "lib.test.ts": "mine", "app.test.ts": "t" });
+    expect(kept.apps.b).toEqual({ sources: { "app.ts": "b" } });
+    expect(kept.apps.gone).toBeUndefined();
+    expect(keepAppTestFiles(saved, undefined)).toBe(saved);
+  });
 });

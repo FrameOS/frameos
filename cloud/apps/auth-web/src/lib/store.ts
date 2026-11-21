@@ -1,12 +1,13 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
 import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { isTemplateZipEntry, readTemplateZip, templateZipBytes } from "./scene-zip";
 import { sceneNeeds } from "../../../../../frontend/src/utils/sceneNeeds";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { isDesktopLayout, isDeviceLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
 import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
-import { strToU8, unzlibSync, zipSync } from "fflate";
+import { unzlibSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
 import {
   categorySlugForTitle,
@@ -528,9 +529,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     // Inflate only the files we read; other entries still count against the
     // entry and size caps but are never decompressed. The size cap is
     // enforced on the bytes that actually come out, not the header's claim.
-    files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
+    files = unzipBounded(new Uint8Array(content), isTemplateZipEntry);
   } catch {
     return { ok: false, error: "invalid_zip" };
   }
@@ -550,8 +549,9 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
     return { ok: false, error: "invalid_template_json" };
   }
 
-  const scenesRaw = files[`${folder}scenes.json`];
-  const scenes = scenesRaw ? parseJson(scenesRaw) : undefined;
+  // Scene folders (docs/scene-packages.md), or the scenes.json of a zip from
+  // before them.
+  const scenes = readTemplateZip(new Uint8Array(content))?.scenes;
   if (!Array.isArray(scenes) || scenes.length === 0) {
     return { ok: false, error: "missing_scenes" };
   }
@@ -624,12 +624,12 @@ export type ManifestPatch = {
   tags?: string[] | undefined;
 };
 
-// Rebuild the template interchange zip with some of its three files changed
-// and the rest byte-identical: new scenes.json, manifest fields patched, the
-// cover swapped (`previewImage: null` removes it). The manifest is
-// re-serialized only when something in it changes, so a rebuild that only
-// swaps scenes.json leaves template.json untouched. Every write path that
-// mints a version from an existing zip goes through here.
+// Rebuild the template interchange zip with some of it changed: new scenes,
+// manifest fields patched, the cover swapped (`previewImage: null` removes
+// it). Written as scene packages (docs/scene-packages.md, scene-zip.ts)
+// whichever form the zip came in, so a version minted from one before
+// packages is laid out the new way. Every write path that mints a version
+// from an existing zip goes through here.
 export function rebuildZip(
   zipBytes: Buffer,
   changes: {
@@ -639,72 +639,46 @@ export function rebuildZip(
   },
 ): Buffer | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-    const manifestBytes = manifestPath ? files[manifestPath] : undefined;
-    if (!manifestPath || !manifestBytes) {
+    const zip = readTemplateZip(new Uint8Array(zipBytes));
+    if (!zip) {
       return undefined;
     }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenes = changes.scenesJson
-      ? strToU8(changes.scenesJson)
-      : files[`${folder}scenes.json`];
-    if (!scenes) {
+    const scenes = changes.scenesJson === undefined ? zip.scenes : (JSON.parse(changes.scenesJson) as unknown);
+    if (!Array.isArray(scenes)) {
       return undefined;
     }
-
-    let manifest: Uint8Array = manifestBytes;
+    const record: Record<string, unknown> = { ...zip.manifest };
     const patch = changes.manifest ?? {};
     const swappingPreview = changes.previewImage !== undefined;
-    if (Object.keys(patch).length > 0 || swappingPreview) {
-      const parsed = parseJson(manifestBytes);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        return undefined;
-      }
-      const record = { ...(parsed as Record<string, unknown>) };
-      if (patch.name !== undefined) {
-        record.name = patch.name;
-      }
-      for (const key of ["description", "category", "frameosVersion"] as const) {
-        const value = patch[key];
-        if (value === null) {
-          delete record[key];
-        } else if (value !== undefined) {
-          record[key] = value;
-        }
-      }
-      if (patch.tags !== undefined) {
-        if (patch.tags.length > 0) {
-          record.tags = patch.tags;
-        } else {
-          delete record.tags;
-        }
-      }
-      if (swappingPreview) {
-        // Dimensions describe the previous image; FrameOS recomputes them
-        // on import and the store reads its own.
-        delete record.imageHeight;
-        delete record.imageWidth;
-        if (changes.previewImage) {
-          record.image = "./image.jpg";
-        } else {
-          delete record.image;
-        }
-      }
-      manifest = strToU8(JSON.stringify(record, null, 2));
+    if (patch.name !== undefined) {
+      record.name = patch.name;
     }
-
-    const next: Record<string, Uint8Array> = {
-      [manifestPath]: manifest,
-      [`${folder}scenes.json`]: scenes,
-    };
+    for (const key of ["description", "category", "frameosVersion"] as const) {
+      const value = patch[key];
+      if (value === null) {
+        delete record[key];
+      } else if (value !== undefined) {
+        record[key] = value;
+      }
+    }
+    if (patch.tags !== undefined) {
+      if (patch.tags.length > 0) {
+        record.tags = patch.tags;
+      } else {
+        delete record.tags;
+      }
+    }
+    if (swappingPreview) {
+      // Dimensions describe the previous image; FrameOS recomputes them
+      // on import and the store reads its own.
+      delete record.imageHeight;
+      delete record.imageWidth;
+      if (changes.previewImage) {
+        record.image = "./image.jpg";
+      } else {
+        delete record.image;
+      }
+    }
     // The interchange format knows one cover path. Cloud galleries hold
     // several images; FrameOS/Pillow sniffs the real raster format from the
     // bytes, so PNG/WebP/GIF go under the conventional name untranscoded.
@@ -712,17 +686,15 @@ export function rebuildZip(
       ? changes.previewImage
         ? new Uint8Array(changes.previewImage)
         : undefined
-      : files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
-    }
-    return Buffer.from(zipSync(next));
+      : zip.image;
+    // Written as scene packages whatever form it came in.
+    return templateZipBytes(zip.folder, record, scenes, image);
   } catch {
     return undefined;
   }
 }
 
-// Swap scenes.json, keeping template.json and image.jpg byte-identical —
+// New scenes, the manifest and the cover carried over —
 // unless `renameTo` is given, which also rewrites the manifest's name.
 export function rebuildZipWithScenes(
   zipBytes: Buffer,

@@ -411,3 +411,59 @@ def test_evdev_shared_driver_wrapper_avoids_image_runtime_imports():
     assert "import pixie" not in source
     assert "import frameos/types" not in source
     assert "proc frameos_driver_init*(driverContextPtr: pointer" in source
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_that_reads_scene_packages_is_sent_scenes_zip(monkeypatch):
+    """docs/scene-packages.md: from SCENE_PACKAGES_RUNTIME on a Pi reads its
+    deployed set as scenes.zip (an app's files read when its interpreter
+    starts); an older runtime gets scenes.json.gz. Whichever is not written
+    is removed, so neither runtime reads the other's older copy."""
+    import io
+    import json
+    import zipfile
+
+    from app.utils.scene_package import set_from_package_files
+
+    uploads: dict[str, bytes] = {}
+    renames: list[tuple[str, str]] = []
+    commands: list[str] = []
+
+    async def fake_upload_file(_db, _redis, _frame, path, data, **_kwargs):
+        uploads[path] = data
+
+    async def fake_rename_path(_db, _redis, _frame, source, target, **_kwargs):
+        renames.append((source, target))
+        uploads[target] = uploads.pop(source)
+
+    monkeypatch.setattr("app.tasks._frame_deployer.upload_file", fake_upload_file)
+    monkeypatch.setattr("app.tasks._frame_deployer.rename_path", fake_rename_path)
+    scenes = [{
+        "id": "w", "name": "Weather", "nodes": [], "edges": [], "settings": {"execution": "interpreted"},
+        "apps": {"card": {"name": "Card", "sources": {"app.ts": "export const a = 1\n", "app.test.ts": "test()\n"}}},
+    }]
+    deployer = FrameDeployer(
+        db=None, redis=None, frame=SimpleNamespace(id=1, scenes=scenes), nim_path="/usr/bin/nim", temp_dir="/tmp/x"
+    )
+
+    async def fake_exec(command, **_kwargs):
+        commands.append(command)
+        return 0
+
+    deployer.exec_command = fake_exec
+    await deployer.upload_scenes("/srv/frameos/current", "2026.11.14", atomic=True)
+    data = uploads["/srv/frameos/current/scenes.zip"]
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        files = {name: zf.read(name).decode() for name in zf.namelist()}
+    assert files["Weather/apps/card/app.ts"] == "export const a = 1\n"
+    assert not any(name.endswith(".test.ts") for name in files)
+    assert "sources" not in json.loads(files["Weather/scene.json"])["apps"]["card"]
+    read, _manifest = set_from_package_files(files)
+    assert read[0]["apps"]["card"]["sources"] == {"app.ts": "export const a = 1\n"}
+    assert commands == ["rm -f /srv/frameos/current/scenes.json.gz"]
+
+    uploads.clear()
+    commands.clear()
+    await deployer.upload_scenes("/srv/frameos/releases/r1", "2026.11.13")
+    assert list(uploads) == ["/srv/frameos/releases/r1/scenes.json.gz"]
+    assert commands == ["rm -f /srv/frameos/releases/r1/scenes.zip"]

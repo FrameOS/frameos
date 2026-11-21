@@ -44,6 +44,26 @@ def is_app_test_file(path: str) -> bool:
     return bool(_TEST_FILE.search(path))
 
 
+def keep_app_test_files(scene: dict, stored: dict | None) -> dict:
+    """`scene` with the test files of `stored` (the plane's copy of the same
+    scene) put back into each app both have: a frame is never sent an app's
+    tests, so a scene its code editor saves back has none. A test file the
+    scene carries itself wins."""
+    if not isinstance(stored, dict) or not isinstance(scene.get("apps"), dict) or not isinstance(stored.get("apps"), dict):
+        return scene
+    apps = dict(scene["apps"])
+    for keyword, app in apps.items():
+        before = stored["apps"].get(keyword)
+        if not isinstance(app, dict) or not isinstance(before, dict) or not isinstance(before.get("sources"), dict):
+            continue
+        sources = dict(app["sources"]) if isinstance(app.get("sources"), dict) else {}
+        for path, text in before["sources"].items():
+            if is_app_test_file(path) and isinstance(text, str) and path not in sources:
+                sources[path] = text
+        apps[keyword] = {**app, "sources": sources}
+    return {**scene, "apps": apps}
+
+
 def app_folder_name(keyword: str) -> str:
     return keyword.replace("%", "%25").replace("/", "%2F")
 
@@ -248,6 +268,27 @@ def set_from_package_files(files: dict[str, str], root: str | None = None) -> tu
     if not order:
         raise ScenePackageError("missing_scenes", "The package holds no scene")
     return [scene_from_package_files(_files_under(own, folder)) for folder in order], manifest
+
+
+# ---- frames -----------------------------------------------------------------
+
+SCENE_PACKAGES_RUNTIME = "2026.11.14"
+"""The first FrameOS whose Linux runtime reads a deployed scenes.zip."""
+
+
+def runtime_reads_scene_packages(runtime_version: str | None) -> bool:
+    from app.utils.versions import version_tuple
+
+    reported = version_tuple(runtime_version)
+    floor = version_tuple(SCENE_PACKAGES_RUNTIME)
+    return reported is not None and floor is not None and reported >= floor
+
+
+def deployed_set_package_bytes(scenes: list[dict]) -> bytes:
+    """A Pi's deployed set as a package (scenes.zip): template.json with the
+    scenes' order, a folder per scene. The runtime parses each scene.json and
+    reads an app's files when its interpreter starts."""
+    return zip_bytes(set_package_files(scenes, {}))
 
 
 # ---- zips -------------------------------------------------------------------

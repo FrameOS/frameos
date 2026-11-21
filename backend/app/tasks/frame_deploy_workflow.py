@@ -1470,10 +1470,8 @@ class FrameDeployWorkflow:
             await self.deployer._upload_frame_json_atomically("/srv/frameos/current/frame.json")
             # A fast deploy keeps the runtime the frame already runs, so the
             # scenes go out as that version reads them (utils/retired_apps.py).
-            await self.deployer._upload_scenes_json_atomically(
-                "/srv/frameos/current/scenes.json.gz",
-                gzip=True,
-                runtime_version=plan.frame_dict.get("frameos_version"),
+            await self.deployer.upload_scenes(
+                "/srv/frameos/current", plan.frame_dict.get("frameos_version"), atomic=True
             )
             # all_scenes.json is no longer uploaded, but a runtime from before
             # it was dropped still prefers one over scenes.json when `frameos
@@ -1838,11 +1836,7 @@ class FrameDeployWorkflow:
     async def _upload_release_metadata(self, build_id: str) -> None:
         # The release directory gets this backend's own FrameOS: the scenes go
         # out as that version reads them (utils/retired_apps.py).
-        await self.deployer._upload_scenes_json(
-            f"{self._release_dir(build_id)}/scenes.json.gz",
-            gzip=True,
-            runtime_version=current_frameos_version(),
-        )
+        await self.deployer.upload_scenes(self._release_dir(build_id), current_frameos_version())
         await self.deployer._upload_frame_json(f"{self._release_dir(build_id)}/frame.json")
 
     async def _sync_vendor_dependencies(

@@ -18,6 +18,7 @@ from app.tasks.frame_deploy_workflow import (
     RemoteUpgradePlan,
 )
 from app.utils.cross_compile import TargetMetadata
+from app.utils.scene_package import runtime_reads_scene_packages
 
 
 class FakeDeployer:
@@ -115,6 +116,11 @@ class RecordingDeployer(FakeDeployer):
         self, path: str, gzip: bool = False, runtime_version: str | None = None
     ) -> None:
         self.atomic_uploads.append((path, gzip))
+        self.scenes_runtime_version = runtime_version
+
+    async def upload_scenes(self, directory: str, runtime_version: str | None, *, atomic: bool = False) -> None:
+        name = "scenes.zip" if runtime_reads_scene_packages(runtime_version) else "scenes.json.gz"
+        self.atomic_uploads.append((f"{directory}/{name}", atomic))
         self.scenes_runtime_version = runtime_version
 
 

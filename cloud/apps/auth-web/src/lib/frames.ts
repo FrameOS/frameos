@@ -36,13 +36,13 @@ import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "../../../../../frontend/src/sceneWorkspace/lib/preview-settings";
-import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
+import { scenesForFrame } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
-import { unzipBounded } from "./zip-bounded";
+import { readTemplateZip } from "./scene-zip";
 import { sceneHashes } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
@@ -1782,7 +1782,7 @@ export async function storeServiceSettingGroups(
     .where(eq(frames.id, frameId));
 }
 
-// Pull the shallowest scenes.json out of a published template zip. The zip is
+// The scenes of a published template zip. The zip is
 // untrusted input (an old version row, a future publish path), so it gets the
 // same entry-count and uncompressed-size caps validateSceneZip enforces at
 // publish time — zip-bomb defence in depth. `bytes` is the raw scenes.json
@@ -1790,28 +1790,13 @@ export async function storeServiceSettingGroups(
 export function extractScenesJson(
   zip: Buffer,
 ): { bytes: number; scenes: unknown[] } | undefined {
-  try {
-    let best: { path: string; data: Uint8Array } | undefined;
-    // Inflate only scenes.json; other entries still count against the caps
-    // but are never decompressed.
-    const entries = unzipBounded(new Uint8Array(zip), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    for (const [path, data] of Object.entries(entries)) {
-      if (!best || path.split("/").length < best.path.split("/").length) {
-        best = { data, path };
-      }
-    }
-    if (!best || best.data.length > maxSceneZipUncompressedBytes) {
-      return undefined;
-    }
-    const parsed = JSON.parse(Buffer.from(best.data).toString("utf8"));
-    return Array.isArray(parsed)
-      ? { bytes: best.data.length, scenes: parsed }
-      : undefined;
-  } catch {
+  // Scene folders (docs/scene-packages.md) or a legacy scenes.json; the
+  // other entries still count against the caps but are never decompressed.
+  const read = readTemplateZip(new Uint8Array(zip));
+  if (!read || read.sceneBytes > maxSceneZipUncompressedBytes) {
     return undefined;
   }
+  return { bytes: read.sceneBytes, scenes: read.scenes };
 }
 
 // Resolve the store_scene_versions row an assignment actually pins: the
@@ -2082,7 +2067,7 @@ export async function buildScenesPayloadForFrame(
     // assignment row across versions, never part of the published bytes.
     // ...and the layout that install wears, written on as `layout` the same
     // way (scene-layouts.ts).
-    const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
+    const stamped = scenesForFrame(
       withSceneLayouts(
         withSceneEventMaps(
           withStoreSceneOrigin(
@@ -2185,7 +2170,7 @@ export async function publicStoreSceneForFrame(
   if (extracted.bytes > maxScenesPayloadBytes) {
     return { error: "scenes_payload_too_large" };
   }
-  const scenes = (frameHardwareIsEsp32(frame) ? scenesForEmbeddedRuntime : scenesForRuntime)(
+  const scenes = scenesForFrame(
     withStoreSceneOrigin(
       extracted.scenes,
       { id: storeSceneId, slug: scene.slug, version: versionRow.version },

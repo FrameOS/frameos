@@ -407,6 +407,12 @@ def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
     return result
 
 
-def scenes_for_embedded_runtime(scenes: Any, runtime_version: str | None) -> list:
-    """As scenes_for_runtime, for an ESP32: also without the apps' test files."""
+def scenes_for_frame(scenes: Any, runtime_version: str | None) -> list:
+    """What any frame is sent: scenes_for_runtime without the apps' test
+    files, which run in the editor and never on a frame (docs/scene-packages.md;
+    a frame's code editor saving a scene back keeps the plane's,
+    scene_package.keep_app_test_files)."""
     return strip_app_test_files(scenes_for_runtime(scenes, runtime_version))
+
+
+scenes_for_embedded_runtime = scenes_for_frame

@@ -79,3 +79,15 @@ def test_device_package_keeps_scene_json_first_and_stored():
     size = int.from_bytes(data[18:22], "little")
     start = 30 + name_len + extra_len
     assert json.loads(data[start : start + size])["id"] == scene["id"]
+
+
+def test_a_scene_saved_back_from_a_frame_keeps_the_planes_app_tests():
+    """A frame is never sent an app's tests (retired_apps.scenes_for_frame):
+    its code editor saves a scene without them, and the plane keeps its own."""
+    stored = {"id": "s", "apps": {"a": {"sources": {"app.ts": "old", "app.test.ts": "t", "lib.test.ts": "u"}}, "gone": {"sources": {"x.test.ts": "v"}}}}
+    saved = {"id": "s", "apps": {"a": {"name": "A", "sources": {"app.ts": "new", "lib.test.ts": "mine"}}, "b": {"sources": {"app.ts": "b"}}}}
+    kept = sp.keep_app_test_files(saved, stored)
+    assert kept["apps"]["a"]["sources"] == {"app.ts": "new", "lib.test.ts": "mine", "app.test.ts": "t"}
+    assert kept["apps"]["b"] == {"sources": {"app.ts": "b"}}
+    assert "gone" not in kept["apps"]
+    assert sp.keep_app_test_files(saved, None) is saved

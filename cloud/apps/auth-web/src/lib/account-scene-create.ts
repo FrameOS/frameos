@@ -13,7 +13,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { createDb, storeScenes } from "@frameos-cloud/db";
-import { strToU8, zipSync } from "fflate";
+import { templateZipBytes } from "./scene-zip";
 import type { NextResponse } from "next/server";
 import { jsonError } from "./device-flow";
 import { maxSceneZipBytes } from "./store";
@@ -118,7 +118,8 @@ export async function createAccountScene(
   );
 }
 
-// One version's zip: manifest, scenes.json, optional cover.
+// One version's zip: manifest, a folder per scene (its scene.json and its
+// apps' files, docs/scene-packages.md), optional cover.
 function buildSceneZip(
   name: string,
   description: string | undefined,
@@ -130,16 +131,12 @@ function buildSceneZip(
     name,
     ...(description ? { description } : {}),
     ...(previewImage ? { image: "./image.jpg" } : {}),
-    scenes: "./scenes.json",
   };
-  const content = Buffer.from(
-    zipSync({
-      [`${folder}/template.json`]: strToU8(JSON.stringify(manifest, null, 2)),
-      [`${folder}/scenes.json`]: strToU8(JSON.stringify(scenes, null, 2)),
-      // The interchange format knows one cover path; the real raster format
-      // is sniffed from the bytes wherever it is read.
-      ...(previewImage ? { [`${folder}/image.jpg`]: new Uint8Array(previewImage) } : {}),
-    }),
+  const content = templateZipBytes(
+    `${folder}/`,
+    manifest,
+    scenes,
+    previewImage ? new Uint8Array(previewImage) : undefined,
   );
   if (content.length > maxSceneZipBytes) {
     return { error: jsonError("scene_too_large", 413, { max_bytes: maxSceneZipBytes }) };

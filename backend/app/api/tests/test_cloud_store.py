@@ -1,11 +1,11 @@
 """Store publishing: publish templates to the cloud store."""
 import base64
 import io
-import json
 import zipfile
 
 import pytest
 
+from app.utils.scene_package import set_from_package_files
 from app.models.cloud import CloudBackendLink
 from app.models.template import Template
 from app.utils import cloud_link
@@ -86,11 +86,8 @@ async def test_publish_sends_template_zip(async_client, db, store_calls):
     # The payload is the standard template interchange zip.
     zip_bytes = base64.b64decode(payload["content_base64"])
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-        names = archive.namelist()
-        manifest_path = next(name for name in names if name.endswith("template.json"))
-        scenes_path = next(name for name in names if name.endswith("scenes.json"))
-        manifest = json.loads(archive.read(manifest_path))
-        scenes = json.loads(archive.read(scenes_path))
+        # A folder per scene (docs/scene-packages.md).
+        scenes, manifest = set_from_package_files({name: archive.read(name).decode() for name in archive.namelist()})
     assert manifest["name"] == "Sunrise Clock"
     # Zips are stamped with the FrameOS version they were exported with; the
     # store surfaces it on scene listings.
@@ -193,8 +190,7 @@ async def test_publish_inline_scenes_from_frame(async_client, db, store_calls):
     assert payload["name"] == "Straight off the frame"
     zip_bytes = base64.b64decode(payload["content_base64"])
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
-        scenes_path = next(name for name in archive.namelist() if name.endswith("scenes.json"))
-        scenes = json.loads(archive.read(scenes_path))
+        scenes, _manifest = set_from_package_files({name: archive.read(name).decode() for name in archive.namelist()})
     assert scenes == [{"id": "scene-2", "nodes": []}]
     # Nothing is persisted locally: publishing to the private cloud is not "save to my scenes".
     from app.models.template import Template as TemplateModel

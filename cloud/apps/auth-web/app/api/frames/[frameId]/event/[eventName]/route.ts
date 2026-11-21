@@ -33,7 +33,7 @@ import {
 } from "../../../../../../src/lib/frame-scenes";
 import { deviceSceneIdForFrame } from "../../../../../../src/lib/scene-images";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
-import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
+import { scenesForFrame } from "../../../../../../src/lib/retired-apps";
 import { sceneListWithPreview } from "../../../../../../src/lib/scene-preview-list";
 import { readSession } from "../../../../../../src/lib/session";
 import {
@@ -301,7 +301,7 @@ export async function POST(
       }
       // In the form this frame's firmware reads: an older one gets a retired
       // Nim app's keyword back (data/immich), as the assignment push does.
-      const bundle = scenesForRuntime(scenes, frame.frameosVersion);
+      const bundle = scenesForFrame(scenes, frame.frameosVersion);
       // The frame keeps its assigned scenes, with the preview in them
       // (lib/scene-preview-list.ts): an ESP32 is sent the previewed scenes
       // alone, and the Install or Discard after it changes one.

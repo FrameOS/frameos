@@ -13,7 +13,7 @@ import {
 } from "../../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { extractAppKeywords } from "../../../../../src/lib/store";
-import { unzipBounded } from "../../../../../src/lib/zip-bounded";
+import { templateZipScenes } from "../../../../../src/lib/scene-zip";
 import {
   classifyStoreScene,
   isClassificationConfigured,
@@ -176,21 +176,6 @@ export async function POST(request: NextRequest) {
 }
 
 function appKeywordsFromZip(zipBytes: Buffer): string[] {
-  try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    const scenesPath = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length,
-    )[0];
-    const raw = scenesPath ? files[scenesPath] : undefined;
-    if (!raw) {
-      return [];
-    }
-    return extractAppKeywords(
-      JSON.parse(Buffer.from(raw).toString("utf8")),
-    );
-  } catch {
-    return [];
-  }
+  const scenes = templateZipScenes(zipBytes);
+  return scenes ? extractAppKeywords(scenes) : [];
 }

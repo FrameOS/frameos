@@ -48,6 +48,31 @@ export function isAppTestFile(path: string): boolean {
   return TEST_FILE.test(path)
 }
 
+/** `scene` with the test files of `stored` (the plane's copy of the same
+ * scene) put back into each app both have: a frame is never sent an app's
+ * tests, so a scene its code editor saves back has none
+ * (docs/scene-packages.md). A test file the scene carries itself wins. */
+export function keepAppTestFiles(scene: PackageScene, stored: PackageScene | null | undefined): PackageScene {
+  if (!stored || !isObject(scene.apps) || !isObject(stored.apps)) {
+    return scene
+  }
+  const apps: Record<string, unknown> = { ...scene.apps }
+  for (const [keyword, app] of Object.entries(apps)) {
+    const before = (stored.apps as Record<string, unknown>)[keyword]
+    if (!isObject(app) || !isObject(before) || !isObject(before.sources)) {
+      continue
+    }
+    const sources: Record<string, unknown> = isObject(app.sources) ? { ...app.sources } : {}
+    for (const [path, text] of Object.entries(before.sources)) {
+      if (isAppTestFile(path) && typeof text === 'string' && !(path in sources)) {
+        sources[path] = text
+      }
+    }
+    apps[keyword] = { ...app, sources }
+  }
+  return { ...scene, apps }
+}
+
 /** The folder an app's files go in: its keyword, with `%` and `/` escaped. */
 export function appFolderName(keyword: string): string {
   return keyword.replace(/%/g, '%25').replace(/\//g, '%2F')

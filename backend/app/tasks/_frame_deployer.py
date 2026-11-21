@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models.apps import get_scene_apps_from_scenes
 from app.models.frame import Frame, get_frame_json, get_interpreted_scenes_json
+from app.utils.scene_package import deployed_set_package_bytes, runtime_reads_scene_packages
 from app.utils.scene_execution import scene_is_interpreted
 from app.models.log import new_log as log
 from app.utils.local_exec import exec_local_command
@@ -282,6 +283,30 @@ class FrameDeployer:
         if gzip:
             json_data = compress(json_data)
         await upload_file(self.db, self.redis, self.frame, path, json_data, transport=self.remote_transport)
+
+    async def upload_scenes(self, directory: str, runtime_version: str | None, *, atomic: bool = False) -> None:
+        """The scenes a runtime of `runtime_version` reads from `directory`: a
+        package, scenes.zip (docs/scene-packages.md), where it reads them, and
+        scenes.json.gz before that. Whichever is not written is removed, so the
+        runtime never reads the other one's older copy."""
+        if runtime_reads_scene_packages(runtime_version):
+            path, stale = f"{directory}/scenes.zip", f"{directory}/scenes.json.gz"
+            data = deployed_set_package_bytes(get_interpreted_scenes_json(self.frame, runtime_version))
+            target = f"{path}.tmp-{self.build_id}" if atomic else path
+            await upload_file(self.db, self.redis, self.frame, target, data, transport=self.remote_transport)
+            if atomic:
+                await rename_path(self.db, self.redis, self.frame, target, path, transport=self.remote_transport)
+        else:
+            stale = f"{directory}/scenes.zip"
+            if atomic:
+                await self._upload_scenes_json_atomically(
+                    f"{directory}/scenes.json.gz", gzip=True, runtime_version=runtime_version
+                )
+            else:
+                await self._upload_scenes_json(f"{directory}/scenes.json.gz", gzip=True, runtime_version=runtime_version)
+        await self.exec_command(
+            f"rm -f {shlex.quote(stale)}", raise_on_error=False, log_command=False, log_output=False
+        )
 
     async def _upload_frame_json_atomically(self, path: str) -> None:
         temp_path = f"{path}.tmp-{self.build_id}"

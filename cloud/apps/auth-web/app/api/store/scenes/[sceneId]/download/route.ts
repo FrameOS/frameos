@@ -127,14 +127,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return photoLinkRefusal(403);
   }
   // The stored zip is the publisher's bytes; what a frame installs from it
-  // must say where it came from, so every scene in the served scenes.json
-  // carries this scene's `origin` (see scene-origin.ts). The digest header
-  // describes the bytes actually served.
-  const content = rebuildZipWithSceneOrigins(Buffer.from(stored), {
-    id: scene.id,
-    slug: scene.slug,
-    version: version.version,
-  });
+  // must say where it came from, so every scene served carries this scene's
+  // `origin` (see scene-origin.ts). The digest header describes the bytes
+  // actually served. Laid out as scene packages (docs/scene-packages.md);
+  // `?layout=json` is the form before them, a scenes.json with the whole
+  // array, which is what the store page's frameos:zip tag names so that a
+  // self-hosted backend from before packages can still install from it.
+  const content = rebuildZipWithSceneOrigins(
+    Buffer.from(stored),
+    { id: scene.id, slug: scene.slug, version: version.version },
+    request.nextUrl.searchParams.get("layout") === "json" ? "json" : "packages",
+  );
   if (!content) {
     return jsonError("invalid_scene_zip", 500);
   }

@@ -330,8 +330,10 @@ export default async function ScenePage({
   const shownListing = pinnedVersion ? listingForVersion(pinnedVersion, scene) : scene;
   // The icon of the version shown: each version records its own.
   const shownIcon = pinnedVersion ? pinnedVersion.icon : scene.icon;
+  // The form a backend from before scene packages reads (docs/scene-packages.md):
+  // a newer one reads both.
   const zipUrl = new URL(
-    withShare(`/api/store/scenes/${scene.id}/download`),
+    withShare(`/api/store/scenes/${scene.id}/download?layout=json`),
     getScenesBaseUrl(),
   ).toString();
 

@@ -21,7 +21,7 @@ import { readSession } from "../../../../../../src/lib/session";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
 import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
-import { unzipBounded } from "../../../../../../src/lib/zip-bounded";
+import { templateZipScenes } from "../../../../../../src/lib/scene-zip";
 
 export const runtime = "nodejs";
 
@@ -196,22 +196,9 @@ function versionParam(request: NextRequest): number | undefined | null {
 // The zip was validated at publish (validateSceneZip); this re-extract only
 // inflates the one file it returns.
 function extractScenesJson(content: Buffer): unknown[] | undefined {
-  try {
-    const files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    const path = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
-    )[0];
-    const bytes = path ? files[path] : undefined;
-    if (!bytes) {
-      return undefined;
-    }
-    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+  // Scene folders (docs/scene-packages.md) or a legacy scenes.json: the
+  // scenes whole either way.
+  return templateZipScenes(content);
 }
 
 // Cache policy is per-response here (see storeRoute): anything this

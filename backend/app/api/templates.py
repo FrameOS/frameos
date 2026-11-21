@@ -40,6 +40,7 @@ from app.utils.upload_limits import (
     reject_oversized_content_length,
 )
 from app.utils.scene_execution import normalize_scenes_execution
+from app.utils.scene_package import ScenePackageError, set_from_package_files, set_package_files, zip_bytes
 from app.utils.scene_layouts import bad_layouts_message
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
@@ -123,25 +124,22 @@ def template_download_error(exc: httpx.HTTPError, url: str) -> HTTPException:
 
 
 def template_zip_bytes(template: Template) -> bytes:
-    """The template interchange zip: {name}/template.json + scenes.json + image.jpg.
-    Also the payload format for cloud template backups."""
+    """The template interchange zip, as a set of scene packages
+    (docs/scene-packages.md): {name}/template.json, {name}/image.jpg, and a
+    folder per scene holding its scene.json and apps/<keyword>/<file>. Also
+    the payload format for cloud template backups."""
     template_name = safe_template_name(template)
     template_dict = template.to_dict()
     template_dict.pop('id', None)
-    in_memory = io.BytesIO()
-    with zipfile.ZipFile(in_memory, 'a', zipfile.ZIP_DEFLATED) as zf:
-        scenes = strip_scene_prompts(template_dict.pop('scenes', []))
-        template_dict['scenes'] = './scenes.json'
-        template_dict['image'] = './image.jpg'
-        # The FrameOS version this template was exported with. Informational —
-        # the store surfaces it so people know what a scene was built/tested on.
-        template_dict['frameosVersion'] = current_frameos_version()
-        zf.writestr(f"{template_name}/scenes.json", json.dumps(scenes, indent=2))
-        zf.writestr(f"{template_name}/template.json", json.dumps(template_dict, indent=2))
-        if template.image:
-            zf.writestr(f"{template_name}/image.jpg", template.image)
-    in_memory.seek(0)
-    return in_memory.getvalue()
+    scenes = strip_scene_prompts(template_dict.pop('scenes', None) or [])
+    template_dict['image'] = './image.jpg'
+    # The FrameOS version this template was exported with. Informational —
+    # the store surfaces it so people know what a scene was built/tested on.
+    template_dict['frameosVersion'] = current_frameos_version()
+    files: dict[str, str | bytes] = dict(set_package_files(scenes, template_dict))
+    if template.image:
+        files['image.jpg'] = template.image
+    return zip_bytes(files, prefix=f"{template_name}/")
 
 
 def open_template_zip(zip_bytes: bytes) -> zipfile.ZipFile:
@@ -172,13 +170,42 @@ def read_template_member(zip_file: zipfile.ZipFile, name: str) -> bytes:
     return read_zip_member_limited(zip_file, name, MAX_TEMPLATE_MEMBER_BYTES)
 
 
+_TEMPLATE_TEXT_MEMBER = re.compile(r'(^|/)(template\.json|scenes\.json|scene\.json)$|(^|/)apps/')
+_MAX_TEMPLATE_TEXT_BYTES = 32 * 1024 * 1024
+
+
+def template_zip_scenes(zip_file: zipfile.ZipFile) -> tuple[list, dict]:
+    """A template zip's scenes and its template.json ({} without one),
+    whichever form it is in: scene folders (docs/scene-packages.md), one
+    scene package, or template.json naming a scenes.json. 422 when it is
+    none of them."""
+    files: dict[str, str] = {}
+    total = 0
+    for member in zip_file.namelist():
+        if member.endswith('/') or not _TEMPLATE_TEXT_MEMBER.search(member):
+            continue
+        data = read_template_member(zip_file, member)
+        total += len(data)
+        if total > _MAX_TEMPLATE_TEXT_BYTES:
+            raise HTTPException(status_code=413, detail="Template zip too large")
+        try:
+            files[member] = data.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail=f"{member} is not UTF-8 text") from exc
+    try:
+        scenes, manifest = set_from_package_files(files)
+    except ScenePackageError as exc:
+        raise HTTPException(status_code=422, detail=f"Not a valid template .zip: {exc}") from exc
+    return scenes, dict(manifest or {})
+
+
 def parse_template_zip(zip_bytes: bytes) -> dict:
     """Inverse of template_zip_bytes: returns template fields incl. scenes/image."""
     zip_file = open_template_zip(zip_bytes)
     folder_name = template_zip_folder(zip_file)
 
-    data = json.loads(read_template_member(zip_file, f'{folder_name}template.json'))
-    data['scenes'] = json.loads(read_template_member(zip_file, f'{folder_name}scenes.json'))
+    scenes, data = template_zip_scenes(zip_file)
+    data['scenes'] = scenes
     image = data.get('image')
     if isinstance(image, str) and image.startswith('./'):
         image_path = image[len('./'):]
@@ -314,15 +341,15 @@ async def create_template(
         "imageHeight": imageHeight,
     }
 
-    # If we have a zip file, parse template.json and scenes.json
+    # If we have a zip file, its template.json and its scenes (scene folders,
+    # or the scenes.json of a zip from before packages)
     if zip_file:
         folder_name = template_zip_folder(zip_file)
 
-        template_json = read_template_member(zip_file, f'{folder_name}template.json')
-        scenes_json = read_template_member(zip_file, f'{folder_name}scenes.json')
-
-        parsed_data = json.loads(template_json)
-        parsed_data['scenes'] = json.loads(scenes_json)
+        scenes_found, parsed_data = template_zip_scenes(zip_file)
+        parsed_data['scenes'] = scenes_found
+        if not parsed_data.get('name') and scenes_found:
+            parsed_data['name'] = scenes_found[0].get('name')
 
         # Merge into data if not already provided
         for k, v in parsed_data.items():
@@ -337,7 +364,11 @@ async def create_template(
                 img_val = base64.b64decode(b64data)
             elif img_val.startswith('./'):
                 image_path = img_val[len('./'):]
-                img_val = read_template_member(zip_file, f'{folder_name}{image_path}')
+                try:
+                    img_val = read_template_member(zip_file, f'{folder_name}{image_path}')
+                except KeyError:
+                    # template.json names ./image.jpg even when there is none.
+                    img_val = None
             elif img_val.startswith('http:') or img_val.startswith('https:'):
                 from app.utils.cloud_backup import cloud_headers_for_url
 

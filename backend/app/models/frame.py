@@ -1203,9 +1203,9 @@ def get_interpreted_scenes_json(frame: Frame, runtime_version: str | None = None
     release this backend carries) must receive them: one that predates a
     retired Nim app's replacement gets the Nim keyword back
     (utils/retired_apps.py)."""
-    from app.utils.retired_apps import scenes_for_runtime
+    from app.utils.retired_apps import scenes_for_frame
 
-    return scenes_for_runtime(
+    return scenes_for_frame(
         [scene for scene in (frame.scenes or []) if scene_is_interpreted(scene)],
         runtime_version,
     )

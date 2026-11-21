@@ -1,7 +1,6 @@
-import { strToU8, zipSync } from "fflate";
+import { readTemplateZip, templateZipBytes, templateZipLegacyBytes } from "./scene-zip";
 import { withAppPermissions } from "../../../../../frontend/src/utils/sceneAccess";
 import { getScenesBaseUrl } from "./env";
-import { unzipBounded } from "./zip-bounded";
 
 // Where an installed scene came from — the `origin` field on every scene
 // object that leaves the store. The frameos workspace reads it to say
@@ -82,50 +81,24 @@ export function withStoreSceneOrigin<T>(
   });
 }
 
-// The template interchange zip with every scene in scenes.json stamped. Only
-// the three files frameos reads survive (same as the other rebuildZip*
-// helpers in store.ts); the manifest and image bytes are copied through.
+// The template interchange zip with every scene stamped, as scene packages
+// (docs/scene-packages.md); `layout: "json"` writes the form before packages,
+// a scenes.json with the whole array, for a backend that reads only that.
+// The manifest and the cover are carried over.
 export function rebuildZipWithSceneOrigins(
   zipBytes: Buffer,
   source: StoreSceneOriginSource,
+  layout: "packages" | "json" = "packages",
 ): Buffer | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort(
-        (a, b) =>
-          a.split("/").length - b.split("/").length || a.localeCompare(b),
-      )[0];
-    if (!manifestPath) {
+    const zip = readTemplateZip(new Uint8Array(zipBytes));
+    if (!zip) {
       return undefined;
     }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenesBytes = files[`${folder}scenes.json`];
-    const manifestBytes = files[manifestPath];
-    if (!scenesBytes || !manifestBytes) {
-      return undefined;
-    }
-    const scenes: unknown = JSON.parse(Buffer.from(scenesBytes).toString("utf8"));
-    if (!Array.isArray(scenes)) {
-      return undefined;
-    }
-    const next: Record<string, Uint8Array> = {
-      [manifestPath]: manifestBytes,
-      [`${folder}scenes.json`]: strToU8(
-        JSON.stringify(withStoreSceneOrigin(scenes, source), null, 2),
-      ),
-    };
-    const image = files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
-    }
-    return Buffer.from(zipSync(next));
+    const scenes = withStoreSceneOrigin(zip.scenes, source);
+    return layout === "json"
+      ? templateZipLegacyBytes(zip.folder, zip.manifest, scenes, zip.image)
+      : templateZipBytes(zip.folder, zip.manifest, scenes, zip.image);
   } catch {
     return undefined;
   }
