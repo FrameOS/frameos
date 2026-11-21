@@ -1674,6 +1674,25 @@ proc glyphPath(font: Font, rune: Rune): Path =
   except PixieError:
     nil
 
+proc emitColorGlyph(font: Font, rune: Rune, at: Vec2, x, y, opacity: float32,
+    drawn: var seq[SvgNode]): bool =
+  ## A colour (emoji) glyph is a picture, not an outline: an <image> where the
+  ## pen puts it, drawn by the same pass as the text, from the emoji face the
+  ## text falls back to (pixie's colorGlyphImage). False for a rune with none.
+  var off: Vec2
+  let image =
+    try: font.typeface.colorGlyphImage(rune, font.size, off)
+    except PixieError: nil
+  if image.isNil:
+    return false
+  let node = SvgNode(tag: "image", image: image, attrs: @[
+    ("x", num(round(at.x + x + off.x))), ("y", num(round(at.y + y + off.y))),
+    ("width", num(image.width.float32)), ("height", num(image.height.float32))])
+  if opacity < 1:
+    node.attrs.add(("opacity", num(opacity)))
+  drawn.add node
+  true
+
 proc emitGlyphs(arrangement: Arrangement, n: UiNode, x, y, opacity: float32,
     drawn: var seq[SvgNode]): bool =
   ## The arrangement as glyph runs; false when it has what glyphs cannot
@@ -1690,6 +1709,8 @@ proc emitGlyphs(arrangement: Arrangement, n: UiNode, x, y, opacity: float32,
     for i in start .. stop:
       let rune = arrangement.runes[i]
       if rune.isWhiteSpace:
+        continue
+      if rune.int32 >= 0x80 and emitColorGlyph(font, rune, arrangement.positions[i], x, y, opacity, drawn):
         continue
       let path = glyphPath(font, rune)
       if path.isNil:
@@ -1735,6 +1756,11 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       paths = arrangement.computePaths()
     except PixieError:
       return
+    for spanIndex, (start, stop) in arrangement.spans:
+      for i in start .. stop:
+        if arrangement.runes[i].int32 >= 0x80:
+          discard emitColorGlyph(arrangement.fonts[spanIndex], arrangement.runes[i],
+            arrangement.positions[i], x + shift, y, opacity, drawn)
   for i, path in paths:
     let font = arrangement.fonts[i]
     path.transform(translate(vec2(x + shift, y)))
@@ -1756,7 +1782,8 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     entry.drawnAt = at
     entry.drawn = drawn[first .. ^1]
     for node in entry.drawn:
-      node.path.share() # never changed again: its bounds and shapes are kept
+      if not node.path.isNil: # an emoji's <image> has none
+        node.path.share() # never changed again: its bounds and shapes are kept
 
 proc caretAt(arrangement: Arrangement, x, y: float32): int =
   ## The rune a tap at (x, y) in the text puts the caret before: the nearest

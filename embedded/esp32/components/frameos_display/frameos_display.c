@@ -409,11 +409,13 @@ esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
 }
 
 /* init, picture, refresh and sleep: the whole of a full refresh. Under one bus
- * hold: the drivers toggle CS by hand, so a shared card may not get a word in
- * until the panel sleeps. */
+ * hold: the drivers toggle CS by hand, so a shared card gets a word in only
+ * while the panel sleeps through a wait with its chip selects high
+ * (DEV_Delay_ms, fos_bus_share.h): a waveform, not a command. */
 static esp_err_t refresh_in_place(const uint8_t *buf)
 {
     int64_t start = esp_timer_get_time();
+    uint32_t lent = DEV_SPI_Bus_Yields();
     /* A controller that keeps the picture (the IT8951) waits for a waveform at
      * its next use (it8951.c): put to sleep here, it was waited for here, 1.7 s
      * of each of the E1003's scene switches. It stays up as after a partial
@@ -440,7 +442,8 @@ static esp_err_t refresh_in_place(const uint8_t *buf)
         s_panel_rested = false;
     }
     s_panel_awake = keep_awake;
-    ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
+    ESP_LOGI(TAG, "blit + refresh took %lld ms (bus lent %lu times)", (esp_timer_get_time() - start) / 1000,
+             (unsigned long)(DEV_SPI_Bus_Yields() - lent));
     return ESP_OK;
 }
 

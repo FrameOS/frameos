@@ -781,14 +781,15 @@ proc clearColorGlyphCache*() {.raises: [].} =
 proc colorGlyphCacheBytes*(): int {.raises: [].} =
   colorGlyphBytes
 
-proc fileColorGlyph(
+proc faceColorGlyph(
   typeface: Typeface, rune: Rune, size: float32, offset: var Vec2
 ): Image {.raises: [PixieError].} =
-  ## A file font's colour glyph scaled to `size` px, and where its top left
-  ## goes from the pen (`offset`): read from the card, decoded and scaled
-  ## once, then kept within `colorGlyphCacheBudget`. The PNG at the strike's
-  ## size (136x128 for Noto Color Emoji, 70 KB decoded) lives only while it
-  ## is scaled; what is kept is the size it is drawn at.
+  ## The face's colour bitmap glyph scaled to `size` px, and where its top
+  ## left goes from the pen (`offset`): read (from the card, for a file
+  ## font), decoded and scaled once, then kept within `colorGlyphCacheBudget`.
+  ## The PNG at the strike's size (136x128 for Noto Color Emoji, 70 KB
+  ## decoded) lives only while it is scaled; what is kept is the size it is
+  ## drawn at. nil for no bitmap (a COLR glyph is layers of outlines).
   let key = int32(round(size * 64))
   for i in 0 ..< colorGlyphs.len:
     if colorGlyphs[i].face == typeface.serial and colorGlyphs[i].rune == rune.int32 and
@@ -800,13 +801,18 @@ proc fileColorGlyph(
       offset = entry.offset
       return entry.image
   var bitmap: BitmapGlyph
-  if not typeface.file.bitmapGlyph(rune.int32, size, bitmap):
+  if typeface.file != nil:
+    if not typeface.file.bitmapGlyph(rune.int32, size, bitmap):
+      return nil
+  elif typeface.opentype == nil or not typeface.opentype.getBitmapGlyph(rune, size, bitmap):
     return nil
   let s = size / bitmap.ppem
-  offset = vec2(bitmap.xOffset, -bitmap.yOffset) * s
+  let top = bitmap.yOffset
   inc colorGlyphDecodes
   let full = newImage(decodePng(bitmap.png))
   bitmap.png = ""
+  offset = vec2(bitmap.xOffset,
+    -(if bitmap.yOffsetIsBottom: top + full.height.float32 else: top)) * s
   result = newImage(max(1, ceil(full.width.float32 * s).int), max(1, ceil(full.height.float32 * s).int))
   result.draw(full, scale(vec2(s)))
   let bytes = result.width * result.height * 4
@@ -824,6 +830,19 @@ proc fileColorGlyph(
   colorGlyphs.add ColorGlyphEntry(face: typeface.serial, rune: rune.int32, size: key,
     image: result, offset: offset, pass: pass)
   colorGlyphBytes += bytes
+
+proc colorGlyphImage*(
+  typeface: Typeface, rune: Rune, size: float32, offset: var Vec2
+): Image {.raises: [PixieError].} =
+  ## The rune's colour (emoji) glyph at `size` px from whichever of the face
+  ## and its fallbacks has it, as a picture, and where its top left goes from
+  ## the pen: what JSX and SVG text place as an image where a glyph path
+  ## cannot be (docs/jsx-ui.md "Text and fonts"). nil for a rune with no
+  ## colour bitmap glyph.
+  let face = typeface.fallbackTypeface(rune)
+  if face.isNil or not face.hasColorGlyph(rune):
+    return nil
+  face.faceColorGlyph(rune, size, offset)
 
 proc drawColorGlyphs(
   target: Image,
@@ -847,7 +866,7 @@ proc drawColorGlyphs(
     if typeface.file != nil:
       # A colour bitmap read where it lies: drawn at the size it is kept at.
       var offset: Vec2
-      let image = typeface.fileColorGlyph(rune, font.size, offset)
+      let image = typeface.faceColorGlyph(rune, font.size, offset)
       if image != nil:
         let at = position + offset
         target.draw(image, transform * translate(vec2(round(at.x), round(at.y))))

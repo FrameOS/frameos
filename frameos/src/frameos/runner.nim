@@ -483,6 +483,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
   # memory for a UI's every label and box.
   coverageCacheBudget = 8 * 1024 * 1024
   glyphCacheBudget = 1024 * 1024 # and its glyphs' (paths.nim, the glyph cache)
+  colorGlyphCacheBudget = 512 * 1024 # and its emoji, kept at their drawn size (fonts.nim)
   self.logger.log(%*{"event": "render:startLoop"})
   var timer = getMonoTime()
   var driverTimer = getMonoTime()

@@ -915,7 +915,11 @@
   (`refresh_task` in `frameos_display.c`, the picture copied, the newest one
   next, `fos_refresh_queue.c`): a new panel entry point calls `refresh_wait`
   first (`test_esp32_refresh_queue.py` reads every bus taker for it), and a timed
-  render waits while `fos_display_refreshing()`. A touch
+  render waits while `fos_display_refreshing()`. Where an SD card shares the
+  panel's bus (the E-series), the panel lends it for every wait it sleeps
+  through with its chip selects high (`DEV_Delay_ms`, `fos_bus_share.h`): a
+  panel chip select written behind `DEV_Digital_Write` would let a card clock
+  the panel (`test_esp32_bus_share.py` reads for it). A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):

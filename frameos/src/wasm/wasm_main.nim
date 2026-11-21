@@ -357,6 +357,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     timeZone: cstring, settingsJson: cstring): bool {.exportc, cdecl.} =
   coverageCacheBudget = 2 * 1024 * 1024 # pixie keeps shared paths' coverage, as the devices do
   glyphCacheBudget = 512 * 1024 # and glyphs' (paths.nim, the glyph cache)
+  colorGlyphCacheBudget = 256 * 1024 # and emoji, kept at their drawn size (fonts.nim)
   ## Build the minimal FrameConfig + Logger the interpreter and apps expect.
   ## Safe to call repeatedly; every call resets scenes and state.
   ##

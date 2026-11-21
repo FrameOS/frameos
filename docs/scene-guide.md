@@ -803,8 +803,12 @@ SVG"; in a JS app, "No image provided"): `svg` (with a `viewBox`), `g`,
   `fontFamily`, `fontSize`, `fontWeight`, `fontStyle`, `textAnchor`,
   `dominantBaseline` (`font-family` and so on in markup), and `<tspan>`
   children. Not supported: wrapping, `textPath`, `textLength`,
-  `letterSpacing`, per-glyph positions, emoji. One line per `text` or
+  `letterSpacing`, per-glyph positions. One line per `text` or
   `tspan`: break lines yourself, or set the text in a UI, which wraps it.
+  Emoji draw in colour (as pictures: no fill or stroke on them) where the
+  frame has the emoji font, in a UI's text and `render/text` too; without it
+  they draw nothing (a gap), so never let an emoji carry meaning a
+  word should.
 - `render/text` wraps text and takes caret styling with
   `richText: "basic-caret"`: `^(16)` size, `^(#FF00FF)` color,
   `^(PTSans-Bold.ttf)` font, `^(underline)`, combined as `^(16,#FF0000)`,

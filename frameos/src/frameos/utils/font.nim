@@ -104,42 +104,32 @@ proc fileTypeface*(font: string, assetsPath: string): Typeface =
     refuseFont(font, "could not be read in place", %*{"error": error.msg})
     return nil
 
-when defined(frameosEmbedded):
-  var
-    emojiFace: Typeface
-    emojiLooked: bool
-    emojiLookedAt: MonoTime
+var
+  emojiFace: Typeface
+  emojiAssets: string
+  emojiLookedAt: MonoTime
 
 proc getEmojiFallbackTypeface(assetsPath: string): Typeface =
   ## The colour emoji face a text falls back to for the runes its own face
-  ## lacks, when the frame's fonts folder has it. On an ESP32 it is read where
-  ## it lies on the card like every face there (a CBDT font: each emoji's PNG
-  ## read and decoded when it is drawn, kept at its drawn size in pixie's
-  ## colour glyph cache; docs/esp32-fonts.md "Emoji"), and whether the card
-  ## has it is asked at most every 30 s, not at every text.
+  ## lacks, when the frame's fonts folder has it: on every host it is read
+  ## where it lies like a face on an ESP32's card (a CBDT font: each emoji's
+  ## PNG read and decoded when it is drawn, kept at its drawn size in pixie's
+  ## colour glyph cache; docs/esp32-fonts.md "Emoji"), so a Pi no longer holds
+  ## the 10.7 MB font parsed whole, and the Text app, JSX and SVG text draw
+  ## the same emoji on a Pi, an ESP32 and in the browser preview. Whether the
+  ## folder has it is asked at most every 30 s, not at every text. Read on the
+  ## render thread only.
   if assetsPath.len == 0:
     return nil
-  when defined(frameosEmbedded):
-    let now = getMonoTime()
-    if not emojiLooked or (now - emojiLookedAt).inSeconds >= 30 or
-        (emojiFace != nil and emojiFace.isStale):
-      emojiLooked = true
-      emojiLookedAt = now
-      emojiFace =
-        if fileExists(assetsPath & "/fonts/" & emojiFallbackFont): fileTypeface(emojiFallbackFont, assetsPath)
-        else: nil
-    return emojiFace
-  else:
-    let fontPath = assetsPath / "fonts" / emojiFallbackFont
-    if not fileExists(fontPath):
-      return nil
-
-    let cacheKey = "emoji:" & normalizedPath(fontPath)
-    if not typefaces.hasKey(cacheKey):
-      withLock typefaceLock:
-        if not typefaces.hasKey(cacheKey):
-          typefaces[cacheKey] = parseTtf(readFile(fontPath))
-    return typefaces[cacheKey]
+  let now = getMonoTime()
+  if emojiAssets != assetsPath or (now - emojiLookedAt).inSeconds >= 30 or
+      (emojiFace != nil and emojiFace.isStale):
+    emojiAssets = assetsPath
+    emojiLookedAt = now
+    emojiFace =
+      if fileExists(assetsPath & "/fonts/" & emojiFallbackFont): fileTypeface(emojiFallbackFont, assetsPath)
+      else: nil
+  emojiFace
 
 proc withEmojiFallback(typeface: Typeface, assetsPath: string): Typeface =
   result = typeface
@@ -344,27 +334,34 @@ proc svgFontFileFor*(family: string, weight = 400, italic = false): string =
     svgFontChoices[cacheKey] = best
   best
 
+proc svgFace(family: string, weight: int, italic: bool): Typeface =
+  if family.len == 0:
+    return getDefaultTypeface()
+  let file = svgFontFileFor(family, weight, italic)
+  if file.len == 0:
+    return nil
+  when defined(frameosEmbedded):
+    # Read where it lies on the card, as every face there is.
+    return fileTypeface(file, svgFontAssetsPath)
+  else:
+    let alreadyParsed = typefaces.hasKey(file)
+    if not alreadyParsed and svgFontsParsed >= svgTypefaceBudget:
+      return fileTypeface(file, svgFontAssetsPath)
+    result = getTypeface(file, svgFontAssetsPath, withEmoji = false)
+    if not alreadyParsed:
+      withLock typefaceLock:
+        inc svgFontsParsed
+
 proc svgTypeface(family: string, weight: int, italic: bool): Typeface {.gcsafe.} =
   ## The hook pixie calls per font-family candidate. nil declines, so the next
   ## candidate — and finally the empty family, i.e. the default face — answers.
+  ## A face falls back to the emoji face where the frame has one: SVG and JSX
+  ## text draw emoji as pictures (pixie's colorGlyphImage), as the Text app does.
   {.cast(gcsafe).}:
     try:
-      if family.len == 0:
-        return getDefaultTypeface()
-      let file = svgFontFileFor(family, weight, italic)
-      if file.len == 0:
-        return nil
-      when defined(frameosEmbedded):
-        # Read where it lies on the card, as every face there is.
-        return fileTypeface(file, svgFontAssetsPath)
-      else:
-        let alreadyParsed = typefaces.hasKey(file)
-        if not alreadyParsed and svgFontsParsed >= svgTypefaceBudget:
-          return fileTypeface(file, svgFontAssetsPath)
-        result = getTypeface(file, svgFontAssetsPath, withEmoji = false)
-        if not alreadyParsed:
-          withLock typefaceLock:
-            inc svgFontsParsed
+      result = svgFace(family, weight, italic)
+      if result != nil:
+        result = result.withEmojiFallback(svgFontAssetsPath)
     except CatchableError:
       # A corrupt TTF, a vanished assets directory: the drawing still renders.
       return nil
