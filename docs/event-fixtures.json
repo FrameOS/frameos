@@ -3489,7 +3489,7 @@
       ],
       "trace": [
        "mapped frame button",
-       "run frameMapA button {\"pin\":-1,\"label\":\"A\",\"role\":\"refresh\",\"action\":\"press\"}"
+       "run frameMapA button {\"pin\":-1,\"label\":\"A\",\"role\":\"primary\",\"action\":\"press\"}"
       ]
      },
      {
