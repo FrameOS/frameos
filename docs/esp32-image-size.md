@@ -1223,6 +1223,36 @@ half a minute.
   and the apply's whole-file load. A frame in the field may hold a combined
   file, so the reader stays whatever the writers do.
 
+## Fonts on the card read in place: −32,704, and emoji +3.3 KB back
+
+Every font on the SD card is read where it lies (pixie's
+`fontformats/filefont.nim`, docs/esp32-fonts.md) instead of one at a time
+parsed whole, so nothing on an ESP32 calls pixie's OpenType parser any more
+and it leaves the image: 3,207,904 → 3,175,200 on the S3 (EPD_7in5_V2,
+against main at f257c8244 built the same way, 2026-11-20). Colour emoji from
+the card's CBDT font came after, about +3.3 KB by symbol (CBLC searched in
+place 1.4 KB, the colour glyph cache and its draw 1.4 KB, the fallback
+0.4 KB; pixie's PNG decoder and image draw were in the image): the branch
+then stood at 3,209,584 → 3,181,504 against main at 9afaa9ac8 (−28,080). By
+symbol (`nm -S`, before the linker's alignment), the fonts:
+
+| | bytes | what |
+|---|---:|---|
+| `opentype.nim` | −35,365 | the whole parse: CFF charstrings, cmap, hmtx, name, OS/2, GPOS pair tables built in RAM, COLR/CPAL, CBLC/CBDT, sbix |
+| its constants | −6,354 | CFF's standard strings (4 KB) and the parse's literals |
+| `filefont.nim` | +7,648 | the open 1.4 KB, its own `parseCompositeGlyph` 1.0 KB, kerning and the subtable index 1.7 KB, the page cache and its three tables 1.4 KB |
+| `utils/font.nim` | +2,197 | the family resolver and the folder's listing, on the ESP32 now, and `fileTypeface` |
+| `fonts.nim` | +496 | a `file` branch in each accessor |
+
+The first cut was 2.6 KB bigger: the faces by name in an `OrderedTable` and
+the refused names in a `Table` (a list each now: there are few, and each
+table instance is about a kilobyte), the table tags computed at every
+comparison (compile-time constants now).
+
+- Not done: `parseCompositeGlyph` is generic, an instance per font kind
+  (on the ESP32 now the indexed font's and this one, opentype's gone): one
+  over a "read this glyph" proc would save about 1 KB.
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim

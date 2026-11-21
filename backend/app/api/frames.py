@@ -3484,7 +3484,7 @@ async def api_frame_assets_sync(
         )
     if _is_embedded_frame(frame):
         # An ESP32 with an SD card DOES have somewhere to keep fonts, and the
-        # renderer loads them from there (one parsed face at a time — see the
+        # renderer reads them there, each in place (docs/esp32-fonts.md, the
         # embedded branch of frameos/src/frameos/utils/font.nim). Without a
         # card there is no filesystem at all, and saying so beats pretending
         # the sync worked.
