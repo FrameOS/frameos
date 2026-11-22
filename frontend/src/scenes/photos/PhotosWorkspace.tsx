@@ -640,7 +640,7 @@ function PhotosTopBar(): JSX.Element {
               buttonContent={<ChevronDownIcon className="h-4 w-4" />}
               items={[
                 {
-                  label: 'Resize and upload…',
+                  label: 'Resize and upload',
                   icon: <ArrowsPointingInIcon className="h-5 w-5" />,
                   onClick: () =>
                     openResizeUpload({

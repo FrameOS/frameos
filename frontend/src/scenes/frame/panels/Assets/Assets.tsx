@@ -250,7 +250,7 @@ function TreeNode({
                 readOnly
                   ? null
                   : {
-                      label: 'Resize and upload…',
+                      label: 'Resize and upload',
                       icon: <ArrowsPointingInIcon className="w-5 h-5" />,
                       title: 'Make photos smaller in this browser, to this frame’s size or another, then upload them',
                       onClick: () => resizeAndUploadAssets(node.path),
