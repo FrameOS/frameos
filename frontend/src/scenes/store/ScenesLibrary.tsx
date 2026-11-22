@@ -525,8 +525,8 @@ function StorePage(): JSX.Element {
           activeShelf && storeShelfDescriptions[activeShelf.slug]
             ? storeShelfDescriptions[activeShelf.slug]
             : storeKind === 'layout'
-            ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
-            : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame.'
+              ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
+              : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame.'
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -566,8 +566,8 @@ function StorePage(): JSX.Element {
                   ? "The scene store could not be reached. Check the frame's connection and try again."
                   : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
                 : search
-                ? `No store scenes match "${search}".`
-                : 'No store scenes fit this screen.'
+                  ? `No store scenes match "${search}".`
+                  : 'No store scenes fit this screen.'
             }
           />
         )}
@@ -853,7 +853,7 @@ function InstalledScenesPage(): JSX.Element {
   const shelvesRef = useRef<HTMLDivElement>(null)
   const frames = installedFrames(framesList)
   const shownFrames = frameFilter ? frames.filter((frame) => frameIdsEqual(frame.id, frameFilter)) : frames
-  const focused = frameFilter ? shownFrames[0] ?? null : null
+  const focused = frameFilter ? (shownFrames[0] ?? null) : null
   useEffect(() => {
     if (frameFilter) {
       return

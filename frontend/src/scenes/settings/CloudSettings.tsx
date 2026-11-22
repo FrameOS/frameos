@@ -350,22 +350,22 @@ export function CloudSettingsSection({
                               control === 'locked'
                                 ? true
                                 : control === 'local'
-                                ? Boolean(
-                                    localKey === 'frames'
-                                      ? cloudStatus?.backup_frames_enabled
-                                      : localKey === 'scenes'
-                                      ? cloudStatus?.backup_scenes_enabled
-                                      : cloudStatus?.backup_frames_enabled || cloudStatus?.backup_scenes_enabled
-                                  )
-                                : enabledFeatureDraft.includes(scope)
+                                  ? Boolean(
+                                      localKey === 'frames'
+                                        ? cloudStatus?.backup_frames_enabled
+                                        : localKey === 'scenes'
+                                          ? cloudStatus?.backup_scenes_enabled
+                                          : cloudStatus?.backup_frames_enabled || cloudStatus?.backup_scenes_enabled
+                                    )
+                                  : enabledFeatureDraft.includes(scope)
                             }
                             disabled={control === 'locked'}
                             onChange={
                               control === 'toggle'
                                 ? () => toggleEnabledFeature(scope)
                                 : control === 'local' && localKey
-                                ? (event) => setBackupFeature(localKey, event.target.checked)
-                                : undefined
+                                  ? (event) => setBackupFeature(localKey, event.target.checked)
+                                  : undefined
                             }
                             className="mt-0.5"
                           />
@@ -464,8 +464,8 @@ export function CloudSettingsSection({
                       cloudStatus?.managed_available
                         ? undefined
                         : cloudStatus?.backend_managed
-                        ? undefined
-                        : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
+                          ? undefined
+                          : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
                     }
                     unavailableNode={
                       !cloudStatus?.managed_available && cloudStatus?.backend_managed ? (

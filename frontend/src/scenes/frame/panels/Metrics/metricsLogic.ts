@@ -810,8 +810,8 @@ export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<str
           key === 'memoryUsage'
             ? normalizeMemoryUsageEntries(valueRecord)
             : key === 'diskUsage'
-            ? normalizeDiskUsageEntries(valueRecord)
-            : Object.entries(value)
+              ? normalizeDiskUsageEntries(valueRecord)
+              : Object.entries(value)
         for (const [subKey, subValue] of entries) {
           if (
             (key === 'memoryUsage' && (subKey === 'active' || subKey === 'free' || subKey === 'percentage')) ||
@@ -836,34 +836,34 @@ export function metricsByCategoryFromMetrics(metrics: MetricsType[]): Record<str
                     'bytes'
                   )
                 : key === 'diskUsage'
-                ? getOrCreateMetricSeries(
-                    metricsByCategory,
-                    key,
-                    fullSubKey,
-                    subKey,
-                    DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                    'left',
-                    'bytes'
-                  )
-                : key === 'processMemory'
-                ? getOrCreateMetricSeries(
-                    metricsByCategory,
-                    key,
-                    fullSubKey,
-                    subKey,
-                    metricSeriesColor(metricsByCategory[key]?.length ?? 0),
-                    'left',
-                    'bytes'
-                  )
-                : getOrCreateMetricSeries(
-                    metricsByCategory,
-                    fullSubKey,
-                    fullSubKey,
-                    humanizeMetricLabel(fullSubKey),
-                    SINGLE_SERIES_COLOR,
-                    'left',
-                    metricUnit(key, subKey)
-                  )
+                  ? getOrCreateMetricSeries(
+                      metricsByCategory,
+                      key,
+                      fullSubKey,
+                      subKey,
+                      DISK_USAGE_COLORS[subKey] ?? metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                      'left',
+                      'bytes'
+                    )
+                  : key === 'processMemory'
+                    ? getOrCreateMetricSeries(
+                        metricsByCategory,
+                        key,
+                        fullSubKey,
+                        subKey,
+                        metricSeriesColor(metricsByCategory[key]?.length ?? 0),
+                        'left',
+                        'bytes'
+                      )
+                    : getOrCreateMetricSeries(
+                        metricsByCategory,
+                        fullSubKey,
+                        fullSubKey,
+                        humanizeMetricLabel(fullSubKey),
+                        SINGLE_SERIES_COLOR,
+                        'left',
+                        metricUnit(key, subKey)
+                      )
             series.data.push({ x: timestamp, y: value })
           }
         }
@@ -1432,7 +1432,7 @@ export const metricsLogic = kea<metricsLogicType>([
         }
         return selectedTimeRange
           ? clampTimeRange(selectedTimeRange, metricsTimeRange, defaultSelectedTimeRange)
-          : timeRangeForPreset(metricsTimeRange, selectedTimeRangePreset) ?? defaultSelectedTimeRange
+          : (timeRangeForPreset(metricsTimeRange, selectedTimeRangePreset) ?? defaultSelectedTimeRange)
       },
     ],
     // How often this frame actually samples: the interval the samples report

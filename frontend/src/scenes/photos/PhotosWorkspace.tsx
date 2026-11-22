@@ -434,8 +434,8 @@ function PhotosSidebar(): JSX.Element {
                 !rootLoaded
                   ? 'Loading'
                   : looseRootFileCount
-                  ? `${albums.length} albums, ${photoCountLabel(looseRootFileCount)}`
-                  : `${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`
+                    ? `${albums.length} albums, ${photoCountLabel(looseRootFileCount)}`
+                    : `${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`
               }
               icon={<RectangleStackIcon className="h-5 w-5" />}
               active={folder === ''}
@@ -825,8 +825,8 @@ function SelectToggle({
         selected
           ? 'frameos-primary-active border-transparent text-white'
           : placement === 'tile'
-          ? 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
-          : 'border-slate-300 text-transparent hover:border-slate-500 hover:text-slate-400'
+            ? 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
+            : 'border-slate-300 text-transparent hover:border-slate-500 hover:text-slate-400'
       )}
     >
       <CheckIcon className="h-4 w-4" />
@@ -1276,8 +1276,8 @@ function UploadPanel(): JSX.Element | null {
           {activeUploadCount
             ? `Uploading ${Math.min(done + failed.length + 1, uploads.length)} of ${uploads.length}`
             : failed.length
-            ? `${done} uploaded, ${failed.length} failed`
-            : `${done} uploaded`}
+              ? `${done} uploaded, ${failed.length} failed`
+              : `${done} uploaded`}
         </div>
         {!activeUploadCount ? (
           <button type="button" aria-label="Close" onClick={dismissUploads} className={iconButtonClassName}>
@@ -1975,8 +1975,8 @@ function ShareDialog(): JSX.Element | null {
     share.name !== null
       ? share.name
       : share.frame_id === null
-      ? 'Anyone with the link'
-      : frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`
+        ? 'Anyone with the link'
+        : (frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`)
   // The backend answers a path: a frame's own link gets that frame's address
   // for the backend, the others the backend's public origin (behind Home
   // Assistant's ingress, the add-on's frames port, not the page's origin).
@@ -1996,8 +1996,8 @@ function ShareDialog(): JSX.Element | null {
   const choiceTaken = custom
     ? false
     : shareFrameChoice === ''
-    ? shareTargetShares.some((share) => share.name === null && share.frame_id === null)
-    : shareTargetShares.some((share) => share.name === null && String(share.frame_id) === shareFrameChoice)
+      ? shareTargetShares.some((share) => share.name === null && share.frame_id === null)
+      : shareTargetShares.some((share) => share.name === null && String(share.frame_id) === shareFrameChoice)
   const canCreate = !shareBusy && !sharesLoading && !choiceTaken && (!custom || shareCustomName.trim().length > 0)
   const create = (): void => {
     if (!canCreate) {
@@ -2191,8 +2191,8 @@ function ShowPicker(): JSX.Element | null {
   const what = showPickerTarget.photo
     ? `"${photoBaseName(showPickerTarget.photo)}"`
     : showPickerTarget.albums.length === 1
-    ? `"${photoBaseName(showPickerTarget.albums[0])}"`
-    : `these ${showPickerTarget.albums.length} albums`
+      ? `"${photoBaseName(showPickerTarget.albums[0])}"`
+      : `these ${showPickerTarget.albums.length} albums`
   return (
     <FramePicker
       title="Show on frame"
@@ -2663,10 +2663,10 @@ function PhotosNotReady({ status }: { status: PhotosStatus }): JSX.Element {
     status.problem === 'suspended'
       ? 'Photos is turned off for this account'
       : status.problem === 'not_persistent'
-      ? 'Photos needs a storage volume'
-      : status.problem === 'not_writable'
-      ? 'Photos cannot write its folder'
-      : 'Photos is not available'
+        ? 'Photos needs a storage volume'
+        : status.problem === 'not_writable'
+          ? 'Photos cannot write its folder'
+          : 'Photos is not available'
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-6">
       <div className="frameos-card max-w-lg space-y-3 rounded-[24px] border border-white/90 bg-white/90 p-6 shadow-lg">

@@ -69,7 +69,7 @@ export function ConfirmDialog(): JSX.Element | null {
             >
               {busyExtra ? <Spinner /> : null}
               <span>
-                {busyExtra ? pending.extraAction.busyLabel ?? pending.extraAction.label : pending.extraAction.label}
+                {busyExtra ? (pending.extraAction.busyLabel ?? pending.extraAction.label) : pending.extraAction.label}
               </span>
             </button>
           ) : null}
@@ -89,8 +89,8 @@ export function ConfirmDialog(): JSX.Element | null {
             {busy && !busyExtra ? <Spinner {...(pending.danger ? {} : { color: 'white' as const })} /> : null}
             <span>
               {busy && !busyExtra
-                ? pending.busyLabel ?? pending.confirmLabel ?? 'Confirm'
-                : pending.confirmLabel ?? 'Confirm'}
+                ? (pending.busyLabel ?? pending.confirmLabel ?? 'Confirm')
+                : (pending.confirmLabel ?? 'Confirm')}
             </span>
           </button>
         </div>

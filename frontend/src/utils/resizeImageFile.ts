@@ -68,8 +68,8 @@ export function planUploadResize(
     return null
   }
   const landscape = width >= height
-  const boxWidth = landscape ? long : short ?? Infinity
-  const boxHeight = landscape ? short ?? Infinity : long
+  const boxWidth = landscape ? long : (short ?? Infinity)
+  const boxHeight = landscape ? (short ?? Infinity) : long
   const fits = width <= boxWidth && height <= boxHeight
 
   if (options.fit === 'inside') {

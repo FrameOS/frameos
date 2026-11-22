@@ -340,10 +340,10 @@ export function ActivityPage(): JSX.Element {
           {!loadedOnce
             ? 'Loading…'
             : failed
-            ? 'Could not load activity. Try again in a moment.'
-            : filtered
-            ? 'No activity matches these filters.'
-            : 'No activity recorded yet.'}
+              ? 'Could not load activity. Try again in a moment.'
+              : filtered
+                ? 'No activity matches these filters.'
+                : 'No activity recorded yet.'}
         </Box>
       )}
     </div>

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="bg-gray-900">
   <head>
     <meta charset="UTF-8" />
@@ -11,8 +11,8 @@
           storedTheme === 'light' || storedTheme === 'dark'
             ? storedTheme
             : window.matchMedia?.('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light'
+              ? 'dark'
+              : 'light'
         document.documentElement.dataset.frameosTheme = theme
         document.documentElement.style.colorScheme = theme
 
@@ -42,8 +42,8 @@
               ? '/img/logo-2/logo-white.svg'
               : '/img/logo-2/logo-black.svg'
             : darkChrome
-            ? '/img/logo-2/logo-white-colors.svg'
-            : '/img/logo-2/logo.svg'
+              ? '/img/logo-2/logo-white-colors.svg'
+              : '/img/logo-2/logo.svg'
           favicon.href = basePath + icon
         }
       } catch (error) {}

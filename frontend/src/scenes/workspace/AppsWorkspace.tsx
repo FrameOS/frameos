@@ -1248,10 +1248,10 @@ function AppsWorkspaceFrame({
     routeSceneApps[0] ??
     null
   const selectedScene = selectedApp
-    ? scenes.find((scene) => scene.id === selectedApp.sceneId) ?? null
+    ? (scenes.find((scene) => scene.id === selectedApp.sceneId) ?? null)
     : routeSceneId && !inFrameAdminMode
-    ? scenes.find((scene) => scene.id === routeSceneId) ?? null
-    : null
+      ? (scenes.find((scene) => scene.id === routeSceneId) ?? null)
+      : null
   const selectedSystemApp =
     (routeSystemAppKeyword ? installedSystemApps.find((option) => option.keyword === routeSystemAppKeyword) : null) ??
     null
@@ -1283,7 +1283,7 @@ function AppsWorkspaceFrame({
               <AppsTopBar frame={frame} scene={selectedScene} app={selectedApp} unsavedChanges={unsavedChanges} />
             )
           }
-          chatNodeId={effectiveSourceMode === 'frames' ? selectedApp?.nodeId ?? null : null}
+          chatNodeId={effectiveSourceMode === 'frames' ? (selectedApp?.nodeId ?? null) : null}
           showAiButton={effectiveSourceMode === 'frames'}
           mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
           rightPanel={null}
@@ -1353,9 +1353,9 @@ export function AppsWorkspace({ frameId, sceneId, nodeId, keyword }: AppsWorkspa
   const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(keyword ?? sceneId) : null
   const { searchParams } = useValues(router)
   const routeFile = typeof searchParams.file === 'string' && searchParams.file ? searchParams.file : null
-  const routeFrameId = routeSourceMode === 'frames' ? frameId ?? null : null
-  const routeSceneId = routeSourceMode === 'frames' ? sceneId ?? null : null
-  const routeNodeId = routeSourceMode === 'frames' ? nodeId ?? null : null
+  const routeFrameId = routeSourceMode === 'frames' ? (frameId ?? null) : null
+  const routeSceneId = routeSourceMode === 'frames' ? (sceneId ?? null) : null
+  const routeNodeId = routeSourceMode === 'frames' ? (nodeId ?? null) : null
 
   useMountedLogic(
     appsWorkspaceLogic({
@@ -1367,7 +1367,7 @@ export function AppsWorkspace({ frameId, sceneId, nodeId, keyword }: AppsWorkspa
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, frames, framesList } = useValues(framesModel)
   const parsedRouteFrameId = sourceMode === 'frames' ? parseRouteFrameId(routeFrameId) : null
-  const routeFrame = parsedRouteFrameId ? frames[parsedRouteFrameId] ?? null : null
+  const routeFrame = parsedRouteFrameId ? (frames[parsedRouteFrameId] ?? null) : null
   const firstFrame = routeFrame ?? selectedFrame ?? activeFramesList[0] ?? framesList[0] ?? null
 
   // Without a frame the system apps are all there is to browse; the Frames

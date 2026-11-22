@@ -19,7 +19,9 @@ export interface SceneAppEntry {
 /** What the tree has open in the file pane. A scene's diagram is the scene
  * the editor shows (its own `selectedSceneId`), so `diagram` names none. */
 export type SceneFileSelection =
-  { kind: 'template' } | { kind: 'diagram' } | { kind: 'app'; sceneId: string; nodeId: string }
+  | { kind: 'template' }
+  | { kind: 'diagram' }
+  | { kind: 'app'; sceneId: string; nodeId: string }
 
 /** The template's listing, as its template.json carries it (the store
  * zip's manifest), minus the paths to its other files. */

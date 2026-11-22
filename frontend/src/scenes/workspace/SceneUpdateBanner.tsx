@@ -52,8 +52,8 @@ export function SceneUpdateBanner({
         updating
           ? 'Updating this scene to the latest version'
           : checking
-          ? 'Checking what the latest version changes'
-          : `Version ${shortSceneVersion(version)} of this scene is available — click to update`
+            ? 'Checking what the latest version changes'
+            : `Version ${shortSceneVersion(version)} of this scene is available — click to update`
       }
       onClick={(event) => {
         event.stopPropagation()

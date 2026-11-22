@@ -238,21 +238,27 @@ export const scheduleLogic = kea<scheduleLogicType>([
         frame: scheduleLogicValues['frame'],
         frameForm: scheduleLogicValues['frameForm']
       ): Record<string, StateField[]> =>
-        (frameForm?.scenes ?? frame.scenes ?? []).reduce((acc, scene) => {
-          acc[scene.id] = sceneStateFields(scene)
-          return acc
-        }, {} as Record<string, StateField[]>),
+        (frameForm?.scenes ?? frame.scenes ?? []).reduce(
+          (acc, scene) => {
+            acc[scene.id] = sceneStateFields(scene)
+            return acc
+          },
+          {} as Record<string, StateField[]>
+        ),
     ],
     eventCountsByScene: [
       (s) => [s.events],
       (events: scheduleLogicValues['events']): Record<string, number> =>
-        events.reduce((acc, event) => {
-          const sceneId = scheduledEventIsSceneChange(event) ? event.payload?.sceneId : null
-          if (sceneId) {
-            acc[sceneId] = (acc[sceneId] ?? 0) + 1
-          }
-          return acc
-        }, {} as Record<string, number>),
+        events.reduce(
+          (acc, event) => {
+            const sceneId = scheduledEventIsSceneChange(event) ? event.payload?.sceneId : null
+            if (sceneId) {
+              acc[sceneId] = (acc[sceneId] ?? 0) + 1
+            }
+            return acc
+          },
+          {} as Record<string, number>
+        ),
     ],
     sortedEvents: [
       (s) => [s.events],

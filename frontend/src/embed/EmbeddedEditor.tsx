@@ -405,8 +405,8 @@ export function EmbeddedEditor(): JSX.Element {
             message.theme === 'dark' || message.theme === 'light'
               ? message.theme
               : document.documentElement.dataset.frameosTheme === 'dark'
-              ? 'dark'
-              : 'light',
+                ? 'dark'
+                : 'light',
           // Only a same-origin proxy: it sees every URL scene code fetches.
           previewProxyUrl: sameOriginPreviewProxyUrl(message.previewProxyUrl, window.location.origin),
           description: typeof message.description === 'string' ? message.description : undefined,

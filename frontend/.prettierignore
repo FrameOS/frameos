@@ -1,0 +1,14 @@
+# Written by generators, several of them pinned by a `--check` in the backend
+# suite: formatting them here would fail that check.
+src/generated/
+src/**/*.gen.ts
+src/decorators/timezones.json
+
+# The scene workspace moved here from cloud/apps/auth-web and keeps the cloud's
+# style (double quotes, semicolons), which the root .prettierrc does not describe.
+src/sceneWorkspace/
+
+# Byte-for-byte copies of frameos/wasm/src/devices.ts and pointer.ts, pinned
+# equal by the cloud's shared-spa tests: format the package's copy, not these.
+src/utils/deviceLimits.ts
+src/utils/previewPointer.ts

@@ -432,8 +432,8 @@ const decorateEdges = (edges: DiagramEdge[]): DiagramEdge[] =>
         ? { ...edge, type: 'appNodeEdge' }
         : edge
       : edge.type !== 'codeNodeEdge'
-      ? { ...edge, type: 'codeNodeEdge' }
-      : edge
+        ? { ...edge, type: 'codeNodeEdge' }
+        : edge
   )
 
 const clipboardPayloadForNodes = (
@@ -1007,7 +1007,7 @@ export const diagramLogic = kea<diagramLogicType>([
                   ...node,
                   data: {
                     ...(node.data ?? {}),
-                    config: { ...('config' in node.data ? node.data?.config ?? {} : {}), [field]: value },
+                    config: { ...('config' in node.data ? (node.data?.config ?? {}) : {}), [field]: value },
                   },
                 }
               : node
@@ -1149,23 +1149,29 @@ export const diagramLogic = kea<diagramLogicType>([
     edgesForNode: [
       (s) => [s.edges],
       (edges: DiagramEdge[]): Record<string, DiagramEdge[]> => {
-        return edges.reduce((acc, edge) => {
-          acc[edge.source] = [...(acc[edge.source] ?? []), edge]
-          acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-          return acc
-        }, {} as Record<string, DiagramEdge[]>)
+        return edges.reduce(
+          (acc, edge) => {
+            acc[edge.source] = [...(acc[edge.source] ?? []), edge]
+            acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+            return acc
+          },
+          {} as Record<string, DiagramEdge[]>
+        )
       },
     ],
     nodesById: [
       (s) => [s.nodes],
       (nodes: DiagramNode[]): Record<string, DiagramNode> => {
-        return nodes.reduce((acc, node) => {
-          if (acc[node.id]) {
-            console.error('Duplicate node id found', node.id)
-          }
-          acc[node.id] = node
-          return acc
-        }, {} as Record<string, DiagramNode>)
+        return nodes.reduce(
+          (acc, node) => {
+            if (acc[node.id]) {
+              console.error('Duplicate node id found', node.id)
+            }
+            acc[node.id] = node
+            return acc
+          },
+          {} as Record<string, DiagramNode>
+        )
       },
     ],
     hasChanges: [
@@ -1562,33 +1568,36 @@ export const diagramLogic = kea<diagramLogicType>([
       }
     },
     rearrangeCurrentScene: () => {
-      const fieldOrderByNodeId = values.nodes.reduce((acc, node) => {
-        let fields: (AppConfigField | MarkdownField)[] | null = null
-        if (node.type === 'app' || node.type === 'source') {
-          const keyword = (node.data as AppNodeData)?.keyword
-          fields = keyword ? (values.effectiveApps[keyword] as AppConfig | undefined)?.fields ?? null : null
-        } else if (node.type === 'dispatch' || node.type === 'event') {
-          const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
-          const event = frameEventForScene(keyword, values.scene)
-          fields = eventPayloadIsSceneState(event?.name) ? values.scene?.fields ?? null : event?.fields ?? null
-        } else if (node.type === 'scene') {
-          fields = values.scene?.fields ?? null
-        }
+      const fieldOrderByNodeId = values.nodes.reduce(
+        (acc, node) => {
+          let fields: (AppConfigField | MarkdownField)[] | null = null
+          if (node.type === 'app' || node.type === 'source') {
+            const keyword = (node.data as AppNodeData)?.keyword
+            fields = keyword ? ((values.effectiveApps[keyword] as AppConfig | undefined)?.fields ?? null) : null
+          } else if (node.type === 'dispatch' || node.type === 'event') {
+            const keyword = (node.data as DispatchNodeData | EventNodeData)?.keyword
+            const event = frameEventForScene(keyword, values.scene)
+            fields = eventPayloadIsSceneState(event?.name) ? (values.scene?.fields ?? null) : (event?.fields ?? null)
+          } else if (node.type === 'scene') {
+            fields = values.scene?.fields ?? null
+          }
 
-        if (node.type === 'code') {
-          const codeArgs = (node.data as CodeNodeData | undefined)?.codeArgs ?? []
-          if (codeArgs.length > 0) {
-            acc[node.id] = codeArgs.map((arg) => arg.name)
+          if (node.type === 'code') {
+            const codeArgs = (node.data as CodeNodeData | undefined)?.codeArgs ?? []
+            if (codeArgs.length > 0) {
+              acc[node.id] = codeArgs.map((arg) => arg.name)
+            }
+            return acc
+          }
+
+          const order = fieldOrderFromFields(fields)
+          if (order.length > 0) {
+            acc[node.id] = order
           }
           return acc
-        }
-
-        const order = fieldOrderFromFields(fields)
-        if (order.length > 0) {
-          acc[node.id] = order
-        }
-        return acc
-      }, {} as Record<string, string[]>)
+        },
+        {} as Record<string, string[]>
+      )
 
       const arranged = arrangeSceneGraph(values.nodes, values.edges, { fieldOrderByNodeId })
       withHistoryIgnored(cache, () => {

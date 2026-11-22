@@ -562,8 +562,8 @@ function TaskToast({ task }: { task: LongRunningTask }): JSX.Element {
     task.status === 'running' && latestLog
       ? latestLog
       : task.detail
-      ? { id: 'detail', timestamp: task.completedAt ?? task.startedAt, type: 'status', line: task.detail }
-      : latestLog ?? null
+        ? { id: 'detail', timestamp: task.completedAt ?? task.startedAt, type: 'status', line: task.detail }
+        : (latestLog ?? null)
   const hasProgress =
     typeof task.progressCurrent === 'number' && typeof task.progressTotal === 'number' && task.progressTotal > 0
   const progressPercent = hasProgress

@@ -105,8 +105,8 @@ export const getRoutes = () =>
     ...(isInFrameAdminMode()
       ? {}
       : isCloudMode()
-      ? { [urls.settings()]: 'settings', [urls.settings(':page')]: 'settings' }
-      : { [urls.settings()]: 'settings' }),
+        ? { [urls.settings()]: 'settings', [urls.settings(':page')]: 'settings' }
+        : { [urls.settings()]: 'settings' }),
     [urls.scenes()]: 'sceneWorkspace',
     // Signed out, the cloud's /scenes is the public store, not the workspace.
     ...(isCloudMode() && !cloudSignedIn() ? { [urls.scenes()]: 'storeFront' } : {}),
@@ -135,7 +135,7 @@ export const getRoutes = () =>
     [urls.setupUnavailable()]: 'setupUnavailable',
     [urls.frame(':id')]: 'frame',
     [urls.frame(':id', ':tool')]: 'frame',
-  } as const)
+  }) as const
 
 // Addresses that only send the browser on, replaced before any scene
 // renders (sceneLogic). A backend's root, and under Home Assistant the bare

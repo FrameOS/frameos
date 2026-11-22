@@ -797,14 +797,14 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const syncDisabledReason = isVirtualFrame(frame)
     ? 'Virtual frames render in your browser, with the fonts bundled into the renderer.'
     : workspaceMode() === 'frameAdmin'
-    ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
-    : fontSyncElsewhere
-    ? `Fonts go in the assets folder, where the renderer reads them. Switch to ${
-        storages.find((option) => option.id === DEFAULT_ASSET_STORAGE)?.name ?? 'it'
-      } to sync them.`
-    : isEmbeddedHardwareFrame(frame) && storageUnmounted
-    ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
-    : null
+      ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
+      : fontSyncElsewhere
+        ? `Fonts go in the assets folder, where the renderer reads them. Switch to ${
+            storages.find((option) => option.id === DEFAULT_ASSET_STORAGE)?.name ?? 'it'
+          } to sync them.`
+        : isEmbeddedHardwareFrame(frame) && storageUnmounted
+          ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
+          : null
   const showSyncAction = true
 
   // syncAssets registers a long-running task toast, so no need to open logs

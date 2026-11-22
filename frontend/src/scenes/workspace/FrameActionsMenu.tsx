@@ -236,23 +236,23 @@ export function FrameActionsMenu({
                     icon: <ArrowPathIcon className="h-5 w-5 animate-spin" />,
                   }
                 : frameUpgradeIsQueued(frame)
-                ? {
-                    // Already in the queue: a second click would only enqueue
-                    // the same nudge behind the first.
-                    label: 'Update queued',
-                    title: 'The update request is queued and applies when the frame next wakes',
-                    disabled: true,
-                    icon: <HourglassIcon className="h-5 w-5" />,
-                  }
-                : {
-                    label: 'Update firmware',
-                    title:
-                      disabledReason('updateFirmware') ??
-                      'Ask the frame to check for new firmware and install it in the background',
-                    disabled: Boolean(disabledReason('updateFirmware')),
-                    onClick: () => updateFrameFirmware(frame.id),
-                    icon: <CloudArrowDownIcon className="h-5 w-5" />,
-                  },
+                  ? {
+                      // Already in the queue: a second click would only enqueue
+                      // the same nudge behind the first.
+                      label: 'Update queued',
+                      title: 'The update request is queued and applies when the frame next wakes',
+                      disabled: true,
+                      icon: <HourglassIcon className="h-5 w-5" />,
+                    }
+                  : {
+                      label: 'Update firmware',
+                      title:
+                        disabledReason('updateFirmware') ??
+                        'Ask the frame to check for new firmware and install it in the background',
+                      disabled: Boolean(disabledReason('updateFirmware')),
+                      onClick: () => updateFrameFirmware(frame.id),
+                      icon: <CloudArrowDownIcon className="h-5 w-5" />,
+                    },
             ]
           : []),
         ...(allows('restartRemote') && agentConfigured

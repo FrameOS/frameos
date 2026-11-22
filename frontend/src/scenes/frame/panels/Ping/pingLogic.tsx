@@ -303,7 +303,7 @@ export const pingLogic = kea<pingLogicType>([
         ok = payload?.ok ?? response.ok
         mode = (payload?.mode as PingMode) || selectedMode
         target = payload?.target ?? values.targetLabel
-        status = mode === 'http' ? (payload ? payload.status ?? null : response.status) : null
+        status = mode === 'http' ? (payload ? (payload.status ?? null) : response.status) : null
         if (payload?.message) {
           message = payload.message
         } else if (payload && Object.keys(payload).length > 0) {

@@ -139,12 +139,12 @@ function SidebarStatusDots({ frame, inactive }: { frame: FrameType; inactive?: b
         inactive
           ? 'bg-white shadow-sm ring-1 ring-slate-300/80'
           : checkin?.kind === 'sleeping'
-          ? 'bg-sky-400'
-          : stale || checkin?.kind === 'overdue'
-          ? 'bg-amber-400'
-          : ready
-          ? 'bg-emerald-400'
-          : 'bg-slate-300'
+            ? 'bg-sky-400'
+            : stale || checkin?.kind === 'overdue'
+              ? 'bg-amber-400'
+              : ready
+                ? 'bg-emerald-400'
+                : 'bg-slate-300'
       )}
     />
   )
@@ -318,8 +318,8 @@ function FrameTreeRow({
           selected
             ? 'frameos-frame-row-selected'
             : archived
-            ? 'text-slate-500 hover:bg-slate-100'
-            : 'text-slate-700 hover:bg-slate-100'
+              ? 'text-slate-500 hover:bg-slate-100'
+              : 'text-slate-700 hover:bg-slate-100'
         )}
       >
         <FrameChangeStatusIcon frameId={frame.id} />

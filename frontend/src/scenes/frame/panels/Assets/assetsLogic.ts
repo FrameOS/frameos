@@ -302,7 +302,7 @@ function collectAssetStats(node: AssetNode, isRoot = true): AssetStats {
     stats.latestMtime =
       stats.latestMtime && childStats.latestMtime
         ? Math.max(stats.latestMtime, childStats.latestMtime)
-        : stats.latestMtime ?? childStats.latestMtime
+        : (stats.latestMtime ?? childStats.latestMtime)
   })
 
   return stats
@@ -381,8 +381,8 @@ async function responseErrorMessage(response: Response, fallback: string): Promi
       return typeof payload.detail === 'string'
         ? payload.detail
         : typeof payload.message === 'string'
-        ? payload.message
-        : fallback
+          ? payload.message
+          : fallback
     } catch {
       return text
     }
@@ -999,10 +999,10 @@ export const assetsLogic = kea<assetsLogicType>([
           path: asset.path.startsWith(`${assetsPath}/`)
             ? '.' + asset.path.substring(assetsPath.length)
             : asset.path.startsWith(`${normalizedAssetsPath}/`)
-            ? '.' + asset.path.substring(normalizedAssetsPath.length)
-            : asset.path === assetsPath || asset.path === normalizedAssetsPath
-            ? '.'
-            : asset.path,
+              ? '.' + asset.path.substring(normalizedAssetsPath.length)
+              : asset.path === assetsPath || asset.path === normalizedAssetsPath
+                ? '.'
+                : asset.path,
         }))
         cleanedAssets.sort((a, b) => a.path.localeCompare(b.path))
         return cleanedAssets
@@ -1273,8 +1273,8 @@ export const assetsLogic = kea<assetsLogicType>([
           const chunkSize = isInFrameAdminMode()
             ? undefined
             : cloudUpload && !isEsp32CloudFrame(values.frame)
-            ? 1024 * 1024
-            : 256 * 1024
+              ? 1024 * 1024
+              : 256 * 1024
           try {
             const asset = chunkedUpload
               ? await uploadFileInChunks({

@@ -208,7 +208,7 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
       },
     ],
     frameForm: {
-      initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame } as FrameType),
+      initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame }) as FrameType,
     },
     convertingSceneId: [
       null as string | null,

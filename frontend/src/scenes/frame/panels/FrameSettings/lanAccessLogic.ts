@@ -425,12 +425,15 @@ export const lanAccessLogic = kea<lanAccessLogicType>([
     ],
     pendingNote: [
       (s) => [s.queuedValue, s.lanAccess],
-      (queuedValue: lanAccessLogicValues['queuedValue'], lanAccess: lanAccessLogicValues['lanAccess']): string | null =>
+      (
+        queuedValue: lanAccessLogicValues['queuedValue'],
+        lanAccess: lanAccessLogicValues['lanAccess']
+      ): string | null =>
         queuedValue === null || queuedValue === lanAccess
           ? null
           : queuedValue
-          ? 'The frame checks the code when it wakes up.'
-          : 'The frame turns local network access off when it wakes up.',
+            ? 'The frame checks the code when it wakes up.'
+            : 'The frame turns local network access off when it wakes up.',
     ],
   }),
   listeners(({ actions, values, props }) => ({

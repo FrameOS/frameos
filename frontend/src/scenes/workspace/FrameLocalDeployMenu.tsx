@@ -1,5 +1,11 @@
 import { useActions } from 'kea'
-import { ArrowPathIcon, ArrowUturnUpIcon, CloudArrowUpIcon, PowerIcon, RocketLaunchIcon } from '@heroicons/react/24/outline'
+import {
+  ArrowPathIcon,
+  ArrowUturnUpIcon,
+  CloudArrowUpIcon,
+  PowerIcon,
+  RocketLaunchIcon,
+} from '@heroicons/react/24/outline'
 import { EllipsisHorizontalIcon } from '@heroicons/react/24/solid'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'

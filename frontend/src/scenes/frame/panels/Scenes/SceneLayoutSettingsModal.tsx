@@ -50,8 +50,7 @@ export function SceneLayoutSettingsModal({
           {settingsForEveryScene
             ? 'These go on every scene wearing this layout.'
             : 'These belong to this installed scene: other scenes wearing the layout keep their own.'}{' '}
-          Save the frame to push
-          them.
+          Save the frame to push them.
         </p>
         <div className="flex justify-end gap-2">
           <button

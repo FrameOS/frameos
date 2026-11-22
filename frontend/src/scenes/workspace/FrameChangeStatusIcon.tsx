@@ -75,14 +75,14 @@ export function FrameChangeStatusIcon({
   const statusLabel = unsavedChanges
     ? 'Unsaved'
     : firmwareUpdating
-    ? 'Updating'
-    : hasFrameSyncChanges
-    ? 'Sync'
-    : awaitingAck
-    ? 'Waiting'
-    : undeployedChanges
-    ? 'Undeployed'
-    : null
+      ? 'Updating'
+      : hasFrameSyncChanges
+        ? 'Sync'
+        : awaitingAck
+          ? 'Waiting'
+          : undeployedChanges
+            ? 'Undeployed'
+            : null
   const drawerKind = frameChangeDrawerKind(frame, unsavedChanges)
   // Name what is pending rather than just its category: "Undeployed changes"
   // gave no hint that the thing waiting was a FrameOS release, which is the
@@ -91,10 +91,10 @@ export function FrameChangeStatusIcon({
     deploying && deployProgress
       ? deployProgress.title
       : firmwareUpdating && firmwareProgress
-      ? firmwareProgress.title
-      : (statusLabel === 'Undeployed' || statusLabel === 'Waiting') && undeployedChangeDetails.length > 0
-      ? undeployedChangeDetails.map((change) => change.label).join(', ')
-      : `${statusLabel} changes`
+        ? firmwareProgress.title
+        : (statusLabel === 'Undeployed' || statusLabel === 'Waiting') && undeployedChangeDetails.length > 0
+          ? undeployedChangeDetails.map((change) => change.label).join(', ')
+          : `${statusLabel} changes`
   // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
   // only open it where that action exists — the same predicate the "…" menu,
   // the dashboard tile and the scene sidebar use, so every deploy affordance
@@ -108,12 +108,12 @@ export function FrameChangeStatusIcon({
   const StatusIcon = unsavedChanges
     ? CloudArrowUpIcon
     : firmwareUpdating
-    ? ArrowPathIcon
-    : hasFrameSyncChanges
-    ? ArrowsRightLeftIcon
-    : awaitingAck
-    ? HourglassIcon
-    : DeployToFrameIcon
+      ? ArrowPathIcon
+      : hasFrameSyncChanges
+        ? ArrowsRightLeftIcon
+        : awaitingAck
+          ? HourglassIcon
+          : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard
     ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'
@@ -200,14 +200,14 @@ export function FrameChangeStatusIcon({
             ? 'Close unsaved changes'
             : 'Close deploy'
           : drawerKind === 'unsaved'
-          ? 'Open unsaved changes'
-          : unsavedChanges
-          ? 'Open deploy for unsaved changes'
-          : firmwareUpdating
-          ? 'Open deploy for the running firmware update'
-          : hasFrameSyncChanges
-          ? 'Open sync'
-          : 'Open deploy for undeployed changes'
+            ? 'Open unsaved changes'
+            : unsavedChanges
+              ? 'Open deploy for unsaved changes'
+              : firmwareUpdating
+                ? 'Open deploy for the running firmware update'
+                : hasFrameSyncChanges
+                  ? 'Open sync'
+                  : 'Open deploy for undeployed changes'
       }
       onClick={openDrawer}
       className={clsx(

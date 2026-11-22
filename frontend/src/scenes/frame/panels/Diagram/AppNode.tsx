@@ -91,28 +91,28 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isSelected
       ? 'frameos-diagram-node-selected'
       : isDispatch
-      ? 'border-orange-900 shadow-orange-700/50 '
-      : isCustomApp || isSceneApp
-      ? 'border-teal-900 shadow-teal-700/50 '
-      : isDataApp
-      ? 'border-green-700 shadow-green-500/50 '
-      : isScene
-      ? 'frameos-diagram-node-scene '
-      : 'border-sky-900 shadow-sky-700/50 ',
+        ? 'border-orange-900 shadow-orange-700/50 '
+        : isCustomApp || isSceneApp
+          ? 'border-teal-900 shadow-teal-700/50 '
+          : isDataApp
+            ? 'border-green-700 shadow-green-500/50 '
+            : isScene
+              ? 'frameos-diagram-node-scene '
+              : 'border-sky-900 shadow-sky-700/50 ',
     runtimeErrorClassName
   )
 
   const titleBackground = isSelected
     ? 'frameos-diagram-title-selected'
     : isDispatch
-    ? 'bg-orange-900'
-    : isCustomApp || isSceneApp
-    ? 'bg-teal-900'
-    : isDataApp
-    ? 'bg-green-700'
-    : isScene
-    ? 'frameos-diagram-title-scene'
-    : 'bg-sky-900'
+      ? 'bg-orange-900'
+      : isCustomApp || isSceneApp
+        ? 'bg-teal-900'
+        : isDataApp
+          ? 'bg-green-700'
+          : isScene
+            ? 'frameos-diagram-title-scene'
+            : 'bg-sky-900'
 
   const titleClassName = clsx(
     'frameos-node-title text-xl p-1 px-2 gap-2',

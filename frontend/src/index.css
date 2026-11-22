@@ -124,7 +124,8 @@ body.frameos-workspace-scroll-locked {
 
 .frameos-connection-dot__core {
   background: rgb(var(--frameos-connection-green-rgb));
-  box-shadow: 0 0 0 1px rgb(var(--frameos-connection-green-rgb) / 0.22),
+  box-shadow:
+    0 0 0 1px rgb(var(--frameos-connection-green-rgb) / 0.22),
     0 0 8px rgb(var(--frameos-connection-green-rgb) / 0.2);
 }
 
@@ -178,7 +179,11 @@ body.frameos-workspace-scroll-locked {
 }
 
 .frameos-button {
-  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .frameos-clear-button {
@@ -237,36 +242,36 @@ body.frameos-workspace-scroll-locked {
 .frameos-change-status-button {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(
-      135deg,
-      rgb(var(--frameos-color-brass-rgb) / 0.38),
-      rgb(var(--frameos-color-evergreen-rgb) / 0.16)
-    ),
+  background:
+    linear-gradient(135deg, rgb(var(--frameos-color-brass-rgb) / 0.38), rgb(var(--frameos-color-evergreen-rgb) / 0.16)),
     rgba(255, 255, 255, 0.94);
   border: 1px solid rgb(var(--frameos-color-brass-rgb) / 0.62);
   color: color-mix(in srgb, var(--frameos-color-brass) 68%, var(--frameos-color-graphite));
-  box-shadow: 0 8px 18px rgb(var(--frameos-color-brass-rgb) / 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.64);
+  box-shadow:
+    0 8px 18px rgb(var(--frameos-color-brass-rgb) / 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.64);
 }
 
 .frameos-change-status-button:hover {
   transform: translateY(-1px);
-  background: linear-gradient(
-      135deg,
-      rgb(var(--frameos-color-brass-rgb) / 0.48),
-      rgb(var(--frameos-color-evergreen-rgb) / 0.2)
-    ),
+  background:
+    linear-gradient(135deg, rgb(var(--frameos-color-brass-rgb) / 0.48), rgb(var(--frameos-color-evergreen-rgb) / 0.2)),
     #ffffff;
   border-color: rgb(var(--frameos-color-brass-rgb) / 0.78);
   color: color-mix(in srgb, var(--frameos-color-brass) 78%, var(--frameos-color-graphite));
-  box-shadow: 0 12px 26px rgb(var(--frameos-color-brass-rgb) / 0.24),
-    0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 12px 26px rgb(var(--frameos-color-brass-rgb) / 0.24),
+    0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .frameos-change-status-button--idle {
   background: rgba(255, 255, 255, 0.74);
   border: 1px solid rgba(148, 163, 184, 0.46);
   color: #475569;
-  box-shadow: 0 4px 10px rgba(100, 116, 139, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 4px 10px rgba(100, 116, 139, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .frameos-change-status-button--idle:hover {
@@ -302,11 +307,15 @@ body.frameos-workspace-scroll-locked {
 }
 
 .frameos-change-status-button--sidebar {
-  box-shadow: 0 5px 12px rgb(var(--frameos-color-brass-rgb) / 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.58);
+  box-shadow:
+    0 5px 12px rgb(var(--frameos-color-brass-rgb) / 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.58);
 }
 
 .frameos-change-status-button--dashboard {
-  box-shadow: 0 10px 24px rgb(var(--frameos-color-brass-rgb) / 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.66);
+  box-shadow:
+    0 10px 24px rgb(var(--frameos-color-brass-rgb) / 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.66);
 }
 
 .frameos-app-shell .frameos-primary-soft-active,
@@ -481,7 +490,8 @@ html[data-frameos-theme='dark'] .frameos-spinner,
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background: linear-gradient(
+  background:
+    linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.68),
       rgb(var(--frameos-color-mist-rgb) / 0.9) 44%,
@@ -502,7 +512,8 @@ html[data-frameos-theme='dark'] .frameos-spinner,
 }
 
 .frameos-app-shell.frameos-theme-dark::before {
-  background: linear-gradient(
+  background:
+    linear-gradient(
       135deg,
       var(--frameos-color-graphite),
       color-mix(in srgb, var(--frameos-color-graphite) 94%, var(--frameos-color-mist)) 48%,
@@ -619,7 +630,9 @@ html[data-frameos-theme='dark'] .frameos-empty {
   z-index: 25;
   pointer-events: none;
   border: 4px solid var(--frameos-primary);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.78), 0 0 0 2px var(--frameos-primary-ring-soft);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.78),
+    0 0 0 2px var(--frameos-primary-ring-soft);
 }
 
 .frameos-split-cell-empty {
@@ -631,7 +644,9 @@ html[data-frameos-theme='dark'] .frameos-empty {
     rgba(148, 163, 184, 0.2) 8px,
     rgba(148, 163, 184, 0.2) 16px
   );
-  box-shadow: inset 0 0 0 2px rgba(15, 23, 42, 0.26), inset 0 0 0 9999px rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 23, 42, 0.26),
+    inset 0 0 0 9999px rgba(255, 255, 255, 0.06);
 }
 
 .frameos-split-drop-label {
@@ -642,7 +657,9 @@ html[data-frameos-theme='dark'] .frameos-empty {
   border: 2px solid rgba(15, 23, 42, 0.82);
   border-radius: 9999px;
   background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.88),
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.88),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
   color: #0f172a;
   line-height: 1;
@@ -715,7 +732,9 @@ html[data-frameos-theme='dark'] .frameos-split-cell-selected {
 
 .frameos-theme-dark .frameos-split-cell-selected::after,
 html[data-frameos-theme='dark'] .frameos-split-cell-selected::after {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3), 0 0 0 2px var(--frameos-primary-ring-soft);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+    0 0 0 2px var(--frameos-primary-ring-soft);
 }
 
 .frameos-theme-dark .frameos-split-cell-empty,
@@ -728,14 +747,19 @@ html[data-frameos-theme='dark'] .frameos-split-cell-empty {
     rgba(148, 163, 184, 0.18) 8px,
     rgba(148, 163, 184, 0.18) 16px
   );
-  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.34), inset 0 0 0 9999px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.34),
+    inset 0 0 0 9999px rgba(0, 0, 0, 0.12);
 }
 
 .frameos-theme-dark .frameos-split-drop-label,
 html[data-frameos-theme='dark'] .frameos-split-drop-label {
   border-color: rgba(255, 255, 255, 0.82);
   background: rgba(15, 23, 42, 0.94);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.52), 0 0 0 1px rgba(15, 23, 42, 0.84), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(15, 23, 42, 0.84),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
   color: #f8fafc;
 }
 
@@ -1343,29 +1367,27 @@ html[data-frameos-theme='dark'] .frameos-warning-button:hover {
 
 .frameos-theme-dark .frameos-change-status-button,
 html[data-frameos-theme='dark'] .frameos-change-status-button {
-  background: linear-gradient(
-      135deg,
-      rgb(var(--frameos-color-brass-rgb) / 0.3),
-      rgb(var(--frameos-color-evergreen-rgb) / 0.2)
-    ),
+  background:
+    linear-gradient(135deg, rgb(var(--frameos-color-brass-rgb) / 0.3), rgb(var(--frameos-color-evergreen-rgb) / 0.2)),
     rgba(255, 255, 255, 0.07);
   border-color: rgb(var(--frameos-color-brass-rgb) / 0.56);
   color: color-mix(in srgb, var(--frameos-color-brass) 74%, var(--frameos-color-mist));
-  box-shadow: 0 8px 20px rgb(var(--frameos-color-brass-rgb) / 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 8px 20px rgb(var(--frameos-color-brass-rgb) / 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .frameos-theme-dark .frameos-change-status-button:hover,
 html[data-frameos-theme='dark'] .frameos-change-status-button:hover {
-  background: linear-gradient(
-      135deg,
-      rgb(var(--frameos-color-brass-rgb) / 0.38),
-      rgb(var(--frameos-color-evergreen-rgb) / 0.26)
-    ),
+  background:
+    linear-gradient(135deg, rgb(var(--frameos-color-brass-rgb) / 0.38), rgb(var(--frameos-color-evergreen-rgb) / 0.26)),
     rgba(255, 255, 255, 0.1);
   border-color: rgb(var(--frameos-color-brass-rgb) / 0.7);
   color: color-mix(in srgb, var(--frameos-color-brass) 84%, var(--frameos-color-mist));
-  box-shadow: 0 12px 28px rgb(var(--frameos-color-brass-rgb) / 0.14),
-    0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 12px 28px rgb(var(--frameos-color-brass-rgb) / 0.14),
+    0 0 0 3px rgb(var(--frameos-color-brass-rgb) / 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .frameos-theme-dark .frameos-change-status-button--idle,
@@ -2639,7 +2661,9 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   background: var(--frameos-primary-soft);
   border-color: var(--frameos-primary-border-strong);
   color: #ffffff;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34), 0 0 0 1px var(--frameos-primary-border);
+  box-shadow:
+    0 14px 30px rgba(0, 0, 0, 0.34),
+    0 0 0 1px var(--frameos-primary-border);
   transform: translateY(-1px);
 }
 
@@ -2658,7 +2682,9 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   background: var(--frameos-primary-soft);
   border-color: var(--frameos-primary-border-strong);
   color: var(--frameos-primary-text);
-  box-shadow: 0 14px 30px rgba(100, 116, 139, 0.22), 0 0 0 1px var(--frameos-primary-border);
+  box-shadow:
+    0 14px 30px rgba(100, 116, 139, 0.22),
+    0 0 0 1px var(--frameos-primary-border);
   transform: translateY(-1px);
 }
 
@@ -2748,9 +2774,12 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 
 .frame-tool-drag-handle {
   align-self: stretch;
-  background-image: radial-gradient(circle, rgba(100, 116, 139, 0.64) 1.15px, transparent 1.35px),
+  background-image:
+    radial-gradient(circle, rgba(100, 116, 139, 0.64) 1.15px, transparent 1.35px),
     radial-gradient(circle, rgba(100, 116, 139, 0.64) 1.15px, transparent 1.35px);
-  background-position: 2px 4px, 7px 4px;
+  background-position:
+    2px 4px,
+    7px 4px;
   background-repeat: repeat-y;
   background-size: 8px 8px;
   flex: 0 0 0.75rem;
@@ -2763,7 +2792,8 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 }
 
 .frameos-theme-dark .frame-tool-drag-handle {
-  background-image: radial-gradient(circle, rgba(219, 227, 238, 0.58) 1.15px, transparent 1.35px),
+  background-image:
+    radial-gradient(circle, rgba(219, 227, 238, 0.58) 1.15px, transparent 1.35px),
     radial-gradient(circle, rgba(219, 227, 238, 0.58) 1.15px, transparent 1.35px);
 }
 
@@ -2931,7 +2961,10 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   background: rgba(226, 232, 240, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.48);
   box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
-  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .frameos-switch-track-on {
@@ -3565,9 +3598,13 @@ html[data-frameos-theme='dark'] select.with-triangle:focus {
   inset: -2px;
   padding: 2px;
   z-index: 2;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
   mask-composite: exclude;
 }
 

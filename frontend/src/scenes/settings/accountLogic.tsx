@@ -250,8 +250,8 @@ export const accountLogic = kea<accountLogicType>([
           email: !email
             ? 'Enter an email address'
             : !email.includes('@') || email.startsWith('@') || email.endsWith('@')
-            ? 'Enter a valid email address'
-            : null,
+              ? 'Enter a valid email address'
+              : null,
         }
       },
       submit: async (form) => {
@@ -298,8 +298,8 @@ export const accountLogic = kea<accountLogicType>([
         password: !form.password
           ? 'Enter a new password'
           : form.password.length < 8
-          ? 'Password must be at least 8 characters'
-          : null,
+            ? 'Password must be at least 8 characters'
+            : null,
         password2: form.password !== form.password2 ? 'Passwords do not match' : null,
       }),
       submit: async (form) => {

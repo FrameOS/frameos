@@ -389,8 +389,8 @@ function BatteryFacts({
           segment
             ? `${formatDate(segment.start)} · ${segment.startPercent}% → ${segment.endPercent}%`
             : samples.length > 0
-            ? `${samples.length} reading${samples.length === 1 ? '' : 's'}`
-            : placeholder
+              ? `${samples.length} reading${samples.length === 1 ? '' : 's'}`
+              : placeholder
         }
         title={
           segment

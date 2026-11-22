@@ -62,7 +62,7 @@ export function frameButtons(
 ): GPIOButton[] {
   const fixed = configuredGpioButtonsForDevice(frame?.device) ?? []
   const own = frameForm?.gpio_buttons ?? frame?.gpio_buttons
-  const reported = own ? [] : frame?.hardware?.gpioButtons ?? []
+  const reported = own ? [] : (frame?.hardware?.gpioButtons ?? [])
   const result: GPIOButton[] = []
   const seenPins = new Set<number>()
   const seenLabels = new Set<string>()

@@ -305,102 +305,101 @@ export interface EditableInputHSLAProps extends Omit<EditableInputRGBAProps, 'rP
   aProps?: false | EditableInputRGBAProps['aProps']
   onChangeHSLA?: (next: HslaColor, changed: 'h' | 's' | 'l' | 'a') => void
 }
-const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProps>(function EditableInputHSLA(
-  props,
-  ref
-) {
-  const {
-    prefixCls = 'w-color-editable-input-hsla',
-    hsva,
-    hsla: hslaProp,
-    hProps = {},
-    sProps = {},
-    lProps = {},
-    aProps = {},
-    className,
-    onChange,
-    onChangeHSLA,
-    ...other
-  } = props
-  const hsla = (hslaProp ?? (hsva ? hsvaToHsla(hsva) : { h: 0, s: 0, l: 0, a: 0 })) as HslaColor
+const EditableInputHSLA = React.forwardRef<HTMLDivElement, EditableInputHSLAProps>(
+  function EditableInputHSLA(props, ref) {
+    const {
+      prefixCls = 'w-color-editable-input-hsla',
+      hsva,
+      hsla: hslaProp,
+      hProps = {},
+      sProps = {},
+      lProps = {},
+      aProps = {},
+      className,
+      onChange,
+      onChangeHSLA,
+      ...other
+    } = props
+    const hsla = (hslaProp ?? (hsva ? hsvaToHsla(hsva) : { h: 0, s: 0, l: 0, a: 0 })) as HslaColor
 
-  const coerceNumber = (val: string | number) => {
-    if (typeof val === 'number') return val
-    const cleaned = String(val)
-      .replace(',', '.')
-      .replace(/[^\d.]+/g, '')
-    const num = parseFloat(cleaned)
-    return Number.isNaN(num) ? null : num
+    const coerceNumber = (val: string | number) => {
+      if (typeof val === 'number') return val
+      const cleaned = String(val)
+        .replace(',', '.')
+        .replace(/[^\d.]+/g, '')
+      const num = parseFloat(cleaned)
+      return Number.isNaN(num) ? null : num
+    }
+
+    const handleChange = (
+      value: string | number,
+      type: 'h' | 's' | 'l' | 'a',
+      _evn: React.ChangeEvent<HTMLInputElement>
+    ) => {
+      const num = coerceNumber(value)
+      if (num === null) return
+
+      if (type === 'h') {
+        const h = Math.max(0, Math.min(360, num))
+        onChangeHSLA?.({ ...hsla, h }, 'h')
+        return
+      }
+      if (type === 's') {
+        const s = Math.max(0, Math.min(100, num))
+        onChangeHSLA?.({ ...hsla, s }, 's')
+        return
+      }
+      if (type === 'l') {
+        const l = Math.max(0, Math.min(100, num))
+        onChangeHSLA?.({ ...hsla, l }, 'l')
+        return
+      }
+      if (type === 'a') {
+        let a = num
+        if (a > 1) a = Math.min(100, a) / 100
+        a = Math.max(0, Math.min(1, a))
+        onChangeHSLA?.({ ...hsla, a }, 'a')
+      }
+    }
+
+    let aPropsObj: false | EditableInputProps =
+      aProps == false
+        ? false
+        : {
+            label: 'A',
+            value: Math.round(hsla.a * 100) / 100,
+            ...aProps,
+            onChange: (evn, val) => handleChange(val, 'a', evn),
+          }
+    return (
+      <EditableInputRGBA
+        ref={ref}
+        hsva={hsva}
+        rProps={{
+          label: 'H',
+          value: Math.round(hsla.h),
+          ...hProps,
+          onChange: (evn, val) => handleChange(val, 'h', evn),
+        }}
+        gProps={{
+          label: 'S',
+          value: `${Math.round(hsla.s)}%`,
+          ...sProps,
+          onChange: (evn, val) => handleChange(val, 's', evn),
+        }}
+        bProps={{
+          label: 'L',
+          value: `${Math.round(hsla.l)}%`,
+          ...lProps,
+          onChange: (evn, val) => handleChange(val, 'l', evn),
+        }}
+        aProps={aPropsObj}
+        className={[prefixCls, className || ''].filter(Boolean).join(' ')}
+        {...other}
+      />
+    )
   }
-
-  const handleChange = (
-    value: string | number,
-    type: 'h' | 's' | 'l' | 'a',
-    _evn: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const num = coerceNumber(value)
-    if (num === null) return
-
-    if (type === 'h') {
-      const h = Math.max(0, Math.min(360, num))
-      onChangeHSLA?.({ ...hsla, h }, 'h')
-      return
-    }
-    if (type === 's') {
-      const s = Math.max(0, Math.min(100, num))
-      onChangeHSLA?.({ ...hsla, s }, 's')
-      return
-    }
-    if (type === 'l') {
-      const l = Math.max(0, Math.min(100, num))
-      onChangeHSLA?.({ ...hsla, l }, 'l')
-      return
-    }
-    if (type === 'a') {
-      let a = num
-      if (a > 1) a = Math.min(100, a) / 100
-      a = Math.max(0, Math.min(1, a))
-      onChangeHSLA?.({ ...hsla, a }, 'a')
-    }
-  }
-
-  let aPropsObj: false | EditableInputProps =
-    aProps == false
-      ? false
-      : {
-          label: 'A',
-          value: Math.round(hsla.a * 100) / 100,
-          ...aProps,
-          onChange: (evn, val) => handleChange(val, 'a', evn),
-        }
-  return (
-    <EditableInputRGBA
-      ref={ref}
-      hsva={hsva}
-      rProps={{
-        label: 'H',
-        value: Math.round(hsla.h),
-        ...hProps,
-        onChange: (evn, val) => handleChange(val, 'h', evn),
-      }}
-      gProps={{
-        label: 'S',
-        value: `${Math.round(hsla.s)}%`,
-        ...sProps,
-        onChange: (evn, val) => handleChange(val, 's', evn),
-      }}
-      bProps={{
-        label: 'L',
-        value: `${Math.round(hsla.l)}%`,
-        ...lProps,
-        onChange: (evn, val) => handleChange(val, 'l', evn),
-      }}
-      aProps={aPropsObj}
-      className={[prefixCls, className || ''].filter(Boolean).join(' ')}
-      {...other}
-    />
-  )
-})
+)
 
 export interface SketchProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'color'> {
   prefixCls?: string
@@ -587,15 +586,15 @@ const Sketch = React.forwardRef<HTMLDivElement, SketchProps>(function Sketch(pro
         ? e.shiftKey
           ? 0.1
           : e.altKey
-          ? 0.005
-          : 0.01
+            ? 0.005
+            : 0.01
         : channel === 'h'
-        ? e.shiftKey
-          ? 10
-          : 1
-        : e.shiftKey
-        ? 10
-        : 1
+          ? e.shiftKey
+            ? 10
+            : 1
+          : e.shiftKey
+            ? 10
+            : 1
     const { hsla } = nudgeHSLA(channel, dir * base)
     const val = formatHSLA(channel, hsla)
     const input = e.currentTarget
@@ -801,8 +800,10 @@ export function ColorPicker({ value, onChange }: ColorPickerProps) {
   )
 }
 
-export interface ColorInputProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'type'> {
+export interface ColorInputProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'onChange' | 'value' | 'type'
+> {
   value?: string
   onChange?: (value: string) => void
   theme?: 'node' | 'full'

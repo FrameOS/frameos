@@ -419,8 +419,8 @@ export function FrameSettingsProvider({
   const cloudBatteryEnablePinDisabledReason = cloudEsp32BatteryEnablePinSupported
     ? undefined
     : frame.frameos_version
-    ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-    : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+      ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+      : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const cloudCpuModeDisabledReason =
     esp32CloudProfile && cloudFrameSupportsEsp32CpuMode(frame.frameos_version)
       ? undefined
@@ -446,8 +446,8 @@ export function FrameSettingsProvider({
     !cloudProfile || cloudFrameSupportsRenderScale(frame.frameos_version)
       ? undefined
       : frame.frameos_version
-      ? `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-      : `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+        ? `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+        : `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   // "Automatic" names the scale this panel gets: a cloud frame's size is the
   // one its device reported.
   const renderScaleOptions = frameRenderScaleOptions(
@@ -457,7 +457,7 @@ export function FrameSettingsProvider({
     frameForm.render_scale
   )
 
-  const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
+  const cloudDevice = cloudProfile ? (frame.hardware?.device ?? '') : ''
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
     frameForm.embedded?.hardwarePreset ?? frameForm.device_config?.hardwarePreset
   )
@@ -660,8 +660,8 @@ export function FrameSettingsProvider({
     !cloudProfile || cloudFrameSupportsFrameSettingsOnScreen(frame.frameos_version)
       ? undefined
       : frame.frameos_version
-      ? `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-      : `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+        ? `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+        : `This needs FrameOS ${frameSettingsOnScreenCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const buttonBeep: FrameSettingsContextValue['buttonBeep'] = esp32CloudProfile
     ? {
         pin: frameForm.buzzer_pin,
@@ -671,24 +671,24 @@ export function FrameSettingsProvider({
         disabledReason: cloudFrameSupportsEsp32Buzzer(frame.frameos_version)
           ? undefined
           : frame.frameos_version
-          ? `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-          : `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+            ? `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+            : `The button beep needs FrameOS ${esp32BuzzerCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
         touchBeep: (frameForm.touch_beep ?? frame.hardware?.touchBeep) !== false,
         touchBeepDisabledReason: cloudFrameSupportsEsp32TouchBeep(frame.frameos_version)
           ? undefined
           : `The touch beep needs FrameOS ${esp32TouchBeepCloudFrameSettingsMinVersion} or newer on the frame.`,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
-    ? {
-        pin: powerDeviceConfig.buzzerPin ?? powerDeviceConfig.buzzer_pin,
-        toneHz: powerDeviceConfig.buzzerToneHz ?? powerDeviceConfig.buzzer_tone_hz,
-        reportedPin: undefined,
-        reportedToneHz: undefined,
-        disabledReason: undefined,
-        touchBeep: (powerDeviceConfig.touchBeep ?? powerDeviceConfig.touch_beep) !== false,
-        touchBeepDisabledReason: undefined,
-      }
-    : null
+      ? {
+          pin: powerDeviceConfig.buzzerPin ?? powerDeviceConfig.buzzer_pin,
+          toneHz: powerDeviceConfig.buzzerToneHz ?? powerDeviceConfig.buzzer_tone_hz,
+          reportedPin: undefined,
+          reportedToneHz: undefined,
+          disabledReason: undefined,
+          touchBeep: (powerDeviceConfig.touchBeep ?? powerDeviceConfig.touch_beep) !== false,
+          touchBeepDisabledReason: undefined,
+        }
+      : null
   const setButtonBeep = (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
@@ -748,8 +748,8 @@ export function FrameSettingsProvider({
   const microphoneDisabledReason = cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
     ? undefined
     : frame.frameos_version
-    ? `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set them here.`
-    : `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`
+      ? `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set them here.`
+      : `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`
   const microphone: FrameSettingsContextValue['microphone'] = esp32CloudProfile
     ? {
         clkPin: frameForm.mic_clk_pin,
@@ -761,16 +761,16 @@ export function FrameSettingsProvider({
         disabledReason: microphoneDisabledReason,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
-    ? {
-        clkPin: configuredMicPins.clk,
-        dataPin: configuredMicPins.data,
-        pwrPin: configuredMicPins.pwr,
-        boardClkPin: boardMicPins.clk,
-        boardDataPin: boardMicPins.data,
-        boardPwrPin: boardMicPins.pwr,
-        disabledReason: undefined,
-      }
-    : null
+      ? {
+          clkPin: configuredMicPins.clk,
+          dataPin: configuredMicPins.data,
+          pwrPin: configuredMicPins.pwr,
+          boardClkPin: boardMicPins.clk,
+          boardDataPin: boardMicPins.data,
+          boardPwrPin: boardMicPins.pwr,
+          disabledReason: undefined,
+        }
+      : null
   const setMicrophonePins = (patch: { clkPin?: number; dataPin?: number; pwrPin?: number }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
@@ -814,8 +814,8 @@ export function FrameSettingsProvider({
   const statusLedDisabledReason = cloudFrameSupportsEsp32Led(frame.frameos_version)
     ? undefined
     : frame.frameos_version
-    ? `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-    : `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+      ? `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+      : `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
   const statusLed: FrameSettingsContextValue['statusLed'] = esp32CloudProfile
     ? {
         pin: frameForm.led_pin,
@@ -825,14 +825,14 @@ export function FrameSettingsProvider({
         disabledReason: statusLedDisabledReason,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
-    ? {
-        pin: powerDeviceConfig.ledPin ?? powerDeviceConfig.led_pin,
-        type: ledType(powerDeviceConfig.ledType ?? powerDeviceConfig.led_type),
-        reportedPin: undefined,
-        reportedType: undefined,
-        disabledReason: undefined,
-      }
-    : null
+      ? {
+          pin: powerDeviceConfig.ledPin ?? powerDeviceConfig.led_pin,
+          type: ledType(powerDeviceConfig.ledType ?? powerDeviceConfig.led_type),
+          reportedPin: undefined,
+          reportedType: undefined,
+          disabledReason: undefined,
+        }
+      : null
   const setStatusLed = (patch: { pin?: number; type?: StatusLedType }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
@@ -873,24 +873,24 @@ export function FrameSettingsProvider({
   const voiceChat: FrameSettingsContextValue['voiceChat'] = !hasMicrophone
     ? null
     : esp32CloudProfile
-    ? {
-        enabled: frameForm.voice_chat,
-        reported: typeof frame.hardware?.voiceChat === 'boolean' ? frame.hardware.voiceChat : undefined,
-        microphone: typeof frame.hardware?.microphone === 'boolean' ? frame.hardware.microphone : undefined,
-        disabledReason: cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
-          ? undefined
-          : frame.frameos_version
-          ? `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-          : `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
-      }
-    : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
-    ? {
-        enabled: powerDeviceConfig.voiceChat ?? powerDeviceConfig.voice_chat,
-        reported: undefined,
-        microphone: undefined,
-        disabledReason: undefined,
-      }
-    : null
+      ? {
+          enabled: frameForm.voice_chat,
+          reported: typeof frame.hardware?.voiceChat === 'boolean' ? frame.hardware.voiceChat : undefined,
+          microphone: typeof frame.hardware?.microphone === 'boolean' ? frame.hardware.microphone : undefined,
+          disabledReason: cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
+            ? undefined
+            : frame.frameos_version
+              ? `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+              : `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+        }
+      : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
+        ? {
+            enabled: powerDeviceConfig.voiceChat ?? powerDeviceConfig.voice_chat,
+            reported: undefined,
+            microphone: undefined,
+            disabledReason: undefined,
+          }
+        : null
   const setVoiceChat = (enabled: boolean): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({ voice_chat: enabled })
@@ -907,8 +907,8 @@ export function FrameSettingsProvider({
   const voicePermissions: FrameSettingsContextValue['voicePermissions'] = !voiceChat
     ? null
     : esp32CloudProfile
-    ? voicePermissionsOf(frameForm.voice_permissions ?? frame.voice_permissions)
-    : voicePermissionsFromDeviceConfig(powerDeviceConfig)
+      ? voicePermissionsOf(frameForm.voice_permissions ?? frame.voice_permissions)
+      : voicePermissionsFromDeviceConfig(powerDeviceConfig)
   const setVoicePermission = (key: VoicePermissionKey, enabled: boolean): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({

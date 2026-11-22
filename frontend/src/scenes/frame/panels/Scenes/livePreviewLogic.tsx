@@ -609,9 +609,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenes: livePreviewLogicValues['scenes']
       ): FrameScene | null =>
         livePreviewSceneId
-          ? (livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
+          ? ((livePreviewScenes ?? []).find((scene) => scene.id === livePreviewSceneId) ??
             scenes.find((scene) => scene.id === livePreviewSceneId) ??
-            null
+            null)
           : null,
     ],
     gpioButtons: [

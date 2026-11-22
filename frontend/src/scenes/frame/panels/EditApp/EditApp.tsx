@@ -46,10 +46,10 @@ export function appSourceEditorLanguage(file: string): string {
   return file.endsWith('.json')
     ? 'json'
     : file.endsWith('.ts') || file.endsWith('.tsx')
-    ? 'typescript'
-    : file.endsWith('.js') || file.endsWith('.jsx')
-    ? 'javascript'
-    : 'python'
+      ? 'typescript'
+      : file.endsWith('.js') || file.endsWith('.jsx')
+        ? 'javascript'
+        : 'python'
 }
 
 /** Files the frame's module loader can `import`: the app's own code and JSON. */
@@ -204,8 +204,8 @@ export function EditAppFileList({ sceneId, nodeId, className, onSelectFile }: Ed
                     ? 'app-file-row-error-active'
                     : 'app-file-row-active'
                   : modelMarkers[file]?.length
-                  ? 'app-file-row-error'
-                  : null
+                    ? 'app-file-row-error'
+                    : null
               )}
               title={
                 modelMarkers[file]?.length
@@ -472,8 +472,8 @@ export function EditApp({
               {activeTestRun?.status === 'done'
                 ? reportSummary(activeTestRun.report)
                 : activeTestRun?.status === 'running'
-                ? 'Running…'
-                : 'Tests run in the FrameOS runtime, with every request mocked.'}
+                  ? 'Running…'
+                  : 'Tests run in the FrameOS runtime, with every request mocked.'}
             </div>
             <Button
               size="tiny"

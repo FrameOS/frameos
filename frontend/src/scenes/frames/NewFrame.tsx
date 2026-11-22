@@ -277,8 +277,18 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
 // to the frame (docs/voice-chat.md). Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP /
 // _VOICE_EVENT_MAP (backend) and fos_board.c.
 const SEEED_RETERMINAL_EVENT_MAP: EventMapRule[] = [
-  { event: 'button', match: { label: 'LEFT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'button', match: { label: 'RIGHT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+  {
+    event: 'button',
+    match: { label: 'LEFT', action: 'longPress' },
+    emit: 'setCurrentScene',
+    as: { direction: 'prev' },
+  },
+  {
+    event: 'button',
+    match: { label: 'RIGHT', action: 'longPress' },
+    emit: 'setCurrentScene',
+    as: { direction: 'next' },
+  },
 ]
 const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
   ...SEEED_RETERMINAL_EVENT_MAP,
@@ -302,7 +312,12 @@ const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VO
 // and fos_board.c.
 const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'button', match: { label: 'DOWN', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+  {
+    event: 'button',
+    match: { label: 'DOWN', action: 'longPress' },
+    emit: 'setCurrentScene',
+    as: { direction: 'next' },
+  },
   { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
@@ -1052,10 +1067,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
     newFrame.mode === 'import'
       ? 'import'
       : newFrame.mode === 'adopt'
-      ? 'adopt'
-      : isVirtualPlatform
-      ? 'virtual'
-      : installMethod
+        ? 'adopt'
+        : isVirtualPlatform
+          ? 'virtual'
+          : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
   const rootPassword = newFrame.ssh_pass ?? ''

@@ -299,8 +299,8 @@ function DockerDaemonStatus(): JSX.Element {
         {systemInfo?.docker?.daemonAvailable
           ? 'Docker daemon is reachable.'
           : systemInfo?.docker?.cliAvailable
-          ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
-          : 'Docker CLI is not installed.'}
+            ? `Docker daemon is not reachable${systemInfo?.docker?.error ? `: ${systemInfo.docker.error}` : '.'}`
+            : 'Docker CLI is not installed.'}
       </p>
       <Button size="tiny" color="secondary" onClick={loadSystemInfo}>
         Recheck

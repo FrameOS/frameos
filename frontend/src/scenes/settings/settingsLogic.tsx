@@ -34,10 +34,10 @@ function setDefaultSettings(settings: Partial<FrameOSSettings> | Record<string, 
     (settings.modalSandbox?.enabled
       ? 'modal'
       : settings.buildHost?.enabled
-      ? 'buildHost'
-      : inHassioAddon()
-      ? 'none'
-      : 'docker')
+        ? 'buildHost'
+        : inHassioAddon()
+          ? 'none'
+          : 'docker')
   const personalSettings = isSettingsObject(settings.personal) ? settings.personal : {}
   return {
     ...settings,

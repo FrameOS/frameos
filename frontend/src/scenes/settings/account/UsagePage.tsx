@@ -355,18 +355,18 @@ function PlanSummary(): JSX.Element | null {
   const status = subscription?.cancel_at
     ? `Cancelled. You keep it until ${formatDate(subscription.cancel_at)}, then the account moves to Free.`
     : subscription?.renews_at
-    ? nextPlan
-      ? `Renews on ${formatDate(subscription.renews_at)} as ${nextPlan.name} at ${wholeDollars(
-          nextPlan.priceMicros
-        )}/month.`
-      : `Renews on ${formatDate(subscription.renews_at)}.`
-    : paid && grant
-    ? grant.endsAt
-      ? `Given to you for free until ${formatDate(grant.endsAt)}, then the account moves to Free.`
-      : 'Given to you for free. Nothing is charged.'
-    : paid
-    ? 'Set up for you by support. Write to us to change it.'
-    : 'Everything a household needs. A paid plan holds more frames and more files.'
+      ? nextPlan
+        ? `Renews on ${formatDate(subscription.renews_at)} as ${nextPlan.name} at ${wholeDollars(
+            nextPlan.priceMicros
+          )}/month.`
+        : `Renews on ${formatDate(subscription.renews_at)}.`
+      : paid && grant
+        ? grant.endsAt
+          ? `Given to you for free until ${formatDate(grant.endsAt)}, then the account moves to Free.`
+          : 'Given to you for free. Nothing is charged.'
+        : paid
+          ? 'Set up for you by support. Write to us to change it.'
+          : 'Everything a household needs. A paid plan holds more frames and more files.'
   return (
     <Box className="space-y-4 p-5" data-plan-summary>
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -507,8 +507,8 @@ function StatementDetails({ statement }: { statement: AccountStatement }): JSX.E
                 owed
               )}. The month-end invoice collects it: metered usage and any plan fee, less any credit.`
             : owed < 0n
-            ? `You have a credit of ${dollars(-owed)}, which goes against what you use next.`
-            : 'Nothing is owed. Charges are positive, and what paid or credited them is negative.'}
+              ? `You have a credit of ${dollars(-owed)}, which goes against what you use next.`
+              : 'Nothing is owed. Charges are positive, and what paid or credited them is negative.'}
         </p>
         {statement.lines.length > 0 ? (
           <AccountTable head={['When', 'What', 'Amount']}>

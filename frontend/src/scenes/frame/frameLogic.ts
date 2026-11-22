@@ -406,8 +406,8 @@ export function pendingFrameosUpgrade(
   const details = isCloudManagedFrame(frame)
     ? cloudUndeployedChangeDetails(frame, latestPublishedRelease)
     : isInFrameAdminMode()
-    ? []
-    : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
+      ? []
+      : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
   const upgrade = details.find((change) => change.frameosVersionChange?.kind === 'upgrade')?.frameosVersionChange
   return upgrade?.previousVersion ? upgrade : null
 }
@@ -974,7 +974,7 @@ function withServiceKeyFingerprints(
   const fingerprints = frame?.settings_fingerprints
   return fingerprints && !frameForm?.settings_fingerprints
     ? { ...(frameForm ?? {}), settings_fingerprints: fingerprints }
-    : frameForm ?? {}
+    : (frameForm ?? {})
 }
 
 export function serviceKeysChangeDetail(
@@ -3416,8 +3416,10 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode))
-          : firstDeployChangeDetails(frameForm, mode),
+            ? sortDeployChangeDetails(
+                deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode)
+              )
+            : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],

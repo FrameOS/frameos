@@ -186,7 +186,7 @@ export function parseFrameGestureValue(value: string): FrameGesture | null {
 }
 
 export function frameGestureTitle(gesture: FrameGesture): string {
-  return isEdgeGesture(gesture) ? EDGE_TITLES[gesture.edge] ?? `Swipe in from ${gesture.edge}` : gestureTitle(gesture)
+  return isEdgeGesture(gesture) ? (EDGE_TITLES[gesture.edge] ?? `Swipe in from ${gesture.edge}`) : gestureTitle(gesture)
 }
 
 /** The swipes a touch screen offers as rows, one per edge. */

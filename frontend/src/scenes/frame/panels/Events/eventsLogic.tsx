@@ -298,8 +298,8 @@ export const eventsLogic = kea<eventsLogicType>([
           tab === 'listen'
             ? frameEventsForScene(scene).filter((event) => event.canListen && !isAliasEvent(event.name))
             : tab === 'dispatch'
-            ? frameEventsForScene(scene).filter((event) => event.canDispatch)
-            : []
+              ? frameEventsForScene(scene).filter((event) => event.canDispatch)
+              : []
         ).filter((event) => searchInText(search, event.name) || searchInText(search, event.description ?? ''))
       },
     ],

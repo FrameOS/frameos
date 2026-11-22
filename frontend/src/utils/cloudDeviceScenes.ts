@@ -111,8 +111,8 @@ export function deviceScenesImportSummary(result: CloudDeviceScenesImportResult)
       result.assigned === 0
         ? ''
         : result.connected === false
-        ? ' The frame takes them over when it next connects.'
-        : ' The frame is taking them over now.'
+          ? ' The frame takes them over when it next connects.'
+          : ' The frame is taking them over now.'
     lines.push(`${parts.join(', ')}.${where}`)
   }
   for (const scene of [...result.imported, ...result.reused]) {

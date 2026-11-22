@@ -82,7 +82,7 @@ export function filterFieldsByShowIf<T extends Partial<AppConfigField> | Markdow
   options: ShowIfEvaluationOptions = {}
 ): T[] {
   return fields.filter((field) =>
-    evaluateShowIf(field.showIf, values, 'name' in field ? field.name ?? null : null, options)
+    evaluateShowIf(field.showIf, values, 'name' in field ? (field.name ?? null) : null, options)
   )
 }
 

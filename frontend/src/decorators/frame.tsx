@@ -151,8 +151,8 @@ function estimatedCheckinPeriodSeconds(frame: FrameType): number | null {
     typeof metrics.onBattery === 'boolean'
       ? metrics.onBattery
       : typeof metrics.batteryMillivolts === 'number'
-      ? metrics.batteryMillivolts >= batteryPresentMillivolts
-      : false
+        ? metrics.batteryMillivolts >= batteryPresentMillivolts
+        : false
   if (deepSleep !== true && !(deepSleepOnBattery === true && onBattery)) {
     return null
   }
@@ -452,7 +452,9 @@ export function frameDeployProgress(frame: FrameType, now: number = Date.now()):
   }
   const detail = typeof record.detail === 'string' && record.detail ? record.detail : null
   const error =
-    typeof record.error === 'string' && record.error ? deployProgressErrorWords.get(record.error) ?? record.error : null
+    typeof record.error === 'string' && record.error
+      ? (deployProgressErrorWords.get(record.error) ?? record.error)
+      : null
   let percent = 0
   if (status === 'done') {
     percent = 100
@@ -466,10 +468,10 @@ export function frameDeployProgress(frame: FrameType, now: number = Date.now()):
   }
   const label =
     status === 'done'
-      ? deployProgressDoneWords[record.kind as DeployProgressKind] ?? 'deployed'
+      ? (deployProgressDoneWords[record.kind as DeployProgressKind] ?? 'deployed')
       : status === 'error'
-      ? 'failed'
-      : stageSpec?.label ?? record.stage
+        ? 'failed'
+        : (stageSpec?.label ?? record.stage)
   const bytes =
     status === 'running' && record.progress && typeof record.progress.total === 'number' && record.progress.total > 0
       ? `${Math.round((100 * record.progress.current) / record.progress.total)}%`
@@ -478,10 +480,10 @@ export function frameDeployProgress(frame: FrameType, now: number = Date.now()):
     status === 'error'
       ? `${label}: ${error ?? 'deploy did not complete'}`
       : status === 'done'
-      ? detail
-        ? `${label} · ${detail}`
-        : label
-      : [label, bytes ?? detail].filter(Boolean).join(' · ')
+        ? detail
+          ? `${label} · ${detail}`
+          : label
+        : [label, bytes ?? detail].filter(Boolean).join(' · ')
   const title = [kindSpec.label, status === 'running' ? label : caption, status === 'running' ? detail : null]
     .filter(Boolean)
     .join(' · ')

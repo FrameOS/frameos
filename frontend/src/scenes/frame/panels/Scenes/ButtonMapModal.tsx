@@ -42,8 +42,8 @@ export function ButtonMapModal({ frameId, sceneId }: { frameId: FrameId; sceneId
     const asIsLabel = asIs.length
       ? `As is (${asIs.map((button) => button.label).join(', ')})`
       : buttons.length
-      ? 'As is (no button on this frame)'
-      : 'As is'
+        ? 'As is (no button on this frame)'
+        : 'As is'
     const byButton = new Map<string, { value: string; label: string }[]>()
     for (const gesture of gestures) {
       const entry = { value: gestureValue(gesture), label: gestureTitle(gesture) }

@@ -1906,10 +1906,10 @@ export const workspaceLogic = kea<workspaceLogicType>([
           installMethod === 'sd_card'
             ? 'sdCard'
             : installMethod === 'script'
-            ? 'script'
-            : installMethod === 'embedded'
-            ? 'embedded'
-            : 'main'
+              ? 'script'
+              : installMethod === 'embedded'
+                ? 'embedded'
+                : 'main'
         actions.setSearch('')
         actions.selectFrame(frameId)
         cache.skipNextFrameChangeDrawerScrollPreserve = true
@@ -2302,18 +2302,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
       payload.kind === 'unsaved'
         ? drawerUrlForFrame(payloadFrameId(payload.frameId), 'unsavedChanges')
         : payload.preferFrameRoute
-        ? [
-            urls.frame(payloadFrameId(payload.frameId)),
-            {
-              ...withoutTool(clearDrawerSearchParams(router.values.searchParams)),
-              drawer: 'deployPlan',
+          ? [
+              urls.frame(payloadFrameId(payload.frameId)),
+              {
+                ...withoutTool(clearDrawerSearchParams(router.values.searchParams)),
+                drawer: 'deployPlan',
+                ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
+              },
+              utilityDrawerClosedHash(),
+            ]
+          : drawerUrlForFrame(payloadFrameId(payload.frameId), 'deployPlan', {
               ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
-            },
-            utilityDrawerClosedHash(),
-          ]
-        : drawerUrlForFrame(payloadFrameId(payload.frameId), 'deployPlan', {
-            ...(payload.deployDrawerView ? { deployView: payload.deployDrawerView } : {}),
-          }),
+            }),
     closeFrameChangeDrawer: clearDrawerUrl,
     openUtilityPanel: (payload: Record<string, any>) => {
       const panel = payload.panel
