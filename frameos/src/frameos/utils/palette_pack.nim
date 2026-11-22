@@ -91,6 +91,25 @@ const
   paletteRowsSharedPixels = 64 * 1024 ## a smaller picture is not worth waking the other core for
   palettePublishEvery = 8 ## pixels between two progress stores
 
+when not defined(frameosEmbedded):
+  # The wait for the row above spins. On an ESP32 the two workers are tasks
+  # pinned to the two cores (fos_rows.c), so the row it waits for is always
+  # running and the spin is a few cycles: that path stays a bare spin. On a
+  # host the two are threads the scheduler may put on one core (a busy CI
+  # runner, a Pi doing other work): a bare spin then burns the waiter's whole
+  # slice while the row it waits for cannot run, a slice per row handed over
+  # (test_palette_pack.nim's 2x40000 picture: four minutes on one CPU). After
+  # a short spin the waiter gives the core away.
+  proc schedYield(): cint {.importc: "sched_yield", header: "<sched.h>".}
+
+  const paletteSpinsBeforeYield = 256
+
+  template paletteWaitedOnce(spins: var int) =
+    inc spins
+    if spins >= paletteSpinsBeforeYield:
+      spins = 0
+      discard schedYield()
+
 type PaletteRowsJob = object
   width, height: int
   format: PixelFormat
@@ -176,6 +195,8 @@ proc ditherPaletteRow(job: ptr PaletteRowsJob, y: int) {.hotLoop.} =
     job.loadPaletteRow(next, y + 1)
   # Pixels of the row above known done (0 for the first row: none needed).
   var ready = if y == 0: width else: 0
+  when not defined(frameosEmbedded):
+    var spins = 0
   template push(row: ptr UncheckedArray[uint8], rx: int, er, eg, eb: int, weight: int) =
     row[rx * 3 + 0] = paletteClip(row[rx * 3 + 0].int + (er * weight div 16))
     row[rx * 3 + 1] = paletteClip(row[rx * 3 + 1].int + (eg * weight div 16))
@@ -184,6 +205,9 @@ proc ditherPaletteRow(job: ptr PaletteRowsJob, y: int) {.hotLoop.} =
     let need = min(xx + 3, width)
     while ready < need:
       ready = above[].load(moAcquire) - aboveBase
+      when not defined(frameosEmbedded):
+        if ready < need:
+          paletteWaitedOnce(spins)
     let
       imageR = cur[xx * 3 + 0].int
       imageG = cur[xx * 3 + 1].int
