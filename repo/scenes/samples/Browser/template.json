@@ -1,6 +1,6 @@
 {
   "name": "Browser",
-  "description": "A web browser on the frame: type an address or words to search for, and the page is downloaded, stripped of its scripts and hidden parts, and drawn as JSX with the colors, sizes and layout of its style sheets (Tailwind sites included). Tap a link to open it in place, hold one to open it or show its QR code for a phone. Back and forward, reload, home, text size, and a view of the page as the JSX it became. Made with Hacker News as the benchmark: its front page, comments and search work.",
+  "description": "A web browser on the frame: type an address or words to search for, and the page is downloaded, stripped of its scripts and hidden parts, and drawn as JSX with the colors, sizes and layout of its style sheets, read at the frame's width as a phone would. Big pages (news sites of several megabytes) are read in pieces and kept small enough for an ESP32, where a long page is drawn a part at a time and its pictures are kept only while it shows. Inside a desktop layout its toolbar, buttons and address field take that desktop's look. Tap a link to open it in place, hold one to open it or show its QR code for a phone. Back and forward, reload, home, text size, and a view of the page as the JSX it became. Sites that need JavaScript to show anything (search results on Google, Reddit's login wall) say so as they would in any browser without it.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
