@@ -72,7 +72,6 @@ static StaticSemaphore_t s_ota_lock_storage;
 static SemaphoreHandle_t s_ota_lock = NULL;
 static portMUX_TYPE s_ota_lock_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_ota_request_mux = portMUX_INITIALIZER_UNLOCKED;
-static TaskHandle_t s_ota_task_handle = NULL;
 static volatile bool s_ota_busy = false;
 static volatile bool s_ota_reboot_scheduled = false;
 static volatile bool s_cloud_ota_running = false;
@@ -915,45 +914,58 @@ esp_err_t fos_ota_run_boot_request(void)
     return err;
 }
 
-static void ota_task(void *arg)
+/* The periodic check is a timer, and the 8 KB stack exists only while a
+ * check runs: a task parked in ulTaskNotifyTake for 24 hours held 8 KB of
+ * internal RAM for a check that used 0.7 KB of it (docs/esp32-memory.md,
+ * "Task stacks"). The timer only starts the task; the check itself (network,
+ * flash) never runs on the esp_timer task. */
+static esp_timer_handle_t s_ota_timer = NULL;
+static volatile bool s_ota_check_running = false;
+
+static void ota_periodic_check_task(void *arg)
 {
-    uint32_t interval_hours = (uint32_t)(uintptr_t)arg;
-    if (interval_hours == 0) interval_hours = 24;
-    /* In ticks straight from seconds: pdMS_TO_TICKS(24 h in ms) multiplies
-     * 86,400,000 by the tick rate in 32 bits and wrapped to ~500 s, so every
-     * awake board checked (and stopped its HTTP server) every 8.3 minutes
-     * and a board on a dev build took the release mid-bench (2026-11-19). */
-    TickType_t interval_ticks = (TickType_t)interval_hours * 3600u * (TickType_t)configTICK_RATE_HZ;
-    while (true) {
-        uint32_t notifications = ulTaskNotifyTake(pdTRUE, interval_ticks);
-        bool manual = notifications > 0;
-        if (manual) {
-            vTaskDelay(pdMS_TO_TICKS(250));
-        }
-        ESP_LOGW(TAG, "%s OTA check waking", manual ? "manual" : "periodic");
-        esp_err_t err = fos_ota_check_and_apply();
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "%s OTA check failed: %s",
-                     manual ? "manual" : "periodic", esp_err_to_name(err));
-        }
+    (void)arg;
+    ESP_LOGW(TAG, "periodic OTA check waking");
+    esp_err_t err = fos_ota_check_and_apply();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "periodic OTA check failed: %s", esp_err_to_name(err));
+    }
+    s_ota_check_running = false;
+    vTaskDelete(NULL);
+}
+
+static void ota_timer_cb(void *arg)
+{
+    (void)arg;
+    if (s_ota_check_running) return;
+    s_ota_check_running = true;
+    if (xTaskCreate(ota_periodic_check_task, "fos_ota", 8192, NULL, 4, NULL) != pdPASS) {
+        s_ota_check_running = false;
+        ESP_LOGE(TAG, "OTA check task start failed: internal=%u psram=%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     }
 }
 
 void fos_ota_start_periodic_task(uint32_t interval_hours)
 {
-    if (s_ota_task_handle != NULL) return;
+    if (s_ota_timer != NULL) return;
     if (!ota_supported()) {
         ESP_LOGI(TAG, "no OTA app partition in this flash layout; periodic OTA disabled");
         return;
     }
-    BaseType_t created = xTaskCreate(ota_task, "fos_ota", 8192,
-                                     (void *)(uintptr_t)interval_hours, 4,
-                                     &s_ota_task_handle);
-    if (created != pdPASS) {
-        s_ota_task_handle = NULL;
-        ESP_LOGE(TAG, "OTA task start failed: internal=%u psram=%u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    if (interval_hours == 0) interval_hours = 24;
+    const esp_timer_create_args_t args = {.callback = ota_timer_cb, .name = "fos_ota"};
+    if (esp_timer_create(&args, &s_ota_timer) != ESP_OK) {
+        s_ota_timer = NULL;
+        ESP_LOGE(TAG, "OTA timer create failed");
+        return;
+    }
+    /* The first check one interval after boot, as the parked task did. */
+    if (esp_timer_start_periodic(s_ota_timer, (uint64_t)interval_hours * 3600ull * 1000000ull) != ESP_OK) {
+        esp_timer_delete(s_ota_timer);
+        s_ota_timer = NULL;
+        ESP_LOGE(TAG, "OTA timer start failed");
     }
 }
 

@@ -13,6 +13,7 @@ idf_component_register(
         "fos_gauge.c"
         "fos_touch.c"
         "fos_usb_pads.c"
+        "fos_usj_attach.c"
         "fos_codec.c"
         "fos_rtc.c"
         "fos_voice_binding.c"
