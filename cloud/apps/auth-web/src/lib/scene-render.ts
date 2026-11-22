@@ -7,6 +7,7 @@ import { zlibSync } from "fflate";
 import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
 import { panelPackerSource } from "./panel-pack";
+import { dbsMaxPixels, type NormalizedDither, openDisplayDithererSource, openDisplayModulePath } from "./panel-dither";
 import { addressIsPrivateSource } from "./private-address";
 
 // Headless scene rendering on the server: the same frameos-wasm bundle the
@@ -150,10 +151,14 @@ export type RelayedDeviceInput = {
 
 /** SceneRenderOptions.pack. */
 export type RenderPanelPack = {
+  /** The frame's normalized `dither` (panel-dither.ts); null or absent = Floyd-Steinberg. */
+  dither?: NormalizedDither | null;
   format: number;
   height: number;
   /** The frame's `palette` colours, `["#rrggbb", …]` (panel-pack.ts panelPalette). */
   palette?: unknown;
+  /** The panel's pixel density, for OpenDisplay's DBS pass. */
+  ppi?: number;
   rotate: number;
   width: number;
 };
@@ -495,6 +500,11 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
         pack: options.pack ?? null,
         packerSource: options.pack ? panelPackerSource : "",
+        // OpenDisplay, when the frame dithers with it (panel-dither.ts): the
+        // ditherer's text and where the worker loads the package from.
+        dithererSource: options.pack?.dither ? openDisplayDithererSource : "",
+        ditherModulePath: options.pack?.dither ? openDisplayModulePath() : null,
+        dbsMaxPixels,
         renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
@@ -1180,11 +1190,25 @@ async function main() {
       const packer = new Function("__name", "return (" + workerData.packerSource + ")")((fn) => fn)();
       const pack = workerData.pack;
       const pixels = new Uint8Array(Module.HEAPU8.buffer, ptr, len);
+      // OpenDisplay, when the frame asked for it and the package loads; any
+      // failure leaves the packer's Floyd-Steinberg (the ditherer answers
+      // null, or is never built).
+      let ditherer = null;
+      if (pack.dither && workerData.dithererSource && workerData.ditherModulePath) {
+        try {
+          const od = require(workerData.ditherModulePath);
+          const build = new Function("__name", "return (" + workerData.dithererSource + ")")((fn) => fn);
+          ditherer = build(od, pack.dither, pack.ppi || 127, workerData.dbsMaxPixels);
+        } catch {
+          ditherer = null;
+        }
+      }
       const fosb = packer.panelFosb(
         pixels,
         { width, height },
         { format: pack.format, height: pack.height, rotate: pack.rotate, width: pack.width },
         packer.panelPalette(pack.format, { frame: pack.palette, photo: palette }),
+        ditherer,
       );
       const body = fosb.byteOffset === 0 && fosb.byteLength === fosb.buffer.byteLength ? fosb.buffer : fosb.slice().buffer;
       parentPort.postMessage(

@@ -23,6 +23,21 @@ type Rgb = readonly [number, number, number];
 /** A panel's table by wire index; null is an index the panel has no colour for. */
 export type PanelPalette = readonly (Rgb | null)[];
 
+/** One colour a palette panel can show: its wire index and its ink's name (paletteInks). */
+export type PanelPaletteEntry = { color: Rgb; index: number; ink: string | null };
+
+/**
+ * Another way to dither a palette panel (panel-dither.ts: OpenDisplay): the
+ * picture, already turned to the panel, and the colours it can show; one
+ * index into `entries` per pixel, or null to dither with Floyd-Steinberg.
+ */
+export type PanelDitherer = (
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+  entries: readonly PanelPaletteEntry[],
+) => Uint8Array | null;
+
 /**
  * The packer, whole: every table and function of this file, built by a call
  * of this one function. It is the ONE source, and it is self-contained on
@@ -374,23 +389,44 @@ export function createPanelPacker() {
     return out;
   }
 
+  /**
+   * The ink of each wire index of a stock-shaped palette (null where an index
+   * is not an ink, Spectra 6's 4), as panel_dither.py names them; null for a
+   * table of another shape.
+   */
+  function paletteInks(palette: PanelPalette): (string | null)[] | null {
+    if (palette.length === 7) {
+      return palette[4] === null
+        ? ["black", "white", "yellow", "red", null, "blue", "green"]
+        : ["black", "white", "green", "blue", "red", "yellow", "orange"];
+    }
+    if (palette.length === 4) return ["black", "white", "yellow", "red"];
+    return null;
+  }
+
   function packPalette(
     rgba: Uint8Array,
     width: number,
     height: number,
     palette: PanelPalette,
     bits: 2 | 4,
+    ditherer?: PanelDitherer | null,
   ): Uint8Array {
     // Dither against the colours the panel has, then write each pixel's wire
     // index (Spectra 6 skips 4).
-    const entries = palette.flatMap((color, index) => (color ? [{ color, index }] : []));
-    const indices = ditherIndices(
-      rgbPlane(rgba, width, height),
-      width,
-      height,
-      3,
-      entries.map((entry) => entry.color),
+    const inks = paletteInks(palette);
+    const entries: PanelPaletteEntry[] = palette.flatMap((color, index) =>
+      color ? [{ color, index, ink: inks ? (inks[index] ?? null) : null }] : [],
     );
+    const indices =
+      (ditherer && inks ? ditherer(rgba, width, height, entries) : null) ??
+      ditherIndices(
+        rgbPlane(rgba, width, height),
+        width,
+        height,
+        3,
+        entries.map((entry) => entry.color),
+      );
     const perByte = bits === 2 ? 4 : 2;
     const row = Math.ceil(width / perByte);
     const out = new Uint8Array(row * height);
@@ -428,6 +464,7 @@ export function createPanelPacker() {
     height: number,
     format: PanelPixelFormatCode,
     palette?: PanelPalette | null,
+    ditherer?: PanelDitherer | null,
   ): Uint8Array {
     if (rgba.length !== width * height * 4) {
       throw new Error(`packForPanel: ${rgba.length} bytes is not ${width}x${height} RGBA`);
@@ -442,11 +479,11 @@ export function createPanelPacker() {
       case PanelPixelFormat.twoBitGray:
         return packTwoBitGray(rgba, width, height);
       case PanelPixelFormat.twoBitBwyr:
-        return packPalette(rgba, width, height, palette ?? bwyrPalette, 2);
+        return packPalette(rgba, width, height, palette ?? bwyrPalette, 2, ditherer);
       case PanelPixelFormat.fourBitSevenColor:
-        return packPalette(rgba, width, height, palette ?? sevenColorPalette, 4);
+        return packPalette(rgba, width, height, palette ?? sevenColorPalette, 4, ditherer);
       case PanelPixelFormat.fourBitSpectra6:
-        return packPalette(rgba, width, height, palette ?? spectra6Palette, 4);
+        return packPalette(rgba, width, height, palette ?? spectra6Palette, 4, ditherer);
       case PanelPixelFormat.fourBitGray:
         return packFourBitGray(rgba, width, height);
       case PanelPixelFormat.rgb565:
@@ -467,13 +504,15 @@ export function createPanelPacker() {
   /**
    * The scene's RGBA, rendered on the canvas `sceneCanvasSize` gave, as the
    * FOSB a panel of `width` x `height` in `format` hung at `rotate` takes,
-   * dithered to `palette` (panelPalette) where the format has one.
+   * dithered to `palette` (panelPalette) where the format has one, by
+   * `ditherer` when given (panel-dither.ts), else Floyd-Steinberg.
    */
   function panelFosb(
     rgba: Uint8Array,
     canvas: { height: number; width: number },
     panel: { format: PanelPixelFormatCode; height: number; rotate: number; width: number },
     palette?: PanelPalette | null,
+    ditherer?: PanelDitherer | null,
   ): Uint8Array {
     const turned = rotateRgbaClockwise(rgba, canvas.width, canvas.height, panel.rotate);
     if (turned.width !== panel.width || turned.height !== panel.height) {
@@ -485,7 +524,7 @@ export function createPanelPacker() {
       panel.width,
       panel.height,
       panel.format,
-      packForPanel(turned.rgba, turned.width, turned.height, panel.format, palette),
+      packForPanel(turned.rgba, turned.width, turned.height, panel.format, palette, ditherer),
     );
   }
 
@@ -497,6 +536,7 @@ export function createPanelPacker() {
     fosbPayload,
     isPanelPixelFormat,
     packForPanel,
+    paletteInks,
     panelBufferBytes,
     panelFosb,
     panelPalette,
@@ -528,6 +568,7 @@ export const panelBufferBytes = packer.panelBufferBytes;
 export const sceneCanvasSize = packer.sceneCanvasSize;
 export const rotateRgbaClockwise = packer.rotateRgbaClockwise;
 export const packForPanel = packer.packForPanel;
+export const paletteInks = packer.paletteInks;
 
 function asBuffer(bytes: Uint8Array): Buffer {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -548,6 +589,7 @@ export function panelFosb(
   canvas: { height: number; width: number },
   panel: { format: PanelPixelFormatCode; height: number; rotate: number; width: number },
   palette?: PanelPalette | null,
+  ditherer?: PanelDitherer | null,
 ): Buffer {
-  return asBuffer(packer.panelFosb(rgba, canvas, panel, palette));
+  return asBuffer(packer.panelFosb(rgba, canvas, panel, palette, ditherer));
 }

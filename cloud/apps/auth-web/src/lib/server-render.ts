@@ -36,6 +36,7 @@ import {
   sceneCanvasSize,
   type PanelPixelFormatCode,
 } from "./panel-pack";
+import { type NormalizedDither, normalizeDither, openDisplayDitherer, panelPpi } from "./panel-dither";
 import {
   isRenderErrorLine,
   maxRenderDimension,
@@ -515,7 +516,7 @@ async function serviceSettings(db: Database, frame: FrameRow, linkedClient: Link
  * plane set, else the one the device reports running: its board's preset),
  * its palette's colour list and its colours block.
  */
-export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings">): RenderFrameConfig {
+export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings"> & { dither?: unknown }): RenderFrameConfig {
   const settings = readFrameSettings(frame.settings);
   const hardware = isRecord(frame.hardware) ? frame.hardware : {};
   const eventMap = Array.isArray(settings.event_map)
@@ -524,15 +525,32 @@ export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings">
       ? hardware.eventMap
       : undefined;
   const palette = isRecord(settings.palette) && Array.isArray(settings.palette.colors) ? settings.palette.colors : undefined;
+  let colors = isRecord(settings.colors) ? settings.colors : undefined;
+  if (normalizeDither(frame.dither) && (colors?.autoFit ?? "default") === "default") {
+    // OpenDisplay fits the picture to the panel's own white itself; the
+    // render's automatic fit on top would tone-map it twice. An owner's
+    // explicit "on" still wins (panel_dither.py does the same).
+    colors = { ...colors, autoFit: "off" };
+  }
   // The panel the board reported ("EPD_10in3"): its size is what the
   // automatic render scale goes by, as on the board.
   const panel = typeof hardware.device === "string" && hardware.device ? hardware.device : undefined;
   return {
-    ...(isRecord(settings.colors) ? { colors: settings.colors } : {}),
+    ...(colors ? { colors } : {}),
     ...(eventMap ? { eventMap } : {}),
     ...(palette ? { palette } : {}),
     ...(panel ? { panel } : {}),
   };
+}
+
+/** The packer's dithering for a frame: its normalized `dither` and its panel's pixel density (panel-dither.ts). */
+export function frameDither(
+  frame: Pick<FrameRow, "hardware"> & { dither?: unknown },
+  panel: { height: number; width: number },
+): { dither: NormalizedDither | null; ppi: number } {
+  const hardware = isRecord(frame.hardware) ? frame.hardware : {};
+  const panelName = typeof hardware.panel === "string" ? hardware.panel : null;
+  return { dither: normalizeDither(frame.dither), ppi: panelPpi(panelName, panel.width, panel.height) };
 }
 
 /** The scene's state as the plane keeps it: a scene's storable fields, a built-in scene's state if it is small. */
@@ -668,7 +686,7 @@ async function draw(
       ...(typeof input.nowMs === "number" ? { nowMs: input.nowMs } : {}),
       owner: frame.accountId,
       // Packed in the render's worker, off the event loop (scene-render.ts).
-      pack: { ...input.panel, palette: renderFrameConfig(frame).palette },
+      pack: { ...input.panel, palette: renderFrameConfig(frame).palette, ...frameDither(frame, input.panel) },
       rawRgba: true,
       renderScale: frameRenderScale(frame),
       sceneId: active,
@@ -705,11 +723,13 @@ async function draw(
     // The worker handed the pixels over (it could not build its packer, or a
     // renderer that is not the worker drew them): packed here, as before.
     noteMainThreadPack(result.packError);
+    const { dither, ppi } = frameDither(frame, input.panel);
     body = panelFosb(
       result.rgba!,
       canvas,
       input.panel,
       panelPalette(input.panel.format, { frame: renderFrameConfig(frame).palette, photo: result.palette }),
+      openDisplayDitherer(dither, ppi),
     );
   }
   if (body.length !== fosbHeaderBytes + panelBufferBytes(input.panel.width, input.panel.height, input.panel.format)) {

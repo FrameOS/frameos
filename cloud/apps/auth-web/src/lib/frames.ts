@@ -1027,6 +1027,10 @@ export function frameSummary(
     // the Settings panel draws them in a known position. Written by
     // POST /api/frames/{id}/voice/permissions; never pushed to the device.
     voice_permissions: readVoicePermissions(frame.voicePermissions),
+    // How the cloud dithers the panel's picture (docs/dithering.md): null =
+    // Floyd-Steinberg. Written by POST /api/frames/{id}/dither; never pushed
+    // to the device.
+    dither: frame.dither ?? null,
     ...(linkedClient
       ? {
           service_settings_enabled: linkedClientScopes(linkedClient).includes(

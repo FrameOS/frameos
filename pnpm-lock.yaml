@@ -294,6 +294,9 @@ importers:
       '@frameos-cloud/scene-convert':
         specifier: workspace:*
         version: link:../../packages/scene-convert
+      '@opendisplay/epaper-dithering':
+        specifier: 7.0.1
+        version: 7.0.1
       '@simplewebauthn/browser':
         specifier: ^13.3.0
         version: 13.3.0
@@ -2493,6 +2496,10 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@opendisplay/epaper-dithering@7.0.1':
+    resolution: {integrity: sha512-9+L9YqqYSV6/xiocD/xVkdhntWpfwqr3NBCQU5mO/Th47GuLhoch+78WIYRSkBNfzsaALcexMDcok0y+hkHmXw==}
+    engines: {node: '>=18.0.0'}
 
   '@parcel/watcher-android-arm64@2.5.6':
     resolution: {integrity: sha512-YQxSS34tPF/6ZG7r/Ih9xy+kP/WwediEUsqmtf0cuCV5TPPKw/PQHRhueUo6JdeFJaqV3pyjm0GdYjZotbRt/A==}
@@ -8247,6 +8254,8 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
+
+  '@opendisplay/epaper-dithering@7.0.1': {}
 
   '@parcel/watcher-android-arm64@2.5.6':
     optional: true

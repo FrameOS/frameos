@@ -42,6 +42,7 @@
     "@frameos-cloud/ledger": "workspace:*",
     "@frameos-cloud/mcp": "workspace:*",
     "@frameos-cloud/scene-convert": "workspace:*",
+    "@opendisplay/epaper-dithering": "7.0.1",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "aws4fetch": "^1.0.20",

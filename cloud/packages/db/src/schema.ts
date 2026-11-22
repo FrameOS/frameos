@@ -1054,6 +1054,12 @@ export const frames = pgTable(
     // sees (auth-web's voice-permissions.ts reads it); NULL = the defaults
     // (settings and installed scenes allowed, new scenes not).
     voicePermissions: jsonb("voice_permissions"),
+    // How the cloud dithers the picture it packs for this frame's palette
+    // panel (server rendering, thin clients; docs/dithering.md): NULL =
+    // Floyd-Steinberg, or {"method": "opendisplay", ...} (auth-web's
+    // panel-dither.ts). Plane-side, never sent to the device. Written by
+    // POST /api/frames/{id}/dither.
+    dither: jsonb("dither"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),
