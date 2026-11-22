@@ -2818,7 +2818,9 @@ typedef struct {
 /* 27 routes per server (13 GET + 14 POST), x2 servers (http + https), or
  * 27 + 7 captive-portal probes in portal mode. 64 leaves headroom. */
 #define FOS_HTTP_MAX_LOGGED_ROUTES 64
-static logged_route_t s_logged_routes[FOS_HTTP_MAX_LOGGED_ROUTES];
+/* 2.8 KB, read once a request: in PSRAM where the board has some, allocated
+ * at the first route, so internal RAM keeps it for DMA, stacks and Wi-Fi. */
+static logged_route_t *s_logged_routes = NULL;
 static size_t s_logged_route_count = 0;
 
 static bool path_has_suffix(const char *path, const char *suffix)
@@ -2928,6 +2930,10 @@ static esp_err_t register_logged_route(httpd_handle_t server, const httpd_uri_t 
     if (s_logged_route_count >= FOS_HTTP_MAX_LOGGED_ROUTES) {
         ESP_LOGE(TAG, "logged route table full, cannot register %s", route->uri);
         return ESP_ERR_NO_MEM;
+    }
+    if (s_logged_routes == NULL) {
+        s_logged_routes = fos_cold_calloc(FOS_HTTP_MAX_LOGGED_ROUTES, sizeof(logged_route_t));
+        if (s_logged_routes == NULL) return ESP_ERR_NO_MEM;
     }
     logged_route_t *slot = &s_logged_routes[s_logged_route_count];
     slot->handler = route->handler;
