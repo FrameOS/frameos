@@ -654,6 +654,44 @@ large at the lows: Wi-Fi TX buffers while the board sends a big answer or
 its picture (up to ~26 KB), and the HTTP server's stacks (next section).
 +592 bytes of flash.
 
+## Task stacks (2026-11-23)
+
+Every FrameOS task's stack is internal RAM (a task that touches flash must
+not run on a PSRAM stack), so each was measured before any was resized: the
+probe's task table after boot, idle, a full backend push, the authenticated
+HTTP API on both ports (reads, the 455 KB frame payload and 691 KB picture, a
+one-scene put, an asset upload and delete, an event; after each request, to
+see which one raised a high-water mark), a TLS fetch from a scene, the scene
+switcher and a desktop with windows, on the SenseCAP and the E1002 (the
+render task also by the `renderStackFreeBytes` every metrics line carries,
+across the bench's full runs since 2026-11-20). The rule for a new size:
+the peak plus 50 % or plus 3 KB, whichever is more.
+
+| Task | Stack | Worst seen (where) | Rule | Now |
+| --- | ---: | --- | ---: | ---: |
+| `fos_client` (render) | 40 KB | 29.0 KB (E1002, bench full run, metrics) | 43.5 KB | 40 KB, unchanged |
+| `httpd` (plain) | 8 KB | 7.5 KB (a one-scene put, both boards) | 11.3 KB | **11 KB** |
+| `httpd` (TLS) | 12 KB | 7.3 KB (the same put; the handshake is 4.6 KB) | 11 KB | **11 KB** |
+| `websocket_task` (cloud boards) | 10 KB | 3.4 KB (connect; no cloud push measured) | 6.4 KB | unchanged |
+| `console` | 8 KB | 5.5 KB | 8.5 KB | unchanged |
+| `fos_link` | 8 KB | 4.3 KB | 7.3 KB | unchanged |
+| `fos_cloud` (cloud boards only since the section above) | 8 KB | 2.8 KB (enrollment not measured) | 5.8 KB | unchanged |
+| `fos_store` | 6 KB | 3.4 KB | 6.4 KB | unchanged |
+| `fos_refresh` | 5 KB | 2.0 KB | 5 KB | unchanged |
+| `state_wr` | 4 KB | 1.9 KB | 4.9 KB | unchanged |
+| `fos_buttons`, `log_ring`, `fos_touch`, `fos_rows`, `fos_mark` | 3 KB each | 0.9-1.9 KB | 3.9-4.9 KB | unchanged |
+| `fos_ota` | 8 KB | 0.7 KB | | only while a check runs (section above) |
+
+So nothing here was over-provisioned once the API was in the measurement:
+the stack that looked idle (the HTTP server's, 1.1 KB at boot) had 650 bytes
+left after a scene put, a crash one level of nesting away. Both servers run
+the same handlers and are now 11 KB: +3 KB for the plain one, -1 KB for the
+TLS one. The render task stays at 40 KB. A stack with 3 KB or less cannot
+get smaller under the rule. What would make the servers' stacks smaller is
+the put itself: it parses the scene and writes its slot on the server's
+task (`fos_scenes_put`), and its frames, not the handler's, are the 2.7 KB
+above the status page's 4.6 KB.
+
 ## What a loaded scene keeps (2026-11-21)
 
 A loaded scene used to keep every app's source twice:
