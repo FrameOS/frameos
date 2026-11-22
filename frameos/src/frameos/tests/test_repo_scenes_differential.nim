@@ -35,6 +35,8 @@ let networkApps = toHashSet([
   "sceneStore",
   # the Browser sample's own JS app: Hacker News, its home page
   "browser",
+  # the Hacker News sample's own JS app: the HN and Algolia APIs
+  "hackerNews",
   # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
   # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
   "weatherOpenMeteoJS", "birdJournal", "flightRadar"
