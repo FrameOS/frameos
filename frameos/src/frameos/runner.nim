@@ -40,6 +40,7 @@ import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
 import frameos/utils/memory
 import frameos/watchdog
+import frameos/scene_background
 
 import drivers/drivers as drivers
 
@@ -406,7 +407,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     var outImage: Image
     if image.width != requiredWidth or image.height != requiredHeight:
       outImage = newImage(requiredWidth, requiredHeight)
-      outImage.fill(scene.backgroundColor)
+      outImage.fill(sceneBackgroundColor(scene))
       scaleAndDrawImage(outImage, image, self.frameConfig.scalingMode)
     else:
       outImage = image

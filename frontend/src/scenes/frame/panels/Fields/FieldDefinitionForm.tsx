@@ -14,6 +14,7 @@ import {
   refreshIntervalFieldIndex,
 } from '../../../../utils/refreshInterval'
 import { RENDER_SCALE_ROLE, renderScaleFieldIndex } from '../../../../utils/renderScale'
+import { BACKGROUND_COLOR_ROLE, backgroundColorFieldIndex } from '../../../../utils/sceneBackground'
 import { withStateFieldRole } from '../../../../utils/fieldTypes'
 
 /**
@@ -91,6 +92,48 @@ function RenderScaleRoleField<T extends AppConfigField>({
           aria-label="Use as scale"
           value={active}
           onChange={(enabled) => setFields(withStateFieldRole(fields, index, RENDER_SCALE_ROLE, enabled))}
+        />
+      )}
+    </Field>
+  )
+}
+
+/**
+ * "Use as background": a color field's value is the scene's background, over
+ * its Background color setting (utils/sceneBackground.ts), so a control panel
+ * can change the bars around a photo. Only on color fields; at most one state
+ * field carries the role.
+ */
+function BackgroundColorRoleField<T extends AppConfigField>({
+  fields,
+  index,
+  setFields,
+}: {
+  fields: T[]
+  index: number
+  setFields: (fields: T[]) => void
+}): JSX.Element | null {
+  if (fields[index]?.type !== 'color') {
+    return null
+  }
+  const active = backgroundColorFieldIndex(fields as StateField[]) === index
+  return (
+    <Field
+      name="role"
+      label="Use as background"
+      tooltip={
+        <>
+          The value of this field is the scene's background color: what shows wherever nothing is drawn, like the bars
+          around a photo shown whole on a screen of another shape. It wins over the background color in the scene's
+          settings. Costs nothing when the picture covers the screen. Only one field per scene can have this role.
+        </>
+      }
+    >
+      {() => (
+        <Switch
+          aria-label="Use as background"
+          value={active}
+          onChange={(enabled) => setFields(withStateFieldRole(fields, index, BACKGROUND_COLOR_ROLE, enabled))}
         />
       )}
     </Field>
@@ -288,6 +331,7 @@ export function FieldDefinitionForm<T extends AppConfigField>({
           </Field>
           <RefreshIntervalRoleField fields={fields} index={index} setFields={setFields} />
           <RenderScaleRoleField fields={fields} index={index} setFields={setFields} />
+          <BackgroundColorRoleField fields={fields} index={index} setFields={setFields} />
         </>
       ) : null}
       <div className="flex w-full items-center justify-between gap-2">

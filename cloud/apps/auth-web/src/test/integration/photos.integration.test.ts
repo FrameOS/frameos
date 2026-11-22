@@ -1178,11 +1178,11 @@ describe("photo library: album scenes", () => {
     const album = forKitchen.scene.nodes.find((node) => node.data.keyword === "photoAlbum");
     expect(album?.data.config).toEqual({ album: forKitchen.share.url, counterStateKey: "photoIndex" });
     // Every shape by default; `shapes` picks the scene's toggles.
-    expect(forKitchen.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "true", "true", "true", "0"]);
+    expect(forKitchen.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "#000000", "true", "true", "true", "0"]);
     const portraits = (await (
       await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026", shapes: ["portrait"] }))
     ).json()) as SceneAnswer;
-    expect(portraits.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "false", "true", "false", "0"]);
+    expect(portraits.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "#000000", "false", "true", "false", "0"]);
     // The same frame again: the same link. POST /shares with the frame too.
     const again = (await (
       await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026" }))
@@ -1268,7 +1268,7 @@ describe("photo library: album scenes", () => {
     expect(album?.data.config).toEqual({ album: body.share.url, counterStateKey: "photoIndex" });
     expect(body.scene.name).toBe("Summer 2026");
     expect(body.scene.settings).toEqual({ backgroundColor: "#000000", execution: "interpreted", refreshInterval: 600 });
-    expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "true", "true", "true", "0"]);
+    expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "#000000", "true", "true", "true", "0"]);
     expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/image/photoAlbum");
     expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.test.ts", "app.ts", "config.json"]);
 
@@ -1282,7 +1282,7 @@ describe("photo library: album scenes", () => {
     expect((await share("Summer 2026")).token).toBe(body.share.token);
     expect(again.scene.name).toBe("Beach");
     expect(again.scene.settings.refreshInterval).toBe(3600);
-    expect(again.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "true", "true", "true", "0"]);
+    expect(again.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "#000000", "true", "true", "true", "0"]);
     expect(again.scene.id).not.toBe(body.scene.id);
     const audited = await db
       .select({ eventType: auditEvents.eventType })

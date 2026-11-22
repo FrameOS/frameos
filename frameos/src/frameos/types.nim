@@ -418,6 +418,9 @@ type
     renderScaleKey*: string
     renderScaleSetting*: float
     backgroundColor*: Color
+    ## The state key of a field with role backgroundColor, "" = none: its
+    ## color is the background over `backgroundColor` (scene_background.nim).
+    backgroundColorKey*: string
     execNode*: proc(nodeId: NodeId, context: ExecutionContext)
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
     lastPublicStateUpdate*: float
@@ -583,6 +586,7 @@ type
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
     renderScaleSetting*: float ## see FrameScene.renderScaleSetting
+    backgroundColorKey*: string ## see FrameScene.backgroundColorKey
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj

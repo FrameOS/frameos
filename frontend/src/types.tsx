@@ -1136,7 +1136,7 @@ export interface FontMetadata {
 }
 
 /** What the runtime uses a state field for (see utils/refreshInterval.ts and utils/renderScale.ts). */
-export type StateFieldRole = 'refreshInterval' | 'renderScale'
+export type StateFieldRole = 'refreshInterval' | 'renderScale' | 'backgroundColor'
 
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'

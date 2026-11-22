@@ -67,6 +67,15 @@
         "value": "cover"
       },
       {
+        "access": "public",
+        "label": "Background",
+        "name": "background",
+        "persist": "disk",
+        "role": "backgroundColor",
+        "type": "color",
+        "value": "#000000"
+      },
+      {
         "name": "showFilename",
         "label": "Show filename",
         "type": "boolean",
