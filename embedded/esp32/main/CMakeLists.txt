@@ -12,6 +12,7 @@ idf_component_register(
         "fos_climate.c"
         "fos_gauge.c"
         "fos_touch.c"
+        "fos_usb_pads.c"
         "fos_codec.c"
         "fos_rtc.c"
         "fos_voice_binding.c"

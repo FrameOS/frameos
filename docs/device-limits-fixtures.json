@@ -165,6 +165,16 @@
       "canvasBytesPerPixel": 1
     },
     {
+      "name": "the Sunton 800x480 RGB565 LCD: three 768 KB frame buffers of its own",
+      "width": 800,
+      "height": 480,
+      "psramBytes": 8388608,
+      "pixelFormat": 9,
+      "memoryBytes": 5036032,
+      "previewOverheadBytes": 768000,
+      "canvasBytesPerPixel": 2
+    },
+    {
       "name": "the SenseCAP Indicator's LCD unturned: its frame buffers are charged as before",
       "width": 480,
       "height": 480,

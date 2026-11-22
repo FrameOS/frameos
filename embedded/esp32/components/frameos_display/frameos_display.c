@@ -194,6 +194,17 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
      * expander's I2C bus exists before the touch controller next to it
      * asks to join (fos_display_shared_i2c_bus, fos_touch_start). */
     if (entry->bus == FOS_PANEL_BUS_RGB) {
+        /* The driver's board table is the glass's truth: a panel entry
+         * whose size disagrees with the selected board would size the
+         * render target and the backend's picture wrong. */
+        int drv_w = 0, drv_h = 0;
+        fos_lcd_st7701s_size(&drv_w, &drv_h);
+        if (drv_w != entry->width || drv_h != entry->height) {
+            ESP_LOGE(TAG, "panel %s is %dx%d but the board's glass is %dx%d",
+                     entry->name, entry->width, entry->height, drv_w, drv_h);
+            s_panel = NULL;
+            return ESP_ERR_INVALID_ARG;
+        }
         s_module_ready = true;
         if (entry->driver_init() != 0) {
             ESP_LOGE(TAG, "panel %s failed to start", entry->name);

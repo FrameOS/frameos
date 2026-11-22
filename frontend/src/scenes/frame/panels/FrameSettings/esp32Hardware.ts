@@ -184,6 +184,29 @@ export const ESP32_SEEED_SENSECAP_INDICATOR_PIN_LAYOUT: Esp32PinLayout = {
   mosi: -1,
   pwr: -1,
 }
+// The Sunton ESP32-8048S070's LCD wiring is the firmware's own board table
+// (components/frameos_display/lcd_st7701s_rgb.c): no EPD pins, like the
+// Indicator's.
+export const ESP32_SUNTON_ESP32_8048S070_PIN_LAYOUT: Esp32PinLayout = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
+// Its microSD slot on the chip's own SPI bus (CS10/SCK12/MISO13/MOSI11), no
+// power switch and no card-detect contact.
+export const ESP32_SUNTON_ESP32_8048S070_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 10,
+  sck: 12,
+  miso: 13,
+  mosi: 11,
+  pwr: -1,
+  det: -1,
+}
 export const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
   dc: 4,
@@ -474,6 +497,21 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '8MB',
     psramMB: 8,
     pins: ESP32_SEEED_SENSECAP_INDICATOR_PIN_LAYOUT,
+  },
+  sunton_esp32_8048s070: {
+    label: 'Sunton ESP32-8048S070 (7.0" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.ek9716_800x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_SUNTON_ESP32_8048S070_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'sunton_esp32_8048s070',
+      pins: ESP32_SUNTON_ESP32_8048S070_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

@@ -84,6 +84,11 @@ const boardChoices = [
     value: 'hw:seeed_sensecap_indicator_d1',
     platform: genericPlatform,
   },
+  {
+    label: 'Sunton ESP32-8048S070 (7" LCD ESP32-S3)',
+    value: 'hw:sunton_esp32_8048s070',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',

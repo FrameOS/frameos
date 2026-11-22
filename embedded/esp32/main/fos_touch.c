@@ -118,6 +118,7 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_i2c.h"
+#include "fos_usb_pads.h"
 #include "fos_events_gen.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -591,6 +592,16 @@ esp_err_t fos_touch_start(void)
     s_bus = share ? (i2c_master_bus_handle_t)shared : lent;
     s_bus_owned = false;
     if (!s_bus) {
+        /* GPIO19/20 are the ESP32-S3's USB D-/D+ pads, and the ROM leaves
+         * the USB-Serial/JTAG PHY attached to them. The Sunton boards wire
+         * their GT911 to exactly those two (a CH340 on UART0 for USB):
+         * with the PHY still on the pads the controller answered the first
+         * read and then NACKed every one after (the same failure fos_i2c.c
+         * and fos_mic.c cure). Detach it once, before the bus comes up — and
+         * claim the pads, so that the console does not take them back under
+         * the controller (it did, and every read timed out from then on:
+         * 2026-11-22). */
+        fos_usb_pads_claim(pins->sda, pins->scl);
         i2c_master_bus_config_t bus_config = {
             .i2c_port = -1,
             .sda_io_num = (gpio_num_t)pins->sda,

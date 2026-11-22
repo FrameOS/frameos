@@ -114,6 +114,15 @@ def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():
     assert device is not None and device.pixel_format == 9
     assert device.limits(480, 480)["memoryBytes"] == 5_957_632
 
+    # The Sunton 7" 800x480 LCD: the same three-buffer charge, and each frame
+    # buffer is 768 KB, so the heap is smaller than the Indicator's.
+    sunton = Frame(id=7, mode="embedded", device="lcd.ek9716_800x480",
+                   embedded={"hardwarePreset": "sunton_esp32_8048s070"})
+    device = frame_render_device(sunton)
+    assert device is not None and device.pixel_format == 9
+    assert device.label == "ESP32 with 8 MB PSRAM"
+    assert device.limits(800, 480)["memoryBytes"] == 5_036_032
+
 
 def test_frames_that_do_not_render_in_a_few_megabytes_render_unlimited():
     # A Pi, a PSRAM-less thin client (the backend renders it), an S3 told to

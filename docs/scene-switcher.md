@@ -13,7 +13,7 @@ one. A gear in its header opens the frame's own settings page.
 | The event that opens it, `sceneSwitcher` | `docs/events-contract.json` (a `scene-command`), resolved by `frameos/src/frameos/event_loop.nim` |
 | The scene, `system/sceneSwitcher` (the contract's `scenes.switcher`) | `frameos/src/system/sceneSwitcher/scene.nim`, one module for every host |
 | What it lists, and the pictures | the host's: `frameos/scene_switcher_linux.nim`, `embedded/embedded_runtime.nim`, `wasm/wasm_main.nim` |
-| The default bindings | `frameos/device_event_map.nim` (every HyperPixel), the SenseCAP Indicator's and the reTerminal E1003's presets (`fos_board.c` `TOUCH_EDGE_SWIPES` and `INDICATOR_EVENT_MAP`, `EMBEDDED_HARDWARE_PRESETS`, the SPA's `NewFrame.tsx`) |
+| The default bindings | `frameos/device_event_map.nim` (every HyperPixel), the SenseCAP Indicator's, the Sunton S070's and the reTerminal E1003's presets (`fos_board.c` `TOUCH_EDGE_SWIPES` and `INDICATOR_EVENT_MAP`/`ONE_BUTTON_TOGGLE`, `EMBEDDED_HARDWARE_PRESETS`, the SPA's `NewFrame.tsx`) |
 | "Button actions" | `frontend/src/utils/frameEventMap.ts` (the action "Scene switcher", and the edges of a touch screen as rows) |
 
 ## Opening and closing it

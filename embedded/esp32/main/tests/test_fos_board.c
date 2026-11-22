@@ -170,6 +170,14 @@ static void test_event_maps(void)
           "indicator bottom edge is the switcher");
     CHECK(strstr(indicator, "\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]") != NULL,
           "indicator top edge is the settings");
+    /* The Sunton's one key is the BOOT key: the Indicator's map, relabelled. */
+    const char *sunton = event_map("sunton_esp32_8048s070");
+    CHECK(strstr(sunton, "\"label\":\"BOOT\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
+          "sunton press toggles the screen");
+    CHECK(strstr(sunton, "\"label\":\"BOOT\",\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "sunton double press is the switcher");
+    CHECK(strstr(sunton, "longPress") == NULL, "sunton held is nothing");
+    CHECK(strstr(sunton, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "sunton left edge is back");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks, and
      * the edges swipe as on every touch preset. */
     const char *sticky = event_map("seeed_reterminal_sticky");
@@ -343,6 +351,9 @@ static void test_sd_pins(void)
     /* The Sticky's, on its panel's SCK13/MOSI14 with its own switch and detect. */
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_sticky"), "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11") == 0,
           "sticky TF");
+    /* The Sunton S070's socket is a bus of its own: no switch, no detect. */
+    CHECK(strcmp(fos_board_sd_pins("sunton_esp32_8048s070"), "cs=10,sck=12,miso=13,mosi=11") == 0,
+          "sunton TF");
     /* The X4 shares its bus too but its CS is unpublished: none, as before. */
     CHECK(strcmp(fos_board_sd_pins("xteink_x4"), "") == 0, "x4: none");
     CHECK(strcmp(fos_board_sd_pins("trmnl_og"), "") == 0, "trmnl: none");
@@ -362,6 +373,10 @@ static void test_touch_pins(void)
      * would be a very bad surprise. */
     CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1004"), "") == 0, "e1004: no touch");
     CHECK(strcmp(fos_board_touch_pins("waveshare_esp32_s3_photopainter"), "") == 0, "photopainter: no touch");
+    /* The Sunton's GT911 sits on the chip's I2C 19/20 (the USB pads, which
+     * fos_touch.c frees from the PHY first), reset 38, no interrupt line. */
+    CHECK(strcmp(fos_board_touch_pins("sunton_esp32_8048s070"), "sda=19,scl=20,int=-1,rst=38,en=-1") == 0,
+          "sunton touch");
     CHECK(strcmp(fos_board_touch_pins(""), "") == 0, "no preset");
     /* The Indicator's and the Sticky's glass read both axes the other way; the others match. */
     CHECK(fos_board_touch_mirror("seeed_sensecap_indicator_d1") ==

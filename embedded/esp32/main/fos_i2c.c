@@ -11,11 +11,9 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "soc/soc_caps.h"
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "hal/usb_serial_jtag_ll.h"
-#endif
 
 #include "fos_config.h"
+#include "fos_usb_pads.h"
 
 static const char *TAG = "fos_i2c";
 
@@ -54,24 +52,17 @@ static int8_t s_device_bus[FOS_I2C_CHIP_COUNT]; /* which bus answered, -1 = abse
 /* A bus another driver put a device of its own on (fos_i2c_lend_bus): the
  * reTerminal E1003's touch controller shares the clock's bus. */
 static bool s_bus_lent[FOS_I2C_BUSES_MAX];
-static bool s_usb_pads_taken = false;
 
 /* GPIO19/20 are the ESP32-S3's USB D-/D+ pads, and the ROM leaves the
  * USB-Serial/JTAG PHY attached to them. The Seeed reTerminal E-series wire
  * exactly those two to their I2C bus (CH340 for USB instead): with the PHY
  * still on the pads the bus answered the first read and then NACKed every
  * write (0x103 on the E1002, 2026-10-25) until a re-init happened to win the
- * pads back. Detach the PHY once, before the bus comes up. */
+ * pads back. Detach the PHY once, before the bus comes up — and say so, so
+ * that the console does not take the pads back under it. */
 static void release_usb_pads_if_needed(const fos_i2c_bus_t *bus)
 {
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (bus->sda == 19 || bus->sda == 20 || bus->scl == 19 || bus->scl == 20) {
-        usb_serial_jtag_ll_phy_enable_pad(false);
-        s_usb_pads_taken = true;
-    }
-#else
-    (void)bus;
-#endif
+    fos_usb_pads_claim(bus->sda, bus->scl);
 }
 
 static void teardown_locked(void)
@@ -263,11 +254,6 @@ i2c_master_bus_handle_t fos_i2c_lend_bus(int sda, int scl)
     }
     xSemaphoreGive(s_lock);
     return bus;
-}
-
-bool fos_i2c_owns_usb_pads(void)
-{
-    return s_usb_pads_taken;
 }
 
 const char *fos_i2c_chip_name(fos_i2c_chip_t chip)

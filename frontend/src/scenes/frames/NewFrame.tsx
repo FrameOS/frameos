@@ -427,6 +427,26 @@ const XTEINK_X4_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>
   mosi: 10,
   pwr: -1,
 }
+// The Sunton ESP32-8048S070's LCD is wired by the firmware's board table too.
+const SUNTON_ESP32_8048S070_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
+const SUNTON_ESP32_8048S070_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: 'sunton_esp32_8048s070',
+  mountPath: '/srv/assets',
+  pins: { cs: 10, sck: 12, miso: 13, mosi: 11, pwr: -1, det: -1 },
+  maxFrequencyKHz: 20000,
+}
 // The SenseCAP Indicator's LCD is wired by the firmware's board table: no EPD pins.
 const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: -1,
@@ -444,6 +464,12 @@ const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['d
 const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BUTTON', action: 'press' }, emit: 'toggleScreen', as: {} },
   { event: 'button', match: { label: 'BUTTON', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  ...TOUCH_EDGE_SWIPES,
+]
+// The Sunton's one key is the BOOT key (GPIO0): the same as the Indicator's.
+const SUNTON_ESP32_8048S070_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
+  { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
@@ -638,6 +664,17 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     pins: SEEED_SENSECAP_INDICATOR_PINS,
     gpioButtons: [{ pin: 38, label: 'BUTTON' }],
     eventMap: SEEED_SENSECAP_INDICATOR_EVENT_MAP,
+  },
+  sunton_esp32_8048s070: {
+    label: 'Sunton ESP32-8048S070 (7.0" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.ek9716_800x480',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: SUNTON_ESP32_8048S070_PINS,
+    gpioButtons: [{ pin: 0, label: 'BOOT' }],
+    eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
+    sdCardAssets: SUNTON_ESP32_8048S070_SD_CARD_ASSETS,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

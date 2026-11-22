@@ -14,9 +14,7 @@
 #include "fos_codec.h"
 #include "fos_config.h"
 #include "fos_i2s.h"
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "hal/usb_serial_jtag_ll.h"
-#endif
+#include "fos_usb_pads.h"
 
 /* The S3's I2S0 decodes PDM into PCM in hardware (SOC_I2S_SUPPORTS_PDM2PCM).
  * ESP-IDF's I2S driver does the same job in ~14 KB of flash (i2s_common,
@@ -214,11 +212,7 @@ static void setup_i2s(int clk_pin, int data_pin)
      * its USB being a CH343 on UART0 — and the ROM leaves the USB-Serial/JTAG
      * PHY on them; detach it first or the data line reads the PHY, not the
      * microphone (the same cure as fos_i2c.c's for the E-series' bus). */
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (clk_pin == 19 || clk_pin == 20 || data_pin == 19 || data_pin == 20) {
-        usb_serial_jtag_ll_phy_enable_pad(false);
-    }
-#endif
+    fos_usb_pads_claim(clk_pin, data_pin);
     gpio_func_sel((gpio_num_t)clk_pin, PIN_FUNC_GPIO);
     esp_rom_gpio_connect_out_signal(clk_pin, I2S0I_WS_OUT_IDX, false, false);
     gpio_func_sel((gpio_num_t)data_pin, PIN_FUNC_GPIO);

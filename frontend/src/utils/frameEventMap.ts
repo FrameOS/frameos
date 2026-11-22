@@ -517,6 +517,7 @@ export function frameOffersEdgeGestures(
     touch === true ||
     deviceEventMap(device) !== null ||
     device === 'lcd.st7701s_480x480' ||
+    device === 'lcd.ek9716_800x480' ||
     (rules ?? []).some((rule) => rule.event === 'edgeSwipe')
   )
 }
