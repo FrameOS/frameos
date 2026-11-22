@@ -2606,7 +2606,7 @@ export interface frameLogicMeta {
     defaultScene: (frame: FrameType, frameForm: Partial<FrameType>) => string
     width: (frameForm: Partial<FrameType>) => number | undefined
     height: (frameForm: Partial<FrameType>) => number | undefined
-    defaultInterval: () => number
+    defaultInterval: (frameForm: Partial<FrameType>) => number
     deployWithAgent: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     deployTransportToggleVisible: (frameForm: Partial<FrameType>, frame: FrameType) => boolean
     frameSyncSectionsWithChanges: (frameSyncStatus: FrameSyncStatus | null) => FrameSyncSection[]

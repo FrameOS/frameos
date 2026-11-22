@@ -120,8 +120,8 @@ async function fetchSidecar(
 export interface assetColorsLogicValues {
   assetTree: AssetNode // assetsLogic
   assets: AssetType[] // assetsLogic
-  storage: AssetStorageId // assetsLogic
   colorProfileKeys: Set<string> // assetsLogic
+  storage: AssetStorageId // assetsLogic
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   adjustmentMode: AdjustmentMode
@@ -161,7 +161,7 @@ export interface assetColorsLogicValues {
 export interface assetColorsLogicActions {
   deleteAsset: (
     path: string,
-    storage?: AssetStorageId
+    storage?: AssetStorageId | undefined
   ) => {
     path: string
     storage: AssetStorageId | undefined

@@ -71,7 +71,7 @@ export interface backendsLogicActions {
   ) => {
     id: string
     options: {
-      resumed?: boolean | undefined
+      resumed?: boolean
     }
   }
   revokeFinished: () => {

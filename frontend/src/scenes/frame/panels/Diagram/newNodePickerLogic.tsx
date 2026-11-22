@@ -44,7 +44,7 @@ import { isAliasEvent } from '../../../../utils/eventsContract'
 import type { FrameScene, SceneApp } from '../../../../types'
 import type { StateField, TemplateType } from '../../../../types'
 import type { DeepPartial } from 'kea-forms/lib/types'
-import type { Connection, XYPosition } from 'reactflow/dist/esm/index'
+import type { Connection, XYPosition } from 'reactflow'
 
 export interface LocalFuse extends Fuse<OptionWithType> {}
 

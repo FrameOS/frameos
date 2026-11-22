@@ -86,14 +86,14 @@ export interface scenesLogicValues {
   aiSceneFormLocation: string | null
   aiSceneLastLog: {
     message: string
-    stage?: string | undefined
-    status?: string | undefined
+    stage?: string
+    status?: string
     timestamp: string
   } | null
   aiSceneLogs: {
     message: string
-    stage?: string | undefined
-    status?: string | undefined
+    stage?: string
+    status?: string
     timestamp: string
   }[]
   aiSceneLogsByRequestId: Record<
@@ -328,8 +328,8 @@ export interface scenesLogicActions {
     log: {
       message: string
       requestId: string
-      stage?: string | undefined
-      status?: string | undefined
+      stage?: string
+      status?: string
       timestamp: string
     }
   }
@@ -476,8 +476,8 @@ export interface scenesLogicMeta {
       >
     ) => {
       message: string
-      stage?: string | undefined
-      status?: string | undefined
+      stage?: string
+      status?: string
       timestamp: string
     } | null
     aiSceneLogs: (
@@ -493,8 +493,8 @@ export interface scenesLogicMeta {
       >
     ) => {
       message: string
-      stage?: string | undefined
-      status?: string | undefined
+      stage?: string
+      status?: string
       timestamp: string
     }[]
   }

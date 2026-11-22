@@ -160,7 +160,7 @@ export interface embedFrameLogicMeta {
     mode: (frame: any, frameForm: any) => 'buildroot' | 'embedded' | 'rpios'
     width: (frameForm: any) => number | undefined
     height: (frameForm: any) => number | undefined
-    defaultInterval: () => number
+    defaultInterval: (frameForm: any) => number
     defaultScene: (scenes: any) => string
   }
 }

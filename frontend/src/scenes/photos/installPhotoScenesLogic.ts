@@ -149,9 +149,9 @@ export interface installPhotoScenesLogicActions {
   }
   install: (options?: { activate?: boolean; photo?: string | null; save?: boolean }) => {
     options: {
-      activate?: boolean | undefined
-      photo?: string | null | undefined
-      save?: boolean | undefined
+      activate?: boolean
+      photo?: string | null
+      save?: boolean
     }
   }
   loadLibrary: () => any

@@ -5,16 +5,18 @@
     "lib": ["DOM", "DOM.Iterable", "ESNext", "ESNext.Array"],
     "allowJs": false,
     "skipLibCheck": true,
-    "esModuleInterop": false,
     "allowSyntheticDefaultImports": true,
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    // TypeScript 7 no longer loads every @types package by itself. These
+    // declare modules (react-syntax-highlighter's deep imports) or globals.
+    "types": ["react-syntax-highlighter"],
     // The SPA bundles the frameos-wasm package from its source (the scene
     // workspace's preview, frontend/src/sceneWorkspace): no build of the
     // package has to run first. The cloud's auth-web resolves the built one.
