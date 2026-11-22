@@ -367,6 +367,10 @@
   for an app whose `permissions` has `"code"` (red tag, detected from
   `frameos.code(`) and only while the frame offers its page. The scene
   settings' Code button opens it on a scene (its public field `open`).
+  It also opens a folder of the frame's storages (Open folder: the tree,
+  any text file read and saved) through the asset calls alone, under
+  `"assets-write"`, which works where the scenes are off: never a
+  `frameos.code` op for files.
   A file is a virtualized list built from the JSX layer alone (doc section
   "The file open"): a box that scrolls, as tall as the file, holding only the
   lines around `scrollTop` as one `<textarea>` colored by its `<span>`s,
