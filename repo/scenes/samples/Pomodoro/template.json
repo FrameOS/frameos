@@ -1,6 +1,6 @@
 {
   "name": "Pomodoro",
-  "description": "A pomodoro timer for the desk: focus for 25 minutes, take a 5 minute break, and a 15 minute break after every fourth session. Tap the ring or Start to start, pause and resume, Skip to go on to the next phase and Reset to start this one again (hold it for a new set); the tabs pick a phase by hand. Today's finished sessions show as tomatoes against a daily goal. On an LCD or a screen the ring counts down every second; on e-paper it shows whole minutes and refreshes once a minute and when the phase ends. Set the lengths, the sessions in a set, the daily goal, what you are working on, and whether the next phase starts by itself. On a frame with buttons, forward starts and pauses, back resets or skips; on a Pi with a keyboard, space, N and R do the same. High contrast on black-and-white and grey panels, or always with the Contrast setting.",
+  "description": "A pomodoro timer for the desk: 25 minutes of focus, then a break, with today's sessions counted against a daily goal.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

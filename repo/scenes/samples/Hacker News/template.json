@@ -1,6 +1,6 @@
 {
   "name": "Hacker News",
-  "description": "Hacker News, drawn like news.ycombinator.com: the front page, new, Ask HN, Show HN and jobs, each story with its points, author, age and comments. Open a story for its whole thread, nested as on the site, and collapse any reply. On a story's page, tap its title for the link as a QR code for your phone, or its author for their page. Works by touch, with a mouse and keyboard, or with a frame's buttons alone (next and previous walk the stories, the green key opens, a long press goes back). Larger text and high contrast on big and black-and-white e-paper. The list refreshes every 15 minutes.",
+  "description": "Hacker News, drawn like the site: the front page, new, Ask, Show and jobs, with each story's comment thread.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

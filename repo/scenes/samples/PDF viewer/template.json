@@ -1,6 +1,6 @@
 {
   "name": "PDF viewer",
-  "description": "PDF files from the frame's card, read on the frame: a library of every .pdf on it, each page drawn to fit the screen or read at its width a part at a time, the bookmarks, go to a page by its number, and each document opened where you left it. Tap or swipe to turn pages, or use the keys.",
+  "description": "Read PDF files from the frame's card, with bookmarks and your place kept in each document.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

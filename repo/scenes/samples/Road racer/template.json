@@ -1,6 +1,6 @@
 {
   "name": "Road racer",
-  "description": "A pseudo-3D race against the clock for a fast screen (LCD or HDMI): a winding, hilly road through forests, meadows and rocks, traffic to overtake, checkpoints that add time, speed and gear on the dashboard, and the light going from day to dusk to night lap by lap. Keep off the grass and the trees. Touch: the arrows steer and A / B are gas and brake, or hold the left or right half of the road to steer; gas is automatic unless you play with a keyboard, so one thumb is enough. Keyboard: arrows or A / D to steer, Up, W, Space or Z for gas, Down, S or X to brake, Enter or P to pause. GPIO buttons follow the Buttons setting (a key the frame's own Button actions bind to a long press still does that when held). Settings: difficulty, traffic, time of day, automatic gas, on-screen controls, pixel size and a High contrast mode in black and white. Keeps the top five scores. On e-paper it shows its title card and sleeps.",
+  "description": "A pseudo-3D race against the clock on a winding, hilly road, overtaking traffic as day turns to night. Needs a fast screen (LCD or HDMI).",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

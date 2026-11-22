@@ -1,6 +1,6 @@
 {
   "name": "Handwriting notes",
-  "description": "Notebooks for handwriting on a touch screen: lined, squared, dotted or plain paper, a pen in four colors and two widths, a highlighter that stays under the ink, and an eraser that lifts whole strokes, with undo. Turn pages with the arrows or back and forward (a swipe in from the edge), add and delete pages. Every page is saved as its own SVG file in the assets folder (\"Notes\" by default), which opens as a plain picture anywhere, and the list shows each notebook with its pages and the date it was written. On e-paper the ink appears as the panel refreshes. High contrast on black-and-white and grey panels. Reads and writes the assets folder.",
+  "description": "Handwritten notebooks on a touch screen, with pens, a highlighter and an eraser. Every page is saved as an SVG in the assets folder.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

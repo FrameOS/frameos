@@ -1,6 +1,6 @@
 {
   "name": "Brick breaker",
-  "description": "Brick breaker, in chunky pixels: keep the ball in play with the paddle and break every brick. Where the ball lands on the paddle sets its angle. Silver bricks take two hits, gold three, steel never breaks, and capsules fall from broken bricks: W a wider paddle, M three balls, S a slower ball, L a laser (A fires) and + an extra life. Eight hand-made levels, then new ones made for every level after. Drag anywhere on the play area to move the paddle (lift your finger to serve), or use the arrows on the screen, the arrow keys or A/D with Space to serve and fire (P pauses), or the frame's buttons (set under Buttons). Settings: ball speed, lives, capsules on or off. The best five scores are kept. Needs a fast screen (LCD or HDMI): on e-paper it shows a title card with the high scores. High contrast (black on white) is automatic on black-and-white panels, or set it under Contrast. Holding a key the frame's Button actions bind still does that; a short press plays.",
+  "description": "Break every brick with the ball and paddle, catching capsules for a wider paddle, more balls or a laser. Needs a fast screen (LCD or HDMI).",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

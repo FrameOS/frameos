@@ -1,6 +1,6 @@
 {
   "name": "Home Assistant remote",
-  "description": "A touch remote for Home Assistant. List entities in the Cards setting, one per line (light.kitchen, switch.fan | Fan, climate.living_room...), and # lines to put them on pages. Tap to switch lights and switches, slide brightness, volume and blind positions, set the heating, play and pause, run scenes and scripts, lock and unlock (it asks first), and read sensors and the weather. Set your Home Assistant URL and a long-lived access token in FrameOS's Home Assistant settings first. On a frame managed by FrameOS Cloud, turn on Local network access for a Home Assistant on your network. It reads the cards on the page showing every 60 seconds (the refresh interval: right for an LCD, set it longer on e-paper) and right after a tap. Columns, compact cards, tabs at the top or bottom and a high contrast look for black-and-white panels are settings.",
+  "description": "A touch remote for Home Assistant: switch lights, set the heating, play music, run scenes and read sensors from the cards you pick.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

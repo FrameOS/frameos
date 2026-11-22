@@ -1,6 +1,6 @@
 {
   "name": "Slideshow with motion",
-  "description": "Smooth slow zoom and pan across your photos. Only for HDMI/LCD frames that render many times per second - e-ink panels refresh far too slowly for this.",
+  "description": "Your photos with a slow zoom and pan. For LCD and HDMI frames: e-paper refreshes far too slowly for it.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

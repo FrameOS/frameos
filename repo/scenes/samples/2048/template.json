@@ -1,6 +1,6 @@
 {
   "name": "2048",
-  "description": "The sliding tile puzzle: slide the tiles, equal tiles merge, and try to reach 2048. Swipe on the board, tap the arrow buttons (made for e-paper, where a tap is cheaper than a swipe), use the arrow keys on a keyboard, or the frame's back and forward for left and right. One move can be undone, and the game in progress and the best score per board size are kept. Pick a 4x4, 5x5 or 6x6 board in the settings. High contrast on black-and-white panels: every tile has a look of its own as well as its number.",
+  "description": "The sliding tile puzzle: merge equal tiles and try to reach 2048.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

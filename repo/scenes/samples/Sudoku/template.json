@@ -1,6 +1,6 @@
 {
   "name": "Sudoku",
-  "description": "Sudoku made on the frame: every puzzle is new and has exactly one solution, at the difficulty you pick (easy, medium, hard or expert). Tap a cell, then a number on the pad. Notes pencils small candidates in, Erase clears a cell, Undo takes the last change back, Hint fills a cell, Check marks the wrong ones, and digits that clash in a row, column or box are marked as you go (you can turn that off). The minutes played show beside the difficulty. The game in progress is kept, and a keyboard works too (arrows, digits, Backspace). High contrast on black-and-white panels.",
+  "description": "Sudoku made on the frame: a new puzzle with exactly one solution every time, from easy to expert.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

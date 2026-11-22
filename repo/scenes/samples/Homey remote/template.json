@@ -1,6 +1,6 @@
 {
   "name": "Homey remote",
-  "description": "A touch remote for a Homey Pro on your network. Leave Cards empty for every device, a page per zone, or list devices by name (Kitchen light, Living room/Thermostat), flow:Good night for a flow, *Kitchen for a whole zone and # lines for pages. Tap to switch, slide to dim, set the thermostat, move blinds, play and pause, lock and unlock (it asks first), and read sensors. Homey has no settings of its own on FrameOS, so the Homey address and an API key (Homey web app: Settings, API keys) are this scene's settings. On a frame managed by FrameOS Cloud, turn on Local network access. Values are read every 60 seconds (the refresh interval: right for an LCD, set it longer on e-paper) and right after a tap. Columns, compact cards, tabs at the top or bottom and a high contrast look for black-and-white panels are settings.",
+  "description": "A touch remote for a Homey Pro on your network: switch and dim lights, set the thermostat, move blinds and run flows.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

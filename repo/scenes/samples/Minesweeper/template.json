@@ -1,6 +1,6 @@
 {
   "name": "Minesweeper",
-  "description": "Minesweeper for a touch screen. Tap a square to open it; a number says how many mines touch it. Switch the Open / Flag button to mark mines with a tap (made for e-paper, where holding is clumsy), or hold a square on a fast screen. Tap an open number whose mines are all flagged to open the rest around it. The first square you open is never a mine and always opens an area. Beginner (9×9, 10 mines), intermediate (16×16, 40), expert (sized to fill the screen, a fifth of it mines) or a custom board, the mines left, your best time for each, and the board shown when you win or lose. Forward starts a new game and back switches between opening and flagging on frames with buttons. On black-and-white panels it plays in high contrast; the Contrast setting picks it anywhere.",
+  "description": "Minesweeper for a touch screen, from beginner to expert, with a flag mode made for e-paper.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

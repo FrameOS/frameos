@@ -1,6 +1,6 @@
 {
   "name": "Memory match",
-  "description": "Memory for a touch screen: tap two cards to turn them over. A pair stays up; two that differ turn back with your next tap, so it plays the same on e-paper as on a fast screen, with no timers. Choose 12, 16, 24 or 30 cards (laid out to fit the screen, turned on a tall one), play alone against your fewest moves for each size, or with two players taking turns (a pair found keeps the turn). The pictures are drawn shapes, sixteen of them. Forward deals again once a game is done on frames with buttons. On black-and-white panels it plays in high contrast; the Contrast setting picks it anywhere.",
+  "description": "The memory card game for a touch screen, alone or with two players. No timers, so it plays as well on e-paper.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

@@ -1,6 +1,6 @@
 {
   "name": "Checkers",
-  "description": "Checkers (English draughts) against the computer or a second player. Tap one of your pieces to see where it can go and tap the square to move; a jump goes on by itself as far as it can, and a man reaching the far row is crowned king. Four levels for the computer, compulsory jumps on or off, who starts, and legal-move hints in the settings. Undo takes back your last move (and the computer's reply), and the game in progress is kept. Arrow keys and Enter play it from a keyboard. High contrast on black-and-white panels: white and black pieces on black squares.",
+  "description": "Checkers (English draughts) against the computer or a second player.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

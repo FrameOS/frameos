@@ -1,6 +1,6 @@
 {
   "name": "Chromium screenshot",
-  "description": "Chromium (degoogled Chrome) only works on devices with over 1GB of RAM. This will NOT work on the Pi Zero 2 W.",
+  "description": "A screenshot of any web page, taken with Chromium on the frame. Needs a Pi with more than 1 GB of RAM (not the Pi Zero 2 W).",
   "embedded": false,
   "config": null,
   "image": "./image.jpg",

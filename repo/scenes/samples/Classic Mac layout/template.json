@@ -1,6 +1,6 @@
 {
   "name": "Classic Mac layout",
-  "description": "A black-and-white Macintosh of 1991 around each scene: a menu bar with the screen's rounded corners, and a pinstriped window on the grey desktop. File opens a scene and its info, the clock the frame's page; the close box closes it, the gear box opens its settings. On a Pi or an ESP32 every scene opens in a window of its own: a double click rolls one up to its title bar.",
+  "description": "A black-and-white Macintosh of 1991 around each scene. On a Pi or an ESP32 every scene opens in a window of its own.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

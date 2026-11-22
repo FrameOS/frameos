@@ -1,6 +1,6 @@
 {
   "name": "Tiling layout",
-  "description": "Every scene opened tiled on the desktop and running at once: the one with the focus large on the left, the others in a column beside it. On a Pi or an ESP32; elsewhere a bar above the scene.",
+  "description": "Every scene you open, tiled and running at once: the one with the focus large on the left, the others beside it.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

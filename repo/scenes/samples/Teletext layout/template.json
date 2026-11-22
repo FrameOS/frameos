@@ -1,6 +1,6 @@
 {
   "name": "Teletext layout",
-  "description": "A teletext page around each scene: a header with the page number, the date and the clock, the scene's name in a colored band, and the four Fastext links at the bottom. Red and green go to the scene before and after, yellow to the index, cyan to the scene's settings, and the clock to the frame's page.",
+  "description": "A teletext page around each scene, with the clock in the header and the four colored Fastext links at the bottom.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

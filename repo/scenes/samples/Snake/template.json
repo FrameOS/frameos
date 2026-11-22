@@ -1,6 +1,6 @@
 {
   "name": "Snake",
-  "description": "Snake, in chunky pixels: eat the fruit, grow longer and never bite yourself or the walls. A bonus star shows now and then for a few seconds, the body's colors flow and a crash crumbles the snake. Steer with the arrows on the screen, a tap beside the snake's head, the arrow keys or WASD (P pauses), or the frame's buttons (by default LEFT and RIGHT turn, the third button steps; change it under Buttons). Two quick turns both count. Settings: speed (or faster as it grows), walls or wrap-around edges, board size, and obstacles: a few stones or eight maze levels. The best five scores are kept. On e-paper it becomes a puzzle where every press is one step. High contrast (black on white) is automatic on black-and-white panels, or set it under Contrast. Holding a key the frame's Button actions bind (such as LEFT held for the previous scene) still does that: a short press steers.",
+  "description": "Classic snake in chunky pixels: eat the fruit, grow longer and never bite yourself. On e-paper every press is one step.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

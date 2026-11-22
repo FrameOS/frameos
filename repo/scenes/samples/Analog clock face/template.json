@@ -1,6 +1,6 @@
 {
   "name": "Analog clock face",
-  "description": "An SVG dial in three styles: station clock, minimal and roman. Refreshes every minute.",
+  "description": "An analog clock dial in three styles: station clock, minimal and roman.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

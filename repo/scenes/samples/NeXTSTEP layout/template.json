@@ -1,6 +1,6 @@
 {
   "name": "NeXTSTEP layout",
-  "description": "The main menu down the left, a window with a black title bar, and the Dock down the right, in four greys that look the same on a screen, a grey panel and black-and-white e-paper. The Dock's mark opens the scene list and its clock the frame's page; Info opens the scene's settings. On a Pi or an ESP32 every scene opens in a window of its own, with the frame's scenes in the Dock.",
+  "description": "NeXTSTEP's menu, window and Dock around each scene, in greys that look right on any panel. On a Pi or an ESP32 every scene opens in a window of its own.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

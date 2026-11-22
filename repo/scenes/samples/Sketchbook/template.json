@@ -1,6 +1,6 @@
 {
   "name": "Sketchbook",
-  "description": "A sketchbook for a touch screen: draw with a finger in a calm palette of pens, four brush sizes, an eraser, undo and redo (also back and forward). Drawings are saved and opened as SVG files in the assets folder (\"Drawings\" by default, a setting), and you can draw over a picture from the assets folder: the eraser puts the picture back. The tools fold into a corner to give the drawing the whole screen, and can sit on either side. High contrast on black-and-white and grey panels: black ink and a white pen. Reads and writes the assets folder.",
+  "description": "Draw with a finger in a calm palette of pens, and keep your drawings as SVG files in the assets folder.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

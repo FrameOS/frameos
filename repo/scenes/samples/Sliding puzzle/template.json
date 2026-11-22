@@ -1,6 +1,6 @@
 {
   "name": "Sliding puzzle",
-  "description": "The classic 15 puzzle for a touch screen: tap a tile in the gap's row or column and it slides into the gap, with every tile between. Put them back in order in as few moves as you can. 3×3, 4×4 or 5×5, with numbers or a drawn picture (a landscape at dusk or rings) cut into tiles, each with its number in the corner. Every shuffle can be solved, numbers in their place turn teal, and your best for each size is kept. Arrow keys slide tiles on a keyboard, and forward deals a new puzzle once one is solved on frames with buttons. On black-and-white panels it plays in high contrast, the pictures in black and white; the Contrast setting picks it anywhere.",
+  "description": "The classic 15 puzzle for a touch screen, in three sizes, with numbers or a picture cut into tiles.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

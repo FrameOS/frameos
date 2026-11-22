@@ -1,6 +1,6 @@
 {
   "name": "Word clock",
-  "description": "\"IT IS HALF PAST NINE\" in a big letter grid or as typeset text. The classic e-ink build, with no dependencies. Refreshes every 5 minutes.",
+  "description": "The time in words, \"IT IS HALF PAST NINE\", lit in a big letter grid or set as text.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

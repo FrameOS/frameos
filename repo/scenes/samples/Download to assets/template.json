@@ -1,6 +1,6 @@
 {
   "name": "Download to assets",
-  "description": "Downloads files from the web into the frame's assets folder, for a gallery, the Files scene or a font to find. List the addresses in the scene's settings, one a line, or type one on the frame and tap Download; write \"https://… -> name.ext\" to pick a file's name. Files go into a folder of your choice (Downloads at first), a chunk at a time, so a big file works on an ESP32 too, with a progress line as it goes; a file already there is skipped, replaced or kept beside the new one, as you set. The folder's files are listed with their sizes, to delete with a confirm. Turn on \"Download new addresses by themselves\" for a frame without touch. On an ESP32 the server has to send files in parts (most file hosts do). The scene writes to the assets folder: installing it allows that. High contrast on black-and-white and grey panels, or always with the Contrast setting.",
+  "description": "Downloads files from the web into the frame's assets folder, a chunk at a time, so big files work on an ESP32 too.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

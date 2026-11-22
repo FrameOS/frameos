@@ -1,6 +1,6 @@
 {
   "name": "ePub reader",
-  "description": "EPUB books from the frame's card, read on the frame: a library of every .epub on it with their covers, pages laid out to fit the screen (two columns on a wide one) with the books' own pictures, the contents, the text size, and each book opened where you left it. Tap or swipe to turn pages, or use the keys.",
+  "description": "Read EPUB books from the frame's card, with their covers and pictures, and your place kept in each book.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

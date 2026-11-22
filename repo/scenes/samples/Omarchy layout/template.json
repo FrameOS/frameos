@@ -1,6 +1,6 @@
 {
   "name": "Omarchy layout",
-  "description": "A thin bar along the top and the scene in a tile with gaps and a colored border, after Omarchy 4 (Quattro): the menu, the workspaces, the window's name, the day and the time, the signal and the battery. On a Pi or an ESP32 it is a tiling desktop: every scene opened is a tile on a numbered workspace, all running at once, in dwindle, scrolling or floating layouts (Super+L), with a menu that filters (Super+Space), Omarchy's keys and eleven of its themes.",
+  "description": "A thin top bar and the scene in a tile, after Omarchy. On a Pi or an ESP32 it is a tiling desktop with workspaces and eleven themes.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
