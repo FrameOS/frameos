@@ -401,13 +401,19 @@ static esp_err_t refuse_protected_access(httpd_req_t *req)
     }
 
     if (!admin_auth_configured(config)) {
+        /* Who reads this has typed the frame's address into a browser and
+         * expected the control plane's interface: say what the page is, and
+         * give every way to set the login, the cloud included, which has no
+         * field for it (the old text sent cloud owners to "the backend"). */
         log_http_denied(req, 403);
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_send_err(
             req,
             HTTPD_403_FORBIDDEN,
-            "FrameOS setup is locked because admin credentials are not configured. "
-            "Connect through the FrameOS hotspot, or set frame admin auth in the backend and redeploy.");
+            "This is the frame's setup page (Wi-Fi, panel, SD card). It is locked: no admin login is set. "
+            "Scenes and files are managed in FrameOS Cloud or your backend. To open this page, join the frame's "
+            "hotspot, set \"Frame setup access\" in the backend, or on the USB console: "
+            "set admin_user NAME, set admin_pass PASSWORD, set admin_auth 1");
     }
 
     log_http_denied(req, 401);
