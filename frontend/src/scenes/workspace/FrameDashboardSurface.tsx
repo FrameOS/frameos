@@ -101,7 +101,7 @@ const sceneToolButtons = [
   { label: 'Schedule', panel: 'schedule', icon: CalendarDaysIcon },
   { label: 'Logs', panel: 'logs', icon: DocumentTextIcon },
   { label: 'Metrics', panel: 'metrics', icon: ChartBarIcon },
-  { label: 'Assets', panel: 'assets', icon: CircleStackIcon },
+  { label: 'Files', panel: 'assets', icon: CircleStackIcon },
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const

@@ -233,7 +233,7 @@ struct FrameDetailView: View {
                 }
                 NavigationLink {
                     AssetsView(frameId: frameId, folder: "")
-                } label: { Label("Assets", systemImage: "folder") }
+                } label: { Label("Files", systemImage: "folder") }
                 NavigationLink {
                     LogsView(frameId: frameId)
                 } label: { Label("Logs", systemImage: "text.alignleft") }

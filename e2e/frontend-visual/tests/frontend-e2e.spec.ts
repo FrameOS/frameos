@@ -15,7 +15,7 @@ const frameTools = [
   { label: 'Preview', path: '/frames/1/preview', text: /Preview/i },
   { label: 'Logs', path: '/frames/1/logs', text: /Search logs/i },
   { label: 'Metrics', path: '/frames/1/metrics', text: /datapoints loaded/i },
-  { label: 'Assets', path: '/frames/1/assets', text: /Files/i },
+  { label: 'Files', path: '/frames/1/assets', text: /Files/i },
   { label: 'Terminal', path: '/frames/1/terminal', text: /Send command/i },
   { label: 'Ping', path: '/frames/1/ping', text: /Connectivity/i },
   { label: 'Debug', path: '/frames/1/debug', text: /Debug/i },
