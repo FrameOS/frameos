@@ -939,6 +939,14 @@ ESP-IDF expects them.
   `ci_build_image.sh` prints the count (`link_order: … calls between
   functions in flash, … of them long`) and what the file no longer matches:
   run `optimize` again when that climbs, or before a release.
+- **Written again after 2026.11.14** (2026-11-22): the file named eight
+  objects #959 had removed (zippy, qoi, flatty's encoder) and missed three
+  new ones (`file_slice`, pixie's `filefont` and `indexedfont`). From that
+  release's build: 7,624 → 7,297 long calls, 3,176,736 → 3,175,568 bytes
+  (−1,168). On four boards' benchmark, JSON 1.5-3.7 % faster and the SVG
+  raster 0.7-2.1 % slower: placement moves both, and neither is what the
+  order is for. A second pass from the ordered build came out worse (7,341,
+  +512 bytes) and was not kept.
 - A Nim object is named by its source path (`frameos/interpreter.nim`,
   `nim/lib/system.nim`, `pkgs/flatty/flatty/binny.nim`), not by the file Nim
   writes, so the Docker image's Nim, a choosenim one and nixpkgs' ROT13 names
