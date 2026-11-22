@@ -1,4 +1,23 @@
 import { FrameScene } from '../../../../types'
+import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../../../../generated/repoApps'
+import { buildSceneApp } from '../../../../utils/sceneApps'
+
+/** The repo app that shows the frame's files (the built-in data/localImage was retired to it). */
+const LOCAL_IMAGE_APP_ORIGIN = 'repo/apps/image/localImage'
+const LOCAL_IMAGE_APP_KEY = 'localImage'
+
+/** The scene's copy of the Local Image app, under the key its node names. */
+function localImageApps(): FrameScene['apps'] {
+  const sources = embeddedRepoAppSources[LOCAL_IMAGE_APP_ORIGIN]
+  if (!sources) {
+    throw new Error('The Local Image app is missing from this build.')
+  }
+  return {
+    [LOCAL_IMAGE_APP_KEY]: buildSceneApp(LOCAL_IMAGE_APP_KEY, embeddedRepoAppConfigs[LOCAL_IMAGE_APP_ORIGIN], sources, {
+      origin: LOCAL_IMAGE_APP_ORIGIN,
+    }),
+  }
+}
 
 const baseSdCardImageScene: FrameScene = {
   id: '6c7a6328-bb39-452a-bd3e-e9902b3925f4',
@@ -119,7 +138,7 @@ const baseSdCardImageScene: FrameScene = {
         config: {
           counterStateKey: 'counter',
         },
-        keyword: 'data/localImage',
+        keyword: LOCAL_IMAGE_APP_KEY,
       },
       dragging: false,
       height: 196,
@@ -375,6 +394,7 @@ export function buildSdCardImageScene(imageFilename: string, assetsPath: string,
   return {
     ...baseSdCardImageScene,
     id: sceneId,
+    apps: localImageApps(),
     fields: baseSdCardImageScene.fields?.map((field) => {
       if (field.name === 'imageFolder') {
         return { ...field, value: uploadFolder }
@@ -394,6 +414,7 @@ export function buildLocalImageScene(imageFilename: string, imageFolder: string,
   return {
     ...baseSdCardImageScene,
     id: sceneId,
+    apps: localImageApps(),
     fields: baseSdCardImageScene.fields?.map((field) => {
       if (field.name === 'imageFolder') {
         return { ...field, value: normalizedFolder }
@@ -413,6 +434,7 @@ export function buildLocalImageFolderScene(imageFolder: string, sceneId: string,
   return {
     ...baseSdCardImageScene,
     id: sceneId,
+    apps: localImageApps(),
     fields: baseSdCardImageScene.fields?.map((field) => {
       if (field.name === 'imageFolder') {
         return { ...field, value: normalizedFolder }

@@ -132,7 +132,7 @@ ask the visitor, then `preview.setFastMode(true)` to let the scene run at its ow
 The runtime's `/srv/assets` — where a real frame keeps its assets — is a folder that lives in
 the visitor's browser (IndexedDB, via emscripten's IDBFS). It is shared by every preview on the
 same origin, survives reloads, and never leaves the browser. A fresh folder gets a few generated
-sample photos so image scenes render something at once. Scenes read from it (`data/localImage`,
+sample photos so image scenes render something at once. Scenes read from it (the Local Image app,
 fonts, …) and, with `saveAssets` on (the default here), write into it.
 
 ```ts
@@ -190,7 +190,7 @@ Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePub
   access off would. A proxy refusal with an `X-FrameOS-Proxy-Refused` header reaches the scene
   as words (docs/lan-access.md).
 - Apps that need host processes are not in the wasm build: `data/chromiumScreenshot`,
-  `data/rstpSnapshot`. `data/localImage` reads the browser asset folder (see above).
+  `data/rstpSnapshot`. The Local Image app reads the browser asset folder (see above).
 - `index.html` in the package root is a standalone demo page:
   `npx serve node_modules/frameos-wasm` and paste a scenes.json.
 

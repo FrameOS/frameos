@@ -77,23 +77,26 @@ def test_replacement_entry_is_the_repo_app():
 
 
 def test_keywords_runtime_lacks():
-    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]
     # 2026.10.11 has fetchImage; 2026.10.13 has app.frame.embedded,
     # frameos.remember and the failing throw the later four need.
-    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]
-    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]
+    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]
+    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]
     # 2026.10.22 is the first release without the Nim agenda.
-    assert keywords_runtime_lacks("2026.10.13") == ["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]
-    assert keywords_runtime_lacks("2026.10.21") == ["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]
+    assert keywords_runtime_lacks("2026.10.13") == ["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]
+    assert keywords_runtime_lacks("2026.10.21") == ["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]
     # 2026.11.5 is the first release without the Nim calendar.
-    assert keywords_runtime_lacks("2026.10.22") == ["render/calendar", "data/icalJson", "data/clock"]
-    assert keywords_runtime_lacks("2026.11.4") == ["render/calendar", "data/icalJson", "data/clock"]
+    assert keywords_runtime_lacks("2026.10.22") == ["render/calendar", "data/icalJson", "data/clock", "data/localImage"]
+    assert keywords_runtime_lacks("2026.11.4") == ["render/calendar", "data/icalJson", "data/clock", "data/localImage"]
     # 2026.11.6 is the first release without the Nim iCal parser.
-    assert keywords_runtime_lacks("2026.11.5") == ["data/icalJson", "data/clock"]
-    assert keywords_runtime_lacks("2026.11.6") == ["data/clock"]
+    assert keywords_runtime_lacks("2026.11.5") == ["data/icalJson", "data/clock", "data/localImage"]
+    assert keywords_runtime_lacks("2026.11.6") == ["data/clock", "data/localImage"]
     # 2026.11.11 is the first release without the Nim clock.
-    assert keywords_runtime_lacks("2026.11.10") == ["data/clock"]
-    assert keywords_runtime_lacks("2026.11.11") == []
+    assert keywords_runtime_lacks("2026.11.10") == ["data/clock", "data/localImage"]
+    assert keywords_runtime_lacks("2026.11.11") == ["data/localImage"]
+    # 2026.11.15 is the first release without the Nim local image.
+    assert keywords_runtime_lacks("2026.11.14") == ["data/localImage"]
+    assert keywords_runtime_lacks("2026.11.15") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []
 

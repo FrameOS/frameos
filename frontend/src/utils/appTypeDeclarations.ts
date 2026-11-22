@@ -761,8 +761,11 @@ declare const frameos: {
       mask?: { offset: number; length: number; inflate?: boolean; pixels: { width: number; height: number; bits?: number; predictor?: number; invert?: boolean } };
       /** Which of app.frame.storages the path is in (FrameOS 2026.11.11+). */
       storage?: "assets" | "internal";
+      /** Also read the photo's EXIF block, as fetchImage's exif does: the reference then carries exif (camera, lens,
+       * exposure, date, GPS, ...) and exifSummary, a one-line credit, when the file has them (FrameOS 2026.11.15+). */
+      exif?: boolean;
     }
-  ): FrameOSImageRef | null;
+  ): (FrameOSImageRef & { exif?: Record<string, any>; exifSummary?: string }) | null;
   openAssetStream(path: string, mode?: "r" | "w" | "a"): FrameOSStreamRef | null;
   createStream(base64: string): FrameOSStreamRef | null;
   streamRead(stream: FrameOSStreamRef | number, length: number): string | null;

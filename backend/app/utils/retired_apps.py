@@ -124,6 +124,12 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "runtime": "2026.11.11",
         "needs": "nothing new: an older frame keeps the built-in clock it has",
     },
+    "data/localImage": {
+        "replacement": "repo/apps/image/localImage",
+        "sceneAppKey": "localImage",
+        "runtime": "2026.11.15",
+        "needs": "requested bounds reaching a JS producer, context.remakingCachedValue and repainting, and frameos.loadAssetImage's exif",
+    },
 }
 
 

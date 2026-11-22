@@ -499,9 +499,22 @@ proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
     if chainNode.nodeType != "app":
       return nil
     if isOpaque != nil and isOpaque(currentId):
-      # A JS app sizes its own output; nothing upstream of it is bounded by
-      # the consumer anymore.
-      return nil
+      # A JS app is where the walk ends, as the intoTarget walk does: whether
+      # it decodes is its call, so the bounds are offered, not assumed. One
+      # that decodes a file (frameos.loadAssetImage, frameos.fetchImage)
+      # takes them (`takeDecodeBounds`), so a photo under a render/zoomPan
+      # decodes at the crop's resolution and the node cache keeps it
+      # (keepsBoundedImage); one that makes its own image leaves them, and
+      # unclaimed bounds cost nothing.
+      return ImageBoundsPlan(
+        inputName: input,
+        producerNodeId: currentId,
+        fromCanvas: fromCanvas,
+        fixedWidth: fixedWidth,
+        fixedHeight: fixedHeight,
+        swapped: swapped,
+        scale: scale
+      )
     let chainCaps = appCapabilities(chainNode.appKeyword())
 
     var terminal = false

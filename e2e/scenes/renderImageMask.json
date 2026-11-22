@@ -78,9 +78,9 @@
         "y": -508.86248337158395
       },
       "data": {
-        "keyword": "data/localImage",
+        "keyword": "data/downloadImage",
         "config": {
-          "path": "./assets/mask.png"
+          "url": "https://frameos.net/img/mask_in_ci_tests.png"
         },
         "cache": {
           "duration": "900",
@@ -106,9 +106,9 @@
         "y": -272.72052699982964
       },
       "data": {
-        "keyword": "data/localImage",
+        "keyword": "data/downloadImage",
         "config": {
-          "path": "./assets/bird.png"
+          "url": "https://frameos.net/img/bird_in_ci_tests.png"
         },
         "cache": {
           "duration": "900",

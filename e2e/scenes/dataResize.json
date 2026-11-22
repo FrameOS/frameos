@@ -216,9 +216,9 @@
             "inputEnabled": true
           },
           "config": {
-            "path": "./assets/image.png"
+            "url": "https://frameos.net/img/logo_in_ci_tests.png"
           },
-          "keyword": "data/localImage"
+          "keyword": "data/downloadImage"
         },
         "dragging": false,
         "height": 244,

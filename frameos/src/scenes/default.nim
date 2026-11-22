@@ -10,7 +10,7 @@ import frameos/utils/image
 import frameos/utils/url
 import frameos/utils/time
 import apps/render/opacity/app as render_opacityApp
-import apps/data/localImage/app as data_localImageApp
+import apps/data/newImage/app as data_newImageApp
 import apps/render/split/app as render_splitApp
 import apps/render/image/app as render_imageApp
 import apps/render/color/app as render_colorApp
@@ -21,7 +21,7 @@ let PERSISTED_STATE_KEYS*: seq[string] = @[]
 
 type Scene* = ref object of FrameScene
   node1: render_opacityApp.App
-  node2: data_localImageApp.App
+  node2: data_newImageApp.App
   node3: render_splitApp.App
   node4: render_imageApp.App
   node5: render_colorApp.App
@@ -110,13 +110,14 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     frameConfig: scene.frameConfig, appConfig: render_opacityApp.AppConfig(
     opacity: 0.5,
   ))
-  scene.node2 = data_localImageApp.App(nodeName: "data/localImage", nodeId: 2.NodeId, scene: scene.FrameScene,
-    frameConfig: scene.frameConfig, appConfig: data_localImageApp.AppConfig(
-    path: "./assets/bird.png",
-    order: "random",
-    counterStateKey: "",
+  # Was data/localImage on ./assets/bird.png, a path in the working
+  # directory, which the JavaScript app that replaced it (repo/apps/image/
+  # localImage) cannot read: a plain fill in the cell instead.
+  scene.node2 = data_newImageApp.App(nodeName: "data/newImage", nodeId: 2.NodeId, scene: scene.FrameScene,
+    frameConfig: scene.frameConfig, appConfig: data_newImageApp.AppConfig(
+    color: parseHtmlColor("#4a90d9"),
+    opacity: 1.0,
   ))
-  scene.node2.init()
   scene.node3 = render_splitApp.App(nodeName: "render/split", nodeId: 3.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     columns: 2,

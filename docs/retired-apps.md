@@ -21,6 +21,20 @@ noticing. `docs/retired-apps.json` lists them:
 | `render/calendar` | `repo/apps/image/calendar` | 2026.11.5 | nothing new: an older frame keeps the built-in calendar it has |
 | `data/icalJson` | `repo/apps/json/icalJson` | 2026.11.6 | `frameos.openLines` and a spooled field reaching a JS app (`byteIter`) |
 | `data/clock` | `repo/apps/text/clockStdTimes` | 2026.11.11 | nothing new: an older frame keeps the built-in clock it has |
+| `data/localImage` | `repo/apps/image/localImage` | 2026.11.15 | the consumer's bounds reaching a JS app, `context.remakingCachedValue` / `repainting`, `loadAssetImage`'s `exif` |
+
+**Local Image reads the frame's files only.** The Nim app read any path
+(`files`: `/home/pi/Pictures`, a USB stick, a path in the working
+directory). Its replacement reads what a JS app may: the frame's assets
+folder (an ESP32's card) and `/srv/internal`. Its `path` is mapped onto them
+(empty is the assets folder; the assets folder or a path in it, `/srv/internal`
+or a path in it); anything else shows "`<path>` is outside the frame's files:
+put the photos in `<assets folder>`". A Raspberry Pi scene pointed elsewhere
+needs its photos moved into the assets folder (or the frame's assets folder
+pointed at them). It shows an error as a picture, logged, rather than
+throwing: the picture is the node's value, which its cache keeps for its
+period, so an empty folder under an animation is looked at once a period, as
+the Nim app's error frame was.
 
 The clock's replacement keeps the std/times format its scenes were written in
 (`HH:mm`, a port of std/times' `format` in JavaScript); a new scene uses

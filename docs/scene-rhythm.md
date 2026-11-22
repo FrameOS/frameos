@@ -123,7 +123,7 @@ due time moving: a **repaint**. While it runs, `FrameScene.repainting` is
 true. Today a repaint is an ordinary run for most apps, so an app that fetches
 a random photo fetches a new one, and an album moves on. That is a known cost
 of a device that cannot keep the picture, not a bug in the schedule. The SD
-card's slideshow (`data/localImage`) reads the flag and shows the photo it
+card's slideshow (the Local Image app, `context.repainting`) reads the flag and shows the photo it
 showed.
 
 A hole whose UI moved its holes (a window dragged, opened or closed on a

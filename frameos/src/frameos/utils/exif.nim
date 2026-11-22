@@ -356,3 +356,20 @@ proc mergeParsedExif*(metadata: JsonNode, data: string) =
   let summary = exifSummary(exif)
   if summary != "":
     metadata["exifSummary"] = %summary
+
+proc readExifHead*(path: string): string =
+  ## A JPEG file's first ExifScanBytes: enough for the EXIF segment without
+  ## reading a multi-megabyte photo whole. "" for anything else.
+  let lowerPath = path.toLowerAscii()
+  if not (lowerPath.endsWith(".jpg") or lowerPath.endsWith(".jpeg")):
+    return ""
+  var file: File
+  if not open(file, path):
+    return ""
+  defer: file.close()
+  try:
+    result = newString(ExifScanBytes)
+    let bytesRead = file.readBuffer(addr result[0], result.len)
+    result.setLen(max(bytesRead, 0))
+  except CatchableError:
+    result = ""

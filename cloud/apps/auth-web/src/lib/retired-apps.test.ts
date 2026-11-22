@@ -74,22 +74,25 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
   });
 
   it("knows which runtimes lack the replacement", () => {
-    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
+    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
     // 2026.10.22 is the first release without the Nim agenda.
-    expect(keywordsRuntimeLacks("2026.10.13")).toEqual(["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("2026.10.21")).toEqual(["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock"]);
+    expect(keywordsRuntimeLacks("2026.10.13")).toEqual(["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.10.21")).toEqual(["data/eventsToAgenda", "render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
     // 2026.11.5 is the first release without the Nim calendar.
-    expect(keywordsRuntimeLacks("2026.10.22")).toEqual(["render/calendar", "data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("2026.11.4")).toEqual(["render/calendar", "data/icalJson", "data/clock"]);
+    expect(keywordsRuntimeLacks("2026.10.22")).toEqual(["render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.11.4")).toEqual(["render/calendar", "data/icalJson", "data/clock", "data/localImage"]);
     // 2026.11.6 is the first release without the Nim iCal parser.
-    expect(keywordsRuntimeLacks("2026.11.5")).toEqual(["data/icalJson", "data/clock"]);
-    expect(keywordsRuntimeLacks("2026.11.6")).toEqual(["data/clock"]);
+    expect(keywordsRuntimeLacks("2026.11.5")).toEqual(["data/icalJson", "data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.11.6")).toEqual(["data/clock", "data/localImage"]);
     // 2026.11.11 is the first release without the Nim clock.
-    expect(keywordsRuntimeLacks("2026.11.10")).toEqual(["data/clock"]);
-    expect(keywordsRuntimeLacks("2026.11.11")).toEqual([]);
+    expect(keywordsRuntimeLacks("2026.11.10")).toEqual(["data/clock", "data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.11.11")).toEqual(["data/localImage"]);
+    // 2026.11.15 is the first release without the Nim local image.
+    expect(keywordsRuntimeLacks("2026.11.14")).toEqual(["data/localImage"]);
+    expect(keywordsRuntimeLacks("2026.11.15")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);
   });

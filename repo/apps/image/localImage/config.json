@@ -1,6 +1,6 @@
 {
   "name": "Local Image",
-  "description": "Show an image from the SD card",
+  "description": "Show an image from the frame's files: one picture, or a folder of them one at a time.",
   "category": "data",
   "version": "1.0.0",
   "permissions": ["files"],
@@ -13,7 +13,8 @@
       "value": "",
       "required": true,
       "label": "Image filename or folder",
-      "placeholder": "Defaults to the assets folder (e.g. /srv/assets)"
+      "placeholder": "Defaults to the assets folder (e.g. /srv/assets)",
+      "hint": "In the frame's files: its assets folder (an SD card on an ESP32) or /srv/internal."
     },
     {
       "name": "order",
@@ -50,16 +51,7 @@
   "output": [
     {
       "name": "image",
-      "type": "image",
-      "capabilities": {
-        "intoTarget": {
-          "fits": [
-            "cover", "contain", "stretch", "center",
-            "top-left", "top-center", "top-right", "center-left", "center-right",
-            "bottom-left", "bottom-center", "bottom-right"
-          ]
-        }
-      }
+      "type": "image"
     }
   ],
   "cache": {

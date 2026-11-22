@@ -192,6 +192,7 @@ export const BUILTIN_APP_ACCESS: Readonly<
   Record<string, { permissions?: readonly ScenePermission[]; settings?: readonly string[] }>
 > = {
   'data/chromiumScreenshot': { permissions: ['shell'] },
+  // Retired to repo/apps/image/localImage (docs/retired-apps.json): a scene not yet converted still names it.
   'data/localImage': { permissions: ['files'] },
   'data/rstpSnapshot': { permissions: ['shell'] },
 }

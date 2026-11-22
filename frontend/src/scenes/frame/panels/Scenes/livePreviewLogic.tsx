@@ -77,7 +77,7 @@ export function measureFps(arrivals: readonly number[]): number | null {
 
 // Apps that can't work in the browser preview: excluded from the wasm build
 // (see frameos/src/apps/apps.nim — child processes, external binaries).
-// data/localImage works: it reads the browser asset folder (see
+// The Local Image app works: it reads the browser asset folder (see
 // BrowserAssetsModal) mounted at the frame's /srv/assets path.
 const WASM_UNAVAILABLE_APPS: Record<string, string> = {
   'data/chromiumScreenshot': 'requires Playwright/Chromium',

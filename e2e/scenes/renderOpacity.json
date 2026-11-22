@@ -57,9 +57,9 @@
           "inputEnabled": true
         },
         "config": {
-          "path": "./assets/bird.png"
+          "url": "https://frameos.net/img/bird_in_ci_tests.png"
         },
-        "keyword": "data/localImage"
+        "keyword": "data/downloadImage"
       },
       "dragging": false,
       "height": 216,

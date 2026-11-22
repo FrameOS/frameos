@@ -45,9 +45,9 @@
         "y": 100
       },
       "data": {
-        "keyword": "data/localImage",
+        "keyword": "data/downloadImage",
         "config": {
-          "path": "./assets/image.png"
+          "url": "https://frameos.net/img/logo_in_ci_tests.png"
         },
         "cache": {
           "enabled": true,
