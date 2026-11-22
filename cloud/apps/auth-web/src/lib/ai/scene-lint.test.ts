@@ -731,6 +731,16 @@ describe("lintScenes", () => {
     expect(messages([markup]).errors).toEqual([expect.stringContaining("SVG root needs a viewBox attribute")]);
   });
 
+  it("reads no app test file: its fixtures never reach a frame", () => {
+    const tested = withDrawingApp({
+      "app.tsx":
+        "export function get(app, context) {\n  const w = context.imageWidth\n  return <svg viewBox={`0 0 ${w} ${w}`} width={w} height={w} />\n}",
+      "app.test.tsx":
+        "const PAGE = `<html><head><style>.gone { display: none }</style></head><body><svg width=\"300\" height=\"100\"></svg></body></html>`\ntest('parses', () => {})",
+    });
+    expect(messages([tested])).toEqual({ errors: [], warnings: [] });
+  });
+
   it("steers SVG markup built as a string to JSX, and leaves JSX and catalog templates alone", () => {
     const withDrawing = withDrawingApp;
     const markup = "export function get(app, context) {\n  const w = context.imageWidth\n  return frameos.svg(`<svg viewBox=\"0 0 ${w} ${w}\"><circle r=\"4\"/></svg>`)\n}";

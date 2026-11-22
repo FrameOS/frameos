@@ -733,6 +733,12 @@ export function lintScene(
         if (typeof content !== "string" || !/\.(ts|js|tsx|jsx)$/.test(file)) {
           continue;
         }
+        // An app's tests run in the editor and CI, never on a frame (no frame
+        // is sent them): their fixtures may hold any markup a test needs, such
+        // as a web page with <style> for the Browser's parser.
+        if (/\.test\.(ts|js|tsx|jsx)$/.test(file)) {
+          continue;
+        }
         // Only the main module is held to the get()/run() contract; helpers
         // export whatever app.ts imports from them.
         const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, sceneAppCategory(obj(raw))) : [];
