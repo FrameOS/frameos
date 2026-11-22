@@ -254,6 +254,17 @@ suite "local image js app":
     check context.decodeBoundsWidth == 0 # taken, one-shot
     check context.decodeBoundsClaimedBy == h.owner.nodeId
 
+  test "a working-directory assets folder, named with or without its ./":
+    # The e2e harness's frame reads tmp/assets, its scene names ./tmp/assets/image.png.
+    let relative = "tmp" / ("local-image-js-relative-" & $(epochTime() * 1000).int64)
+    createDir(relative)
+    defer: removeDir(relative)
+    writePpm(relative / "image.ppm", 9, 9, 9)
+    let h = newHarness(relative)
+    let shown = h.get(%*{"path": "./" & relative & "/image.ppm", "metadataStateKey": "meta"})
+    check shown.unsafe[0, 0].r == 9
+    check h.scene.state["meta"]["total"].getInt() == 1
+
   test "its place in the folder outlives its interpreter":
     # On an ESP32 an idle interpreter goes after each render; what it
     # remembered (frameos.remember) is the node's, not the interpreter's.

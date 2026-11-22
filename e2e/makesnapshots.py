@@ -220,6 +220,9 @@ def write_runtime_frame_config(upload_url, frame_size=None):
     ])
     device_config["uploadHeaders"] = headers
     contents["deviceConfig"] = device_config
+    # "tmp/assets": without a leading "./", which the runtime's asset paths
+    # are normalized without (the Local Image app reads the scene's
+    # "./tmp/assets/image.png" as in it).
     contents["assetsPath"] = str(prepare_assets_folder(contents.get("assetsPath") or ""))
 
     runtime_config_path = Path("./tmp/frame.snapshot.json")

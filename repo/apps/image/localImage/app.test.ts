@@ -143,6 +143,9 @@ describe('localImage', () => {
     expect(resolveFolder('', '/srv/assets')).toEqual({ storage: 'assets', dir: '' })
     expect(resolveFolder('/srv/assets/../etc', '/srv/assets')).toBeNull()
     expect(resolveFolder('/srv/assetsx', '/srv/assets')).toBeNull()
+    // A working-directory folder, with or without its "./".
+    expect(resolveFolder('./tmp/assets/a.png', 'tmp/assets')).toEqual({ storage: 'assets', dir: 'a.png' })
+    expect(resolveFolder('tmp/assets/a.png', './tmp/assets/')).toEqual({ storage: 'assets', dir: 'a.png' })
     expect(shuffled(['a', 'b', 'c', 'd'], 7)).toEqual(shuffled(['a', 'b', 'c', 'd'], 7))
   })
 })

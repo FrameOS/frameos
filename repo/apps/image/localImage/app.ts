@@ -33,13 +33,19 @@ function trimSlashes(text: string): string {
   return text.length > 1 ? text.replace(/\/+$/, '') : text
 }
 
+// A path as compared: no trailing slash, no leading "./" (a working-directory
+// assets folder is written both ways).
+function comparable(text: string): string {
+  return trimSlashes(text.replace(/^(\.\/)+/, ''))
+}
+
 // Where `path` is among the frame's storages: the storage and the path in it
 // ('' for its root), or null when it is outside them.
 export function resolveFolder(path: unknown, assetsPath: string): { storage: string; dir: string } | null {
-  const wanted = trimSlashes(String(path ?? '').trim())
+  const wanted = comparable(String(path ?? '').trim())
   if (!wanted) return { storage: 'assets', dir: '' }
   for (const [storage, root] of [
-    ['assets', trimSlashes(assetsPath || '/srv/assets')],
+    ['assets', comparable(assetsPath || '/srv/assets')],
     ['internal', INTERNAL_ROOT],
   ]) {
     if (wanted === root) return { storage, dir: '' }
