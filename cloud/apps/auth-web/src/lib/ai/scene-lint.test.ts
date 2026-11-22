@@ -256,6 +256,17 @@ describe("lintScenes", () => {
     ).toEqual([expect.stringContaining('unknown role "timeout"')]);
   });
 
+  it("accepts one backgroundColor role on a color field and rejects the rest", () => {
+    const bars = { name: "background", role: "backgroundColor", type: "color", value: "#ffffff" };
+    expect(messages([scene({ fields: [bars] })])).toEqual({ errors: [], warnings: [] });
+    expect(
+      messages([scene({ fields: [bars, { ...bars, name: "bars" }] })]).errors,
+    ).toEqual([expect.stringContaining('"background" and "bars" both have role "backgroundColor"')]);
+    expect(
+      messages([scene({ fields: [{ ...bars, type: "string" }] })]).errors,
+    ).toEqual([expect.stringContaining('role "backgroundColor" but type "string"')]);
+  });
+
   it("accepts one renderScale role and a settings.renderScale up to 4", () => {
     const zoom = { name: "zoom", role: "renderScale", type: "float", value: "1.5" };
     const seconds = { name: "seconds", role: "refreshInterval", type: "float", value: "600" };

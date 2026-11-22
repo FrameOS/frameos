@@ -149,6 +149,18 @@ export function buildPhotoAlbumScene(options: {
         type: "select",
         value: options.fit,
       },
+      // Its role makes it the scene's background color: the bars around a
+      // photo shown whole, nothing when a photo fills the screen
+      // (frameos/src/frameos/scene_background.nim).
+      {
+        access: "public",
+        label: "Background",
+        name: "background",
+        persist: "disk",
+        role: "backgroundColor",
+        type: "color",
+        value: "#000000",
+      },
       ...photoAlbumShapes.map((shape) => ({
         access: "public",
         label: shape.label,

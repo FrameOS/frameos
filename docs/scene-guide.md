@@ -185,6 +185,12 @@ part people can see and change:
   sleep after one render only. When the interval deserves its own label
   ("Seconds per image"), declare one `float` field with
   `"role": "refreshInterval"`; its value is then the interval.
+- `settings.backgroundColor` is what shows wherever nothing is drawn: the bars
+  around a photo shown whole (`contain`) on a screen of another shape. To let
+  people pick it, declare one `color` field with `"role": "backgroundColor"`;
+  its value is then the background. Never paint the bars yourself with a
+  full-screen `render/color` before the image: the background costs nothing
+  when the picture covers the screen, a fill always does.
 - A scene drawn inside another (a `scene` node, such as a split's panel)
   renders on its own `refreshInterval`, and in between the frame shows the
   picture it drew last time. A split made in the editor renders at most as

@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { FrameScene } from '../../types'
+import type { FrameScene, StateField } from '../../types'
 import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../../generated/repoApps'
 import { buildSceneApp } from '../../utils/sceneApps'
+import { BACKGROUND_COLOR_ROLE } from '../../utils/sceneBackground'
 
 export const PHOTO_ALBUM_APP_ORIGIN = 'repo/apps/image/photoAlbum'
 const PHOTO_ALBUM_APP_KEY = 'photoAlbum'
@@ -59,6 +60,22 @@ export interface PhotoAlbumSceneOptions {
   photo?: string
 }
 
+/** The scene's Background, its role the scene's background color
+ * (utils/sceneBackground.ts): the bars around a photo it shows whole, a
+ * control on the frame's page, and nothing drawn when a photo fills the
+ * screen. */
+function backgroundField(value: string): StateField {
+  return {
+    name: 'background',
+    role: BACKGROUND_COLOR_ROLE,
+    label: 'Background',
+    type: 'color',
+    persist: 'disk',
+    access: 'public',
+    value,
+  }
+}
+
 /** A scene that shows one photo of an album per render: render event →
  * render/image fed by the photoAlbum app, then sleep for `seconds`. The link
  * sits in the app node's config, out of the public state. The backend and the
@@ -66,6 +83,7 @@ export interface PhotoAlbumSceneOptions {
  * docs/photo-album-scene.json pins all three. */
 export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScene {
   const sources = embeddedRepoAppSources[PHOTO_ALBUM_APP_ORIGIN]
+  const background = options.backgroundColor ?? '#000000'
   if (!sources) {
     throw new Error('The Photo album app is missing from this build.')
   }
@@ -105,7 +123,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
       id: uuidv4(),
       name: options.name,
       settings: {
-        backgroundColor: options.backgroundColor ?? '#000000',
+        backgroundColor: background,
         refreshInterval: seconds,
         execution: 'interpreted',
       },
@@ -119,6 +137,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
           access: 'public',
           value: options.fit,
         },
+        backgroundField(background),
       ],
       nodes: [
         node(ids.event, 'event', { keyword: 'render' }, -320, 120),
@@ -158,7 +177,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
     id: uuidv4(),
     name: options.name,
     settings: {
-      backgroundColor: options.backgroundColor ?? '#000000',
+      backgroundColor: background,
       refreshInterval: seconds,
       execution: 'interpreted',
     },
@@ -191,6 +210,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         access: 'public',
         value: options.fit,
       },
+      backgroundField(background),
       ...PHOTO_ALBUM_SHAPES.map((shape) => ({
         name: shape.value,
         label: shape.label,

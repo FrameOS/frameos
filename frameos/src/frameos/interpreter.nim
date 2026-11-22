@@ -22,6 +22,7 @@ import frameos/events
 import frameos/planner
 import frameos/refresh_interval
 import frameos/render_scale
+import frameos/scene_background
 import frameos/runtime_diagnostics
 import frameos/render_probe
 import std/monotimes
@@ -1933,6 +1934,7 @@ proc initScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     renderScaleKey: exportedScene.renderScaleKey,
     renderScaleSetting: exportedScene.renderScaleSetting,
     backgroundColor: exportedScene.backgroundColor,
+    backgroundColorKey: exportedScene.backgroundColorKey,
     state: %*{},
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
@@ -2316,7 +2318,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     # Owed, not painted: whatever draws first pays it, and a first paint
     # that covers the canvas opaquely waives it (ExecutionContext's
     # backgroundPending). Paid below when nothing draws.
-    context.backgroundColor = scene.backgroundColor
+    context.backgroundColor = sceneBackgroundColor(scene)
     context.backgroundPending = true
     scene.slots.setLen(0)
     # One render listener whose flow is one node: what that node draws is the
@@ -3081,6 +3083,8 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     renderScaleKey: renderScaleFieldKey(scene.fields),
     # Out of range is ignored where it is read (sceneRenderScale).
     renderScaleSetting: settings.renderScale,
+    # Its background from a role field, over the setting (scene_background).
+    backgroundColorKey: backgroundColorFieldKey(scene.fields),
     init: init,
     render: render,
     runEvent: runEvent,

@@ -102,6 +102,18 @@ def build_photo_album_scene(
                 "access": "public",
                 "value": fit,
             },
+            {
+                # Its role makes it the scene's background color: the bars
+                # around a photo shown whole, nothing when a photo fills the
+                # screen (frameos/src/frameos/scene_background.nim).
+                "name": "background",
+                "role": "backgroundColor",
+                "label": "Background",
+                "type": "color",
+                "persist": "disk",
+                "access": "public",
+                "value": "#000000",
+            },
             *(
                 {
                     "name": shape["value"],

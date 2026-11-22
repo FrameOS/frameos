@@ -52,6 +52,15 @@
         "value": "contain"
       },
       {
+        "name": "background",
+        "role": "backgroundColor",
+        "label": "Background",
+        "type": "color",
+        "persist": "disk",
+        "access": "public",
+        "value": "#000000"
+      },
+      {
         "name": "landscape",
         "label": "Landscape photos",
         "type": "boolean",

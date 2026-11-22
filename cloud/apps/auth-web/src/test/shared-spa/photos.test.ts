@@ -294,7 +294,7 @@ describe('buildPhotoAlbumScene', () => {
       photo: 'trip/beach.jpg',
     })
     // Nothing to shuffle through and no interval to pick: only the fit stays.
-    expect((single.fields as { name: string }[]).map((field) => field.name)).toEqual(['fit'])
+    expect((single.fields as { name: string }[]).map((field) => field.name)).toEqual(['fit', 'background'])
     expect((single.nodes as unknown as TestNode[]).map((node) => node.data.keyword)).toEqual([
       'render',
       'render/image',
@@ -328,6 +328,20 @@ describe('buildPhotoAlbumScene', () => {
     expect(
       buildPhotoAlbumScene({ ...white, order: 'random', fit: 'contain', photo: 'a.jpg' }).settings?.backgroundColor
     ).toBe('#ffffff')
+    // The scene's Background field holds it too: its role makes the field's
+    // value the background (scene_background.nim), so the frame's page can
+    // change the bars, and nothing is drawn for them when a photo fills.
+    for (const built of [
+      buildPhotoAlbumScene({ ...white, order: 'random', fit: 'contain' }),
+      buildPhotoAlbumScene({ ...white, order: 'random', fit: 'contain', photo: 'a.jpg' }),
+    ]) {
+      expect(built.fields?.find((field) => field.name === 'background')).toMatchObject({
+        role: 'backgroundColor',
+        type: 'color',
+        access: 'public',
+        value: '#ffffff',
+      })
+    }
   })
 })
 

@@ -1585,7 +1585,7 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
     }
     assert scene["name"] == "Summer 2026"
     assert scene["settings"]["refreshInterval"] == 600
-    assert [field["value"] for field in scene["fields"]] == ["600", "newest", "contain", "true", "false", "true", "0"]
+    assert [field["value"] for field in scene["fields"]] == ["600", "newest", "contain", "#000000", "true", "false", "true", "0"]
     # The link the scene carries plays.
     assert (await no_auth_client.get(f"/api/photos/shared/{token}")).json()["count"] == 1
 
@@ -1600,7 +1600,7 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
     assert db.query(PhotoShare).count() == 2
     assert again["scene"]["name"] == "Beach"
     assert again["scene"]["settings"]["refreshInterval"] == 3600
-    assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "true", "true", "true", "0"]
+    assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "#000000", "true", "true", "true", "0"]
     assert again["scene"]["id"] != scene["id"]
 
     # The address is the frame's: https and an IPv6 literal.
