@@ -25,6 +25,17 @@ static inline void *fos_big_realloc(void *ptr, size_t size)
     return heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
 }
 
+// A cold buffer that would otherwise be a static: in PSRAM where the board
+// has some, else (or when PSRAM is full) internal RAM, zeroed. For what is
+// read now and then, never by an interrupt, a DMA or with the flash cache
+// off: a static of ours sits in internal .bss, where every KB is a KB less
+// for DMA buffers, task stacks and Wi-Fi (docs/esp32-memory.md, "Statics").
+static inline void *fos_cold_calloc(size_t count, size_t size)
+{
+    return heap_caps_calloc_prefer(count, size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 // Internal RAM as malloc() sees it.
 //
 // heap_caps_get_free_size(MALLOC_CAP_INTERNAL) sums every heap that carries

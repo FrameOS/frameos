@@ -1392,7 +1392,10 @@ void frameos_nim_set_log_tap(void (*tap)(const char *line, uint32_t seq))
  * (which drains on flush) and the cloud tap (live sessions only). Serves
  * GET /logs, the cloud get_logs verb and `usb_api logs`. Guarded by the same
  * lock as the upload queue. */
-static frameos_log_entry_t s_log_ring[FOS_NIM_LOG_RING_CAP];
+/* 2 KB of entries (the lines are in PSRAM already): in PSRAM too where the
+ * board has some, allocated at the first line under the lock, so internal
+ * RAM keeps them for DMA, stacks and Wi-Fi. */
+static frameos_log_entry_t *s_log_ring = NULL;
 static size_t s_log_ring_next = 0;
 static size_t s_log_ring_count = 0;
 static uint32_t s_log_ring_seq = 0;
@@ -1417,6 +1420,16 @@ static uint32_t ring_log_line(const char *msg)
         free(line);
         return 0;
     }
+    if (s_log_ring == NULL) {
+        s_log_ring = heap_caps_calloc_prefer(FOS_NIM_LOG_RING_CAP, sizeof(frameos_log_entry_t), 2,
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                             MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (s_log_ring == NULL) {
+            xSemaphoreGive(s_log_lock);
+            free(line);
+            return 0;
+        }
+    }
     uint32_t seq = ++s_log_ring_seq;
     free(s_log_ring[s_log_ring_next].line);
     s_log_ring[s_log_ring_next].line = line;
@@ -1432,7 +1445,7 @@ size_t frameos_nim_log_recent(frameos_log_entry_t *out, size_t max)
 {
     if (out == NULL || max == 0 || s_log_lock == NULL) return 0;
     if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return 0;
-    size_t take = s_log_ring_count < max ? s_log_ring_count : max;
+    size_t take = s_log_ring == NULL ? 0 : (s_log_ring_count < max ? s_log_ring_count : max);
     /* Oldest-first of the newest `take` entries. */
     size_t start = (s_log_ring_next + FOS_NIM_LOG_RING_CAP - take) % FOS_NIM_LOG_RING_CAP;
     size_t copied = 0;
