@@ -2190,6 +2190,10 @@ static void ws_handle_asset_verb_in(asset_job_kind_t kind, const cJSON *root, co
         ws_ack(id, false, "busy");
         return;
     }
+    /* The cloud task runs it now rather than at its next 1 s tick: an upload
+     * has one chunk in flight at a time, so the tick (half a second on
+     * average) was added to every chunk, 35 of them for a phone photo. */
+    if (s_task) xTaskNotifyGive(s_task);
     if (ack_now) ws_ack(id, true, NULL);
 }
 
@@ -3946,7 +3950,8 @@ static void cloud_task(void *arg)
              * tick keeps browse-the-SD latency humane; the polls are cheap
              * flag/queue checks. */
             ws_process_asset_jobs();
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            /* The tick, cut short when an asset job is queued. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
             continue;
         }
 
