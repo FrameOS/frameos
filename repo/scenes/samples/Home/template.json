@@ -6,5 +6,5 @@
   "imageWidth": 800,
   "imageHeight": 600,
   "scenes": "./scenes.json",
-  "frameosVersion": "2026.11.0"
+  "frameosVersion": "2026.11.14"
 }

@@ -659,6 +659,14 @@ export function get(app, context) {
   its props are the same; pass it values (`<Card i={i} on={on[i]} />`) and
   make its `onClick` inside it, since a function made anew each render is
   never equal.
+- What a tap changes can be a `signal(v)` (FrameOS 2026.11.14+): a `memo()`'d
+  component that reads `x.value` is subscribed, and a handler that only sets
+  signals redraws just those components, without running `get()`. A grid
+  holds one signal per cell (`const lit = cells.map(() => signal(false))`,
+  `<Cell i={i} />` reading `lit[i].value`), the status line one of its own.
+  The rule: a handler that sets a signal changes nothing else the picture
+  reads (a module variable it changes there shows only at the next whole
+  render); keep a value that must last through `frameos.remember` as before.
 - Fields: `<input value={v} onChange={(e) => { v = e.target.value }} />`
   and `<textarea>`, controlled as in React (`placeholder`, `type="password"`
   or `"number"`, `onKeyDown` with `e.key`; `focus:` and `placeholder:`
@@ -1178,6 +1186,16 @@ declare namespace JSX {
  * (onClick={() => ...}) is never equal: pass values, make handlers inside.
  */
 declare function memo<P extends Record<string, any>>(component: (props: P) => any): (props: P & { key?: string | number }) => any;
+/**
+ * signal(value): a value a memo()'d component reads through .value, which
+ * subscribes it. A handler that sets signals and nothing else the picture
+ * reads redraws only the components that read them, without running get()
+ * (docs/jsx-ui.md "Signals"). .peek() reads without subscribing. One
+ * signal per list item, not one every item compares with.
+ * FrameOS 2026.11.14+.
+ */
+interface Signal<T> { value: T; peek(): T; }
+declare function signal<T>(value: T): Signal<T>;
 
 interface FrameOSApp {
   nodeId: number;

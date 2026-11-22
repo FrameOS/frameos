@@ -126,8 +126,8 @@ whole, as before.
 
 ## Signals (experimental)
 
-*2026.11.14+, not in the scene guide or `appTypeDeclarations.ts` yet: making
-it public is those two plus the AI evals, as for `docs/async-js.md`.*
+*2026.11.14+. In the scene guide and `appTypeDeclarations.ts` since the
+store's tap-driven samples moved to it (2026-11-22).*
 
 A tap normally runs `get()` again: the whole tree is made and read, and
 `memo()` hands back what did not change. A `signal` lets a handler say what
