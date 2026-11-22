@@ -136,9 +136,11 @@ function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-// The error as a picture: white, the message wrapped in it.
+// The error as a picture: white, the message wrapped in it in black, as the
+// runtime's error frame is (32 px there; here up to that, at least 14, so a
+// small frame a device makes still reads when it is drawn larger).
 export function errorPanel(width: number, height: number, message: string): string {
-  const size = Math.max(10, Math.round(Math.min(width, height) / 24))
+  const size = Math.min(32, Math.max(14, Math.round(Math.min(width, height) / 12)))
   const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))
   const lines: string[] = []
   for (const paragraph of message.split('\n')) {
@@ -154,7 +156,7 @@ export function errorPanel(width: number, height: number, message: string): stri
   const text = lines
     .map(
       (l, i) =>
-        `<text x="${size}" y="${size * 2 + i * Math.round(size * 1.35)}" font-family="Ubuntu" font-size="${size}" fill="#111111">${esc(l)}</text>`
+        `<text x="${size}" y="${size * 2 + i * Math.round(size * 1.35)}" font-family="Ubuntu" font-size="${size}" fill="#000000">${esc(l)}</text>`
     )
     .join('')
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"><rect width="${width}" height="${height}" fill="#ffffff"/>${text}</svg>`

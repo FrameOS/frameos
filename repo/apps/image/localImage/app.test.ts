@@ -90,7 +90,7 @@ describe('localImage', () => {
     const error = mock.frameos('error')
     const noMatch = get(makeApp({ config: { path: '', search: 'none' } }), render()) as { svg: string }
     expect(error.calls[0][0]).toBe('No images matching the search query "none" found in the folder: ')
-    expect(noMatch.svg).toContain('No images matching the search query &quot;none&quot;')
+    expect(noMatch.svg).toContain('No images matching the search query')
     const empty = get(
       makeApp({ config: { path: '/srv/assets/missing' } }),
       render({ imageWidth: 800, imageHeight: 480 })
