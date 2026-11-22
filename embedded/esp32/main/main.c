@@ -25,6 +25,7 @@
 #include "esp_spiffs.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
+#include "cJSON.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -382,8 +383,23 @@ static void log_bootup_event(bool online)
 #define BOOTMEM(stage) ((void)0)
 #endif
 
+/* cJSON's nodes and strings in PSRAM. Every malloc under
+ * CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16 KB) goes to internal RAM first, and
+ * a scene set's parse is thousands of 2-40 B blocks: a 25-scene push took the
+ * SenseCAP's internal floor to 171 B and the E1002's malloc-visible one to
+ * 16 B, leaving the Wi-Fi stack's internal-only TX buffers nothing
+ * (docs/esp32-memory.md, "cJSON"). A C3 has no PSRAM: the fallback is the
+ * default heap, as before. */
+static void *cjson_malloc(size_t size)
+{
+    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_DEFAULT);
+}
+
 void app_main(void)
 {
+    /* First, before anything parses JSON (the config's own maps included). */
+    cJSON_Hooks cjson_hooks = {.malloc_fn = cjson_malloc, .free_fn = heap_caps_free};
+    cJSON_InitHooks(&cjson_hooks);
     const esp_app_desc_t *app = esp_app_get_description();
     const esp_partition_t *running = esp_ota_get_running_partition();
     ESP_LOGI(TAG, "FrameOS %s (idf %s) booting from %s",

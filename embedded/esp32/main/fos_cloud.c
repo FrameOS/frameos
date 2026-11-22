@@ -3981,17 +3981,38 @@ static void cloud_task(void *arg)
     }
 }
 
+/* Whether this frame has anything for the cloud task to do. A frame that was
+ * never on the cloud (a backend's, a standalone one) has nothing: the task
+ * would wake every 5 s to re-derive a policy that cannot change, on an 8 KB
+ * internal stack it used 0.8 KB of (docs/esp32-memory.md, "Task stacks").
+ * Enrolled, enrolling (a claim token), a permanent enroll error a new claim
+ * token re-arms, or demoted with the cloud's scenes still resident (the
+ * policy follows the scenes and `set allow_local_network`): the task runs. */
+static bool cloud_task_needed(void)
+{
+    const fos_config_t *config = fos_config();
+    if (s_state != FOS_CLOUD_NONE) return true;
+    if (config->cloud_url[0] && config->claim_token[0]) return true;
+    return fos_scenes_from_cloud();
+}
+
 esp_err_t fos_cloud_start(void)
 {
+    static bool loaded = false;
     if (s_dispatch_lock == NULL) s_dispatch_lock = xSemaphoreCreateMutex();
     if (s_task != NULL) return ESP_OK;
-    /* Read the stored link state and arm the private-network policy here, not
-     * in the task: main() brings the render loop up immediately after this
-     * call, and an enrolled frame must not get to run even one scene HTTP
-     * request in the window before the task is first scheduled. Both are pure
-     * NVS reads plus string work — nothing that needs a task context. */
-    load_stored_state();
-    apply_network_policy();
+    if (!loaded) {
+        /* Read the stored link state and arm the private-network policy here,
+         * not in the task: main() brings the render loop up immediately after
+         * this call, and an enrolled frame must not get to run even one scene
+         * HTTP request in the window before the task is first scheduled. Both
+         * are pure NVS reads plus string work — nothing that needs a task
+         * context. */
+        loaded = true;
+        load_stored_state();
+        apply_network_policy();
+    }
+    if (!cloud_task_needed()) return ESP_OK;
     if (xTaskCreate(cloud_task, "fos_cloud", FOS_CLOUD_TASK_STACK, NULL, 3, &s_task) != pdPASS) {
         s_task = NULL;
         ESP_LOGE(TAG, "cloud task start failed");

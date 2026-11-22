@@ -46,7 +46,8 @@ bool fos_ota_busy(void);
 void fos_ota_replay_last_line(void);
 bool fos_ota_boot_request_pending(void);
 esp_err_t fos_ota_run_boot_request(void);
-/* Background task that checks every interval_hours (backend-managed). */
+/* A check every interval_hours (backend-managed): a timer that starts a
+ * short-lived task for each check, so no stack is held between them. */
 void fos_ota_start_periodic_task(uint32_t interval_hours);
 /* Request an early-boot OTA check and schedule a reboot into it. The delay
  * lets HTTP and USB callers flush their acknowledgement first. */

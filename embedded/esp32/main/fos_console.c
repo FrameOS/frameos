@@ -45,6 +45,7 @@
 #include "fos_console_line.h"
 #include "fos_events.h"
 #include "fos_usb_pads.h"
+#include "fos_usj_attach.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
@@ -1163,6 +1164,9 @@ static int cmd_set(int argc, char **argv)
         return 1;
     }
     printf("ok: %s set (some settings need `restart`)\n", key);
+    /* A frame that was never on the cloud runs no cloud task: provisioning
+     * one (the flasher's `set cloud_url` + `set claim_token`) starts it. */
+    if (strcmp(key, "claim_token") == 0 || strcmp(key, "cloud_url") == 0) fos_cloud_start();
     if (strcmp(key, "backend") == 0 && value[0] && fos_cloud_state() == FOS_CLOUD_ENROLLED) {
         print_backend_owns_cloud_frame();
     }
@@ -2364,6 +2368,29 @@ static void console_feed_byte(console_line_state_t *state, uint8_t ch)
     }
 }
 
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+static esp_err_t console_init_usb_serial_jtag(void);
+/* The USB-Serial/JTAG channel's driver goes in only once a host is seen on
+ * the native port (fos_usj_attach.h): its rings are 10 KB of internal RAM. */
+static fos_usj_attach_t s_usj_attach;
+
+static void console_poll_usb_serial_jtag(void)
+{
+    static TickType_t last = 0;
+    TickType_t now = xTaskGetTickCount();
+    if (s_usj_attach.installed || now - last < pdMS_TO_TICKS(FOS_USJ_ATTACH_POLL_MS)) return;
+    last = now;
+    if (!fos_usj_attach_poll(&s_usj_attach, fos_usb_pads_claimed(), usb_serial_jtag_is_connected())) return;
+    esp_err_t err = console_init_usb_serial_jtag();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
+        return;
+    }
+    printf("console: a USB host on the native port, usb-serial-jtag channel up\n");
+    console_prompt();
+}
+#endif
+
 static void fos_console_task(void *arg)
 {
     (void)arg;
@@ -2389,8 +2416,12 @@ static void fos_console_task(void *arg)
              * busy port never waits one timeout per byte. */
             uint8_t ch;
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-            /* No driver behind it on a board whose USB pads are spoken for. */
-            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG && fos_usb_pads_claimed()) continue;
+            /* No driver behind it until a host is seen, and never on a board
+             * whose USB pads are spoken for. */
+            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG) {
+                console_poll_usb_serial_jtag();
+                if (!s_usj_attach.installed) continue;
+            }
 #endif
             int n = console_channel_read(states[i].channel, &ch, 1, pdMS_TO_TICKS(10));
             while (n > 0) {
@@ -2476,13 +2507,10 @@ esp_err_t fos_console_start(void)
      * driver would take the pads back from them. The UART channel is the
      * console there. */
     bool usb_pads_taken = fos_usb_pads_claimed();
-    if (!usb_pads_taken) {
-        err = console_init_usb_serial_jtag();
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
-            return err;
-        }
-    }
+    /* With the pads free, the driver waits for a USB host on the native port
+     * (console_poll_usb_serial_jtag, from the console task): stdout's mirror
+     * to it is the VFS's polled FIFO until then, which drops the bytes when
+     * no host reads them, as on a board with the pads claimed. */
 #endif
 #if FOS_CONSOLE_HAS_UART
     err = console_init_uart();

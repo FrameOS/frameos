@@ -44,8 +44,12 @@ typedef enum {
     FOS_CLOUD_ERROR,     /* enrollment permanently failed (claim token dead) */
 } fos_cloud_state_t;
 
-/* Start the background enrollment/WS task. Call once at boot; the task idles
- * until cloud_url (+ claim_token) exist in the config and Wi-Fi is up. */
+/* Load the stored link state, arm the private-network policy, and start the
+ * background enrollment/WS task when there is something for it to do
+ * (enrolled, a claim token stored, or the cloud's scenes still resident).
+ * Called at boot, and again whenever cloud_url or claim_token is set (the
+ * console's `set`, USB provisioning): a frame that was never on the cloud
+ * runs no task until then. */
 esp_err_t fos_cloud_start(void);
 
 #define FOS_CLOUD_TOKEN_LEN 256

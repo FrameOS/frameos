@@ -595,6 +595,65 @@ tables of the host-tested `fos_events.c` and `fos_scene_state.c`. List the
 next ones with `xtensa-esp32s3-elf-nm -S --size-sort -t d frameos_esp32.elf`,
 addresses from 0x3FC80000.
 
+## cJSON in PSRAM, and no RAM for what does not run (2026-11-23)
+
+`CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` (16 KB) sends every smaller `malloc`
+to internal RAM first. Nim and QuickJS have their own PSRAM-first
+allocators; cJSON had none, and a scene set's parse is thousands of 2-40 B
+nodes and strings (on `fos_store`, `fos_client` and the HTTP server's task).
+A backend push of the SenseCAP's 25 scenes (453 KB) emptied the internal
+memory `malloc` can reach (16 bytes left) and the Wi-Fi stack's TX buffers,
+which must be internal (1,632 B each), took the rest: 171 bytes of internal
+RAM were left. The E1002's four scenes did the same to its malloc-visible
+pool. Nothing failed outright, because `malloc` then falls back to PSRAM;
+the Wi-Fi stack has no such fallback, and an HTTPS answer of 455 KB
+(`GET /api/frames/<id>/`) on the SenseCAP broke off after 28 KB.
+
+Three changes (`main.c`, `fos_cloud.c`, `fos_ota.c`, `fos_console.c` +
+`fos_usj_attach.c`):
+
+- **cJSON allocates PSRAM-first** (`cJSON_InitHooks` first thing in
+  `app_main`, `heap_caps_malloc_prefer` falling back to the default heap, so a
+  C3 is as before).
+- **The cloud task runs only on a frame with something for it** (enrolled, a
+  claim token stored, an enroll error a new token re-arms, or the cloud's
+  scenes still resident; `cloud_task_needed`). It used 0.8 KB of its 8 KB on a
+  frame never on the cloud. The console's `set cloud_url` / `set claim_token`
+  (the flasher's provisioning) starts it.
+- **The periodic OTA check is a timer** that starts a short-lived task per
+  check; the task parked in `ulTaskNotifyTake` for 24 hours held 8 KB for a
+  check that used 0.7 KB.
+- **The USB-Serial/JTAG console's driver goes in only when a USB host is
+  seen** on the native port (IDF's connection monitor, which reads the port's
+  start-of-frame bit from a tick hook and needs no driver), never with the
+  pads claimed. Its rings were 10 KB (8 KB in, 2 KB out) of malloc-visible
+  internal RAM on every board whose pads are free, and no bench board has a
+  host on that port (their consoles are CH340/CH343 bridges on UART0).
+  Hot-plugging a host is host-tested (`tests/test_fos_usj_attach.c`), not
+  tried on a board.
+
+Same moments, before (main) and after, `heap_caps` minima since boot (the
+probe of 2026-11-22: `iram reset`, the moment, the task table; a push is the
+bench backend's whole set with every scene changed):
+
+| Board, moment | Internal free | Internal min | malloc-visible min |
+| --- | --- | --- | --- |
+| SenseCAP, boot + idle | 46.2 → 76.5 KB | 8,231 → 50,723 B | 3,660 → 20,732 B |
+| SenseCAP, push of 25 scenes | | 267 → 39,567 B | 16 → 19,156 B |
+| SenseCAP, the HTTP API on :80 and :8443 | | 23 → 13,923 B | 16 → 9,716 B |
+| E1002 (on the cloud), boot + idle | 75.6 → 84.6 KB | 42,647 → 59,419 B | 15,288 → 23,316 B |
+| E1002, push of 4 scenes | | 20,499 → 47,427 B | 16 → 21,928 B |
+| E1002, the HTTP API | | 12,503 → 44,375 B | 16 → 21,928 B |
+
+The SenseCAP's +30 KB at idle is the two stacks (16.4 KB with their control
+blocks), the USB rings (10 KB) and the parse's leftovers; the E1002 keeps its
+cloud task and had no USB rings (its pads are its I2C bus), so it gains the
+OTA stack and the parse. With the HTTPS server on (it starts on both), the
+SenseCAP's 455 KB HTTPS answer completes. What is still internal-only and
+large at the lows: Wi-Fi TX buffers while the board sends a big answer or
+its picture (up to ~26 KB), and the HTTP server's stacks (next section).
++592 bytes of flash.
+
 ## What a loaded scene keeps (2026-11-21)
 
 A loaded scene used to keep every app's source twice:
