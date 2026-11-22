@@ -8,6 +8,7 @@ import { FrameSettingsProvider, useFrameSettings, type FrameSettingsProps } from
 import { GpioButtonsSection, InputSettingsSection } from './fields/sharedFields'
 import { ButtonActionsSection } from './fields/buttonActionsSection'
 import { ColorsSection } from './fields/colorsSection'
+import { DitheringSection } from './fields/ditheringSection'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
 import { LanAccessSection } from './sections/lanAccessSection'
 import { LayoutsSection } from './sections/layoutsSection'
@@ -205,6 +206,9 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="palette">
           <PaletteSection />
+        </FrameSettingsSection>
+        <FrameSettingsSection sectionKey="dithering">
+          <DitheringSection />
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="colors">
           <ColorsSection />

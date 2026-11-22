@@ -264,6 +264,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-palette',
+    'frame-settings-dithering',
     'frame-settings-colors',
     'frame-settings-qr',
     'frame-settings-assets',
@@ -338,6 +339,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // Palette: the ESP32 profile only (esp32CloudOnlyFrameSettingsSections);
     // a cloud Pi edits its palette inside the unlinked Panel fieldset.
     'frame-settings-palette',
+    // Dithering: ESP32 frames only (esp32CloudOnlyFrameSettingsSections), the
+    // ones the cloud packs a picture for (docs/dithering.md).
+    'frame-settings-dithering',
     'frame-settings-power',
     // The account's SSH keys, written into SD cards built for this frame
     // (cloud Linux frames only; FrameSettings skips it on an ESP32).
@@ -961,6 +965,7 @@ const esp32CloudFrameSettingsSections: readonly string[] = [
   'frame-settings-layouts',
   'frame-settings-power',
   'frame-settings-palette',
+  'frame-settings-dithering',
   'frame-settings-colors',
   'frame-settings-button-actions',
   'frame-settings-lan-access',
@@ -970,9 +975,10 @@ const esp32CloudFrameSettingsSections: readonly string[] = [
  * Sections only the cloud esp32 profile renders under their own heading. A
  * cloud Pi has the same setting (palette) but edits it inside the Panel
  * fieldset, whose heading is `frame-settings-hardware`, so a Palette link
- * there would scroll to nothing.
+ * there would scroll to nothing. Dithering applies only where the cloud packs
+ * the picture, which is an ESP32 (server rendering, thin clients).
  */
-const esp32CloudOnlyFrameSettingsSections: readonly string[] = ['frame-settings-palette']
+const esp32CloudOnlyFrameSettingsSections: readonly string[] = ['frame-settings-palette', 'frame-settings-dithering']
 
 /**
  * Sections only ESP32 frames render — for everyone else the anchor does not

@@ -350,6 +350,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     conditions: 'The heading always renders; panels without a palette get a line saying so.',
   },
   {
+    key: 'dithering',
+    title: 'Dithering',
+    anchor: 'frame-settings-dithering',
+    surfaces: ['backend', 'cloudEsp32'],
+    conditions:
+      'Only where the control plane packs the picture (server rendering, thin clients; docs/dithering.md); panels without a palette get a line saying so. Plane-side: never sent to the device, never a pending deploy.',
+  },
+  {
     key: 'colors',
     title: 'Colors',
     anchor: 'frame-settings-colors',

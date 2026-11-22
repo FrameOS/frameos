@@ -644,6 +644,8 @@ export interface FrameType {
   error_behavior?: FrameErrorBehavior
   palette?: Palette
   colors?: FrameColors
+  /** How the control plane dithers the packed picture (docs/dithering.md); null = Floyd–Steinberg. Never sent to the device. */
+  dither?: FrameDither | null
   buildroot?: FrameBuildrootConfig
   embedded?: FrameEmbeddedConfig
   rpios?: FrameRpiOSConfig
@@ -804,6 +806,15 @@ export interface FrameColorGlobal {
 }
 
 /** frame.json's `colors` (docs/asset-color-profiles.md). */
+/** The frame's `dither` setting (backend/app/utils/panel_dither.py, cloud panel-dither.ts). */
+export interface FrameDither {
+  method: 'floydSteinberg' | 'opendisplay'
+  algorithm?: string
+  dbs?: boolean
+  exposure?: number
+  viewingDistanceCm?: number
+}
+
 export interface FrameColors {
   /** The automatic fit of drawn images into the panel's range: `default` = on when the panel dithers to a palette. */
   autoFit?: 'default' | 'on' | 'off'
