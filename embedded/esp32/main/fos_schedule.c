@@ -181,6 +181,42 @@ static void swap_events(schedule_event_t *events, int count)
     free(old);
 }
 
+/* What /state/schedule.json holds, by length and FNV-1a of its bytes, so a
+ * set that changes nothing writes nothing. Every settings fetch and every
+ * cloud set_schedule carries the whole schedule, and a write is an open, two
+ * unlinks and a rename on SPIFFS: a name lookup each, ~0.5 s apiece on the
+ * 32 MB boards' /state. That was about 2 s on the render task after every
+ * scene push, in front of whatever was asked next (the bench, 2026-11-22:
+ * a switch to a scene waited 7 s). Unknown (false) until init has looked,
+ * and again after a write that failed; a length of 0 is no file. */
+static bool s_stored_known = false;
+static size_t s_stored_len = 0;
+static uint32_t s_stored_hash = 0;
+
+static uint32_t fnv1a(const char *bytes, size_t len)
+{
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h ^= (uint8_t)bytes[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void remember_stored(const char *json, size_t len)
+{
+    s_stored_len = json ? len : 0;
+    s_stored_hash = json ? fnv1a(json, len) : 0;
+    s_stored_known = true;
+}
+
+static bool stored_already(const char *json, size_t len)
+{
+    if (!s_stored_known) return false;
+    if (json == NULL || len == 0) return s_stored_len == 0;
+    return s_stored_len == len && s_stored_hash == fnv1a(json, len);
+}
+
 static esp_err_t persist(const char *json, size_t len)
 {
     if (json == NULL || len == 0) {
@@ -207,7 +243,10 @@ esp_err_t fos_schedule_set_json(const char *json, size_t len)
 {
     if (json == NULL || len == 0) {
         swap_events(NULL, 0);
-        persist(NULL, 0);
+        if (!stored_already(NULL, 0)) {
+            persist(NULL, 0);
+            remember_stored(NULL, 0);
+        }
         return ESP_OK;
     }
     if (len > SCHEDULE_MAX_BYTES) return ESP_ERR_INVALID_SIZE;
@@ -215,12 +254,22 @@ esp_err_t fos_schedule_set_json(const char *json, size_t len)
     int count = parse_events(json, len, &events);
     if (count < 0) return ESP_ERR_INVALID_ARG;
     swap_events(events, count);
-    esp_err_t err = persist(json, len);
-    char line[160];
+    bool unchanged = stored_already(json, len);
+    esp_err_t err = ESP_OK;
+    if (!unchanged) {
+        err = persist(json, len);
+        if (err == ESP_OK) {
+            remember_stored(json, len);
+        } else {
+            s_stored_known = false;
+        }
+    }
+    char line[176];
     snprintf(line, sizeof(line),
              "{\"event\":\"schedule:set\",\"source\":\"esp32\",\"events\":%d,"
-             "\"utcOffsetMinutes\":%d,\"persisted\":%s}",
-             count, s_utc_offset_minutes, err == ESP_OK ? "true" : "false");
+             "\"utcOffsetMinutes\":%d,\"persisted\":%s,\"unchanged\":%s}",
+             count, s_utc_offset_minutes, err == ESP_OK ? "true" : "false",
+             unchanged ? "true" : "false");
     frameos_nim_log_hook(line);
     return err;
 }
@@ -238,7 +287,10 @@ esp_err_t fos_schedule_init(void)
         nvs_close(nvs);
     }
     FILE *f = fopen(SCHEDULE_PATH, "rb");
-    if (f == NULL) return ESP_OK; /* no schedule stored */
+    if (f == NULL) {
+        remember_stored(NULL, 0); /* no schedule stored */
+        return ESP_OK;
+    }
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -254,6 +306,7 @@ esp_err_t fos_schedule_init(void)
     size_t got = fread(buf, 1, (size_t)size, f);
     fclose(f);
     buf[got] = '\0';
+    if (got == (size_t)size) remember_stored(buf, got);
     schedule_event_t *events = NULL;
     int count = parse_events(buf, got, &events);
     free(buf);
