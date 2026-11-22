@@ -1,6 +1,7 @@
 #include "fos_voice.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
@@ -230,12 +231,16 @@ static void bounded_copy(char *dst, size_t dst_len, const char *src)
 static void capture_task(void *arg)
 {
     (void)arg;
-    /* 1024 bytes = 32 ms: the DMA holds 90, so a read never waits long. */
-    static uint8_t block[1024];
+    /* 1024 bytes = 32 ms: the DMA holds 90, so a read never waits long. The
+     * mic copies out of its DMA buffers into it, so it can be in PSRAM: one
+     * while a sentence is heard, not a static in internal RAM for good. */
+    enum { BLOCK_BYTES = 1024 };
+    uint8_t *block = fos_cold_calloc(1, BLOCK_BYTES);
+    if (!block) ESP_LOGW(TAG, "mic read: no memory for the block");
     size_t discard = (size_t)VOICE_DISCARD_MS * FOS_MIC_BYTES_PER_SECOND / 1000;
-    while (s_capturing) {
+    while (block && s_capturing) {
         size_t got = 0;
-        esp_err_t err = fos_mic_read(block, sizeof(block), &got, 200);
+        esp_err_t err = fos_mic_read(block, BLOCK_BYTES, &got, 200);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "mic read: %s", esp_err_to_name(err));
             break;
@@ -254,6 +259,7 @@ static void capture_task(void *arg)
         s_written += got;
         if (s_written >= s_buf_cap) break; /* FOS_VOICE_MAX_SECONDS: the sentence ends here */
     }
+    free(block);
     s_capturing = false;
     s_capture_done = true;
     vTaskDelete(NULL);

@@ -24,6 +24,7 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_events_gen.h"
+#include "fos_mem.h"
 #include "fos_touch.h"
 #include "fos_voice.h"
 #include "fos_voice_binding.h"
@@ -91,14 +92,17 @@ static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
  * clicks nothing and carries `claimed`. */
 static bool s_voice_key[FOS_GPIO_BUTTONS_MAX];
 static fos_voice_hold_t s_hold[FOS_GPIO_BUTTONS_MAX];
-static char s_bound_map[FOS_EVENT_MAP_LEN];
+/* The map the voice keys were last read from: 1 KB, in PSRAM where there is
+ * some (fos_cold_calloc). Without it the keys are read every time. */
+static char *s_bound_map = NULL;
 static bool s_bound_once = false;
 
 static void refresh_voice_keys(const fos_config_t *config)
 {
-    if (s_bound_once && strcmp(s_bound_map, config->event_map) == 0) return;
+    if (s_bound_once && s_bound_map && strcmp(s_bound_map, config->event_map) == 0) return;
     s_bound_once = true;
-    strlcpy(s_bound_map, config->event_map, sizeof(s_bound_map));
+    if (!s_bound_map) s_bound_map = fos_cold_calloc(1, FOS_EVENT_MAP_LEN);
+    if (s_bound_map) strlcpy(s_bound_map, config->event_map, FOS_EVENT_MAP_LEN);
     char labels[FOS_GPIO_BUTTONS_MAX][FOS_VOICE_BINDING_LABEL_LEN];
     size_t bound = fos_voice_binding_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
     for (size_t i = 0; i < config->gpio_button_count; i++) {

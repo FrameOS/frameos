@@ -37,6 +37,18 @@ export function framePacedByInterval(
   if (frame.deep_sleep) {
     return true
   }
+  return frameHasPaperPanel(frame)
+}
+
+/**
+ * Whether the frame's panel is e-paper: the runtime's panelIsPaper
+ * (frameos/src/frameos/panel_shape.nim), on an ESP32 anything but an RGB565
+ * LCD, on a Pi by its device.
+ */
+export function frameHasPaperPanel(frame: Pick<FrameType, 'device' | 'hardware'> | null | undefined): boolean {
+  if (!frame) {
+    return false
+  }
   const device = frame.device ?? ''
   if (device === 'embedded') {
     return frame.hardware?.pixelFormat !== ESP32_PIXEL_RGB565

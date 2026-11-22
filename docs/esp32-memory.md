@@ -550,6 +550,51 @@ eight with ten, and once in eight of the release image (ten buffers) in the
 bench logs of 2026-11-18. Too few to blame the buffers or clear them; watch
 for it.
 
+## Statics (2026-11-22)
+
+What the firmware's own C declares at file scope lands in internal `.bss`,
+and internal RAM is what the frame has least of: the floor of the main
+internal region is reached at boot ("Where the floor is" above), so every
+KB of `.bss` is a KB less there for good. The largest were cold data that
+no interrupt, DMA or cache-off code reads, and they now come from
+`fos_cold_calloc` (`main/fos_mem.h`: PSRAM where the board has some, else
+internal) at first use:
+
+| Static | Bytes | Now |
+| --- | ---: | --- |
+| `s_config` (`fos_config.c`: two TLS PEMs, the event map, …) | 12,416 | by a constructor, before `app_main` (IDF puts PSRAM in the heap in its core init, before the constructors) |
+| `s_logged_routes` (`fos_http.c`) | 2,816 | at the first route |
+| `s_log_ring` (`frameos_nim_glue.c`; its lines were in PSRAM already) | 2,048 | at the first line, under the log lock |
+| `s_bound_map` (`fos_buttons.c`) | 1,024 | at the first read of the voice keys |
+| the voice capture's block (`fos_voice.c`) | 1,024 | while a sentence is heard |
+
+Static D/IRAM went from 182,395 to 163,019 bytes (`esp_idf_size` on the
+generic S3 image), for +432 bytes of flash (the file reads the config
+through a local pointer per function: through the global one, which the
+compiler loads again after every call, it was +1.7 KB). On the boards,
+against v2026.11.14 (`status`, `reboot`, `benchmark`; `heapinfo` after the
+benchmark, the main internal heap):
+
+| Board | Internal free at idle | Lowest since boot |
+| --- | --- | --- |
+| reTerminal E1002 | 62.4 → 87.9 KB | 8.0 → 26.3 KB |
+| reTerminal Sticky | 69.1 → 88.4 KB | 19.0 → 34.8 KB |
+| reTerminal E1003 | 85.8 → 105.2 KB | 32.1 → 52.9 KB |
+| reTerminal E1004 | 84.6 → 103.9 KB | 22.3 → 38.2 KB |
+| SenseCAP Indicator | 46.8 → 46.3-52.2 KB | 11.3 → 9.6-11.1 KB |
+
+The SenseCAP's floor did not rise because its HTTPS server now starts: every
+build since 2026.11.10 had skipped it at boot for low internal memory
+(`server=skipped: low memory` in `status`), and the server is where the gain
+went. Two runs of each image; the other boards' rows are one each. IDF's own way, `EXT_RAM_BSS_ATTR` with
+`CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`, is not open to us: it cannot
+be combined with `CONFIG_SPIRAM_IGNORE_NOTFOUND`, and the generic image must
+boot on an S3 without PSRAM. Not moved: what an ISR touches (`fos_touch.c`'s
+semaphore, `fos_mic.c`'s queue), DMA buffers, task stacks, and the 1.2 KB
+tables of the host-tested `fos_events.c` and `fos_scene_state.c`. List the
+next ones with `xtensa-esp32s3-elf-nm -S --size-sort -t d frameos_esp32.elf`,
+addresses from 0x3FC80000.
+
 ## What a loaded scene keeps (2026-11-21)
 
 A loaded scene used to keep every app's source twice:
