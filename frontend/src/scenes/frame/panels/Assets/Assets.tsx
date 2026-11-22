@@ -591,7 +591,7 @@ function AssetsSummaryHeader({
     <div className="frame-tool-card mb-4 overflow-hidden rounded-[22px]">
       <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-3 @3xl:gap-3 @3xl:px-4 @3xl:py-4">
         <div className="min-w-0">
-          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Assets</div>
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Files</div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
             <div className="truncate text-lg font-bold tracking-normal text-[color:var(--tool-strong)] @3xl:text-xl">
               {rootName || '/srv/assets'}
