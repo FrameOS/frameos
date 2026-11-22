@@ -552,6 +552,20 @@ EMBEDDED_LED_TYPES = ("gpio", "gpio_inverted", "ws2812")
 # The contract's `cpu_mode` enum: the chip's clock, set at boot (main.c).
 # Unset = auto, 160 MHz on e-paper and 240 on an LCD or a touch panel.
 EMBEDDED_CPU_MODES = ("auto", "battery", "performance")
+# The sounds a tap and a press make (`click_sounds`, docs/cloud-frames-contract.json):
+# silent, or the buzzer's own. More modes may join.
+EMBEDDED_CLICK_SOUNDS = ("silent", "normal")
+# The presets whose board makes those sounds: a buzzer, or the codec's speaker.
+# Most frames have none, and the settings leave the choice out for them.
+EMBEDDED_SOUND_PRESETS = frozenset({
+    "seeed_reterminal_sticky",
+    "seeed_reterminal_e1001",
+    "seeed_reterminal_e1002",
+    "seeed_reterminal_e1003",
+    "seeed_reterminal_e1004",
+    "waveshare_esp32_s3_photopainter",
+    "waveshare_esp32_s3_epaper_13_3e6",
+})
 EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
     "ledPin": 6,
     "ledType": "gpio_inverted",
@@ -1460,6 +1474,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("buzzerToneHz", "buzzer_tone_hz"),
     ("voiceChat", "voice_chat"),
     ("touchBeep", "touch_beep"),
+    ("clickSounds", "click_sounds"),
     ("micClkPin", "mic_clk_pin"),
     ("micDataPin", "mic_data_pin"),
     ("micPwrPin", "mic_pwr_pin"),
@@ -2115,6 +2130,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     touch_beep = _embedded_device_config_value(frame, "touchBeep", "touch_beep")
     if isinstance(touch_beep, bool):
         settings.append(_provisioning_setting("touch_beep", 1 if touch_beep else 0))
+    click_sounds = _embedded_device_config_value(frame, "clickSounds", "click_sounds")
+    if isinstance(click_sounds, str) and click_sounds in EMBEDDED_CLICK_SOUNDS:
+        settings.append(_provisioning_setting("click_sounds", click_sounds))
     cpu_mode = _embedded_device_config_value(frame, "cpuMode", "cpu_mode")
     if isinstance(cpu_mode, str) and cpu_mode in EMBEDDED_CPU_MODES:
         settings.append(_provisioning_setting("cpu_mode", cpu_mode))

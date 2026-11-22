@@ -299,6 +299,13 @@ export function cloudFrameSupportsEsp32RenderMode(frameosVersion: string | null 
   return cloudFrameSupportsSettingsFrom(esp32RenderModeCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** 2026.11.15: the sounds of a tap and a press (`click_sounds`: silent or normal). Live. */
+export const esp32ClickSoundsCloudFrameSettingsMinVersion = '2026.11.15'
+
+export function cloudFrameSupportsEsp32ClickSounds(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32ClickSoundsCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /** 2026.11.6: the click of a press on the glass (`touch_beep`). */
 export const esp32TouchBeepCloudFrameSettingsMinVersion = '2026.11.6'
 

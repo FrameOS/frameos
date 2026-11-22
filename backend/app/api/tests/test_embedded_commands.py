@@ -711,3 +711,22 @@ async def test_the_frame_page_rotation_and_scale_land_on_the_row_and_baseline(_p
                                          'renderScale': 9})
     db.refresh(frame)
     assert frame.rotate == 90 and frame.render_scale == 1.5
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_click_sounds_land_in_device_config(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.device_config = {"hardwarePreset": "seeed_reterminal_sticky", "click_sounds": "normal"}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'clickSounds',
+        'clickSounds': 'silent',
+    })
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "seeed_reterminal_sticky", "clickSounds": "silent"}
+    # An unknown mode, or one from anyone but the page, changes nothing.
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'clickSounds': 'loud'})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'clickSounds': 'normal'})
+    db.refresh(frame)
+    assert frame.device_config["clickSounds"] == "silent"

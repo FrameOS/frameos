@@ -87,6 +87,8 @@ export interface ScenePreviewInfo {
 
 /** The ESP32's clock (the contract's `cpu_mode`): auto is 240 MHz on an LCD or touch panel, else 160. */
 export type CpuMode = 'auto' | 'battery' | 'performance'
+/** The sounds of a tap and a press (docs/cloud-frames-contract.json `click_sounds`). More modes may join. */
+export type ClickSounds = 'silent' | 'normal'
 
 /** Where an ESP32's scenes run (the contract's `render_mode`, docs/server-rendering.md):
  * on the frame's own runtime, or on its control plane, which hands it the finished picture. */
@@ -165,6 +167,10 @@ export interface FrameType {
     microphone?: boolean | null
     voiceChat?: boolean | null
     touchBeep?: boolean | null
+    /** ESP32 only: the sounds of a tap and a press (`click_sounds`, 2026.11.15+). */
+    clickSounds?: ClickSounds | null
+    /** ESP32 only: the board makes sounds (a buzzer, a speaker, an LED that follows them), 2026.11.15+. */
+    sounds?: boolean | null
     /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
     cpuMode?: CpuMode | null
     cpuMhz?: number | null
@@ -359,6 +365,9 @@ export interface FrameType {
     voice_chat?: boolean
     touchBeep?: boolean
     touch_beep?: boolean
+    /** The sounds of a tap and a press: silent, or the buzzer's own (default). */
+    clickSounds?: ClickSounds
+    click_sounds?: ClickSounds
     /** ESP32: the chip's clock (main.c, at boot); unset = auto. */
     cpuMode?: CpuMode
     cpu_mode?: CpuMode
@@ -460,6 +469,8 @@ export interface FrameType {
   /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
   touch_beep?: boolean
+  /** ESP32: the sounds of a tap and a press (`click_sounds`); unset = normal. */
+  click_sounds?: ClickSounds
   /** ESP32: the chip's clock, 160 MHz (battery) or 240 (performance); unset = auto. */
   cpu_mode?: CpuMode
   /** ESP32: where its scenes run (docs/server-rendering.md); unset = on the frame. */
