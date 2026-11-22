@@ -290,7 +290,7 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
         ...PREVIEW_SIZE_PRESETS.map(
           (preset): UploadResizeSizeChoice => ({
             key: `size:${preset.width}x${preset.height}`,
-            label: `${preset.width}×${preset.height} ${preset.label}`,
+            label: `${preset.width}×${preset.height} — ${preset.label}`,
             group: 'presets',
             longEdge: Math.max(preset.width, preset.height),
             shortEdge: Math.min(preset.width, preset.height),
