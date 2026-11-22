@@ -996,6 +996,86 @@ describe("POST /api/frames/{id}/assets/upload", () => {
     expect(device.seen.filter((c) => c.type === "asset_put_chunk")).toHaveLength(2);
   });
 
+  it("waits on a chunk a timed-out request left queued instead of sending it again", async () => {
+    // The request that gave up (frame_unreachable after the ack wait) left
+    // its command queued; the browser's retry of the same chunk must not
+    // queue a second copy of it.
+    const { frame } = await activeFrame();
+    const queued = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { upload_id: "slow_link", offset: 0, data: Buffer.from("abc").toString("base64") },
+      type: "asset_put_chunk",
+    });
+    const device = fakeDevice(frame.id, () => ({ ok: true }));
+    try {
+      const retry = await uploadFrameAsset(
+        chunkUpload(
+          frame.id,
+          { upload_id: "slow_link", filename: "p.jpg", offset: "0", complete: "0" },
+          new Uint8Array([97, 98, 99]),
+        ),
+        assetsParams(frame.id),
+      );
+      expect(retry.status).toBe(200);
+      expect(await retry.json()).toEqual({ pending: true, received: 3 });
+      const chunks = device.seen.filter((c) => c.type === "asset_put_chunk");
+      expect(chunks.map((c) => c.id)).toEqual([queued!.id]);
+
+      // The last chunk landed after its request gave up: the part is the
+      // file now, so a second copy would come back chunk_gap and restart the
+      // whole upload. Its retry is answered from the acked command.
+      const last = await uploadFrameAsset(
+        chunkUpload(
+          frame.id,
+          { upload_id: "slow_link", filename: "p.jpg", offset: "3", complete: "1" },
+          new Uint8Array([100]),
+        ),
+        assetsParams(frame.id),
+      );
+      expect(last.status).toBe(200);
+      const again = await uploadFrameAsset(
+        chunkUpload(
+          frame.id,
+          { upload_id: "slow_link", filename: "p.jpg", offset: "3", complete: "1" },
+          new Uint8Array([100]),
+        ),
+        assetsParams(frame.id),
+      );
+      expect(again.status).toBe(200);
+      expect(await again.json()).toMatchObject({ path: "p.jpg", size: 4, is_dir: false });
+    } finally {
+      await device.stop();
+    }
+    const chunks = device.seen.filter((c) => c.type === "asset_put_chunk");
+    expect(chunks.map((c) => (c.payload as { offset: number }).offset)).toEqual([0, 3]);
+  });
+
+  it("sends a chunk again when its earlier copy was refused", async () => {
+    const { frame } = await activeFrame();
+    let refuse = true;
+    const device = fakeDevice(frame.id, (command) => {
+      if (command.type !== "asset_put_chunk" || !refuse) return { ok: true };
+      refuse = false;
+      return { ok: false, error: "write_failed" };
+    });
+    try {
+      const request = () =>
+        uploadFrameAsset(
+          chunkUpload(
+            frame.id,
+            { upload_id: "flaky_card", filename: "p.jpg", offset: "0", complete: "0" },
+            new Uint8Array(10),
+          ),
+          assetsParams(frame.id),
+        );
+      expect((await request()).status).toBe(400);
+      expect((await request()).status).toBe(200);
+    } finally {
+      await device.stop();
+    }
+    expect(device.seen.filter((c) => c.type === "asset_put_chunk")).toHaveLength(2);
+  });
+
   it("caps an esp32 frame's chunks at what one of its WS frames can carry", async () => {
     const { frame } = await activeFrame();
     await db.update(frames).set({ hardware: { platform: "esp32-s3" } }).where(eq(frames.id, frame.id));

@@ -5,7 +5,7 @@
 // client contract so the shared SPA needs no cloud branch.
 
 import { randomUUID } from "node:crypto";
-import { and, eq, like, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, or, sql } from "drizzle-orm";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
 import type { NextRequest } from "next/server";
 import { recordAuditEvent } from "./audit";
@@ -126,13 +126,21 @@ export async function runAssetWriteCommand(
   if (!command) {
     return { ok: false, error: "command_not_queued" };
   }
+  return waitForAssetCommand(db, command.id);
+}
+
+/** Long-poll one queued write verb's ack (runAssetWriteCommand's wait). */
+async function waitForAssetCommand(
+  db: CommandDatabase,
+  commandId: string,
+): Promise<AssetCommandResult> {
   const deadline = Date.now() + ackTimeoutMs;
   while (Date.now() < deadline) {
     await sleep(ackPollStepMs);
     const [row] = await db
       .select({ error: frameCommands.error, status: frameCommands.status })
       .from(frameCommands)
-      .where(eq(frameCommands.id, command.id))
+      .where(eq(frameCommands.id, commandId))
       .limit(1);
     if (!row) {
       return { ok: false, error: "command_lost" };
@@ -168,17 +176,61 @@ export async function putAssetChunk(
     storage?: string;
   },
 ): Promise<AssetCommandResult> {
-  const result = await runAssetWriteCommand(db, accountId, frameId, "asset_put_chunk", {
-    upload_id: chunk.uploadId,
-    offset: chunk.offset,
-    data: Buffer.from(chunk.bytes).toString("base64"),
-    ...(chunk.finalPath !== undefined ? { complete: true, path: chunk.finalPath } : {}),
-    ...assetStoragePayload(chunk.storage ?? defaultAssetStorage),
-  });
+  // A retry of a chunk whose request gave up (frame_unreachable after
+  // ackTimeoutMs) while its command stayed queued: wait for that command
+  // instead of sending the chunk again. A second copy only doubled what a
+  // slow link carried, and a last chunk that landed late had already turned
+  // the part into the file, so its copy came back chunk_gap and the browser
+  // started the whole upload over.
+  const earlier = await earlierChunkCommand(db, frameId, chunk);
+  if (earlier?.status === "acked") {
+    return { ok: true };
+  }
+  const result = earlier
+    ? await waitForAssetCommand(db, earlier.id)
+    : await runAssetWriteCommand(db, accountId, frameId, "asset_put_chunk", {
+        upload_id: chunk.uploadId,
+        offset: chunk.offset,
+        data: Buffer.from(chunk.bytes).toString("base64"),
+        ...(chunk.finalPath !== undefined ? { complete: true, path: chunk.finalPath } : {}),
+        ...assetStoragePayload(chunk.storage ?? defaultAssetStorage),
+      });
   if (!result.ok && (result.error === "unknown_verb" || result.error === "unsupported_verb")) {
     return { ok: false, error: "chunked_upload_unsupported" };
   }
   return result;
+}
+
+/**
+ * The newest `asset_put_chunk` of this upload at this offset that is still on
+ * its way or was acked, within a command's lifetime. An upload id is the
+ * browser's for one file, so the same id and offset are the same bytes; a
+ * refused or expired copy does not count, and the chunk goes again.
+ */
+async function earlierChunkCommand(
+  db: CommandDatabase,
+  frameId: string,
+  chunk: { uploadId: string; offset: number; finalPath?: string },
+): Promise<{ id: string; status: string } | undefined> {
+  const [row] = await db
+    .select({ id: frameCommands.id, status: frameCommands.status })
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        eq(frameCommands.type, "asset_put_chunk"),
+        inArray(frameCommands.status, ["pending", "sent", "acked"]),
+        gt(frameCommands.createdAt, new Date(Date.now() - commandTtlMs)),
+        sql`${frameCommands.payload} ->> 'upload_id' = ${chunk.uploadId}`,
+        sql`${frameCommands.payload} ->> 'offset' = ${String(chunk.offset)}`,
+        chunk.finalPath !== undefined
+          ? sql`${frameCommands.payload} ->> 'path' = ${chunk.finalPath}`
+          : sql`${frameCommands.payload} ->> 'complete' is null`,
+      ),
+    )
+    .orderBy(desc(frameCommands.createdAt))
+    .limit(1);
+  return row;
 }
 
 /**
