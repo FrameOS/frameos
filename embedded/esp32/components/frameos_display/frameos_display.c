@@ -162,8 +162,9 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     /* The RGB LCD's control wiring (its IO expander, its 3-wire SPI, its
      * backlight) is the board's, not the panel's: the preset picks the
-     * table, like the PhotoPainter's PMIC and the E1004's panel tuning. */
-    fos_lcd_st7701s_select_board(config->hardware_preset);
+     * table, like the PhotoPainter's PMIC and the E1004's panel tuning;
+     * without a preset the panel names the board. */
+    fos_lcd_st7701s_select_board(config->hardware_preset, entry->name);
 
     if (photo_painter) {
         esp_err_t pmic_err = fos_photo_painter_enable_epd_power(s_lend_i2c_bus);
