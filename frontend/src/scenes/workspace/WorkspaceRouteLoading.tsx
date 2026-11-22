@@ -210,8 +210,8 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const frameHref = selectedFrame
     ? urls.frame(selectedFrame.id)
     : inFrameAdminMode
-    ? urls.frameControl()
-    : urls.frames()
+      ? urls.frameControl()
+      : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
     : rememberedAppsHref(lastAppsHref)
@@ -392,8 +392,8 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
           mode === 'scenes'
             ? 'scene-workspace-main h-screen overflow-hidden p-0'
             : mode === 'apps'
-            ? 'apps-workspace-main h-screen overflow-hidden max-lg:h-auto max-lg:overflow-visible max-lg:px-4'
-            : 'h-screen overflow-y-auto max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
+              ? 'apps-workspace-main h-screen overflow-hidden max-lg:h-auto max-lg:overflow-visible max-lg:px-4'
+              : 'h-screen overflow-y-auto max-lg:h-auto max-lg:overflow-visible max-lg:px-4 max-lg:pb-6'
         )}
       >
         <MainLoadingPlaceholder mode={mode} />

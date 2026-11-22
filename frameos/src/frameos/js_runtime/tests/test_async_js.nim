@@ -2,7 +2,7 @@
 ## `frameos.useFetch`, AbortController, an async `init()` and `<img src="https://…">`. The runner's loop is played here by
 ## `pumpJsAsync`; the network by `jsIoHook`, on the workers.
 
-import std/[base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
+import std/[atomics, base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
 import pixie
 
 import frameos/channels
@@ -34,7 +34,15 @@ let pngBytes = block:
 
 # The network: `?ms=N` answers after N ms, `/fail` does not answer at all,
 # `/missing` is a 404, `.png` is an 8x6 picture, `/json` a JSON body.
+# `networkMost` is the most requests it has held at once (reset by a test).
+var networkNow, networkMost: Atomic[int]
+
 jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+  let now = networkNow.fetchAdd(1) + 1
+  defer: discard networkNow.fetchSub(1)
+  var most = networkMost.load
+  while now > most and not networkMost.compareExchange(most, now):
+    discard
   let at = request.url.find("ms=")
   if at >= 0:
     var digits = ""
@@ -134,9 +142,8 @@ suite "async JavaScript":
       }
       export function get() { return weather }
     """, "weather")
-    let start = getMonoTime()
+    # "loading" with the request still in flight is the proof the render did not wait.
     check a.render() == "loading"
-    check msSince(start) < 200
     check jsIoInFlight() == 1
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
     check a.render() == """true|200|test||POST sunny {"city":"Tartu"}"""
@@ -167,12 +174,12 @@ suite "async JavaScript":
         }
         export function get() { return got }
       """, "slow" & $i)
-    let start = getMonoTime()
+    networkMost.store(0)
     for a in apps:
       check a.render() == "-"
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
-    # Four answers of 300 ms each, together: one after the other would be 1.2 s.
-    check msSince(start) < 900
+    # Four answers of 300 ms each, together: the network held all four at once.
+    check networkMost.load == min(4, JsIoWorkers)
     for a in apps:
       check a.render() == "GET  "
 
@@ -321,9 +328,8 @@ suite "async JavaScript":
         )
       }
     """, "img")
-    let start = getMonoTime()
     var picture = u.draw()
-    check msSince(start) < 60
+    # The black pixel and the three requests in flight are the proof the draw did not wait.
     check picture[0, 0] == rgbx(0, 0, 0, 255)
     check jsIoInFlight() == 3
     discard u.draw()
@@ -389,6 +395,77 @@ suite "async JavaScript":
       # Rows 2-3: the far picture, scrolled to 40 (shaded by the box's scroll bar).
       check picture[1, 3].r > 150 and picture[1, 3].g == 0
       check picture[1, 0] == rgbx(0, 0, 0, 255)
+
+  test "<img src>: a list scrolled through keeps the pictures on the screen and loads the others again":
+    # The Scene store's covers (2026-11-22): a list longer than the kept
+    # pictures, scrolled. The picture beside it, drawn every render, is never
+    # the one pushed out (the least lately drawn go first), and the list's
+    # first pictures, pushed out while out of sight, load again when it is
+    # scrolled back, rather than waiting out the churn hold as blanks.
+    let u = ui("""
+      export function get(app) {
+        const rows = []
+        for (let i = 0; i < 60; i++)
+          rows.push(<img src={`https://img.test/row${i}.png?ms=1`} className="w-[6px] h-[2px] shrink-0" />)
+        return (
+          <div className="flex w-[8px] h-[4px] bg-black">
+            <img src="https://img.test/beside.png?ms=1" className="w-[2px] h-[4px] shrink-0" />
+            <div className="flex flex-col w-[6px] h-[4px] overflow-y-auto bg-black" scrollTop={app.config.top}>
+              {rows}
+            </div>
+          </div>
+        )
+      }
+    """, "imgscroll")
+    var top = 0
+    while top <= 116:
+      discard u.draw(%*{"top": top})
+      check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+      discard drainRenders()
+      top += 4
+    var picture = u.draw(%*{"top": 116})
+    check jsIoInFlight() == 0
+    check picture[0, 0] == rgbx(255, 0, 0, 255) # beside the list, kept throughout
+    check not logged.anyIt("beside.png" in it)
+    # Back to the top: its pictures went while out of sight, and come again.
+    picture = u.draw(%*{"top": 0})
+    check jsIoInFlight() >= 1
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+    discard drainRenders()
+    picture = u.draw(%*{"top": 0})
+    check picture[4, 0].r > 150 and picture[4, 0].g == 0
+    check picture[0, 0] == rgbx(255, 0, 0, 255)
+
+  test "<img src>: more pictures near the screen than are kept: the ones on it all show":
+    # A screenful of 24 covers and four rows of them either side: 72 near,
+    # 48 kept. Fetched ahead only into room, the ones off the screen never
+    # push out one on it.
+    let u = ui("""
+      export function get(app) {
+        const cells = []
+        for (let i = 0; i < 120; i++)
+          cells.push(<img src={`https://img.test/cell${i}.png?ms=1`} className="w-[1px] h-[1px] shrink-0" />)
+        return (
+          <div className="flex flex-row flex-wrap content-start w-[6px] h-[4px] overflow-y-auto bg-black" scrollTop={app.config.top}>
+            {cells}
+          </div>
+        )
+      }
+    """, "imgnear")
+    for top in [0, 4, 8]:
+      for i in 0 ..< 12:
+        discard u.draw(%*{"top": top})
+        if not pumpUntil(proc(): bool = jsAsyncPending() == 0):
+          break
+        discard drainRenders()
+    let picture = u.draw(%*{"top": 8})
+    var red = 0
+    for y in 0 ..< 4:
+      for x in 0 ..< 5: # the last column is under the scroll bar
+        if picture[x, y].r > 150 and picture[x, y].g == 0:
+          inc red
+    check red == 20
+    check jsIoInFlight() == 0
 
   test "where nothing pumps, an <img> is fetched in the render":
     asyncPumped = false

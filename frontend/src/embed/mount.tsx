@@ -147,7 +147,8 @@ export function mountFrameOSEditor(container: HTMLElement, options: FrameOSEdito
       if (!options.onSaveScreenshot) {
         return // no ack → the editor falls back to a local download
       }
-      void options.onSaveScreenshot(message.dataUrl, typeof message.sceneId === 'string' ? message.sceneId : null)
+      void options
+        .onSaveScreenshot(message.dataUrl, typeof message.sceneId === 'string' ? message.sceneId : null)
         .catch((error): FrameOSEditorScreenshotResult => ({ ok: false, error: String(error) }))
         .then((result) => {
           window.postMessage({ type: 'frameos-editor:screenshot-saved', ...result }, window.location.origin)

@@ -160,7 +160,7 @@ export interface embedFrameLogicMeta {
     mode: (frame: any, frameForm: any) => 'buildroot' | 'embedded' | 'rpios'
     width: (frameForm: any) => number | undefined
     height: (frameForm: any) => number | undefined
-    defaultInterval: () => number
+    defaultInterval: (frameForm: any) => number
     defaultScene: (scenes: any) => string
   }
 }
@@ -208,7 +208,7 @@ export const embedFrameLogic = kea<embedFrameLogicType>([
       },
     ],
     frameForm: {
-      initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame } as FrameType),
+      initEmbedFrame: (_: any, { frame }: { frame: Partial<FrameType> }) => ({ ...frame }) as FrameType,
     },
     convertingSceneId: [
       null as string | null,

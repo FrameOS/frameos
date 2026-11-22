@@ -364,7 +364,7 @@ export function assignSceneToSplitLayoutLeaf(
     return {
       ...node,
       sceneId,
-      state: node.sceneId === sceneId ? node.state ?? {} : {},
+      state: node.sceneId === sceneId ? (node.state ?? {}) : {},
     }
   }) as SplitLayoutBranch
 }

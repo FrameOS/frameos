@@ -53,8 +53,8 @@ export function AccountNotice({
     tone === 'error'
       ? 'border-red-500/40 bg-red-500/10 text-red-700'
       : tone === 'success'
-      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
-      : 'frameos-inset border'
+        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+        : 'frameos-inset border'
   return (
     <p role={tone === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-sm ${className}`}>
       {children}

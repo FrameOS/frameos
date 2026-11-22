@@ -29,8 +29,8 @@ export function InstallSceneModal(): JSX.Element | null {
     target.kind === 'install'
       ? `Install "${target.template.name}"`
       : target.kind === 'ai'
-      ? 'Create a scene with AI'
-      : 'New blank scene'
+        ? 'Create a scene with AI'
+        : 'New blank scene'
   const prompt =
     target.kind === 'install'
       ? 'Choose the frames this scene should be installed on.'
@@ -41,8 +41,8 @@ export function InstallSceneModal(): JSX.Element | null {
         ? `Install on ${selectedFrameIds.length} frames`
         : 'Install'
       : target.kind === 'ai'
-      ? 'Create with AI'
-      : 'Create'
+        ? 'Create with AI'
+        : 'Create'
   return (
     <Modal
       open

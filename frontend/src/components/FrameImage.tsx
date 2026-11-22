@@ -275,7 +275,7 @@ export function FrameImage({
 
   const { imageUrl, isLoading, setIsLoading } = useEntityImage(entityId, subEntityId)
   const thumbImageSrc = imageUrl ? imageUrl + (imageUrl.includes('?') ? '&thumb=1' : '?thumb=1') : undefined
-  const imageSrc = thumb ? thumbImageSrc : imageUrl ?? undefined
+  const imageSrc = thumb ? thumbImageSrc : (imageUrl ?? undefined)
   const shouldProgressivelyLoadFullSize = Boolean(loadFullSizeAfterThumb && thumb && imageUrl)
   const [fullSizeLoadUrl, setFullSizeLoadUrl] = useState<string | null>(null)
   const [fullSizeLoadedUrl, setFullSizeLoadedUrl] = useState<string | null>(null)

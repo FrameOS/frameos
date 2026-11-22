@@ -348,7 +348,7 @@ export interface longRunningTasksModelActions {
   startTask: (task: StartTaskPayload) => {
     task: {
       activeStatusSeen: boolean
-      detail?: string | null | undefined
+      detail?: string | null
       expanded: boolean
       frameId: FrameId
       id: string
@@ -356,8 +356,8 @@ export interface longRunningTasksModelActions {
       logs: LongRunningTaskLog[]
       progressCurrent: number | null
       progressTotal: number | null
-      quiet?: boolean | undefined
-      sceneId?: string | null | undefined
+      quiet?: boolean
+      sceneId?: string | null
       startedAt: string
       status: LongRunningTaskStatus
       title: string
@@ -365,12 +365,12 @@ export interface longRunningTasksModelActions {
   }
   taskFailed: (task: FinishTaskPayload) => {
     task: {
-      detail?: string | null | undefined
+      detail?: string | null
       frameId: FrameId
-      kind?: LongRunningTaskKind | undefined
-      sceneId?: string | null | undefined
+      kind?: LongRunningTaskKind
+      sceneId?: string | null
       status: LongRunningTaskStatus
-      taskId?: string | undefined
+      taskId?: string
     }
   }
   toggleTaskExpanded: (taskId: string) => {

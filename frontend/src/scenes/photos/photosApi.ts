@@ -290,7 +290,7 @@ function chunkError(response: ChunkResponse): PhotosApiError {
   const message =
     typeof detail === 'string' && detail && !/^[a-z_]+$/.test(detail)
       ? detail
-      : STATUS_MESSAGES[response.status] ?? `Upload failed (${response.status})`
+      : (STATUS_MESSAGES[response.status] ?? `Upload failed (${response.status})`)
   return new PhotosApiError(response.status, message)
 }
 

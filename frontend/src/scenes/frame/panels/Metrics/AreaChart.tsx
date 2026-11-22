@@ -130,8 +130,8 @@ function formatMetricTick(value: number, unit?: MetricSeries['unit']): string {
   return value >= 1000000
     ? `${Math.floor(value / 100000) / 10}M`
     : value >= 1000
-    ? `${Math.floor(value / 1000)}K`
-    : String(value)
+      ? `${Math.floor(value / 1000)}K`
+      : String(value)
 }
 
 function formatMetricNumber(value: number): string {

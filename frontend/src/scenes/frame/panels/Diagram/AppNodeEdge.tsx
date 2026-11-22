@@ -41,13 +41,13 @@ export function AppNodeEdge({
     ? selected
       ? { strokeWidth: 8, stroke: selectedStroke, ...roundedStroke }
       : connectedToSelectedNode
-      ? { strokeWidth: 8, stroke: connectedStroke, ...roundedStroke }
-      : { strokeWidth: 6, stroke: defaultNodeStroke, ...roundedStroke }
+        ? { strokeWidth: 8, stroke: connectedStroke, ...roundedStroke }
+        : { strokeWidth: 6, stroke: defaultNodeStroke, ...roundedStroke }
     : selected
-    ? { strokeWidth: 4, stroke: selectedStroke, ...roundedStroke }
-    : connectedToSelectedNode
-    ? { strokeWidth: 5, stroke: connectedStroke, ...roundedStroke }
-    : { strokeWidth: 2.5, stroke: defaultFieldStroke, ...roundedStroke }
+      ? { strokeWidth: 4, stroke: selectedStroke, ...roundedStroke }
+      : connectedToSelectedNode
+        ? { strokeWidth: 5, stroke: connectedStroke, ...roundedStroke }
+        : { strokeWidth: 2.5, stroke: defaultFieldStroke, ...roundedStroke }
   return (
     <>
       <BaseEdge id={id} path={edgePath} style={edgeStyle} />

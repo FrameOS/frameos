@@ -3485,8 +3485,15 @@ suite "a scene's own icon (app.frame.scenes[i].icon)":
           if a.color(x, y) != b.color(x, y): return false
       true
     check same(plainDesk, iconDesk, int(terminal[0]), int(terminal[1]), int(terminal[2]), int(terminal[3]))
-    # The taskbar: Start, then the terminal's button with its prompt.
-    check same(plainBar, iconBar, 0, H - 40, W, H)
+    # The taskbar: Start, then the terminal's button with its prompt. Its
+    # buttons alone: the tray's clock is the real time, and a minute turning
+    # between the two renders failed the whole bar (CI, 2026-11-21).
+    var pressed: seq[array[4, float32]]
+    uiPressRects(Layout, pressed)
+    let buttons = pressed.filterIt(it[1] >= float32(H - 40) and it[2] <= float32(W div 2))
+    check buttons.len >= 2
+    for r in buttons:
+      check same(plainBar, iconBar, int(r[0]), int(r[1]), int(r[2]), int(r[3]))
     check problems.len == 0
     desk().state["openScenes"] = %*[]
     chooseLayout("")

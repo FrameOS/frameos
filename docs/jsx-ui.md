@@ -124,6 +124,56 @@ row ticked 493 → 219 ms, a calculator key 328 → ~200 ms, the counter's +
 363 → 226 ms. A frame into a buffer that holds a different scene is drawn
 whole, as before.
 
+## Signals (experimental)
+
+*2026.11.14+, not in the scene guide or `appTypeDeclarations.ts` yet: making
+it public is those two plus the AI evals, as for `docs/async-js.md`.*
+
+A tap normally runs `get()` again: the whole tree is made and read, and
+`memo()` hands back what did not change. A `signal` lets a handler say what
+changed instead:
+
+```tsx
+const on = devices.map(() => signal(false))
+const Tile = memo(({ i }) => {
+  const lit = on[i].value                    // reading it subscribes this Tile
+  return <div className={lit ? 'bg-amber-300' : 'bg-white/10'}
+    onClick={() => { on[i].value = !lit }} />
+})
+export const get = () => <div className="grid grid-cols-2">{devices.map((_, i) => <Tile i={i} />)}</div>
+```
+
+- `signal(v)` (a prelude global) holds a value: `.value` reads and sets it,
+  `.peek()` reads without subscribing. A `memo()`'d component that reads
+  `.value` while it runs is subscribed to it; a read anywhere else
+  subscribes nothing.
+- **A handler that set signals and nothing else** asks for a partial render:
+  the components that read them run again alone, with the props they had,
+  and their elements are spliced into the tree the walker read last
+  (`jsx.nim` `jsxSplice`: the nodes from the root down to each copied,
+  everything else the same objects). `get()` does not run, and nothing
+  that did not change is walked; the layout, the damage and the raster
+  are as for any render. A `memo()`'d call that reads a signal gets a
+  record (the C `memo()`'s, `js_runtime/jsx_native.nim`), made at the first
+  read, so an app with no signals makes none and pays nothing: a set marks
+  it dirty, the next call or the partial render runs it, and the
+  `memo()`'d components around it run at the next whole render (what they
+  made holds the old element).
+- **Anything else is a whole `get()`**, as before: a handler that set no
+  signal, a different config, the scene's own interval, a render from
+  outside. So the rule an app keeps: a handler that sets a signal changes
+  nothing else that `get()` reads (a module variable it changes there shows
+  at the next whole render). A component whose handlers change in number
+  when it runs again, or a dirty one never drawn, is a whole `get()` too.
+- **A list wants a signal per item**, as above: one `selected` signal that
+  every cell compares with makes every cell run when it is set.
+
+On the SenseCAP Indicator a tap in a grid of a hundred `memo()`'d cells is
+a 28 ms `get()` and an 87 ms render; with a signal per cell the partial
+render's JavaScript is 3 to 12 ms (`docs/perf-todo.md`; how much depends
+on where the image's code landed in the 16 KB instruction cache,
+`docs/esp32-memory.md`).
+
 ## What it costs
 
 Flash on the generic ESP32-S3 image, measured against the build before it

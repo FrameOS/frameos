@@ -515,8 +515,8 @@ export function EmbeddedUsbFirmwareUpdate({
             phase === 'error'
               ? 'text-xs font-semibold text-red-500'
               : phase === 'done'
-              ? 'text-xs font-semibold text-green-600'
-              : 'frame-tool-muted text-xs leading-5'
+                ? 'text-xs font-semibold text-green-600'
+                : 'frame-tool-muted text-xs leading-5'
           }
         >
           {message}

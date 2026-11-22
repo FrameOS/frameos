@@ -360,7 +360,10 @@ proc flushWindow(s: var InflateStreamState) =
   ## bytes back, so the retained tail is all the history the stream needs.
   let emitLen = s.op - inflateWindowSize
   if emitLen <= 0:
-    return
+    # Only a buffer smaller than the window fills up before it has a window
+    # to keep (inflateToString's, for an output known to be small): the
+    # stream holds more than it said.
+    failStream()
   s.onData(s.buf.toOpenArrayByte(0, emitLen - 1))
   s.emitted += emitLen
   moveMem(s.buf[0].addr, s.buf[emitLen].addr, inflateWindowSize)
@@ -524,10 +527,11 @@ proc inflateNoCompressionStream(
 
 proc inflateStream(
   onData: InflateOnData,
-  b: var BitStreamReader
+  b: var BitStreamReader,
+  bufLen = inflateBufferSize
 ) =
   var
-    s = InflateStreamState(buf: newString(inflateBufferSize), onData: onData)
+    s = InflateStreamState(buf: newString(bufLen), onData: onData)
     finalBlock: bool
   while not finalBlock:
     let
@@ -551,7 +555,8 @@ proc inflateStream(
 
 proc uncompressZlibFrom(
   onData: InflateOnData,
-  b: var BitStreamReader
+  b: var BitStreamReader,
+  bufLen = inflateBufferSize
 ) {.raises: [PixieError].} =
   let
     cmf = b.readBits(8).uint8
@@ -574,7 +579,7 @@ proc uncompressZlibFrom(
   if (flg and 0b00100000) != 0: # FDICT
     raise newException(PixieError, "Preset dictionary is not yet supported")
 
-  inflateStream(onData, b)
+  inflateStream(onData, b, bufLen)
 
 proc uncompressStreamZlib*(
   onData: InflateOnData,
@@ -627,6 +632,49 @@ proc uncompressStreamZlib*(
     data: cast[ptr UncheckedArray[uint8]](src), len: len
   )]
   uncompressStreamZlib(onData, segment)
+
+proc inflateToString(
+  b: var BitStreamReader, zlib: bool, expected: int
+): string {.raises: [PixieError].} =
+  ## The whole output in one string. `expected`, when known, sizes it once,
+  ## and an output smaller than the window is inflated in a buffer of its own
+  ## size instead of the 64 KB one (a font block is 2 KB).
+  var output = newStringOfCap(max(expected, 0))
+  let onData = proc (data: openArray[uint8]) {.gcsafe, raises: [PixieError].} =
+    if data.len > 0:
+      let at = output.len
+      output.setLen(at + data.len)
+      copyMem(output[at].addr, data[0].unsafeAddr, data.len)
+  let bufLen =
+    if expected > 0 and expected + 288 < inflateBufferSize: expected + 288
+    else: inflateBufferSize
+  if zlib:
+    uncompressZlibFrom(onData, b, bufLen)
+  else:
+    inflateStream(onData, b, bufLen)
+  move output
+
+proc uncompressZlib*(
+  segments: openArray[InflateSegment], expected = 0
+): string {.raises: [PixieError].} =
+  ## A zlib stream split across segments (a PNG's IDAT chunks), uncompressed
+  ## into one string; `expected` is the output's length when known.
+  var total = 0
+  for segment in segments:
+    total += segment.len
+  if total < 6:
+    failStream()
+  var b = initBitStreamReader(segments)
+  inflateToString(b, true, expected)
+
+proc uncompressDeflate*(
+  src: pointer, len: int, expected = 0
+): string {.raises: [PixieError].} =
+  ## A raw deflate stream (no zlib header or trailer) uncompressed into one
+  ## string; `expected` is the output's length when known.
+  let segment = [InflateSegment(data: cast[ptr UncheckedArray[uint8]](src), len: len)]
+  var b = initBitStreamReader(segment)
+  inflateToString(b, false, expected)
 
 when defined(release):
   {.pop.}

@@ -44,7 +44,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const isEventWithStateFields = eventOffersSceneState(keyword)
 
   const eventFields = frameEventForScene(keyword, scene)?.fields ?? []
-  const fields = isEventWithStateFields ? scene?.fields ?? [] : eventFields
+  const fields = isEventWithStateFields ? (scene?.fields ?? []) : eventFields
   const eventFilterConfig = { ...(data.config ?? {}) }
   if (keyword === 'button' && eventFilterConfig.label === undefined && 'label' in data) {
     eventFilterConfig.label = data.label

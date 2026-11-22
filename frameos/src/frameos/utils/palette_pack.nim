@@ -91,6 +91,29 @@ const
   paletteRowsSharedPixels = 64 * 1024 ## a smaller picture is not worth waking the other core for
   palettePublishEvery = 8 ## pixels between two progress stores
 
+when not defined(frameosEmbedded) and not defined(emscripten):
+  # The wait for the row above spins. On an ESP32 the two workers are tasks
+  # pinned to the two cores (fos_rows.c), so the row it waits for is always
+  # running and the spin is a few cycles: that path stays a bare spin, and the
+  # wasm runtime has one worker. On a host (only test_palette_pack.nim runs
+  # two there) the two are threads the scheduler may put on one busy core: CI
+  # runs sixteen tests at once on sixteen cores. A bare spin, or a
+  # sched_yield, keeps the waiter runnable, and the row it waits for then
+  # gets the core only after every busy neighbour's slice: the test hung for
+  # minutes. After a short spin the waiter sleeps a moment instead, so it is
+  # not runnable and the row it waits for runs next.
+  import std/posix
+
+  const paletteSpinsBeforeSleep = 256
+
+  template paletteWaitedOnce(spins: var int) =
+    inc spins
+    if spins >= paletteSpinsBeforeSleep:
+      spins = 0
+      var nap = Timespec(tv_sec: posix.Time(0), tv_nsec: 1000)
+      var left: Timespec
+      discard nanosleep(nap, left)
+
 type PaletteRowsJob = object
   width, height: int
   format: PixelFormat
@@ -176,6 +199,8 @@ proc ditherPaletteRow(job: ptr PaletteRowsJob, y: int) {.hotLoop.} =
     job.loadPaletteRow(next, y + 1)
   # Pixels of the row above known done (0 for the first row: none needed).
   var ready = if y == 0: width else: 0
+  when not defined(frameosEmbedded) and not defined(emscripten):
+    var spins = 0
   template push(row: ptr UncheckedArray[uint8], rx: int, er, eg, eb: int, weight: int) =
     row[rx * 3 + 0] = paletteClip(row[rx * 3 + 0].int + (er * weight div 16))
     row[rx * 3 + 1] = paletteClip(row[rx * 3 + 1].int + (eg * weight div 16))
@@ -184,6 +209,9 @@ proc ditherPaletteRow(job: ptr PaletteRowsJob, y: int) {.hotLoop.} =
     let need = min(xx + 3, width)
     while ready < need:
       ready = above[].load(moAcquire) - aboveBase
+      when not defined(frameosEmbedded) and not defined(emscripten):
+        if ready < need:
+          paletteWaitedOnce(spins)
     let
       imageR = cur[xx * 3 + 0].int
       imageG = cur[xx * 3 + 1].int

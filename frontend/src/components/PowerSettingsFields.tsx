@@ -143,8 +143,8 @@ export function PowerSettingsFields({
               on-board clock&apos;s alarm for the next render and cuts its own power, drawing about 20 µA. It wakes on
               that alarm or on a press of any of the front buttons, fetches the picture, refreshes the panel and powers
               off again. While off it is offline, so changes made here land on the next wake. On USB power the board
-              cannot cut its power, so it waits out the interval instead. That is also what "on battery" means
-              here: the firmware checks for USB power itself, no battery sense pin involved.
+              cannot cut its power, so it waits out the interval instead. That is also what "on battery" means here: the
+              firmware checks for USB power itself, no battery sense pin involved.
             </>
           }
         >

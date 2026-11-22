@@ -32,11 +32,7 @@ export function hasFrameosSceneDragData(dataTransfer: DataTransfer): boolean {
 // Drag data for moving a scene between split-screen cells. Carries the source leaf id so a
 // drop onto another cell can swap their contents. The scene id is included as well so plain
 // scene drop targets keep working.
-export function setFrameosSplitLeafDragData(
-  dataTransfer: DataTransfer,
-  leafId: string,
-  sceneId?: string | null
-): void {
+export function setFrameosSplitLeafDragData(dataTransfer: DataTransfer, leafId: string, sceneId?: string | null): void {
   dataTransfer.effectAllowed = 'copyMove'
   dataTransfer.setData(FRAMEOS_SPLIT_LEAF_DRAG_TYPE, leafId)
   if (sceneId) {

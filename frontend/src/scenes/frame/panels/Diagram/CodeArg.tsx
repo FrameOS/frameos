@@ -39,8 +39,8 @@ export function CodeArg({ codeArg, onChange, onDelete }: CodeArgProps): JSX.Elem
   const nameError = !trimmedName
     ? 'The field needs a name'
     : otherNames.includes(trimmedName)
-    ? `"${trimmedName}" is already an argument of this node`
-    : null
+      ? `"${trimmedName}" is already an argument of this node`
+      : null
   const changed = type !== codeArg.type || trimmedName !== codeArg.name
   const codeNode = (
     <div className={clsx('flex items-center gap-1', onChange && 'hover:underline cursor-pointer')}>

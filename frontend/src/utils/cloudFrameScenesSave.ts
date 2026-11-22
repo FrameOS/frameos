@@ -380,7 +380,7 @@ async function persistAndPushCloudFrameScenesNow(
         // A pinned assignment follows the edit it just made; an unpinned one
         // is moved to the latest (which now IS the edit) — the only scene of
         // this push that moves, the rest stay at the version the frame holds.
-        scene_version: row.scene_version ? version ?? null : null,
+        scene_version: row.scene_version ? (version ?? null) : null,
         latest: true,
         settings_groups: keptGrant(row),
         event_maps,

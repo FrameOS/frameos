@@ -955,8 +955,8 @@ export function esp32PinLayoutPresetOptions(device?: string): Option[] {
     device === ESP32_WAVESHARE_PHOTOPAINTER_DEVICE
       ? 'waveshare-photopainter'
       : device === ESP32_WAVESHARE_13IN3E6_DEVICE
-      ? 'waveshare-13in3e6'
-      : null
+        ? 'waveshare-13in3e6'
+        : null
   if (preferredValue) {
     options.sort((first, second) => (first.value === preferredValue ? -1 : second.value === preferredValue ? 1 : 0))
   }

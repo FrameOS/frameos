@@ -7,7 +7,9 @@
 export function AiElsewhereNote(): JSX.Element {
   return (
     <>
-      <div className="frameos-muted">Not from here. This panel is the frame itself, and the frame has no AI to ask.</div>
+      <div className="frameos-muted">
+        Not from here. This panel is the frame itself, and the frame has no AI to ask.
+      </div>
       <div className="frameos-muted">
         Generate a scene at{' '}
         <a

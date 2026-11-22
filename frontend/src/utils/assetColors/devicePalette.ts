@@ -14,7 +14,8 @@ import { hexToTriplet, type RgbTriplet } from './profile'
 // in devices.ts lists, spelled as a pattern so this module (which the cloud
 // typechecks through the shared-SPA tests) does not pull a component module
 // in. Mirrors `panelPaletteForDevice` in utils/asset_colors.nim.
-const spectraDevicePattern = /(13in3e|9in7e|7in3e|4in0e|photopainter_7in3e)$|inky_impression_(4|7|13)(_2025|_spectra6)?$/
+const spectraDevicePattern =
+  /(13in3e|9in7e|7in3e|4in0e|photopainter_7in3e)$|inky_impression_(4|7|13)(_2025|_spectra6)?$/
 
 /** Measured on a Spectra panel. Index 4 is the placeholder the device skips. */
 export const SPECTRA6_PALETTE: RgbTriplet[] = [
@@ -176,14 +177,14 @@ function panelPaletteKindForColorMode(mode: unknown): PanelPaletteKind {
   return mode === 'spectra6'
     ? 'spectra6'
     : mode === 'sevencolor'
-    ? 'sevenColor'
-    : mode === 'bwyr'
-    ? 'fourColor'
-    : mode === 'gray4'
-    ? 'gray4'
-    : mode === 'bw'
-    ? 'blackWhite'
-    : 'none'
+      ? 'sevenColor'
+      : mode === 'bwyr'
+        ? 'fourColor'
+        : mode === 'gray4'
+          ? 'gray4'
+          : mode === 'bw'
+            ? 'blackWhite'
+            : 'none'
 }
 
 /**

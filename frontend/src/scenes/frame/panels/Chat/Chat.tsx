@@ -565,10 +565,10 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
                     {chatContextType === 'app'
                       ? 'Ask for edits to this app, or ask questions about how it works.'
                       : chatSceneName
-                      ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
-                      : frameId === null
-                      ? 'Ask what is on a frame, change a frame or its scenes, or build something new.'
-                      : 'Ask what is on this frame, change its settings or scenes, or build something new.'}
+                        ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
+                        : frameId === null
+                          ? 'Ask what is on a frame, change a frame or its scenes, or build something new.'
+                          : 'Ask what is on this frame, change its settings or scenes, or build something new.'}
                   </div>
                 </div>
               </div>
@@ -624,8 +624,8 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
                           isUser
                             ? 'frameos-chat-bubble-user'
                             : isLog
-                            ? 'frameos-chat-bubble-log'
-                            : 'frameos-chat-bubble'
+                              ? 'frameos-chat-bubble-log'
+                              : 'frameos-chat-bubble'
                         )}
                       >
                         <div className="frame-tool-muted flex items-center justify-between text-[11px] mb-2">

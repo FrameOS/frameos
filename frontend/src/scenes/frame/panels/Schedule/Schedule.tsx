@@ -69,8 +69,8 @@ function entryTitle(event: ScheduledEvent, scene: FrameScene | null | undefined)
   return isScheduledSystemEvent(event.event)
     ? scheduledSystemEventLabel(event.event)
     : isScheduledCustomEvent(event.event)
-    ? event.event
-    : sceneName(scene)
+      ? event.event
+      : sceneName(scene)
 }
 
 function SystemEventIcon({ event, className }: { event: ScheduledSystemEventName; className?: string }): JSX.Element {
@@ -116,8 +116,8 @@ function SceneScheduleCard({
     layout === 'grid'
       ? 'min-w-0'
       : layout === 'responsive'
-      ? 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
-      : 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
+        ? 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
+        : 'min-w-[8.5rem] max-w-[9.5rem] flex-none'
 
   return (
     <div className={clsx('relative', sizeClassName)}>
@@ -756,7 +756,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
         if (eventIndex === -1) {
           return null
         }
-        const sceneId = scheduledEventIsSceneChange(event) ? event.payload?.sceneId ?? '' : ''
+        const sceneId = scheduledEventIsSceneChange(event) ? (event.payload?.sceneId ?? '') : ''
         const scene = (sceneId ? scenesById[sceneId] : null) ?? null
         const inactive = event.disabled || disabled
 

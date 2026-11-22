@@ -67,6 +67,19 @@ static void test_a_new_scene_starts_from_a_clean_panel(void)
     CHECK(!fos_partial_refresh_wanted(&input));
 }
 
+static void test_a_new_scene_someone_switched_to_is_partial(void)
+{
+    /* The switcher's tile, a swipe: half a second, not a flash. */
+    fos_partial_refresh_input_t input = a_small_change();
+    input.same_scene = false;
+    input.input_recent = true;
+    input.changed_bytes = 20000;
+    CHECK(fos_partial_refresh_wanted(&input));
+    /* Most of the panel changed: a flash all the same. */
+    input.changed_bytes = 30000;
+    CHECK(!fos_partial_refresh_wanted(&input));
+}
+
 static void test_a_full_refresh_clears_the_ghosts_on_a_schedule(void)
 {
     fos_partial_refresh_input_t input = a_small_change();
@@ -133,6 +146,7 @@ int main(void)
     test_a_panel_without_the_waveform_is_never_partial();
     test_an_unknown_picture_on_the_glass_is_a_full_refresh();
     test_a_new_scene_starts_from_a_clean_panel();
+    test_a_new_scene_someone_switched_to_is_partial();
     test_a_full_refresh_clears_the_ghosts_on_a_schedule();
     test_the_ghosts_wait_while_someone_is_tapping();
     test_a_picture_that_mostly_changed_is_a_full_refresh();

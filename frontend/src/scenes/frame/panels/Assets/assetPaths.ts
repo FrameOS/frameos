@@ -98,8 +98,8 @@ export function withRenamedAsset<T extends AssetPathEntry>(
     const movedPath = asset.path.startsWith('/')
       ? normalizeAssetPath(movedKey, assetsPath)
       : asset.path.startsWith('./')
-      ? `./${movedKey}`
-      : movedKey
+        ? `./${movedKey}`
+        : movedKey
     return { ...asset, path: movedPath }
   })
 }

@@ -120,8 +120,8 @@ async function fetchSidecar(
 export interface assetColorsLogicValues {
   assetTree: AssetNode // assetsLogic
   assets: AssetType[] // assetsLogic
-  storage: AssetStorageId // assetsLogic
   colorProfileKeys: Set<string> // assetsLogic
+  storage: AssetStorageId // assetsLogic
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   adjustmentMode: AdjustmentMode
@@ -161,7 +161,7 @@ export interface assetColorsLogicValues {
 export interface assetColorsLogicActions {
   deleteAsset: (
     path: string,
-    storage?: AssetStorageId
+    storage?: AssetStorageId | undefined
   ) => {
     path: string
     storage: AssetStorageId | undefined
@@ -513,8 +513,8 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         sameAdjustments(profile, defaultAssetColorProfile())
           ? 'none'
           : autoEndPoints && sameAdjustments(profile, autoProfileFor(profile, autoEndPoints))
-          ? 'auto'
-          : 'custom',
+            ? 'auto'
+            : 'custom',
     ],
     isDirty: [
       (s) => [s.profile, s.savedProfile],
@@ -561,13 +561,13 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
     previousImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
-        position.index > 0 ? folderImagePaths[position.index - 1] ?? null : null,
+        position.index > 0 ? (folderImagePaths[position.index - 1] ?? null) : null,
     ],
     nextImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
         position.index >= 0 && position.index < position.count - 1
-          ? folderImagePaths[position.index + 1] ?? null
+          ? (folderImagePaths[position.index + 1] ?? null)
           : null,
     ],
   }),

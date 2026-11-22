@@ -77,7 +77,9 @@ export function Modal({
                   ) : null}
                 </div>
               ) : null}
-              <div className={clsx('overflow-y-auto', fullHeight ? 'flex-1 min-h-0' : bodyClassName ?? 'max-h-[70vh]')}>
+              <div
+                className={clsx('overflow-y-auto', fullHeight ? 'flex-1 min-h-0' : (bodyClassName ?? 'max-h-[70vh]'))}
+              >
                 {children}
               </div>
               {footer}

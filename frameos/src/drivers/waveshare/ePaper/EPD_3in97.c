@@ -26,12 +26,16 @@ parameter:
 ******************************************************************************/
 static void EPD_3in97_Reset(void)
 {
+    // The controller wants RST low for tens of microseconds and is ready
+    // when BUSY falls, which every caller waits for next. The reference
+    // driver's 100 ms on each side were 200 ms of every wake from a park and
+    // of every full refresh (the reTerminal Sticky, 2026-11-21).
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(100);
+    DEV_Delay_ms(10);
     DEV_Digital_Write(EPD_RST_PIN, 0);
     DEV_Delay_ms(2);
     DEV_Digital_Write(EPD_RST_PIN, 1);
-    DEV_Delay_ms(100);
+    DEV_Delay_ms(10);
 }
 
 /******************************************************************************
@@ -75,19 +79,21 @@ parameter:
 static void EPD_3in97_ReadBusy(void)
 {
     Debug("e-Paper busy\r\n");
-    UDOUBLE busy_wait_ms = 0;
+    // Polled at the finest the delay gives (a tick on an ESP32, a
+    // millisecond on a Pi), and nothing after: BUSY low is the controller
+    // ready. 20 ms steps and 20 ms more after were up to 40 ms of every tap's
+    // update and of each wait in an init.
+    UDOUBLE start = DEV_Millis();
     while(1)
     {
         if(DEV_Digital_Read(EPD_BUSY_PIN)==0)
             break;
-        if (busy_wait_ms >= EPD_BUSY_TIMEOUT_MS) {
+        if (DEV_Millis() - start >= EPD_BUSY_TIMEOUT_MS) {
             Debug("e-Paper busy timeout\r\n");
             break;
         }
-        DEV_Delay_ms(20);
-        busy_wait_ms += 20;
+        DEV_Delay_ms(1);
     }
-    DEV_Delay_ms(20);
     Debug("e-Paper busy release\r\n");
 }
 
@@ -214,7 +220,6 @@ void EPD_3in97_Init(void)
     EPD_3in97_WaitPending();
     EPD_3in97_AnalogOn = 0;
     EPD_3in97_Reset();
-    DEV_Delay_ms(100);
 
     EPD_3in97_ReadBusy();
     EPD_3in97_SendCommand(0x12);  //SWRESET
@@ -259,15 +264,11 @@ parameter:
 void EPD_3in97_Display(UBYTE *Image)
 {
     EPD_3in97_WaitPending();
-    UWORD i;
-    UWORD height = EPD_3in97_HEIGHT;
-    UWORD width = EPD_3in97_WIDTH/8;
-
+    // The rows lie one after another: one write of the plane, not a chip
+    // select and a transaction per row (960 of them a partial update, ~30 ms
+    // of the reTerminal Sticky's 70, 2026-11-21).
     EPD_3in97_SendCommand(0x24);   //write RAM for black(0)/white (1)
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Image+i*width), width);
-    }
+    EPD_3in97_SendData2(Image, (UDOUBLE)EPD_3in97_HEIGHT * (EPD_3in97_WIDTH / 8));
     EPD_3in97_TurnOnDisplay();
 }
 
@@ -295,24 +296,16 @@ parameter:
 ******************************************************************************/
 void EPD_3in97_Display_Partial(UBYTE *Image, UBYTE *Previous)
 {
-    UWORD i;
-    UWORD height = EPD_3in97_HEIGHT;
-    UWORD width = EPD_3in97_WIDTH/8;
+    UDOUBLE plane = (UDOUBLE)EPD_3in97_HEIGHT * (EPD_3in97_WIDTH / 8);
 
     EPD_3in97_WaitPending();
     EPD_3in97_SetCursor(0, 0);
     EPD_3in97_SendCommand(0x26);   //write RAM for the previous picture
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Previous+i*width), width);
-    }
+    EPD_3in97_SendData2(Previous, plane);
 
     EPD_3in97_SetCursor(0, 0);
     EPD_3in97_SendCommand(0x24);   //write RAM for black(0)/white (1)
-    for(i=0; i<height; i++)
-    {
-        EPD_3in97_SendData2((UBYTE *)(Image+i*width), width);
-    }
+    EPD_3in97_SendData2(Image, plane);
     EPD_3in97_TurnOnDisplay_Partial();
 }
 

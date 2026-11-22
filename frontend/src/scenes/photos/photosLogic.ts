@@ -980,7 +980,7 @@ export const photosLogic = kea<photosLogicType>([
     lightboxEntry: [
       (s) => [s.lightboxEntries, s.lightboxPath],
       (lightboxEntries: PhotoEntry[], lightboxPath: string | null): PhotoEntry | null =>
-        lightboxPath ? lightboxEntries.find((entry) => entry.path === lightboxPath) ?? null : null,
+        lightboxPath ? (lightboxEntries.find((entry) => entry.path === lightboxPath) ?? null) : null,
     ],
     /** One link per folder, for the "shared" marks: the general one when there is one. */
     sharesByPath: [

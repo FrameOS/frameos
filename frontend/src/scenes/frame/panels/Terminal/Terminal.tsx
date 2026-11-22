@@ -55,7 +55,7 @@ function ansiToHtml(value: string, theme: WorkspaceTheme): string {
   const ansiRegex = /\x1b\[([0-9;]*)m/g
   const colors = terminalPalettes[theme]
   const escapeHtml = (str: string): string =>
-    str.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]!))
+    str.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
   let result = ''
   let lastIndex = 0
   const stack: string[] = []
@@ -191,12 +191,12 @@ export function Terminal() {
         ? 'bg-emerald-400/10 text-emerald-300 ring-emerald-400/20'
         : 'bg-emerald-500/10 text-emerald-700 ring-emerald-500/20'
       : connectionState === 'connecting'
-      ? theme === 'dark'
-        ? 'bg-amber-400/10 text-amber-300 ring-amber-400/20'
-        : 'bg-amber-500/10 text-amber-700 ring-amber-500/20'
-      : theme === 'dark'
-      ? 'bg-slate-100/10 text-slate-300 ring-white/10'
-      : 'bg-slate-500/10 text-slate-600 ring-slate-500/20'
+        ? theme === 'dark'
+          ? 'bg-amber-400/10 text-amber-300 ring-amber-400/20'
+          : 'bg-amber-500/10 text-amber-700 ring-amber-500/20'
+        : theme === 'dark'
+          ? 'bg-slate-100/10 text-slate-300 ring-white/10'
+          : 'bg-slate-500/10 text-slate-600 ring-slate-500/20'
 
   const controlButtonClassName =
     'frameos-secondary-button h-10 shrink-0 rounded-lg px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'

@@ -46,7 +46,8 @@ const needDescriptions: Record<SceneNeed, string> = {
   touch: 'Used with taps and swipes on a touch screen, or with a mouse.',
   keys: 'Used with a keyboard.',
   buttons: "Used with the frame's own buttons.",
-  linux: 'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
+  linux:
+    'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
 }
 
 export function sceneNeedLabel(need: SceneNeed): string {
@@ -210,10 +211,16 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
       }
     }
     const code = codeOf(entry)
-    if ([...events].some((name) => POINTER_EVENTS.has(name)) || code.some((text) => POINTER_HANDLER.test(text) || POINTER_NAME.test(text))) {
+    if (
+      [...events].some((name) => POINTER_EVENTS.has(name)) ||
+      code.some((text) => POINTER_HANDLER.test(text) || POINTER_NAME.test(text))
+    ) {
       needs.add('touch')
     }
-    if ([...events].some((name) => KEY_EVENTS.has(name)) || code.some((text) => KEY_HANDLER.test(text) || KEY_NAME.test(text))) {
+    if (
+      [...events].some((name) => KEY_EVENTS.has(name)) ||
+      code.some((text) => KEY_HANDLER.test(text) || KEY_NAME.test(text))
+    ) {
       needs.add('keys')
     }
     if ([...events].some((name) => BUTTON_EVENTS.has(name)) || code.some((text) => BUTTON_NAME.test(text))) {

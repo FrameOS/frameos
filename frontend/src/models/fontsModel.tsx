@@ -194,13 +194,16 @@ export const fontsModel = kea<fontsModelType>([
     fontsByName: [
       (s) => [s.fonts],
       (fonts: FontMetadata[]): Record<string, FontMetadata[]> =>
-        fonts.reduce((acc, font) => {
-          if (!acc[font.name]) {
-            acc[font.name] = []
-          }
-          acc[font.name].push(font)
-          return acc
-        }, {} as Record<string, FontMetadata[]>),
+        fonts.reduce(
+          (acc, font) => {
+            if (!acc[font.name]) {
+              acc[font.name] = []
+            }
+            acc[font.name].push(font)
+            return acc
+          },
+          {} as Record<string, FontMetadata[]>
+        ),
     ],
     fontsByNameOptions: [
       (s) => [s.fontsByName],

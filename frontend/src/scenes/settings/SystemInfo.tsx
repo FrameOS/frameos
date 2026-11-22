@@ -58,7 +58,9 @@ export function SystemInfo() {
             </div>
             <div className="frameos-inset rounded-xl border p-3">
               <div className="frameos-muted text-xs uppercase">Memory</div>
-              <div className="frameos-strong text-lg font-semibold">{formatBytes(currentMemory?.availableBytes)} free</div>
+              <div className="frameos-strong text-lg font-semibold">
+                {formatBytes(currentMemory?.availableBytes)} free
+              </div>
               <div className="frameos-muted text-xs">of {formatBytes(currentMemory?.totalBytes)} total</div>
             </div>
             <div className="frameos-inset rounded-xl border p-3">

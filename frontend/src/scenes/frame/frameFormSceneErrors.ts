@@ -20,8 +20,8 @@ export function frameFormSceneErrors(scenes: Partial<FrameScene>[] | undefined):
           name: !name
             ? 'Codename is required'
             : fieldNames.findIndex((candidate: string) => candidate === name) !== fieldIndex
-            ? 'Codename must be unique'
-            : '',
+              ? 'Codename must be unique'
+              : '',
           type: field.type ? '' : 'Type is required',
         }
       }),
@@ -31,10 +31,10 @@ export function frameFormSceneErrors(scenes: Partial<FrameScene>[] | undefined):
           name: !name
             ? 'Event name is required'
             : builtinFrameEventNames.has(name)
-            ? 'Event name must not match a built-in event'
-            : customEventNames.findIndex((candidate: string) => candidate === name) !== eventIndex
-            ? 'Event name must be unique'
-            : '',
+              ? 'Event name must not match a built-in event'
+              : customEventNames.findIndex((candidate: string) => candidate === name) !== eventIndex
+                ? 'Event name must be unique'
+                : '',
           fields: (event.fields ?? []).map((field: Record<string, any>) => ({
             name: String(field.name ?? '').trim() ? '' : 'Codename is required',
             type: field.type ? '' : 'Type is required',

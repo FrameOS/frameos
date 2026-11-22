@@ -215,7 +215,7 @@ final class TourUITests: XCTestCase {
         // Every page linked from the frame, then back.
         let pages = [
             ("Settings", "20 frame settings"), ("Schedule", "21 schedule"), ("Button actions", "22 button actions"),
-            ("Assets", "23 assets"), ("Logs", "24 logs"), ("Metrics", "25 metrics"),
+            ("Files", "23 assets"), ("Logs", "24 logs"), ("Metrics", "25 metrics"),
             ("Generate scene", "26a generate scene"), ("Ask AI about this frame", "26 frame chat"),
         ]
         for (title, shot) in pages {

@@ -429,12 +429,12 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
     usbLogStreamState?.status === 'selecting'
       ? 'Select USB port'
       : usbLogStreamState?.status === 'connecting'
-      ? 'Connecting USB'
-      : usbLogStreamState?.status === 'stopping'
-      ? 'Disconnecting USB'
-      : usbLogStreamOpen
-      ? 'Disconnect USB'
-      : 'Connect USB'
+        ? 'Connecting USB'
+        : usbLogStreamState?.status === 'stopping'
+          ? 'Disconnecting USB'
+          : usbLogStreamOpen
+            ? 'Disconnect USB'
+            : 'Connect USB'
 
   const scrollListToAbsoluteEnd = (behavior: ScrollBehavior = 'auto') => {
     virtuosoRef.current?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior })
@@ -609,11 +609,11 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
         fullScreen
           ? ['min-h-[calc(100vh-3rem)] w-full', renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950']
           : compact
-          ? [
-              'h-full min-h-0 overflow-hidden bg-transparent',
-              renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950',
-            ]
-          : 'frame-tool-terminal h-full overflow-hidden rounded-[22px] p-3'
+            ? [
+                'h-full min-h-0 overflow-hidden bg-transparent',
+                renderTheme === 'dark' ? 'text-slate-100' : 'text-slate-950',
+              ]
+            : 'frame-tool-terminal h-full overflow-hidden rounded-[22px] p-3'
       )}
     >
       {compact ? null : fullScreen ? (
@@ -823,8 +823,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
           fullScreen
             ? 'min-h-[calc(100vh-6rem)] w-full pr-14'
             : compact
-            ? 'h-full min-h-0 pr-2'
-            : 'h-full overflow-y-auto pr-2'
+              ? 'h-full min-h-0 pr-2'
+              : 'h-full overflow-y-auto pr-2'
         )}
         ref={virtuosoRef}
         initialTopMostItemIndex={searchActive ? 0 : Math.max(visibleLogs.length - 1, 0)}
@@ -1019,8 +1019,8 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 ? 'bottom-20'
                 : 'bottom-[4.5rem]'
               : fullScreen
-              ? 'bottom-6'
-              : 'bottom-5'
+                ? 'bottom-6'
+                : 'bottom-5'
           )}
         >
           Scroll to latest

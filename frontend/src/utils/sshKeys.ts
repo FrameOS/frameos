@@ -1,8 +1,6 @@
 import { FrameOSSettings, SSHKeyEntry } from '../types'
 
-export const normalizeSshKeys = (
-  sshKeys: FrameOSSettings['ssh_keys'] | undefined
-): { keys: SSHKeyEntry[] } => {
+export const normalizeSshKeys = (sshKeys: FrameOSSettings['ssh_keys'] | undefined): { keys: SSHKeyEntry[] } => {
   if (!sshKeys) {
     return { keys: [] }
   }
@@ -39,7 +37,9 @@ export const normalizeSshKeys = (
 }
 
 export const getDefaultSshKeyIds = (sshKeys: FrameOSSettings['ssh_keys'] | undefined): string[] =>
-  normalizeSshKeys(sshKeys).keys.filter((key) => key.use_for_new_frames).map((key) => key.id)
+  normalizeSshKeys(sshKeys)
+    .keys.filter((key) => key.use_for_new_frames)
+    .map((key) => key.id)
 
 // OpenSSH public key line: `<type> <base64> [comment]`. The type list is
 // what dropbear/OpenSSH accept in authorized_keys.

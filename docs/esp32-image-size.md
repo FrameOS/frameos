@@ -1263,6 +1263,39 @@ taking a whole-parsed face's bitmap too (+0.1 KB net) and `colorGlyphImage`
 (0.1 KB); the shared bus lent during the panel's waits, 0.15 KB
 (`DEV_Delay_ms`, `DEV_Digital_Write`).
 
+## What the dependencies still carried: −47,232 (2026-11-21)
+
+Against main at 2032552e5 built the same way (`ci_build_image.sh`,
+`EPD_7in5_V2`, 8 MB layout): **3,214,144 → 3,166,912 bytes**, the OTA slot
+89.2% → 87.9% full. The way in: host `readelf -rW` reads the xtensa objects
+of the build's nimcache, each `.rela.text.<fn>` lists what `<fn>` calls, and
+with the map's sizes that is a call graph: cut the edges of a branch that
+cannot run on a frame and see what nothing reaches any more. By module, from
+the two maps:
+
+| Cut | Saves | How |
+|---|---:|---|
+| The rest of pixie's OpenType reader | ≈ −14,100 | #943 took `parseOpenType` out, but `fonts.nim` asked every typeface for its `opentype` in fifteen accessors, which kept the CFF charstring parse, the sbix/CBDT/COLR glyph paths, `glyphBox`, kerning and an instance of `parseCompositeGlyph` (opentype −13,343 with the fold below, fonts −1,659). `-d:pixieNoOpenType` takes the field and its branches out; `readTypeface` / `parseTtf` do not exist on the ESP32 now, and a Context opens its font file in place. |
+| `fillPath` / `strokePath` made for `string` | −8,697 | `SomePath = Path \| string`, and the SVG reader handed its late path data (`lateData`, solid paint only) straight in: a second `fillPath` (3.8 KB), `strokePath` (4.0 KB), `fillGradientBox` (1.7 KB). `fillPathText` / `strokePathText` draw one colour from the commands' flattening (anything else through a Path), and the stroke's batch loop is one non-generic `strokeSolidShapes`. |
+| One inflater | −5,315 | zippy's inflate, gzip, adler32 and their helpers (−5,992) beside pixie's `inflatestream`: PNG's interlaced decode, the built-in face's blocks and the time zone aliases go through `uncompressZlib` / `uncompressDeflate` (+677). An output of known size under the window is inflated in a buffer its own size, so a font block is no 64 KB allocation; the IDAT chunks are read where they lie, not joined first. zippy's `crc32` stays (PNG). |
+| Strings hashed with murmur (`-d:nimStringHash2`) | −3,220 | `hash(string)` inlined FarmHash, 64-bit arithmetic on a 32-bit core. No string hash leaves the runtime; a string-keyed `Table` iterates in another order. Part of the tables' −2,413 below is this too. |
+| chrono's time zones without `json.to` | −3,282 | `loadTzData`'s `to(seq[TimeZone])` / `to(seq[DstChange])` was the only user of std/json's typed reader (json −4,086, chrono −397); `tz.nim` reads the two shapes itself (+1,201). |
+| QOI (`-d:pixieNoQoi`) | −2,542 | as PPM: no web fetch, scene asset or upload produces one. The extension lists follow: `localImage` and the Files scene leave QOI and PPM out on an ESP32, the SPA's path picker too (`utils/pathExtensions.ts`), and WebP, which every runtime decodes, is on the lists now. |
+| `parsePngStructure` once | −1,903 | the contiguous parser is the segmented one over one segment (4,098 → 2,195 by symbol). |
+| std/uri for one host | −2,106 | `embeddedSizedRemoteImageUrl` cut the Unsplash URL at `?` and `#` with `parseUri` and `$` (uri −2,314, parseutils −521, image +729). |
+| `parseCompositeGlyph` once | ≈ −900 | the generic is a reader proc and one non-generic body (`parseCompositeGlyphWith`), for the indexed face and the card's fonts (3,082 → 1,148 by symbol, opentype's copy included). |
+
+The rest is what went with them: table and seq instances, hooks, strings
+(tables −2,413, system −1,347, about −1.5 KB scattered). Behaviour is
+unchanged except where the table says (a QOI on an ESP32, a Table's order).
+
+Looked at and kept: blend modes (a field of render/image and render/svg),
+chrono's `format` / `parseTs` (the JS chrono bindings), `zip_entry` (the JS
+assets API), GIF and BMP (decision 2026-11-21). Not done, needs work: std/xml
+(`parsexml`, `xmlparser`, `xmltree`, `strtabs`, about 10 KB) leaves only if
+the SVG reader's fast parser learns entities, text and CDATA and the Nim
+`xmlToJson` app is retired to JavaScript; kept for now (2026-11-21).
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim

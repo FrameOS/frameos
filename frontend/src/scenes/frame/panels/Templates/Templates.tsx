@@ -151,8 +151,8 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
     section === 'store'
       ? 'Search the scene store, or paste a scene URL...'
       : section === 'saved'
-      ? 'Search private scenes...'
-      : 'Search scenes, or paste a scene URL...'
+        ? 'Search private scenes...'
+        : 'Search scenes, or paste a scene URL...'
 
   const addRepository = canAddRepository ? (
     showingAddRepository ? (
@@ -551,8 +551,8 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
                 {inFrameAdminMode
                   ? "The scene store could not be reached. Check the frame's connection and try again."
                   : search !== ''
-                  ? `No store scenes match "${search}".`
-                  : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'}
+                    ? `No store scenes match "${search}".`
+                    : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'}
               </div>
             </div>
           ) : null}

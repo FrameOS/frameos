@@ -25,6 +25,7 @@ import {
   CloudArrowDownIcon,
   DocumentArrowUpIcon,
   ArrowPathIcon,
+  ArrowsPointingInIcon,
   PlayIcon,
   PencilSquareIcon,
   SwatchIcon,
@@ -50,6 +51,7 @@ import type { FrameId } from '../../../../types'
 import { AssetColorsModal } from './AssetColorsModal'
 import { assetColorsLogic } from './assetColorsLogic'
 import { SlideshowSettingsModal } from './SlideshowSettingsModal'
+import { ResizeUploadDialog } from '../../../../components/ResizeUploadDialog'
 import { slideshowSettingsLogic } from './slideshowSettingsLogic'
 
 function humaniseSize(size: number) {
@@ -106,6 +108,7 @@ function TreeNode({
   frameId,
   storage,
   uploadAssets,
+  resizeAndUploadAssets,
   deleteAsset,
   renameAsset,
   createFolder,
@@ -128,6 +131,7 @@ function TreeNode({
   /** The storage the tree is (thumbnails, downloads, which folders are open). */
   storage: AssetStorageId
   uploadAssets: (path: string) => void
+  resizeAndUploadAssets: (path: string) => void
   deleteAsset: (path: string) => void
   renameAsset: (oldPath: string, newPath: string) => void
   createFolder: (path: string) => void
@@ -246,6 +250,14 @@ function TreeNode({
                 readOnly
                   ? null
                   : {
+                      label: 'Resize and upload',
+                      icon: <ArrowsPointingInIcon className="w-5 h-5" />,
+                      title: 'Make photos smaller in this browser, to this frame’s size or another, then upload them',
+                      onClick: () => resizeAndUploadAssets(node.path),
+                    },
+                readOnly
+                  ? null
+                  : {
                       label: 'New folder',
                       icon: <FolderPlusIcon className="w-5 h-5" />,
                       onClick: () => {
@@ -327,6 +339,7 @@ function TreeNode({
                 frameId={frameId}
                 storage={storage}
                 uploadAssets={uploadAssets}
+                resizeAndUploadAssets={resizeAndUploadAssets}
                 deleteAsset={deleteAsset}
                 renameAsset={renameAsset}
                 createFolder={createFolder}
@@ -591,7 +604,7 @@ function AssetsSummaryHeader({
     <div className="frame-tool-card mb-4 overflow-hidden rounded-[22px]">
       <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-3 @3xl:gap-3 @3xl:px-4 @3xl:py-4">
         <div className="min-w-0">
-          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Assets</div>
+          <div className="frame-tool-muted text-xs font-semibold uppercase tracking-wide">Files</div>
           <div className="mt-1 flex min-w-0 items-center gap-2">
             <div className="truncate text-lg font-bold tracking-normal text-[color:var(--tool-strong)] @3xl:text-xl">
               {rootName || '/srv/assets'}
@@ -756,8 +769,16 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const { secondsBetweenImages } = useValues(slideshowSettingsLogic)
   const { openSettings: openSlideshowSettings } = useActions(slideshowSettingsLogic)
   const { frameAssetFolderExpansion } = useValues(workspaceLogic)
-  const { refreshAssets, syncAssets, uploadAssets, uploadDroppedFiles, deleteAsset, renameAsset, createFolder } =
-    useActions(assetsLogic(assetsLogicProps))
+  const {
+    refreshAssets,
+    syncAssets,
+    uploadAssets,
+    resizeAndUploadAssets,
+    uploadDroppedFiles,
+    deleteAsset,
+    renameAsset,
+    createFolder,
+  } = useActions(assetsLogic(assetsLogicProps))
   const { toggleShowSystemFolders, toggleShowHiddenFiles, setStorage } = useActions(assetsLogic(assetsLogicProps))
   const { setFrameAssetFolderExpanded } = useActions(workspaceLogic)
   // Font sync copies a control plane's font store onto the frame, into the
@@ -776,14 +797,14 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
   const syncDisabledReason = isVirtualFrame(frame)
     ? 'Virtual frames render in your browser, with the fonts bundled into the renderer.'
     : workspaceMode() === 'frameAdmin'
-    ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
-    : fontSyncElsewhere
-    ? `Fonts go in the assets folder, where the renderer reads them. Switch to ${
-        storages.find((option) => option.id === DEFAULT_ASSET_STORAGE)?.name ?? 'it'
-      } to sync them.`
-    : isEmbeddedHardwareFrame(frame) && storageUnmounted
-    ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
-    : null
+      ? 'This panel runs on the frame itself, so there is no font store to copy from. Upload a .ttf into the fonts/ folder here instead — the renderer reads the same place.'
+      : fontSyncElsewhere
+        ? `Fonts go in the assets folder, where the renderer reads them. Switch to ${
+            storages.find((option) => option.id === DEFAULT_ASSET_STORAGE)?.name ?? 'it'
+          } to sync them.`
+        : isEmbeddedHardwareFrame(frame) && storageUnmounted
+          ? 'No SD card in this frame, so fonts have nowhere to go. Insert one and refresh.'
+          : null
   const showSyncAction = true
 
   // syncAssets registers a long-running task toast, so no need to open logs
@@ -867,6 +888,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
             frameId={frame.id}
             storage={storage}
             uploadAssets={uploadAssets}
+            resizeAndUploadAssets={resizeAndUploadAssets}
             deleteAsset={deleteAsset}
             renameAsset={renameAsset}
             createFolder={createFolder}
@@ -888,6 +910,7 @@ export function Assets({ scrollContainer = true }: AssetsProps = {}): JSX.Elemen
       )}
       <AssetColorsModal frameId={frame.id} />
       <SlideshowSettingsModal />
+      <ResizeUploadDialog />
     </div>
   )
 }

@@ -256,11 +256,14 @@ export const repositoriesModel = kea<repositoriesModelType>([
         return
       }
       cache.pendingRefreshPolls = polls + 1
-      cache.pendingRefreshTimer = window.setTimeout(() => {
-        if (!values.repositoriesLoading) {
-          actions.loadRepositories()
-        }
-      }, PENDING_REFRESH_POLL_MS * (polls + 1))
+      cache.pendingRefreshTimer = window.setTimeout(
+        () => {
+          if (!values.repositoriesLoading) {
+            actions.loadRepositories()
+          }
+        },
+        PENDING_REFRESH_POLL_MS * (polls + 1)
+      )
     },
   })),
   afterMount(({ actions }) => {

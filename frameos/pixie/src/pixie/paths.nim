@@ -2523,9 +2523,9 @@ proc paintStripRows*(width, height: int, coverageOnly = false): int {.raises: []
   ## on a 1200x960 canvas that pair is 9.2 MB, which no ESP32 has spare. The
   ## pair may take half the decode budget and each image must fit the
   ## contiguous budget; with both unlimited (the host default) the strip is
-  ## the whole image and nothing changes. `coverageOnly`: a gradient into a
-  ## grey or 565 image has no paint image and its mask is a byte a pixel, so
-  ## its strips are eight times as tall.
+  ## the whole image and nothing changes. `coverageOnly`: a gradient blended
+  ## normally has no paint image and its mask is a byte a pixel, so its
+  ## strips are eight times as tall.
   if width <= 0 or height <= 0:
     return max(1, height)
   let rowBytes = width.int64 * (if coverageOnly: 1 else: 4)
@@ -2538,14 +2538,15 @@ proc paintStripRows*(width, height: int, coverageOnly = false): int {.raises: []
     rows = min(rows, contiguous.int64 div rowBytes)
   max(min(height.int64, paintStripMinRows.int64), rows).int
 
-# -------- A gradient into a grey or 565 image
+# -------- A gradient into an image, without a paint image
 #
-# Blended normally into a canvas that is not RGBA, a gradient needs no paint
-# image: each row is painted where the shape covers it, the gradient
-# evaluated there alone and stored straight into the canvas, with the
-# arithmetic the paint image, its mask multiply and the normal composite had
-# (a 565 canvas's dither and a sixteen-grey one's included), so the same
-# pixels. A grey target takes its rows as luma and alpha (`prepareGrey`)
+# Blended normally, a gradient needs no paint image: each row is painted
+# where the shape covers it, the gradient evaluated there alone and stored
+# straight into the canvas, with the arithmetic the paint image, its mask
+# multiply and the normal composite had (a 565 canvas's dither and a
+# sixteen-grey one's included), so the same pixels. An RGBX or 565 target
+# takes a row of colours and blends them in without a call a pixel
+# (`storeColorLine`: the colour e-paper panels' canvases, 2026-11-21). A grey target takes its rows as luma and alpha (`prepareGrey`)
 # where the shape covers a pixel whole, two pixels of a sixteen-grey byte in
 # one store. The rows are a job a host may share between its cores
 # (`rowsRunner`).
@@ -2568,7 +2569,8 @@ type GradientFillJob = object
   rows: ptr GradientRows
   data8: ptr UncheckedArray[uint8]
   data16: ptr UncheckedArray[uint16]
-  four, dither, grey, lines: bool ## `lines`: a grey target's rows as luma and alpha
+  data32: ptr UncheckedArray[ColorRGBX]
+  four, dither, grey, rgbx, lines: bool ## `lines`: a grey target's rows as luma and alpha
   origin, stride: int ## the image's, as `dataIndex` reads them
   x0, x1, y0: int     ## the box in the image's pixels
   rowsX0: int         ## where the gradient rows count x from
@@ -2628,6 +2630,9 @@ proc storeColor(job: ptr GradientFillJob, idx: int, color: ColorRGBX, coverage: 
     c = blendMask(c, rgbx(coverage, coverage, coverage, coverage))
   if c.a == 0:
     return
+  if job.rgbx:
+    job.data32[idx] = blendNormal(job.data32[idx], c)
+    return
   if not job.grey:
     if c.a != 255:
       c = blendNormal(rgb565ToRgbx(job.data16[idx]), c)
@@ -2644,6 +2649,71 @@ proc storeColor(job: ptr GradientFillJob, idx: int, color: ColorRGBX, coverage: 
   else:
     data[idx] = value
 
+proc storeColorLine(
+  job: ptr GradientFillJob, start, n: int, colors: ptr UncheckedArray[ColorRGBX],
+  covered: ptr UncheckedArray[uint8]
+) {.inline.} =
+  ## A run of colours blended normally into a 565 or RGBX image from the
+  ## pixel at `start`, each under `covered[i]` (nil: the job's coverage):
+  ## `storeColor`'s arithmetic, a row at a time with nothing called a pixel.
+  ## blendMask, blendNormal and the 565 pack were procs the -O2 loop called
+  ## for every pixel (a page's gradient was 0.92 µs a pixel on a reTerminal
+  ## E1004's 565 canvas, the hardware bench of 2026-11-21); the templates
+  ## here are the same integer steps, so the same pixels.
+  template source(i: int, c: untyped) =
+    ## `c`: colour `i` under its coverage (`covered`, as blendMask applies it).
+    var c = colors[i]
+    let m = (if covered.isNil: job.coverage else: covered[i])
+    if m != 255:
+      let k = m.uint32
+      c.r = ((c.r.uint32 * k) div 255).uint8
+      c.g = ((c.g.uint32 * k) div 255).uint8
+      c.b = ((c.b.uint32 * k) div 255).uint8
+      c.a = ((c.a.uint32 * k) div 255).uint8
+  if job.rgbx:
+    let data = job.data32
+    for i in 0 ..< n:
+      source(i, c)
+      if c.a == 0:
+        continue
+      let idx = start + i
+      if c.a == 255:
+        data[idx] = c
+        continue
+      let d = data[idx]
+      if d.a == 0:
+        data[idx] = c
+        continue
+      # blendNormal, written out.
+      let k = 255'u32 - c.a.uint32
+      data[idx] = ColorRGBX(
+        r: c.r + ((d.r.uint32 * k) div 255).uint8,
+        g: c.g + ((d.g.uint32 * k) div 255).uint8,
+        b: c.b + ((d.b.uint32 * k) div 255).uint8,
+        a: c.a + ((d.a.uint32 * k) div 255).uint8)
+    return
+  let data = job.data16
+  template run(dithered: static bool) =
+    for i in 0 ..< n:
+      source(i, c)
+      if c.a == 0:
+        continue
+      let idx = start + i
+      var r, g, b: uint8
+      if c.a == 255:
+        r = c.r
+        g = c.g
+        b = c.b
+      else:
+        # Over the opaque colour the 565 pixel expands to (rgb565ToRgbx).
+        expandRgb565(data[idx], backR, backG, backB)
+        let k = 255'u32 - c.a.uint32
+        r = c.r + ((backR * k) div 255).uint8
+        g = c.g + ((backG * k) div 255).uint8
+        b = c.b + ((backB * k) div 255).uint8
+      data[idx] = (when dithered: packRgb565Dithered(r, g, b, idx) else: packRgb565(r, g, b))
+  if job.dither: run(true) else: run(false)
+
 proc gradientFillSpan(
   job: ptr GradientFillJob, y, a, b: int, covered, scratch: ptr UncheckedArray[uint8]
 ) {.inline.} =
@@ -2655,6 +2725,10 @@ proc gradientFillSpan(
   if not job.lines:
     let colors = cast[ptr UncheckedArray[ColorRGBX]](scratch)
     job.rows[].row(y, rowsAt, rowsAt + b - a, colors)
+    if not job.grey:
+      job.storeColorLine(start, b - a, colors,
+        if covered.isNil: nil else: cast[ptr UncheckedArray[uint8]](covered[a].addr))
+      return
     for i in 0 ..< b - a:
       job.storeColor(start + i, colors[i], if covered.isNil: job.coverage else: covered[a + i])
     return
@@ -2720,8 +2794,8 @@ proc gradientFill(
   image: Image, rows: var GradientRows, x0, y0, x1, y1, rowsX0: int, coverage: uint8,
   mask: Image, scratch: var seq[uint8]
 ) {.raises: [].} =
-  ## The rows of a gradient into the box (x0, y0) .. (x1, y1) of a grey or
-  ## 565 `image`: under `coverage` everywhere, or where a grey `mask` the
+  ## The rows of a gradient into the box (x0, y0) .. (x1, y1) of `image`:
+  ## under `coverage` everywhere, or where a grey `mask` the
   ## size of the box says, whose whole pixels hold `coverage`. `rows` were
   ## prepared for that coverage if the image is grey (`prepareGrey`, which
   ## said yes: `lines`).
@@ -2734,9 +2808,11 @@ proc gradientFill(
     rows: rows.addr,
     data8: image.data8,
     data16: image.data16,
+    data32: image.data,
     four: image.format == pfGray4,
     dither: image.ditherStores,
     grey: grey,
+    rgbx: image.format == pfRgbx,
     lines: lines,
     origin: image.origin,
     stride: image.stride,
@@ -2756,10 +2832,10 @@ var gradientBoxFills* {.threadvar.}: int ## fills that went without a mask so fa
 proc fillGradientBox(
   image: Image, path: SomePath, paint: Paint, transform: Mat3
 ): bool {.raises: [PixieError].} =
-  ## The gradient `paint` blended normally into a grey or 565 `image` over
+  ## The gradient `paint` blended normally into `image` over
   ## `path`, when the path under `transform` is one box of whole pixels;
   ## false, with nothing drawn, when it is anything else.
-  if image.format == pfRgbx or paint.blendMode != NormalBlend or
+  if paint.blendMode != NormalBlend or
       paint.kind notin {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}:
     return false
   var shapes = parseSomePath(path, true, transform.pixelScale())
@@ -2855,9 +2931,9 @@ template paintThroughMask(
   let
     boxW = boxX1 - boxX0
     savedOpacity = paint.opacity
-    # A gradient blended normally onto grey or 565: no paint image
-    # (`gradientFill`) and a mask of a byte a pixel.
-    narrowGradient = image.format != pfRgbx and paint.blendMode == NormalBlend and
+    # A gradient blended normally: no paint image (`gradientFill`) and a
+    # mask of a byte a pixel.
+    narrowGradient = paint.blendMode == NormalBlend and
       paint.kind in {LinearGradientPaint, RadialGradientPaint, AngularGradientPaint}
     stripRows = paintStripRows(max(boxW, 1), max(boxY1 - boxY0, 1), narrowGradient)
     # A pixel the shape covers whole, as `applyOpacity` leaves it in the mask.
@@ -3731,6 +3807,56 @@ proc fillPath*(
       image.paintThroughMask(paint, transform, shapeBounds(path, transform)):
         mask.fillPath(path, color(1, 1, 1, 1), stripTransform, windingRule)
 
+proc strokeSolidShapes(
+  image: Image,
+  shapes: seq[Polygon],
+  color: Color,
+  transform: Mat3,
+  pixelScale: float32,
+  strokeWidth: float32,
+  lineCap: LineCap,
+  lineJoin: LineJoin,
+  miterLimit: float32,
+  dashes: seq[float32],
+  blendMode: BlendMode
+) {.raises: [PixieError].} =
+  ## strokePath's one colour: `shapes` (the path flattened at `pixelScale`)
+  ## outlined and filled. Not generic, so a Path and path data share it.
+  let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
+  defer:
+    if pathProbeOn:
+      pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
+      inc pathProbeCount[ppStroke]
+  let
+    # An opaque color blended normally is outlined and filled a batch of
+    # subpaths at a time: what one batch paints, the next painting again
+    # leaves as it was (bar the soft edge where two batches cross). A
+    # stroke outlines every point (a round join is a circle) and the fill
+    # holds every edge of the outline at once, so a long path (a map's
+    # roads, thousands of subpaths) outlined whole needed megabytes that
+    # a frame does not have. A translucent stroke stays one fill: two
+    # batches over the same pixels would show where they cross.
+    batches = color.a >= 1 and blendMode == NormalBlend
+  var
+    first = 0
+    points = 0
+  for i in 0 ..< shapes.len:
+    points += shapes[i].len
+    if i == shapes.high or (batches and points >= strokeBatchPoints):
+      var outline = strokeShapes(
+        shapes.toOpenArray(first, i),
+        strokeWidth,
+        lineCap,
+        lineJoin,
+        miterLimit,
+        dashes,
+        pixelScale
+      )
+      outline.transform(transform)
+      image.fillShapes(outline, color, NonZero, blendMode)
+      first = i + 1
+      points = 0
+
 proc strokePath*(
   image: Image,
   path: SomePath,
@@ -3765,42 +3891,10 @@ proc strokePath*(
             true, strokeWidth, lineCap, lineJoin, miterLimit, dashes)
         if masked:
           return
-      let probeStart = if pathProbeOn: getMonoTime() else: MonoTime()
-      defer:
-        if pathProbeOn:
-          pathProbeNs[ppStroke] += (getMonoTime() - probeStart).inNanoseconds
-          inc pathProbeCount[ppStroke]
-      let
-        pixelScale = transform.pixelScale()
-        shapes = parseSomePath(path, false, pixelScale)
-        # An opaque color blended normally is outlined and filled a batch of
-        # subpaths at a time: what one batch paints, the next painting again
-        # leaves as it was (bar the soft edge where two batches cross). A
-        # stroke outlines every point (a round join is a circle) and the fill
-        # holds every edge of the outline at once, so a long path (a map's
-        # roads, thousands of subpaths) outlined whole needed megabytes that
-        # a frame does not have. A translucent stroke stays one fill: two
-        # batches over the same pixels would show where they cross.
-        batches = color.a >= 1 and paint.blendMode == NormalBlend
-      var
-        first = 0
-        points = 0
-      for i in 0 ..< shapes.len:
-        points += shapes[i].len
-        if i == shapes.high or (batches and points >= strokeBatchPoints):
-          var outline = strokeShapes(
-            shapes.toOpenArray(first, i),
-            strokeWidth,
-            lineCap,
-            lineJoin,
-            miterLimit,
-            dashes,
-            pixelScale
-          )
-          outline.transform(transform)
-          image.fillShapes(outline, color, NonZero, paint.blendMode)
-          first = i + 1
-          points = 0
+      let pixelScale = transform.pixelScale()
+      image.strokeSolidShapes(parseSomePath(path, false, pixelScale), color,
+        transform, pixelScale, strokeWidth, lineCap, lineJoin, miterLimit,
+        dashes, paint.blendMode)
     return
 
   var bounds = shapeBounds(path, transform)
@@ -3821,6 +3915,58 @@ proc strokePath*(
         miterLimit,
         dashes
       )
+
+proc fillPathText*(
+  image: Image,
+  data: string,
+  paint: Paint,
+  transform = mat3(),
+  windingRule = NonZero
+) {.raises: [PixieError].} =
+  ## fillPath for path data that is read here and let go (the SVG reader's
+  ## long paths, `lateData`): one colour straight from the commands' flattening,
+  ## any other paint through a Path. Draws what `fillPath(data, ...)` does
+  ## without a second copy of fillPath made for strings.
+  paint.opacity = clamp(paint.opacity, 0, 1)
+  if paint.opacity == 0:
+    return
+  if paint.kind != SolidPaint:
+    image.fillPath(parsePath(data), paint, transform, windingRule)
+    return
+  if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
+    var color = paint.color
+    color.a *= paint.opacity
+    pathProbe(ppFill):
+      var shapes = parsePath(data).commandsToShapes(true, transform.pixelScale())
+      shapes.transform(transform)
+      image.fillShapes(shapes, color, windingRule, paint.blendMode)
+
+proc strokePathText*(
+  image: Image,
+  data: string,
+  paint: Paint,
+  transform = mat3(),
+  strokeWidth: float32 = 1.0,
+  lineCap = ButtCap,
+  lineJoin = MiterJoin,
+  miterLimit = defaultMiterLimit,
+  dashes: seq[float32] = @[]
+) {.raises: [PixieError].} =
+  ## strokePath for path data that is read here and let go, as fillPathText.
+  paint.opacity = clamp(paint.opacity, 0, 1)
+  if paint.opacity == 0:
+    return
+  if paint.kind != SolidPaint:
+    image.strokePath(parsePath(data), paint, transform, strokeWidth, lineCap,
+      lineJoin, miterLimit, dashes)
+    return
+  if paint.color.a > 0 or paint.blendMode == OverwriteBlend:
+    var color = paint.color
+    color.a *= paint.opacity
+    let pixelScale = transform.pixelScale()
+    image.strokeSolidShapes(parsePath(data).commandsToShapes(false, pixelScale),
+      color, transform, pixelScale, strokeWidth, lineCap, lineJoin, miterLimit,
+      dashes, paint.blendMode)
 
 proc overlaps(
   shapes: seq[Polygon],

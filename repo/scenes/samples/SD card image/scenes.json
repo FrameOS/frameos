@@ -25,6 +25,7 @@
           "png",
           "gif",
           "bmp",
+          "webp",
           "qoi",
           "ppm",
           "svg"

@@ -143,8 +143,8 @@ function LayoutThumbnail({ root }: { root: SplitLayoutNode }): JSX.Element {
             index % 3 === 0
               ? 'frameos-split-thumbnail-cell-a'
               : index % 3 === 1
-              ? 'frameos-split-thumbnail-cell-b'
-              : 'frameos-split-thumbnail-cell-c'
+                ? 'frameos-split-thumbnail-cell-b'
+                : 'frameos-split-thumbnail-cell-c'
           )}
           style={{
             height: `${rect.height}%`,
@@ -568,7 +568,7 @@ function SplitRenderControls({
   onSetBorderWidth: (borderWidth: number) => void
   onSetOuterBorderWidth: (outerBorderWidth: number) => void
 }): JSX.Element {
-  const backgroundScene = background.sceneId ? scenes.find((scene) => scene.id === background.sceneId) ?? null : null
+  const backgroundScene = background.sceneId ? (scenes.find((scene) => scene.id === background.sceneId) ?? null) : null
   const hasBackgroundScene = Boolean(background.sceneId)
 
   const handleSceneDragOver = (event: DragEvent<HTMLDivElement>): void => {
@@ -937,9 +937,9 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const scenes = sceneById(frame)
   const frameScenes = frame.scenes ?? []
   const leaves = splitLayoutLeaves(layout.root)
-  const selectedLeaf = selectedLeafId ? leaves.find((leaf) => leaf.id === selectedLeafId) ?? null : null
-  const selectedLeafScene = selectedLeaf?.sceneId ? scenes.get(selectedLeaf.sceneId) ?? null : null
-  const editingScene = editingSceneId ? scenes.get(editingSceneId) ?? null : null
+  const selectedLeaf = selectedLeafId ? (leaves.find((leaf) => leaf.id === selectedLeafId) ?? null) : null
+  const selectedLeafScene = selectedLeaf?.sceneId ? (scenes.get(selectedLeaf.sceneId) ?? null) : null
+  const editingScene = editingSceneId ? (scenes.get(editingSceneId) ?? null) : null
   const selectedLeafRhythm = splitPanelRhythm(
     selectedLeafScene,
     selectedLeaf?.state,
@@ -1137,7 +1137,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
                 outerBorderWidth={layout.outerBorderWidth}
                 rect={rect}
                 root={layout.root}
-                scene={rect.sceneId ? scenes.get(rect.sceneId) ?? null : null}
+                scene={rect.sceneId ? (scenes.get(rect.sceneId) ?? null) : null}
                 selected={selectedLeafId === rect.leafId}
                 onDropScene={handleDropScene}
                 onRemoveScene={(leafId) => assignSceneWithTitle(leafId, null)}

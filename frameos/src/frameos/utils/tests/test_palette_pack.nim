@@ -221,8 +221,11 @@ suite "a colour picture packed on two cores":
     var checked = 0
     for (name, palette) in palettes:
       for format in [pfRgb565, pfRgbx, pfGray8, pfGray4]:
-        # Big enough to be shared (64 K pixels), and odd sizes around it.
-        for (width, height) in [(320, 205), (257, 256), (1201, 57), (64, 1031), (2, 40000)]:
+        # Big enough to be shared (64 K pixels), and odd sizes around it. Every
+        # row is one wait for the row above, and a test binary shares its cores
+        # with fifteen others on CI: a 2x40000 picture here was 40000 waits a
+        # pack, 96% of the suite's, and timed the test out under that load.
+        for (width, height) in [(320, 205), (257, 256), (1201, 57), (64, 1031)]:
           for amp in [0, DitherJitterDefaultAmp]:
             for who in [-1'i32, 0, 1]:
               stallWorker.store(who)

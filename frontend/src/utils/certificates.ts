@@ -75,13 +75,8 @@ export function getCertificateValidityInfo(value?: string): CertificateValidityI
   }
 }
 
-export function getFrameCertificateStatus(
-  frame: Pick<FrameType, 'https_proxy'>
-): CertificateSeverity | null {
-  const certDates = [
-    frame.https_proxy?.client_ca_cert_not_valid_after,
-    frame.https_proxy?.server_cert_not_valid_after,
-  ]
+export function getFrameCertificateStatus(frame: Pick<FrameType, 'https_proxy'>): CertificateSeverity | null {
+  const certDates = [frame.https_proxy?.client_ca_cert_not_valid_after, frame.https_proxy?.server_cert_not_valid_after]
   const infos = certDates
     .map((date) => getCertificateValidityInfo(date))
     .filter((info): info is CertificateValidityInfo => !!info)

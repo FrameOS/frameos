@@ -224,8 +224,8 @@ export function WorkspaceSceneDropDown({
                       candidate.id === scene.id
                         ? { ...candidate, default: true }
                         : candidate.default
-                        ? { ...candidate, default: false }
-                        : candidate
+                          ? { ...candidate, default: false }
+                          : candidate
                     )
                   ),
                 icon: <FlagIcon className="h-5 w-5" />,

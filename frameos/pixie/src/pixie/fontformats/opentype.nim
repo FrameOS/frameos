@@ -2721,14 +2721,19 @@ proc parseGlyphPath*(
 
     result.closePath()
 
-proc parseCompositeGlyph*[T](
-  source: T, buf: string, offset, recursionDepth: int
-): Path =
+type GlyfComponentReader = proc (
+  source: pointer, glyphId: uint16, recursionDepth: int
+): Path {.nimcall, raises: [PixieError], gcsafe.}
+  ## How parseCompositeGlyphWith reads a component: the font kind's
+  ## `parseGlyfGlyph`, `source` its font.
+
+proc parseCompositeGlyphWith(
+  source: pointer, read: GlyfComponentReader, buf: string, offset, recursionDepth: int
+): Path {.raises: [PixieError].} =
   ## A composite TrueType glyph's outline: its components (each read through
-  ## `source.parseGlyfGlyph`, the font that holds them) placed by their
-  ## transforms. `buf` holds the composite's record, its components' list
-  ## from `offset` on.
-  mixin parseGlyfGlyph
+  ## `read`, from the font that holds them) placed by their transforms. `buf`
+  ## holds the composite's record, its components' list from `offset` on.
+  ## Not generic: one copy for every font kind.
   result = newPath()
 
   var
@@ -2812,10 +2817,7 @@ proc parseCompositeGlyph*[T](
     # elif (flags and 0b1000000000000) != 0: # UNSCALED_COMPONENT_OFFSET
     #   discard
 
-    var subPath = source.parseGlyfGlyph(
-      component.glyphId,
-      recursionDepth + 1
-    )
+    var subPath = read(source, component.glyphId, recursionDepth + 1)
     subPath.transform(mat3(
       component.xScale, component.scale10, 0.0,
       component.scale01, component.yScale, 0.0,
@@ -2825,6 +2827,17 @@ proc parseCompositeGlyph*[T](
     result.addPath(subPath)
 
     moreComponents = (flags and 0b100000) != 0
+
+proc parseCompositeGlyph*[T: ref](
+  source: T, buf: string, offset, recursionDepth: int
+): Path {.raises: [PixieError].} =
+  ## A composite glyph of `source`, whose `parseGlyfGlyph` reads its
+  ## components (see parseCompositeGlyphWith).
+  mixin parseGlyfGlyph
+  proc read(font: pointer, glyphId: uint16, depth: int): Path {.
+      nimcall, raises: [PixieError], gcsafe.} =
+    cast[T](font).parseGlyfGlyph(glyphId, depth)
+  parseCompositeGlyphWith(cast[pointer](source), read, buf, offset, recursionDepth)
 
 proc parseGlyfGlyph(
   opentype: OpenType, glyphId: uint16, recursionDepth: int

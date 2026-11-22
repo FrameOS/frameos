@@ -839,10 +839,10 @@ function OverviewStatCard({
     tone === 'good'
       ? 'text-emerald-500'
       : tone === 'warning'
-      ? 'text-amber-500'
-      : tone === 'danger'
-      ? 'text-red-500'
-      : 'frameos-primary-text'
+        ? 'text-amber-500'
+        : tone === 'danger'
+          ? 'text-red-500'
+          : 'frameos-primary-text'
 
   return (
     <div className="frame-tool-card rounded-[22px] p-4">
@@ -1077,8 +1077,8 @@ function OverviewSystemMetricTiles({
   const emptyDetail = metricsLoading
     ? 'Loading metrics...'
     : frame.metrics_interval > 0
-    ? 'Waiting for sample'
-    : 'Metrics disabled'
+      ? 'Waiting for sample'
+      : 'Metrics disabled'
 
   return (
     <>
@@ -1134,8 +1134,8 @@ function OverviewScheduleCard({ frame, scenes }: { frame: FrameType; scenes: Fra
   const summary = disabled
     ? 'Paused'
     : enabledEvents.length === 0
-    ? 'No active entries'
-    : `${enabledEvents.length} active ${enabledEvents.length === 1 ? 'entry' : 'entries'}`
+      ? 'No active entries'
+      : `${enabledEvents.length} active ${enabledEvents.length === 1 ? 'entry' : 'entries'}`
 
   return (
     <div className="frame-tool-card rounded-[22px] p-4">
@@ -1199,12 +1199,12 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
   const healthTone = healthy
     ? 'good'
     : checkin?.kind === 'sleeping'
-    ? 'neutral'
-    : stale || checkin?.kind === 'overdue'
-    ? 'warning'
-    : frame.status === 'error'
-    ? 'danger'
-    : 'neutral'
+      ? 'neutral'
+      : stale || checkin?.kind === 'overdue'
+        ? 'warning'
+        : frame.status === 'error'
+          ? 'danger'
+          : 'neutral'
   const frameAspectRatio =
     frame.width && frame.height
       ? frame.rotate === 90 || frame.rotate === 270
@@ -1227,14 +1227,14 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
               healthy
                 ? 'Healthy'
                 : checkin?.kind === 'sleeping'
-                ? 'Asleep'
-                : checkin?.kind === 'overdue'
-                ? 'Overdue'
-                : stale
-                ? 'Stale'
-                : frame.status
+                  ? 'Asleep'
+                  : checkin?.kind === 'overdue'
+                    ? 'Overdue'
+                    : stale
+                      ? 'Stale'
+                      : frame.status
             }
-            detail={checkin ? frameCheckinDescription(frameWithLatestLog, checkin) ?? undefined : undefined}
+            detail={checkin ? (frameCheckinDescription(frameWithLatestLog, checkin) ?? undefined) : undefined}
             tone={healthTone}
           />
           <OverviewStatCard
@@ -1586,8 +1586,8 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
                 toolUsesPageScroll
                   ? 'overflow-visible'
                   : frameToolIsFullBleed(activeToolPanel)
-                  ? 'overflow-hidden'
-                  : 'overflow-y-auto'
+                    ? 'overflow-hidden'
+                    : 'overflow-y-auto'
               )}
             >
               {toolRoute.kind === 'notFound' ? (

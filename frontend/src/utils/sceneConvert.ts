@@ -89,7 +89,7 @@ export async function postSceneConversion(
       ok: false,
       error:
         errorMessages[code] ??
-        `Conversion failed: ${code}${payload.hint ?? payload.detail ? ` — ${payload.hint ?? payload.detail}` : ''}`,
+        `Conversion failed: ${code}${(payload.hint ?? payload.detail) ? ` — ${payload.hint ?? payload.detail}` : ''}`,
     }
   }
   const report = payload.reports?.[0]

@@ -98,20 +98,20 @@ export function ExpandedScene({
       ? 'Pushing…'
       : 'Activating…'
     : frameAdminMode && sceneIsUnsaved
-    ? 'Save & activate'
-    : needsPush
-    ? pushCopy.label
-    : sceneIsCurrent
-    ? 'Apply'
-    : 'Activate'
+      ? 'Save & activate'
+      : needsPush
+        ? pushCopy.label
+        : sceneIsCurrent
+          ? 'Apply'
+          : 'Activate'
   const activateDescription =
     frameAdminMode && sceneIsUnsaved
       ? 'Save your changes and make this the active scene'
       : needsPush
-      ? pushCopy.description
-      : sceneIsCurrent
-      ? 'Send these values to the scene on the frame'
-      : 'Make this the active scene on the frame'
+        ? pushCopy.description
+        : sceneIsCurrent
+          ? 'Send these values to the scene on the frame'
+          : 'Make this the active scene on the frame'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }

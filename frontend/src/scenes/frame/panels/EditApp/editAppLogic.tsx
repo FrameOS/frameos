@@ -302,7 +302,7 @@ export const editAppLogic = kea<editAppLogicType>([
     sceneApp: [
       (s) => [s.scene, s.sceneAppKey],
       (scene: editAppLogicValues['scene'], sceneAppKey: editAppLogicValues['sceneAppKey']) =>
-        sceneAppKey ? scene?.apps?.[sceneAppKey] ?? null : null,
+        sceneAppKey ? (scene?.apps?.[sceneAppKey] ?? null) : null,
     ],
     savedSources: [
       (s) => [s.appData, s.sceneApp],

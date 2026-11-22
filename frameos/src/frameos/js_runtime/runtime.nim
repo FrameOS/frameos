@@ -161,6 +161,44 @@ const __frameosSameProps = (a, b) => {
 // (2026-11-07), on every host that keeps the interpreter between renders.
 // The same two Map objects, cleared, not a new one a render: an animation
 // renders thirty times a second.
+// signal(v) (docs/jsx-ui.md "Signals"): a value a memo()'d component reads
+// through .value subscribes that component's call (the C memo's record,
+// js_runtime/jsx_native.nim); setting it marks those calls dirty. A handler
+// that set signals and nothing else re-runs those components alone
+// (__frameosPartial) and the walker splices their elements into the tree it
+// read last (jsx.nim jsxSplice), with no get(). Outside a memo()'d component
+// a read subscribes nothing.
+globalThis.__frameosDirty = [];
+globalThis.signal = (v) => {
+  const subs = new Set();
+  return {
+    get value() {
+      const t = typeof __frameosSignal === "function" ? __frameosSignal(0) : null;
+      if (t !== null && !subs.has(t)) { subs.add(t); __frameosSignal(1, t, subs); }
+      return v;
+    },
+    set value(n) {
+      if (Object.is(n, v)) return;
+      v = n;
+      for (const r of subs) if (__frameosSignal(2, r)) globalThis.__frameosDirty.push(r);
+    },
+    peek() { return v; },
+  };
+};
+// The dirty calls again, alone: [the walker's number of the element each
+// made last, its new element, ...], or null when one cannot be spliced.
+globalThis.__frameosPartial = () => {
+  const out = [], list = globalThis.__frameosDirty;
+  globalThis.__frameosDirty = [];
+  __frameosSignal(4);
+  for (const r of list) {
+    const pair = __frameosSignal(3, r);
+    if (pair === undefined) continue;
+    if (pair === null) return null;
+    out.push(pair[0], pair[1]);
+  }
+  return out;
+};
 globalThis.memo = (component) => {
   let render = -1, turn = 0;
   let last = new Map(), used = new Map();

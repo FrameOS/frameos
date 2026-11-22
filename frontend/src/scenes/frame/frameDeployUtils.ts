@@ -517,12 +517,12 @@ export function buildFullDeployPlanSummary(
     value: fullPlan.binary.will_attempt_precompiled
       ? 'Download and install the precompiled FrameOS release'
       : fullPlan.binary.will_attempt_cross_compile
-      ? fullPlan.binary.build_executor
-        ? `Cross-compile via ${fullPlan.binary.build_executor}`
-        : 'Cross-compile locally on this server'
-      : fullPlan.binary.cross_compile_supported
-      ? 'Build on device because the global build environment is disabled'
-      : 'Build on device because cross-compilation is unavailable for this target',
+        ? fullPlan.binary.build_executor
+          ? `Cross-compile via ${fullPlan.binary.build_executor}`
+          : 'Cross-compile locally on this server'
+        : fullPlan.binary.cross_compile_supported
+          ? 'Build on device because the global build environment is disabled'
+          : 'Build on device because cross-compilation is unavailable for this target',
   }
   let compilationItem: SummaryItem | null = null
   const items: SummaryItem[] = [

@@ -656,4 +656,3 @@ export async function updateCloudAccountSceneContent(
   const data = (await response.json()) as { scene?: { version?: number } }
   return typeof data.scene?.version === 'number' ? data.scene.version : undefined
 }
-

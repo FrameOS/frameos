@@ -60,7 +60,7 @@ function hueWeights(hue: number): number[] {
   }
   for (let i = 0; i < 8; i++) {
     const c0 = HUE_RANGE_CENTRES[i] ?? 0
-    const c1 = i === 7 ? 360 : HUE_RANGE_CENTRES[i + 1] ?? 360
+    const c1 = i === 7 ? 360 : (HUE_RANGE_CENTRES[i + 1] ?? 360)
     if (h >= c0 && h < c1) {
       const t = (h - c0) / (c1 - c0)
       weights[i] = 1 - t

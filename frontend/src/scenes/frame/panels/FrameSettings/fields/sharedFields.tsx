@@ -73,7 +73,7 @@ export function PaletteField(): JSX.Element {
                 value={value?.colors?.[index] ?? color}
                 onChange={(_value) => {
                   const newColors = palette.colors.map((c, i) =>
-                    i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                    i === index ? _value : (value?.colors?.[i] ?? c ?? '#000000')
                   )
                   onChange({ colors: newColors })
                 }}
@@ -85,7 +85,7 @@ export function PaletteField(): JSX.Element {
                 value={value?.colors?.[index] ?? color}
                 onChange={(_value) => {
                   const newColors = palette.colors.map((c, i) =>
-                    i === index ? _value : value?.colors?.[i] ?? c ?? '#000000'
+                    i === index ? _value : (value?.colors?.[i] ?? c ?? '#000000')
                   )
                   onChange({ colors: newColors })
                 }}
@@ -106,7 +106,8 @@ export function PaletteField(): JSX.Element {
  * same columns, plus Remove.
  */
 const GPIO_BUTTON_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)]'
-const GPIO_BUTTON_EDIT_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)_auto] @md:items-end'
+const GPIO_BUTTON_EDIT_ROW =
+  'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)_auto] @md:items-end'
 
 function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Element {
   return (
@@ -309,8 +310,8 @@ function ButtonBeepField(): JSX.Element | null {
     reportedPin === undefined
       ? 'Board default, -1 = off'
       : reportedPin < 0
-      ? 'Off on the frame'
-      : `${reportedPin} on the frame`
+        ? 'Off on the frame'
+        : `${reportedPin} on the frame`
   const tonePlaceholder = reportedToneHz === undefined ? '2000' : `${reportedToneHz} on the frame`
   return (
     <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
@@ -399,7 +400,11 @@ function StatusLedField(): JSX.Element | null {
   }
   const { pin, type, reportedPin, reportedType, disabledReason } = statusLed
   const pinPlaceholder =
-    reportedPin === undefined ? 'Board default, -1 = none' : reportedPin < 0 ? 'None on the frame' : `${reportedPin} on the frame`
+    reportedPin === undefined
+      ? 'Board default, -1 = none'
+      : reportedPin < 0
+        ? 'None on the frame'
+        : `${reportedPin} on the frame`
   const typeLabels: Record<StatusLedType, string> = {
     gpio: 'GPIO, lit high (reTerminal E1004)',
     gpio_inverted: 'GPIO, lit low (reTerminal E1001/E1002/E1003)',
@@ -425,7 +430,11 @@ function StatusLedField(): JSX.Element | null {
           />
         </Label>
         <div className="w-full">
-          <NumberTextInput value={pin} onChange={(value) => setStatusLed({ pin: value })} placeholder={pinPlaceholder} />
+          <NumberTextInput
+            value={pin}
+            onChange={(value) => setStatusLed({ pin: value })}
+            placeholder={pinPlaceholder}
+          />
         </div>
       </div>
       <div className="space-y-1 @md:flex @md:gap-2">
@@ -691,7 +700,9 @@ export function RenderScaleField(): JSX.Element {
         name="render_scale"
         label={RENDER_SCALE_LABEL}
         tooltip={RENDER_SCALE_HELP}
-        hint={renderScaleDisabledReason ? <span className="frameos-muted">{renderScaleDisabledReason}</span> : undefined}
+        hint={
+          renderScaleDisabledReason ? <span className="frameos-muted">{renderScaleDisabledReason}</span> : undefined
+        }
       >
         {({ value, onChange }) => (
           <Select
@@ -1034,8 +1045,8 @@ export function SaveAssetsField(): JSX.Element {
                       typeof frameForm.save_assets === 'object'
                         ? frameForm.save_assets
                         : frameForm.save_assets === true
-                        ? Object.fromEntries(Object.entries(appsWithSaveAssets).map(([k]) => [k, true]))
-                        : {}
+                          ? Object.fromEntries(Object.entries(appsWithSaveAssets).map(([k]) => [k, true]))
+                          : {}
                     setFrameFormValues({
                       save_assets: {
                         ...prevValues,

@@ -22,8 +22,8 @@ export function DeployProgressBar({
     progress.status === 'error'
       ? 'bg-red-400'
       : progress.status === 'done'
-      ? 'bg-emerald-400'
-      : 'bg-[color:var(--frameos-primary)]'
+        ? 'bg-emerald-400'
+        : 'bg-[color:var(--frameos-primary)]'
   return (
     <span
       className={clsx('frameos-deploy-progress block min-w-0', className)}

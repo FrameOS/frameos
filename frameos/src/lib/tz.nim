@@ -5,7 +5,7 @@ import os
 import system
 import strutils
 import tables
-import zippy
+import pixie/inflatestream
 import assets/tz_aliases
 
 var timeZoneDataLoaded = false
@@ -34,10 +34,28 @@ proc loadedTimeZoneDataSource*(): string =
   else:
     ""
 
+proc loadTzDataJson(tzData: string) =
+  ## chrono's `loadTzData`, read field by field: its `json.to` was the only
+  ## user of std/json's typed reader, 3 KB of generic code on an ESP32 for
+  ## two small types. Missing keys raise as they did.
+  let parsed = parseJson(tzData)
+  var zones: seq[TimeZone]
+  for node in parsed["timezones"]:
+    zones.add TimeZone(id: node["id"].getInt().int16, name: node["name"].getStr())
+  var changes: seq[DstChange]
+  for node in parsed["dstChanges"]:
+    changes.add DstChange(
+      tzId: node["tzId"].getInt().int16,
+      name: node["name"].getStr(),
+      start: node["start"].getFloat(),
+      offset: node["offset"].getFloat().int32) # a whole number, whichever way it was written
+  tzs = move zones
+  dstChanges = move changes
+
 proc loadTimeZoneData*(tzData: string, fromOverride = false) {.gcsafe.} =
   withLock timeZoneDataLock:
     {.cast(gcsafe).}:
-      loadTzData(tzData)
+      loadTzDataJson(tzData)
     timeZoneDataLoaded = true
     timeZoneDataLoadedFromOverride = fromOverride
 
@@ -71,7 +89,8 @@ proc initTimeZoneAliases() =
     return
   # assets/compiled/tz/timezone_aliases.json, raw-deflated by prepare_assets:
   # 2.5 KB in the image instead of 8.6 KB.
-  let aliases = parseJson(uncompress(timeZoneAliasesDeflated, dfDeflate))
+  let aliases = parseJson(uncompressDeflate(
+    cast[pointer](timeZoneAliasesDeflated.cstring), timeZoneAliasesDeflated.len))
   if aliases.kind == JObject:
     for alias, target in aliases:
       if target.kind == JString:
