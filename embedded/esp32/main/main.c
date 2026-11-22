@@ -46,6 +46,7 @@
 #include "fos_cpu.h"
 #include "fos_codec.h"
 #include "fos_touch.h"
+#include "fos_usb_pads.h"
 #include "fos_voice.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -756,6 +757,12 @@ void app_main(void)
     }
 
     BOOTMEM("after-spill");
+    /* The board's microphone may sit on the chip's native USB pads (the
+     * reTerminal Sticky's PDM lines): they belong to the microphone from
+     * boot, even though it only runs during a voice session. Claim them
+     * before the console, whose USB-Serial/JTAG driver would take them back
+     * (fos_usb_pads.c). */
+    fos_usb_pads_claim(config->mic_pins.clk, config->mic_pins.data);
     fos_console_start();
     /* Log lines leave the logging task here on: a printf on the render task
      * was a third of an isolated tap on an LCD board (fos_log_ring.h). */

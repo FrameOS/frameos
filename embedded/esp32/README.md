@@ -34,6 +34,9 @@ main/                     boot orchestration + platform modules
                           override guard, origin comparison for the OTA bearer (host-tested)
   fos_minisig.c           minisign .minisig parser + "signed as which release?" check gating every OTA image (host-tested)
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
+  fos_usb_pads.c          the owner of the S3's native USB pads (GPIO19/20): every driver that
+                          puts a peripheral on them claims the pads (the PHY comes off them), and
+                          the console then offers no USB-Serial/JTAG channel
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
   fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
@@ -274,10 +277,17 @@ for the two Spectra boards most of the bench work runs on:
   **GPIO19/20 are the S3's native USB pads**, and the ROM leaves the
   USB-Serial/JTAG PHY attached to them: with the PHY still on, the I2C bus on
   those pins answered its first read and then NACKed every write (I2C error
-  `0x103`) until a bus re-init happened to win the pads back. `fos_i2c_init`
-  detaches the PHY (`usb_serial_jtag_ll_phy_enable_pad(false)`) when a bus
-  uses 19 or 20, and the console then skips its USB-Serial/JTAG channel —
-  the E-series' USB is a CH340 on UART0 anyway.
+  `0x103`) until a bus re-init happened to win the pads back. `fos_usb_pads.c`
+  owns the pads: every driver that puts a peripheral on 19 or 20 claims them
+  (`fos_usb_pads_claim`), which detaches the PHY
+  (`usb_serial_jtag_ll_phy_enable_pad(false)`) and remembers that they are
+  spoken for, and the console then skips its USB-Serial/JTAG channel — the
+  E-series' USB is a CH340 on UART0 anyway. **The claim is the pads'**: the
+  console's USB-Serial/JTAG driver puts the PHY back on them
+  (`usb_serial_jtag_driver_install` calls `usb_serial_jtag_ll_phy_enable_pad(true)`),
+  so a driver that detached the PHY without claiming the pads lost them again
+  — the Sunton's GT911 answered its first read and every read after the
+  console came up timed out (`i2c.master: I2C software timeout`, 2026-11-22).
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); BQ25616 charger enabled through GPIO39 (low); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
@@ -290,7 +300,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_xiao_ee05` | S3 | EPD_7in5_V2 by default | XIAO ePaper Display Board EE05, 24-pin panels only, chosen as on the EE04; KEY3 GPIO8, battery switch GPIO39. Unverified on hardware |
 | `seeed_xiao_epaper_7in5` | C3 | EPD_7in5_V2 7.5" mono | XIAO 7.5" ePaper Panel, thin client; SCK8/MOSI10, CS3, DC5, RST2, BUSY4; BOOT GPIO9; no battery sense |
 | `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
-| `sunton_esp32_8048s070` | S3 | LCD_EK9716_800x480 7" IPS LCD (RGB, 16-bit colour) | Sunton (GUITION) ESP32-8048S070, 16MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table (no SPI init, no IO expander), backlight GPIO2, no EPD pins; the BOOT key GPIO0 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); GT911 touch on the chip's I2C 19/20 (the USB-Serial/JTAG PHY is detached from those pads first), reset GPIO38, polled (its interrupt line is behind an unpopulated R17); microSD on its own SPI bus (CS10/SCK12/MISO13/MOSI11); USB is a CH340 on UART0 |
+| `sunton_esp32_8048s070` | S3 | LCD_EK9716_800x480 7" IPS LCD (RGB, 16-bit colour) | Sunton (GUITION) ESP32-8048S070, 16MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table (no SPI init, no IO expander), backlight GPIO2, no EPD pins; the BOOT key GPIO0 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); GT911 touch on the chip's I2C 19/20 (the pads are claimed from the USB-Serial/JTAG PHY first, `fos_usb_pads.c`, and the console then offers no USB-Serial/JTAG channel), reset GPIO38, polled (its interrupt line is behind an unpopulated R17); microSD on its own SPI bus (CS10/SCK12/MISO13/MOSI11); USB is a CH340 on UART0 |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
   it renders on-device like the E-series; every pin below is from Seeed's
@@ -308,8 +318,10 @@ for the two Spectra boards most of the bench work runs on:
   touch wakes a deep-sleeping frame through ext0 on TP_INT (GPIO21, an RTC
   IO); the controller is held powered through the sleep for it (a few mA).
   The PDM microphone sits on GPIO19/20, the S3's native USB pads: the board's
-  USB is a CH343 on UART0, so `fos_mic.c` detaches the USB-Serial/JTAG PHY
-  from them when it opens the microphone (the console loses nothing). The
+  USB is a CH343 on UART0, so the pads are claimed from the USB-Serial/JTAG
+  PHY at boot (`main.c` claims the configured microphone's pins,
+  `fos_usb_pads.c`), before the console comes up — the console offers no
+  USB-Serial/JTAG channel and says so on the wire. The
   cell has no divider: the BQ27220 fuel gauge (0x55 on the sensor bus)
   answers `fos_battery_read` with its own voltage and state of charge, and
   its discharge flag is the power decision's "on battery" (`fos_gauge.c`),

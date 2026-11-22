@@ -111,9 +111,6 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
 #include "driver/rtc_io.h"
 #endif
-#if CONFIG_IDF_TARGET_ESP32S3
-#include "hal/usb_serial_jtag_ll.h"
-#endif
 
 #include "fos_board.h"
 #include "fos_buzzer.h"
@@ -121,6 +118,7 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_i2c.h"
+#include "fos_usb_pads.h"
 #include "fos_events_gen.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -599,12 +597,11 @@ esp_err_t fos_touch_start(void)
          * their GT911 to exactly those two (a CH340 on UART0 for USB):
          * with the PHY still on the pads the controller answered the first
          * read and then NACKed every one after (the same failure fos_i2c.c
-         * and fos_mic.c cure). Detach it once, before the bus comes up. */
-#if CONFIG_IDF_TARGET_ESP32S3
-        if (pins->sda == 19 || pins->sda == 20 || pins->scl == 19 || pins->scl == 20) {
-            usb_serial_jtag_ll_phy_enable_pad(false);
-        }
-#endif
+         * and fos_mic.c cure). Detach it once, before the bus comes up — and
+         * claim the pads, so that the console does not take them back under
+         * the controller (it did, and every read timed out from then on:
+         * 2026-11-22). */
+        fos_usb_pads_claim(pins->sda, pins->scl);
         i2c_master_bus_config_t bus_config = {
             .i2c_port = -1,
             .sda_io_num = (gpio_num_t)pins->sda,

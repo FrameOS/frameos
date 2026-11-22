@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@
 #include "fos_config.h"
 #include "fos_console_line.h"
 #include "fos_events.h"
+#include "fos_usb_pads.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
@@ -2387,8 +2389,8 @@ static void fos_console_task(void *arg)
              * busy port never waits one timeout per byte. */
             uint8_t ch;
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-            /* No driver behind it on a board whose I2C owns the USB pads. */
-            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG && fos_i2c_owns_usb_pads()) continue;
+            /* No driver behind it on a board whose USB pads are spoken for. */
+            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG && fos_usb_pads_claimed()) continue;
 #endif
             int n = console_channel_read(states[i].channel, &ch, 1, pdMS_TO_TICKS(10));
             while (n > 0) {
@@ -2469,11 +2471,12 @@ esp_err_t fos_console_start(void)
     fcntl(fileno(stdout), F_SETFL, 0);
 
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-    /* No USB-Serial/JTAG channel on a board whose I2C runs on the USB pads
-     * (fos_i2c.c): the UART channel is the console there. */
-    if (fos_i2c_owns_usb_pads()) {
-        printf("console: GPIO19/20 are an I2C bus here, no usb-serial-jtag channel\n");
-    } else {
+    /* No USB-Serial/JTAG channel on a board whose USB pads are spoken for
+     * (an I2C bus, a touch controller or a microphone on GPIO19/20): the
+     * driver would take the pads back from them. The UART channel is the
+     * console there. */
+    bool usb_pads_taken = fos_usb_pads_claimed();
+    if (!usb_pads_taken) {
         err = console_init_usb_serial_jtag();
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
@@ -2486,6 +2489,15 @@ esp_err_t fos_console_start(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart console init failed: %s", esp_err_to_name(err));
         return err;
+    }
+#endif
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+    if (usb_pads_taken) {
+        /* After the UART console is up: the notice is a whole line on the
+         * wire. Printed before it, it raced the log ring's first flush and
+         * came out cut short ("co" on the Sunton, 2026-11-22). */
+        printf("console: GPIO19/20 are spoken for here, no usb-serial-jtag channel\n");
+        fflush(stdout);
     }
 #endif
 
