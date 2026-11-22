@@ -11,7 +11,13 @@ import { ShapeToggles } from './ShapeToggles'
 import { urls } from '../../urls'
 import { installPhotoScenesLogic } from './installPhotoScenesLogic'
 import { photoThumbUrl } from './photosApi'
-import { PHOTO_ALBUM_FITS, PHOTO_ALBUM_ORDERS, type PhotoAlbumFit, type PhotoAlbumOrder } from './photoAlbumScene'
+import {
+  PHOTO_ALBUM_BACKGROUNDS,
+  PHOTO_ALBUM_FITS,
+  PHOTO_ALBUM_ORDERS,
+  type PhotoAlbumFit,
+  type PhotoAlbumOrder,
+} from './photoAlbumScene'
 import { photoCountLabel } from './photoPaths'
 
 /** The Add scene drawer's "Photos" page: tick albums, pick the timing, and
@@ -26,6 +32,7 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
     seconds,
     order,
     fit,
+    backgroundColor,
     shapes,
     customLink,
     customLinkValid,
@@ -40,6 +47,7 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
     setSeconds,
     setOrder,
     setFit,
+    setBackground,
     toggleShape,
     setCustomLink,
     setNewAlbumName,
@@ -194,6 +202,11 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
         <label className="block space-y-1.5">
           <span className="frameos-form-label text-sm font-medium">Fit</span>
           <Select value={fit} onChange={(value) => setFit(value as PhotoAlbumFit)} options={PHOTO_ALBUM_FITS} />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="frameos-form-label text-sm font-medium">Background</span>
+          <Select value={backgroundColor} onChange={setBackground} options={PHOTO_ALBUM_BACKGROUNDS} />
+          <span className="frameos-muted block text-xs">Around a photo that does not fill the screen.</span>
         </label>
       </div>
 
