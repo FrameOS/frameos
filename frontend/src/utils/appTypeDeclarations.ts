@@ -299,6 +299,16 @@ declare namespace JSX {
  * (onClick={() => ...}) is never equal: pass values, make handlers inside.
  */
 declare function memo<P extends Record<string, any>>(component: (props: P) => any): (props: P & { key?: string | number }) => any;
+/**
+ * signal(value): a value a memo()'d component reads through .value, which
+ * subscribes it. A handler that sets signals and nothing else the picture
+ * reads redraws only the components that read them, without running get()
+ * (docs/jsx-ui.md "Signals"). .peek() reads without subscribing. One
+ * signal per list item, not one every item compares with.
+ * FrameOS 2026.11.14+.
+ */
+interface Signal<T> { value: T; peek(): T; }
+declare function signal<T>(value: T): Signal<T>;
 
 interface FrameOSApp {
   nodeId: number;
