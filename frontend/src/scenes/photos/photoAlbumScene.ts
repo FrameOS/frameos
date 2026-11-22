@@ -23,6 +23,14 @@ export const PHOTO_ALBUM_FITS: { value: PhotoAlbumFit; label: string }[] = [
   { value: 'contain', label: 'Show the whole photo' },
 ]
 
+/** The scene's background, which shows around a photo that does not fill the
+ * screen ("Show the whole photo"): white like the paper on e-paper, black on
+ * a screen that lights up (photoBackgroundFor in installPhotoScenesLogic). */
+export const PHOTO_ALBUM_BACKGROUNDS: { value: string; label: string }[] = [
+  { value: '#000000', label: 'Black' },
+  { value: '#ffffff', label: 'White' },
+]
+
 /** The scene's three shape toggles, one boolean field each, in field order. */
 export const PHOTO_ALBUM_SHAPES: { value: PhotoAlbumShape; label: string }[] = [
   { value: 'landscape', label: 'Landscape photos' },
