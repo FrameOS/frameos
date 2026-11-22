@@ -15,6 +15,9 @@
 
 typedef struct {
     const char *preset;
+    /* The panel table's key for this glass: a board set up by panel alone
+     * (no preset) still gets its own wiring. */
+    const char *panel;
     int width, height; /* the glass */
     /* The expander's bus, the expander's pins (the TCA9535's P0..P15, or the
      * HT8574's P0..P7 with the same numbers below 8). */
@@ -58,6 +61,7 @@ typedef struct {
 static const lcd_board_t k_boards[] = {
     {
         .preset = "seeed_sensecap_indicator_d1",
+        .panel = "LCD_ST7701S_480x480",
         .width = 480, .height = 480,
         .i2c_sda = 39, .i2c_scl = 40,
         .exp_lcd_cs = 4, .exp_lcd_rst = 5, .exp_tp_rst = 7,
@@ -98,6 +102,7 @@ static const lcd_board_t k_boards[] = {
      * 80 MHz PSRAM on one shared bus. `lcd pclk <mhz>` tunes it live. */
     {
         .preset = "sunton_esp32_8048s070",
+        .panel = "LCD_EK9716_800x480",
         .width = 800, .height = 480,
         .i2c_sda = -1, .i2c_scl = -1,
         .exp_lcd_cs = -1, .exp_lcd_rst = -1, .exp_tp_rst = -1,
@@ -123,17 +128,26 @@ static int s_width = 480;
 static int s_height = 480;
 static size_t s_fb_bytes = (size_t)480 * 480 * 2u;
 
-void fos_lcd_st7701s_select_board(const char *hardware_preset)
+void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel)
 {
-    s_board = &k_boards[0];
-    if (hardware_preset && hardware_preset[0]) {
-        for (size_t i = 0; i < sizeof(k_boards) / sizeof(k_boards[0]); i++) {
-            if (strcmp(hardware_preset, k_boards[i].preset) == 0) {
-                s_board = &k_boards[i];
-                break;
-            }
+    /* The preset names the board; without one that this table knows (a
+     * frame set up with `set panel` alone, or by its device), the panel
+     * does: the EK9716 is only ever the Sunton's glass. Neither: the
+     * Indicator's, as before. */
+    const lcd_board_t *pick = &k_boards[0];
+    bool by_panel = false;
+    for (size_t i = 0; i < sizeof(k_boards) / sizeof(k_boards[0]); i++) {
+        const lcd_board_t *b = &k_boards[i];
+        if (hardware_preset && strcmp(hardware_preset, b->preset) == 0) {
+            pick = b;
+            break;
+        }
+        if (!by_panel && panel && strcmp(panel, b->panel) == 0) {
+            pick = b;
+            by_panel = true;
         }
     }
+    s_board = pick;
     s_width = s_board->width;
     s_height = s_board->height;
     s_fb_bytes = (size_t)s_width * (size_t)s_height * 2u;

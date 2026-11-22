@@ -19,8 +19,8 @@
  * IO expander (a TCA9535 at 0x20, an HT8574 at 0x39 on later batches), the
  * way Seeed's own firmware does it; the Sunton's EK9716 scans what the
  * host writes and takes no setup at all. All of that is the board's
- * wiring, so the hardware preset selects the table
- * (fos_lcd_st7701s_select_board); the panel key stays LCD_ST7701S_480x480
+ * wiring, so the hardware preset selects the table, or the panel key when
+ * there is no preset (fos_lcd_st7701s_select_board): LCD_ST7701S_480x480
  * on the Indicator and LCD_EK9716_800x480 on the Sunton. The two boards
  * known are the SenseCAP Indicator and the Sunton ESP32-8048S070.
  *
@@ -40,9 +40,10 @@
 #include "lcd_splash.h"
 
 /* Pick the board's wiring by hardware preset ("seeed_sensecap_indicator_d1"
- * or "sunton_esp32_8048s070"); an unknown or empty preset keeps the
+ * or "sunton_esp32_8048s070"); an unknown or empty preset goes by the panel
+ * key instead (LCD_EK9716_800x480 is the Sunton's), and neither keeps the
  * Indicator's. Called by fos_display_init before the first blit. */
-void fos_lcd_st7701s_select_board(const char *hardware_preset);
+void fos_lcd_st7701s_select_board(const char *hardware_preset, const char *panel);
 
 /* The selected board's glass, in pixels. The panel table entry the rest of
  * the firmware sizes the render target, the canvas and the backend's
