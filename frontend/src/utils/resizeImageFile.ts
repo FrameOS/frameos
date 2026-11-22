@@ -7,6 +7,8 @@
 // landscape and portrait photos alike: a landscape photo gets a box that is
 // `longEdge` wide and `shortEdge` tall, a portrait one the box on its side.
 
+import { exifWithUprightOrientation, readExif, writeExif } from './imageExif'
+
 export type UploadResizeFit = 'cover' | 'inside' | 'contain' | 'fill'
 export type UploadResizeFormat = 'keep' | 'jpeg' | 'png' | 'webp'
 
@@ -23,6 +25,12 @@ export interface UploadResizeOptions {
   upscale: boolean
   /** `#rrggbb`: the padding of `contain`, and what is behind transparent parts in a JPEG. */
   background: string
+  /**
+   * Carry the photo's EXIF block (date taken, camera, GPS location) into the
+   * copy. Off, every photo is written again without it, one that already fits
+   * included.
+   */
+  keepMetadata: boolean
 }
 
 /** Where the photo goes on the canvas, and the canvas's size. null: the photo stays as it is. */
@@ -206,9 +214,10 @@ export async function resizeImageFile(file: File, options: UploadResizeOptions):
   try {
     const output = uploadResizeOutputFormat(file.type, options.format)
     const sameFormat = ENCODABLE[file.type.toLowerCase()] === output
+    // Written again at its own size: another format, or its metadata to go.
     const plan =
       planUploadResize(bitmap.width, bitmap.height, options) ??
-      (sameFormat
+      (sameFormat && options.keepMetadata
         ? null
         : {
             canvasWidth: bitmap.width,
@@ -239,7 +248,17 @@ export async function resizeImageFile(file: File, options: UploadResizeOptions):
     const type = `image/${output}`
     const quality = output === 'png' ? undefined : Math.max(0.01, Math.min(1, options.quality / 100))
     const blob = await canvasToBlob(canvas, type, quality)
-    return new File([blob], uploadResizeFileName(file.name, output), {
+    let body: Blob = blob
+    if (options.keepMetadata) {
+      const exif = readExif(new Uint8Array(await file.arrayBuffer()))
+      if (exif) {
+        const encoded = new Uint8Array(await blob.arrayBuffer())
+        body = new Blob([writeExif(encoded, exifWithUprightOrientation(exif), canvas.width, canvas.height)], {
+          type: blob.type || type,
+        })
+      }
+    }
+    return new File([body], uploadResizeFileName(file.name, output), {
       type: blob.type || type,
       lastModified: file.lastModified,
     })

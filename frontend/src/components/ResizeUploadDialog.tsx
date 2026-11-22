@@ -35,6 +35,7 @@ export function ResizeUploadDialog(): JSX.Element | null {
     quality,
     upscale,
     background,
+    keepMetadata,
     options,
     progress,
     failures,
@@ -49,6 +50,7 @@ export function ResizeUploadDialog(): JSX.Element | null {
     setQuality,
     setUpscale,
     setBackground,
+    setKeepMetadata,
     resizeAndUpload,
   } = useActions(resizeUploadLogic)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -80,8 +82,7 @@ export function ResizeUploadDialog(): JSX.Element | null {
       <div className="space-y-4 p-5">
         <p className="frameos-muted text-sm">
           Photos are made smaller in this browser before they go up. The size is the box's longer and shorter edge,
-          turned to suit each photo, landscape or portrait. A resized copy keeps no metadata (date taken, location,
-          camera); a photo that already fits goes up untouched, and files that are not photos go up as they are.
+          turned to suit each photo, landscape or portrait. Files that are not photos go up as they are.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm sm:col-span-2">
@@ -142,6 +143,23 @@ export function ResizeUploadDialog(): JSX.Element | null {
               onChange={(event) => setUpscale(event.target.checked)}
             />
             <span>Enlarge photos smaller than this size</span>
+          </label>
+          <label className="flex items-start gap-2 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={keepMetadata}
+              disabled={busy}
+              onChange={(event) => setKeepMetadata(event.target.checked)}
+            />
+            <span>
+              Keep metadata, location included
+              <span className="frameos-muted block text-xs">
+                {keepMetadata
+                  ? 'Date taken, camera and GPS location go with each photo; one that already fits goes up untouched.'
+                  : 'Every photo goes up without its date taken, camera and location, one that already fits written again.'}
+              </span>
+            </span>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="frameos-strong font-semibold">Format</span>

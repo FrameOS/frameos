@@ -5,6 +5,12 @@ import {
   uploadResizeFileName,
   uploadResizeOutputFormat,
 } from "../../../../../../frontend/src/utils/resizeImageFile";
+import {
+  crc32,
+  exifWithUprightOrientation,
+  readExif,
+  writeExif,
+} from "../../../../../../frontend/src/utils/imageExif";
 
 // "Resize and upload" on Photos and a frame's Files: the size is a longer and
 // a shorter edge, turned to suit each photo, and a photo that needs no change
@@ -111,5 +117,67 @@ describe("output format and name", () => {
     expect(isResizableImage(new File([], "a.jpg", { type: "image/jpeg" }))).toBe(true);
     expect(isResizableImage(new File([], "a.svg", { type: "image/svg+xml" }))).toBe(false);
     expect(isResizableImage(new File([], "a.ttf", { type: "font/ttf" }))).toBe(false);
+  });
+});
+
+// "Keep metadata, location included": the EXIF block read from the original
+// and written into the copy the canvas encoded, its Orientation made 1.
+describe("EXIF carried into the copy", () => {
+  // A little-endian TIFF with one IFD0 entry: Orientation (SHORT) = 6.
+  const tiff = new Uint8Array([
+    0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x01, 0x00,
+    0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+  ]);
+  const ascii = (text: string) => Array.from(text, (c) => c.charCodeAt(0));
+  const jfif = [0xff, 0xe0, 0x00, 0x10, ...ascii("JFIF"), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0];
+  const jpeg = (...segments: number[][]) =>
+    new Uint8Array([0xff, 0xd8, ...segments.flat(), 0xff, 0xda, 0x00, 0x02, 0xff, 0xd9]);
+  const app1 = (block: Uint8Array) => {
+    const length = 2 + 6 + block.length;
+    return [0xff, 0xe1, length >> 8, length & 0xff, ...ascii("Exif"), 0, 0, ...block];
+  };
+
+  it("reads a JPEG's block", () => {
+    expect(readExif(jpeg(jfif, app1(tiff)))).toEqual(tiff);
+    expect(readExif(jpeg(jfif))).toBeNull();
+  });
+
+  it("writes it into a JPEG after the JFIF segment", () => {
+    const written = writeExif(jpeg(jfif), tiff, 10, 10);
+    expect(Array.from(written.slice(2, 2 + jfif.length))).toEqual(jfif);
+    expect(written[2 + jfif.length + 1]).toBe(0xe1);
+    expect(readExif(written)).toEqual(tiff);
+  });
+
+  it("sets the orientation upright, leaving the original as it was", () => {
+    const upright = exifWithUprightOrientation(tiff);
+    expect(upright[18]).toBe(1);
+    expect(tiff[18]).toBe(6);
+  });
+
+  it("writes and reads a PNG's eXIf chunk", () => {
+    expect(crc32(new Uint8Array(ascii("IEND")))).toBe(0xae426082);
+    const ihdr = [0, 0, 0, 13, ...ascii("IHDR"), 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89];
+    const iend = [0, 0, 0, 0, ...ascii("IEND"), 0xae, 0x42, 0x60, 0x82];
+    const png = new Uint8Array([0x89, ...ascii("PNG"), 0x0d, 0x0a, 0x1a, 0x0a, ...ihdr, ...iend]);
+    const written = writeExif(png, tiff, 1, 1);
+    expect(String.fromCharCode(...written.slice(8 + 25 + 4, 8 + 25 + 8))).toBe("eXIf");
+    expect(readExif(written)).toEqual(tiff);
+  });
+
+  it("gives a simple WebP the extended header and an EXIF chunk", () => {
+    const vp8 = [...ascii("VP8 "), 4, 0, 0, 0, 1, 2, 3, 4];
+    const body = [...ascii("WEBP"), ...vp8];
+    const webp = new Uint8Array([...ascii("RIFF"), body.length, 0, 0, 0, ...body]);
+    const written = writeExif(webp, tiff, 640, 480);
+    const view = new DataView(written.buffer);
+    expect(String.fromCharCode(...written.slice(12, 16))).toBe("VP8X");
+    expect((written[20] ?? 0) & 0x08).toBe(0x08);
+    expect(view.getUint16(24, true) | ((written[26] ?? 0) << 16)).toBe(639);
+    expect(view.getUint16(27, true) | ((written[29] ?? 0) << 16)).toBe(479);
+    expect(view.getUint32(4, true)).toBe(written.length - 8);
+    expect(readExif(written)).toEqual(tiff);
   });
 });

@@ -70,6 +70,7 @@ export interface resizeUploadLogicValues {
   failures: string[]
   fit: UploadResizeFit
   format: UploadResizeFormat
+  keepMetadata: boolean
   longEdge: number | null
   options: UploadResizeOptions | null
   progress: ResizeUploadProgress | null
@@ -111,6 +112,9 @@ export interface resizeUploadLogicActions {
   setFormat: (format: UploadResizeFormat) => {
     format: UploadResizeFormat
   }
+  setKeepMetadata: (keepMetadata: boolean) => {
+    keepMetadata: boolean
+  }
   setLongEdge: (longEdge: number | null) => {
     longEdge: number | null
   }
@@ -145,7 +149,8 @@ export interface resizeUploadLogicMeta {
       format: UploadResizeFormat,
       quality: number,
       upscale: boolean,
-      background: string
+      background: string,
+      keepMetadata: boolean
     ) => UploadResizeOptions | null
   }
 }
@@ -186,6 +191,7 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
     setQuality: (quality: number) => ({ quality }),
     setUpscale: (upscale: boolean) => ({ upscale }),
     setBackground: (background: string) => ({ background }),
+    setKeepMetadata: (keepMetadata: boolean) => ({ keepMetadata }),
     /** The files picked in the dialog: resized one at a time, then uploaded. */
     resizeAndUpload: (files: File[]) => ({ files }),
     resizeProgressed: (progress: ResizeUploadProgress) => ({ progress }),
@@ -258,6 +264,12 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
       { persist: true, storageKey: 'resizeUploadLogic.background' },
       { setBackground: (_, { background }) => background },
     ],
+    // On by default: an upload keeps what the owner's photo says unless they ask (docs/photos.md, "Metadata").
+    keepMetadata: [
+      true,
+      { persist: true, storageKey: 'resizeUploadLogic.keepMetadata' },
+      { setKeepMetadata: (_, { keepMetadata }) => keepMetadata },
+    ],
   }),
   selectors({
     // The frames' own panels, the common sizes, and "custom".
@@ -289,7 +301,7 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
     ],
     /** What the resize is told; null while the form cannot be used (no longer edge, a missing shorter one). */
     options: [
-      (s) => [s.longEdge, s.shortEdge, s.fit, s.format, s.quality, s.upscale, s.background],
+      (s) => [s.longEdge, s.shortEdge, s.fit, s.format, s.quality, s.upscale, s.background, s.keepMetadata],
       (
         longEdge: number | null,
         shortEdge: number | null,
@@ -297,7 +309,8 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
         format: UploadResizeFormat,
         quality: number,
         upscale: boolean,
-        background: string
+        background: string,
+        keepMetadata: boolean
       ): UploadResizeOptions | null => {
         if (longEdge === null || (shortEdge === null && fit !== 'inside')) {
           return null
@@ -305,7 +318,7 @@ export const resizeUploadLogic = kea<resizeUploadLogicType>([
         if (shortEdge !== null && shortEdge > longEdge) {
           return null
         }
-        return { longEdge, shortEdge, fit, format, quality, upscale, background }
+        return { longEdge, shortEdge, fit, format, quality, upscale, background, keepMetadata }
       },
     ],
   }),
