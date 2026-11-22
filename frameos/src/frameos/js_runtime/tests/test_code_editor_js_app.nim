@@ -100,7 +100,7 @@ suite "the Code editor sample":
 
   test "it asks for the code and the frame's folders, and for nothing else":
     let config = parseJson(sample["apps"]["codeEditor"]["sources"]["config.json"].getStr())
-    check config["permissions"] == %*["code", "assets-write"]
+    check config["permissions"] == %*["code", "assets", "assets-write"]
     check codeGrantFromConfig(config)
     check not frameGrantFromConfig(config)
     check assetGrantFromConfig(config) == agReadWrite
