@@ -26,6 +26,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -182,10 +183,20 @@ char *fos_frame_settings_json(void)
     return out.buf;
 }
 
+/* Long enough for any panel's redraw of the page; the display's shutdown
+ * handler waits out a refresh still running (frameos_display.c). */
+#define RESTART_RENDER_WAIT_US (30 * 1000000LL)
+
 static void restart_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1500)); /* the log line goes out first */
+    /* The page's redraw after Save says the frame restarts to turn the
+     * screen: let it reach the panel. A restart 1.5 s after Save cut it off,
+     * and a reTerminal Sticky going blank without a word looked like a crash
+     * (2026-11-22). Bounded: the restart is owed either way. */
+    int64_t deadline = esp_timer_get_time() + RESTART_RENDER_WAIT_US;
+    while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(100));
     esp_restart();
 }
 

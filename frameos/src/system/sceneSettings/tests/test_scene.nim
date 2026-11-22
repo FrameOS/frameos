@@ -610,6 +610,8 @@ block the_frame_page:
   doAssert sent.len == 0 or sent[0][0] == evRender, $sent
   doAssert scene.state["frameValues"].len == 0
   doAssert scene.state["page"].getStr() == "frame"
+  # A new rotation restarts the frame: the page says so until it does.
+  doAssert scene.state{"restarting"}.getBool()
   online = true
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")

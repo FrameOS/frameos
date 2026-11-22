@@ -25,7 +25,7 @@ import {
   StarIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { PlayIcon } from '@heroicons/react/24/solid'
+import { CheckIcon, PlayIcon } from '@heroicons/react/24/solid'
 import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { H6 } from '../../components/H6'
@@ -72,7 +72,7 @@ import { missingSettingsGroups } from '../../utils/cloudFrameScenes'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
-import { Templates } from '../frame/panels/Templates/Templates'
+import { StarredTemplates, Templates } from '../frame/panels/Templates/Templates'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { repositoriesModel } from '../../models/repositoriesModel'
@@ -654,6 +654,7 @@ const ADD_SCENE_PAGE_TITLES: Record<AddScenePage, string> = {
   actions: 'Add scene',
   store: 'Scene store',
   saved: 'Private scenes',
+  starred: 'Starred scenes',
   photos: 'Photos',
   layouts: 'New layout',
 }
@@ -800,6 +801,8 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
                   <InstallPhotoScenes frame={frame} />
                 ) : page === 'layouts' ? (
                   <NewLayoutStarters frame={frame} />
+                ) : page === 'starred' ? (
+                  <StarredTemplates />
                 ) : (
                   <Templates section={page} />
                 )}
@@ -813,10 +816,12 @@ function OpenTemplateDrawer({ frame }: { frame: FrameType }): JSX.Element {
   )
 }
 
-/** The layouts a frame can start from: a click adds one to the frame, unsaved like any added scene. */
+/** The layouts a frame can start from: a click adds one to the frame, unsaved
+ * like any added scene. The list stays open for the next one, and the ones on
+ * the frame are ticked. */
 function NewLayoutStarters({ frame }: { frame: FrameType }): JSX.Element {
   const { addStarterLayout } = useActions(frameLayoutsLogic({ frameId: frame.id }))
-  const { closeTemplateDrawer } = useActions(workspaceLogic)
+  const { addedStarterNames } = useValues(frameLayoutsLogic({ frameId: frame.id }))
   return (
     <div className="mb-4 space-y-5" data-layout-starter-list>
       {LAYOUT_STARTER_GROUPS.map((group) => (
@@ -830,23 +835,42 @@ function NewLayoutStarters({ frame }: { frame: FrameType }): JSX.Element {
             </div>
           </div>
           <div className="grid gap-3">
-            {group.items.map((starter) => (
-              <button
-                key={starter.name}
-                type="button"
-                onClick={() => {
-                  addStarterLayout(starter.name)
-                  closeTemplateDrawer()
-                }}
-                className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                <img src={starter.image} alt="" className="h-[66px] w-[110px] shrink-0 rounded-lg object-cover" />
-                <span className="min-w-0 flex-1">
-                  <span className="frameos-strong block truncate text-sm font-semibold">{starter.name}</span>
-                  <span className="frameos-muted block text-xs">{starter.description}</span>
-                </span>
-              </button>
-            ))}
+            {group.items.map((starter) => {
+              const added = addedStarterNames.has(starter.name)
+              return (
+                <button
+                  key={starter.name}
+                  type="button"
+                  aria-pressed={added}
+                  title={added ? 'Added to this frame' : `Add ${starter.name} to this frame`}
+                  onClick={() => {
+                    if (!added) {
+                      addStarterLayout(starter.name)
+                    }
+                  }}
+                  className={clsx(
+                    'frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/70 p-3 text-left transition',
+                    added ? 'cursor-default' : 'hover:-translate-y-0.5 hover:shadow-lg'
+                  )}
+                  data-layout-starter-added={added ? 'true' : undefined}
+                >
+                  <img src={starter.image} alt="" className="h-[66px] w-[110px] shrink-0 rounded-lg object-cover" />
+                  <span className="min-w-0 flex-1">
+                    <span className="frameos-strong block truncate text-sm font-semibold">{starter.name}</span>
+                    <span className="frameos-muted block text-xs">{starter.description}</span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className={clsx(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition',
+                      added ? 'frameos-primary-action border-transparent' : 'border-slate-400/50'
+                    )}
+                  >
+                    {added ? <CheckIcon className="h-4 w-4" /> : null}
+                  </span>
+                </button>
+              )
+            })}
           </div>
         </section>
       ))}
@@ -964,7 +988,7 @@ function AddSceneDrawerActions({
   const { openGenerator } = useActions(splitScreenLayoutLogic({ frameId: frame.id }))
   const { openFrameTool, closeTemplateDrawer, openChatDrawer } = useActions(workspaceLogic)
   const generatesElsewhere = isInFrameAdminMode()
-  const { applyFavouriteTemplatesToFrame, uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
+  const { uploadSceneFile } = useActions(templatesLogic({ frameId: frame.id }))
   const {
     favouriteTemplates,
     installableFavouriteTemplates,
@@ -1019,6 +1043,29 @@ function AddSceneDrawerActions({
             <span className="frameos-muted block text-xs">{savedSubtitle}</span>
           </span>
           <AddSceneCount count={savedSceneCount} loading={savedScenesLoading} />
+          <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
+        </button>
+      ) : null}
+      {addSceneActionIsAllowed(workspaceMode(), 'starred') ? (
+        <button
+          type="button"
+          onClick={() => onOpenPage('starred')}
+          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
+            <StarIcon className="h-6 w-6" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="frameos-strong block truncate text-sm font-semibold">Starred scenes</span>
+            <span className="frameos-muted block text-xs">
+              {favouriteTemplateCount === 0
+                ? 'Star scenes in the store to keep them here'
+                : installableFavouriteTemplateCount !== favouriteTemplateCount
+                  ? `Your starred scenes, ${installableFavouriteTemplateCount} supported here`
+                  : 'Your starred scenes, ready to install'}
+            </span>
+          </span>
+          <AddSceneCount count={favouriteTemplateCount} loading={false} />
           <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0 text-slate-400" />
         </button>
       ) : null}
@@ -1124,32 +1171,6 @@ function AddSceneDrawerActions({
           }
         }}
       />
-      {favouriteTemplateCount > 0 ? (
-        <button
-          type="button"
-          disabled={installableFavouriteTemplateCount === 0}
-          title={
-            installableFavouriteTemplateCount === 0
-              ? 'No personal favourites are supported by this frame'
-              : 'Install all personal favourites on this frame'
-          }
-          onClick={() => applyFavouriteTemplatesToFrame(false)}
-          className="frameos-template-action-button frameos-card group flex items-center gap-3 rounded-2xl border border-white/90 bg-white/80 px-4 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white hover:shadow-lg hover:shadow-slate-300/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 disabled:hover:bg-white/80 disabled:hover:shadow-sm"
-        >
-          <span className="frameos-primary-hover-bg frameos-primary-hover-text frameos-icon-tile flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition">
-            <StarIcon className="h-6 w-6" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="frameos-strong block truncate text-sm font-semibold">Install all starred scenes</span>
-            <span className="frameos-muted block text-xs">
-              Personal favourites saved for this user
-              {installableFavouriteTemplateCount !== favouriteTemplateCount
-                ? `, ${installableFavouriteTemplateCount} supported here`
-                : ''}
-            </span>
-          </span>
-        </button>
-      ) : null}
       {offersFirstLayout ? (
         <button
           type="button"

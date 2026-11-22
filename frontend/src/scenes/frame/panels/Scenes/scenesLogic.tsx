@@ -8,7 +8,14 @@ import {
 } from '../../../../utils/sceneLayouts'
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
-import { frameCanUseFastDeploy, frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
+import {
+  AWAITS_FIRST_DEPLOY_DETAIL,
+  frameAwaitsFirstDeploy,
+  frameCanUseFastDeploy,
+  frameLogic,
+  sanitizeScene,
+  sceneEqualForComparison,
+} from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
 import { scenePushSceneIds } from '../../../../utils/scenePush'
 import { collectScenePreviewPayloadScenes, sceneListWithPreview } from '../../../../utils/scenePreviewPayload'
@@ -539,6 +546,8 @@ export async function pushWithoutActivating(
       title,
       detail: 'Pushed. The frame has it as soon as it syncs.',
     })
+  } else if (frameAwaitsFirstDeploy(frame)) {
+    reportTaskOutcome('success', { frameId, kind: 'save', title, detail: AWAITS_FIRST_DEPLOY_DETAIL })
   } else {
     framesModel.actions.deployFrame(
       frameId,
@@ -1506,7 +1515,9 @@ export const scenesLogic = kea<scenesLogicType>([
       // Only what changed is saved (backend) or persisted (cloud): every
       // other unsaved edit stays in the form.
       const toSave = isCloudMode() ? sceneIds : sceneIds.filter((id) => values.unsavedSceneIds.has(id))
-      if (!activate) {
+      if (!activate || frameAwaitsFirstDeploy(values.frame)) {
+        // A frame nothing has reached yet is not asked to show anything: the
+        // scenes are saved, and its first deploy takes them.
         await pushWithoutActivating(props.frameId, values.frame, toSave, title, sceneId)
         return
       }

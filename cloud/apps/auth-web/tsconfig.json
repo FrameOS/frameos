@@ -202,6 +202,8 @@
     "src/test/shared-spa/scene-layout-picker.test.tsx",
     // Mounts templatesLogic (→ frameLogic), same reason.
     "src/test/shared-spa/template-install-feedback.test.ts",
+    // Imports embeddedCompatibility (→ sceneApps), same reason.
+    "src/test/shared-spa/template-needs-linux.test.ts",
     // Mounts eventsLogic (→ frameLogic), same reason.
     "src/test/shared-spa/custom-event-origins.test.ts",
     // Mounts frameLogic for Save & Deploy, same reason.

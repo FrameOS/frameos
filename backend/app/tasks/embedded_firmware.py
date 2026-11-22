@@ -852,6 +852,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
         "psramMB": 8,
+        # The 3.97" panel is landscape and the board stands portrait: a new
+        # frame starts at this rotation (seed_embedded_preset_rotation).
+        "rotate": 270,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
         "gpioButtons": EMBEDDED_SEEED_STICKY_GPIO_BUTTONS,
         "eventMap": EMBEDDED_SEEED_STICKY_EVENT_MAP,
@@ -1514,6 +1517,16 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
             device_config[key] = preset[key]
     frame.device_config = device_config
     return preset_key
+
+
+def seed_embedded_preset_rotation(frame: Frame) -> None:
+    """A new frame on a board held at a rotation (the reTerminal Sticky,
+    portrait) starts at it. Only at creation: `apply_embedded_hardware_preset`
+    runs on every PATCH, and the rotation is the owner's after that."""
+    preset_key = embedded_hardware_preset_for_frame(frame)
+    rotate = EMBEDDED_HARDWARE_PRESETS.get(preset_key, {}).get("rotate") if preset_key else None
+    if isinstance(rotate, int) and not frame.rotate:
+        frame.rotate = rotate
 
 
 EMBEDDED_SCALING_MODES = ("contain", "cover", "stretch", "center")

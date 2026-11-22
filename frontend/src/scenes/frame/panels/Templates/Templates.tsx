@@ -5,6 +5,7 @@ import { frameLogic } from '../../frameLogic'
 import { Button } from '../../../../components/Button'
 import { isCloudStoreRepository, templatesLogic } from './templatesLogic'
 import { groupByStoreShelf } from '../../../../utils/storeCategories'
+import { latestStoreAdditions } from '../../../../utils/storeSort'
 import { templatesModel } from '../../../../models/templatesModel'
 import { TemplateRow } from './Template'
 import { Box } from '../../../../components/Box'
@@ -120,6 +121,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
     hideAddRepository,
     toggleExpanded,
     setSearch,
+    showMoreLatest,
   } = useActions(templatesLogic({ frameId }))
   const {
     repositories,
@@ -134,6 +136,7 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
     installingTemplateIds,
     favouriteTemplateIds,
     storeScenesLoading,
+    latestLimit,
   } = useValues(templatesLogic({ frameId }))
   const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
   const { removeRepository, refreshRepository } = useActions(repositoriesModel)
@@ -290,6 +293,18 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
       // own collapsible section. The repository itself is reduced
       // to a status line: how many scenes, how fresh, and the menu.
       const shelves = groupByStoreShelf(rows.map((row) => ({ ...row, category: row.template.category })))
+      // The newest scenes first, a few at a time, above the shelves. Not
+      // while searching: the shelves are the results then.
+      const rowByTemplate = new Map(rows.map((row) => [row.template, row]))
+      const latestRows =
+        search === ''
+          ? latestStoreAdditions(rows.map((row) => row.template)).flatMap((template) => {
+              const row = rowByTemplate.get(template)
+              return row ? [row] : []
+            })
+          : []
+      const latestKey = `${repository.url}#latest`
+      const latestExpanded = isExpanded(latestKey)
       return (
         <div className="space-y-6 !mt-6" key={repository.id}>
           <div className="flex items-start justify-between gap-2">
@@ -310,6 +325,27 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
             </div>
             {menu}
           </div>
+          {latestRows.length ? (
+            <div className="space-y-2" data-store-latest>
+              <H6
+                className="flex cursor-pointer flex-wrap items-center gap-x-1"
+                onClick={() => toggleExpanded(latestKey)}
+              >
+                {latestExpanded ? <ChevronDownIcon className="w-6 h-6" /> : <ChevronRightIcon className="w-6 h-6" />}
+                Latest
+              </H6>
+              {latestExpanded ? (
+                <div className="space-y-2">
+                  {latestRows.slice(0, latestLimit).map(renderRow)}
+                  {latestRows.length > latestLimit ? (
+                    <Button size="small" color="secondary" onClick={showMoreLatest}>
+                      Show more
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {shelves.map(({ shelf, templates: shelfRows }) => {
             const expandedKey = `${repository.url}#${shelf.slug}`
             const expanded = isExpanded(expandedKey)
@@ -560,6 +596,93 @@ export function Templates({ openInstalledSceneDrawer = false, section = 'all' }:
           {section === 'all' ? addRepository : null}
         </>
       ) : null}
+    </div>
+  )
+}
+
+/** The Add scene drawer's Starred scenes page: every scene the user starred,
+ * from the store, a repository or the local library, with "Install all". */
+export function StarredTemplates({ openInstalledSceneDrawer = false }: { openInstalledSceneDrawer?: boolean }) {
+  const inFrameAdminMode = isInFrameAdminMode()
+  const { frameId } = useValues(frameLogic)
+  const { applyRemoteToFrame, installTemplate, saveRemoteAsLocal, applyFavouriteTemplatesToFrame } = useActions(
+    templatesLogic({ frameId })
+  )
+  const { favouriteTemplates, installableFavouriteTemplates, installedTemplatesByName, installingTemplateIds } =
+    useValues(templatesLogic({ frameId }))
+  const { togglePersonalFavouriteTemplate } = useActions(settingsLogic)
+  const rows = favouriteTemplates
+
+  if (rows.length === 0) {
+    return (
+      <div className="frame-tool-panel space-y-2">
+        <div className="frame-tool-muted rounded-xl px-3 py-2 text-sm">
+          No starred scenes yet. Star a scene in the scene store (the star on its card) and it is listed here, ready to
+          install on any frame.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="frame-tool-panel space-y-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="frame-tool-muted text-sm">
+          {rows.length} starred {rows.length === 1 ? 'scene' : 'scenes'}
+          {installableFavouriteTemplates.length !== rows.length
+            ? `, ${installableFavouriteTemplates.length} supported here`
+            : ''}
+        </div>
+        <Button
+          size="small"
+          color="primary"
+          disabled={installableFavouriteTemplates.length === 0}
+          title={
+            installableFavouriteTemplates.length === 0
+              ? 'No starred scene is supported by this frame'
+              : 'Install every starred scene on this frame'
+          }
+          onClick={() => applyFavouriteTemplatesToFrame(openInstalledSceneDrawer)}
+        >
+          Install all
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {rows.map(({ template, repository, favouriteId, compatibility }) => (
+          <TemplateRow
+            key={favouriteId}
+            template={template}
+            frameId={frameId}
+            repository={repository}
+            favourite
+            favouriteId={favouriteId}
+            onToggleFavourite={togglePersonalFavouriteTemplate}
+            saveRemoteAsLocal={
+              repository && !inFrameAdminMode ? (template) => saveRemoteAsLocal(repository, template) : undefined
+            }
+            applyTemplate={(template) =>
+              repository
+                ? applyRemoteToFrame(repository, template, openInstalledSceneDrawer)
+                : installTemplate(template, openInstalledSceneDrawer)
+            }
+            installAndActivate={(template) =>
+              repository
+                ? applyRemoteToFrame(repository, template, openInstalledSceneDrawer, true)
+                : installTemplate(template, false, true)
+            }
+            installedTemplatesByName={installedTemplatesByName}
+            installing={Boolean(installingTemplateIds[favouriteId])}
+            templateDragData={
+              compatibility.supported
+                ? repository
+                  ? { template, repository: { id: repository.id, name: repository.name, url: repository.url } }
+                  : { template }
+                : undefined
+            }
+            compatibility={compatibility}
+          />
+        ))}
+      </div>
     </div>
   )
 }

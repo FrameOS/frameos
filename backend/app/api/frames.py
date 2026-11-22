@@ -181,6 +181,7 @@ from app.tasks.embedded_firmware import (
     normalize_embedded_platform,
     embedded_provisioning_plan,
     ensure_embedded_frame_defaults,
+    seed_embedded_preset_rotation,
     is_thin_client_frame,
     is_virtual_frame,
     request_embedded_firmware_update,
@@ -5104,6 +5105,7 @@ async def api_frame_new(
                     **data.network,
                 }
             ensure_embedded_frame_defaults(frame, data.platform)
+            seed_embedded_preset_rotation(frame)
             db.add(frame)
             db.commit()
             db.refresh(frame)

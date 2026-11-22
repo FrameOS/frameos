@@ -509,6 +509,9 @@ export function FrameSettingsProvider({
     if (!frameForm.max_http_response_bytes || frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES) {
       nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     }
+    if (presetConfig.rotate !== undefined) {
+      nextValues.rotate = presetConfig.rotate
+    }
     setFrameFormValues(nextValues)
   }
 

@@ -316,6 +316,20 @@ export function frameCanUseFastDeploy(frame: FrameType | null | undefined, requi
   return (frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)
 }
 
+/** A frame nothing has reached yet: never deployed and never heard from (an
+ * ESP32 not flashed over USB yet, a Pi still being set up). An install or a
+ * push on one saves the scenes and stops there: its first deploy takes them,
+ * and a deploy started now could only fail ("Embedded full deploy is
+ * available after the device has sent at least one boot or render log"). */
+export function frameAwaitsFirstDeploy(frame: FrameType | null | undefined): boolean {
+  if (!frame || isCloudMode()) {
+    return false
+  }
+  return !frame.last_successful_deploy_at && !frame.last_successful_deploy && !frameHasActivityLog(frame)
+}
+
+export const AWAITS_FIRST_DEPLOY_DETAIL = 'Installed. The frame gets it with its first deploy.'
+
 function deployedFrameBaseline(frame: FrameType | null | undefined): Partial<FrameType> | null {
   if (!frame) {
     return null
