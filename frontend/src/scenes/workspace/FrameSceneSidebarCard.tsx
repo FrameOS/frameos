@@ -126,12 +126,12 @@ export function FrameSceneSidebarCard({
           {usbLogStreamState?.status === 'selecting'
             ? 'Select USB port'
             : usbLogStreamState?.status === 'connecting'
-            ? 'Connecting USB'
-            : usbLogStreamState?.status === 'stopping'
-            ? 'Disconnecting USB'
-            : usbLogStreamOpen
-            ? 'Disconnect USB'
-            : 'Connect USB'}
+              ? 'Connecting USB'
+              : usbLogStreamState?.status === 'stopping'
+                ? 'Disconnecting USB'
+                : usbLogStreamOpen
+                  ? 'Disconnect USB'
+                  : 'Connect USB'}
         </button>
       ) : null}
       <SaveFrameButton onSave={saveFrame} unsavedChanges={unsavedChanges} />

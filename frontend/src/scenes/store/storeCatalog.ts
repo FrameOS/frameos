@@ -72,4 +72,3 @@ export function storeRepositoryOf(repositories: RepositoryType[], template: Temp
       ) ?? null
   )
 }
-

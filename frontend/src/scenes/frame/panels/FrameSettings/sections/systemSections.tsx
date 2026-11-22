@@ -370,7 +370,7 @@ export function AssetsSection(): JSX.Element | null {
           {({ value, onChange }) => (
             <TextInput
               name="assets_path"
-              value={isBuildrootMode ? '/srv/assets' : value ?? ''}
+              value={isBuildrootMode ? '/srv/assets' : (value ?? '')}
               onChange={onChange}
               onClick={() => touchFrameFormField('assets_path')}
               type="text"

@@ -173,7 +173,7 @@ export function ButtonActionsSection(): JSX.Element {
     !cloudProfile && (frameForm.event_map ?? null) === null && (frame.event_map ?? null) === null
       ? deviceEventMap(device)
       : null
-  const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? deviceDefault ?? [])
+  const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : (frame.event_map ?? deviceDefault ?? []))
   const { bindings, others } = frameBindings(rules)
   // A touch screen's rows include the swipes in from its edges.
   const touch = frameOffersEdgeGestures(frame.hardware?.touch, device, [...rules, ...(reported ?? [])])

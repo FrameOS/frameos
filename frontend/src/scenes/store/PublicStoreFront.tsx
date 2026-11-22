@@ -122,8 +122,8 @@ export function PublicStoreFront(): JSX.Element {
               {activeShelf && storeShelfDescriptions[activeShelf.slug]
                 ? storeShelfDescriptions[activeShelf.slug]
                 : storeKind === 'layout'
-                ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
-                : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own and install them on your frames.'}
+                  ? 'Layouts go around the scenes on a frame: a bar, a picture frame, or a desktop that runs them side by side in windows. Open one to try it around a scene.'
+                  : 'Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own and install them on your frames.'}
             </p>
           </div>
           <StoreKindTabs
@@ -179,8 +179,8 @@ export function PublicStoreFront(): JSX.Element {
                   storeScenesCount === 0
                     ? 'The scene store is not available right now.'
                     : search
-                    ? `No store scenes match "${search}".`
-                    : 'No store scenes fit this screen.'
+                      ? `No store scenes match "${search}".`
+                      : 'No store scenes fit this screen.'
                 }
               />
             )}

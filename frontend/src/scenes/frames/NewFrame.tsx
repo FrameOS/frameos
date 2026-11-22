@@ -1104,10 +1104,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
     newFrame.mode === 'import'
       ? 'import'
       : newFrame.mode === 'adopt'
-      ? 'adopt'
-      : isVirtualPlatform
-      ? 'virtual'
-      : installMethod
+        ? 'adopt'
+        : isVirtualPlatform
+          ? 'virtual'
+          : installMethod
   const timezone = normalizedTimezone(newFrame.timezone, savedSettings.defaults?.timezone)
   const selectedSshKeys = new Set(newFrame.ssh_keys ?? defaultInstallSshKeyIds(savedSettings))
   const rootPassword = newFrame.ssh_pass ?? ''

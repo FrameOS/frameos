@@ -464,9 +464,12 @@ for another window, as it keeps any scene (`builtInScenesStay`): it stays open
 there with its page and its edits, and does not time out. A `<Scene id>` of one
 is that instance only while it is open so, never a new one: it has nothing to
 show until the dispatcher opens it from a scene, and opened so again it starts
-afresh. It goes back by itself as always (Save, Cancel, a scene picked, its
+afresh. It goes back by itself as always (Save, Cancel, its
 timeout while it has the focus, or its command again from anyone, which the
-dispatcher marks as going back, `goneBack`), and then it is done. Whatever else
+dispatcher marks as going back, `goneBack`), and then it is done. A scene picked
+in the scene list is not going back here: the list is a launcher, open in its
+window beside the scene it opened until it is closed (2026-11-22; before, a
+pick closed it). Whatever else
 takes the focus from it (another window, the API, a key, a schedule, the voice
 chat) leaves it open beside the scene showing, its page and edits as they were:
 the scene modules list those in `builtInsAway`, which a layout reads as

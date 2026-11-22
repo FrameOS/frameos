@@ -181,7 +181,10 @@ proc newFont(ctx: Context): Font =
     raise newException(PixieError, "No font has been set on this Context")
 
   if ctx.font notin ctx.typefaces:
-    ctx.typefaces[ctx.font] = readTypeface(ctx.font)
+    when pixieOpenType:
+      ctx.typefaces[ctx.font] = readTypeface(ctx.font)
+    else:
+      ctx.typefaces[ctx.font] = openTypefaceFile(ctx.font)
 
   result = newFont(ctx.typefaces.getOrDefault(ctx.font, nil))
   result.size = ctx.fontSize

@@ -21,8 +21,8 @@ export function getCertificateHint(certificateName: string, value?: string): JSX
     validityInfo.severity === 'expired'
       ? 'text-red-300'
       : validityInfo.severity === 'expiring'
-      ? 'text-yellow-300'
-      : 'frame-tool-muted'
+        ? 'text-yellow-300'
+        : 'frame-tool-muted'
 
   return (
     <div className={colorClass} title={validityInfo.exactDateTime}>
@@ -191,14 +191,14 @@ export function upgradeStatusColor(status: string | undefined) {
   return status === 'failed'
     ? 'red'
     : status === 'success'
-    ? 'teal'
-    : status === 'reboot_required'
-    ? 'orange'
-    : status === 'running' || status === 'starting'
-    ? 'primary'
-    : status === 'dry_run'
-    ? 'yellow'
-    : 'gray'
+      ? 'teal'
+      : status === 'reboot_required'
+        ? 'orange'
+        : status === 'running' || status === 'starting'
+          ? 'primary'
+          : status === 'dry_run'
+            ? 'yellow'
+            : 'gray'
 }
 
 export function upgradeStatusLabel(status: string | undefined): string {

@@ -45,8 +45,8 @@ export function CodeNodeEdge({
           selected
             ? { strokeWidth: 6, stroke: selectedStroke, ...roundedStroke }
             : connectedToSelectedNode
-            ? { strokeWidth: 6, stroke: connectedStroke, ...roundedStroke }
-            : { strokeWidth: 4, stroke: defaultStroke, ...roundedStroke }
+              ? { strokeWidth: 6, stroke: connectedStroke, ...roundedStroke }
+              : { strokeWidth: 4, stroke: defaultStroke, ...roundedStroke }
         }
       />
       <EdgeLabelRenderer>

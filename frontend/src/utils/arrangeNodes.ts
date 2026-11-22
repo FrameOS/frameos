@@ -450,32 +450,39 @@ function uniqueNodeId(baseId: string, usedNodeIds: Set<string>): string {
 }
 
 function splitSharedStateNodes(nodes: DiagramNode[], edges: DiagramEdge[]): ArrangeGraphResult {
-  const nodesById = nodes.reduce((acc, node) => {
-    acc[node.id] = node
-    return acc
-  }, {} as Record<string, DiagramNode>)
+  const nodesById = nodes.reduce(
+    (acc, node) => {
+      acc[node.id] = node
+      return acc
+    },
+    {} as Record<string, DiagramNode>
+  )
   const usedNodeIds = new Set(nodes.map((node) => node.id))
   const edgeOrderByEdge = new WeakMap<DiagramEdge, number>()
   edges.forEach((edge, index) => {
     edgeOrderByEdge.set(edge, index)
   })
 
-  const stateInputEdgesBySource = edges.reduce((acc, edge) => {
-    const sourceNode = nodesById[edge.source]
-    const targetNode = nodesById[edge.target]
-    const targetsNodeInput = edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/')
-    if (
-      sourceNode?.type !== 'state' ||
-      !targetNode ||
-      (targetNode.type !== 'app' && targetNode.type !== 'code') ||
-      edge.sourceHandle !== 'fieldOutput' ||
-      !targetsNodeInput
-    ) {
+  const stateInputEdgesBySource = edges.reduce(
+    (acc, edge) => {
+      const sourceNode = nodesById[edge.source]
+      const targetNode = nodesById[edge.target]
+      const targetsNodeInput =
+        edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/')
+      if (
+        sourceNode?.type !== 'state' ||
+        !targetNode ||
+        (targetNode.type !== 'app' && targetNode.type !== 'code') ||
+        edge.sourceHandle !== 'fieldOutput' ||
+        !targetsNodeInput
+      ) {
+        return acc
+      }
+      acc[edge.source] = [...(acc[edge.source] ?? []), edge]
       return acc
-    }
-    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
 
   const clonedNodes: DiagramNode[] = []
   const replacementSourceByEdge = new WeakMap<DiagramEdge, string>()
@@ -486,10 +493,13 @@ function splitSharedStateNodes(nodes: DiagramNode[], edges: DiagramEdge[]): Arra
       return
     }
 
-    const edgesByTarget = stateEdges.reduce((acc, edge) => {
-      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-      return acc
-    }, {} as Record<string, DiagramEdge[]>)
+    const edgesByTarget = stateEdges.reduce(
+      (acc, edge) => {
+        acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+        return acc
+      },
+      {} as Record<string, DiagramEdge[]>
+    )
     const targetGroups = Object.entries(edgesByTarget).sort(
       ([targetA, edgesA], [targetB, edgesB]) =>
         (edgeOrderByEdge.get(edgesA[0]) ?? 0) - (edgeOrderByEdge.get(edgesB[0]) ?? 0) || targetA.localeCompare(targetB)
@@ -546,7 +556,11 @@ export function arrangeSceneGraph(
   }
 }
 
-export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options: ArrangeNodesOptions = {}): DiagramNode[] {
+export function arrangeNodes(
+  nodes: DiagramNode[],
+  edges: DiagramEdge[],
+  options: ArrangeNodesOptions = {}
+): DiagramNode[] {
   if (!nodes.length) {
     return nodes
   }
@@ -566,28 +580,37 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
     (node) =>
       isAlwaysFlowNode(node) || (node.type === 'app' && !isDataAppNode(node) && flowConnectedNodeIds.has(node.id))
   )
-  const nodesById = sizedNodes.reduce((acc, node) => {
-    acc[node.id] = node
-    return acc
-  }, {} as Record<string, DiagramNode>)
+  const nodesById = sizedNodes.reduce(
+    (acc, node) => {
+      acc[node.id] = node
+      return acc
+    },
+    {} as Record<string, DiagramNode>
+  )
   const flowNodeIds = new Set(flowNodes.map((node) => node.id))
   const flowEdges = edges.filter(
     (edge) => flowNodeIds.has(edge.source) && flowNodeIds.has(edge.target) && isFlowEdge(edge)
   )
-  const outgoingEdges = edges.reduce((acc, edge) => {
-    if (!edge.source || !edge.target) {
+  const outgoingEdges = edges.reduce(
+    (acc, edge) => {
+      if (!edge.source || !edge.target) {
+        return acc
+      }
+      acc[edge.source] = [...(acc[edge.source] ?? []), edge]
       return acc
-    }
-    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
-  const incomingEdges = edges.reduce((acc, edge) => {
-    if (!edge.source || !edge.target) {
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
+  const incomingEdges = edges.reduce(
+    (acc, edge) => {
+      if (!edge.source || !edge.target) {
+        return acc
+      }
+      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }
-    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
   const edgeOrderByEdge = new WeakMap<DiagramEdge, number>()
   edges.forEach((edge, index) => {
     edgeOrderByEdge.set(edge, index)
@@ -689,22 +712,28 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
       })
   }
 
-  const branchEdgesBySource = orderedFlowEdges.reduce((acc, edge) => {
-    if (!edge.sourceHandle?.startsWith('field/') || edge.targetHandle !== 'prev') {
+  const branchEdgesBySource = orderedFlowEdges.reduce(
+    (acc, edge) => {
+      if (!edge.sourceHandle?.startsWith('field/') || edge.targetHandle !== 'prev') {
+        return acc
+      }
+      acc[edge.source] = [...(acc[edge.source] ?? []), edge]
       return acc
-    }
-    acc[edge.source] = [...(acc[edge.source] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
   const branchTargetIds = new Set(
     Object.values(branchEdgesBySource).flatMap((sourceEdges) =>
       sourceEdges.length > 1 ? sourceEdges.map((edge) => edge.target) : []
     )
   )
-  const incomingFlowEdgesByTarget = orderedFlowEdges.reduce((acc, edge) => {
-    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
+  const incomingFlowEdgesByTarget = orderedFlowEdges.reduce(
+    (acc, edge) => {
+      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
+      return acc
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
   const nearestBranchRootCache = new Map<string, string | null>()
   const nearestBranchRoot = (nodeId: string, visited: Set<string> = new Set()): string | null => {
     if (nearestBranchRootCache.has(nodeId)) {
@@ -1060,14 +1089,17 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
   }
 
   const anchoredNodes = sizedNodes.filter((node) => !flowNodeIds.has(node.id))
-  const nodesByAnchor = anchoredNodes.reduce((acc, node) => {
-    const anchor = resolveAnchor(node.id)
-    if (!anchor) {
+  const nodesByAnchor = anchoredNodes.reduce(
+    (acc, node) => {
+      const anchor = resolveAnchor(node.id)
+      if (!anchor) {
+        return acc
+      }
+      acc[anchor] = [...(acc[anchor] ?? []), node]
       return acc
-    }
-    acc[anchor] = [...(acc[anchor] ?? []), node]
-    return acc
-  }, {} as Record<string, DiagramNode[]>)
+    },
+    {} as Record<string, DiagramNode[]>
+  )
 
   const positionedNodes = sizedNodes.map((node) => {
     const basePosition = basePositions.get(node.id)
@@ -1077,24 +1109,30 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
     return { ...node, position: { ...basePosition } }
   })
 
-  const positionedById = positionedNodes.reduce((acc, node) => {
-    acc[node.id] = node
-    return acc
-  }, {} as Record<string, DiagramNode>)
+  const positionedById = positionedNodes.reduce(
+    (acc, node) => {
+      acc[node.id] = node
+      return acc
+    },
+    {} as Record<string, DiagramNode>
+  )
 
   const stackedStateInputTargets = (): Map<string, string> => {
-    const stateInputEdgesByTarget = edges.reduce((acc, edge) => {
-      if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('fieldInput/')) {
+    const stateInputEdgesByTarget = edges.reduce(
+      (acc, edge) => {
+        if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('fieldInput/')) {
+          return acc
+        }
+        const sourceNode = nodesById[edge.source]
+        const targetNode = nodesById[edge.target]
+        if (sourceNode?.type !== 'state' || targetNode?.type !== 'app') {
+          return acc
+        }
+        acc[edge.target] = [...(acc[edge.target] ?? []), edge]
         return acc
-      }
-      const sourceNode = nodesById[edge.source]
-      const targetNode = nodesById[edge.target]
-      if (sourceNode?.type !== 'state' || targetNode?.type !== 'app') {
-        return acc
-      }
-      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-      return acc
-    }, {} as Record<string, DiagramEdge[]>)
+      },
+      {} as Record<string, DiagramEdge[]>
+    )
 
     const targetByInputId = new Map<string, string>()
     Object.entries(stateInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
@@ -1118,7 +1156,7 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
     if (!depths) {
       return nodeId === anchorId ? 0 : 1
     }
-    return nodeId === anchorId ? 0 : depths.get(nodeId) ?? 1
+    return nodeId === anchorId ? 0 : (depths.get(nodeId) ?? 1)
   }
 
   const desiredPlacement = (node: DiagramNode, anchorId: string, depth: number): { centerX: number; order: number } => {
@@ -1254,18 +1292,21 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
   const isLocalInputEdge = (edge: DiagramEdge): boolean =>
     Boolean(
       edge.source &&
-        edge.target &&
-        !flowNodeIds.has(edge.source) &&
-        (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
+      edge.target &&
+      !flowNodeIds.has(edge.source) &&
+      (edge.targetHandle?.startsWith('fieldInput/') || edge.targetHandle?.startsWith('codeField/'))
     )
 
-  const localInputEdgesByTarget = edges.reduce((acc, edge) => {
-    if (!isLocalInputEdge(edge)) {
+  const localInputEdgesByTarget = edges.reduce(
+    (acc, edge) => {
+      if (!isLocalInputEdge(edge)) {
+        return acc
+      }
+      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
       return acc
-    }
-    acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-    return acc
-  }, {} as Record<string, DiagramEdge[]>)
+    },
+    {} as Record<string, DiagramEdge[]>
+  )
 
   const sortedUniqueLocalInputEdges = (targetId: string, allowedFlowIds?: Set<string>): DiagramEdge[] =>
     Array.from(
@@ -1616,18 +1657,21 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
   }
 
   const placeCodeInputsNearTargets = (): void => {
-    const codeInputEdgesByTarget = edges.reduce((acc, edge) => {
-      if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('codeField/')) {
+    const codeInputEdgesByTarget = edges.reduce(
+      (acc, edge) => {
+        if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('codeField/')) {
+          return acc
+        }
+        const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+        const targetNode = positionedById[edge.target] ?? nodesById[edge.target]
+        if (!sourceNode || targetNode?.type !== 'code' || flowNodeIds.has(sourceNode.id)) {
+          return acc
+        }
+        acc[edge.target] = [...(acc[edge.target] ?? []), edge]
         return acc
-      }
-      const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
-      const targetNode = positionedById[edge.target] ?? nodesById[edge.target]
-      if (!sourceNode || targetNode?.type !== 'code' || flowNodeIds.has(sourceNode.id)) {
-        return acc
-      }
-      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-      return acc
-    }, {} as Record<string, DiagramEdge[]>)
+      },
+      {} as Record<string, DiagramEdge[]>
+    )
 
     Object.entries(codeInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
       if (inputEdges.length <= CODE_INPUTS_PER_ROW) {
@@ -1752,18 +1796,21 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
   const placeStateInputsNearTargets = (): void => {
     stateInputTargetByNodeId.clear()
 
-    const stateInputEdgesByTarget = edges.reduce((acc, edge) => {
-      if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('fieldInput/')) {
+    const stateInputEdgesByTarget = edges.reduce(
+      (acc, edge) => {
+        if (!edge.source || !edge.target || !edge.targetHandle?.startsWith('fieldInput/')) {
+          return acc
+        }
+        const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
+        const targetNode = positionedById[edge.target] ?? nodesById[edge.target]
+        if (sourceNode?.type !== 'state' || targetNode?.type !== 'app') {
+          return acc
+        }
+        acc[edge.target] = [...(acc[edge.target] ?? []), edge]
         return acc
-      }
-      const sourceNode = positionedById[edge.source] ?? nodesById[edge.source]
-      const targetNode = positionedById[edge.target] ?? nodesById[edge.target]
-      if (sourceNode?.type !== 'state' || targetNode?.type !== 'app') {
-        return acc
-      }
-      acc[edge.target] = [...(acc[edge.target] ?? []), edge]
-      return acc
-    }, {} as Record<string, DiagramEdge[]>)
+      },
+      {} as Record<string, DiagramEdge[]>
+    )
 
     Object.entries(stateInputEdgesByTarget).forEach(([targetId, inputEdges]) => {
       const targetNode = positionedById[targetId] ?? nodesById[targetId]
@@ -1880,8 +1927,8 @@ export function arrangeNodes(nodes: DiagramNode[], edges: DiagramEdge[], options
                 ? [nodeA, nodeB]
                 : [nodeB, nodeA]
               : nodeA.position.x <= nodeB.position.x
-              ? [nodeA, nodeB]
-              : [nodeB, nodeA]
+                ? [nodeA, nodeB]
+                : [nodeB, nodeA]
           const fixedSize = getNodeSize(fixedNode)
           const movableSize = getNodeSize(movableNode)
           const nextX =

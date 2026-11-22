@@ -13,6 +13,7 @@ import {
   ArrowsPointingInIcon,
   ArrowsPointingOutIcon,
   CheckIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
   UserIcon,
@@ -39,6 +40,8 @@ import { FrameosShell } from '../workspace/FrameosShell'
 import { Button } from '../../components/Button'
 import { DropdownMenu, type DropdownMenuItem } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
+import { ResizeUploadDialog } from '../../components/ResizeUploadDialog'
+import { resizeUploadLogic } from '../../components/resizeUploadLogic'
 import { Spinner } from '../../components/Spinner'
 import { TextInput } from '../../components/TextInput'
 import { framesModel } from '../../models/framesModel'
@@ -431,8 +434,8 @@ function PhotosSidebar(): JSX.Element {
                 !rootLoaded
                   ? 'Loading'
                   : looseRootFileCount
-                  ? `${albums.length} albums, ${photoCountLabel(looseRootFileCount)}`
-                  : `${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`
+                    ? `${albums.length} albums, ${photoCountLabel(looseRootFileCount)}`
+                    : `${albums.length} ${albums.length === 1 ? 'album' : 'albums'}`
               }
               icon={<RectangleStackIcon className="h-5 w-5" />}
               active={folder === ''}
@@ -506,6 +509,7 @@ function PhotosTopBar(): JSX.Element {
     selectAll,
     selectByOrientation,
   } = useActions(photosLogic)
+  const { openResizeUpload } = useActions(resizeUploadLogic)
   const inputRef = useRef<HTMLInputElement>(null)
   const selectedFolders = selectedEntries.filter((entry) => entry.kind === 'folder').map((entry) => entry.path)
   const installAlbums = selectedFolders.length ? selectedFolders : folder ? [folder] : []
@@ -534,52 +538,29 @@ function PhotosTopBar(): JSX.Element {
               className="frameos-input h-10 w-full rounded-xl border border-white/90 bg-white/90 pl-9 pr-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
-          <div className="frameos-segment-group flex h-10 shrink-0 items-center rounded-xl p-1">
-            {(
-              [
-                ['grid', Squares2X2Icon, 'Grid'],
-                ['list', ListBulletIcon, 'List'],
-              ] as const
-            ).map(([mode, Icon, label]) => (
-              <button
-                key={mode}
-                type="button"
-                title={label}
-                aria-label={label}
-                aria-pressed={viewMode === mode}
-                onClick={() => setViewMode(mode)}
-                className={clsx(
-                  'frameos-segment flex h-8 w-8 items-center justify-center rounded-lg transition',
-                  viewMode === mode ? 'frameos-primary-soft-active' : 'text-slate-500'
-                )}
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            ))}
-          </div>
-          <div className="frameos-segment-group flex h-10 shrink-0 items-center rounded-xl p-1">
-            {(
-              [
-                ['cover', ArrowsPointingOutIcon, 'Fill the tiles'],
-                ['contain', ArrowsPointingInIcon, 'Show whole photos'],
-              ] as const
-            ).map(([fit, Icon, label]) => (
-              <button
-                key={fit}
-                type="button"
-                title={label}
-                aria-label={label}
-                aria-pressed={thumbnailFit === fit}
-                onClick={() => setThumbnailFit(fit)}
-                className={clsx(
-                  'frameos-segment flex h-8 w-8 items-center justify-center rounded-lg transition',
-                  thumbnailFit === fit ? 'frameos-primary-soft-active' : 'text-slate-500'
-                )}
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            ))}
-          </div>
+          {/* One button each, showing what a press turns it to. */}
+          <button
+            type="button"
+            title={viewMode === 'grid' ? 'Show as a list' : 'Show as a grid'}
+            aria-label={viewMode === 'grid' ? 'Show as a list' : 'Show as a grid'}
+            onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button w-10 justify-center !px-0')}
+          >
+            {viewMode === 'grid' ? <ListBulletIcon className="h-5 w-5" /> : <Squares2X2Icon className="h-5 w-5" />}
+          </button>
+          <button
+            type="button"
+            title={thumbnailFit === 'cover' ? 'Show whole photos' : 'Fill the tiles'}
+            aria-label={thumbnailFit === 'cover' ? 'Show whole photos' : 'Fill the tiles'}
+            onClick={() => setThumbnailFit(thumbnailFit === 'cover' ? 'contain' : 'cover')}
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button w-10 justify-center !px-0')}
+          >
+            {thumbnailFit === 'cover' ? (
+              <ArrowsPointingInIcon className="h-5 w-5" />
+            ) : (
+              <ArrowsPointingOutIcon className="h-5 w-5" />
+            )}
+          </button>
           <DropdownMenu
             // The menu's own trigger is a small pill; here it is a toolbar button like its neighbours.
             className="h-10 w-10 items-center !rounded-xl !px-0 !py-0"
@@ -641,15 +622,36 @@ function PhotosTopBar(): JSX.Element {
               <span className="hidden @3xl:inline">Show on frame</span>
             </button>
           ) : null}
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            title="Upload files"
-            className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
-          >
-            <ArrowUpTrayIcon className="h-5 w-5" />
-            <span className="hidden @lg:inline">Upload</span>
-          </button>
+          {/* Upload, and beside it a menu with "Resize and upload". */}
+          <div className="flex shrink-0 items-stretch">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              title="Upload files"
+              className={clsx(toolbarButtonClassName, 'frameos-primary-action !rounded-r-none text-white')}
+            >
+              <ArrowUpTrayIcon className="h-5 w-5" />
+              <span className="hidden @lg:inline">Upload</span>
+            </button>
+            <DropdownMenu
+              buttonColor="blue"
+              className="h-10 w-8 items-center !rounded-l-none !rounded-r-xl border-l border-white/30 !px-0 !py-0 text-white"
+              buttonTitle="More ways to upload"
+              buttonContent={<ChevronDownIcon className="h-4 w-4" />}
+              items={[
+                {
+                  label: 'Resize and upload',
+                  icon: <ArrowsPointingInIcon className="h-5 w-5" />,
+                  onClick: () =>
+                    openResizeUpload({
+                      title: folder ? photoBaseName(folder) : 'Photos',
+                      accept: status?.accepts ? status.accepts.join(',') : 'image/*',
+                      onUpload: (files) => uploadFiles(folder, files),
+                    }),
+                },
+              ]}
+            />
+          </div>
           <input
             ref={inputRef}
             type="file"
@@ -823,8 +825,8 @@ function SelectToggle({
         selected
           ? 'frameos-primary-active border-transparent text-white'
           : placement === 'tile'
-          ? 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
-          : 'border-slate-300 text-transparent hover:border-slate-500 hover:text-slate-400'
+            ? 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
+            : 'border-slate-300 text-transparent hover:border-slate-500 hover:text-slate-400'
       )}
     >
       <CheckIcon className="h-4 w-4" />
@@ -1274,8 +1276,8 @@ function UploadPanel(): JSX.Element | null {
           {activeUploadCount
             ? `Uploading ${Math.min(done + failed.length + 1, uploads.length)} of ${uploads.length}`
             : failed.length
-            ? `${done} uploaded, ${failed.length} failed`
-            : `${done} uploaded`}
+              ? `${done} uploaded, ${failed.length} failed`
+              : `${done} uploaded`}
         </div>
         {!activeUploadCount ? (
           <button type="button" aria-label="Close" onClick={dismissUploads} className={iconButtonClassName}>
@@ -1973,8 +1975,8 @@ function ShareDialog(): JSX.Element | null {
     share.name !== null
       ? share.name
       : share.frame_id === null
-      ? 'Anyone with the link'
-      : frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`
+        ? 'Anyone with the link'
+        : (frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`)
   // The backend answers a path: a frame's own link gets that frame's address
   // for the backend, the others the backend's public origin (behind Home
   // Assistant's ingress, the add-on's frames port, not the page's origin).
@@ -1994,8 +1996,8 @@ function ShareDialog(): JSX.Element | null {
   const choiceTaken = custom
     ? false
     : shareFrameChoice === ''
-    ? shareTargetShares.some((share) => share.name === null && share.frame_id === null)
-    : shareTargetShares.some((share) => share.name === null && String(share.frame_id) === shareFrameChoice)
+      ? shareTargetShares.some((share) => share.name === null && share.frame_id === null)
+      : shareTargetShares.some((share) => share.name === null && String(share.frame_id) === shareFrameChoice)
   const canCreate = !shareBusy && !sharesLoading && !choiceTaken && (!custom || shareCustomName.trim().length > 0)
   const create = (): void => {
     if (!canCreate) {
@@ -2189,8 +2191,8 @@ function ShowPicker(): JSX.Element | null {
   const what = showPickerTarget.photo
     ? `"${photoBaseName(showPickerTarget.photo)}"`
     : showPickerTarget.albums.length === 1
-    ? `"${photoBaseName(showPickerTarget.albums[0])}"`
-    : `these ${showPickerTarget.albums.length} albums`
+      ? `"${photoBaseName(showPickerTarget.albums[0])}"`
+      : `these ${showPickerTarget.albums.length} albums`
   return (
     <FramePicker
       title="Show on frame"
@@ -2315,6 +2317,7 @@ function PhotosDialogs(): JSX.Element {
       <InstallPicker />
       <ShowPicker />
       <ResizeDialog />
+      <ResizeUploadDialog />
     </>
   )
 }
@@ -2660,10 +2663,10 @@ function PhotosNotReady({ status }: { status: PhotosStatus }): JSX.Element {
     status.problem === 'suspended'
       ? 'Photos is turned off for this account'
       : status.problem === 'not_persistent'
-      ? 'Photos needs a storage volume'
-      : status.problem === 'not_writable'
-      ? 'Photos cannot write its folder'
-      : 'Photos is not available'
+        ? 'Photos needs a storage volume'
+        : status.problem === 'not_writable'
+          ? 'Photos cannot write its folder'
+          : 'Photos is not available'
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-6">
       <div className="frameos-card max-w-lg space-y-3 rounded-[24px] border border-white/90 bg-white/90 p-6 shadow-lg">

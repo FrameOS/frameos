@@ -1979,7 +1979,7 @@ proc renderSvg(
           paint.blendMode = blendMode
 
           if late and paint.kind == SolidPaint:
-            target.fillPath(element.lateData, paint, transform, props.fillRule)
+            target.fillPathText(element.lateData, paint, transform, props.fillRule)
           else:
             if late and path.isNil:
               path = element.pathOf()
@@ -1991,7 +1991,7 @@ proc renderSvg(
           let paint = props.stroke.copy()
           paint.color.a *= (props.opacity * props.strokeOpacity)
           if late and paint.kind == SolidPaint:
-            target.strokePath(
+            target.strokePathText(
               element.lateData,
               paint,
               transform,

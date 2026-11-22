@@ -168,7 +168,7 @@ export interface securityLogicActions {
     }
   ) => {
     options: {
-      resumed?: boolean | undefined
+      resumed?: boolean
     }
     seconds: number
   }
@@ -194,7 +194,7 @@ export interface securityLogicActions {
       has_password: boolean
       is_superadmin: boolean
       name: string | null
-      saved_keys_reauth_choices?: number[] | undefined
+      saved_keys_reauth_choices?: number[]
       saved_keys_reauth_seconds: number
     } | null,
     payload?: {
@@ -206,7 +206,7 @@ export interface securityLogicActions {
       has_password: boolean
       is_superadmin: boolean
       name: string | null
-      saved_keys_reauth_choices?: number[] | undefined
+      saved_keys_reauth_choices?: number[]
       saved_keys_reauth_seconds: number
     } | null
     payload?: {
@@ -224,7 +224,7 @@ export interface securityLogicActions {
   }
   signOutEverywhere: (options?: { resumed?: boolean }) => {
     options: {
-      resumed?: boolean | undefined
+      resumed?: boolean
     }
   }
   submitDeleteAccount: () => {

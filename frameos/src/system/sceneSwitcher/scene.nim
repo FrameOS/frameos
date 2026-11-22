@@ -435,19 +435,27 @@ type Spot* = tuple[col, top: int]
   ## Where a tile goes in the list: its column, and its top from the list's.
 
 proc rowH(self: SceneSwitcherScene, grid: SwitcherGrid): int =
-  ## A row's height: its cells, and over them the strip its categories'
-  ## headings sit in where there are any.
+  ## A row's height, roughly: its cells, and over a category's first row the
+  ## strip its heading sits in where there are any.
   grid.tileH + grid.gap + (if self.headed: grid.headingH else: 0)
 
 proc spots*(self: SceneSwitcherScene, grid: SwitcherGrid): seq[Spot] =
-  ## Every cell's place in the list, row after row, one category's straight
-  ## after another's: a heading sits over its category's first cells in the
-  ## row it starts in (Finder's groups, but no row left half empty for a
-  ## category of one).
-  let row = self.rowH(grid)
-  let first = grid.y0 - grid.listY + (if self.headed: grid.headingH else: 0)
+  ## Every cell's place in the list, row after row. Where the categories have
+  ## headings each starts a row of its own, its heading in a strip above it
+  ## (a file manager's sections); without them the scenes flow on in one.
+  var col = 0
+  var top = grid.y0 - grid.listY + (if self.headed: grid.headingH else: 0)
   for i in 0 ..< self.entries.len:
-    result.add (i mod grid.cols, first + (i div grid.cols) * row)
+    if i > 0:
+      if self.heads(i):
+        col = 0
+        top += grid.tileH + grid.gap + grid.headingH
+      elif col + 1 >= grid.cols:
+        col = 0
+        top += grid.tileH + grid.gap
+      else:
+        inc col
+    result.add (col, top)
 
 # ------------------------------------------------------------------ the model
 
@@ -492,7 +500,7 @@ proc reveal(self: SceneSwitcherScene, index: int) =
   let spot = self.spots(grid)[index]
   let margin = grid.y0 - grid.listY
   var top = spot.top - margin
-  if self.headed:
+  if self.heads(index - spot.col):
     top -= grid.headingH
   let bottom = spot.top + grid.tileH + margin
   let y = listScroll()
@@ -530,9 +538,9 @@ proc screenful(self: SceneSwitcherScene, delta: int) =
       self.highlight(if lit == 0: n - 1 else: max(lit - step, 0))
 
 var wentBack {.threadvar.}: bool
-  ## It went back by itself (a scene picked, Close, its timeout), not merely
-  ## lost the focus to a window beside it: its "close" ends it
-  ## (docs/scene-layouts.md "Windows").
+  ## It went back by itself (Close, its timeout, a scene picked where it is
+  ## no window), not merely lost the focus to a window beside it: its "close"
+  ## ends it (docs/scene-layouts.md "Windows").
 
 proc choose(self: SceneSwitcherScene, index: int) =
   ## Show the scene at `index`, or at the tile count the frame page (the
@@ -541,7 +549,9 @@ proc choose(self: SceneSwitcherScene, index: int) =
   let payload = newJObject()
   if index >= 0 and index < self.entries.len:
     payload.put("sceneId", newJString(self.entries[index].id))
-    wentBack = true
+    # On a desktop it is a launcher: the scene picked opens beside it and the
+    # list stays open in its window until it is closed (2026-11-22).
+    wentBack = not builtInScenesStay
     sendEvent(evSetCurrentScene, payload, eoScene)
   elif index == self.entries.len and self.gear:
     payload.put("page", newJString("frame"))
@@ -866,8 +876,8 @@ when not defined(frameosEmbedded):
       root.children.add gear
 
 proc heading(grid: SwitcherGrid, spot: Spot, span: int, title: string, paper: bool): SvgNode =
-  ## A category's name over its first cells, small, with a rule under it as
-  ## far as they go: a file manager's groups.
+  ## A category's name over the row it starts, small, with a rule under it
+  ## across the row: a file manager's sections.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top - grid.headingH,
     span * (grid.tileW + grid.gap) - grid.gap, grid.headingH - grid.gap)
@@ -934,19 +944,8 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     if index == 0 or self.entries[index].category != self.entries[index - 1].category:
       inc group
     if self.heads(index):
-      # Over its cells in this row: as far as the category goes, and on over
-      # the empty places after the list's last cell while its name needs the
-      # room (a letter is about 0.55 of the size, bold); no further, so it
-      # never runs over another category's: there it is cut short.
-      var span = 1
-      while index + span < self.entries.len and spots[index + span].top == spots[index].top and
-          self.entries[index + span].category == self.entries[index].category:
-        inc span
-      let need = self.entries[index].category.len * max(grid.text - 1, 10) * 11 div 20 + 2 * grid.inner
-      while index + span >= self.entries.len and spots[index].col + span < grid.cols and
-          span * (grid.tileW + grid.gap) - grid.gap < need:
-        inc span
-      list.children.add heading(grid, spots[index], span, self.entries[index].category, paper)
+      # Across its row: a category starts a row of its own.
+      list.children.add heading(grid, spots[index], grid.cols, self.entries[index].category, paper)
     look.hue = group
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
@@ -1068,9 +1067,16 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   of "open":
     wentBack = false
     builtInAway(self.id.string, false)
-    if self.state.hasKey("away"):
+    if self.state{"away"}.getBool():
+      # Brought forward from its window: where it was, scrolled and
+      # highlighted as it was left, the host's scenes listed again.
       self.state.delete("away")
-    self.opened()
+      self.list()
+      self.touch()
+    else:
+      if self.state.hasKey("away"):
+        self.state.delete("away")
+      self.opened()
   of "close":
     # Sent back by the dispatcher (its command again from anyone, a layout's
     # close) is going back too.

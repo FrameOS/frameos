@@ -136,8 +136,8 @@ export function CloudBaseSettingsSection(): JSX.Element {
                 cloudEsp32TimeZoneSupported
                   ? 'The time zone the frame keeps its clock in: scene times, the weather forecast and the schedule. Applied live — no reboot.'
                   : frame.frameos_version
-                  ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
-                  : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+                    ? `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+                    : `The time zone needs FrameOS ${esp32TimeZoneCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
               }
             >
               <Select name="timezone" options={frameTimezoneOptions} />
@@ -167,8 +167,8 @@ export function CloudBaseSettingsSection(): JSX.Element {
           {virtual
             ? 'This frame has no hardware: FrameOS Cloud draws its scenes and shows the picture at the link under Virtual frame below. Its size and that link are set there.'
             : esp32
-            ? 'This ESP32 frame accepts its name, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
-            : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
+              ? 'This ESP32 frame accepts its name, rotation, scaling mode, scale, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
+              : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
       </SectionBody>
     </>

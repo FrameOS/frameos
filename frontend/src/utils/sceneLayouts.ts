@@ -149,7 +149,7 @@ export function commonSceneLayoutId(
   layouts: readonly Pick<FrameScene, 'id'>[]
 ): string | null {
   const ids = new Set(scenes.map((scene) => currentSceneLayout(scene, layouts)?.sceneId ?? ''))
-  return ids.size > 1 ? null : [...ids][0] ?? ''
+  return ids.size > 1 ? null : ([...ids][0] ?? '')
 }
 
 /**

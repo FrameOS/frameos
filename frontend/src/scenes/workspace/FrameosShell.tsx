@@ -460,8 +460,8 @@ export function FrameosShell({
   const frameHref = selectedFrame
     ? urls.frame(selectedFrame.id)
     : inFrameAdminMode
-    ? urls.frameControl()
-    : urls.frames()
+      ? urls.frameControl()
+      : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
     : rememberedAppsHref(lastAppsHref)

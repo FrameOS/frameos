@@ -90,7 +90,7 @@ export function SceneUpdatesSection({
     return null
   }
   const openUpdate = sceneUpdateDiff
-    ? pendingSceneUpdates.find((update) => update.key === sceneUpdateDiff.key) ?? null
+    ? (pendingSceneUpdates.find((update) => update.key === sceneUpdateDiff.key) ?? null)
     : null
   return (
     <section className={clsx('space-y-2', className)}>

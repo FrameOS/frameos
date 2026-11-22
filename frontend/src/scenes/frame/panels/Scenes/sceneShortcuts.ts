@@ -16,7 +16,7 @@ const baseSdCardImageScene: FrameScene = {
       persist: 'disk',
       type: 'path',
       pick: 'any',
-      extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'qoi', 'ppm', 'svg'],
+      extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'qoi', 'ppm', 'svg'],
       value: '/srv/assets',
     },
     {

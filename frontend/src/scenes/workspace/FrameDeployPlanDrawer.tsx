@@ -447,7 +447,7 @@ function deployPlanProgressSteps({
   return [
     {
       label: connected ? 'Connected to frame' : 'Connecting to frame',
-      detail: connected ? null : connectStartedLog?.line ?? null,
+      detail: connected ? null : (connectStartedLog?.line ?? null),
       state: connected ? 'done' : error ? 'error' : 'current',
     },
     {
@@ -879,10 +879,10 @@ function PendingActionsSection({ frame, className }: { frame: FrameType; classNa
             checkin.announced ? '' : '~'
           )}.`
         : checkin?.kind === 'overdue'
-        ? `Queued on the account. The frame was expected back ${formatFrameRelativeTime(
-            checkin.wakeAt
-          )} and has not reconnected — these apply when it does.`
-        : 'Queued on the account. The frame applies these the next time it connects.'
+          ? `Queued on the account. The frame was expected back ${formatFrameRelativeTime(
+              checkin.wakeAt
+            )} and has not reconnected — these apply when it does.`
+          : 'Queued on the account. The frame applies these the next time it connects.'
       : 'Queued on the account and being delivered now.'
 
   return (
@@ -948,8 +948,8 @@ function pendingCommandDetail(command: FramePendingCommand): string {
       minutes <= 0
         ? 'expiring now'
         : minutes < 60
-        ? `expires in ${minutes} minute${minutes === 1 ? '' : 's'}`
-        : `expires in ${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? '' : 's'}`
+          ? `expires in ${minutes} minute${minutes === 1 ? '' : 's'}`
+          : `expires in ${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? '' : 's'}`
     )
   }
   if (command.detail) {
@@ -1084,8 +1084,8 @@ function ShellLessDeploySection({
             {status
               ? 'Up to date with the latest release.'
               : deviceUpgradeLoading
-              ? 'Asking the frame for its version…'
-              : deviceUpgradeError ?? 'As last reported by the frame.'}
+                ? 'Asking the frame for its version…'
+                : (deviceUpgradeError ?? 'As last reported by the frame.')}
             {problemLines}
           </>
         }
@@ -1098,7 +1098,9 @@ function ShellLessDeploySection({
         label="FrameOS"
         value="Not reported yet"
         detail={
-          deviceUpgradeLoading ? 'Asking the frame for its version…' : deviceUpgradeError ?? 'Refresh to ask the frame.'
+          deviceUpgradeLoading
+            ? 'Asking the frame for its version…'
+            : (deviceUpgradeError ?? 'Refresh to ask the frame.')
         }
         tone="muted"
       />
@@ -1171,8 +1173,8 @@ function ShellLessDeploySection({
                 inFlight
                   ? 'The frame is installing the update'
                   : updateAvailable
-                  ? 'The frame downloads the latest release, verifies its signature and installs it'
-                  : 'The frame already runs the latest release'
+                    ? 'The frame downloads the latest release, verifies its signature and installs it'
+                    : 'The frame already runs the latest release'
               }
               className={clsx(
                 updateAvailable && !inFlight ? 'frameos-primary-action' : 'frameos-secondary-button',
@@ -1434,7 +1436,7 @@ function DeployTransportToggle({
                       label: <DeployRemoteLabel notice={remoteUpgradeNotice} />,
                       title: selectedRemoteDisconnected
                         ? selectedConnectionUnavailableTitle
-                        : remoteUpgradeTitle ?? selectedConnectionTitle,
+                        : (remoteUpgradeTitle ?? selectedConnectionTitle),
                       disabled: selectedRemoteDisconnected,
                       onClick: () => onDeployRemote(false, selectedTransport),
                     },
@@ -2345,8 +2347,8 @@ function OtaUpdateCard({
     progress?.kind === 'running'
       ? progress.title
       : queued
-      ? 'An update request is already queued for this frame'
-      : undefined
+        ? 'An update request is already queued for this frame'
+        : undefined
   const busyIcon =
     progress?.kind === 'running' || deploying ? (
       <ArrowPathIcon className="h-5 w-5 animate-spin" />
@@ -2363,12 +2365,12 @@ function OtaUpdateCard({
     !deploy || fullBusy
       ? null
       : deploy.recommendedMode === 'fast'
-      ? 'scenes'
-      : deploy.recommendedMode === 'full' && fullDeploy
-      ? deploy.firmwareOnly
-        ? 'firmware'
-        : 'both'
-      : null
+        ? 'scenes'
+        : deploy.recommendedMode === 'full' && fullDeploy
+          ? deploy.firmwareOnly
+            ? 'firmware'
+            : 'both'
+          : null
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
@@ -2531,9 +2533,9 @@ function EmbeddedFirmwareSection({
           ) : picoCardsAvailable ? (
             <>
               This {picoBoardLabel(platformLabel)} is a thin client: this backend renders its scenes and the board
-              fetches the picture. Installing it takes two steps: copy the FrameOS firmware onto the board, then
-              connect over USB so the browser can tell it which frame it is. Later firmware updates go the same way; a
-              Pico has no over-the-air update.
+              fetches the picture. Installing it takes two steps: copy the FrameOS firmware onto the board, then connect
+              over USB so the browser can tell it which frame it is. Later firmware updates go the same way; a Pico has
+              no over-the-air update.
             </>
           ) : isPicoFrame ? (
             <>
@@ -2976,7 +2978,7 @@ function CloudDeployStatus({
         detail={
           releaseInfo.loading
             ? 'Checking the latest published release…'
-            : releaseInfo.error ?? 'Could not determine the latest published release.'
+            : (releaseInfo.error ?? 'Could not determine the latest published release.')
         }
         tone="muted"
       />
@@ -3125,10 +3127,10 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
                   checkin.announced ? '' : '~'
                 )}.`
               : checkin?.kind === 'overdue'
-              ? `The frame is overdue (expected back ${formatFrameRelativeTime(
-                  checkin.wakeAt
-                )}) — the deploy is queued until it reconnects.`
-              : 'The frame is offline right now — the deploy is queued and applied when it reconnects.'
+                ? `The frame is overdue (expected back ${formatFrameRelativeTime(
+                    checkin.wakeAt
+                  )}) — the deploy is queued until it reconnects.`
+                : 'The frame is offline right now — the deploy is queued and applied when it reconnects.'
             : 'The frame applies them as soon as it syncs.'}
         </div>
         <SummaryRows
@@ -3139,8 +3141,8 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
                 sends.length > 0
                   ? capitalizeFirst(sends.join(', '))
                   : awaitingAck
-                  ? 'Nothing new. The last push is still on its way; this would send it again.'
-                  : 'No unsaved changes. This re-sends the current scenes.',
+                    ? 'Nothing new. The last push is still on its way; this would send it again.'
+                    : 'No unsaved changes. This re-sends the current scenes.',
             },
           ]}
         />
@@ -3242,11 +3244,11 @@ function CloudOtaDeployView({
                     updateState.progress?.kind === 'running'
                       ? updateState.progress.title
                       : updateState.queued
-                      ? 'The update request is queued and applies when the frame next wakes'
-                      : firmwareDisabledReason ??
-                        (alsoPushScenes && offerResend
-                          ? 'Queue a firmware update and resend this frame’s scenes & settings'
-                          : 'Queue a firmware update notification')
+                        ? 'The update request is queued and applies when the frame next wakes'
+                        : (firmwareDisabledReason ??
+                          (alsoPushScenes && offerResend
+                            ? 'Queue a firmware update and resend this frame’s scenes & settings'
+                            : 'Queue a firmware update notification'))
                   }
                   disabled={Boolean(firmwareDisabledReason) || updateState.inFlight}
                   onClick={() => {
@@ -3278,8 +3280,8 @@ function CloudOtaDeployView({
                   {updateState.progress?.kind === 'running'
                     ? 'Updating firmware'
                     : updateState.queued
-                    ? 'Update queued'
-                    : 'Update firmware'}
+                      ? 'Update queued'
+                      : 'Update firmware'}
                 </button>
                 {/* Nothing to resend when the device already acked everything:
                   a tick that sends nothing only invites the question of why
@@ -3531,12 +3533,12 @@ function CloudHardwareDetails({
   const sdValue = !sd
     ? null
     : !sd.enabled
-    ? 'not configured'
-    : sd.mounted
-    ? typeof sd.capacityBytes === 'number' && sd.capacityBytes > 0
-      ? `${formatFirmwareBytes(sd.capacityBytes)} mounted`
-      : 'mounted'
-    : 'enabled, not mounted'
+      ? 'not configured'
+      : sd.mounted
+        ? typeof sd.capacityBytes === 'number' && sd.capacityBytes > 0
+          ? `${formatFirmwareBytes(sd.capacityBytes)} mounted`
+          : 'mounted'
+        : 'enabled, not mounted'
   const otaSlotBytes = storage?.otaSlotBytes ?? 0
 
   return (
@@ -3707,11 +3709,11 @@ function CloudPiUpdateCard({
               updateState.progress?.kind === 'running'
                 ? updateState.progress.title
                 : updateState.queued
-                ? 'The update request is queued and applies when the frame next wakes'
-                : disabledReason ??
-                  (alsoPushScenes && offerResend
-                    ? 'Queue a FrameOS update and push this frame’s scenes & settings'
-                    : 'Queue a FrameOS update notification')
+                  ? 'The update request is queued and applies when the frame next wakes'
+                  : (disabledReason ??
+                    (alsoPushScenes && offerResend
+                      ? 'Queue a FrameOS update and push this frame’s scenes & settings'
+                      : 'Queue a FrameOS update notification'))
             }
             disabled={Boolean(disabledReason) || updateState.inFlight}
             onClick={() => {
@@ -3743,8 +3745,8 @@ function CloudPiUpdateCard({
             {updateState.progress?.kind === 'running'
               ? 'Updating FrameOS'
               : updateState.queued
-              ? 'Update queued'
-              : 'Update FrameOS'}
+                ? 'Update queued'
+                : 'Update FrameOS'}
           </button>
           {offerResend ? (
             <Checkbox
@@ -3822,10 +3824,10 @@ function CloudDeploySection({
   const activeView: 'main' | 'cloudOta' | 'cloudUsb' = !isEsp32
     ? 'main'
     : usbOnly
-    ? 'cloudUsb'
-    : view === 'cloudOta' || view === 'cloudUsb'
-    ? view
-    : 'main'
+      ? 'cloudUsb'
+      : view === 'cloudOta' || view === 'cloudUsb'
+        ? view
+        : 'main'
 
   return (
     <div className="space-y-5">
@@ -3952,8 +3954,8 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
   const activeDeployDrawerView = directSdCardFirstInstall
     ? 'sdCard'
     : isEmbeddedFrame && !embeddedFastDeployReady
-    ? 'embedded'
-    : deployDrawerView
+      ? 'embedded'
+      : deployDrawerView
   const closeOnlyDrawerView = directSdCardFirstInstall || (isEmbeddedFrame && !embeddedFastDeployReady)
   const canDeployRemote = true
   const canCopyBootstrapScript = !isBuildrootFrame
@@ -4254,7 +4256,7 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                       onOtaUpdate={() => applyEmbeddedFirmwareOta(frame.id)}
                       deploy={{
                         recommendedMode:
-                          deployRecommendation?.mode === 'none' ? null : deployRecommendation?.mode ?? null,
+                          deployRecommendation?.mode === 'none' ? null : (deployRecommendation?.mode ?? null),
                         firmwareOnly:
                           deployChangeDetails.length > 0 &&
                           deployChangeDetails.every((change) => Boolean(change.frameosVersionChange)),
@@ -4364,10 +4366,10 @@ export function FrameDeployPlanDrawer({ frame }: { frame: FrameType }): JSX.Elem
                   {frameSyncApplyMode === 'commit'
                     ? 'Committing sync changes'
                     : !frameSyncStatusReady
-                    ? 'Checking'
-                    : canApplyFrameSync
-                    ? 'Commit selected choices'
-                    : 'Choose changes'}
+                      ? 'Checking'
+                      : canApplyFrameSync
+                        ? 'Commit selected choices'
+                        : 'Choose changes'}
                 </button>
               </>
             ) : (

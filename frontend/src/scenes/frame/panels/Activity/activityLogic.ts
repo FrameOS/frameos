@@ -53,7 +53,7 @@ const POLL_INTERVAL_MS = 30 * 1000
 /** "account@example.com", "device" or "—", plus the IP when there is one. */
 export function activityActorLabel(event: FrameActivityEvent): string {
   const who =
-    event.actor.kind === 'device' ? 'device' : event.actor.email ?? (event.actor.kind === 'account' ? 'account' : '—')
+    event.actor.kind === 'device' ? 'device' : (event.actor.email ?? (event.actor.kind === 'account' ? 'account' : '—'))
   return event.actor.ip ? `${who} · ${event.actor.ip}` : who
 }
 

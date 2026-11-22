@@ -269,7 +269,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
     nodeConfig: [
       (s) => [s.node],
       (node: appNodeLogicValues['node']): AppNodeData['config'] =>
-        node && 'config' in node?.data ? node?.data.config ?? {} : {},
+        node && 'config' in node?.data ? (node?.data.config ?? {}) : {},
       { resultEqualityCheck: equal },
     ],
     codeArgs: [
@@ -365,7 +365,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       ): AppConfig | null => {
         if (node && node.type === 'app' && node.data && 'keyword' in node.data && node.data.keyword) {
           const sceneApp = currentScene?.apps?.[node.data.keyword]
-          return sceneApp ? sceneAppToAppConfig(sceneApp) : effectiveApps[node.data.keyword] ?? null
+          return sceneApp ? sceneAppToAppConfig(sceneApp) : (effectiveApps[node.data.keyword] ?? null)
         }
         return null
       },
@@ -384,7 +384,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.node, s.scenes],
       (node: appNodeLogicValues['node'], scenes: FrameScene[]): FrameScene | null =>
         node?.type === 'scene'
-          ? scenes.find((scene) => scene.id === (node.data as SceneNodeData).keyword) ?? null
+          ? (scenes.find((scene) => scene.id === (node.data as SceneNodeData).keyword) ?? null)
           : null,
     ],
     isApp: [(s) => [s.node], (node: appNodeLogicValues['node']) => node?.type === 'app'],
@@ -540,12 +540,15 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.allFields],
       (fields: appNodeLogicValues['allFields']): Record<string, unknown> => {
         return (
-          fields?.reduce((acc, field) => {
-            if ('value' in field && 'name' in field) {
-              acc[field.name] = field.value
-            }
-            return acc
-          }, {} as Record<string, unknown>) ?? {}
+          fields?.reduce(
+            (acc, field) => {
+              if ('value' in field && 'name' in field) {
+                acc[field.name] = field.value
+              }
+              return acc
+            },
+            {} as Record<string, unknown>
+          ) ?? {}
         )
       },
     ],
@@ -566,10 +569,10 @@ export const appNodeLogic = kea<appNodeLogicType>([
         return event
           ? `Dispatch: ${String(event?.name ?? 'Event')}`
           : app
-          ? String(app?.name ?? configJson?.name ?? 'App')
-          : scene
-          ? String(scene?.name ?? 'Scene')
-          : configJson?.name || 'Node'
+            ? String(app?.name ?? configJson?.name ?? 'App')
+            : scene
+              ? String(scene?.name ?? 'Scene')
+              : configJson?.name || 'Node'
       },
     ],
     isCustomApp: [

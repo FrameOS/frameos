@@ -18,6 +18,17 @@ suite "embedded remote image URLs (no proxies, ever)":
     check "h=800" in rewritten
     check "fit=crop" in rewritten
 
+  test "the query is rewritten in place: path, port, fragment and an author's format stay":
+    check embeddedSizedRemoteImageUrl("https://IMAGES.unsplash.com:443/photo-1", target) ==
+      "https://IMAGES.unsplash.com:443/photo-1?w=800&h=800&fit=crop&auto=format"
+    check embeddedSizedRemoteImageUrl(
+      "https://images.unsplash.com/photo-1?w=10&fm=png#top", target) ==
+      "https://images.unsplash.com/photo-1?w=800&fm=png&h=800&fit=crop#top"
+    check embeddedSizedRemoteImageUrl("https://user@images.unsplash.com?q=1", target) ==
+      "https://user@images.unsplash.com?q=1&w=800&h=800&fit=crop&auto=format"
+    let lookalike = "https://images.unsplash.com.example.org/photo?x=1"
+    check embeddedSizedRemoteImageUrl(lookalike, target) == lookalike
+
   test "all other hosts pass through unchanged — never rewritten to a proxy":
     let gallery = "https://gallery.frameos.net/image?category=building-art-styles"
     check embeddedSizedRemoteImageUrl(gallery, target) == gallery

@@ -39,7 +39,5 @@ export function sceneCategoryFromSelect(value: string): string | undefined {
 
 /** The store's titles a scene picks from, for a linter or a prompt: the scenes' (no layouts'). */
 export function sceneCategoryTitles(isLayout = false): string[] {
-  return storeCategoryShelves
-    .filter((shelf) => (shelf.kind === 'layout') === isLayout)
-    .map((shelf) => shelf.title)
+  return storeCategoryShelves.filter((shelf) => (shelf.kind === 'layout') === isLayout).map((shelf) => shelf.title)
 }

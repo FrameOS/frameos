@@ -296,7 +296,7 @@ export function SceneEditorBody({
   const { shownSelection, treeOpen, builtinAppEditor } = useValues(sceneFileTreeLogic({ frameId }))
   const { setTreeOpen, closeBuiltinApp } = useActions(sceneFileTreeLogic({ frameId }))
   const [ownPanelKey, setOwnPanelKey] = useState<string | null>(null)
-  const activePanelKey = onActivePanelChange ? controlledPanel ?? null : ownPanelKey
+  const activePanelKey = onActivePanelChange ? (controlledPanel ?? null) : ownPanelKey
   const setActivePanelKey = (panel: string | null): void =>
     onActivePanelChange ? onActivePanelChange(panel) : setOwnPanelKey(panel)
   const activePanel = panels.find((panel) => panel.panel === activePanelKey) ?? null
@@ -307,10 +307,10 @@ export function SceneEditorBody({
 
   const selectedScene = scenes.find((scene) => scene.id === selectedSceneId) ?? null
   const appScene =
-    shownSelection.kind === 'app' ? scenes.find((scene) => scene.id === shownSelection.sceneId) ?? null : null
+    shownSelection.kind === 'app' ? (scenes.find((scene) => scene.id === shownSelection.sceneId) ?? null) : null
   const appEntry =
     shownSelection.kind === 'app' && appScene
-      ? sceneAppEntries(appScene).find((entry) => entry.nodeId === shownSelection.nodeId) ?? null
+      ? (sceneAppEntries(appScene).find((entry) => entry.nodeId === shownSelection.nodeId) ?? null)
       : null
   const showTemplate = template !== null && shownSelection.kind === 'template'
 

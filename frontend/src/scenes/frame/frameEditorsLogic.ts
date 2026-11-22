@@ -243,7 +243,7 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         openEditors: frameEditorsLogicValues['openEditors'],
         activeEditorKey: frameEditorsLogicValues['activeEditorKey']
       ): FrameEditor | null =>
-        activeEditorKey ? openEditors.find((editor) => editor.key === activeEditorKey) ?? null : null,
+        activeEditorKey ? (openEditors.find((editor) => editor.key === activeEditorKey) ?? null) : null,
     ],
     scenesOpen: [
       (s) => [s.activeEditor],
@@ -262,7 +262,7 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         openEditors: frameEditorsLogicValues['openEditors'],
         appModalEditorKey: frameEditorsLogicValues['appModalEditorKey']
       ): FrameEditor | null =>
-        appModalEditorKey ? openEditors.find((editor) => editor.key === appModalEditorKey) ?? null : null,
+        appModalEditorKey ? (openEditors.find((editor) => editor.key === appModalEditorKey) ?? null) : null,
     ],
     activeEditApp: [
       (s) => [s.activeEditor],
@@ -288,7 +288,7 @@ export const frameEditorsLogic = kea<frameEditorsLogicType>([
         frameForm: frameEditorsLogicValues['frameForm'],
         selectedSceneId: frameEditorsLogicValues['selectedSceneId']
       ): string | null =>
-        selectedSceneId ? frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null : null,
+        selectedSceneId ? (frameForm?.scenes?.find((s) => s.id === selectedSceneId)?.name ?? null) : null,
     ],
     selectedSceneIsInterpreted: [
       (s) => [s.frameForm, s.selectedSceneId],

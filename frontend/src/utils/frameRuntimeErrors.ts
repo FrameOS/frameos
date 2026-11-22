@@ -169,7 +169,7 @@ export function runtimeNodeErrorsByNodeId(
     const explicitNodeId = valueAsId(payload.sourceNodeId)
     const fallbackNodeId =
       runtimeNodeId !== null
-        ? runtimeNodeMaps[publicSceneId(runtimeSceneId)]?.[runtimeNodeId] ?? valueAsId(payload.nodeId)
+        ? (runtimeNodeMaps[publicSceneId(runtimeSceneId)]?.[runtimeNodeId] ?? valueAsId(payload.nodeId))
         : valueAsId(payload.nodeId)
     const nodeId = explicitNodeId && nodeIds.has(explicitNodeId) ? explicitNodeId : fallbackNodeId
     if (!nodeId || !nodeIds.has(nodeId) || errors[nodeId]) {

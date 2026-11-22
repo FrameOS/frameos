@@ -36,7 +36,14 @@
  * for one, under the same condition (docs/code-editor.md).
  */
 export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code'
-export const SCENE_PERMISSIONS: readonly ScenePermission[] = ['shell', 'files', 'assets', 'assets-write', 'frame', 'code']
+export const SCENE_PERMISSIONS: readonly ScenePermission[] = [
+  'shell',
+  'files',
+  'assets',
+  'assets-write',
+  'frame',
+  'code',
+]
 
 /** "Uses your <service> key": a settings namespace an app reads with getSetting. */
 export type SceneKeyFlag = `key:${string}`

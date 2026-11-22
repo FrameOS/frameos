@@ -81,10 +81,7 @@ export function isValidTsIdentifier(name: string): boolean {
  * has focus) is declared first, so its argument types are the ones TypeScript
  * resolves wherever two nodes claim the same name.
  */
-export function buildCodeNodeDeclarations(
-  entries: CodeNodeArgsEntry[],
-  activeNodeId?: string | null
-): string {
+export function buildCodeNodeDeclarations(entries: CodeNodeArgsEntry[], activeNodeId?: string | null): string {
   const seenNodes = new Set<string>()
   const ordered: CodeNodeArgsEntry[] = []
   for (const entry of entries) {

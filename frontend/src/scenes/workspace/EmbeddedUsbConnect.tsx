@@ -170,8 +170,8 @@ function BootselSection({ frame, label }: { frame: FrameType; label: string }): 
       <div className="frame-tool-muted text-xs leading-4">
         A Pico has no over-the-air update: new firmware is a .uf2 copied onto its bootloader drive. This reboots the
         board into that drive ({bootselDrive}) without the BOOTSEL button
-        {uf2DownloadAvailable ? '. Download the firmware in step 1, then drag it onto the drive.' : '.'} Its Wi-Fi and frame
-        settings are kept. The board leaves USB serial until the copy finishes, so connect again afterwards.
+        {uf2DownloadAvailable ? '. Download the firmware in step 1, then drag it onto the drive.' : '.'} Its Wi-Fi and
+        frame settings are kept. The board leaves USB serial until the copy finishes, so connect again afterwards.
       </div>
       <button type="button" onClick={rebootIntoBootsel} disabled={busy} className={secondaryButtonClass}>
         {bootselBusy ? <Spinner /> : <ArrowDownOnSquareIcon className="h-4 w-4" />}
@@ -330,8 +330,8 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             {canProvision && releaseAvailable
               ? ' Flash FrameOS and set it up as this frame:'
               : cloudManaged
-              ? ' To set it up as this frame, use “Redeploy to this board” below.'
-              : ''}
+                ? ' To set it up as this frame, use “Redeploy to this board” below.'
+                : ''}
           </span>
         </div>
         {canProvision && releaseAvailable ? (
@@ -366,8 +366,8 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
                 ? 'Send it this frame’s settings and Wi-Fi network over USB:'
                 : 'Send it this frame’s settings over USB:'
               : cloudManaged
-              ? 'Use “Redeploy to this board” below to set it up as this frame.'
-              : 'Set it up from the backend that manages this frame.'}
+                ? 'Use “Redeploy to this board” below to set it up as this frame.'
+                : 'Set it up from the backend that manages this frame.'}
           </span>
         </div>
         {canProvision ? <ApplySettingsButton frame={frame} primary label="Set up as this frame" /> : null}
@@ -388,8 +388,8 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
               ? 'Nothing changes unless you set it up as this frame. It then stays linked to FrameOS Cloud, but the cloud can no longer change its scenes or settings.'
               : 'Nothing changes unless you set it up as this frame. The other frame then loses it.'
             : cloudManaged
-            ? 'To use it as this frame, use “Redeploy to this board” below. The other frame then loses it.'
-            : ''}
+              ? 'To use it as this frame, use “Redeploy to this board” below. The other frame then loses it.'
+              : ''}
         </div>
         {canProvision ? <ApplySettingsButton frame={frame} confirmForeign label="Re-provision as this frame" /> : null}
       </div>
@@ -595,8 +595,8 @@ export function EmbeddedUsbConnect({
             {usbLogStreamState?.status === 'selecting'
               ? 'Select USB port'
               : usbLogStreamState?.status === 'connecting'
-              ? 'Connecting'
-              : 'Connect over USB'}
+                ? 'Connecting'
+                : 'Connect over USB'}
           </button>
           <span className="frame-tool-muted text-xs leading-4">
             {uf2

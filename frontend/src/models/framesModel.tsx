@@ -1056,7 +1056,7 @@ export const framesModel = kea<framesModelType>([
               embedded:
                 frame.embedded && state[frame.id]?.embedded?.layout && !frame.embedded.layout
                   ? { ...frame.embedded, layout: state[frame.id]?.embedded?.layout }
-                  : frame.embedded ?? state[frame.id]?.embedded,
+                  : (frame.embedded ?? state[frame.id]?.embedded),
             }),
             state[frame.id]
           ),
@@ -1267,8 +1267,8 @@ export const framesModel = kea<framesModelType>([
               ? 'Turn-on queued for the frame'
               : 'Turn-off queued for the frame'
             : on
-            ? 'Display turned on'
-            : 'Display turned off',
+              ? 'Display turned on'
+              : 'Display turned off',
         })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({

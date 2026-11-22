@@ -30,10 +30,10 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
     name in cache
       ? cache[name]
       : node.type === 'app'
-      ? (configJson?.fields?.filter((c): c is AppConfigField => 'name' in c).find((c) => c.name === name)?.value as
-          | CacheConfig[K]
-          | undefined)
-      : undefined
+        ? (configJson?.fields?.filter((c): c is AppConfigField => 'name' in c).find((c) => c.name === name)?.value as
+            | CacheConfig[K]
+            | undefined)
+        : undefined
 
   return (
     <Tooltip

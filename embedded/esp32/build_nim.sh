@@ -83,6 +83,14 @@ nim c --hints:off -d:release -d:frameosQuickjsNoLibc -d:frameosQuickjsLib="$HOST
 # runs at 93% of its OTA slot. No frame is ever handed a .ppm: the format has
 # no place in a web fetch, a scene asset or an upload, and every other decoder
 # stays. Pi builds keep it (flash is not scarce there).
+# -d:pixieNoQoi drops the QOI codec the same way, for the same reason.
+# -d:pixieNoOpenType drops pixie's whole-parse OpenType reader: every font on
+# an ESP32 is read where it lies (the built-in indexed face, the card's
+# TrueType files), so no typeface ever had an OpenType, but each accessor
+# still asked for one, and that kept 14 KB of the reader in the image.
+# -d:nimStringHash2 hashes strings with murmur instead of FarmHash, whose
+# 64-bit arithmetic is 3 KB on a 32-bit core. No string hash leaves the
+# runtime, so only the order a string-keyed Table iterates in changes.
 # shellcheck disable=SC2086
 nim c \
     $EXTRA_NIM_FLAGS \
@@ -100,6 +108,9 @@ nim c \
     -d:frameosEmbedded \
     -d:frameosPreludeBytecode \
     -d:pixieNoPpm \
+    -d:pixieNoQoi \
+    -d:pixieNoOpenType \
+    -d:nimStringHash2 \
     --nimcache:"$NIMCACHE" \
     src/embedded/embedded_main.nim
 

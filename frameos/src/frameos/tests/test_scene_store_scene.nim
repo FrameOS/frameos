@@ -235,6 +235,19 @@ suite "the Scene store scene":
       if jsAsyncPending() == 0: break
       sleep(5)
 
+  const
+    # An 800x480 store: the categories down the left (200 wide), the first
+    # tile of the pane under the header (52) and the category's name (36).
+    FirstTileX = 280
+    FirstTileY = 150
+    # Under the header, whose search field a tap would focus (and the keys on
+    # the screen come up).
+    BelowHeader = 60
+    # The side panel's rows: the first (Featured) and the second.
+    SideX = 100
+    SideRow1 = 75
+    SideRow2 = 111
+
   proc opened(config: FrameConfig, name: string): FrameScene =
     ## The store with its first page in.
     result = load(config)
@@ -290,9 +303,10 @@ suite "the Scene store scene":
     # second, and a pass per cover.
     check placeholderMs < 150
     check jsIoInFlight() == 6
-    # A tap while they download is answered at once: the first card.
+    # A tap while they download is answered at once: the first card (in the
+    # pane beside the categories, under the category's name).
     started = getMonoTime()
-    scene.tap(64, 126)
+    scene.tap(FirstTileX, FirstTileY)
     discard draw(scene, config, "net-detail")
     check (getMonoTime() - started).inMilliseconds < 150
     check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
@@ -330,14 +344,15 @@ suite "the Scene store scene":
     problems = @[]
     let config = frame(800, 480)
     var scene = opened(config, "again")
-    # The first tile: Featured's first, under the header and its heading.
-    scene.tap(64, 126)
+    # The first tile: Featured's first, beside the categories, under the
+    # header and the category's name.
+    scene.tap(FirstTileX, FirstTileY)
     discard draw(scene, config, "detail")
     check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
     # Install sits right of Preview under the description.
     var installed = false
     for x in countup(420, 780, 20):
-      for y in countup(40, 470, 10):
+      for y in countup(BelowHeader, 470, 10):
         scene.tap(x, y)
         if asked.len > 0 and asked[^1][1] == "install":
           installed = true
@@ -376,7 +391,7 @@ suite "the Scene store scene":
     discard draw(scene, config, "preview")
     var discarded = false
     for x in countup(420, 780, 20):
-      for y in countup(40, 470, 10):
+      for y in countup(BelowHeader, 470, 10):
         scene.tap(x, y)
         if asked.len > 0 and asked[^1][1] == "discard":
           discarded = true
@@ -394,7 +409,7 @@ suite "the Scene store scene":
     proc tapAll(): seq[string] =
       asked = @[]
       for x in countup(420, 780, 20):
-        for y in countup(40, 470, 10):
+        for y in countup(BelowHeader, 470, 10):
           scene.state["spot"] = %*{"page": 1, "detail": detail}
           scene.tap(x, y)
       for (_, action, _) in asked:
@@ -424,7 +439,7 @@ suite "the Scene store scene":
     proc tapAll(): seq[(string, JsonNode)] =
       asked = @[]
       for x in countup(420, 780, 20):
-        for y in countup(40, 470, 10):
+        for y in countup(BelowHeader, 470, 10):
           scene.state["spot"] = %*{"page": 1, "detail": detail, "tried": scene.state{"spot", "tried"}}
           scene.tap(x, y)
       for (_, action, args) in asked:
@@ -466,6 +481,15 @@ suite "the Scene store scene":
     check requested("limit=").len > 0
     # Featured, then the scenes' shelves; the layouts' are on the other tab.
     check scene.state{"spot"}{"shelves"}.len == 4
+    # Too narrow for the side panel: a category opens in a step of its own,
+    # and back comes to the list.
+    check scene.state{"spot"}{"cat"}.getStr() == ""
+    scene.tap(120, 120)
+    discard draw(scene, config, "square-category")
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    scene.tap(40, 27)
+    discard draw(scene, config, "square-back")
+    check scene.state{"spot"}{"cat"}.getStr() == ""
     check problems.len == 0
 
   test "e-paper is not offered the scenes that move, and fetches its own page":
@@ -534,7 +558,7 @@ suite "the Scene store scene":
     check problems.len == 0
     if problems.len > 0: echo problems
 
-  test "a category opens, fetches more as it scrolls, and back goes up one step at a time":
+  test "the categories beside the grid: one opens, fetches more as it scrolls, back from a scene":
     problems = @[]
     realStore = true
     defer: realStore = false
@@ -542,24 +566,21 @@ suite "the Scene store scene":
     withLock requestsLock: requests = @[]
     let config = frame(800, 480)
     var scene = opened(config, "front", %*{})[0]
-    # A section's heading opens all of it.
-    scene.tap(400, 70)
-    discard draw(scene, config, "featured-loading")
+    # A wide window has no front: Featured, beside the categories.
     check scene.state{"spot"}{"cat"}.getStr() == "featured"
-    discard settle()
-    discard draw(scene, config, "featured")
     check requested("page=3").len == 0
-    # Scrolled down: the next page comes as the end of this one nears.
-    for _ in 0 ..< 4:
-      scene.wheel(400, 300, 3.0)
+    # Scrolled down: the next page comes as the end of this one nears (four
+    # tiles across beside the categories: a page of 24 is six rows).
+    for _ in 0 ..< 7:
+      scene.wheel(500, 300, 3.0)
       discard draw(scene, config, "featured-scrolling")
       discard settle()
     check requested("page=3").len == 1
     discard draw(scene, config, "featured-scrolled")
     # A scene opened, and the store started again (a preview, a reboot): it
     # opens on that scene.
-    for y in countup(80, 420, 20):
-      scene.tap(64, y)
+    for y in countup(100, 420, 20):
+      scene.tap(FirstTileX, y)
       if scene.state{"spot"}{"detail"}.kind == JObject: break
     discard draw(scene, config, "featured-detail")
     let spot = scene.state{"spot"}
@@ -567,19 +588,30 @@ suite "the Scene store scene":
     check spot{"scroll"}{"list"}.getInt() > 0
     scene = opened(config, "reopened", spot)[0]
     check scene.state{"spot"}{"detail"}{"name"}.getStr() == spot{"detail"}{"name"}.getStr()
-    # Back: Featured where it was scrolled, then the store's front.
-    scene.tap(40, 27)
+    # Back, at the top of the pane: Featured where it was scrolled.
+    scene.tap(250, 70)
     discard draw(scene, config, "back-featured")
     check scene.state{"spot"}{"detail"}.kind == JNull
     check scene.state{"spot"}{"cat"}.getStr() == "featured"
     check scene.state{"spot"}{"scroll"}{"list"}.getInt() == spot{"scroll"}{"list"}.getInt()
-    scene.tap(40, 27)
-    discard draw(scene, config, "back-front")
-    check scene.state{"spot"}{"cat"}.getStr() == ""
-    # The Layouts side: its own shelves.
+    # Another category, from the side panel: from its top.
+    scene.tap(SideX, SideRow2)
+    discard draw(scene, config, "side-category-loading")
+    let cat = scene.state{"spot"}{"cat"}.getStr()
+    check cat.len > 0 and cat != "featured"
+    check scene.state{"spot"}{"scroll"}{"list"}.getInt() == 0
+    discard settle()
+    discard draw(scene, config, "side-category")
+    check requested("category=" & cat).len >= 1
+    # Featured again.
+    scene.tap(SideX, SideRow1)
+    discard draw(scene, config, "side-featured")
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    # The Layouts side: its own shelves, the first open.
     scene.tap(275, 27)
     discard draw(scene, config, "layouts-loading")
     check scene.state{"spot"}{"tab"}.getStr() == "layouts"
+    check scene.state{"spot"}{"cat"}.getStr() == "desktops"
     discard settle()
     discard draw(scene, config, "layouts")
     check requested("category=desktops").len == 1

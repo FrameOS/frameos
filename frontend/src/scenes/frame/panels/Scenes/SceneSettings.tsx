@@ -343,8 +343,8 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                   {frameRunsInterpreted
                     ? 'This scene carries Nim that ESP32 frames cannot run.'
                     : hasInterpretedCompiledOnlyContent
-                    ? 'This scene carries Nim that interpreted mode will not run.'
-                    : 'Legacy compiled scene — needs a FrameOS source build on every deploy.'}
+                      ? 'This scene carries Nim that interpreted mode will not run.'
+                      : 'Legacy compiled scene — needs a FrameOS source build on every deploy.'}
                 </div>
                 <div>
                   {hasCompiledOnlyContent

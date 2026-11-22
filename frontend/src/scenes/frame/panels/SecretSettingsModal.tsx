@@ -79,16 +79,25 @@ export function SecretSettingsModal({
                       <span className="frameos-strong">{field.label}</span>
                       <div className="flex items-center gap-2">
                         {!isSaved ? (
-                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="yellow">
+                          <span
+                            className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase"
+                            data-tag-color="yellow"
+                          >
                             Missing
                           </span>
                         ) : (
-                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="teal">
+                          <span
+                            className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase"
+                            data-tag-color="teal"
+                          >
                             Saved
                           </span>
                         )}
                         {field.secret ? (
-                          <span className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase" data-tag-color="orange">
+                          <span
+                            className="frameos-tag px-2 py-0.5 text-xs font-semibold uppercase"
+                            data-tag-color="orange"
+                          >
                             Secret
                           </span>
                         ) : null}

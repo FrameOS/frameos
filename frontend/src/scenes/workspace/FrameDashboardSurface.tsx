@@ -101,7 +101,7 @@ const sceneToolButtons = [
   { label: 'Schedule', panel: 'schedule', icon: CalendarDaysIcon },
   { label: 'Logs', panel: 'logs', icon: DocumentTextIcon },
   { label: 'Metrics', panel: 'metrics', icon: ChartBarIcon },
-  { label: 'Assets', panel: 'assets', icon: CircleStackIcon },
+  { label: 'Files', panel: 'assets', icon: CircleStackIcon },
   { label: 'Terminal', panel: 'terminal', icon: CommandLineIcon },
   { label: 'Ping', panel: 'ping', icon: SignalIcon },
 ] as const
@@ -297,8 +297,8 @@ function FramePreviewPanel({ frame, scenes }: { frame: FrameType; scenes: FrameS
             {activeScene
               ? sceneDisplayName(activeScene)
               : activeSceneId === STATUS_SCREEN_SCENE_ID
-              ? STATUS_SCREEN_SCENE_NAME
-              : 'current image'}
+                ? STATUS_SCREEN_SCENE_NAME
+                : 'current image'}
           </div>
           {nextSchedule ? (
             <div className="frameos-muted mt-1 truncate text-xs text-slate-500">
@@ -478,16 +478,16 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   const changeLabel = unsavedChanges
     ? 'unsaved'
     : firmwareProgress
-    ? firmwareProgress.label
-    : upgradeQueued
-    ? 'upgrade queued'
-    : onlyFrameosUpgrade
-    ? 'upgrade'
-    : undeployedChanges
-    ? workspaceMode() === 'cloud'
-      ? 'waiting to sync'
-      : 'deploy now'
-    : 'up to date'
+      ? firmwareProgress.label
+      : upgradeQueued
+        ? 'upgrade queued'
+        : onlyFrameosUpgrade
+          ? 'upgrade'
+          : undeployedChanges
+            ? workspaceMode() === 'cloud'
+              ? 'waiting to sync'
+              : 'deploy now'
+            : 'up to date'
   const frameIsUpToDate = !unsavedChanges && !undeployedChanges
   // Same predicate as the deploy tile above and the "…" menu: this link is
   // one more way into the deploy dialog, so it exists exactly where that
@@ -511,10 +511,10 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
             firmwareProgress
               ? firmwareProgress.title
               : upgradeQueued
-              ? 'The upgrade is queued and applies when the frame next wakes'
-              : awaitingAck
-              ? 'The last push is queued and applies when the frame next syncs'
-              : undefined
+                ? 'The upgrade is queued and applies when the frame next wakes'
+                : awaitingAck
+                  ? 'The last push is queued and applies when the frame next syncs'
+                  : undefined
           }
         >
           {changeLabel}

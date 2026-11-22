@@ -7,12 +7,12 @@ function monacoWorkerUrl(label: string): string {
     label === 'json'
       ? 'json.worker'
       : label === 'css' || label === 'scss' || label === 'less'
-      ? 'css.worker'
-      : label === 'html' || label === 'handlebars' || label === 'razor'
-      ? 'html.worker'
-      : label === 'typescript' || label === 'javascript'
-      ? 'ts.worker'
-      : 'editor.worker'
+        ? 'css.worker'
+        : label === 'html' || label === 'handlebars' || label === 'razor'
+          ? 'html.worker'
+          : label === 'typescript' || label === 'javascript'
+            ? 'ts.worker'
+            : 'editor.worker'
 
   return `${getAssetsBasePath()}/static/monaco/${worker}.js`
 }
