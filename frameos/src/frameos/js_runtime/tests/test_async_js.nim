@@ -2,7 +2,7 @@
 ## `frameos.useFetch`, AbortController, an async `init()` and `<img src="https://…">`. The runner's loop is played here by
 ## `pumpJsAsync`; the network by `jsIoHook`, on the workers.
 
-import std/[base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
+import std/[atomics, base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
 import pixie
 
 import frameos/channels
@@ -34,7 +34,15 @@ let pngBytes = block:
 
 # The network: `?ms=N` answers after N ms, `/fail` does not answer at all,
 # `/missing` is a 404, `.png` is an 8x6 picture, `/json` a JSON body.
+# `networkMost` is the most requests it has held at once (reset by a test).
+var networkNow, networkMost: Atomic[int]
+
 jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+  let now = networkNow.fetchAdd(1) + 1
+  defer: discard networkNow.fetchSub(1)
+  var most = networkMost.load
+  while now > most and not networkMost.compareExchange(most, now):
+    discard
   let at = request.url.find("ms=")
   if at >= 0:
     var digits = ""
@@ -134,9 +142,8 @@ suite "async JavaScript":
       }
       export function get() { return weather }
     """, "weather")
-    let start = getMonoTime()
+    # "loading" with the request still in flight is the proof the render did not wait.
     check a.render() == "loading"
-    check msSince(start) < 200
     check jsIoInFlight() == 1
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
     check a.render() == """true|200|test||POST sunny {"city":"Tartu"}"""
@@ -167,12 +174,12 @@ suite "async JavaScript":
         }
         export function get() { return got }
       """, "slow" & $i)
-    let start = getMonoTime()
+    networkMost.store(0)
     for a in apps:
       check a.render() == "-"
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
-    # Four answers of 300 ms each, together: one after the other would be 1.2 s.
-    check msSince(start) < 900
+    # Four answers of 300 ms each, together: the network held all four at once.
+    check networkMost.load == min(4, JsIoWorkers)
     for a in apps:
       check a.render() == "GET  "
 
@@ -321,9 +328,8 @@ suite "async JavaScript":
         )
       }
     """, "img")
-    let start = getMonoTime()
     var picture = u.draw()
-    check msSince(start) < 60
+    # The black pixel and the three requests in flight are the proof the draw did not wait.
     check picture[0, 0] == rgbx(0, 0, 0, 255)
     check jsIoInFlight() == 3
     discard u.draw()
