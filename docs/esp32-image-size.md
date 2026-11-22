@@ -943,10 +943,18 @@ ESP-IDF expects them.
   objects #959 had removed (zippy, qoi, flatty's encoder) and missed three
   new ones (`file_slice`, pixie's `filefont` and `indexedfont`). From that
   release's build: 7,624 → 7,297 long calls, 3,176,736 → 3,175,568 bytes
-  (−1,168). On four boards' benchmark, JSON 1.5-3.7 % faster and the SVG
-  raster 0.7-2.1 % slower: placement moves both, and neither is what the
-  order is for. A second pass from the ordered build came out worse (7,341,
-  +512 bytes) and was not kept.
+  (−1,168). Speed, main and this order flashed in turn on the same board,
+  the benchmark suite twice each: the SVG raster 0.3 % slower on the
+  SenseCAP and 0.6 % on the E1002, JSON 0.5 % and 4.6 % faster. (Against
+  the morning's release run the raster read 2 % slower: the same build
+  reads 1-2 % apart in two sessions, so compare builds in one, in turn.)
+  The raster's share is where its hot functions land mod 16: the pixie
+  modules built with `-mtarget-align` have 4-byte sections, and a call that
+  is relaxed or not shifts every function after it. `-falign-functions=16`
+  on those modules takes the raster back to main's speed and costs 3.5 KB;
+  padding before each hot object does not (the relaxation inside moves
+  them anyway). A second pass from the ordered build came out worse
+  (7,341, +512 bytes) and was not kept.
 - A Nim object is named by its source path (`frameos/interpreter.nim`,
   `nim/lib/system.nim`, `pkgs/flatty/flatty/binny.nim`), not by the file Nim
   writes, so the Docker image's Nim, a choosenim one and nixpkgs' ROT13 names
