@@ -34,6 +34,7 @@ import {
 import { uploadFileInChunks } from '../../../../utils/uploadFileInChunks'
 import { uploadFormDataWithProgress } from '../../../../utils/uploadFormDataWithProgress'
 import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { resizeUploadLogic } from '../../../../components/resizeUploadLogic'
 import { isHiddenOrJunkAssetPath } from '../../../../utils/hiddenFiles'
 import { consumeFontSyncStream, isFontSyncStream } from '../../../../utils/fontSyncStream'
 import {
@@ -569,6 +570,9 @@ export interface assetsLogicActions {
   toggleShowSystemFolders: () => {
     value: true
   }
+  resizeAndUploadAssets: (path: string) => {
+    path: string
+  }
   uploadAssets: (path: string) => {
     path: string
   }
@@ -642,7 +646,7 @@ export const assetsLogic = kea<assetsLogicType>([
   path(['src', 'scenes', 'frame', 'assetsLogic']),
   props({} as AssetsLogicProps),
   connect(({ frameId }: AssetsLogicProps) => ({
-    logic: [socketLogic],
+    logic: [socketLogic, resizeUploadLogic],
     values: [frameLogic({ frameId }), ['frame'], metricsLogic({ frameId }), ['sortedMetrics']],
   })),
   // The panel's logic is the frame's; a pinned one (a path picker's, while
@@ -654,6 +658,8 @@ export const assetsLogic = kea<assetsLogicType>([
     setStorage: (storage: AssetStorageId) => ({ storage }),
     storagesReported: (storages: AssetStorage[] | null) => ({ storages }),
     uploadAssets: (path: string) => ({ path }),
+    /** "Resize and upload files": the dialog, this frame's size preselected, then the usual upload. */
+    resizeAndUploadAssets: (path: string) => ({ path }),
     uploadDroppedFiles: (path: string, files: File[]) => ({ path, files }),
     assetUploaded: (asset: AssetType) => ({ asset }),
     filesToUpload: (files: string[]) => ({ files }),
@@ -1342,6 +1348,16 @@ export const assetsLogic = kea<assetsLogicType>([
           detail: task.totalFiles === 1 ? `Uploaded ${task.firstFileName}` : `Uploaded ${task.totalFiles} assets`,
         })
       }
+    },
+    resizeAndUploadAssets: ({ path }) => {
+      resizeUploadLogic.actions.openResizeUpload(
+        {
+          title: path ? path.split('/').pop() || path : values.frame.assets_path || 'the frame',
+          accept: 'image/*',
+          onUpload: (files) => actions.uploadDroppedFiles(path, files),
+        },
+        values.frame
+      )
     },
     uploadAssets: async ({ path }) => {
       const input = document.createElement('input')
