@@ -155,6 +155,7 @@ class FrameBase(BaseModel):
     input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]]
     colors: Optional[Dict[str, Any]] = None
+    dither: Optional[Dict[str, Any]] = None
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
@@ -268,6 +269,7 @@ class FrameUpdateRequest(BaseModel):
     input_settings: Optional[Dict[str, Any]] = None
     palette: Optional[Dict[str, Any]] = None
     colors: Optional[Dict[str, Any]] = None
+    dither: Optional[Dict[str, Any]] = None
     service_setting_groups: Optional[List[str]] = None
     buildroot: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
@@ -286,6 +288,13 @@ class FrameUpdateRequest(BaseModel):
     @classmethod
     def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _validate_input_settings(value)
+
+    @field_validator('dither')
+    @classmethod
+    def validate_dither(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        from app.utils.panel_dither import validate_dither
+
+        return validate_dither(value)
 
     @field_validator('frame_settings_on_screen')
     @classmethod

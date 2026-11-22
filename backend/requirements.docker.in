@@ -9,6 +9,7 @@ arq
 asyncssh
 cryptography
 email_validator
+epaper-dithering
 fastapi[standard]
 fonttools
 httpx
