@@ -135,6 +135,16 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
     return FOS_TOUCH_BEEP_NONE;
 }
 
+void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy, int *sw, int *sh)
+{
+    switch (((rotate % 360) + 360) % 360) {
+    case 90: *sx = y; *sy = width - x - 1; *sw = height; *sh = width; break;
+    case 180: *sx = width - x - 1; *sy = height - y - 1; *sw = width; *sh = height; break;
+    case 270: *sx = height - y - 1; *sy = x; *sw = height; *sh = width; break;
+    default: *sx = x; *sy = y; *sw = width; *sh = height; break;
+    }
+}
+
 fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
 {
     if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
@@ -370,25 +380,30 @@ static void click(uint8_t kind, uint8_t id, int taken)
 }
 
 /* An edge swipe's chirp, the same way: each finger that went down at an edge
- * (fos_touch_edge_at, not on the frame's keyboard) is watched until it is a
- * swipe (fos_touch_edge_step, the dispatcher's rule), heard at once, or a
- * drag along the edge. A swipe's lift does not click: its four clicks said
- * it. The panel's pixels: the scene's, turned. */
+ * (fos_touch_edge_at; on the frame's keyboard only its bottom edge, as in the
+ * dispatcher) is watched until it is a swipe (fos_touch_edge_step, the
+ * dispatcher's rule), heard at once, or a drag along the edge. A swipe's lift
+ * does not click: its four clicks said it. In the scene's pixels, which the
+ * dispatcher's edges are named in. */
 static fos_touch_edge_t s_edge[FOS_TOUCH_POINTS_MAX];
 static int16_t s_edge_x[FOS_TOUCH_POINTS_MAX], s_edge_y[FOS_TOUCH_POINTS_MAX];
 
-static void panel_point(uint16_t wx, uint16_t wy, int *x, int *y)
+static void scene_point(uint16_t wx, uint16_t wy, int *x, int *y, int *w, int *h)
 {
-    *x = (int)((int64_t)fos_display_width() * wx / FOS_TOUCH_WIRE_MAX);
-    *y = (int)((int64_t)fos_display_height() * wy / FOS_TOUCH_WIRE_MAX);
+    int pw = fos_display_width(), ph = fos_display_height();
+    int px = (int)((int64_t)pw * wx / FOS_TOUCH_WIRE_MAX);
+    int py = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
+    if (px >= pw) px = pw - 1;
+    if (py >= ph) py = ph - 1;
+    fos_touch_scene_point(px, py, pw, ph, fos_config()->rotate, x, y, w, h);
 }
 
 static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 {
-    int x, y;
-    panel_point(wx, wy, &x, &y);
-    s_edge[id] = taken == 2 ? FOS_TOUCH_EDGE_NONE
-                            : fos_touch_edge_at(x, y, fos_display_width(), fos_display_height());
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
+    fos_touch_edge_t edge = fos_touch_edge_at(x, y, w, h);
+    s_edge[id] = taken == 2 && edge != FOS_TOUCH_EDGE_BOTTOM ? FOS_TOUCH_EDGE_NONE : edge;
     s_edge_x[id] = (int16_t)x;
     s_edge_y[id] = (int16_t)y;
 }
@@ -396,8 +411,8 @@ static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 static void edge_moved(uint8_t id, uint16_t wx, uint16_t wy)
 {
     if (s_edge[id] == FOS_TOUCH_EDGE_NONE) return;
-    int x, y;
-    panel_point(wx, wy, &x, &y);
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
     int step = fos_touch_edge_step(s_edge[id], x - s_edge_x[id], y - s_edge_y[id]);
     if (step == 0) return;
     if (step > 0) {

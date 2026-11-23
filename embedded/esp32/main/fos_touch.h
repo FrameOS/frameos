@@ -139,9 +139,8 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
 
 /* The dispatcher's edge swipe (frameos/input_state.nim edgeAt / edgeTravel,
  * the contract's `gestures`), for its chirp: the touch task sounds it the
- * moment a press becomes one, not when the render task delivers it. Panel
- * pixels, which are the scene's turned by the frame's rotation: the same
- * distances. */
+ * moment a press becomes one, not when the render task delivers it. In the
+ * scene's pixels (fos_touch_scene_point). */
 typedef enum {
     FOS_TOUCH_EDGE_NONE = 0,
     FOS_TOUCH_EDGE_LEFT,
@@ -149,6 +148,11 @@ typedef enum {
     FOS_TOUCH_EDGE_TOP,
     FOS_TOUCH_EDGE_BOTTOM,
 } fos_touch_edge_t;
+/* Panel pixel (x, y) of a `width` x `height` panel as the scene's pixel and
+ * the scene canvas's size, under the frame's rotation: utils/image.nim
+ * panelToScenePoint, which the dispatcher's edges are in (top is the scene's
+ * top, whichever way the panel is mounted). Pure. */
+void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy, int *sw, int *sh);
 /* The edge within FOS_GESTURE_EDGE_PX of (x, y) on a `width` x `height`
  * panel, the nearest in a corner; none on a panel too small to spare four
  * edge widths across. Pure. */

@@ -213,6 +213,21 @@ static void test_passed(void)
 
 static void test_edge_swipe(void)
 {
+    /* The scene's pixels (utils/image.nim panelToScenePoint): an 800x480
+     * panel turned 270 (the reTerminal Sticky) is a 480x800 scene whose
+     * bottom is the panel's left side. */
+    int sx, sy, sw, sh;
+    fos_touch_scene_point(2, 300, 800, 480, 270, &sx, &sy, &sw, &sh);
+    CHECK(sw == 480 && sh == 800 && sx == 179 && sy == 2, "270: the panel's left is the scene's top");
+    CHECK(fos_touch_edge_at(sx, sy, sw, sh) == FOS_TOUCH_EDGE_TOP, "270: so it is the top edge");
+    fos_touch_scene_point(797, 300, 800, 480, 270, &sx, &sy, &sw, &sh);
+    CHECK(fos_touch_edge_at(sx, sy, sw, sh) == FOS_TOUCH_EDGE_BOTTOM, "270: the panel's right, the bottom");
+    fos_touch_scene_point(2, 300, 800, 480, 90, &sx, &sy, &sw, &sh);
+    CHECK(sx == 300 && sy == 797 && fos_touch_edge_at(sx, sy, sw, sh) == FOS_TOUCH_EDGE_BOTTOM, "90: the left, the bottom");
+    fos_touch_scene_point(10, 20, 800, 480, 180, &sx, &sy, &sw, &sh);
+    CHECK(sx == 789 && sy == 459 && sw == 800 && sh == 480, "180: turned about");
+    fos_touch_scene_point(10, 20, 800, 480, 0, &sx, &sy, &sw, &sh);
+    CHECK(sx == 10 && sy == 20, "0: as it is");
     /* The dispatcher's rule (input_state.nim edgeAt / edgeTravel). */
     CHECK(fos_touch_edge_at(400, 2, 800, 480) == FOS_TOUCH_EDGE_TOP, "near the top");
     CHECK(fos_touch_edge_at(400, 479, 800, 480) == FOS_TOUCH_EDGE_BOTTOM, "the last row is the bottom");
