@@ -312,36 +312,23 @@ bool fos_touch_finger_down(void)
 }
 
 /* The click of a press something takes, on e-paper, where the picture takes
- * its moment to answer. Asked before the event runs, of what the last render
- * drew. The render task's, so a press during a panel update is heard when
- * that ends. */
-static void play_beep(fos_touch_beep_t beep)
+ * its moment to answer: from this task, the moment the finger lands or
+ * lifts, on its own core. The render task is in a render, a panel update or
+ * (rendered on the server) a pull for a second or more at a time, and a
+ * click that waited for it to dispatch the press came that late: a key typed
+ * on the reTerminal Sticky while the last one drew clicked when the drawing
+ * was done (2026-11-23). Whether the press is taken is the press map's, of
+ * the picture showing (fos_client_press_taken): the plane's with a picture
+ * it rendered, the runtime's after each render here. No map, no click. */
+static void click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
 {
-    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    static uint8_t held = 0, beeped = 0;
+    int taken = kind == FOS_TOUCH_DOWN ? fos_client_press_taken(wx, wy) : 0;
+    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &held, &beeped);
+    if (beep == FOS_TOUCH_BEEP_NONE || !fos_config()->touch_beep || fos_display_is_lcd()) return;
     if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
     else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
     else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
-}
-
-static void touch_feedback(const fos_touch_event_t *event)
-{
-    static uint8_t held = 0, beeped = 0;
-    if (event->kind == FOS_TOUCH_MOVE) return;
-    bool captured = event->kind == FOS_TOUCH_DOWN && frameos_nim_press_taken(event->x, event->y);
-    play_beep(fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped));
-}
-
-/* The same click for a frame rendered on the server, from the touch task the
- * moment the finger lands or lifts: the render task is in a pull or a panel
- * refresh for a second or more at a time there, and the picture's own press
- * map (its plane's, fos_client_remote_press_taken) says without asking
- * anyone whether the press is taken. A frame that runs its scene here leaves
- * it to touch_feedback, after the runtime's answer. */
-static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
-{
-    static uint8_t held = 0, beeped = 0;
-    int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
-    play_beep(fos_touch_beep_step(kind, id, taken > 0, &held, &beeped));
 }
 
 bool fos_touch_process_events(void)
@@ -377,8 +364,7 @@ bool fos_touch_process_events(void)
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a
-         * gesture changed state. */
-        touch_feedback(&event);
+         * gesture changed state. Its click was the touch task's (click). */
         fos_events_dispatch(FOS_ORIGIN_DRIVER, names[event.kind], payload);
         any = true;
     }
@@ -495,7 +481,7 @@ static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
      * was, not only a finger dragged. */
     enqueue(FOS_TOUCH_MOVE, id, wx, wy);
     enqueue(FOS_TOUCH_DOWN, id, wx, wy);
-    remote_click(FOS_TOUCH_DOWN, id, wx, wy);
+    click(FOS_TOUCH_DOWN, id, wx, wy);
 }
 
 /* A press reported once it settled, where it is then; or, when it glided
@@ -590,7 +576,7 @@ static void touch_task(void *arg)
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) {
                 enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
-                remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
             }
         }
         s_down_mask &= seen; /* a finger still settling is not down yet */
@@ -744,6 +730,10 @@ esp_err_t fos_touch_start(void)
      * PSRAM: internal RAM is the Wi-Fi stack's. Without them a move carries
      * none. */
     s_passed = heap_caps_calloc(FOS_TOUCH_POINTS_MAX, sizeof(fos_touch_passed_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* What click asks a scene that runs here: the press map of every render.
+     * An LCD never clicks (its picture answers at once), and an animation
+     * there would make one every frame for nothing. */
+    if (!fos_display_is_lcd()) frameos_nim_keep_press_map(true);
     s_present = true;
     char line[256];
     snprintf(line, sizeof(line),

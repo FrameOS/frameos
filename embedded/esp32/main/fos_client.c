@@ -1317,16 +1317,20 @@ static void press_map_keep(const remote_pull_t *pull)
     __atomic_store_n(&s_press_count, count, __ATOMIC_RELEASE);
 }
 
-int fos_client_remote_press_taken(int wire_x, int wire_y)
+int fos_client_press_taken(int wire_x, int wire_y)
 {
-    if (renders_locally(fos_config()) || !fos_display_present()) return -1;
-    /* The glass's wire position as the panel's pixel, as the plane reads it
+    if (!fos_display_present()) return -1;
+    /* The glass's wire position as the panel's pixel, as the runtime reads it
      * (utils/image.nim pointerToScenePoint). */
     int width = fos_display_width(), height = fos_display_height();
     int x = width * wire_x / FOS_TOUCH_WIRE_MAX;
     int y = height * wire_y / FOS_TOUCH_WIRE_MAX;
     if (x >= width) x = width - 1;
     if (y >= height) y = height - 1;
+    /* A scene that runs here: the map its last render left
+     * (frameos_nim_press_map_takes), read without the runtime's lock, which
+     * the render holds. */
+    if (renders_locally(fos_config())) return frameos_nim_press_map_takes(x, y);
     return fos_press_map_takes(s_press_map, __atomic_load_n(&s_press_count, __ATOMIC_ACQUIRE), x, y) ? 1 : 0;
 }
 

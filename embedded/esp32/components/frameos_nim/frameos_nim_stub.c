@@ -126,11 +126,12 @@ double frameos_nim_scene_interval(void) { return 0; }
 bool frameos_nim_scene_awaited(void) { return true; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
-bool frameos_nim_press_taken(int wire_x, int wire_y)
+void frameos_nim_keep_press_map(bool keep) { (void)keep; }
+int frameos_nim_press_map_takes(int x, int y)
 {
-    (void)wire_x;
-    (void)wire_y;
-    return false;
+    (void)x;
+    (void)y;
+    return -1;
 }
 bool frameos_nim_tick(void) { return false; }
 int frameos_nim_next_async_ms(void) { return -1; }

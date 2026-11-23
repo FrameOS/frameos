@@ -1338,6 +1338,10 @@ with a handler, a field, a box that scrolls, a scene listening for a press)
 it plays the button's down click, and its up click when it lifts; a finger
 added to one already on the glass plays the higher click of a double press.
 A press on nothing is silent, and so is an LCD, whose picture answers at once.
+The click is the touch task's, on core 0, the moment the finger lands: it
+never waits for the render task to finish a render or a panel update. What
+is taken is the press map of the picture showing, which the runtime leaves
+after every render (`docs/server-rendering.md` "The click").
 What such a press or a key starts, if it takes over 1.5 s to load, chirps
 quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set touch_beep 0` turns both off, or "Touch beep" in the frame's settings

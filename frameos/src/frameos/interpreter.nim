@@ -2271,6 +2271,50 @@ proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   while result.len > 0 and not result[^1].taken:
     result.setLen(result.len - 1)
 
+type PanelPressRect* = object
+  ## A press map entry on the panel: whole pixels, x1 and y1 past the last.
+  x0*, y0*, x1*, y1*: int
+  taken*: bool
+
+proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: string;
+                    maxEntries: int): seq[PanelPressRect] =
+  ## pressMap on the panel's pixels, the canvas turned back by the frame's
+  ## rotation and flip (utils/image panelToScenePoint the other way round),
+  ## cut at `maxEntries`: a press past the cut is not clicked at, nothing
+  ## worse. What a plane sends a board with its picture
+  ## (wasm_main frameos_wasm_press_map) and what an ESP32 that runs its scene
+  ## keeps after every render for its touch task (embedded_main
+  ## fos_nim_press_map_impl): both click at a press without asking anyone.
+  let
+    turn = ((rotate mod 360) + 360) mod 360
+    turned = turn in [90, 270]
+    panelW = if turned: canvasH else: canvasW
+    panelH = if turned: canvasW else: canvasH
+  proc down(v: float32): int = int(v)
+  proc up(v: float32): int =
+    result = int(v)
+    if result.float32 < v: result += 1
+  for entry in pressMap(scene, canvasW, canvasH):
+    if result.len == maxEntries:
+      break
+    var
+      x0 = clamp(down(entry.box[0]), 0, canvasW)
+      y0 = clamp(down(entry.box[1]), 0, canvasH)
+      x1 = clamp(up(entry.box[2]), 0, canvasW)
+      y1 = clamp(up(entry.box[3]), 0, canvasH)
+    if x1 <= x0 or y1 <= y0:
+      continue
+    if flip in ["horizontal", "both"]:
+      (x0, x1) = (canvasW - x1, canvasW - x0)
+    if flip in ["vertical", "both"]:
+      (y0, y1) = (canvasH - y1, canvasH - y0)
+    let (px0, py0, px1, py1) = case turn
+      of 90: (panelW - y1, x0, panelW - y0, x1)
+      of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
+      of 270: (y0, panelH - x1, y1, panelH - x0)
+      else: (x0, y0, x1, y1)
+    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken)
+
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns
   ## true is drawn again, as a run of a JSX handler is.

@@ -1078,12 +1078,23 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## redraw; clears the flag.
   takeRenderRequested()
 
-proc fos_nim_press_taken_impl(wireX, wireY: cint): bool {.exportc, cdecl.} =
-  ## Whether something on the frame takes a press at this position on the glass.
+proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr UncheckedArray[uint8];
+                            maxEntries: cint): cint {.exportc, cdecl.} =
+  ## The press map after a render (embedded_runtime.panelPressMapNow) into the
+  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, 1 or 0 in `taken`.
+  ## How many entries, -1 when it could not be made.
   try:
-    pressTaken(wireX.int, wireY.int)
+    var count = 0
+    for entry in panelPressMapNow(maxEntries.int):
+      boxes[4 * count] = uint16(clamp(entry.x0, 0, 0xFFFF))
+      boxes[4 * count + 1] = uint16(clamp(entry.y0, 0, 0xFFFF))
+      boxes[4 * count + 2] = uint16(clamp(entry.x1, 0, 0xFFFF))
+      boxes[4 * count + 3] = uint16(clamp(entry.y1, 0, 0xFFFF))
+      taken[count] = if entry.taken: 1'u8 else: 0'u8
+      count += 1
+    count.cint
   except Exception:
-    false
+    -1
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):

@@ -10,6 +10,7 @@ import ../scene_rhythm
 import ../types
 import ../ui/events as ui_events
 from ../ui/keyboard import keyboardBox
+from ../utils/image import panelToScenePoint
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
@@ -609,6 +610,30 @@ suite "layouts":
               taken = entry.taken
               break
           check taken == pressTakenAt(scene, x, y)
+
+  test "the press map on the panel answers where a touch lands on the scene":
+    # What an ESP32 keeps after each render for its touch task, and what a
+    # plane sends a board: the canvas turned back onto the panel, so a press
+    # at a panel pixel answers as the scene pixel it is (panelToScenePoint).
+    for name in ["tests/inTaskbar", "tests/counter"]:
+      let scene = newScene(name)
+      let image = pass(scene)
+      for rotate in [0, 90, 180, 270]:
+        for flip in ["", "horizontal", "both"]:
+          let map = panelPressMap(scene, image.width, image.height, rotate, flip, 64)
+          check map.len > 0
+          let turned = rotate in [90, 270]
+          let panelW = if turned: image.height else: image.width
+          let panelH = if turned: image.width else: image.height
+          for py in countup(0, panelH - 1, 3):
+            for px in countup(0, panelW - 1, 3):
+              var taken = false
+              for entry in map:
+                if px >= entry.x0 and py >= entry.y0 and px < entry.x1 and py < entry.y1:
+                  taken = entry.taken
+                  break
+              let at = panelToScenePoint(px, py, panelW, panelH, rotate, flip)
+              check taken == pressTakenAt(scene, at.x, at.y)
 
 suite "a canvas that stays":
   var generation = 0'i64
