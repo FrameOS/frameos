@@ -1127,7 +1127,7 @@ interface FrameOSStore {
   url: string;
   /** This frame's FrameOS: the listing offers only what runs on it. */
   version: string;
-  /** The action running ("install", "preview", "update", "remove", "discard"), else "". One at a time. */
+  /** The action running ("install", "preview", "update", "updateAll", "remove", "discard"), else "". One at a time. */
   busy: string;
   /** The last action's refusal ("offline", "too_many_scenes", "panel_locked", ...), else "". */
   error: string;
@@ -1137,6 +1137,10 @@ interface FrameOSStore {
   installed: { id: string; store: string; v: number }[];
   /** The store scene this frame previews, until it is installed or discarded. */
   preview: { store: string; id: string; name: string } | null;
+  /** The store scenes on the frame its control plane has a newer version of: the version it has (from) and the
+   * newest (to); owner when the new one asks for more access than the frame may give it (its owner updates it).
+   * Absent with no control plane and while not known yet (FrameOS 2026.11.15+). */
+  updates?: { store: string; name: string; from: number; to: number; owner?: boolean }[];
   /** A scene not from the store may be removed too (a frame with no control plane). */
   removeAny: boolean;
   /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
@@ -1523,9 +1527,10 @@ declare const frameos: {
    * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
   store(): FrameOSStore | null;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
-   * {store}, remove {store}, discard. It runs off the render and this scene renders again when it is done (see
-   * store().busy). False where there is no host (FrameOS 2026.11.8+). */
-  storeAction(action: "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
+   * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
+   * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
+   * where there is no host (FrameOS 2026.11.8+). */
+  storeAction(action: "preview" | "install" | "update" | "updateAll" | "remove" | "discard", args?: Record<string, any>): boolean;
   /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
    * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
    * frame's settings are allowed on its screen: it throws otherwise. "read" is what the page shows, null where there is
