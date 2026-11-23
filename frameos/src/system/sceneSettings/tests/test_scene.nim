@@ -421,6 +421,45 @@ block the_page_follows_the_frames_scale:
       $asked & " drew at " & $uiTarget(SceneSettingsId, 1, create = false).scale
     scene.send("close", %*{})
 
+block a_round_panel_has_the_frame_page_inside_its_circle:
+  # The Waveshare 1.75" AMOLED's frame page (where a touch board joins
+  # Wi-Fi): the square panel's page in the square inside the circle, every
+  # region on the glass, and the form's gear on the way there.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": ["restart"],
+      "wifi": {"ssid": "home", "connected": true, "networks": []}}
+  let roundConfig = FrameConfig(width: 480, height: 480, device: "amoled.co5300_466x466",
+    scalingMode: "cover", saveAssets: %*false)
+  proc allOnTheGlass(where: string) =
+    var regions = 0
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.visible[0] >= r.visible[2] or r.visible[1] >= r.visible[3]:
+        continue
+      inc regions
+      for (x, y) in [(r.visible[0], r.visible[1]), (r.visible[2] - 1, r.visible[3] - 1)]:
+        doAssert insideRound(480, 480, int(x), int(y)), where & ": a region reaches off the glass at " & $(x, y) & " " & $r
+    doAssert regions > 0, where & ": nothing to press"
+  let page = settings.exportedScene.init(SceneSettingsId.SceneId, roundConfig, logger, %*{})
+  page.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert page.state["page"].getStr() == "frame"
+  var image = page.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-round-frame.png")
+  doAssert page.state["page"].getStr() == "frame", "a round panel kept its frame page"
+  allOnTheGlass("the frame page")
+  # A scene's form on the same panel: the gear is there.
+  let form = settings.exportedScene.init(SceneSettingsId.SceneId, roundConfig, logger, %*{})
+  form.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false}],
+    "values": {"city": "Oslo"}}})
+  image = form.draw()
+  allOnTheGlass("the form")
+  # The gear's handler is 2 (scene.nim HGear): it is there, and opens the page.
+  form.tap(regionWith(2))
+  discard form.draw()
+  doAssert form.state["page"].getStr() == "frame", "the round form's gear opens the frame page"
+  allOnTheGlass("the frame page from the form")
+  frameSettingsRead = nil
+
 block it_opens_on_the_frame_page_with_no_scene_showing:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
     %*{"rotate": 0, "renderScale": 0, "actions": []}

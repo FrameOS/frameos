@@ -2341,6 +2341,12 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     # looks there. Until 2026.11.10 it also said what `fast` says now, and
     # today the two are opposites on every panel. The panel's, as above.
     return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
+  of "round":
+    # Only the circle inside the panel's square shows and takes touches
+    # (panel_shape.panelIsRound: the HyperPixel 2.1 Round, the Waveshare
+    # 1.75" AMOLED). An app that draws the whole panel keeps what matters
+    # inside it; the frame's own scenes do.
+    return nimBoolToJS(ctx, panelIsRound(e.owner.frameConfig.device))
   of "color":
     # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
     # a scene draws in high contrast where it does not. The panel's, as above.
@@ -2493,7 +2499,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
+      "paper", "color", "round", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")

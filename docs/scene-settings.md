@@ -113,7 +113,7 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
 | `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
@@ -301,14 +301,17 @@ gets a dark form that shows presses; e-paper black on white, no press shown
 A scene with no field to show says so: "This scene has no settings."
 
 **A round panel** (`frameos/panel_shape.nim` `panelIsRound`: the HyperPixel
-2.1" Round) keeps the form inside its circle, `RoundInset` (12 px) in from
-the rim, as the switcher does: the scene's name in the top arc, Cancel and
-Save centred under it, and the list as wide as the circle is where the list
+2.1" Round, the Waveshare ESP32-S3-Touch-AMOLED-1.75) keeps the form inside
+its circle, `RoundInset` (12 px) in from the rim, as the switcher does: the
+scene's name in the top arc, Cancel and Save centred under it with the gear
+between them where the host offers the frame page, and the list as wide as the circle is where the list
 ends (as far below the centre as it starts above it). With the keyboard up
 it sits on the circle's lower half (`docs/jsx-ui.md`), the name makes way
 for the buttons, and the list ends above the keys. `test_scene.nim` checks
-every hit region and every pixel drawn, the keyboard down and up. No ESP32
-board is round: the firmware carries the rectangular form alone.
+every hit region and every pixel drawn, the keyboard down and up. The frame
+page there is the square panel's page laid out in the square inside the
+circle (cut short above the keyboard while it is up): a round touch board
+joins Wi-Fi on it like any other touch board.
 
 ## The scene
 

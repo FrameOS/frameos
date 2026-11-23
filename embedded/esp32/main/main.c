@@ -665,12 +665,10 @@ void app_main(void)
      * and a tap that woke a sleeping Sticky waited ~11 s for Wi-Fi before the
      * scene even started (2026-11-23). A sleeping e-paper board's timer wake
      * is nobody's tap: it waits for the network as a classic panel does, so
-     * the one picture it draws before sleeping again has its data. Not a
-     * round panel (the Waveshare 1.75" AMOLED): the scene settings offer no
-     * frame page inside a circle, so it is set up like a board without touch. */
+     * the one picture it draws before sleeping again has its data. */
     bool woke_by_timer = esp_reset_reason() == ESP_RST_DEEPSLEEP &&
                          esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
-    bool touch_setup = fos_touch_present() && (fos_display_is_lcd() || !woke_by_timer) && !fos_display_round();
+    bool touch_setup = fos_touch_present() && (fos_display_is_lcd() || !woke_by_timer);
     fos_frame_settings_init();
     fos_store_init();
     fos_code_init();
