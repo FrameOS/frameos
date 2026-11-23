@@ -52,6 +52,7 @@ type
                                 ## pressing, and no handler ran: the next
                                 ## render needs no new tree (app_runtime.get)
     partial*, full*: bool       ## since the last render: a handler set signals (and only that) / did not
+    declined*: bool             ## the pointer handler just run returned false: no render for it
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
     heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
@@ -1452,6 +1453,20 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
         into.add [target.offsetX + r.visible[0] * scale, target.offsetY + r.visible[1] * scale,
                   target.offsetX + r.visible[2] * scale, target.offsetY + r.visible[3] * scale]
 
+proc handlerPayload(target: UiTarget, r: UiRegion, payload: JsonNode, scale: float32): JsonNode =
+  ## What a pointer handler is handed: the event, a coalesced move's `points`
+  ## (docs/events.md "Pointer") in the element's own pixels, as localX and
+  ## localY are.
+  let points = payload{"points"}
+  if points.isNil or points.kind != JArray or points.len == 0:
+    return payload
+  result = copy(payload)
+  let local = newJArray()
+  for i in 0 ..< points.len:
+    let v = points[i].getFloat()
+    local.add(%(if (i and 1) == 0: (v - target.offsetX) / scale - r.x else: (v - target.offsetY) / scale - r.y))
+  result["points"] = local
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = false): bool =
   ## Hands a pointer event, or a key for a field, to the scene's UIs. True
   ## when the frame should render again: a handler ran (whatever it changed,
@@ -1852,10 +1867,15 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
           if r.key == captured:
             let handler = r.handlers[UiEvent(kind)]
             if handler > 0:
-              target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
+              target.declined = false
+              target.call(handler - 1, event, target.handlerPayload(r, payload, scale),
+                [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
               target.inputOnly = false # whatever the handler changed, get() shows it
               handled = true
-              result = true
+              # A pointer handler that returned false keeps what it did for
+              # the next render (a drawing app batching a stroke's points).
+              if not target.declined:
+                result = true
             break
       continue
     # The innermost element with a handler for it: the last one painted. A
@@ -1903,8 +1923,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
             target.typeGlided(handler - 1 - KeyBase, pointer, lx, ly)
             target.pressKey(handler - 1 - KeyBase)
         else:
-          target.call(handler - 1, event, payload, [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
+          target.declined = false
+          target.call(handler - 1, event, target.handlerPayload(r, payload, scale),
+            [float32(lx - r.x), float32(ly - r.y), r.w, r.h])
           target.inputOnly = false # whatever the handler changed, get() shows it
+          if target.declined:
+            break # no render for it: what it did shows with the next
         result = true
         break
 

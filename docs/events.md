@@ -274,7 +274,17 @@ forever: store scenes are versioned and immutable. The editor offers the new
 names.
 
 **Pointer.** `pointerMove {x, y, pointerId, pointerType, buttons}` on every
-motion report (`coalesce: latest`, per pointer). On an ESP32 the pointer is
+motion report (`coalesce: latest`, per pointer). A move that replaced queued
+ones (they came while the scene was busy: a render, a slow handler) carries
+where those were in `points`, `[x, y, x, y, ...]` oldest first, in the units
+of `x` and `y`, at most 64 of them (past that every other one goes, the newest
+stays); a move that replaced none has no `points`. So a scene that draws a
+stroke keeps every point of it however long the frame took, as a browser's
+`getCoalescedEvents()` does: the ESP32's touch queue keeps them per finger
+(`fos_touch_passed_t`, `fos_touch.c`), the dispatcher's input lane per pointer
+(`event_loop.enqueue`, and the Linux drivers' structs in `enqueueInput`), and
+the browser preview sends the moves it held for an animation frame and the
+browser's coalesced ones (`frameos/wasm/src/pointer.ts`). On an ESP32 the pointer is
 a touch panel (the reTerminal Sticky's GT911, `embedded/esp32/main/fos_touch.c`):
 the firmware queues the glass's reports as `pointerDown` / `pointerMove` /
 `pointerUp` on the wire (`pointerType: "touch"`, `pointerId` 1 + the

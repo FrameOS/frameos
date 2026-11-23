@@ -4100,6 +4100,10 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
           target.partial = true
         else:
           target.full = true
+        # A pointer handler that returns false asks for no render: what it
+        # changed shows with the next one (docs/jsx-ui.md "Events").
+        target.declined = name.startsWith("pointer") and jsIsBool(returned) and
+          not toNimBool(ctx, returned)
     if JS_IsException(returned) != 0:
       frameos_apps.logError(owner, "JS app handler failed: " &
         runtime.appText(mappedJsExceptionDetails(ctx).message))

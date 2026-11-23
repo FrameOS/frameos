@@ -39,6 +39,11 @@ const
   ## A relative pointer's cursor is drawn (by the Linux runner) for this long
   ## after it last moved, then hidden until it moves again.
   CursorHideMs* = 5000
+  ## The most positions a coalesced `pointerMove` carries in `points`: the
+  ## moves it stands for that no scene heard (docs/events.md "Pointer"). Past
+  ## it every other one goes, the newest stays, so a long wait keeps the
+  ## shape of the drag in a bounded payload.
+  MovePointsMax* = 64
 
 type
   InputDelivery* = object
@@ -452,8 +457,25 @@ proc releaseEdge(rec: ptr PointerRecord, output: var seq[InputDelivery]) =
   rec.edgeHeld.setLen(0)
   rec.edge = ""
 
+proc thinPoints*[T](points: var seq[T]) =
+  ## `points` (x, y, x, y, ...) down to MovePointsMax pairs: every other pair
+  ## goes, from the oldest, and the newest stays.
+  while points.len > 2 * MovePointsMax:
+    var kept = newSeqOfCap[T](points.len div 2 + 2)
+    var i = 0
+    while i + 3 < points.len:
+      kept.add points[i]
+      kept.add points[i + 1]
+      i += 4
+    kept.add points[^2]
+    kept.add points[^1]
+    points = move(kept)
+
 proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int,
-                  origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
+                  origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery],
+                  passed: seq[int] = @[]) =
+  ## `passed`: where the pointer was between its last move delivered and this
+  ## one (scene pixels, oldest first), from moves a queue coalesced into it.
   let rec = state.pointer(id, pointerType, origin)
   state.place(rec, x, y)
   if rec.down and rec.edgeTaken:
@@ -478,7 +500,14 @@ proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int
     if abs(along) <= GestureTapSlopPx or abs(along) < inward:
       return # not yet one or the other: held, the move with it
     releaseEdge(rec, output) # along the edge: a drag that happens to start there
-  output.add(pointerEvent(rec[], evPointerMove, origin, buttons = true))
+  var moved = pointerEvent(rec[], evPointerMove, origin, buttons = true)
+  if passed.len >= 2:
+    let points = newJArray()
+    for i in 0 ..< passed.len div 2:
+      points.add(%state.clampX(passed[2 * i]))
+      points.add(%state.clampY(passed[2 * i + 1]))
+    moved.payload["points"] = points
+  output.add(moved)
 
 when not defined(frameosEmbedded):
   proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
@@ -803,14 +832,20 @@ when not defined(frameosEmbedded):
 
 when not defined(frameosEmbedded):
   proc applyDriverInput*(state: var InputState, event: DriverInputEvent, origin: EventOrigin,
-                         now: MonoTime, output: var seq[InputDelivery]) =
+                         now: MonoTime, output: var seq[InputDelivery], trail: seq[int32] = @[]) =
     ## One struct from an input driver (frameos/driver_abi) -> the events it means.
+    ## `trail`: the wire positions of the absolute moves coalesced into it.
     let hasPosition = (event.flags.int and ord(difHasPosition)) != 0
     let pointerType = pointerTypeName(event.pointerType.int)
     case DriverInputKind(event.kind)
     of dikPointerAbs:
       let (x, y) = state.wireToScene(event.x.int, event.y.int)
-      state.pointerMoved(event.pointerId.int, pointerType, x, y, origin, now, output)
+      var passed: seq[int]
+      for i in 0 ..< trail.len div 2:
+        let (px, py) = state.wireToScene(trail[2 * i].int, trail[2 * i + 1].int)
+        passed.add px
+        passed.add py
+      state.pointerMoved(event.pointerId.int, pointerType, x, y, origin, now, output, passed)
     of dikPointerRel:
       state.cursorMovedBy(event.x.int, event.y.int, origin, now, output)
     of dikPointerDown, dikPointerUp:
@@ -854,7 +889,17 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     let pointerType = payload{"pointerType"}.getStr()
     if payload.isInt("x") and payload.isInt("y"):
       let (x, y) = state.wireToScene(payload["x"].getInt(), payload["y"].getInt())
-      state.pointerMoved(id, pointerType, x, y, origin, now, output)
+      # The positions of the moves a queue coalesced into this one, on the wire
+      # too (event_loop.enqueue, the ESP32's touch queue).
+      var passed: seq[int]
+      let points = payload{"points"}
+      if not points.isNil and points.kind == JArray:
+        for i in 0 ..< min(points.len, 2 * MovePointsMax) div 2:
+          if points[2 * i].kind == JInt and points[2 * i + 1].kind == JInt:
+            let (px, py) = state.wireToScene(points[2 * i].getInt(), points[2 * i + 1].getInt())
+            passed.add px
+            passed.add py
+      state.pointerMoved(id, pointerType, x, y, origin, now, output, passed)
     else:
       let rec = state.pointer(id, pointerType, origin)
       state.pointerMoved(id, pointerType, rec.x, rec.y, origin, now, output)
