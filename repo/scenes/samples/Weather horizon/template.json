@@ -1,0 +1,10 @@
+{
+  "name": "Weather horizon",
+  "description": "The next two days as one long sky: day and night, dawn and dusk and the clouds in its colors, with the temperature drawn across it and the rain falling from the top. Live from Open-Meteo.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

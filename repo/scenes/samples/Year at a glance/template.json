@@ -1,0 +1,10 @@
+{
+  "name": "Year at a glance",
+  "description": "Twelve months on one page from this month on, the days with events marked in their colors, today circled and the next few events listed.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

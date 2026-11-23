@@ -81,6 +81,131 @@ const THEMES = {
   },
 }
 
+// The newer looks also lay the month out differently: each day a rounded card
+// with a gap around it (`cellGap`, `cellRadius`, `cellBackground`, and a
+// `cellShadow` under it), the date centred and today circled (`todayStyle:
+// 'circle'`, `todayTextColor`), weekday names in coloured pills
+// (`weekdayColors`) and rounded event chips (`chipRadius`). The built-in
+// app's themes leave them out and draw exactly as before.
+const CARD_FONTS = {
+  weekdayFont: 'FiraGO-Regular.ttf',
+  titleFont: 'FiraGO-SemiBold.ttf',
+  dateFont: 'FiraGO-Regular.ttf',
+  eventTimeFont: 'FiraGO-Regular.ttf',
+  eventTitleFont: 'FiraGO-Regular.ttf',
+  weekdayFontSize: 14,
+  titleFontSize: 30,
+  dateFontSize: 17,
+  eventFontSize: 13,
+}
+
+Object.assign(THEMES, {
+  // Bright primaries on chunky rounded cards, like a toy.
+  toybox: {
+    weekdayFont: 'Galindo-Regular.ttf',
+    titleFont: 'Galindo-Regular.ttf',
+    dateFont: 'Galindo-Regular.ttf',
+    eventTimeFont: 'Ubuntu-Medium.ttf',
+    eventTitleFont: 'Ubuntu-Medium.ttf',
+    weekdayFontSize: 15,
+    titleFontSize: 36,
+    dateFontSize: 17,
+    eventFontSize: 12,
+    backgroundColor: '#fff4dc',
+    weekendBackgroundColor: '#ffe7b0',
+    todayStrokeColor: '',
+    todayBackgroundColor: '#e63946',
+    todayTextColor: '#ffffff',
+    dateTextColor: '#3d2b1f',
+    eventTimeColor: '#8a6a4a',
+    eventTitleColor: '#3d2b1f',
+    titleTextColor: '#e63946',
+    titleBackgroundColor: '',
+    weekdayTextColor: '#ffffff',
+    weekdayBackgroundColor: '',
+    weekdayColors: ['#e63946', '#ff8c1a', '#f5b400', '#2bb24c', '#1d6fd8', '#8e44ad', '#ff5fa2'],
+    gridColor: '',
+    cellGap: 7,
+    cellRadius: 16,
+    cellBackground: '#ffffff',
+    cellShadow: '#efd29a',
+    todayStyle: 'circle',
+    chipRadius: 9,
+    eventColorForeground: ['#ffffff', '#ffffff', '#ffffff', '#ffffff', '#ffffff', '#3d2b1f'],
+    eventColorBackground: ['#1d6fd8', '#2bb24c', '#ff8c1a', '#e63946', '#8e44ad', '#f5b400'],
+  },
+  // Quiet grey cards, a black circle on today, soft pastel chips.
+  minimal: {
+    ...CARD_FONTS,
+    backgroundColor: '#ffffff',
+    weekendBackgroundColor: '#f0f0f2',
+    todayStrokeColor: '',
+    todayBackgroundColor: '#111111',
+    todayTextColor: '#ffffff',
+    dateTextColor: '#1f2937',
+    eventTimeColor: '#6b7280',
+    eventTitleColor: '#1f2937',
+    titleTextColor: '#111111',
+    titleBackgroundColor: '',
+    weekdayTextColor: '#9ca3af',
+    weekdayBackgroundColor: '',
+    gridColor: '',
+    cellGap: 5,
+    cellRadius: 12,
+    cellBackground: '#f7f7f8',
+    todayStyle: 'circle',
+    chipRadius: 6,
+    eventColorForeground: ['#1e3a8a', '#14532d', '#7c2d12', '#831843', '#4c1d95', '#134e4a'],
+    eventColorBackground: ['#dbe7ff', '#d9f5e3', '#ffe6cc', '#ffdce8', '#ebe1ff', '#d4f3f0'],
+  },
+  // Dark cards on near black, a blue circle on today.
+  midnight: {
+    ...CARD_FONTS,
+    backgroundColor: '#0b0e14',
+    weekendBackgroundColor: '#10141c',
+    todayStrokeColor: '',
+    todayBackgroundColor: '#4f8cff',
+    todayTextColor: '#0b0e14',
+    dateTextColor: '#c9d1dc',
+    eventTimeColor: '#7d8696',
+    eventTitleColor: '#e5e9f0',
+    titleTextColor: '#ffffff',
+    titleBackgroundColor: '',
+    weekdayTextColor: '#6b7280',
+    weekdayBackgroundColor: '',
+    gridColor: '',
+    cellGap: 5,
+    cellRadius: 12,
+    cellBackground: '#151a24',
+    todayStyle: 'circle',
+    chipRadius: 6,
+    eventColorForeground: ['#dbe7ff', '#d9f5e3', '#ffe6cc', '#ffdce8', '#ebe1ff', '#d4f3f0'],
+    eventColorBackground: ['#1e3a8a', '#14532d', '#7c2d12', '#831843', '#4c1d95', '#134e4a'],
+  },
+  // Black and white only, heavy lines, today inverted: for e-paper.
+  ink: {
+    ...CARD_FONTS,
+    backgroundColor: '#ffffff',
+    weekendBackgroundColor: '',
+    todayStrokeColor: '',
+    todayBackgroundColor: '#000000',
+    todayTextColor: '#ffffff',
+    dateTextColor: '#000000',
+    eventTimeColor: '#000000',
+    eventTitleColor: '#000000',
+    titleTextColor: '#000000',
+    titleBackgroundColor: '#ffffff',
+    weekdayTextColor: '#ffffff',
+    weekdayBackgroundColor: '#000000',
+    gridColor: '#000000',
+    gridWidth: 2,
+    todayStyle: 'circle',
+    chipRadius: 3,
+    eventColorForeground: ['#ffffff'],
+    eventColorBackground: ['#000000'],
+  },
+})
+
 const DEFAULTS = {
   backgroundColor: '#ffffff',
   weekendBackgroundColor: '#9eafd6',
@@ -335,7 +460,8 @@ export function get(app, context) {
   const rows = Math.floor((firstCol + days + 6) / 7)
 
   const p = Math.max(Math.trunc(number(c.padding, 18)), 0) * s
-  const gridStroke = nimRound(Math.max(number(c.gridWidth, 1), 1) * s)
+  const st0 = style(c)
+  const gridStroke = nimRound(Math.max(number(st0.gridWidth ?? c.gridWidth, 1), 1) * s)
   const contentX = p
   const contentY = p
   const contentW = W - 2 * p
@@ -358,6 +484,9 @@ export function get(app, context) {
     const ww = Math.trunc(w)
     const hh = Math.trunc(h)
     if (fill && ww > 0 && hh > 0) out.push(`<rect x="${n(x)}" y="${n(y)}" width="${ww}" height="${hh}" fill="${esc(fill)}"/>`)
+  }
+  const rrect = (x, y, w, h, r, fill) => {
+    if (fill && w > 0 && h > 0) out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="${n(Math.min(r, w / 2, h / 2))}" fill="${esc(fill)}"/>`)
   }
   const face = (font) => (font ? ` font-family="${esc(font)}"` : '')
   const span = (value, font, size, fill) => ({ value, font, size, fill })
@@ -390,6 +519,15 @@ export function get(app, context) {
   rect(contentX, contentY + topTitle, contentW, weekdayHeaderHeight, st.weekdayBackgroundColor)
   const names = startMonday ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const weekdaySize = st.weekdayFontSize * s
+  const cards = number(st.cellGap, 0) > 0
+  const gap = number(st.cellGap, 0) * s
+  if (st.weekdayColors) {
+    names.forEach((name, i) => {
+      const colors = st.weekdayColors
+      const color = colors[(startMonday ? i + 1 : i) % colors.length]
+      rrect(contentX + i * cellWidth + gap / 2, contentY + topTitle + 2 * s, cellWidth - gap, weekdayHeaderHeight - 4 * s, weekdayHeaderHeight, color)
+    })
+  }
   names.forEach((name, i) => {
     line([span(name, st.weekdayFont, weekdaySize, st.weekdayTextColor)], contentX + i * cellWidth + cellWidth / 2, contentY + topTitle, weekdayHeaderHeight, true, true)
   })
@@ -399,14 +537,27 @@ export function get(app, context) {
     return [contentX + (index % 7) * cellWidth, gridTop + Math.floor(index / 7) * cellHeight]
   }
 
-  // Shading goes under the grid.
-  for (let day = 1; day <= days; day++) {
-    const wd = weekday(year, month, day)
-    if (wd === 0 || wd === 6) rect(...cellAt(day), cellWidth, cellHeight, st.weekendBackgroundColor)
+  const circled = st.todayStyle === 'circle'
+  if (cards) {
+    // A card a day, its shadow under it.
+    const r = number(st.cellRadius, 0) * s
+    for (let day = 1; day <= days; day++) {
+      const [x, y] = cellAt(day)
+      const wd = weekday(year, month, day)
+      const fill = (wd === 0 || wd === 6) && st.weekendBackgroundColor ? st.weekendBackgroundColor : st.cellBackground
+      if (st.cellShadow) rrect(x + gap / 2, y + gap / 2 + 3 * s, cellWidth - gap, cellHeight - gap, r, st.cellShadow)
+      rrect(x + gap / 2, y + gap / 2, cellWidth - gap, cellHeight - gap, r, fill)
+    }
+  } else {
+    // Shading goes under the grid.
+    for (let day = 1; day <= days; day++) {
+      const wd = weekday(year, month, day)
+      if (wd === 0 || wd === 6) rect(...cellAt(day), cellWidth, cellHeight, st.weekendBackgroundColor)
+    }
+    if (isCurrentMonth && todayDay <= days && !circled) rect(...cellAt(todayDay), cellWidth, cellHeight, st.todayBackgroundColor)
   }
-  if (isCurrentMonth && todayDay <= days) rect(...cellAt(todayDay), cellWidth, cellHeight, st.todayBackgroundColor)
 
-  if (bool(c.showGrid, true)) {
+  if (bool(c.showGrid, true) && !cards && st.gridColor) {
     const stroke = Math.max(1, Math.trunc(gridStroke))
     for (let i = 0; i <= 7; i++) rect(contentX + i * cellWidth, gridTop, stroke, gridHeight, st.gridColor)
     for (let i = 0; i <= rows; i++) rect(contentX, gridTop + i * cellHeight, contentW, stroke, st.gridColor)
@@ -423,7 +574,7 @@ export function get(app, context) {
 
     if (isCurrentMonth && day === todayDay) {
       const stroke = Math.trunc(Math.max(0, number(c.todayStrokeWidth, 2) * s))
-      if (stroke > 0) {
+      if (stroke > 0 && st.todayStrokeColor) {
         rect(x, y, cellWidth, stroke, st.todayStrokeColor)
         rect(x, y + cellHeight - stroke, cellWidth, stroke, st.todayStrokeColor)
         rect(x, y, stroke, cellHeight, st.todayStrokeColor)
@@ -431,28 +582,42 @@ export function get(app, context) {
       }
     }
 
-    line([span(String(day), st.dateFont, dateSize, st.dateTextColor)], x + 4 * s, y + 3 * s, 0, false, false)
+    const inset = cards ? gap / 2 : 0
+    if (circled) {
+      // The date in a circle's place, today's circle filled.
+      const cx = x + inset + dateSize * 0.95 + 2 * s
+      const cy = y + inset + dateSize * 0.82 + 2 * s
+      const isToday = isCurrentMonth && day === todayDay
+      if (isToday) out.push(`<circle cx="${n(cx)}" cy="${n(cy)}" r="${n(dateSize * 0.74)}" fill="${esc(st.todayBackgroundColor)}"/>`)
+      line([span(String(day), st.dateFont, dateSize, isToday && st.todayTextColor ? st.todayTextColor : st.dateTextColor)], cx, cy - dateSize * 0.62, dateSize * 1.24, true, true)
+    } else {
+      line([span(String(day), st.dateFont, dateSize, st.dateTextColor)], x + 4 * s, y + 3 * s, 0, false, false)
+    }
 
     const lines = eventsByDay[dayKey([year, month, day])]
     if (!lines) continue
-    const availableH = cellHeight - dateSize - 9 * s
+    const top = circled ? dateSize * 1.62 + 4 * s + (cards ? gap / 2 : 0) : dateSize + 6 * s
+    const availableH = cellHeight - top - 3 * s - (cards ? gap / 2 : 0)
     const maxLines = Math.max(0, Math.trunc((availableH + lineGap) / (lineH + lineGap)))
     const needMore = lines.length > maxLines && maxLines > 0
     const visible = needMore ? Math.max(0, maxLines - 1) : Math.min(lines.length, maxLines)
     const shown = lines.slice(0, visible).map((ev) => ({
       ...ev,
-      display: truncate(ev.display, eventSize, cellWidth - (ev.allDay ? 12 : 6) * s),
+      display: truncate(ev.display, eventSize, cellWidth - (ev.allDay ? 12 : 6) * s - (cards ? gap : 0)),
     }))
     if (needMore && lines.length - visible > 0) {
       shown.push({ display: `+${lines.length - visible} more`, allDay: false, colors: null })
     }
 
-    const baseY = y + dateSize + 6 * s
+    const baseY = y + top
+    const chipX = x + 4 * s + (cards ? gap / 2 : 0)
+    const chipW = cellWidth - 8 * s - (cards ? gap : 0)
     shown.forEach((ev, li) => {
       const yLine = baseY + li * (lineH + lineGap)
       const more = ev.display.startsWith('+')
       const chip = ev.allDay && !more
-      if (chip) rect(x + 4 * s, yLine, cellWidth - 8 * s, lineH, ev.colors ? ev.colors[0] : st.backgroundColor)
+      if (chip && st.chipRadius !== undefined) rrect(chipX, yLine, chipW, lineH, number(st.chipRadius, 0) * s, ev.colors ? ev.colors[0] : st.backgroundColor)
+      else if (chip) rect(x + 4 * s, yLine, cellWidth - 8 * s, lineH, ev.colors ? ev.colors[0] : st.backgroundColor)
       const d = ev.display
       let spans
       if (d.length >= 6 && d[2] === ':' && d[5] === ' ') {
@@ -465,7 +630,7 @@ export function get(app, context) {
       } else {
         spans = [span(d, st.eventTitleFont, eventSize, ev.colors ? ev.colors[1] : st.eventTitleColor)]
       }
-      line(spans, x + (chip ? 8 : 4) * s, yLine + (chip ? s : 0), chip ? lineH - 2 * s : lineH, chip, false)
+      line(spans, x + (chip ? 8 : 4) * s + (cards ? gap / 2 : 0), yLine + (chip ? s : 0), chip ? lineH - 2 * s : lineH, chip, false)
     })
   }
 

@@ -1,0 +1,10 @@
+{
+  "name": "Weather in words",
+  "description": "The forecast written out like a newspaper column: a headline for the day, what to expect, and the details in small print. Live from Open-Meteo.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

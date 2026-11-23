@@ -1,0 +1,251 @@
+[
+  {
+    "id": "weather-window",
+    "name": "Weather window",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -260
+        },
+        "data": {
+          "keyword": "weatherWindow",
+          "config": {}
+        }
+      },
+      {
+        "id": "forecast",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": -420
+        },
+        "data": {
+          "keyword": "openMeteo",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": 1800
+          }
+        }
+      },
+      {
+        "id": "state-location",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -700
+        },
+        "data": {
+          "keyword": "location",
+          "value": "Brussels"
+        }
+      },
+      {
+        "id": "state-temperatureUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -630
+        },
+        "data": {
+          "keyword": "temperatureUnit",
+          "value": "celsius"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-draw",
+        "source": "render",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "picture-draw",
+        "source": "picture",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "forecast-picture",
+        "source": "forecast",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/weather",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-location-forecast",
+        "source": "state-location",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/location",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-temperatureUnit-forecast",
+        "source": "state-temperatureUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/temperatureUnit",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "location",
+        "label": "Location",
+        "type": "string",
+        "value": "Brussels",
+        "description": "A place name, or \"latitude, longitude\".",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "temperatureUnit",
+        "label": "Temperature unit",
+        "type": "select",
+        "value": "celsius",
+        "options": [
+          {
+            "value": "celsius",
+            "label": "Celsius"
+          },
+          {
+            "value": "fahrenheit",
+            "label": "Fahrenheit"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "Weather",
+      "refreshInterval": 900,
+      "backgroundColor": "#1b2a4a",
+      "windowSize": "800x480",
+      "icon": "M14,6L10.25,11L13.1,14.8L11.5,16C9.81,13.75 7,10 7,10L1,18H23L14,6Z"
+    },
+    "apps": {
+      "openMeteo": {
+        "name": "Open-Meteo forecast",
+        "category": "data",
+        "description": "The conditions now, two days by the hour and a week by the day, from Open-Meteo.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "location",
+            "label": "Location",
+            "type": "string",
+            "value": "Brussels",
+            "required": true
+          },
+          {
+            "name": "temperatureUnit",
+            "label": "Temperature unit",
+            "type": "select",
+            "options": [
+              "celsius",
+              "fahrenheit"
+            ],
+            "value": "celsius"
+          },
+          {
+            "name": "windSpeedUnit",
+            "label": "Wind speed unit",
+            "type": "select",
+            "options": [
+              "kmh",
+              "ms",
+              "mph",
+              "kn"
+            ],
+            "value": "kmh"
+          },
+          {
+            "name": "precipitationUnit",
+            "label": "Precipitation unit",
+            "type": "select",
+            "options": [
+              "mm",
+              "inch"
+            ],
+            "value": "mm"
+          }
+        ],
+        "output": [
+          {
+            "name": "weather",
+            "type": "json"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Open-Meteo forecast\",\n  \"category\": \"data\",\n  \"description\": \"The conditions now, two days by the hour and a week by the day, from Open-Meteo.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"location\",\n      \"label\": \"Location\",\n      \"type\": \"string\",\n      \"value\": \"Brussels\",\n      \"required\": true\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"label\": \"Temperature unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"celsius\",\n        \"fahrenheit\"\n      ],\n      \"value\": \"celsius\"\n    },\n    {\n      \"name\": \"windSpeedUnit\",\n      \"label\": \"Wind speed unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"kmh\",\n        \"ms\",\n        \"mph\",\n        \"kn\"\n      ],\n      \"value\": \"kmh\"\n    },\n    {\n      \"name\": \"precipitationUnit\",\n      \"label\": \"Precipitation unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"mm\",\n        \"inch\"\n      ],\n      \"value\": \"mm\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"weather\",\n      \"type\": \"json\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "// Open-Meteo forecast for one place, cut down to what a weather picture draws:\n// the conditions now, the next two days hour by hour and a week day by day.\n// No key needed. Times come back as epoch milliseconds; `offset` is the place's\n// UTC offset in seconds, so a view can tell the place's own clock time\n// whatever time zone the frame is in.\n\nfunction wallClockMs(text: string) {\n  // \"2026-11-23T09:00\" or \"2026-11-23\": the place's wall clock, read as UTC.\n  const year = Number(text.substring(0, 4))\n  const month = Number(text.substring(5, 7)) - 1\n  const day = Number(text.substring(8, 10))\n  const hour = text.length > 10 ? Number(text.substring(11, 13)) : 0\n  const minute = text.length > 13 ? Number(text.substring(14, 16)) : 0\n  return Date.UTC(year, month, day, hour, minute)\n}\n\nfunction findPlace(query: string) {\n  // \"50.85, 4.35\" skips the lookup.\n  const pair = query.match(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)\n  if (pair) {\n    return { query, name: '', country: '', latitude: Number(pair[1]), longitude: Number(pair[2]) }\n  }\n  const known = frameos.recall('place')\n  if (known && known.query === query) {\n    return known\n  }\n  const answer = frameos.fetchJson(\n    'https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name=' + encodeURIComponent(query),\n  )\n  const hit = answer && answer.results && answer.results[0]\n  if (!hit) {\n    throw new Error('Place not found: ' + query)\n  }\n  const place = {\n    query,\n    name: hit.name || query,\n    country: hit.country || '',\n    latitude: hit.latitude,\n    longitude: hit.longitude,\n  }\n  frameos.remember('place', place)\n  return place\n}\n\nfunction rounded(values: number[], digits: number) {\n  const scale = Math.pow(10, digits)\n  return (values || []).map((value) => (value == null ? null : Math.round(value * scale) / scale))\n}\n\nexport function get(app: FrameOSApp) {\n  const query = String(app.config.location || '').trim()\n  if (!query) {\n    throw new Error('Set a location')\n  }\n  const place = findPlace(query)\n  const fahrenheit = app.config.temperatureUnit === 'fahrenheit'\n  const windUnit = app.config.windSpeedUnit || 'kmh'\n  const precipUnit = app.config.precipitationUnit || 'mm'\n  const url =\n    'https://api.open-meteo.com/v1/forecast?latitude=' + place.latitude +\n    '&longitude=' + place.longitude +\n    '&timezone=auto&forecast_days=7&past_hours=2&forecast_hours=50' +\n    '&temperature_unit=' + (fahrenheit ? 'fahrenheit' : 'celsius') +\n    '&wind_speed_unit=' + windUnit +\n    '&precipitation_unit=' + precipUnit +\n    '&current=temperature_2m,apparent_temperature,weather_code,cloud_cover,is_day,precipitation,' +\n    'wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m' +\n    '&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,' +\n    'cloud_cover,wind_speed_10m,wind_direction_10m,is_day' +\n    '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,' +\n    'precipitation_probability_max,wind_speed_10m_max'\n  const data = frameos.fetchJson(url)\n  if (!data || data.error || !data.hourly || !data.daily) {\n    throw new Error(data && data.reason ? data.reason : 'No forecast for ' + query)\n  }\n  const offset = data.utc_offset_seconds || 0\n  const toEpoch = (text: string) => wallClockMs(text) - offset * 1000\n  const now = data.current || {}\n  const hourly = data.hourly\n  const daily = data.daily\n  return {\n    place: place.name,\n    country: place.country,\n    latitude: place.latitude,\n    longitude: place.longitude,\n    offset,\n    fahrenheit,\n    units: {\n      temperature: fahrenheit ? '°F' : '°C',\n      wind: { kmh: 'km/h', ms: 'm/s', mph: 'mph', kn: 'kn' }[windUnit] || windUnit,\n      precipitation: precipUnit === 'inch' ? 'in' : 'mm',\n    },\n    current: {\n      time: now.time ? toEpoch(now.time) : Date.now(),\n      temperature: now.temperature_2m,\n      feelsLike: now.apparent_temperature,\n      code: now.weather_code,\n      cloud: now.cloud_cover,\n      isDay: now.is_day === 1,\n      precipitation: now.precipitation,\n      wind: now.wind_speed_10m,\n      gusts: now.wind_gusts_10m,\n      windDirection: now.wind_direction_10m,\n      humidity: now.relative_humidity_2m,\n    },\n    hourly: {\n      start: toEpoch(hourly.time[0]),\n      temperature: rounded(hourly.temperature_2m, 1),\n      feelsLike: rounded(hourly.apparent_temperature, 1),\n      rainChance: hourly.precipitation_probability,\n      precipitation: rounded(hourly.precipitation, 2),\n      code: hourly.weather_code,\n      cloud: hourly.cloud_cover,\n      wind: rounded(hourly.wind_speed_10m, 0),\n      windDirection: hourly.wind_direction_10m,\n      isDay: hourly.is_day,\n    },\n    daily: {\n      start: toEpoch(daily.time[0]),\n      high: rounded(daily.temperature_2m_max, 1),\n      low: rounded(daily.temperature_2m_min, 1),\n      code: daily.weather_code,\n      sunrise: daily.sunrise.map(toEpoch),\n      sunset: daily.sunset.map(toEpoch),\n      precipitation: rounded(daily.precipitation_sum, 1),\n      rainChance: daily.precipitation_probability_max,\n      wind: rounded(daily.wind_speed_10m_max, 0),\n    },\n  }\n}\n"
+        }
+      },
+      "weatherWindow": {
+        "name": "Weather window",
+        "category": "data",
+        "description": "A landscape painted from the weather now.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "weather",
+            "label": "Weather",
+            "type": "json",
+            "value": "{}"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Weather window\",\n  \"category\": \"data\",\n  \"description\": \"A landscape painted from the weather now.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"weather\",\n      \"label\": \"Weather\",\n      \"type\": \"json\",\n      \"value\": \"{}\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// A landscape painted from the weather now: the sky's color from where the sun\n// is and how cloudy it is, the sun crossing the sky by day and the moon (in its\n// real phase) and stars by night, clouds as many as the cover, and rain, snow,\n// fog or lightning when Open-Meteo says so. The hills, trees and house are the\n// same every time; only the weather changes.\nimport { kindOf, wordsFor, degrees, mix, dayIndex } from './weather'\n\n// A small seeded random generator, so the scenery stays put between renders.\nfunction seeded(seed: number) {\n  let s = seed >>> 0 || 1\n  return () => {\n    s = (Math.imul(s, 1664525) + 1013904223) >>> 0\n    return s / 4294967296\n  }\n}\n\n// Sky colors (top, horizon) by minutes from sunrise or sunset: negative is\n// night, positive day.\nconst SKY: [number, string, string][] = [\n  [-90, '#070d24', '#18264a'],\n  [-40, '#141a46', '#3b3f74'],\n  [-10, '#2a2c62', '#d5735b'],\n  [15, '#45609f', '#f2a66f'],\n  [60, '#3f7cc8', '#cfe0ea'],\n  [120, '#3a7fd0', '#b7daf4'],\n]\n\nfunction skyAt(minutes: number): [string, string] {\n  if (minutes <= SKY[0][0]) return [SKY[0][1], SKY[0][2]]\n  for (let i = 1; i < SKY.length; i++) {\n    if (minutes <= SKY[i][0]) {\n      const t = (minutes - SKY[i - 1][0]) / (SKY[i][0] - SKY[i - 1][0])\n      return [mix(SKY[i - 1][1], SKY[i][1], t), mix(SKY[i - 1][2], SKY[i][2], t)]\n    }\n  }\n  const last = SKY[SKY.length - 1]\n  return [last[1], last[2]]\n}\n\n// A ridge line across the width: a sum of sines, its phases from the seed.\n// `span` keeps the hills as wide on a tall screen as on a wide one.\nfunction ridge(span: number, base: number, amplitude: number, seed: number) {\n  const random = seeded(seed)\n  const waves = [0, 1, 2].map((i) => ({\n    length: span * (0.9 - i * 0.28) * (0.7 + random() * 0.6),\n    phase: random() * Math.PI * 2,\n    height: amplitude / (i + 1),\n  }))\n  return (x: number) => {\n    let y = base\n    for (const wave of waves) y -= Math.sin((x / wave.length) * Math.PI * 2 + wave.phase) * wave.height\n    return y\n  }\n}\n\nfunction ridgePath(W: number, H: number, at: (x: number) => number) {\n  const step = W / 48\n  let d = `M0 ${H} L0 ${at(0).toFixed(1)}`\n  for (let x = step; x <= W + 0.5; x += step) d += ` L${x.toFixed(1)} ${at(x).toFixed(1)}`\n  return d + ` L${W} ${H} Z`\n}\n\n// A cloud: a flat, shaded base under a few soft, lit heaps.\nfunction cloudParts(x: number, y: number, size: number, random: () => number) {\n  const heaps = []\n  const count = 3 + Math.floor(random() * 3)\n  for (let i = 0; i < count; i++) {\n    const t = (i + 0.5) / count\n    const lift = Math.sin(t * Math.PI)\n    heaps.push({\n      cx: x + (t - 0.5) * size * 2.4 + (random() - 0.5) * size * 0.3,\n      cy: y - size * (0.2 + lift * 0.35),\n      rx: size * (0.45 + lift * 0.45) * (0.85 + random() * 0.3),\n      ry: size * (0.3 + lift * 0.3) * (0.85 + random() * 0.3),\n    })\n  }\n  return heaps\n}\n\n// The moon lit as it is tonight: 0 new, 0.5 full.\nfunction moonPhase(epochMs: number) {\n  const days = (epochMs - 947182440000) / 86400000\n  const phase = (days / 29.530588853) % 1\n  return phase < 0 ? phase + 1 : phase\n}\n\nfunction moonPath(cx: number, cy: number, r: number, phase: number) {\n  const waxing = phase < 0.5\n  const inner = Math.abs(Math.cos(phase * Math.PI * 2)) * r\n  const crescent = phase < 0.25 || phase > 0.75\n  const outerSweep = waxing ? 1 : 0\n  const innerSweep = waxing ? (crescent ? 0 : 1) : crescent ? 1 : 0\n  return (\n    `M${cx} ${cy - r} A${r} ${r} 0 0 ${outerSweep} ${cx} ${cy + r} ` +\n    `A${inner.toFixed(2)} ${r} 0 0 ${innerSweep} ${cx} ${cy - r} Z`\n  )\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const u = Math.min(W, H) / 100\n  const weather = app.config.weather || {}\n  if (!weather.current || !weather.daily) {\n    throw new Error(weather.error || 'No weather yet')\n  }\n  const now = Date.now()\n  const current = weather.current\n  const kind = kindOf(current.code)\n  const cloud = Math.max(0, Math.min(100, current.cloud ?? 50)) / 100\n  const today = Math.max(0, Math.min(weather.daily.sunrise.length - 1, dayIndex(weather.daily, now)))\n  const sunrise = weather.daily.sunrise[today]\n  const sunset = weather.daily.sunset[today]\n  const nextSunrise = weather.daily.sunrise[today + 1] ?? sunrise + 86400000\n\n  // Minutes from the nearest sunrise or sunset, signed: + by day, - by night.\n  const isDay = now >= sunrise && now <= sunset\n  const minutes = isDay\n    ? Math.min(now - sunrise, sunset - now) / 60000\n    : -Math.min(Math.abs(now - sunset), Math.abs(now < sunrise ? sunrise - now : nextSunrise - now)) / 60000\n  const night = minutes < -30\n  let [skyTop, skyLow] = skyAt(minutes)\n  // Clouds grey the sky; rain and storms darken it.\n  const gloom = kind === 'storm' ? 0.95 : kind === 'rain' || kind === 'snow' ? 0.85 : cloud * 0.8\n  const greyTop = night ? '#14171f' : kind === 'storm' ? '#3c4250' : '#7c8794'\n  const greyLow = night ? '#272b36' : kind === 'storm' ? '#5b6170' : '#c4cad1'\n  skyTop = mix(skyTop, greyTop, gloom)\n  skyLow = mix(skyLow, greyLow, gloom * 0.9)\n\n  const horizon = H * 0.6\n  const lakeTop = H * 0.7\n  const random = seeded(7)\n\n  // The sun on its arc from sunrise to sunset; the moon on its own by night.\n  const arcLeft = W * 0.08\n  const arcRight = W * 0.92\n  const arcHeight = H * 0.46\n  let bodyX = W * 0.5\n  let bodyY = horizon\n  const bodyR = u * 6\n  if (isDay) {\n    const t = (now - sunrise) / (sunset - sunrise)\n    bodyX = arcLeft + (arcRight - arcLeft) * t\n    bodyY = horizon - Math.sin(t * Math.PI) * arcHeight + bodyR * 0.6\n  } else {\n    const start = now > sunset ? sunset : sunset - 86400000\n    const end = now > sunset ? nextSunrise : sunrise\n    const t = Math.max(0, Math.min(1, (now - start) / (end - start)))\n    bodyX = arcLeft + (arcRight - arcLeft) * t\n    bodyY = horizon - Math.sin(t * Math.PI) * arcHeight * 0.85 + bodyR * 0.6\n  }\n  const bodyShows = cloud < 0.92 && kind !== 'rain' && kind !== 'storm' && kind !== 'snow' && kind !== 'fog'\n  const bodyDim = 1 - Math.max(0, cloud - 0.5) * 1.6\n\n  // The land: five ridges, the far ones fading into the haze of the sky.\n  const daylight = Math.max(0, Math.min(1, (minutes + 30) / 90))\n  const dusk = Math.max(0, 1 - Math.abs(minutes - 5) / 50)\n  let ink = mix('#070b18', '#1d3527', daylight)\n  ink = mix(ink, '#231c33', dusk * 0.5)\n  if (kind === 'snow') ink = mix(ink, mix('#3a4456', '#7d8c9c', daylight), 0.9)\n  ink = mix(ink, night ? '#0b0d12' : '#2b3036', gloom * 0.3)\n  const haze = mix(skyLow, skyTop, 0.15)\n  // Fog swallows all but the nearest ridges.\n  const fade = kind === 'fog' ? 2.6 : 1.15\n  const land = [0, 1, 2, 3, 4].map((i) => mix(haze, ink, (kind === 'fog' ? 0.08 : 0.22) + 0.78 * Math.pow(i / 4, fade)))\n  // Snow lies on the far ridges in snowy weather, and lights them a little.\n  if (kind === 'snow') {\n    for (let i = 0; i < 3; i++) land[i] = mix(land[i], '#f2f5f8', (0.55 - i * 0.12) * (0.4 + daylight * 0.6))\n  }\n\n  const hillSpan = Math.max(W, H * 1.6)\n  const farthest = ridge(hillSpan, horizon - H * 0.12, H * 0.09, 3)\n  const far = ridge(hillSpan, horizon - H * 0.04, H * 0.07, 11)\n  const mid = ridge(hillSpan, horizon + H * 0.04, H * 0.04, 23)\n  const near = ridge(hillSpan, H * 0.8, H * 0.03, 41)\n  const front = ridge(hillSpan, H * 0.93, H * 0.025, 57)\n\n  // Clouds, as many as the cover, drifting a little with the hours; a deck\n  // of grey layers across the sky when it is overcast.\n  const clouds = []\n  // A big panel on an ESP32 has the least memory to spare: fewer clouds there.\n  const cloudCap = app.frame.embedded && W * H > 1000000 ? 6 : 10\n  const cloudCount = kind === 'fog' ? 0 : Math.round((Math.min(cloud, 0.8) / 0.8) * cloudCap)\n  const drift = ((now / 3600000) * W * 0.03) % W\n  const cloudLight = night ? '#373e52' : kind === 'storm' ? '#6b7180' : mix('#fbfcfd', '#cfd4da', gloom)\n  const cloudShade = night ? '#22283a' : kind === 'storm' ? '#40465a' : mix(mix('#c9d1db', skyLow, 0.3), '#8e98a4', gloom)\n  const cloudEdge = night ? '#4a5268' : kind === 'storm' ? '#80869a' : mix('#ffffff', '#e1e5ea', gloom)\n  for (let i = 0; i < cloudCount; i++) {\n    const depth = i / Math.max(1, cloudCount - 1)\n    const size = u * (5 + random() * 5) * (0.6 + depth * 0.7)\n    const x = ((random() * W * 1.3 + drift * (0.5 + depth)) % (W * 1.3)) - W * 0.15\n    const y = H * (0.1 + random() * 0.3) + depth * H * 0.06\n    const heaps = cloudParts(x, y, size, random)\n    // Far clouds take on the sky's color. (Colors, not a group's opacity: a\n    // group with opacity costs a layer the size of the cloud.)\n    const away = (1 - depth) * 0.25\n    const shade = mix(cloudShade, skyTop, away)\n    const light = mix(cloudLight, skyTop, away)\n    const edge = mix(cloudEdge, skyTop, away)\n    clouds.push(\n      <g>\n        <ellipse cx={x} cy={y} rx={size * 1.7} ry={size * 0.3} fill={shade} />\n        {heaps.map((p) => <ellipse cx={p.cx} cy={p.cy + p.ry * 0.25} rx={p.rx} ry={p.ry} fill={shade} />)}\n        {heaps.map((p) => <ellipse cx={p.cx - p.rx * 0.06} cy={p.cy - p.ry * 0.06} rx={p.rx * 0.9} ry={p.ry * 0.85} fill={light} />)}\n        {heaps.map((p) => <ellipse cx={p.cx - p.rx * 0.2} cy={p.cy - p.ry * 0.35} rx={p.rx * 0.45} ry={p.ry * 0.35} fill={edge} opacity={0.7} />)}\n      </g>,\n    )\n  }\n  const deck = []\n  if (cloud > 0.6) {\n    const deckRandom = seeded(31)\n    const strength = (cloud - 0.6) / 0.4\n    for (let i = 0; i < 14; i++) {\n      const y = H * (0.02 + deckRandom() * 0.42)\n      const rx = W * (0.25 + deckRandom() * 0.35)\n      const tone = mix(cloudShade, cloudLight, deckRandom())\n      deck.push(\n        <ellipse cx={deckRandom() * W * 1.2 - W * 0.1} cy={y} rx={rx} ry={H * (0.025 + deckRandom() * 0.04)} fill={tone} opacity={0.35 * strength} />,\n      )\n    }\n  }\n\n  // Stars where the night is clear enough.\n  const stars = []\n  if (night && cloud < 0.75) {\n    const starRandom = seeded(99)\n    for (let i = 0; i < 90; i++) {\n      const x = starRandom() * W\n      const y = starRandom() * horizon * 0.85\n      const r = (0.4 + starRandom() * starRandom() * 1.6) * u * 0.3\n      stars.push(<circle cx={x} cy={y} r={r} fill=\"#f4f1e0\" opacity={(0.35 + starRandom() * 0.65) * (1 - cloud / 0.75)} />)\n    }\n  }\n\n  // Rain, snow, fog and lightning.\n  const weatherMarks = []\n  const windLean = Math.max(-1, Math.min(1, ((current.wind ?? 10) / 40) * (Math.sin(((current.windDirection ?? 270) * Math.PI) / 180) > 0 ? -1 : 1)))\n  if (kind === 'rain' || kind === 'drizzle' || kind === 'storm') {\n    const rainRandom = seeded(5)\n    const count = kind === 'drizzle' ? 90 : current.code === 65 || current.code === 82 || kind === 'storm' ? 260 : 170\n    const length = (kind === 'drizzle' ? 2.2 : 4) * u\n    for (let i = 0; i < count; i++) {\n      const x = rainRandom() * (W + H * 0.3) - H * 0.15\n      const y = rainRandom() * H * 0.95\n      weatherMarks.push(\n        <line x1={x} y1={y} x2={x + windLean * length * 0.5} y2={y + length} stroke=\"#d8e2ee\" strokeWidth={u * 0.22} strokeLinecap=\"round\" opacity={0.25 + rainRandom() * 0.35} />,\n      )\n    }\n  }\n  if (kind === 'snow') {\n    const snowRandom = seeded(6)\n    const count = current.code === 75 || current.code === 86 ? 260 : 160\n    for (let i = 0; i < count; i++) {\n      const r = (0.25 + snowRandom() * 0.55) * u\n      weatherMarks.push(<circle cx={snowRandom() * W} cy={snowRandom() * H} r={r} fill=\"#ffffff\" opacity={0.55 + snowRandom() * 0.45} />)\n    }\n  }\n  if (kind === 'fog') {\n    const fogRandom = seeded(13)\n    for (let i = 0; i < 16; i++) {\n      const y = horizon - H * 0.16 + fogRandom() * H * 0.45\n      weatherMarks.push(\n        <ellipse cx={fogRandom() * W} cy={y} rx={W * (0.3 + fogRandom() * 0.4)} ry={H * (0.03 + fogRandom() * 0.04)} fill={night ? '#5a6273' : '#eef0f2'} opacity={0.22} />,\n      )\n    }\n  }\n  let flash = null\n  if (kind === 'storm') {\n    const x = W * 0.63\n    const y = H * 0.18\n    const s = u * 1.6\n    flash = (\n      <g>\n        <rect width={W} height={H} fill=\"#f5f0ff\" opacity={0.08} />\n        <polygon\n          points={[\n            [x, y], [x - 4 * s, y + 9 * s], [x - 1 * s, y + 9 * s], [x - 5 * s, y + 19 * s],\n            [x + 3 * s, y + 7 * s], [x, y + 7 * s], [x + 3 * s, y],\n          ].map((p) => p.join(',')).join(' ')}\n          fill=\"#fff5c4\"\n        />\n      </g>\n    )\n  }\n\n  // Trees and the house sit on the near ridge.\n  const trees = []\n  const treeColor = mix(land[3], land[4], 0.55)\n  const treeRandom = seeded(77)\n  for (let i = 0; i < 26; i++) {\n    const x = treeRandom() * W\n    if (x > W * 0.66 && x < W * 0.8) continue\n    const h = u * (4 + treeRandom() * 6)\n    const y = near(x) + u * 0.8\n    const w = h * 0.42\n    trees.push(<polygon points={`${x},${y - h} ${x - w},${y} ${x + w},${y}`} fill={treeColor} />)\n    trees.push(<polygon points={`${x},${y - h * 1.25} ${x - w * 0.7},${y - h * 0.45} ${x + w * 0.7},${y - h * 0.45}`} fill={treeColor} />)\n  }\n  const houseX = W * 0.72\n  const houseY = near(houseX) + u * 0.5\n  const hw = u * 7\n  const hh = u * 4.5\n  const lit = !isDay || minutes < 40 || gloom > 0.7\n  const house = (\n    <g>\n      <rect x={houseX - hw / 2} y={houseY - hh} width={hw} height={hh + u} fill={land[4]} />\n      <polygon points={`${houseX - hw * 0.62},${houseY - hh} ${houseX},${houseY - hh - u * 3.6} ${houseX + hw * 0.62},${houseY - hh}`} fill={land[4]} />\n      <rect x={houseX + hw * 0.18} y={houseY - hh - u * 3.4} width={u * 1.1} height={u * 2.4} fill={land[4]} />\n      <rect x={houseX - hw * 0.32} y={houseY - hh * 0.72} width={u * 1.5} height={u * 1.5} fill={lit ? '#ffcf73' : land[2]} />\n      <rect x={houseX + hw * 0.1} y={houseY - hh * 0.72} width={u * 1.5} height={u * 1.5} fill={lit ? '#ffcf73' : land[2]} />\n    </g>\n  )\n\n  // The lake mirrors the sky, darker, with the sun or moon as a glimmer.\n  const lakeTopColor = mix(skyLow, land[2], 0.5)\n  const lakeLowColor = mix(skyTop, land[3], 0.55)\n  const glimmers = []\n  if (bodyShows) {\n    for (let i = 0; i < 7; i++) {\n      const y = lakeTop + u * 1.2 + i * u * 1.3\n      const w = u * (8 - i * 0.7) * (isDay ? 1 : 0.7)\n      glimmers.push(<rect x={bodyX - w / 2} y={y} width={w} height={u * 0.35} rx={u * 0.17} fill={isDay ? '#fff3d1' : '#e9edf5'} opacity={(0.55 - i * 0.06) * bodyDim} />)\n    }\n  }\n\n  const temperature = degrees(current.temperature)\n  const words = wordsFor(current.code)\n  const high = weather.daily.high[today]\n  const low = weather.daily.low[today]\n  const textColor = '#ffffff'\n  const big = Math.min(H * 0.24, W * 0.2)\n  const left = u * 5\n  const bottom = H - u * 5\n\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <linearGradient id=\"sky\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2={horizon}>\n        <stop offset=\"0\" stopColor={skyTop} />\n        <stop offset=\"1\" stopColor={skyLow} />\n      </linearGradient>\n      <radialGradient id=\"glow\" gradientUnits=\"userSpaceOnUse\" cx={bodyX} cy={bodyY} r={u * (isDay ? 38 : 22)}>\n        <stop offset=\"0\" stopColor={isDay ? '#fff1c9' : '#dfe6ff'} stopOpacity={(isDay ? 0.7 : 0.25) * bodyDim} />\n        <stop offset=\"1\" stopColor={isDay ? '#fff1c9' : '#dfe6ff'} stopOpacity=\"0\" />\n      </radialGradient>\n      <linearGradient id=\"lake\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1={lakeTop} x2=\"0\" y2={H}>\n        <stop offset=\"0\" stopColor={lakeTopColor} />\n        <stop offset=\"1\" stopColor={lakeLowColor} />\n      </linearGradient>\n      <linearGradient id=\"shade\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1={H * 0.55} x2=\"0\" y2={H}>\n        <stop offset=\"0\" stopColor=\"#000000\" stopOpacity=\"0\" />\n        <stop offset=\"1\" stopColor=\"#000000\" stopOpacity=\"0.35\" />\n      </linearGradient>\n\n      <rect width={W} height={H} fill=\"url(#sky)\" />\n      {stars}\n      {bodyShows ? <rect width={W} height={H} fill=\"url(#glow)\" /> : null}\n      {bodyShows && isDay ? <circle cx={bodyX} cy={bodyY} r={bodyR} fill=\"#fff4d6\" opacity={bodyDim} /> : null}\n      {bodyShows && !isDay ? (\n        <g>\n          <circle cx={bodyX} cy={bodyY} r={bodyR * 0.8} fill={mix(skyTop, '#ffffff', 0.12)} opacity={bodyDim} />\n          <path d={moonPath(bodyX, bodyY, bodyR * 0.8, moonPhase(now))} fill=\"#f1efe3\" opacity={bodyDim} />\n        </g>\n      ) : null}\n      {deck}\n      {clouds.slice(0, Math.ceil(cloudCount / 2))}\n      <path d={ridgePath(W, H, farthest)} fill={land[0]} />\n      {clouds.slice(Math.ceil(cloudCount / 2))}\n      <path d={ridgePath(W, H, far)} fill={land[1]} />\n      <path d={ridgePath(W, H, mid)} fill={land[2]} />\n      <rect x={0} y={lakeTop} width={W} height={H - lakeTop} fill=\"url(#lake)\" />\n      {glimmers}\n      <path d={ridgePath(W, H, near)} fill={land[3]} />\n      {trees}\n      {house}\n      <path d={ridgePath(W, H, front)} fill={land[4]} />\n      {weatherMarks}\n      {flash}\n      <rect x={0} y={H * 0.55} width={W} height={H * 0.45} fill=\"url(#shade)\" />\n\n      <text x={left} y={bottom - u * 6.5 - big * 0.74 - u * 2.5} fontFamily=\"FiraGO\" fontSize={u * 3.2} fill={textColor} opacity={0.9}>\n        {(weather.place || '').toUpperCase()}\n      </text>\n      <text x={left - big * 0.04} y={bottom - u * 6.5} fontFamily=\"FiraGO\" fontWeight={300} fontSize={big} fill={textColor}>\n        {temperature}\n      </text>\n      <text x={left} y={bottom} fontFamily=\"FiraGO\" fontSize={u * 4.2} fill={textColor}>\n        {`${words} · feels like ${degrees(current.feelsLike)}`}\n      </text>\n      <text x={W - u * 5} y={bottom} fontFamily=\"FiraGO\" fontSize={u * 4.2} fill={textColor} textAnchor=\"end\" opacity={0.9}>\n        {`${degrees(high)} / ${degrees(low)}`}\n      </text>\n    </svg>\n  )\n}\n",
+          "weather.ts": "// What the weather pictures share: the WMO weather codes in words, a color\n// for a temperature, and the place's own clock.\n\nexport type Kind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'storm'\n\n// [kind, words] for each WMO code Open-Meteo sends.\nconst CODES: Record<number, [Kind, string]> = {\n  0: ['clear', 'Clear'],\n  1: ['clear', 'Mostly clear'],\n  2: ['partly', 'Partly cloudy'],\n  3: ['cloudy', 'Overcast'],\n  45: ['fog', 'Fog'],\n  48: ['fog', 'Freezing fog'],\n  51: ['drizzle', 'Light drizzle'],\n  53: ['drizzle', 'Drizzle'],\n  55: ['drizzle', 'Heavy drizzle'],\n  56: ['drizzle', 'Freezing drizzle'],\n  57: ['drizzle', 'Freezing drizzle'],\n  61: ['rain', 'Light rain'],\n  63: ['rain', 'Rain'],\n  65: ['rain', 'Heavy rain'],\n  66: ['rain', 'Freezing rain'],\n  67: ['rain', 'Freezing rain'],\n  71: ['snow', 'Light snow'],\n  73: ['snow', 'Snow'],\n  75: ['snow', 'Heavy snow'],\n  77: ['snow', 'Snow grains'],\n  80: ['rain', 'Showers'],\n  81: ['rain', 'Showers'],\n  82: ['rain', 'Heavy showers'],\n  85: ['snow', 'Snow showers'],\n  86: ['snow', 'Heavy snow showers'],\n  95: ['storm', 'Thunderstorm'],\n  96: ['storm', 'Thunderstorm with hail'],\n  99: ['storm', 'Thunderstorm with hail'],\n}\n\nexport function kindOf(code: number): Kind {\n  return (CODES[code] || CODES[3])[0]\n}\n\nexport function wordsFor(code: number): string {\n  return (CODES[code] || ['cloudy', 'Unknown'])[1]\n}\n\n// Thermal ramp, in °C: violet cold through teal and gold to deep red.\nconst RAMP: [number, number, number, number][] = [\n  [-25, 0x5b, 0x3f, 0x95],\n  [-12, 0x3d, 0x6c, 0xb9],\n  [-2, 0x4f, 0xa3, 0xd1],\n  [6, 0x5f, 0xbf, 0xae],\n  [13, 0xa9, 0xcf, 0x6e],\n  [19, 0xf1, 0xc4, 0x4b],\n  [25, 0xf0, 0x8a, 0x3c],\n  [31, 0xd9, 0x4b, 0x3a],\n  [40, 0x9e, 0x1f, 0x3f],\n]\n\nfunction hex(value: number) {\n  const text = Math.max(0, Math.min(255, Math.round(value))).toString(16)\n  return text.length < 2 ? '0' + text : text\n}\n\nexport function mix(a: string, b: string, t: number) {\n  const pa = parseInt(a.substring(1), 16)\n  const pb = parseInt(b.substring(1), 16)\n  const r = ((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t\n  const g = ((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t\n  const bl = (pa & 255) * (1 - t) + (pb & 255) * t\n  return '#' + hex(r) + hex(g) + hex(bl)\n}\n\nexport function celsius(value: number, fahrenheit: boolean) {\n  return fahrenheit ? ((value - 32) * 5) / 9 : value\n}\n\nexport function temperatureColor(celsiusValue: number) {\n  if (celsiusValue <= RAMP[0][0]) return '#' + hex(RAMP[0][1]) + hex(RAMP[0][2]) + hex(RAMP[0][3])\n  for (let i = 1; i < RAMP.length; i++) {\n    const [top, r, g, b] = RAMP[i]\n    if (celsiusValue <= top) {\n      const [bottom, r0, g0, b0] = RAMP[i - 1]\n      const t = (celsiusValue - bottom) / (top - bottom)\n      return '#' + hex(r0 + (r - r0) * t) + hex(g0 + (g - g0) * t) + hex(b0 + (b - b0) * t)\n    }\n  }\n  const last = RAMP[RAMP.length - 1]\n  return '#' + hex(last[1]) + hex(last[2]) + hex(last[3])\n}\n\n// The place's clock: a Date whose UTC fields are the place's wall clock.\nexport function placeClock(epochMs: number, offsetSeconds: number) {\n  return new Date(epochMs + offsetSeconds * 1000)\n}\n\nexport function two(value: number) {\n  return value < 10 ? '0' + value : '' + value\n}\n\nexport function clockText(epochMs: number, offsetSeconds: number, twelveHour: boolean) {\n  const d = placeClock(epochMs, offsetSeconds)\n  const h = d.getUTCHours()\n  if (twelveHour) {\n    return (h % 12 || 12) + ':' + two(d.getUTCMinutes()) + (h < 12 ? ' am' : ' pm')\n  }\n  return two(h) + ':' + two(d.getUTCMinutes())\n}\n\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = [\n  'January', 'February', 'March', 'April', 'May', 'June',\n  'July', 'August', 'September', 'October', 'November', 'December',\n]\n\n// Index of the hour that holds `epochMs` in an hourly series.\nexport function hourIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 3600000)\n}\n\n// Index of the place's day that holds `epochMs` in a daily series.\nexport function dayIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 86400000)\n}\n\nexport function degrees(value: number) {\n  if (value == null || !isFinite(value)) return '–'\n  const n = Math.round(value)\n  return (n < 0 ? '−' + -n : '' + n) + '°'\n}\n\nexport function compass(directionDegrees: number) {\n  const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']\n  return names[Math.round(((directionDegrees % 360) + 360) / 45) % 8]\n}\n"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "name": "Up next",
+  "description": "The next thing on your calendar, big and with how long until it starts, and the rest of the day and tomorrow under it. Made to be read across a room.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

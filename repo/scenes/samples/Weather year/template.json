@@ -1,0 +1,10 @@
+{
+  "name": "Weather year",
+  "description": "A year of weather in one chart: every day's high and low as a colored bar, the week ahead at the end, and the rain month by month. Live from Open-Meteo's history and forecast.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

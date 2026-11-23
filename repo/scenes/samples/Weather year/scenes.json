@@ -1,0 +1,277 @@
+[
+  {
+    "id": "weather-year",
+    "name": "Weather year",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -260
+        },
+        "data": {
+          "keyword": "weatherYearChart",
+          "config": {}
+        }
+      },
+      {
+        "id": "forecast",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": -420
+        },
+        "data": {
+          "keyword": "weatherYear",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": 21600
+          }
+        }
+      },
+      {
+        "id": "state-location",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -700
+        },
+        "data": {
+          "keyword": "location",
+          "value": "Brussels"
+        }
+      },
+      {
+        "id": "state-temperatureUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -630
+        },
+        "data": {
+          "keyword": "temperatureUnit",
+          "value": "celsius"
+        }
+      },
+      {
+        "id": "state-precipitationUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -560
+        },
+        "data": {
+          "keyword": "precipitationUnit",
+          "value": "mm"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-draw",
+        "source": "render",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "picture-draw",
+        "source": "picture",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "forecast-picture",
+        "source": "forecast",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/weather",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-location-forecast",
+        "source": "state-location",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/location",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-temperatureUnit-forecast",
+        "source": "state-temperatureUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/temperatureUnit",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-precipitationUnit-forecast",
+        "source": "state-precipitationUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/precipitationUnit",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "location",
+        "label": "Location",
+        "type": "string",
+        "value": "Brussels",
+        "description": "A place name, or \"latitude, longitude\".",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "temperatureUnit",
+        "label": "Temperature unit",
+        "type": "select",
+        "value": "celsius",
+        "options": [
+          {
+            "value": "celsius",
+            "label": "Celsius"
+          },
+          {
+            "value": "fahrenheit",
+            "label": "Fahrenheit"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "precipitationUnit",
+        "label": "Rain unit",
+        "type": "select",
+        "value": "mm",
+        "options": [
+          {
+            "value": "mm",
+            "label": "Millimeters"
+          },
+          {
+            "value": "inch",
+            "label": "Inches"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "Weather",
+      "refreshInterval": 21600,
+      "backgroundColor": "#f6f3ee",
+      "windowSize": "800x480",
+      "icon": "M22,21H2V3H4V19H6V10H10V19H12V6H16V19H18V14H22V21Z"
+    },
+    "apps": {
+      "weatherYear": {
+        "name": "Open-Meteo year of weather",
+        "category": "data",
+        "description": "Daily highs, lows and rain for the past year and the week ahead, from Open-Meteo.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "location",
+            "label": "Location",
+            "type": "string",
+            "value": "Brussels",
+            "required": true
+          },
+          {
+            "name": "temperatureUnit",
+            "label": "Temperature unit",
+            "type": "select",
+            "options": [
+              "celsius",
+              "fahrenheit"
+            ],
+            "value": "celsius"
+          },
+          {
+            "name": "precipitationUnit",
+            "label": "Precipitation unit",
+            "type": "select",
+            "options": [
+              "mm",
+              "inch"
+            ],
+            "value": "mm"
+          }
+        ],
+        "output": [
+          {
+            "name": "weather",
+            "type": "json"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Open-Meteo year of weather\",\n  \"category\": \"data\",\n  \"description\": \"Daily highs, lows and rain for the past year and the week ahead, from Open-Meteo.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"location\",\n      \"label\": \"Location\",\n      \"type\": \"string\",\n      \"value\": \"Brussels\",\n      \"required\": true\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"label\": \"Temperature unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"celsius\",\n        \"fahrenheit\"\n      ],\n      \"value\": \"celsius\"\n    },\n    {\n      \"name\": \"precipitationUnit\",\n      \"label\": \"Precipitation unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"mm\",\n        \"inch\"\n      ],\n      \"value\": \"mm\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"weather\",\n      \"type\": \"json\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "// A year of weather for one place: every day's high, low and rain for the\n// past twelve months from Open-Meteo's history, and the week ahead from its\n// forecast. No key needed. Fetch it a few times a day at most: the past does\n// not change.\n\nfunction findPlace(query: string) {\n  // \"50.85, 4.35\" skips the lookup.\n  const pair = query.match(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)\n  if (pair) {\n    return { query, name: '', latitude: Number(pair[1]), longitude: Number(pair[2]) }\n  }\n  const known = frameos.recall('place')\n  if (known && known.query === query) {\n    return known\n  }\n  const answer = frameos.fetchJson(\n    'https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name=' + encodeURIComponent(query),\n  )\n  const hit = answer && answer.results && answer.results[0]\n  if (!hit) {\n    throw new Error('Place not found: ' + query)\n  }\n  const place = { query, name: hit.name || query, latitude: hit.latitude, longitude: hit.longitude }\n  frameos.remember('place', place)\n  return place\n}\n\nfunction isoDate(epochMs: number) {\n  return new Date(epochMs).toISOString().substring(0, 10)\n}\n\nexport function get(app: FrameOSApp) {\n  const query = String(app.config.location || '').trim()\n  if (!query) {\n    throw new Error('Set a location')\n  }\n  const place = findPlace(query)\n  const fahrenheit = app.config.temperatureUnit === 'fahrenheit'\n  const inches = app.config.precipitationUnit === 'inch'\n  const common =\n    'latitude=' + place.latitude + '&longitude=' + place.longitude + '&timezone=auto' +\n    '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum' +\n    '&temperature_unit=' + (fahrenheit ? 'fahrenheit' : 'celsius') +\n    '&precipitation_unit=' + (inches ? 'inch' : 'mm')\n\n  // The forecast first: it says what day it is where the place is.\n  const forecast = frameos.fetchJson('https://api.open-meteo.com/v1/forecast?' + common + '&past_days=3&forecast_days=8')\n  if (!forecast || forecast.error || !forecast.daily) {\n    throw new Error(forecast && forecast.reason ? forecast.reason : 'No forecast for ' + query)\n  }\n  const offset = forecast.utc_offset_seconds || 0\n  const todayText = forecast.daily.time[3]\n  const today = Date.parse(todayText + 'T00:00:00Z')\n  const firstText = isoDate(today - 365 * 86400000)\n  const lastText = isoDate(today - 4 * 86400000)\n  const past = frameos.fetchJson(\n    'https://archive-api.open-meteo.com/v1/archive?' + common + '&start_date=' + firstText + '&end_date=' + lastText,\n  )\n  if (!past || past.error || !past.daily) {\n    throw new Error(past && past.reason ? past.reason : 'No history for ' + query)\n  }\n\n  // One row a day from the first day on: the history, then the forecast.\n  const high: (number | null)[] = []\n  const low: (number | null)[] = []\n  const rain: (number | null)[] = []\n  const round = (value: number | null) => (value == null ? null : Math.round(value * 10) / 10)\n  const add = (daily: any) => {\n    for (let i = 0; i < daily.time.length; i++) {\n      high.push(round(daily.temperature_2m_max[i]))\n      low.push(round(daily.temperature_2m_min[i]))\n      rain.push(round(daily.precipitation_sum[i]))\n    }\n  }\n  add(past.daily)\n  // The forecast starts three days back, where the history stops.\n  add(forecast.daily)\n\n  return {\n    place: place.name,\n    offset,\n    fahrenheit,\n    units: { temperature: fahrenheit ? '°F' : '°C', precipitation: inches ? 'in' : 'mm' },\n    // The first day, as the place's date at midnight UTC; `today` is its index.\n    start: Date.parse(firstText + 'T00:00:00Z'),\n    today: past.daily.time.length + 3,\n    high,\n    low,\n    rain,\n  }\n}\n"
+        }
+      },
+      "weatherYearChart": {
+        "name": "Weather year chart",
+        "category": "data",
+        "description": "A year of daily highs and lows, and the rain by month.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "weather",
+            "label": "Weather",
+            "type": "json",
+            "value": "{}"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Weather year chart\",\n  \"category\": \"data\",\n  \"description\": \"A year of daily highs and lows, and the rain by month.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"weather\",\n      \"label\": \"Weather\",\n      \"type\": \"json\",\n      \"value\": \"{}\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// A year of weather as one chart, in the manner of a newspaper's annual\n// weather page: every day of the past twelve months as a bar from its low to\n// its high, colored by how warm the day was, the week ahead in pale after\n// today, the warmest and coldest days marked, and the rain month by month\n// underneath.\nimport { celsius, temperatureColor, MONTHS, degrees } from './weather'\n\nconst PAPER = '#f6f3ee'\nconst INK = '#26221d'\nconst SOFT = '#7d756b'\nconst GRID = '#e2dcd2'\nconst RAIN = '#4f7fb3'\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const year = app.config.weather || {}\n  if (!year.high || !year.high.length) {\n    throw new Error(year.error || 'No weather yet')\n  }\n  const f = year.fahrenheit\n  const days = year.high.length\n  const u = Math.min(W, H) / 100\n  const pad = u * 5\n  const portrait = H > W\n\n  // Areas: the title, the temperature chart, the months, the rain.\n  const titleSize = u * (portrait ? 6 : 6.4)\n  const label = u * (portrait ? 2.9 : 2.8)\n  const left = pad + label * 2.4\n  const right = W - pad\n  const chartTop = pad + titleSize * 1.9\n  const rainHeight = (H - chartTop) * 0.2\n  const chartBottom = H - pad - rainHeight - label * 3.2\n  const rainTop = chartBottom + label * 2.6\n  const rainBottom = H - pad - label * 1.2\n  const step = (right - left) / days\n  const x = (i: number) => left + i * step\n\n  // The temperature axis, in steps of 5 (or 10 °F).\n  const values = year.high.concat(year.low).filter((v: number | null) => v != null)\n  const tick = f ? 10 : 5\n  const lowest = Math.floor(Math.min(...values) / tick) * tick\n  const highest = Math.ceil(Math.max(...values) / tick) * tick\n  const y = (t: number) => chartBottom - ((t - lowest) / (highest - lowest)) * (chartBottom - chartTop)\n\n  const grid = []\n  for (let t = lowest; t <= highest; t += tick) {\n    grid.push(<line x1={left} y1={y(t)} x2={right} y2={y(t)} stroke={t === 0 && !f ? '#c9c0b3' : GRID} strokeWidth={u * (t === 0 && !f ? 0.3 : 0.18)} />)\n    grid.push(\n      <text x={left - label * 0.5} y={y(t) + label * 0.35} fontFamily=\"FiraGO\" fontSize={label} fill={SOFT} textAnchor=\"end\">\n        {degrees(t)}\n      </text>,\n    )\n  }\n\n  // Months: a line where each starts, its name between, and its rain.\n  const months = []\n  const monthRain: { from: number; to: number; total: number; month: number }[] = []\n  for (let i = 0; i < days; i++) {\n    const date = new Date(year.start + i * 86400000)\n    if (i === 0 || date.getUTCDate() === 1) {\n      monthRain.push({ from: i, to: i, total: 0, month: date.getUTCMonth() })\n    }\n    const current = monthRain[monthRain.length - 1]\n    current.to = i + 1\n    current.total += year.rain[i] ?? 0\n  }\n  for (const m of monthRain) {\n    const wide = m.to - m.from >= 12\n    if (m.from > 0) months.push(<line x1={x(m.from)} y1={chartTop} x2={x(m.from)} y2={rainBottom} stroke={GRID} strokeWidth={u * 0.18} />)\n    if (wide) {\n      months.push(\n        <text x={(x(m.from) + x(m.to)) / 2} y={chartBottom + label * 1.55} fontFamily=\"FiraGO\" fontWeight={600} fontSize={label} fill={SOFT} textAnchor=\"middle\">\n          {MONTHS[m.month].substring(0, portrait ? 1 : 3).toUpperCase()}\n        </text>,\n      )\n    }\n  }\n\n  // The days.\n  const bars = []\n  const barWidth = Math.max(1, step * 0.82)\n  let warmest = -1\n  let coldest = -1\n  for (let i = 0; i < days; i++) {\n    const hi = year.high[i]\n    const lo = year.low[i]\n    if (hi == null || lo == null) continue\n    const ahead = i > year.today\n    const color = temperatureColor(celsius((hi + lo) / 2, f))\n    const top = y(hi)\n    const height = Math.max(u * 0.4, y(lo) - top)\n    if (ahead) {\n      bars.push(<rect x={x(i) + step * 0.09} y={top} width={barWidth} height={height} fill={color} opacity={0.45} />)\n    } else {\n      bars.push(<rect x={x(i) + step * 0.09} y={top} width={barWidth} height={height} fill={color} />)\n      if (warmest < 0 || hi > year.high[warmest]) warmest = i\n      if (coldest < 0 || lo < year.low[coldest]) coldest = i\n    }\n  }\n\n  const dateText = (i: number) => {\n    const d = new Date(year.start + i * 86400000)\n    return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()].substring(0, 3)}`\n  }\n  // A note beside a bar: on the side with room.\n  const note = (i: number, atY: number, lines: string[], above: boolean) => {\n    const toLeft = i > days * 0.7\n    const nx = x(i) + (toLeft ? -label * 0.8 : label * 0.8) + step / 2\n    const ny = atY + (above ? -label * 0.6 : label * 1.6)\n    return (\n      <g>\n        <line x1={x(i) + step / 2} y1={atY} x2={nx} y2={ny - (above ? -label * 0.2 : label * 0.9)} stroke={INK} strokeWidth={u * 0.2} />\n        {lines.map((text, k) => {\n          const ty = ny + (above ? (k - lines.length + 1) * label * 1.15 : k * label * 1.15)\n          // A halo of paper behind the words, so the bars do not run through them.\n          return (\n            <g>\n              <text x={nx} y={ty} fontFamily=\"FiraGO\" fontWeight={k === 0 ? 600 : 400} fontSize={label} fill={PAPER} stroke={PAPER} strokeWidth={label * 0.4} strokeLinejoin=\"round\" textAnchor={toLeft ? 'end' : 'start'}>\n                {text}\n              </text>\n              <text x={nx} y={ty} fontFamily=\"FiraGO\" fontWeight={k === 0 ? 600 : 400} fontSize={label} fill={k === 0 ? INK : SOFT} textAnchor={toLeft ? 'end' : 'start'}>\n                {text}\n              </text>\n            </g>\n          )\n        })}\n      </g>\n    )\n  }\n\n  // The rain, month by month.\n  const rainMax = Math.max(1, ...monthRain.map((m) => m.total))\n  const rainBars = monthRain.map((m) => {\n    const height = ((rainBottom - rainTop - label * 1.3) * m.total) / rainMax\n    const x0 = x(m.from) + step * 2\n    const x1 = x(m.to) - step * 2\n    const total = year.units.precipitation === 'in' ? m.total.toFixed(1) : Math.round(m.total)\n    return (\n      <g>\n        <rect x={x0} y={rainBottom - height} width={Math.max(1, x1 - x0)} height={height} fill={RAIN} opacity={m.to - 1 > year.today ? 0.5 : 1} />\n        {m.to - m.from >= 12 ? (\n          <text x={(x0 + x1) / 2} y={rainBottom - height - label * 0.35} fontFamily=\"FiraGO\" fontSize={label * 0.95} fill={SOFT} textAnchor=\"middle\">\n            {total}\n          </text>\n        ) : null}\n      </g>\n    )\n  })\n  let yearRain = 0\n  for (let i = 0; i <= year.today && i < days; i++) yearRain += year.rain[i] ?? 0\n\n  const todayX = x(year.today) + step / 2\n  const title = `A year of weather in ${year.place || 'town'}`\n  const subtitle = 'Daily high and low · the week ahead in pale'\n  const fitsSubtitle = pad + title.length * titleSize * 0.85 * 0.56 + subtitle.length * label * 0.52 + u * 4 < right\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <rect width={W} height={H} fill={PAPER} />\n      <text x={pad} y={pad + titleSize * 0.8} fontFamily=\"FiraGO\" fontWeight={600} fontSize={titleSize * 0.85} fill={INK}>\n        {title}\n      </text>\n      <text x={right} y={pad + titleSize * 0.8} fontFamily=\"FiraGO\" fontSize={label} fill={SOFT} textAnchor=\"end\">\n        {fitsSubtitle ? subtitle : ''}\n      </text>\n      {grid}\n      {months}\n      <line x1={todayX} y1={chartTop - label * 0.4} x2={todayX} y2={chartBottom} stroke={INK} strokeWidth={u * 0.25} />\n      <text x={todayX} y={chartTop - label * 0.8} fontFamily=\"FiraGO\" fontWeight={600} fontSize={label} fill={INK} textAnchor=\"middle\">\n        Today\n      </text>\n      {bars}\n      {warmest >= 0 ? note(warmest, y(year.high[warmest]), [`Warmest ${degrees(year.high[warmest])}`, dateText(warmest)], false) : null}\n      {coldest >= 0 ? note(coldest, y(year.low[coldest]), [`Coldest ${degrees(year.low[coldest])}`, dateText(coldest)], true) : null}\n      <text x={left - label * 0.5} y={rainTop + label * 0.4} fontFamily=\"FiraGO\" fontWeight={600} fontSize={label} fill={RAIN} textAnchor=\"end\">\n        Rain\n      </text>\n      <text x={left - label * 0.5} y={rainTop + label * 1.6} fontFamily=\"FiraGO\" fontSize={label * 0.9} fill={SOFT} textAnchor=\"end\">\n        {year.units.precipitation}\n      </text>\n      {rainBars}\n      <line x1={left} y1={rainBottom} x2={right} y2={rainBottom} stroke={INK} strokeWidth={u * 0.2} />\n      <text x={right} y={H - pad * 0.6} fontFamily=\"FiraGO\" fontSize={label} fill={SOFT} textAnchor=\"end\">\n        {`${year.units.precipitation === 'in' ? yearRain.toFixed(1) : Math.round(yearRain)} ${year.units.precipitation} of rain in twelve months · Open-Meteo`}\n      </text>\n    </svg>\n  )\n}\n",
+          "weather.ts": "// What the weather pictures share: the WMO weather codes in words, a color\n// for a temperature, and the place's own clock.\n\nexport type Kind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'storm'\n\n// [kind, words] for each WMO code Open-Meteo sends.\nconst CODES: Record<number, [Kind, string]> = {\n  0: ['clear', 'Clear'],\n  1: ['clear', 'Mostly clear'],\n  2: ['partly', 'Partly cloudy'],\n  3: ['cloudy', 'Overcast'],\n  45: ['fog', 'Fog'],\n  48: ['fog', 'Freezing fog'],\n  51: ['drizzle', 'Light drizzle'],\n  53: ['drizzle', 'Drizzle'],\n  55: ['drizzle', 'Heavy drizzle'],\n  56: ['drizzle', 'Freezing drizzle'],\n  57: ['drizzle', 'Freezing drizzle'],\n  61: ['rain', 'Light rain'],\n  63: ['rain', 'Rain'],\n  65: ['rain', 'Heavy rain'],\n  66: ['rain', 'Freezing rain'],\n  67: ['rain', 'Freezing rain'],\n  71: ['snow', 'Light snow'],\n  73: ['snow', 'Snow'],\n  75: ['snow', 'Heavy snow'],\n  77: ['snow', 'Snow grains'],\n  80: ['rain', 'Showers'],\n  81: ['rain', 'Showers'],\n  82: ['rain', 'Heavy showers'],\n  85: ['snow', 'Snow showers'],\n  86: ['snow', 'Heavy snow showers'],\n  95: ['storm', 'Thunderstorm'],\n  96: ['storm', 'Thunderstorm with hail'],\n  99: ['storm', 'Thunderstorm with hail'],\n}\n\nexport function kindOf(code: number): Kind {\n  return (CODES[code] || CODES[3])[0]\n}\n\nexport function wordsFor(code: number): string {\n  return (CODES[code] || ['cloudy', 'Unknown'])[1]\n}\n\n// Thermal ramp, in °C: violet cold through teal and gold to deep red.\nconst RAMP: [number, number, number, number][] = [\n  [-25, 0x5b, 0x3f, 0x95],\n  [-12, 0x3d, 0x6c, 0xb9],\n  [-2, 0x4f, 0xa3, 0xd1],\n  [6, 0x5f, 0xbf, 0xae],\n  [13, 0xa9, 0xcf, 0x6e],\n  [19, 0xf1, 0xc4, 0x4b],\n  [25, 0xf0, 0x8a, 0x3c],\n  [31, 0xd9, 0x4b, 0x3a],\n  [40, 0x9e, 0x1f, 0x3f],\n]\n\nfunction hex(value: number) {\n  const text = Math.max(0, Math.min(255, Math.round(value))).toString(16)\n  return text.length < 2 ? '0' + text : text\n}\n\nexport function mix(a: string, b: string, t: number) {\n  const pa = parseInt(a.substring(1), 16)\n  const pb = parseInt(b.substring(1), 16)\n  const r = ((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t\n  const g = ((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t\n  const bl = (pa & 255) * (1 - t) + (pb & 255) * t\n  return '#' + hex(r) + hex(g) + hex(bl)\n}\n\nexport function celsius(value: number, fahrenheit: boolean) {\n  return fahrenheit ? ((value - 32) * 5) / 9 : value\n}\n\nexport function temperatureColor(celsiusValue: number) {\n  if (celsiusValue <= RAMP[0][0]) return '#' + hex(RAMP[0][1]) + hex(RAMP[0][2]) + hex(RAMP[0][3])\n  for (let i = 1; i < RAMP.length; i++) {\n    const [top, r, g, b] = RAMP[i]\n    if (celsiusValue <= top) {\n      const [bottom, r0, g0, b0] = RAMP[i - 1]\n      const t = (celsiusValue - bottom) / (top - bottom)\n      return '#' + hex(r0 + (r - r0) * t) + hex(g0 + (g - g0) * t) + hex(b0 + (b - b0) * t)\n    }\n  }\n  const last = RAMP[RAMP.length - 1]\n  return '#' + hex(last[1]) + hex(last[2]) + hex(last[3])\n}\n\n// The place's clock: a Date whose UTC fields are the place's wall clock.\nexport function placeClock(epochMs: number, offsetSeconds: number) {\n  return new Date(epochMs + offsetSeconds * 1000)\n}\n\nexport function two(value: number) {\n  return value < 10 ? '0' + value : '' + value\n}\n\nexport function clockText(epochMs: number, offsetSeconds: number, twelveHour: boolean) {\n  const d = placeClock(epochMs, offsetSeconds)\n  const h = d.getUTCHours()\n  if (twelveHour) {\n    return (h % 12 || 12) + ':' + two(d.getUTCMinutes()) + (h < 12 ? ' am' : ' pm')\n  }\n  return two(h) + ':' + two(d.getUTCMinutes())\n}\n\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = [\n  'January', 'February', 'March', 'April', 'May', 'June',\n  'July', 'August', 'September', 'October', 'November', 'December',\n]\n\n// Index of the hour that holds `epochMs` in an hourly series.\nexport function hourIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 3600000)\n}\n\n// Index of the place's day that holds `epochMs` in a daily series.\nexport function dayIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 86400000)\n}\n\nexport function degrees(value: number) {\n  if (value == null || !isFinite(value)) return '–'\n  const n = Math.round(value)\n  return (n < 0 ? '−' + -n : '' + n) + '°'\n}\n\nexport function compass(directionDegrees: number) {\n  const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']\n  return names[Math.round(((directionDegrees % 360) + 360) / 45) % 8]\n}\n"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,279 @@
+[
+  {
+    "id": "world-clock",
+    "name": "World clock",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -260
+        },
+        "data": {
+          "keyword": "worldClock",
+          "config": {}
+        }
+      },
+      {
+        "id": "lookup",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": -420
+        },
+        "data": {
+          "keyword": "worldTimes",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": 1800
+          }
+        }
+      },
+      {
+        "id": "state-cities-lookup",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -700
+        },
+        "data": {
+          "keyword": "cities",
+          "value": "San Francisco\nNew York\nLondon\nBrussels\nDubai\nTokyo\nSydney"
+        }
+      },
+      {
+        "id": "state-temperatureUnit-lookup",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -630
+        },
+        "data": {
+          "keyword": "temperatureUnit",
+          "value": "celsius"
+        }
+      },
+      {
+        "id": "state-clock-picture",
+        "type": "state",
+        "position": {
+          "x": 40,
+          "y": -560
+        },
+        "data": {
+          "keyword": "clock",
+          "value": "24h"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-draw",
+        "source": "render",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "picture-draw",
+        "source": "picture",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "lookup-picture",
+        "source": "lookup",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/cities",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-cities-lookup-edge",
+        "source": "state-cities-lookup",
+        "target": "lookup",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/cities",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-temperatureUnit-lookup-edge",
+        "source": "state-temperatureUnit-lookup",
+        "target": "lookup",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/temperatureUnit",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-clock-picture-edge",
+        "source": "state-clock-picture",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/clock",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "cities",
+        "label": "Cities",
+        "type": "text",
+        "value": "San Francisco\nNew York\nLondon\nBrussels\nDubai\nTokyo\nSydney",
+        "required": true,
+        "description": "One city a line (up to eight). \"Name = latitude, longitude\" names a place the lookup would not find.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "temperatureUnit",
+        "label": "Temperature unit",
+        "type": "select",
+        "value": "celsius",
+        "options": [
+          {
+            "value": "celsius",
+            "label": "Celsius"
+          },
+          {
+            "value": "fahrenheit",
+            "label": "Fahrenheit"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "clock",
+        "label": "Clock",
+        "type": "select",
+        "value": "24h",
+        "options": [
+          {
+            "value": "24h",
+            "label": "24 hour"
+          },
+          {
+            "value": "12h",
+            "label": "12 hour"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "Clocks & time",
+      "refreshInterval": 60,
+      "backgroundColor": "#0b1220",
+      "windowSize": "800x480",
+      "icon": "M17.9,17.39C17.64,16.59 16.89,16 16,16H15V13A1,1 0 0,0 14,12H8V10H10A1,1 0 0,0 11,9V7H13A2,2 0 0,0 15,5V4.59C17.93,5.77 20,8.64 20,12C20,14.08 19.2,15.97 17.9,17.39M11,19.93C7.05,19.44 4,16.08 4,12C4,11.38 4.08,10.78 4.21,10.21L9,15V16A2,2 0 0,0 11,18M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
+    },
+    "apps": {
+      "worldClock": {
+        "name": "World clock",
+        "category": "data",
+        "description": "Cities' times around a day and night map.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "cities",
+            "label": "Cities",
+            "type": "json",
+            "value": "[]"
+          },
+          {
+            "name": "clock",
+            "label": "Clock",
+            "type": "select",
+            "value": "24h",
+            "options": [
+              "24h",
+              "12h"
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"World clock\",\n  \"category\": \"data\",\n  \"description\": \"Cities' times around a day and night map.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"cities\",\n      \"label\": \"Cities\",\n      \"type\": \"json\",\n      \"value\": \"[]\"\n    },\n    {\n      \"name\": \"clock\",\n      \"label\": \"Clock\",\n      \"type\": \"select\",\n      \"value\": \"24h\",\n      \"options\": [\n        \"24h\",\n        \"12h\"\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// A world clock: a dot map of the world lit where the sun is up right now,\n// twilight along the terminator and night beyond it, the cities marked on\n// it, and a card per city with its time, how far it is ahead or behind, and\n// its weather. It draws on the minute.\nimport { timeText, secondsToNextMinute, two } from './time'\nimport { subsolarPoint, sunAltitudeFrom } from './sun'\nimport { LAND_COLUMNS, isLand } from './land'\n\n// Map rows from 84N to 60S (the land worth a dot), 3 degrees each.\nconst FIRST_ROW = 2\nconst LAST_ROW = 49\n\n// A land dot's color by the sun's altitude there.\nconst SHADES: [number, string][] = [\n  [-12, '#25324f'],\n  [-6, '#4a4a72'],\n  [-2, '#9a6f84'],\n  [1, '#d9976b'],\n  [5, '#f0cb86'],\n  [12, '#f6e2a8'],\n]\n\nfunction hex(value: number) {\n  const text = Math.max(0, Math.min(255, Math.round(value))).toString(16)\n  return text.length < 2 ? '0' + text : text\n}\n\nfunction mix(a: string, b: string, t: number) {\n  const pa = parseInt(a.substring(1), 16)\n  const pb = parseInt(b.substring(1), 16)\n  return '#' + hex(((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t) +\n    hex(((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t) + hex((pa & 255) * (1 - t) + (pb & 255) * t)\n}\n\nfunction shadeAt(altitude: number) {\n  if (altitude <= SHADES[0][0]) return SHADES[0][1]\n  for (let i = 1; i < SHADES.length; i++) {\n    if (altitude <= SHADES[i][0]) {\n      return mix(SHADES[i - 1][1], SHADES[i][1], (altitude - SHADES[i - 1][0]) / (SHADES[i][0] - SHADES[i - 1][0]))\n    }\n  }\n  return SHADES[SHADES.length - 1][1]\n}\n\nfunction offsetText(seconds: number) {\n  if (seconds === 0) return 'Same time'\n  const sign = seconds > 0 ? '+' : '−'\n  const minutes = Math.round(Math.abs(seconds) / 60)\n  const h = Math.floor(minutes / 60)\n  const m = minutes % 60\n  return sign + h + (m ? ':' + two(m) : '') + 'h'\n}\n\nconst Sun = ({ className }) => (\n  <svg viewBox=\"0 0 24 24\" className={className}>\n    <circle cx={12} cy={12} r={5} fill=\"currentColor\" />\n    <path d=\"M12 1v3M12 20v3M1 12h3M20 12h3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1\" stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\" />\n  </svg>\n)\nconst Moon = ({ className }) => (\n  <svg viewBox=\"0 0 24 24\" className={className}>\n    <path d=\"M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z\" fill=\"currentColor\" />\n  </svg>\n)\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const cities = Array.isArray(app.config.cities) ? app.config.cities : []\n  if (!cities.length) {\n    throw new Error('No cities yet')\n  }\n  const twelve = app.config.clock === '12h'\n  const nowDate = new Date()\n  const now = nowDate.getTime()\n  frameos.setNextSleep(secondsToNextMinute(nowDate))\n  const homeOffset = -nowDate.getTimezoneOffset() * 60\n  const homeDay = Math.floor((now + homeOffset * 1000) / 86400000)\n\n  const portrait = H > W\n  const pad = Math.round(Math.min(W, H) * 0.035)\n  const gap = Math.round(pad * 0.5)\n  // The cards first: a row of up to four (two on a tall screen), then the map\n  // as big as the rest of the screen lets it be.\n  const columns = portrait ? 2 : Math.min(cities.length, 4)\n  const cardRows = Math.ceil(cities.length / columns)\n  const cardH = Math.round(Math.min(H * (portrait ? 0.13 : 0.2), (H * (portrait ? 0.55 : 0.42)) / cardRows))\n  const small = Math.max(10, Math.round(cardH * 0.17))\n  const cardText = Math.round(Math.min(cardH * 0.42, ((W - pad * 2) / columns) * 0.2))\n  const headerH = small * 1.4 + pad\n  const rows = LAST_ROW - FIRST_ROW + 1\n  const room = H - headerH - cardRows * cardH - (cardRows - 1) * gap - pad * 2\n  const mapW = Math.round(Math.min(W - pad * 2, (room * LAND_COLUMNS) / rows))\n  const cell = mapW / LAND_COLUMNS\n  const mapH = Math.round(cell * rows)\n\n  // The land as dots, one path a shade so the map stays a handful of elements.\n  const subsolar = subsolarPoint(now)\n  const byShade: Record<string, string[]> = {}\n  // A big panel on an ESP32 has the least memory to spare: there a dot\n  // stands for four cells (6 degrees), elsewhere for one (3 degrees).\n  const block = app.frame.embedded && W * H > 1000000 ? 2 : 1\n  const dot = cell * block\n  const r = dot * 0.36\n  for (let row = FIRST_ROW; row + block - 1 <= LAST_ROW; row += block) {\n    const latitude = 90 - (row + block / 2) * 3\n    const cy = (row - FIRST_ROW + block / 2) * cell\n    for (let column = 0; column + block - 1 < LAND_COLUMNS; column += block) {\n      let land = 0\n      for (let dr = 0; dr < block; dr++) for (let dc = 0; dc < block; dc++) if (isLand(column + dc, row + dr)) land++\n      if (land * 2 < block * block || land === 0) continue\n      const longitude = -180 + (column + block / 2) * 3\n      const altitude = sunAltitudeFrom(subsolar, latitude, longitude)\n      const bucket = Math.round(Math.max(-12, Math.min(12, altitude)) / 2) * 2\n      const key = String(bucket)\n      const cx = (column + block / 2) * cell\n      // A dot is a tiny round-capped stroke: far less to hold than a circle.\n      ;(byShade[key] = byShade[key] || []).push(`M${cx.toFixed(1)} ${cy.toFixed(1)}h0.1`)\n    }\n  }\n  const project = (latitude: number, longitude: number) => [\n    ((longitude + 180) / 360) * mapW,\n    ((90 - latitude) / 3 - FIRST_ROW) * cell,\n  ]\n  const [sunX, sunY] = project(subsolar.latitude, subsolar.longitude)\n  const utc = new Date(now)\n\n  const map = (\n    <svg viewBox={`0 0 ${mapW} ${mapH}`} className={`w-[${mapW}px] h-[${mapH}px]`}>\n      <radialGradient id=\"daylight\" gradientUnits=\"userSpaceOnUse\" cx={sunX} cy={sunY} r={mapW * 0.3}>\n        <stop offset=\"0\" stopColor=\"#3b5a8c\" stopOpacity=\"0.55\" />\n        <stop offset=\"1\" stopColor=\"#3b5a8c\" stopOpacity=\"0\" />\n      </radialGradient>\n      <rect width={mapW} height={mapH} fill=\"#0e1729\" />\n      <rect width={mapW} height={mapH} fill=\"url(#daylight)\" />\n      {Object.keys(byShade).map((key) => <path d={byShade[key].join('')} fill=\"none\" stroke={shadeAt(Number(key))} strokeWidth={r * 2} strokeLinecap=\"round\" />)}\n      <circle cx={sunX} cy={sunY} r={cell * 2.4} fill=\"#ffd36b\" opacity={0.25} />\n      <circle cx={sunX} cy={sunY} r={cell * 1.3} fill=\"#ffe39b\" />\n      {cities.map((city) => {\n        const [x, y] = project(city.latitude, city.longitude)\n        return (\n          <g>\n            <circle cx={x} cy={y} r={cell * 1.25} fill=\"none\" stroke=\"#ffffff\" strokeWidth={cell * 0.35} />\n            <circle cx={x} cy={y} r={cell * 0.45} fill=\"#ffffff\" />\n          </g>\n        )\n      })}\n    </svg>\n  )\n\n  return (\n    <div className=\"flex flex-col w-full h-full bg-[#0b1220] text-white font-[FiraGO]\">\n      <div className={`flex items-baseline justify-between px-[${pad}px] pt-[${Math.round(pad * 0.6)}px]`}>\n        <span className={`font-bold uppercase text-[${small}px] text-[#8ea0bf]`}>World clock</span>\n        <span className={`uppercase text-[${small}px] text-[#8ea0bf]`}>{`UTC ${two(utc.getUTCHours())}:${two(utc.getUTCMinutes())}`}</span>\n      </div>\n      <div className=\"flex flex-1 items-center justify-center min-h-0\">{map}</div>\n      <div className={`grid grid-cols-${columns} gap-[${gap}px] px-[${pad}px] pb-[${pad}px]`}>\n        {cities.map((city) => {\n          const local = new Date(now + city.offset * 1000)\n          const day = Math.floor((now + city.offset * 1000) / 86400000) - homeDay\n          const lit = sunAltitudeFrom(subsolar, city.latitude, city.longitude) > -0.8\n          const temperature = city.temperature == null ? '' : `${Math.round(city.temperature)}°`\n          return (\n            <div className={`flex flex-col justify-center h-[${cardH}px] rounded-lg bg-[#131d31] border-t-[3px] ${lit ? 'border-[#f0cb86]' : 'border-[#6d7fb3]'} px-[${Math.round(small * 0.8)}px] overflow-hidden`}>\n              <div className={`flex items-center justify-between text-[${small}px] text-[#a9b6cf] uppercase font-bold`}>\n                <span className=\"truncate\">{city.name}</span>\n                {lit ? <Sun className={`w-[${small}px] h-[${small}px] text-[#f0cb86]`} /> : <Moon className={`w-[${small}px] h-[${small}px] text-[#9fb0de]`} />}\n              </div>\n              <div className={`font-bold text-[${cardText}px] leading-none mt-[2px]`}>\n                {timeText(local.getUTCHours(), local.getUTCMinutes(), twelve)}\n              </div>\n              <div className={`flex justify-between text-[${small}px] text-[#8ea0bf] mt-[3px]`}>\n                <span className=\"truncate\">{offsetText(city.offset - homeOffset) + (day > 0 ? ' · Tomorrow' : day < 0 ? ' · Yesterday' : '')}</span>\n                <span>{temperature}</span>\n              </div>\n            </div>\n          )\n        })}\n      </div>\n    </div>\n  )\n}\n",
+          "land.ts": "// Where the land is, on a 120 x 60 grid of 3-degree cells from 90N and 180W:\n// one hex digit is four cells of a row, a set bit is land. Rasterized from the\n// country outlines of the Visited World Map sample.\nexport const LAND_COLUMNS = 120\nexport const LAND_ROWS = 60\nexport const LAND = [\n  '000000000000000000000000000000',\n  '000000000000000000000000000000',\n  '00000003fffff80000000000000000',\n  '0000000ffffffc00f800001e000000',\n  '00000f3fcffffc004000c01fc03000',\n  '00003fbfc07ff800000311fffe1000',\n  '03f8f7dff83ff8003e023fffffff84',\n  'e7ffffff9e3fc000ffffffffffffff',\n  '6fffffffbe3e0e01ffffffffffffff',\n  '07fffff8381c0003dffffffffffffe',\n  '0383fff83e000023cffffffffff260',\n  '0000ffff3f800071dfffffffffc0c0',\n  '00007fffffc0007ffffffffffff080',\n  '00007fffffc0003ffffffffffff000',\n  '00003fffff00001fffffffffffd000',\n  '00003ffffa00007ffc77ffffff9000',\n  '00003ffff0000078fffbfffffe2000',\n  '00001fffe000007297fffffffa2000',\n  '00000fffe000007f00fffffff3e000',\n  '000007ff8000007ffffffffff90000',\n  '000003f0800000fffffffffff80000',\n  '000003f0000001fffffbfffff00000',\n  '000000f0400003ffff7f1fffe00000',\n  '00000076380003fffffe0f9f800000',\n  '0000003f000003ffffbc0f1f080000',\n  '00000003000003fffff00607880000',\n  '000000019f0001ffffe80603040000',\n  '000000003f8000fffff80204040000',\n  '000000003fe00073fff0000e300000',\n  '000000007fe00001ffe00006f80000',\n  '000000007ff80001ffc00006f88000',\n  '000000007fff0000ff800003087a00',\n  '000000007fff8000ff800001c03c00',\n  '000000003fff0000ffc00000000400',\n  '000000003ffe0000ffc8000001d000',\n  '000000001ffe0000ff98000007d800',\n  '000000000ffe0000ff1800000ff800',\n  '000000000ffc00007f3000003ffc00',\n  '000000000ff000007e1000003ffe00',\n  '000000000ff000007e0000003ffe00',\n  '000000000fe000003c0000003ffe00',\n  '000000000fc0000038000000387e00',\n  '000000001f80000000000000001c02',\n  '000000001e00000000000000000006',\n  '000000001e0000000000000000000c',\n  '000000001c00000000000000000008',\n  '000000001c00000000000000000000',\n  '000000001800000000000000000000',\n  '000000000c00000000000000000000',\n  '000000000000000000000000000000',\n  '000000000000000000000000000000',\n  '000000000000000000000000000000',\n  '0000000006000000001fe1fffff800',\n  '000000000f000007ffffeffffffff0',\n  '0000143fff0001fffffffffffffff8',\n  '003ffffffc003fffffffffffffffe0',\n  '02ffffffe13cffffffffffffffffe0',\n  '007ffffffffffffffffffffffffff0',\n  '003800000000000000000000000000',\n  '000000000000000000000000000000',\n].join('')\n\nexport function isLand(column: number, row: number) {\n  const index = row * LAND_COLUMNS + column\n  const digit = parseInt(LAND.charAt(index >> 2), 16)\n  return ((digit >> (3 - (index & 3))) & 1) === 1\n}\n",
+          "time.ts": "// Words and numbers for times and dates. A JS app's Date is in the frame's\n// time zone.\n\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = [\n  'January', 'February', 'March', 'April', 'May', 'June',\n  'July', 'August', 'September', 'October', 'November', 'December',\n]\n\nexport function two(value: number) {\n  return value < 10 ? '0' + value : '' + value\n}\n\n// \"14:05\", or \"2:05 pm\" on a 12-hour clock.\nexport function timeText(hours: number, minutes: number, twelveHour: boolean) {\n  if (twelveHour) {\n    return (hours % 12 || 12) + ':' + two(minutes) + (hours < 12 ? ' am' : ' pm')\n  }\n  return two(hours) + ':' + two(minutes)\n}\n\nexport function clockOf(date: Date, twelveHour: boolean) {\n  return timeText(date.getHours(), date.getMinutes(), twelveHour)\n}\n\n// Seconds until the next minute starts, so a clock draws on the minute.\nexport function secondsToNextMinute(date: Date) {\n  return Math.max(1, 60 - date.getSeconds())\n}\n",
+          "sun.ts": "// Where the sun and the moon are, worked out from the time (low precision\n// formulas, good to a few minutes for rise and set, a fraction of a degree\n// for position). Angles in degrees unless a name says otherwise.\n\nconst RAD = Math.PI / 180\n\nfunction days2000(epochMs: number) {\n  return epochMs / 86400000 + 2440587.5 - 2451545.0\n}\n\nfunction wrap360(value: number) {\n  const v = value % 360\n  return v < 0 ? v + 360 : v\n}\n\nfunction obliquity(d: number) {\n  return (23.439 - 0.0000004 * d) * RAD\n}\n\n// Right ascension and declination (radians) from ecliptic longitude and latitude.\nfunction equatorial(lambda: number, beta: number, eps: number) {\n  const ra = Math.atan2(Math.sin(lambda) * Math.cos(eps) - Math.tan(beta) * Math.sin(eps), Math.cos(lambda))\n  const dec = Math.asin(Math.sin(beta) * Math.cos(eps) + Math.cos(beta) * Math.sin(eps) * Math.sin(lambda))\n  return { ra, dec }\n}\n\n// Greenwich mean sidereal time, in degrees.\nfunction sidereal(d: number) {\n  return wrap360(280.46061837 + 360.98564736629 * d)\n}\n\nexport function sunPosition(epochMs: number) {\n  const d = days2000(epochMs)\n  const g = wrap360(357.528 + 0.9856003 * d) * RAD\n  const lambda = (wrap360(280.46 + 0.9856474 * d) + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)) * RAD\n  return { ...equatorial(lambda, 0, obliquity(d)), distance: 149598000, d }\n}\n\nexport function moonPosition(epochMs: number) {\n  const d = days2000(epochMs)\n  const L = wrap360(218.316 + 13.176396 * d) * RAD\n  const M = wrap360(134.963 + 13.064993 * d) * RAD\n  const F = wrap360(93.272 + 13.22935 * d) * RAD\n  const lambda = L + 6.289 * RAD * Math.sin(M)\n  const beta = 5.128 * RAD * Math.sin(F)\n  return { ...equatorial(lambda, beta, obliquity(d)), distance: 385001 - 20905 * Math.cos(M), d }\n}\n\n// Altitude above the horizon, in degrees, of a body at ra/dec (radians).\nfunction altitudeOf(body: { ra: number; dec: number; d: number }, latitude: number, longitude: number) {\n  const hourAngle = (sidereal(body.d) + longitude) * RAD - body.ra\n  const lat = latitude * RAD\n  return Math.asin(Math.sin(lat) * Math.sin(body.dec) + Math.cos(lat) * Math.cos(body.dec) * Math.cos(hourAngle)) / RAD\n}\n\nexport function sunAltitude(epochMs: number, latitude: number, longitude: number) {\n  return altitudeOf(sunPosition(epochMs), latitude, longitude)\n}\n\nexport function moonAltitude(epochMs: number, latitude: number, longitude: number) {\n  return altitudeOf(moonPosition(epochMs), latitude, longitude)\n}\n\n// The point on Earth with the sun straight overhead.\nexport function subsolarPoint(epochMs: number) {\n  const sun = sunPosition(epochMs)\n  let longitude = (sun.ra / RAD - sidereal(sun.d)) % 360\n  if (longitude < -180) longitude += 360\n  if (longitude > 180) longitude -= 360\n  return { latitude: sun.dec / RAD, longitude }\n}\n\n// The sun's altitude at a place, given the subsolar point (cheap, for a map).\nexport function sunAltitudeFrom(subsolar: { latitude: number; longitude: number }, latitude: number, longitude: number) {\n  const lat = latitude * RAD\n  const dec = subsolar.latitude * RAD\n  const hourAngle = (longitude - subsolar.longitude) * RAD\n  return Math.asin(Math.sin(lat) * Math.sin(dec) + Math.cos(lat) * Math.cos(dec) * Math.cos(hourAngle)) / RAD\n}\n\n// How much of the moon is lit (0..1) and where it is in its month:\n// phase 0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter.\nexport function moonIllumination(epochMs: number) {\n  const s = sunPosition(epochMs)\n  const m = moonPosition(epochMs)\n  const phi = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) + Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra))\n  const inc = Math.atan2(s.distance * Math.sin(phi), m.distance - s.distance * Math.cos(phi))\n  const angle = Math.atan2(\n    Math.cos(s.dec) * Math.sin(s.ra - m.ra),\n    Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra),\n  )\n  return {\n    fraction: (1 + Math.cos(inc)) / 2,\n    phase: 0.5 + (0.5 * inc * (angle < 0 ? -1 : 1)) / Math.PI,\n  }\n}\n\n// The named phases are moments: within about a day of one, the moon is it.\nexport function moonPhaseName(phase: number) {\n  if (phase < 0.03 || phase > 0.97) return 'New moon'\n  if (phase < 0.22) return 'Waxing crescent'\n  if (phase < 0.28) return 'First quarter'\n  if (phase < 0.47) return 'Waxing gibbous'\n  if (phase < 0.53) return 'Full moon'\n  if (phase < 0.72) return 'Waning gibbous'\n  if (phase < 0.78) return 'Last quarter'\n  return 'Waning crescent'\n}\n\n// The moon drawn lit as it is: a path for the lit part of a disc.\nexport function moonPath(cx: number, cy: number, r: number, phase: number) {\n  const waxing = phase < 0.5\n  const inner = Math.abs(Math.cos(phase * Math.PI * 2)) * r\n  const crescent = phase < 0.25 || phase > 0.75\n  const outerSweep = waxing ? 1 : 0\n  const innerSweep = waxing ? (crescent ? 0 : 1) : crescent ? 1 : 0\n  return (\n    `M${cx.toFixed(1)} ${(cy - r).toFixed(1)} A${r.toFixed(1)} ${r.toFixed(1)} 0 0 ${outerSweep} ${cx.toFixed(1)} ${(cy + r).toFixed(1)} ` +\n    `A${inner.toFixed(1)} ${r.toFixed(1)} 0 0 ${innerSweep} ${cx.toFixed(1)} ${(cy - r).toFixed(1)} Z`\n  )\n}\n"
+        }
+      },
+      "worldTimes": {
+        "name": "World times",
+        "category": "data",
+        "description": "For each city: where it is, its UTC offset now and its weather, from Open-Meteo.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "cities",
+            "label": "Cities",
+            "type": "text",
+            "value": "San Francisco\nNew York\nLondon\nBrussels\nDubai\nTokyo\nSydney",
+            "required": true
+          },
+          {
+            "name": "temperatureUnit",
+            "label": "Temperature unit",
+            "type": "select",
+            "options": [
+              "celsius",
+              "fahrenheit"
+            ],
+            "value": "celsius"
+          }
+        ],
+        "output": [
+          {
+            "name": "cities",
+            "type": "json"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"World times\",\n  \"category\": \"data\",\n  \"description\": \"For each city: where it is, its UTC offset now and its weather, from Open-Meteo.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"cities\",\n      \"label\": \"Cities\",\n      \"type\": \"text\",\n      \"value\": \"San Francisco\\nNew York\\nLondon\\nBrussels\\nDubai\\nTokyo\\nSydney\",\n      \"required\": true\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"label\": \"Temperature unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"celsius\",\n        \"fahrenheit\"\n      ],\n      \"value\": \"celsius\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"cities\",\n      \"type\": \"json\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "// World times: for each city on its own line, where it is (Open-Meteo's\n// geocoder, remembered), its UTC offset at this moment, daylight saving included,\n// and its weather, all in one Open-Meteo request. No key needed.\n\nconst MAX_CITIES = 8\n\ntype City = { name: string; latitude: number; longitude: number }\n\nfunction cityLines(text: string) {\n  const raw = String(text || '')\n  const lines = raw.indexOf('\\n') >= 0 ? raw.split('\\n') : raw.split(',')\n  return lines.map((line) => line.trim()).filter((line) => line.length > 0).slice(0, MAX_CITIES)\n}\n\n// \"Name = 12.3, 45.6\" names a place by its coordinates.\nfunction placeFor(line: string, known: Record<string, City>): City {\n  const pinned = line.match(/^(.*?)\\s*=\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)\n  if (pinned) {\n    return { name: pinned[1] || 'Here', latitude: Number(pinned[2]), longitude: Number(pinned[3]) }\n  }\n  if (known[line]) {\n    return known[line]\n  }\n  const answer = frameos.fetchJson(\n    'https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name=' + encodeURIComponent(line),\n  )\n  const hit = answer && answer.results && answer.results[0]\n  if (!hit) {\n    throw new Error('City not found: ' + line)\n  }\n  const city = { name: hit.name || line, latitude: hit.latitude, longitude: hit.longitude }\n  known[line] = city\n  return city\n}\n\nexport function get(app: FrameOSApp) {\n  const lines = cityLines(app.config.cities)\n  if (!lines.length) {\n    throw new Error('Add a city')\n  }\n  const known: Record<string, City> = frameos.recall('cities') || {}\n  const cities = lines.map((line) => placeFor(line, known))\n  frameos.remember('cities', known)\n\n  const fahrenheit = app.config.temperatureUnit === 'fahrenheit'\n  const url =\n    'https://api.open-meteo.com/v1/forecast?timezone=auto&current=temperature_2m,weather_code,is_day' +\n    '&latitude=' + cities.map((c) => c.latitude).join(',') +\n    '&longitude=' + cities.map((c) => c.longitude).join(',') +\n    '&temperature_unit=' + (fahrenheit ? 'fahrenheit' : 'celsius')\n  const answer = frameos.fetchJson(url)\n  if (!answer || answer.error) {\n    throw new Error(answer && answer.reason ? answer.reason : 'No answer from Open-Meteo')\n  }\n  // One place comes back as an object, several as a list.\n  const rows = Array.isArray(answer) ? answer : [answer]\n  return cities.map((city, i) => {\n    const row = rows[i] || {}\n    const now = row.current || {}\n    return {\n      name: city.name,\n      latitude: city.latitude,\n      longitude: city.longitude,\n      offset: row.utc_offset_seconds ?? 0,\n      zone: row.timezone_abbreviation || '',\n      temperature: now.temperature_2m,\n      code: now.weather_code,\n      fahrenheit,\n    }\n  })\n}\n"
+        }
+      }
+    }
+  }
+]

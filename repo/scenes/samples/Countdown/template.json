@@ -1,0 +1,10 @@
+{
+  "name": "Countdown",
+  "description": "Days to the dates that matter: the next one big, with how far through the wait you are, and the ones after it in a list. Birthdays come round every year.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

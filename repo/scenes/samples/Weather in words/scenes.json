@@ -1,0 +1,383 @@
+[
+  {
+    "id": "weather-in-words",
+    "name": "Weather in words",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -260
+        },
+        "data": {
+          "keyword": "weatherWords",
+          "config": {}
+        }
+      },
+      {
+        "id": "forecast",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": -420
+        },
+        "data": {
+          "keyword": "openMeteo",
+          "config": {},
+          "cache": {
+            "enabled": true,
+            "inputEnabled": true,
+            "durationEnabled": true,
+            "duration": 1800
+          }
+        }
+      },
+      {
+        "id": "state-location",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -700
+        },
+        "data": {
+          "keyword": "location",
+          "value": "Brussels"
+        }
+      },
+      {
+        "id": "state-temperatureUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -630
+        },
+        "data": {
+          "keyword": "temperatureUnit",
+          "value": "celsius"
+        }
+      },
+      {
+        "id": "state-windSpeedUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -560
+        },
+        "data": {
+          "keyword": "windSpeedUnit",
+          "value": "kmh"
+        }
+      },
+      {
+        "id": "state-precipitationUnit",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -490
+        },
+        "data": {
+          "keyword": "precipitationUnit",
+          "value": "mm"
+        }
+      },
+      {
+        "id": "state-clock-picture",
+        "type": "state",
+        "position": {
+          "x": 40,
+          "y": -420
+        },
+        "data": {
+          "keyword": "clock",
+          "value": "24h"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-draw",
+        "source": "render",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "picture-draw",
+        "source": "picture",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "forecast-picture",
+        "source": "forecast",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/weather",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-location-forecast",
+        "source": "state-location",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/location",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-temperatureUnit-forecast",
+        "source": "state-temperatureUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/temperatureUnit",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-windSpeedUnit-forecast",
+        "source": "state-windSpeedUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/windSpeedUnit",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-precipitationUnit-forecast",
+        "source": "state-precipitationUnit",
+        "target": "forecast",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/precipitationUnit",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-clock-picture-edge",
+        "source": "state-clock-picture",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/clock",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "location",
+        "label": "Location",
+        "type": "string",
+        "value": "Brussels",
+        "description": "A place name, or \"latitude, longitude\".",
+        "access": "public",
+        "persist": "disk",
+        "required": true
+      },
+      {
+        "name": "temperatureUnit",
+        "label": "Temperature unit",
+        "type": "select",
+        "value": "celsius",
+        "options": [
+          {
+            "value": "celsius",
+            "label": "Celsius"
+          },
+          {
+            "value": "fahrenheit",
+            "label": "Fahrenheit"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "windSpeedUnit",
+        "label": "Wind speed unit",
+        "type": "select",
+        "value": "kmh",
+        "options": [
+          {
+            "value": "kmh",
+            "label": "km/h"
+          },
+          {
+            "value": "ms",
+            "label": "m/s"
+          },
+          {
+            "value": "mph",
+            "label": "mph"
+          },
+          {
+            "value": "kn",
+            "label": "knots"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "precipitationUnit",
+        "label": "Rain unit",
+        "type": "select",
+        "value": "mm",
+        "options": [
+          {
+            "value": "mm",
+            "label": "Millimeters"
+          },
+          {
+            "value": "inch",
+            "label": "Inches"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "clock",
+        "label": "Clock",
+        "type": "select",
+        "value": "24h",
+        "options": [
+          {
+            "value": "24h",
+            "label": "24 hour"
+          },
+          {
+            "value": "12h",
+            "label": "12 hour"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "Weather",
+      "refreshInterval": 1800,
+      "backgroundColor": "#f3eee4",
+      "windowSize": "800x480",
+      "icon": "M5,4V7H10.5V19H13.5V7H19V4H5Z"
+    },
+    "apps": {
+      "openMeteo": {
+        "name": "Open-Meteo forecast",
+        "category": "data",
+        "description": "The conditions now, two days by the hour and a week by the day, from Open-Meteo.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "location",
+            "label": "Location",
+            "type": "string",
+            "value": "Brussels",
+            "required": true
+          },
+          {
+            "name": "temperatureUnit",
+            "label": "Temperature unit",
+            "type": "select",
+            "options": [
+              "celsius",
+              "fahrenheit"
+            ],
+            "value": "celsius"
+          },
+          {
+            "name": "windSpeedUnit",
+            "label": "Wind speed unit",
+            "type": "select",
+            "options": [
+              "kmh",
+              "ms",
+              "mph",
+              "kn"
+            ],
+            "value": "kmh"
+          },
+          {
+            "name": "precipitationUnit",
+            "label": "Precipitation unit",
+            "type": "select",
+            "options": [
+              "mm",
+              "inch"
+            ],
+            "value": "mm"
+          }
+        ],
+        "output": [
+          {
+            "name": "weather",
+            "type": "json"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Open-Meteo forecast\",\n  \"category\": \"data\",\n  \"description\": \"The conditions now, two days by the hour and a week by the day, from Open-Meteo.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"location\",\n      \"label\": \"Location\",\n      \"type\": \"string\",\n      \"value\": \"Brussels\",\n      \"required\": true\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"label\": \"Temperature unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"celsius\",\n        \"fahrenheit\"\n      ],\n      \"value\": \"celsius\"\n    },\n    {\n      \"name\": \"windSpeedUnit\",\n      \"label\": \"Wind speed unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"kmh\",\n        \"ms\",\n        \"mph\",\n        \"kn\"\n      ],\n      \"value\": \"kmh\"\n    },\n    {\n      \"name\": \"precipitationUnit\",\n      \"label\": \"Precipitation unit\",\n      \"type\": \"select\",\n      \"options\": [\n        \"mm\",\n        \"inch\"\n      ],\n      \"value\": \"mm\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"weather\",\n      \"type\": \"json\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.ts": "// Open-Meteo forecast for one place, cut down to what a weather picture draws:\n// the conditions now, the next two days hour by hour and a week day by day.\n// No key needed. Times come back as epoch milliseconds; `offset` is the place's\n// UTC offset in seconds, so a view can tell the place's own clock time\n// whatever time zone the frame is in.\n\nfunction wallClockMs(text: string) {\n  // \"2026-11-23T09:00\" or \"2026-11-23\": the place's wall clock, read as UTC.\n  const year = Number(text.substring(0, 4))\n  const month = Number(text.substring(5, 7)) - 1\n  const day = Number(text.substring(8, 10))\n  const hour = text.length > 10 ? Number(text.substring(11, 13)) : 0\n  const minute = text.length > 13 ? Number(text.substring(14, 16)) : 0\n  return Date.UTC(year, month, day, hour, minute)\n}\n\nfunction findPlace(query: string) {\n  // \"50.85, 4.35\" skips the lookup.\n  const pair = query.match(/^\\s*(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)\\s*$/)\n  if (pair) {\n    return { query, name: '', country: '', latitude: Number(pair[1]), longitude: Number(pair[2]) }\n  }\n  const known = frameos.recall('place')\n  if (known && known.query === query) {\n    return known\n  }\n  const answer = frameos.fetchJson(\n    'https://geocoding-api.open-meteo.com/v1/search?count=1&format=json&name=' + encodeURIComponent(query),\n  )\n  const hit = answer && answer.results && answer.results[0]\n  if (!hit) {\n    throw new Error('Place not found: ' + query)\n  }\n  const place = {\n    query,\n    name: hit.name || query,\n    country: hit.country || '',\n    latitude: hit.latitude,\n    longitude: hit.longitude,\n  }\n  frameos.remember('place', place)\n  return place\n}\n\nfunction rounded(values: number[], digits: number) {\n  const scale = Math.pow(10, digits)\n  return (values || []).map((value) => (value == null ? null : Math.round(value * scale) / scale))\n}\n\nexport function get(app: FrameOSApp) {\n  const query = String(app.config.location || '').trim()\n  if (!query) {\n    throw new Error('Set a location')\n  }\n  const place = findPlace(query)\n  const fahrenheit = app.config.temperatureUnit === 'fahrenheit'\n  const windUnit = app.config.windSpeedUnit || 'kmh'\n  const precipUnit = app.config.precipitationUnit || 'mm'\n  const url =\n    'https://api.open-meteo.com/v1/forecast?latitude=' + place.latitude +\n    '&longitude=' + place.longitude +\n    '&timezone=auto&forecast_days=7&past_hours=2&forecast_hours=50' +\n    '&temperature_unit=' + (fahrenheit ? 'fahrenheit' : 'celsius') +\n    '&wind_speed_unit=' + windUnit +\n    '&precipitation_unit=' + precipUnit +\n    '&current=temperature_2m,apparent_temperature,weather_code,cloud_cover,is_day,precipitation,' +\n    'wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m' +\n    '&hourly=temperature_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,' +\n    'cloud_cover,wind_speed_10m,wind_direction_10m,is_day' +\n    '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,precipitation_sum,' +\n    'precipitation_probability_max,wind_speed_10m_max'\n  const data = frameos.fetchJson(url)\n  if (!data || data.error || !data.hourly || !data.daily) {\n    throw new Error(data && data.reason ? data.reason : 'No forecast for ' + query)\n  }\n  const offset = data.utc_offset_seconds || 0\n  const toEpoch = (text: string) => wallClockMs(text) - offset * 1000\n  const now = data.current || {}\n  const hourly = data.hourly\n  const daily = data.daily\n  return {\n    place: place.name,\n    country: place.country,\n    latitude: place.latitude,\n    longitude: place.longitude,\n    offset,\n    fahrenheit,\n    units: {\n      temperature: fahrenheit ? '°F' : '°C',\n      wind: { kmh: 'km/h', ms: 'm/s', mph: 'mph', kn: 'kn' }[windUnit] || windUnit,\n      precipitation: precipUnit === 'inch' ? 'in' : 'mm',\n    },\n    current: {\n      time: now.time ? toEpoch(now.time) : Date.now(),\n      temperature: now.temperature_2m,\n      feelsLike: now.apparent_temperature,\n      code: now.weather_code,\n      cloud: now.cloud_cover,\n      isDay: now.is_day === 1,\n      precipitation: now.precipitation,\n      wind: now.wind_speed_10m,\n      gusts: now.wind_gusts_10m,\n      windDirection: now.wind_direction_10m,\n      humidity: now.relative_humidity_2m,\n    },\n    hourly: {\n      start: toEpoch(hourly.time[0]),\n      temperature: rounded(hourly.temperature_2m, 1),\n      feelsLike: rounded(hourly.apparent_temperature, 1),\n      rainChance: hourly.precipitation_probability,\n      precipitation: rounded(hourly.precipitation, 2),\n      code: hourly.weather_code,\n      cloud: hourly.cloud_cover,\n      wind: rounded(hourly.wind_speed_10m, 0),\n      windDirection: hourly.wind_direction_10m,\n      isDay: hourly.is_day,\n    },\n    daily: {\n      start: toEpoch(daily.time[0]),\n      high: rounded(daily.temperature_2m_max, 1),\n      low: rounded(daily.temperature_2m_min, 1),\n      code: daily.weather_code,\n      sunrise: daily.sunrise.map(toEpoch),\n      sunset: daily.sunset.map(toEpoch),\n      precipitation: rounded(daily.precipitation_sum, 1),\n      rainChance: daily.precipitation_probability_max,\n      wind: rounded(daily.wind_speed_10m_max, 0),\n    },\n  }\n}\n"
+        }
+      },
+      "weatherWords": {
+        "name": "Weather in words",
+        "category": "data",
+        "description": "The forecast as an editorial page.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "weather",
+            "label": "Weather",
+            "type": "json",
+            "value": "{}"
+          },
+          {
+            "name": "clock",
+            "label": "Clock",
+            "type": "select",
+            "options": [
+              "24h",
+              "12h"
+            ],
+            "value": "24h"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Weather in words\",\n  \"category\": \"data\",\n  \"description\": \"The forecast as an editorial page.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"weather\",\n      \"label\": \"Weather\",\n      \"type\": \"json\",\n      \"value\": \"{}\"\n    },\n    {\n      \"name\": \"clock\",\n      \"label\": \"Clock\",\n      \"type\": \"select\",\n      \"options\": [\n        \"24h\",\n        \"12h\"\n      ],\n      \"value\": \"24h\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// The forecast written out like a newspaper's weather column: a headline for\n// the rest of the day (or for tonight and tomorrow, after five), a paragraph of\n// what to expect, the week ahead beside it and the figures in small print.\nimport {\n  kindOf, wordsFor, degrees, celsius, compass, placeClock, hourIndex, dayIndex,\n  clockText, WEEKDAYS, MONTHS, temperatureColor,\n} from './weather'\n\nconst PAPER = '#f3eee4'\nconst INK = '#1d1a16'\nconst SOFT = '#6b6258'\nconst ACCENT = '#a4461f'\n\n// km/h in each of Open-Meteo's wind units.\nconst WIND_TO_KMH: Record<string, number> = { 'km/h': 1, 'm/s': 3.6, mph: 1.609, kn: 1.852 }\n\nfunction temperatureWord(c: number) {\n  if (c < -8) return 'bitterly cold'\n  if (c < -1) return 'freezing'\n  if (c < 5) return 'cold'\n  if (c < 10) return 'chilly'\n  if (c < 15) return 'cool'\n  if (c < 21) return 'mild'\n  if (c < 26) return 'warm'\n  if (c < 31) return 'hot'\n  return 'sweltering'\n}\n\n// The weather now, to end \"It is 4° and …\".\nfunction nowPhrase(code: number, isDay: boolean) {\n  const kind = kindOf(code)\n  if (kind === 'clear') return isDay ? 'sunny' : 'clear'\n  if (kind === 'partly') return 'partly cloudy'\n  if (kind === 'cloudy') return 'overcast'\n  if (kind === 'fog') return 'foggy'\n  if (kind === 'drizzle') return 'drizzling'\n  if (kind === 'snow') return 'snowing'\n  if (kind === 'storm') return 'thundery'\n  return code >= 80 ? 'showery' : 'raining'\n}\n\nfunction capitalize(text: string) {\n  return text.charAt(0).toUpperCase() + text.substring(1)\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const weather = app.config.weather || {}\n  if (!weather.current || !weather.hourly) {\n    throw new Error(weather.error || 'No weather yet')\n  }\n  const twelve = app.config.clock === '12h'\n  const now = Date.now()\n  const offset = weather.offset || 0\n  const units = weather.units\n  const f = weather.fahrenheit\n  const hourly = weather.hourly\n  const daily = weather.daily\n  const local = placeClock(now, offset)\n  const localHour = local.getUTCHours()\n  const evening = localHour >= 17\n  const first = Math.max(0, hourIndex(hourly, now))\n  const today = Math.max(0, dayIndex(daily, now))\n  const count = hourly.temperature.length\n\n  // The hours the headline is about: the rest of today, or tonight and tomorrow.\n  const hoursLeftToday = 24 - localHour\n  const last = Math.min(count - 1, first + (evening ? hoursLeftToday + 21 : hoursLeftToday - 1))\n  const hours = []\n  for (let i = first; i <= last; i++) hours.push(i)\n  const hourAt = (i: number) => hourly.start + i * 3600000\n  const clock = (i: number) => {\n    const h = placeClock(hourAt(i), offset).getUTCHours()\n    if (twelve) return (h % 12 || 12) + (h < 12 ? ' am' : ' pm')\n    return (h < 10 ? '0' : '') + h + ':00'\n  }\n  const dayOf = (i: number) => Math.floor((hourAt(i) + offset * 1000) / 86400000) - Math.floor((now + offset * 1000) / 86400000)\n  const when = (i: number) => {\n    const h = placeClock(hourAt(i), offset).getUTCHours()\n    if (dayOf(i) <= 0) return h < 12 ? 'this morning' : h < 17 ? 'this afternoon' : h < 21 ? 'this evening' : 'tonight'\n    return h < 6 ? 'overnight' : h < 12 ? 'tomorrow morning' : h < 17 ? 'tomorrow afternoon' : 'tomorrow evening'\n  }\n  const at = (i: number) => (dayOf(i) <= 0 && i - first < 9 ? 'around ' + clock(i) : when(i))\n\n  // The sky.\n  const lit = hours.filter((i) => hourly.isDay[i] === 1)\n  const skyHours = lit.length >= 3 ? lit : hours\n  let clear = 0\n  let cloudy = 0\n  for (const i of skyHours) {\n    const kind = kindOf(hourly.code[i])\n    if (kind === 'clear') clear++\n    else if (kind !== 'partly') cloudy++\n  }\n  const daytime = lit.length >= 3\n  let sky = [daytime ? 'sunny spells' : 'patchy cloud']\n  if (clear >= skyHours.length * 0.6) sky = daytime ? ['bright', 'sunny'] : ['clear']\n  else if (cloudy >= skyHours.length * 0.7) sky = ['grey']\n  const foggyStart = hours.slice(0, 3).some((i) => kindOf(hourly.code[i]) === 'fog')\n\n  // Rain, snow or storms: when they come, and whether they stay.\n  const wet = hours.filter((i) => (hourly.precipitation[i] ?? 0) >= 0.1 || ['rain', 'drizzle', 'snow', 'storm'].includes(kindOf(hourly.code[i])))\n  let precipitation = ''\n  let noun = 'rain'\n  if (wet.length) {\n    const kinds = wet.map((i) => kindOf(hourly.code[i]))\n    const codes = wet.map((i) => hourly.code[i])\n    if (kinds.includes('storm')) noun = 'thunderstorms'\n    else if (kinds.filter((k) => k === 'snow').length >= wet.length / 2) noun = 'snow'\n    else if (codes.filter((c) => c >= 80 && c <= 82).length >= wet.length / 2) noun = 'showers'\n    else if (kinds.filter((k) => k === 'drizzle').length >= wet.length / 2) noun = 'drizzle'\n    let stretches = 1\n    for (let k = 1; k < wet.length; k++) if (wet[k] - wet[k - 1] > 2) stretches++\n    const start = wet[0]\n    const end = wet[wet.length - 1]\n    if (wet.length >= hours.length * 0.7) precipitation = noun + (evening ? ' through to tomorrow' : ' for most of the day')\n    else if (stretches >= 3) precipitation = noun + ' on and off'\n    else if (start <= first + 1) precipitation = noun + ' clearing ' + (dayOf(end + 1) <= 0 ? 'by ' + clock(end + 1) : when(end + 1))\n    else precipitation = noun + ' ' + (noun === 'thunderstorms' ? 'likely ' : 'arriving ') + at(start)\n  } else {\n    const chance = Math.max(...hours.map((i) => hourly.rainChance[i] ?? 0))\n    if (chance >= 30) precipitation = 'a chance of a shower'\n  }\n\n  // How it feels, and the wind.\n  const temperatures = hours.map((i) => hourly.temperature[i])\n  const highest = Math.max(...temperatures)\n  const lowest = Math.min(...temperatures)\n  const peak = hours[temperatures.indexOf(highest)]\n  const trough = hours[temperatures.indexOf(lowest)]\n  const feel = temperatureWord(celsius(daytime ? highest : (highest + lowest) / 2, f))\n  const windFactor = WIND_TO_KMH[units.wind] || 1\n  const strongest = Math.max(...hours.map((i) => hourly.wind[i] ?? 0))\n  const windy = strongest * windFactor >= 38\n  const frostHours = hours.filter((i) => dayOf(i) <= 1 && hourly.isDay[i] === 0 && celsius(hourly.temperature[i], f) < 0.5)\n  const hardFrost = celsius(lowest, f) < -4\n\n  // The headline.\n  const words = sky.concat([feel], windy ? ['windy'] : [])\n  const listed = words.slice(0, -1).join(', ') + ' and ' + words[words.length - 1]\n  let headline = capitalize(foggyStart && sky[0] !== 'grey' ? 'foggy at first, then ' + listed : listed)\n  if (precipitation) headline += ', with ' + precipitation\n  if (frostHours.length && !wet.some((i) => celsius(hourly.temperature[i], f) < 1)) {\n    headline += (precipitation ? '. ' : ', then ') + (precipitation ? (hardFrost ? 'A hard frost ' : 'A frost ') : hardFrost ? 'a hard frost ' : 'a frost ') + (evening ? 'overnight' : 'tonight')\n  }\n  headline += '.'\n\n  // The paragraph.\n  const current = weather.current\n  const sentences = []\n  const feelsGap = Math.abs((current.feelsLike ?? current.temperature) - current.temperature) >= (f ? 3 : 2)\n  sentences.push(\n    `It is ${degrees(current.temperature)} in ${weather.place || 'town'}` +\n      (feelsGap ? `, though it feels like ${degrees(current.feelsLike)}` : '') +\n      ` and ${nowPhrase(current.code, current.isDay)}.`,\n  )\n  if (!evening) {\n    const tonightLow = daily.low[today + 1] ?? lowest\n    sentences.push(\n      highest > current.temperature + 0.5\n        ? `Expect a high of ${degrees(highest)} ${at(peak)}, before it drops to ${degrees(tonightLow)} overnight.`\n        : `It only gets colder from here, down to ${degrees(tonightLow)} by early tomorrow.`,\n    )\n  } else {\n    const tomorrowHigh = daily.high[today + 1]\n    const todayHigh = daily.high[today]\n    const compare = tomorrowHigh - todayHigh\n    const step = f ? 4 : 2\n    const trend = compare >= step ? 'a warmer day' : compare <= -step ? 'a colder day' : 'much the same'\n    sentences.push(`It falls to ${degrees(lowest)} ${at(trough)}; tomorrow is ${trend}, reaching ${degrees(tomorrowHigh)}.`)\n  }\n  const windNow = current.wind ?? 0\n  const windKmh = windNow * windFactor\n  const gust = current.gusts ?? 0\n  const direction = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][\n    Math.round((((current.windDirection ?? 0) % 360) + 360) / 45) % 8\n  ]\n  if (windKmh < 12) sentences.push(`The wind is light, from the ${direction}.`)\n  else if (windKmh < 30) sentences.push(`A ${direction}erly breeze of ${Math.round(windNow)} ${units.wind}${gust > windNow * 1.3 && gust * windFactor > 35 ? `, gusting to ${Math.round(gust)}` : ''}.`)\n  else sentences.push(`A strong ${direction}erly wind of ${Math.round(windNow)} ${units.wind}${gust > windNow * 1.2 ? `, with gusts to ${Math.round(gust)}` : ''}.`)\n  const total = hours.reduce((sum, i) => sum + (hourly.precipitation[i] ?? 0), 0)\n  if (total >= 0.2) {\n    const amount = units.precipitation === 'in' ? total.toFixed(2) : total < 10 ? total.toFixed(1) : Math.round(total)\n    sentences.push(`About ${amount} ${units.precipitation} of ${noun === 'snow' ? 'snow, as water,' : 'rain'} ${evening ? 'by tomorrow night' : 'before midnight'}.`)\n  }\n  const sunrise = daily.sunrise[today + (evening || now > daily.sunset[today] ? 1 : 0)]\n  const sunset = daily.sunset[today]\n  sentences.push(\n    now < sunset && !evening\n      ? `The sun sets at ${clockText(sunset, offset, twelve)}.`\n      : `The sun rises at ${clockText(sunrise, offset, twelve)}.`,\n  )\n\n  // The week ahead, and its best and wettest days in a sentence.\n  const week = []\n  for (let d = today + 1; d < Math.min(daily.high.length, today + 7); d++) week.push(d)\n  const dayName = (d: number) => WEEKDAYS[placeClock(daily.start + d * 86400000 + 43200000, offset).getUTCDay()]\n  const skyScore = (code: number) => ({ clear: 3, partly: 2, cloudy: 1, fog: 0.5 }[kindOf(code)] ?? 0)\n  const later = week.slice(1)\n  let ahead = ''\n  if (later.length >= 3) {\n    const best = later.reduce((a, b) => (skyScore(daily.code[b]) * 10 + celsius(daily.high[b], f) - (daily.precipitation[b] ?? 0) > skyScore(daily.code[a]) * 10 + celsius(daily.high[a], f) - (daily.precipitation[a] ?? 0) ? b : a))\n    const wettest = later.reduce((a, b) => ((daily.precipitation[b] ?? 0) > (daily.precipitation[a] ?? 0) ? b : a))\n    ahead = `${dayName(best)} looks the pick of the week, ${wordsFor(daily.code[best]).toLowerCase()} at ${degrees(daily.high[best])}.`\n    if ((daily.precipitation[wettest] ?? 0) >= 1 && wettest !== best) {\n      ahead += ` ${dayName(wettest)} is the wettest, with ${daily.precipitation[wettest]} ${units.precipitation}.`\n    } else if (later.every((d) => (daily.precipitation[d] ?? 0) < 1)) {\n      ahead += ' The rest of the week stays mostly dry.'\n    }\n  }\n  const weekHigh = Math.max(...week.map((d) => daily.high[d]))\n  const weekLow = Math.min(...week.map((d) => daily.low[d]))\n  const span = Math.max(1, weekHigh - weekLow)\n\n  const portrait = H > W\n  const headlineSize = Math.round(Math.min(H * (portrait ? 0.07 : 0.1), W * (portrait ? 0.1 : 0.06)) * (headline.length > 70 ? 0.8 : headline.length > 50 ? 0.9 : 1))\n  const bodySize = Math.round(Math.min(H * (portrait ? 0.03 : 0.042), W * (portrait ? 0.045 : 0.032)))\n  const smallSize = Math.round(Math.min(H * 0.028, W * 0.022))\n  const pad = Math.round(Math.min(W, H) * 0.05)\n  const date = `${WEEKDAYS[local.getUTCDay()]}, ${local.getUTCDate()} ${MONTHS[local.getUTCMonth()]}`\n  const label = `font-[PT_Sans] font-bold uppercase text-[${smallSize}px] text-[${SOFT}]`\n\n  const figures = [\n    ['Now', degrees(current.temperature)],\n    ['High', degrees(daily.high[today])],\n    ['Low', degrees(daily.low[today])],\n    ['Rain', `${daily.precipitation[today] ?? 0} ${units.precipitation}`],\n    ['Wind', `${compass(current.windDirection ?? 0)} ${Math.round(windNow)} ${units.wind}`],\n    ['Daylight', `${clockText(daily.sunrise[today], offset, twelve)}–${clockText(sunset, offset, twelve)}`],\n  ]\n\n  return (\n    <div className={`flex flex-col w-full h-full bg-[${PAPER}] text-[${INK}] p-[${pad}px]`}>\n      <div className=\"flex items-end justify-between\">\n        <div className={`font-[Cormorant_Garamond] font-bold text-[${Math.round(smallSize * 1.6)}px] leading-none`}>The Weather</div>\n        <div className={`${label} truncate`}>{`${date} · ${weather.place}`}</div>\n      </div>\n      <div className={`mt-[${Math.round(pad * 0.25)}px] h-[3px] bg-[${INK}]`} />\n      <div className={`mt-[2px] h-[1px] bg-[${INK}]`} />\n      <div className={`flex ${portrait ? 'flex-col' : 'flex-row'} flex-1 min-h-0 mt-[${Math.round(pad * 0.5)}px] gap-[${pad}px]`}>\n        <div className={`flex flex-col min-w-0 ${portrait ? '' : 'flex-1 min-h-0'}`}>\n          <div className={`font-[Cormorant_Garamond] font-bold text-[${headlineSize}px] leading-[1.02]`}>{headline}</div>\n          <div className={`mt-[${Math.round(pad * 0.45)}px] font-[PT_Sans] text-[${bodySize}px] leading-snug text-[${INK}]`}>\n            {sentences.join(' ')}\n          </div>\n          {ahead ? (\n            <div className={`mt-[${Math.round(pad * 0.45)}px] font-[PT_Sans] text-[${bodySize}px] leading-snug`}>\n              <span className={`font-bold uppercase text-[${ACCENT}]`}>Looking ahead </span>\n              {ahead}\n            </div>\n          ) : null}\n        </div>\n        <div className={`flex flex-col ${portrait ? 'flex-1 min-h-0 overflow-hidden' : `w-[30%] border-l border-[${INK}]/30 pl-[${Math.round(pad * 0.6)}px]`}`}>\n          <div className={label}>The week ahead</div>\n          <div className={`flex flex-col mt-[${Math.round(pad * 0.25)}px] gap-[${Math.round(smallSize * 0.5)}px]`}>\n            {week.map((d) => {\n              const day = placeClock(daily.start + d * 86400000 + 43200000, offset)\n              const left = ((daily.low[d] - weekLow) / span) * 100\n              const width = Math.max(4, ((daily.high[d] - daily.low[d]) / span) * 100)\n              return (\n                <div className={`flex flex-col border-b border-[${INK}]/15 pb-[${Math.round(smallSize * 0.35)}px]`}>\n                  <div className={`flex items-baseline font-[PT_Sans] text-[${Math.round(smallSize * 1.15)}px]`}>\n                    <span className={`font-bold w-[${Math.round(smallSize * 3.2)}px]`}>{WEEKDAYS[day.getUTCDay()].substring(0, 3)}</span>\n                    <span className=\"flex-1 truncate\">{wordsFor(daily.code[d])}</span>\n                    <span className=\"font-bold\">{degrees(daily.high[d])}</span>\n                    <span className={`text-[${SOFT}] ml-[6px]`}>{degrees(daily.low[d])}</span>\n                  </div>\n                  <div className={`relative h-[${Math.max(3, Math.round(smallSize * 0.3))}px] mt-[3px] bg-[${INK}]/10`}>\n                    <div className={`absolute top-0 bottom-0 left-[${left.toFixed(1)}%] w-[${width.toFixed(1)}%] bg-[${temperatureColor(celsius((daily.high[d] + daily.low[d]) / 2, f))}]`} />\n                  </div>\n                </div>\n              )\n            })}\n          </div>\n        </div>\n      </div>\n      <div className={`h-[1px] bg-[${INK}] mt-[${Math.round(pad * 0.4)}px]`} />\n      <div className={`flex ${portrait ? 'flex-wrap' : ''} justify-between mt-[${Math.round(pad * 0.3)}px]`}>\n        {figures.map(([name, value]) => (\n          <div className={`flex flex-col ${portrait ? 'w-[33%] mb-[6px]' : ''}`}>\n            <div className={label}>{name}</div>\n            <div className={`font-[PT_Sans] font-bold text-[${Math.round(smallSize * 1.3)}px] ${name === 'Now' ? `text-[${ACCENT}]` : ''}`}>{value}</div>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n",
+          "weather.ts": "// What the weather pictures share: the WMO weather codes in words, a color\n// for a temperature, and the place's own clock.\n\nexport type Kind = 'clear' | 'partly' | 'cloudy' | 'fog' | 'drizzle' | 'rain' | 'snow' | 'storm'\n\n// [kind, words] for each WMO code Open-Meteo sends.\nconst CODES: Record<number, [Kind, string]> = {\n  0: ['clear', 'Clear'],\n  1: ['clear', 'Mostly clear'],\n  2: ['partly', 'Partly cloudy'],\n  3: ['cloudy', 'Overcast'],\n  45: ['fog', 'Fog'],\n  48: ['fog', 'Freezing fog'],\n  51: ['drizzle', 'Light drizzle'],\n  53: ['drizzle', 'Drizzle'],\n  55: ['drizzle', 'Heavy drizzle'],\n  56: ['drizzle', 'Freezing drizzle'],\n  57: ['drizzle', 'Freezing drizzle'],\n  61: ['rain', 'Light rain'],\n  63: ['rain', 'Rain'],\n  65: ['rain', 'Heavy rain'],\n  66: ['rain', 'Freezing rain'],\n  67: ['rain', 'Freezing rain'],\n  71: ['snow', 'Light snow'],\n  73: ['snow', 'Snow'],\n  75: ['snow', 'Heavy snow'],\n  77: ['snow', 'Snow grains'],\n  80: ['rain', 'Showers'],\n  81: ['rain', 'Showers'],\n  82: ['rain', 'Heavy showers'],\n  85: ['snow', 'Snow showers'],\n  86: ['snow', 'Heavy snow showers'],\n  95: ['storm', 'Thunderstorm'],\n  96: ['storm', 'Thunderstorm with hail'],\n  99: ['storm', 'Thunderstorm with hail'],\n}\n\nexport function kindOf(code: number): Kind {\n  return (CODES[code] || CODES[3])[0]\n}\n\nexport function wordsFor(code: number): string {\n  return (CODES[code] || ['cloudy', 'Unknown'])[1]\n}\n\n// Thermal ramp, in °C: violet cold through teal and gold to deep red.\nconst RAMP: [number, number, number, number][] = [\n  [-25, 0x5b, 0x3f, 0x95],\n  [-12, 0x3d, 0x6c, 0xb9],\n  [-2, 0x4f, 0xa3, 0xd1],\n  [6, 0x5f, 0xbf, 0xae],\n  [13, 0xa9, 0xcf, 0x6e],\n  [19, 0xf1, 0xc4, 0x4b],\n  [25, 0xf0, 0x8a, 0x3c],\n  [31, 0xd9, 0x4b, 0x3a],\n  [40, 0x9e, 0x1f, 0x3f],\n]\n\nfunction hex(value: number) {\n  const text = Math.max(0, Math.min(255, Math.round(value))).toString(16)\n  return text.length < 2 ? '0' + text : text\n}\n\nexport function mix(a: string, b: string, t: number) {\n  const pa = parseInt(a.substring(1), 16)\n  const pb = parseInt(b.substring(1), 16)\n  const r = ((pa >> 16) & 255) * (1 - t) + ((pb >> 16) & 255) * t\n  const g = ((pa >> 8) & 255) * (1 - t) + ((pb >> 8) & 255) * t\n  const bl = (pa & 255) * (1 - t) + (pb & 255) * t\n  return '#' + hex(r) + hex(g) + hex(bl)\n}\n\nexport function celsius(value: number, fahrenheit: boolean) {\n  return fahrenheit ? ((value - 32) * 5) / 9 : value\n}\n\nexport function temperatureColor(celsiusValue: number) {\n  if (celsiusValue <= RAMP[0][0]) return '#' + hex(RAMP[0][1]) + hex(RAMP[0][2]) + hex(RAMP[0][3])\n  for (let i = 1; i < RAMP.length; i++) {\n    const [top, r, g, b] = RAMP[i]\n    if (celsiusValue <= top) {\n      const [bottom, r0, g0, b0] = RAMP[i - 1]\n      const t = (celsiusValue - bottom) / (top - bottom)\n      return '#' + hex(r0 + (r - r0) * t) + hex(g0 + (g - g0) * t) + hex(b0 + (b - b0) * t)\n    }\n  }\n  const last = RAMP[RAMP.length - 1]\n  return '#' + hex(last[1]) + hex(last[2]) + hex(last[3])\n}\n\n// The place's clock: a Date whose UTC fields are the place's wall clock.\nexport function placeClock(epochMs: number, offsetSeconds: number) {\n  return new Date(epochMs + offsetSeconds * 1000)\n}\n\nexport function two(value: number) {\n  return value < 10 ? '0' + value : '' + value\n}\n\nexport function clockText(epochMs: number, offsetSeconds: number, twelveHour: boolean) {\n  const d = placeClock(epochMs, offsetSeconds)\n  const h = d.getUTCHours()\n  if (twelveHour) {\n    return (h % 12 || 12) + ':' + two(d.getUTCMinutes()) + (h < 12 ? ' am' : ' pm')\n  }\n  return two(h) + ':' + two(d.getUTCMinutes())\n}\n\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = [\n  'January', 'February', 'March', 'April', 'May', 'June',\n  'July', 'August', 'September', 'October', 'November', 'December',\n]\n\n// Index of the hour that holds `epochMs` in an hourly series.\nexport function hourIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 3600000)\n}\n\n// Index of the place's day that holds `epochMs` in a daily series.\nexport function dayIndex(series: { start: number }, epochMs: number) {\n  return Math.floor((epochMs - series.start) / 86400000)\n}\n\nexport function degrees(value: number) {\n  if (value == null || !isFinite(value)) return '–'\n  const n = Math.round(value)\n  return (n < 0 ? '−' + -n : '' + n) + '°'\n}\n\nexport function compass(directionDegrees: number) {\n  const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']\n  return names[Math.round(((directionDegrees % 360) + 360) / 45) % 8]\n}\n"
+        }
+      }
+    }
+  }
+]

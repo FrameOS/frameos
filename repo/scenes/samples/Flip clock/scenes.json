@@ -1,0 +1,229 @@
+[
+  {
+    "id": "flip-clock",
+    "name": "Flip clock",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "draw",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": -260
+        },
+        "data": {
+          "keyword": "flipClock",
+          "config": {}
+        }
+      },
+      {
+        "id": "state-clock-picture",
+        "type": "state",
+        "position": {
+          "x": 40,
+          "y": -700
+        },
+        "data": {
+          "keyword": "clock",
+          "value": "24h"
+        }
+      },
+      {
+        "id": "state-theme-picture",
+        "type": "state",
+        "position": {
+          "x": 40,
+          "y": -630
+        },
+        "data": {
+          "keyword": "theme",
+          "value": "black"
+        }
+      },
+      {
+        "id": "state-showDate-picture",
+        "type": "state",
+        "position": {
+          "x": 40,
+          "y": -560
+        },
+        "data": {
+          "keyword": "showDate",
+          "value": "true"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-draw",
+        "source": "render",
+        "target": "draw",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "picture-draw",
+        "source": "picture",
+        "target": "draw",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-clock-picture-edge",
+        "source": "state-clock-picture",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/clock",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-theme-picture-edge",
+        "source": "state-theme-picture",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/theme",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-showDate-picture-edge",
+        "source": "state-showDate-picture",
+        "target": "picture",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/showDate",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "clock",
+        "label": "Clock",
+        "type": "select",
+        "value": "24h",
+        "options": [
+          {
+            "value": "24h",
+            "label": "24 hour"
+          },
+          {
+            "value": "12h",
+            "label": "12 hour"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "theme",
+        "label": "Look",
+        "type": "select",
+        "value": "black",
+        "options": [
+          {
+            "value": "black",
+            "label": "Black flaps"
+          },
+          {
+            "value": "cream",
+            "label": "Cream flaps"
+          },
+          {
+            "value": "red",
+            "label": "Red flaps"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "showDate",
+        "label": "Show the date",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "Clocks & time",
+      "refreshInterval": 60,
+      "backgroundColor": "#141414",
+      "windowSize": "800x480",
+      "icon": "M2,6A2,2 0 0,0 0,8V16A2,2 0 0,0 2,18H10A2,2 0 0,0 12,16V8A2,2 0 0,0 10,6H2M14,6A2,2 0 0,0 12,8V16A2,2 0 0,0 14,18H22A2,2 0 0,0 24,16V8A2,2 0 0,0 22,6H14M1,11.5H11V12.5H1V11.5M13,11.5H23V12.5H13V11.5Z"
+    },
+    "apps": {
+      "flipClock": {
+        "name": "Flip clock",
+        "category": "data",
+        "description": "A split-flap clock.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "clock",
+            "label": "Clock",
+            "type": "select",
+            "value": "24h",
+            "options": [
+              "24h",
+              "12h"
+            ]
+          },
+          {
+            "name": "theme",
+            "label": "Look",
+            "type": "select",
+            "value": "black",
+            "options": [
+              "black",
+              "cream",
+              "red"
+            ]
+          },
+          {
+            "name": "showDate",
+            "label": "Show the date",
+            "type": "boolean",
+            "value": "true"
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Flip clock\",\n  \"category\": \"data\",\n  \"description\": \"A split-flap clock.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"clock\",\n      \"label\": \"Clock\",\n      \"type\": \"select\",\n      \"value\": \"24h\",\n      \"options\": [\n        \"24h\",\n        \"12h\"\n      ]\n    },\n    {\n      \"name\": \"theme\",\n      \"label\": \"Look\",\n      \"type\": \"select\",\n      \"value\": \"black\",\n      \"options\": [\n        \"black\",\n        \"cream\",\n        \"red\"\n      ]\n    },\n    {\n      \"name\": \"showDate\",\n      \"label\": \"Show the date\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// A split-flap clock: the hours and the minutes each on a big flap, split\n// across the middle with the hinge pins showing, and the date on three small\n// flaps underneath. It draws on the minute.\nimport { WEEKDAYS, MONTHS, two, secondsToNextMinute } from './time'\n\nconst LOOKS: Record<string, { back: string; backEdge: string; top: string; topLow: string; bottom: string; bottomLow: string; ink: string; split: string; pin: string; tag: string }> = {\n  black: { back: '#1d1d1d', backEdge: '#0a0a0a', top: '#323232', topLow: '#262626', bottom: '#222222', bottomLow: '#1a1a1a', ink: '#ece8df', split: '#050505', pin: '#555555', tag: '#a8a49b' },\n  cream: { back: '#d9d2c4', backEdge: '#b5ad9c', top: '#fbf8f1', topLow: '#efe9dd', bottom: '#e9e3d6', bottomLow: '#ddd5c6', ink: '#232323', split: '#8f8778', pin: '#a69e8e', tag: '#6c665c' },\n  red: { back: '#211c1b', backEdge: '#0c0a0a', top: '#c5372c', topLow: '#b02e24', bottom: '#a52a21', bottomLow: '#93241c', ink: '#fff4e8', split: '#3a0d09', pin: '#6e2a24', tag: '#ffd9cf' },\n}\n\nconst FONT = 'Liberation Sans'\n\n// One flap: two halves split across the middle, the text over both.\nfunction flap(id: string, x: number, y: number, w: number, h: number, text: string, size: number, look: any, tag?: string) {\n  const r = Math.min(w, h) * 0.07\n  const mid = y + h / 2\n  const f = (n: number) => n.toFixed(1)\n  const topHalf = `M${f(x)} ${f(mid)} V${f(y + r)} A${f(r)} ${f(r)} 0 0 1 ${f(x + r)} ${f(y)} H${f(x + w - r)} A${f(r)} ${f(r)} 0 0 1 ${f(x + w)} ${f(y + r)} V${f(mid)} Z`\n  const bottomHalf = `M${f(x)} ${f(mid)} V${f(y + h - r)} A${f(r)} ${f(r)} 0 0 0 ${f(x + r)} ${f(y + h)} H${f(x + w - r)} A${f(r)} ${f(r)} 0 0 0 ${f(x + w)} ${f(y + h - r)} V${f(mid)} Z`\n  const split = Math.max(1.5, h * 0.012)\n  const pinW = Math.max(2, w * 0.018)\n  const pinH = h * 0.09\n  return (\n    <g>\n      <linearGradient id={`${id}-top`} gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1={y} x2=\"0\" y2={mid}>\n        <stop offset=\"0\" stopColor={look.top} />\n        <stop offset=\"1\" stopColor={look.topLow} />\n      </linearGradient>\n      <linearGradient id={`${id}-bottom`} gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1={mid} x2=\"0\" y2={y + h}>\n        <stop offset=\"0\" stopColor={look.bottom} />\n        <stop offset=\"1\" stopColor={look.bottomLow} />\n      </linearGradient>\n      <rect x={x + w * 0.01} y={y + h * 0.035} width={w} height={h} rx={r} fill=\"#000000\" opacity={0.35} />\n      <path d={topHalf} fill={`url(#${id}-top)`} />\n      <path d={bottomHalf} fill={`url(#${id}-bottom)`} />\n      <text x={x + w / 2} y={mid + size * 0.36} fontFamily={FONT} fontWeight={700} fontSize={size} fill={look.ink} textAnchor=\"middle\">\n        {text}\n      </text>\n      <rect x={x} y={mid} width={w} height={h / 2} fill=\"#000000\" opacity={0.07} />\n      <rect x={x} y={mid - split / 2} width={w} height={split} fill={look.split} />\n      <rect x={x} y={mid + split / 2} width={w} height={Math.max(1, split * 0.5)} fill=\"#ffffff\" opacity={0.06} />\n      <rect x={x - pinW * 0.4} y={mid - pinH / 2} width={pinW} height={pinH} rx={pinW * 0.4} fill={look.pin} />\n      <rect x={x + w - pinW * 0.6} y={mid - pinH / 2} width={pinW} height={pinH} rx={pinW * 0.4} fill={look.pin} />\n      {tag ? (\n        <text x={x + w * 0.06} y={y + h * 0.13} fontFamily={FONT} fontWeight={700} fontSize={h * 0.075} fill={look.tag}>\n          {tag}\n        </text>\n      ) : null}\n    </g>\n  )\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const look = LOOKS[app.config.theme] || LOOKS.black\n  const twelve = app.config.clock === '12h'\n  const showDate = String(app.config.showDate) !== 'false'\n  const now = new Date()\n  frameos.setNextSleep(secondsToNextMinute(now))\n\n  const hours = now.getHours()\n  const hourText = twelve ? String(hours % 12 || 12) : two(hours)\n  const minuteText = two(now.getMinutes())\n  const tag = twelve ? (hours < 12 ? 'AM' : 'PM') : undefined\n\n  const portrait = H > W * 1.1\n  const pad = Math.min(W, H) * 0.07\n  const gap = Math.min(W, H) * 0.045\n  const dateShare = showDate ? 0.22 : 0\n  const flaps = []\n  let cardW\n  let cardH\n  let top\n  if (!portrait) {\n    cardW = (W - pad * 2 - gap) / 2\n    cardH = Math.min(cardW * 0.98, (H - pad * 2) * (1 - dateShare) - (showDate ? gap : 0))\n    top = (H - cardH - (showDate ? gap + cardH * 0.3 : 0)) / 2\n    const size = Math.min(cardH * 0.78, cardW * 0.74)\n    flaps.push(flap('h', pad, top, cardW, cardH, hourText, size, look, tag))\n    flaps.push(flap('m', pad + cardW + gap, top, cardW, cardH, minuteText, size, look))\n  } else {\n    cardW = W - pad * 2\n    cardH = Math.min(cardW * 0.8, ((H - pad * 2) * (1 - dateShare * 0.8) - gap * (showDate ? 2 : 1)) / 2)\n    top = (H - cardH * 2 - gap - (showDate ? gap + cardH * 0.3 : 0)) / 2\n    const size = Math.min(cardH * 0.78, cardW * 0.74)\n    flaps.push(flap('h', pad, top, cardW, cardH, hourText, size, look, tag))\n    flaps.push(flap('m', pad, top + cardH + gap, cardW, cardH, minuteText, size, look))\n  }\n\n  if (showDate) {\n    const smallH = cardH * 0.3\n    const bottomOfClock = portrait ? top + cardH * 2 + gap : top + cardH\n    const y = bottomOfClock + gap\n    const parts = [WEEKDAYS[now.getDay()].substring(0, 3).toUpperCase(), String(now.getDate()), MONTHS[now.getMonth()].substring(0, 3).toUpperCase()]\n    const widths = [smallH * 1.9, smallH * 1.3, smallH * 1.9]\n    const smallGap = gap * 0.45\n    const total = widths[0] + widths[1] + widths[2] + smallGap * 2\n    let x = (W - total) / 2\n    parts.forEach((text, i) => {\n      flaps.push(flap(`d${i}`, x, y, widths[i], smallH, text, smallH * 0.55, look))\n      x += widths[i] + smallGap\n    })\n  }\n\n  return (\n    <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>\n      <radialGradient id=\"back\" gradientUnits=\"userSpaceOnUse\" cx={W / 2} cy={H * 0.45} r={Math.max(W, H) * 0.75}>\n        <stop offset=\"0\" stopColor={look.back} />\n        <stop offset=\"1\" stopColor={look.backEdge} />\n      </radialGradient>\n      <rect width={W} height={H} fill=\"url(#back)\" />\n      {flaps}\n    </svg>\n  )\n}\n",
+          "time.ts": "// Words and numbers for times and dates. A JS app's Date is in the frame's\n// time zone.\n\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = [\n  'January', 'February', 'March', 'April', 'May', 'June',\n  'July', 'August', 'September', 'October', 'November', 'December',\n]\n\nexport function two(value: number) {\n  return value < 10 ? '0' + value : '' + value\n}\n\n// \"14:05\", or \"2:05 pm\" on a 12-hour clock.\nexport function timeText(hours: number, minutes: number, twelveHour: boolean) {\n  if (twelveHour) {\n    return (hours % 12 || 12) + ':' + two(minutes) + (hours < 12 ? ' am' : ' pm')\n  }\n  return two(hours) + ':' + two(minutes)\n}\n\nexport function clockOf(date: Date, twelveHour: boolean) {\n  return timeText(date.getHours(), date.getMinutes(), twelveHour)\n}\n\n// Seconds until the next minute starts, so a clock draws on the minute.\nexport function secondsToNextMinute(date: Date) {\n  return Math.max(1, 60 - date.getSeconds())\n}\n"
+        }
+      }
+    }
+  }
+]

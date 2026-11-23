@@ -1,9 +1,10 @@
 {
   "name": "Calendar",
-  "description": "Monthly calendar with .ics support. Light and dark mode.",
+  "description": "A month of your iCal events in six looks: light, dark, toy box, minimal, midnight and ink.",
   "config": null,
   "image": "./image.jpg",
-  "imageWidth": 1280,
-  "imageHeight": 720,
-  "scenes": "./scenes.json"
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.7.5"
 }

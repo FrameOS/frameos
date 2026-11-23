@@ -1,0 +1,10 @@
+{
+  "name": "Week planner",
+  "description": "The next seven days side by side, each event a block at its time, all-day ones along the top and a line at now. From your iCal link.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

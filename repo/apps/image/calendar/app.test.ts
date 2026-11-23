@@ -108,6 +108,25 @@ describe('calendar', () => {
     expect(svg).not.toContain('<rect width="800" height="480"')
   })
 
+  it('draws the card looks as rounded days, today circled, and no grid', () => {
+    const toybox = onDay('2024-03-12', () => draw({ year: 0, month: 0, theme: 'toybox', events: [{ summary: 'Fair', startTime: '2024-03-12' }] }))
+    expect(toybox.svg).toContain('font-family="Galindo-Regular.ttf"')
+    expect(toybox.svg).toContain('fill="#ff8c1a"') // Monday's pill
+    expect(toybox.svg.match(/<circle [^>]*fill="#e63946"/g)).toHaveLength(1)
+    expect(toybox.svg).toMatch(/<rect [^>]*rx="[\d.]+" fill="#ffffff"/)
+    expect(toybox.svg).not.toContain('fill="#999999"')
+    const minimal = onDay('2024-03-12', () => draw({ year: 0, month: 0, theme: 'minimal' }))
+    expect(minimal.svg).toContain('fill="#111111"')
+    expect(minimal.svg).not.toContain('fill="#ff0000"')
+  })
+
+  it('draws the ink look in black and white, its lines two wide', () => {
+    const svg = onDay('2024-03-12', () => draw({ year: 0, month: 0, theme: 'ink' })).svg
+    const fills = new Set((svg.match(/fill="#[0-9a-f]{6}"/g) || []).map((f) => f.slice(6, 13)))
+    expect([...fills].every((f) => f === '#000000' || f === '#ffffff')).toBe(true)
+    expect(svg).toMatch(/width="2" height="[\d.]+" fill="#000000"/)
+  })
+
   it('needs a canvas to size itself to', () => {
     const app = makeApp({ config: {} })
     expect(() => get(app, { ...makeContext(), imageWidth: 0, imageHeight: 0, targetWidth: 0, targetHeight: 0 })).toThrow('No canvas')

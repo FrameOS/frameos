@@ -1,0 +1,10 @@
+{
+  "name": "Flip clock",
+  "description": "A split-flap clock: the hours and minutes on two big flaps and the date on three small ones, in black, cream or red.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
