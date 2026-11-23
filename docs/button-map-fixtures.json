@@ -1,5 +1,5 @@
 {
-  "description": "The frame's \"Button actions\" rows read out of its event map, and written back (docs/events.md \"Event map\"). Each case is one rule of frame.json `eventMap` (`event_map` on the wire); `expect` is the row it means \u2014 its gesture, its action, the two titles the section shows (a key with a name of its own is called by it: the reTerminal Sticky's `AI` is \"Go\"; a scene named by id is called by its name: the scene `weather` is \"Weather\"; a Show scene with settings, `state` beside `sceneId`, says how many), and the rule the row writes back \u2014 or null for a rule the section does not write, which it keeps as it is. Replayed by the SPA (frontend/src/utils/frameEventMap.ts bindingOfRule / bindingRule / frameGestureTitle / frameActionTitle; cloud/apps/auth-web/src/test/shared-spa/button-map-fixtures.test.ts) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/ButtonBindings.swift; ButtonMapFixtureTests.swift).",
+  "description": "The frame's \"Button actions\" rows read out of its event map, and written back (docs/events.md \"Event map\"). Each case is one rule of frame.json `eventMap` (`event_map` on the wire); `expect` is the row it means \u2014 its gesture, its action, the two titles the section shows (a key with a name of its own is called by it: the reTerminal Sticky's `AI` is \"Action\"; a scene named by id is called by its name: the scene `weather` is \"Weather\"; a Show scene with settings, `state` beside `sceneId`, says how many), and the rule the row writes back \u2014 or null for a rule the section does not write, which it keeps as it is. Replayed by the SPA (frontend/src/utils/frameEventMap.ts bindingOfRule / bindingRule / frameGestureTitle / frameActionTitle; cloud/apps/auth-web/src/test/shared-spa/button-map-fixtures.test.ts) and the iOS app (ios/FrameOSKit/Sources/FrameOSKit/Contracts/ButtonBindings.swift; ButtonMapFixtureTests.swift).",
   "cases": [
     {
       "rule": {
@@ -324,7 +324,7 @@
             "kind": "back"
           }
         },
-        "gestureTitle": "Go \u00b7 double press",
+        "gestureTitle": "Action \u00b7 double press",
         "actionTitle": "Back",
         "rule": {
           "event": "button",
@@ -357,7 +357,7 @@
             "kind": "sceneSwitcher"
           }
         },
-        "gestureTitle": "Go \u00b7 triple press",
+        "gestureTitle": "Action \u00b7 triple press",
         "actionTitle": "Scene switcher",
         "rule": {
           "event": "button",

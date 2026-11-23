@@ -706,24 +706,24 @@ on e-paper the chrome never wakes the frame sooner than its scene would
 (`scene_rhythm.nim`).
 
 - **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
-  upright, its panel turned 270, with three keys on its right edge: Go on top
+  upright, its panel turned 270, with three keys on its right edge: Action on top
   (Seeed prints AI on it, and `AI` stays its label in event maps, NVS and the
-  fixtures), then UP and DOWN. Go goes: a press is the scene's (`primary`, the
-  contract's `buttons.roleByLabel`: what is picked opens), twice goes back,
-  three times goes home to the scene list, and held it talks (the board's
-  preset map). People are told "Go" everywhere a key is named for them: the
+  fixtures), then UP and DOWN. Once it is the scene's (`primary`, the
+  contract's `buttons.roleByLabel`: what is picked opens), twice it goes back,
+  thrice it goes home to the scene list, and held it talks (the board's
+  preset map). People are told "Action" everywhere a key is named for them: the
   layout's help, and the SPA's and the iOS app's button rows (`keyTitle`,
   pinned by `docs/button-map-fixtures.json`).
   **One header that shrinks.** Over every scene is a thin bar (6.5 units):
   the time and the short date on the left (a tap: the scene list), the Wi-Fi
   signal and the battery on the right (a tap: the frame's page), a 2 px rule
   under it, one ink and no greys, so it stays crisp on the black-and-white
-  panel. When the scene list is open (a swipe up, Go pressed three times, or
+  panel. When the scene list is open (a swipe up, Action pressed thrice, or
   twice where the frame's map leaves that free: the layout's own binding), the
   same header is big: the layout turns the list into a home screen with the
   time and the date large, the battery and the signal, and under the list how
-  to get around, a line each, read off the frame's event map: what Go does (a press,
-  twice, three times, held: "go", "go back", "go home", "talk"), what UP and
+  to get around, a line each, read off the frame's event map: what Action does (once,
+  twice, thrice, held: "go", "go back", "go home", "talk"), what UP and
   DOWN do (in the list they move; held, the map's scene back and on) and the
   swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
@@ -737,7 +737,7 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   never wakes the panel: the chrome is drawn on the scene's own passes (the
   rule above), so the time shown is when the picture was last drawn, and a
   scene that draws more often than once a minute brings it up to date within
-  a pass, in the same refresh. A press of Go that the frame's
+  a pass, in the same refresh. A press of Action that the frame's
   map leaves to the scene also draws the picture again (`render`).
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
@@ -767,7 +767,7 @@ frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
 E-series' hint under the name; the Sticky's date, in its bar and on its home
 screen, and its help under the list), the Sticky's bar or nothing around a scene,
-whether the Refresh key or Go draws the picture again when pressed (off: the
+whether the Refresh key or Action draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is

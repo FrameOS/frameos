@@ -111,9 +111,9 @@ describe("rules from choices and back", () => {
       { label: "REFRESH", action: "longPress" },
       { label: "LEFT", action: "press" },
     ]);
-    // The reTerminal Sticky's AI key is the Go key to people; AI stays its label.
-    expect(gestureTitle({ label: "AI", action: "triplePress" })).toBe("Go · triple press");
-    expect(gestureTitle({ label: "ai", action: "press" })).toBe("Go · press");
+    // The reTerminal Sticky's AI key is the Action key to people; AI stays its label.
+    expect(gestureTitle({ label: "AI", action: "triplePress" })).toBe("Action · triple press");
+    expect(gestureTitle({ label: "ai", action: "press" })).toBe("Action · press");
     expect(gestureTitle({ label: "AIR", action: "press" })).toBe("AIR · press");
   });
 

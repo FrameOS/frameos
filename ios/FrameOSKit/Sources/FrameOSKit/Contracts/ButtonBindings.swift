@@ -82,8 +82,8 @@ public enum ButtonBindings {
                              "top": "Swipe down from the top", "bottom": "Swipe up from the bottom"]
 
     /// What people call a key whose label on the wire is something else: the
-    /// reTerminal Sticky's `AI` is the Go key (the SPA's keyTitle).
-    static let keyTitles = ["AI": "Go"]
+    /// reTerminal Sticky's `AI` is the Action key (the SPA's keyTitle).
+    static let keyTitles = ["AI": "Action"]
 
     public static func keyTitle(_ label: String) -> String {
         keyTitles[label.trimmingCharacters(in: .whitespaces).uppercased()] ?? label
