@@ -2635,6 +2635,96 @@
     ]
    },
    {
+    "name": "a coalesced move carries the positions it replaced in points",
+    "why": "A drawing scene keeps every point of a stroke that came while it was busy: the move that replaces a queued one carries where that one was (and what that one carried) in `points`, oldest first, converted to scene pixels as `x` and `y` are (the test frame is 4x3, so the wire's thirds land on 0 and 1). A move nothing replaced has no `points`. No pointer is down, so `buttons` is 0.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/points",
+      "name": "points",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "p1",
+        "type": "event",
+        "data": {
+         "keyword": "pointerMove"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/points",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "pointerMove",
+        "payload": {
+         "x": 0,
+         "y": 0,
+         "pointerId": 1,
+         "pointerType": "touch",
+         "buttons": 1
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "pointerMove",
+        "payload": {
+         "x": 10923,
+         "y": 16384,
+         "pointerId": 1,
+         "pointerType": "touch",
+         "buttons": 1,
+         "points": [
+          5461,
+          8192
+         ]
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "pointerMove",
+        "payload": {
+         "x": 32767,
+         "y": 32767,
+         "pointerId": 1,
+         "pointerType": "touch",
+         "buttons": 1
+        }
+       }
+      ],
+      "trace": [
+       "run points pointerMove {\"x\":3,\"y\":2,\"pointerId\":1,\"pointerType\":\"touch\",\"buttons\":0,\"points\":[0,0,0,0,1,1]}"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "pointerMove",
+        "payload": {
+         "x": 0,
+         "y": 0,
+         "pointerId": 1,
+         "pointerType": "touch",
+         "buttons": 1
+        }
+       }
+      ],
+      "trace": [
+       "run points pointerMove {\"x\":0,\"y\":0,\"pointerId\":1,\"pointerType\":\"touch\",\"buttons\":0}"
+      ]
+     }
+    ]
+   },
+   {
     "name": "turnOn and turnOff drive the display, then the scene hears them",
     "why": "A scene command: the host acts, and a listener still runs.",
     "scenes": [

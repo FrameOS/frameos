@@ -884,6 +884,20 @@ export const cloudFramesContract = {
         }
       }
     },
+    "click_sounds": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "silent",
+          "normal"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.11.15"
+        }
+      }
+    },
     "cpu_mode": {
       "rule": {
         "type": "string",

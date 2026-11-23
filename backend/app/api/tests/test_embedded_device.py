@@ -1389,6 +1389,29 @@ async def test_settings_carry_the_status_led_only_when_set(async_client, no_auth
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_the_click_sounds_only_when_set(async_client, no_auth_client, db):
+    """The sounds of a tap and a press (click_sounds): present-only, and only
+    as one of the contract's modes."""
+    frame = await device_frame(async_client, db)
+    base_config = {
+        key: value for key, value in (frame.device_config or {}).items() if key not in ('clickSounds', 'click_sounds')
+    }
+    for config, expected in (
+        (base_config, None),
+        ({**base_config, 'click_sounds': 'silent'}, 'silent'),
+        ({**base_config, 'clickSounds': 'normal'}, 'normal'),
+        ({**base_config, 'clickSounds': 'loud'}, None),
+    ):
+        frame.device_config = config
+        db.add(frame)
+        db.commit()
+        response = await no_auth_client.get(
+            f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+        assert response.status_code == 200, response.text
+        assert response.json()['frame'].get('clickSounds') == expected
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_the_cpu_mode_only_when_set(async_client, no_auth_client, db):
     """The chip's clock (cpu_mode) is present-only: unset, the board runs its
     own rule (160 MHz on e-paper, 240 on an LCD or touch panel), and a value

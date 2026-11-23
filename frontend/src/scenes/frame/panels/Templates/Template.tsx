@@ -46,6 +46,15 @@ import { CURRENT_FRAMEOS_VERSION } from '../../frameDeployUtils'
 import { templateSceneIcon } from '../../../../utils/sceneIcon'
 import { SceneIcon } from '../../../../components/SceneIcon'
 
+/** A description past about three lines of the drawer's card: it is clamped
+ * and gets "Read more". The publisher writes it, and some read like prompts. */
+export function templateDescriptionIsLong(description?: string | null): boolean {
+  if (!description) {
+    return false
+  }
+  return description.length > 160 || description.split('\n').length > 3
+}
+
 // True when a cloud scene was exported with a newer FrameOS than this install
 // runs — a nudge that upgrading may be needed for it to work as published.
 // CalVer (2026.7.3) compares numerically segment by segment.
@@ -166,8 +175,10 @@ export function TemplateRow({
     trySceneConfig,
     scenes: templateScenes,
     canLoadRemoteScenes,
+    descriptionExpanded,
   } = useValues(templateRowLogic({ frameId, template, repository }))
-  const { startTryScene } = useActions(templateRowLogic({ frameId, template, repository }))
+  const { startTryScene, toggleDescription } = useActions(templateRowLogic({ frameId, template, repository }))
+  const longDescription = templateDescriptionIsLong(template.description)
   const imageEntity = useMemo(() => {
     if (typeof template.image === 'string') {
       const match = template.image.match(/^\/api\/(repositories\/system\/[^/]+\/templates\/[^/]+)\/image$/)
@@ -479,12 +490,31 @@ export function TemplateRow({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full justify-between">
-            {template.description ? <div className="frame-tool-muted text-sm">{template.description}</div> : null}
-          </div>
+          {template.description ? (
+            <div className="frame-tool-muted text-sm">
+              <div
+                className={clsx(
+                  'whitespace-pre-line break-words',
+                  longDescription && !descriptionExpanded && 'line-clamp-3'
+                )}
+              >
+                {template.description}
+              </div>
+              {longDescription ? (
+                <button
+                  type="button"
+                  className="mt-0.5 text-xs font-semibold underline-offset-2 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  aria-expanded={descriptionExpanded}
+                  onClick={toggleDescription}
+                >
+                  {descriptionExpanded ? 'Show less' : 'Read more'}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {unsupported ? (
             <div className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-              Not supported on ESP32: {unsupportedReason}
+              Not supported on this frame: {unsupportedReason}
             </div>
           ) : null}
           {missingSecretSettings.size ? (

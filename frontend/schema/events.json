@@ -132,7 +132,7 @@
   },
   {
     "name": "pointerMove",
-    "description": "When a pointer (a finger, a mouse, a pen) moves (not logged)",
+    "description": "When a pointer (a finger, a mouse, a pen) moves (not logged). A move that stands for others the scene did not hear (they came while it was busy) lists where those were in `points`, x, y, x, y, ... oldest first, in the units of `x` and `y`.",
     "canListen": true,
     "fields": [
       {

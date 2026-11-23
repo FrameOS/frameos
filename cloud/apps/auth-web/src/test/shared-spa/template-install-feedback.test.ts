@@ -24,7 +24,17 @@ import type { FrameType, RepositoryType, TemplateType } from "../../../../../../
 type TestWindow = Window & { FRAMEOS_EMBEDDED_NO_BACKEND?: boolean };
 const testWindow = window as TestWindow;
 const frameId = 63 as unknown as FrameType["id"];
-const frame = { id: 63, project_id: 1, name: "Hallway", mode: "rpios", scenes: [] };
+const deployedFrame = {
+  id: 63,
+  project_id: 1,
+  name: "Hallway",
+  mode: "rpios",
+  scenes: [],
+  last_successful_deploy_at: "2026-11-01T00:00:00Z",
+};
+// An ESP32 nothing has reached yet: never deployed, never heard from.
+const unreachedFrame = { id: 63, project_id: 1, name: "Sticky", mode: "embedded", scenes: [] };
+let frame: Record<string, unknown> = deployedFrame;
 
 const scenesUrl = "https://store.example/scenes/weather/scenes.json";
 const repository = { id: "store", name: "Store", url: "https://store.example/repository.json" } as unknown as RepositoryType;
@@ -34,6 +44,7 @@ const installId = templateFavouriteId(template, repository);
 let templateScenes: Promise<Response>;
 
 beforeEach(() => {
+  frame = deployedFrame;
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   apiFetchMock.mockReset();
   apiFetchMock.mockImplementation(async (input) => {
@@ -92,6 +103,28 @@ describe("installing a catalog scene", () => {
       ({ url, init }) => /\/api\/frames\/63$/.test(url) && init?.method && init.method !== "GET" && String(init.body).includes("Weather"),
     );
     expect(save).toBeDefined();
+  });
+
+  it("only saves on a frame nothing has reached yet: its first deploy takes the scene", async () => {
+    // "Install" on an ESP32 not flashed yet started a deploy that could only
+    // fail ("Embedded full deploy is available after the device has sent at
+    // least one boot or render log").
+    frame = unreachedFrame;
+    framesModel.actions.loadFrame(frameId);
+    const logic = templatesLogic({ frameId });
+    logic.mount();
+    await waitFor(() => expect(frameLogic({ frameId }).values.frame?.mode).toBe("embedded"));
+    templateScenes = Promise.resolve(Response.json([{ id: "t-1", name: "Weather", nodes: [], edges: [] }]));
+    logic.actions.applyRemoteToFrame(repository, template);
+    await waitFor(() => expect(logic.values.installingTemplateIds).toEqual({}));
+
+    const calls = apiFetchMock.mock.calls.map(([input, init]) => ({ url: String(input), init }));
+    expect(
+      calls.some(
+        ({ url, init }) => /\/api\/frames\/63$/.test(url) && init?.method && init.method !== "GET" && String(init.body).includes("Weather"),
+      ),
+    ).toBe(true);
+    expect(calls.some(({ url }) => /\/api\/frames\/63\/(fast_)?deploy/.test(url))).toBe(false);
   });
 
   it("reports a download that fails, and lets go of the button", async () => {

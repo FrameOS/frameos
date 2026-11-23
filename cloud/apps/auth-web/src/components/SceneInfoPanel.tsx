@@ -7,6 +7,7 @@ import { formatDate } from "../lib/format";
 import {
   keyFlagNamespace,
   knownSceneAccessFlags,
+  sceneAccessTags,
   settingsKeyTitle,
 } from "../../../../../frontend/src/utils/sceneAccess";
 import type { InstallableFrame } from "./InstallOnFrameBox";
@@ -170,6 +171,10 @@ export function SceneInfoPanel({
     .map((flag) => keyFlagNamespace(flag))
     .filter((namespace): namespace is string => namespace !== null)
     .map((namespace) => settingsKeyTitle(namespace));
+  // What the scene asks of the frame, as the store's cards tag it ("writes
+  // files", "changes the frame", …): a fact of the scene, so it is a row of
+  // the facts, where the store's red tags are found again.
+  const permissionTags = sceneAccessTags(knownSceneAccessFlags(scene.riskFlags));
 
   return (
     <div className="scene-info scene-info--panel">
@@ -228,8 +233,22 @@ export function SceneInfoPanel({
         share={share}
       />
 
-      {showCategory || showVersion || showType || isOwner ? (
+      {showCategory || showVersion || showType || isOwner || permissionTags.length > 0 ? (
         <dl className="scene-facts">
+          {permissionTags.length > 0 ? (
+            <div className="scene-facts__row">
+              <dt>Permissions</dt>
+              <dd>
+                <span className="tag-list">
+                  {permissionTags.map((tag) => (
+                    <span className="risk-badge" key={tag.key} title={tag.description}>
+                      {tag.label}
+                    </span>
+                  ))}
+                </span>
+              </dd>
+            </div>
+          ) : null}
           {showType ? (
             <div className="scene-facts__row">
               <dt>Type</dt>
@@ -336,6 +355,13 @@ export function SceneInfoPanel({
           This scene can change the frame&apos;s Wi-Fi, rotation and scale, restart or reboot it,
           and run its console commands on an ESP32, as the frame&apos;s settings on its screen can.
           Installing it allows that.
+        </p>
+      ) : null}
+      {scene.riskFlags.includes("code") ? (
+        <p className="notice notice-error" role="alert">
+          This scene can read the code and the settings of every scene on the frame (API keys set
+          in their apps included), change them and add scenes, and ask the frame&apos;s control
+          plane&apos;s AI to write scenes. Installing it allows that.
         </p>
       ) : null}
       {keyTitles.length > 0 ? (

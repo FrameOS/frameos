@@ -282,6 +282,11 @@ typedef struct {
     bool touch_beep;               /* e-paper: a click when something takes a
                                     * press on the glass, and when it lifts.
                                     * Default on. */
+    uint8_t click_sounds;          /* FOS_CLICK_SOUNDS_*: what the buzzer (and
+                                    * the LED) make of a tap or a key, on top
+                                    * of touch_beep. The frame's own (its frame
+                                    * page, the console): no plane sets it.
+                                    * Default normal. */
     uint8_t cpu_mode;              /* fos_cpu_mode_t, read at boot */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
@@ -317,6 +322,27 @@ bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_
  * untouched. Same contract as normalize_rotate: every writer — USB console,
  * backend settings poll, cloud set_settings — goes through this. */
 bool fos_config_normalize_render_scale(double value, uint16_t *out_milli);
+/* Tap and click sounds (the frame page's select of that name,
+ * docs/scene-settings.md): silent, normal, and room for more modes after
+ * these (a new one is a number here and an option in the page's list). */
+#define FOS_CLICK_SOUNDS_SILENT 0
+#define FOS_CLICK_SOUNDS_NORMAL 1
+#define FOS_CLICK_SOUNDS_LAST FOS_CLICK_SOUNDS_NORMAL
+/* On every wire a mode is its name ("silent", "normal"): the planes' settings
+ * (`clickSounds` from a backend, `click_sounds` from the cloud), the hardware
+ * report and the frame page. The console also takes its number. Strict:
+ * anything else is refused with `out` untouched. */
+bool fos_config_parse_click_sounds(const char *text, uint8_t *out);
+/* A plane's value, as the frame takes it: a name it does not know (a mode
+ * from a newer plane) is normal. */
+uint8_t fos_config_click_sounds_or_normal(const char *text);
+const char *fos_config_click_sounds_name(uint8_t mode);
+/* Whether a press is heard (and seen on the LED) in `mode`. The one gate:
+ * the click family and the loading chirp in fos_buzzer.c. */
+static inline bool fos_click_sounds_audible(uint8_t mode)
+{
+    return mode != FOS_CLICK_SOUNDS_SILENT;
+}
 /* The console's spelling of the same: the whole of `text` is one number
  * ("1.5", "2", "0"); anything else, trailing junk included, is refused. */
 bool fos_config_parse_render_scale(const char *text, uint16_t *out_milli);

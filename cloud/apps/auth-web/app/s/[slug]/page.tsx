@@ -488,6 +488,7 @@ export default async function ScenePage({
         aiSettingsUrl={`${getAccountSettingsUrl("usage")}#ai`}
         framesUrl={getFramesUrl()}
         backUrl={getStorePath()}
+        backOrigins={[new URL(getCloudBaseUrl()).origin]}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}
         canRemix={scene.status === "active"}

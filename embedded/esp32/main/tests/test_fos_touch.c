@@ -186,8 +186,33 @@ static void test_glided(void)
     CHECK(!fos_touch_glided(48, 0, 0), "no glass size");
 }
 
+static void test_passed(void)
+{
+    fos_touch_passed_t passed = {0};
+    char buf[16 + 12 * FOS_TOUCH_PASSED_MAX];
+    CHECK(fos_touch_passed_json(&passed, buf, sizeof(buf)) == 0, "none: nothing to say");
+    fos_touch_passed_add(&passed, 10, 20);
+    fos_touch_passed_add(&passed, 30, 40);
+    CHECK(fos_touch_passed_json(&passed, buf, sizeof(buf)) > 0, "two");
+    CHECK(strcmp(buf, ",\"points\":[10,20,30,40]") == 0, "oldest first");
+    char small[12];
+    CHECK(fos_touch_passed_json(&passed, small, sizeof(small)) == 0 && small[0] == '\0', "no room: none");
+
+    /* A long render: every other one goes, the first and the newest stay, in order. */
+    passed.count = 0;
+    for (uint16_t i = 0; i < 100; i++) fos_touch_passed_add(&passed, i, (uint16_t)(1000 + i));
+    CHECK(passed.count <= FOS_TOUCH_PASSED_MAX && passed.count > FOS_TOUCH_PASSED_MAX / 2, "bounded");
+    CHECK(passed.xy[0] == 0 && passed.xy[1] == 1000, "the first stays");
+    CHECK(passed.xy[2 * (passed.count - 1)] == 99, "the newest stays");
+    bool ordered = true;
+    for (uint8_t i = 1; i < passed.count; i++) ordered = ordered && passed.xy[2 * i] > passed.xy[2 * (i - 1)];
+    CHECK(ordered, "in order");
+    CHECK(fos_touch_passed_json(&passed, buf, sizeof(buf)) > 0, "a full set fits the payload's room");
+}
+
 int main(void)
 {
+    test_passed();
     test_touch_beep();
     test_decode();
     test_decode_ft();

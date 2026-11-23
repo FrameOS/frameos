@@ -1152,8 +1152,8 @@ interface FrameOSEventPayloads {
   keyUp: { code: string; key: string; shift: boolean; ctrl: boolean; alt: boolean; meta: boolean; linuxCode?: number };
   /** Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from \`keyDown\`; a preview forwards the browser's \`beforeinput\`. */
   textInput: { text: string };
-  /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
-  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
+  /** When a pointer (a finger, a mouse, a pen) moves (not logged). A move that stands for others the scene did not hear (they came while it was busy) lists where those were in \`points\`, x, y, x, y, ... oldest first, in the units of \`x\` and \`y\`. */
+  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number; points?: any };
   /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds \`shift\`, \`ctrl\`, \`alt\` or \`meta\` as true. */
   pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** When a pointer button is released or a finger lifts (not logged) */

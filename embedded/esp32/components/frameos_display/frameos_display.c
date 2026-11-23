@@ -36,6 +36,7 @@ static int8_t s_panel_pins[7] = {-1, -1, -1, -1, -1, -1, -1};
  * that reaches the glass goes through fos_display_blit or fos_display_update
  * and is copied here, whoever drew it (a status screen, an overlay). */
 static const fos_panel_partial_t *s_partial = NULL;
+static void partial_shutdown(void);
 static uint8_t *s_glass = NULL;
 static bool s_glass_known = false;
 static uint32_t s_partials_since_full = 0;
@@ -179,6 +180,10 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     s_partial = NULL;
     for (size_t i = 0; i < FOS_PANEL_PARTIAL_COUNT; i++) {
         if (strcmp(fos_panel_partial_table[i].name, entry->name) == 0) s_partial = &fos_panel_partial_table[i];
+    }
+    static bool partial_shutdown_registered = false;
+    if (s_partial && !partial_shutdown_registered) {
+        partial_shutdown_registered = esp_register_shutdown_handler(partial_shutdown) == ESP_OK;
     }
     const int8_t panel_pins[] = {config->rst, config->dc, config->cs, config->cs2,
                                  config->busy, config->sck, config->mosi};
@@ -528,6 +533,21 @@ static void refresh_shutdown(void)
     }
 }
 
+/* The same for a partial update, which nobody waits for (it runs while the
+ * render task takes the next tap): a restart in its half second left the
+ * Sticky's glass grey, every black half driven (2026-11-23). The panel's
+ * sleep waits the waveform out and takes the high voltage off. */
+static void partial_shutdown(void)
+{
+    if (!s_panel || !s_partial || !s_panel_awake) return;
+    /* A full refresh on the refresh task first, bounded as at any restart. */
+    refresh_shutdown();
+    DEV_SPI_Acquire();
+    s_panel->sleep();
+    DEV_SPI_Release();
+    s_panel_awake = false;
+}
+
 static bool refresh_task_ready(void)
 {
     if (s_refresh_task != NULL) return true;
@@ -658,6 +678,36 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     s_partials_since_full++;
     if (!controller_keeps) s_changed_since_full += input.changed_bytes;
     if (partial) *partial = true;
+    return ESP_OK;
+}
+
+esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, size_t len)
+{
+    if (!s_panel) return ESP_ERR_INVALID_STATE;
+    if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
+    if (fos_display_is_lcd()) return fos_display_blit(buf, len);
+    bool controller_keeps = s_partial && s_partial->changed;
+    if (!previous) previous = s_glass_known ? s_glass : NULL;
+    if (!s_partial || (!controller_keeps && !previous) || (controller_keeps && previous != s_glass) ||
+        fos_display_refreshing()) {
+        ESP_LOGW(TAG, "quick update: partial=%d known=%d refreshing=%d", s_partial != NULL, (int)s_glass_known,
+                 (int)fos_display_refreshing());
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (controller_keeps) {
+        fos_it8951_10in3_set_interactive(true); /* DU */
+        if (s_partial->changed(buf) < 0) return ESP_ERR_NOT_SUPPORTED;
+    }
+    esp_err_t err = ensure_module();
+    if (err != ESP_OK) return err;
+    DEV_SPI_Acquire();
+    if (!s_panel_awake) s_partial->init();
+    s_partial->show((uint8_t *)buf, (uint8_t *)previous);
+    /* Waits the waveform out and takes the high voltage off. */
+    s_panel->sleep();
+    DEV_SPI_Release();
+    s_panel_awake = false;
+    s_glass_known = false; /* the notice is on the glass, in no copy */
     return ESP_OK;
 }
 

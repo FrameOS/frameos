@@ -1296,6 +1296,7 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     httpd_resp_send(req, "<html><body><h1>Saved</h1><p>Rebooting…</p></body></html>", HTTPD_RESP_USE_STRLEN);
     ESP_LOGI(TAG, "configuration saved via portal, rebooting");
     vTaskDelay(pdMS_TO_TICKS(500));
+    fos_restart_notice("Restarting...");
     esp_restart();
     return ESP_OK;
 }
@@ -1981,6 +1982,7 @@ static void restart_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(750)); /* let the HTTP response flush first */
+    fos_restart_notice("Restarting...");
     esp_restart();
 }
 

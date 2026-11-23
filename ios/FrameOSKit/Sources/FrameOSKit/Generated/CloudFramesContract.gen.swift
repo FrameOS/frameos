@@ -27,6 +27,9 @@ enum CloudFramesContractSource {
       "buzzer_tone_hz": {
         "since": "2026.10.12"
       },
+      "click_sounds": {
+        "since": "2026.11.15"
+      },
       "colors": {
         "since": "2026.10.2"
       },
@@ -277,6 +280,13 @@ enum CloudFramesContractSource {
       "max": 10000,
       "min": 100,
       "type": "int"
+    },
+    "click_sounds": {
+      "enum": [
+        "silent",
+        "normal"
+      ],
+      "type": "string"
     },
     "colors": {
       "keys": {

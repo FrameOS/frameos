@@ -24,14 +24,16 @@
 ## grouped as the desktops group them (`grouped`). A gear in the header opens
 ## the frame page (`sceneSettings {page: "frame"}`), where the frame offers
 ## one: the way back to the layout's choice when the switcher is all a layout
-## left reachable.
+## left reachable. A search field beside the title (where the frame takes
+## taps and the panel is not round) keeps the scenes whose name or category
+## holds what is typed (`query`, cleared each time it opens).
 ##
 ## Flash is the budget on an ESP32 (AGENTS.md): the firmware gets the names
 ## only layout, no keyboard, no pictures and no round panel (none of its
 ## boards has one), integer arithmetic, and no Nim checks in this module.
 ## Every index here is guarded by the loop or the test that reaches it.
 
-import std/[json, options, tables, times]
+import std/[json, options, strutils, tables, times]
 when not defined(frameosEmbedded):
   import std/math
 from frameos/events import isSceneSettings
@@ -125,9 +127,13 @@ var
   sceneSwitcherThumbnail*: SwitcherThumbnail
   sceneSwitcherThumbnailPass*: SwitcherThumbnailPass
   # What the last hit test ran: a tile's index, Close (the tile count), the
-  # gear (count + 1), or -1. Read by runEvent once the hit test is done, so
-  # the handler holds nothing of the scene's.
+  # gear (count + 1), the search field (`SearchHandler`, its text in
+  # `searched`), or -1. Read by runEvent once the hit test is done, so the
+  # handler holds nothing of the scene's.
   tapped {.threadvar.}: int
+  searched {.threadvar.}: string
+
+const SearchHandler = 1_000_000 ## the search field's onChange: past any tile count
 
 proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   ## `node[key] = value` for an object node, without json's assert.
@@ -413,10 +419,29 @@ proc grouped*(entries: seq[SwitcherEntry]): seq[SwitcherEntry] =
       if entry.category.len == 0:
         result.add entry
 
+proc holds(text, part: string): bool =
+  ## Whether `part` is in `text`, ASCII letters in either case.
+  if part.len == 0:
+    return true
+  for start in 0 .. text.len - part.len:
+    var k = 0
+    while k < part.len and text[start + k].toLowerAscii == part[k].toLowerAscii:
+      inc k
+    if k == part.len:
+      return true
+  false
+
 proc list(self: SceneSwitcherScene) =
-  ## The host's scenes, in the order they are drawn, and whether their
-  ## categories get headings.
+  ## The host's scenes, in the order they are drawn, those the search holds
+  ## (by name, category or id), and whether their categories get headings.
   self.entries = grouped(listEntries())
+  let query = self.state{"query"}.getStr()
+  if query.len > 0:
+    var kept: seq[SwitcherEntry]
+    for entry in self.entries:
+      if entry.name.holds(query) or entry.category.holds(query) or entry.id.holds(query):
+        kept.add entry
+    self.entries = move(kept)
   var groups = 0
   for i in 0 ..< self.entries.len:
     if i == 0 or self.entries[i].category != self.entries[i - 1].category:
@@ -591,6 +616,10 @@ proc opened(self: SceneSwitcherScene) =
   self.list()
   self.keysOnly = takesNoTaps(self.frameConfig, panelLook(self.frameConfig).paper)
   self.gear = framePageOffered() and not self.keysOnly
+  if self.state.hasKey("query"):
+    # A search is for this time: opened again, every scene shows.
+    self.state.delete("query")
+    self.list()
   let index = self.indexOf(self.opener())
   if index < 0:
     self.forget()
@@ -821,6 +850,20 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
   c = "grow truncate font-bold"
   c.px("text", size)
   header.children.add el("span", c, txt("Scenes"))
+  if not self.keysOnly:
+    # The quick search: what is typed keeps the scenes that hold it.
+    c = "shrink min-w-0 rounded-full"
+    c.px("w", clamp(width * 2 div 5, 64, max(small * 16, 64)))
+    c.px("h", clamp(grid.headerH * 6 div 10, 14, 40))
+    c.px("px", max(6, small))
+    c.px("text", small)
+    if paper: c.add " border-2 border-black bg-white text-black"
+    else: c.add " bg-zinc-800 focus:bg-zinc-700 placeholder:text-zinc-500"
+    let search = el("input", move c)
+    search.attrs.add(("value", self.state{"query"}.getStr()))
+    search.attrs.add(("placeholder", "Search"))
+    search.attrs.add(("on-change", $SearchHandler))
+    header.children.add search.role("field")
   if self.gear:
     header.children.add self.gearButton(clamp(grid.headerH * 6 div 10, 14, 40), paper,
       self.highlighted() == self.entries.len, button)
@@ -918,7 +961,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   c.add " overflow-y-auto"
   if not grid.round:
     c.px("pb", grid.pad)
-  let list = el("div", c)
+  let list = el("div", move c)
   result.children.add list
   when defined(frameosEmbedded):
     self.header(result, grid, paper, width, size, small, button)
@@ -933,7 +976,8 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     else: c.at(0, grid.y0, width, max(height - grid.y0, 1))
     c.add " flex items-center justify-center text-center"
     c.px("text", size)
-    result.children.add el("div", c, txt("No scenes installed yet."))
+    result.children.add el("div", c,
+      txt(if self.state{"query"}.getStr().len > 0: "No scenes match." else: "No scenes installed yet."))
   # No `return` for that: the loop below ends at once, and one way out keeps
   # one clean-up.
   var look = TileLook(paper: paper)
@@ -1003,8 +1047,11 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
 
 proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
-  ## hit, for `pointer` to act on once the hit test is done.
+  ## hit, for `pointer` to act on once the hit test is done; the search
+  ## field's text with it.
   tapped = handler
+  if handler == SearchHandler:
+    searched = event{"value"}.getStr()
 
 proc draw*(self: SceneSwitcherScene, image: Image) =
   ## One render: the list read again, laid out, drawn into `image`, and the
@@ -1037,7 +1084,17 @@ proc pointer(self: SceneSwitcherScene, event: string, payload: JsonNode) =
   tapped = -1
   let changed = dispatchUiEvent(SceneSwitcherId, event, payload)
   let count = self.entries.len
-  if tapped >= 0:
+  if tapped == SearchHandler:
+    # Typed into the search: the list again, from its top, the first match lit.
+    self.state.put("query", newJString(searched))
+    self.list()
+    scrollList(0)
+    if self.entries.len > 0:
+      self.highlight(0)
+    tapped = -1
+    self.touch()
+    sendEvent(evRender, newJObject(), eoScene)
+  elif tapped >= 0:
     # A tile, Close or the gear: what it did is the next picture (a switch).
     # A tap on nothing is nothing.
     if tapped < count: self.choose(tapped)
@@ -1108,8 +1165,14 @@ proc switcherOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
     self.touch()
   else:
     when not defined(frameosEmbedded):
-      if context.event == "keyDown":
+      if context.event == "keyDown" and uiTarget(SceneSwitcherId, SwitcherNode).input.focus == 0:
         self.keyed(payload)
+        return
+      if context.event == "keyDown" and payload{"code"}.getStr() in ["Enter", "NumpadEnter"] and
+          self.entries.len > 0:
+        # Enter in the search shows the scene it found (the first, or the one lit).
+        self.choose(max(self.highlighted(), 0))
+        self.touch()
         return
     # A pointer event (and what is not one, which the hit test makes
     # nothing of: it has no position).

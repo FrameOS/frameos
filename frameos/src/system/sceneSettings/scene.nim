@@ -257,6 +257,11 @@ proc option(value, label: string): JsonNode =
   result.put("value", newJString(value))
   result.put("label", newJString(label))
 
+const ClickSounds = [("silent", "Silent"), ("normal", "Normal")]
+  ## Tap and click sounds, by the names every wire uses (an ESP32's
+  ## fos_config.h keeps them as FOS_CLICK_SOUNDS_*): a new mode is one more
+  ## entry here and its name on the host.
+
 proc scaleLabel(scale: string): string =
   scale & "\xc3\x97"
 
@@ -374,6 +379,15 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
+  if not info{"clickSounds"}.isNil:
+    # Only a frame that makes them (a buzzer, a speaker, an LED that follows
+    # them): the host says so by handing the mode over.
+    var sounds = field("clickSounds", "Tap and click sounds", "string")
+    options = newJArray()
+    for (value, label) in ClickSounds:
+      options.elems.add option(value, label)
+    sounds.put("options", options)
+    result.elems.add sounds
   if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")
@@ -447,6 +461,14 @@ proc saveFrame(self: SceneSettingsScene, fields: JsonNode) =
   ## alone for the saved network. The page stays up so what it did shows.
   let changes = collect(fields, self.objectAt("frameValues"))
   self.state.put("frameValues", newJObject())
+  # A new rotation restarts the frame (the canvas is sized when it starts:
+  # fos_frame_settings.c, frame_settings_linux.nim), and the page says so
+  # until then: a reTerminal Sticky going blank for ten seconds after Save
+  # looked like a crash (2026-11-22).
+  let rotate = changes{"rotate"}
+  let before = frameInfo()
+  if not rotate.isNil and not before.isNil and rotate.getInt(-1) != before{"rotate"}.getInt(-1):
+    self.state.put("restarting", newJBool(true))
   let layout = changes{"layout"}
   if not layout.isNil:
     # The frame's own to keep: no host setting.
@@ -800,6 +822,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   if not battery.isNil and battery.kind == JInt:
     card.line(look, "Battery", $battery.getInt() & "%")
   card.line(look, "Not saved", info{"note"}.getStr())
+  if self.state{"restarting"}.getBool():
+    card.line(look, "Rotation", "Restarting to turn the screen")
   card.line(look, "Managed by", info{"managedBy"}.getStr())
   card.line(look, "Version", info{"version"}.getStr())
   let update = info{"updateState"}.getInt(-1)
@@ -820,7 +844,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     # A turned LCD copies every frame to its place (embedded_main.nim
     # packImageRgb565, 30 ms at 480x480): there is no drawing it turned.
     let note =
-      if name == "rotate" and not look.paper: "Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
+      if name == "rotate" and not look.paper: "A new rotation restarts the frame. Any rotation but 0\xc2\xb0 adds a noticeable delay to every frame of an animated scene."
+      elif name == "rotate": "A new rotation restarts the frame."
       elif name == "clock" and info{"wifi", "state"}.getStr() == "connected": "Online, the clock follows network time."
       else: ""
     if note.len > 0:

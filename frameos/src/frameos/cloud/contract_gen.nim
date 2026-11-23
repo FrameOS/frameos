@@ -288,6 +288,10 @@ const CloudContractSettings* = @[
     Rule(kind: rkBool),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.11.6")]),
+  SettingSpec(key: "click_sounds", rule:
+    Rule(kind: rkString, strEnum: @["silent", "normal"]),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.11.15")]),
   SettingSpec(key: "cpu_mode", rule:
     Rule(kind: rkString, strEnum: @["auto", "battery", "performance"]),
   profiles: @[

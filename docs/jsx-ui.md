@@ -593,7 +593,10 @@ export const get = () => (
   until it presses). `buttons` is the mask of what is held (`1 << button`), so a slider or a
   paint brush that follows the pointer acts only while it is set. A drag renders at
   the frame's render rate, with the newest position (the ESP32 coalesces a
-  finger's moves while a render runs).
+  finger's moves while a render runs); the positions of the moves it stood for
+  are in `e.points` (`[x, y, x, y, ...]`, oldest first, from the element's
+  corner as `localX` / `localY`; docs/events.md "Pointer"), so a drawing keeps
+  every point of a stroke.
 
   ```tsx
   const setLevel = (e) => { level = Math.max(0, Math.min(100, Math.round((e.localX / e.width) * 100))) }
@@ -604,7 +607,14 @@ export const get = () => (
   ```
 - **The frame renders again after a handler**, whatever it did: a handler
   changes what the next `get()` returns (a module variable, `frameos.setState`,
-  `frameos.remember`), and the picture follows.
+  `frameos.remember`), and the picture follows. A pointer handler
+  (`onPointerDown`, `onPointerMove`, `onPointerUp`) that returns `false` asks
+  for no render: what it did shows with the next one (2026.11.15+; other
+  handlers' `false` is a value like any other). A drawing keeps a stroke's
+  points at every move and returns `false` until it wants a piece of the
+  stroke shown: on e-paper about one partial update apart, so no refresh holds
+  the moves back (the Sketchbook and Handwriting notes samples, their
+  `ink.ts`; `test_smooth_ink_scenes.nim`).
 - **`hover:`** applies while the pointer is over the element, **`active:`**
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that

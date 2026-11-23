@@ -1342,6 +1342,31 @@ quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set_settings`, firmware 2026.11.6+). `fos_touch.c`, host-tested in
 `test_fos_touch.c`.
 
+### Tap and click sounds
+
+`click_sounds` (NVS, `silent` or `normal`, default normal; `set
+click_sounds silent|normal`, the frame page's "Tap and click sounds", a
+backend's `clickSounds`, the cloud's `click_sounds`) gates every press sound
+above and the loading chirp in one place, `clicks_heard` in `fos_buzzer.c`.
+Silent leaves the voice chat's cues alone. Live, no restart; the plane's
+`touch_beep` still switches the e-paper touch clicks under it. The hardware
+report says `sounds` (a buzzer, a codec speaker or an LED that follows the
+notes: `fos_buzzer_sounds`) and `clickSounds`.
+
+### Before a restart
+
+Every planned restart (the reboot and restart verbs, a firmware update and
+its download, a setting that needs one, the frame page's rotation, the
+console's `restart`) calls `fos_restart_notice` first (`fos_restart.h`):
+"Restarting...", "Rebooting..." or "Updating..." in a band over the last
+picture, drawn by the render task in the fast waveform
+(`fos_display_quick_update`: an LCD at once, an e-paper with a partial
+waveform, then the panel put to sleep so no restart cuts a waveform), and
+the stored display hash forgotten so the first render after the boot draws.
+A full-refresh-only panel draws nothing (seconds the restart would wait out),
+and the caller waits 2 s at most. The log line `restart:notice` says what
+became of it.
+
 ### Voice chat
 
 Hold the voice key — the key whose long press the frame's event map binds

@@ -40,6 +40,9 @@ import type { AppConfig, FrameOSSettings, FrameType } from '../../../../types'
 import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 import { downloadBlob } from '../../../../utils/objectUrl'
 
+/** The store's Latest shelf: this many at first, twice as many more a "Show more". */
+export const STORE_LATEST_PAGE = 5
+
 export interface TemplateLogicProps {
   frameId: FrameId
 }
@@ -220,6 +223,7 @@ export interface templatesLogicValues {
   isAddTemplateUrlFormSubmitting: boolean
   isAddTemplateUrlFormValid: boolean
   isExpanded: (url: string) => boolean
+  latestLimit: number
   isTemplateFormSubmitting: boolean
   isTemplateFormValid: boolean
   isUploadTemplateFormSubmitting: boolean
@@ -543,6 +547,9 @@ export interface templatesLogicActions {
   toggleExpanded: (url: string) => {
     url: string
   }
+  showMoreLatest: () => {
+    value: true
+  }
   touchAddRepositoryFormField: (key: string) => {
     key: string
   }
@@ -708,6 +715,7 @@ export const templatesLogic = kea<templatesLogicType>([
     remoteInstallStarted: (installId: string) => ({ installId }),
     remoteInstallFinished: (installId: string) => ({ installId }),
     toggleExpanded: (url: string) => ({ url }),
+    showMoreLatest: true,
     applyFavouriteTemplatesToFrame: (openDrawer?: boolean) => ({
       openDrawer: openDrawer ?? false,
     }),
@@ -968,6 +976,14 @@ export const templatesLogic = kea<templatesLogicType>([
       { persist: true, storageKey: 'templatesLogic.expanded' },
       {
         toggleExpanded: (state, { url }) => ({ ...state, [url]: !(state[url] ?? true) }),
+      },
+    ],
+    // How many of the store's newest scenes its Latest shelf shows: a few,
+    // and "Show more" adds a page at a time.
+    latestLimit: [
+      STORE_LATEST_PAGE,
+      {
+        showMoreLatest: (limit) => limit + STORE_LATEST_PAGE * 2,
       },
     ],
   }),

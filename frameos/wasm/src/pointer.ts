@@ -121,6 +121,9 @@ export function wheelNotches(delta: number, deltaMode: number, carry: number): {
   return { notches, carry: total - notches }
 }
 
+// The most positions a move carries in `points` (input_state.nim MovePointsMax).
+const MOVE_POINTS_MAX = 64
+
 /** Where input events go: `FrameOSPreview.sendEvent`, or anything shaped like it. */
 export type PointerEventSink = (name: string, payload: Record<string, unknown>) => void
 
@@ -185,7 +188,34 @@ export function attachPointerInput(
 
   const queueMove = (event: PointerEvent): void => {
     if (v2()) {
-      queuedMoves.set(pointerIdOf(event), pointerPayload(event))
+      const id = pointerIdOf(event)
+      const payload = pointerPayload(event)
+      // Where the pointer passed since the last move sent (the move queued for
+      // this frame, and the browser's own coalescing) goes with it in `points`,
+      // oldest first, as a frame's coalesced move says it (docs/events.md
+      // "Pointer"): a drawing scene keeps the whole stroke.
+      const before = queuedMoves.get(id)
+      const passed: number[] = before
+        ? [...((before.points as number[] | undefined) ?? []), before.x as number, before.y as number]
+        : []
+      const coalesced = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : []
+      if (coalesced.length > 1) {
+        const picture = pointerPictureRect(canvas.getBoundingClientRect(), canvas.width, canvas.height)
+        for (const step of coalesced.slice(0, -1)) {
+          if (Number.isFinite(step.clientX) && Number.isFinite(step.clientY)) {
+            const at = pointerMovePayload(step.clientX, step.clientY, picture)
+            passed.push(at.x, at.y)
+          }
+        }
+      }
+      // Where it is now is the move's own x and y.
+      while (passed.length >= 2 && passed[passed.length - 2] === payload.x && passed[passed.length - 1] === payload.y) {
+        passed.length -= 2
+      }
+      if (passed.length > 0) {
+        payload.points = passed.slice(-2 * MOVE_POINTS_MAX)
+      }
+      queuedMoves.set(id, payload)
     } else {
       queuedMoves.set(0, positionOf(event))
     }

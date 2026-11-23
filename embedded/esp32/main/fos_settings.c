@@ -165,6 +165,7 @@ static void settings_restart_task(void *arg)
     while (fos_voice_busy() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
     vTaskDelay(pdMS_TO_TICKS(2000)); /* the release's render starts within this */
     while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
+    fos_restart_notice("Restarting...");
     esp_restart();
 }
 
@@ -599,6 +600,16 @@ static bool apply_frame_settings(const cJSON *frame)
         config->touch_beep = cJSON_IsTrue(touch_beep);
         changed = true;
     }
+    /* Tap and click sounds ("silent", "normal"; a newer mode is normal here).
+     * Live: asked on every click (fos_buzzer.c). */
+    const cJSON *click_sounds = cJSON_GetObjectItem(frame, "clickSounds");
+    if (cJSON_IsString(click_sounds)) {
+        uint8_t mode = fos_config_click_sounds_or_normal(click_sounds->valuestring);
+        if (mode != config->click_sounds) {
+            config->click_sounds = mode;
+            changed = true;
+        }
+    }
     /* The chip's clock: set once at boot (main.c), hence the restart. */
     const cJSON *cpu_mode = cJSON_GetObjectItem(frame, "cpuMode");
     if (cJSON_IsString(cpu_mode)) {
@@ -979,6 +990,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->touch_beep != after->touch_beep) {
         change_append(out, out_len, "touch_beep", after->touch_beep ? "true" : "false");
+    }
+    if (before->click_sounds != after->click_sounds) {
+        change_append(out, out_len, "click_sounds", fos_config_click_sounds_name(after->click_sounds));
     }
     if (before->cpu_mode != after->cpu_mode) {
         change_append(out, out_len, "cpu_mode", fos_config_cpu_mode_name(after->cpu_mode));

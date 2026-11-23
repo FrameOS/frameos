@@ -45,6 +45,10 @@
 
 /* Once, early in boot, before anything chirps. */
 void fos_buzzer_init(void);
+/* Whether the frame makes its press sounds anywhere: a buzzer pin, a codec's
+ * speaker or a status LED that follows the notes. The frame page offers its
+ * Tap and click sounds only then (fos_frame_settings.c). */
+bool fos_buzzer_sounds(void);
 /* A button press registered: a 14 ms click at the press pitch. Returns at
  * once. No-op without a buzzer. */
 void fos_buzzer_click_down(void);

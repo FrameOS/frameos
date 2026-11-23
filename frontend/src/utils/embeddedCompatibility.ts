@@ -162,6 +162,17 @@ export function templateCompatibilityForFrame(
     return unsupported('This scene runs shell commands, which cloud-managed frames refuse by design.')
   }
 
+  // What the store worked out at publish (utils/sceneNeeds.ts). A store
+  // listing carries no scenes to scan below, so without this a Chromium or
+  // FFmpeg scene offered Install on an ESP32.
+  if (template.needs?.includes('linux')) {
+    return unsupported(
+      embedded
+        ? 'This scene runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32.'
+        : 'This scene runs a program on the frame (Chromium, FFmpeg or a shell command), which cloud-managed frames refuse by design.'
+    )
+  }
+
   if (embedded && template.embedded === false) {
     return unsupported('This scene is marked as not supported on ESP32 frames.')
   }

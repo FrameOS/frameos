@@ -824,7 +824,11 @@ awake ESP32 keeps its JS interpreters between renders while there is room, but
 a UI's `onClick` and friends live only in its interpreter, so one released
 between renders leaves a picture that no longer answers. It stays whatever the
 headroom, and goes only when an allocation actually failed
-(`keepIdleInterpreters`, `releaseRenderMemory`). Any interpreter that does go
+(`keepIdleInterpreters`, `releaseRenderMemory`). The scene showing keeps its
+interpreters (and its layout's) whatever the floors while the headroom is above
+the reserve: its next render needs them again before anything it decodes, and
+a switch drops them with the scene (`settleIdleJsAppRuntimes`'s `resident`;
+docs/esp32-memory.md, 2026-11-23). Any interpreter that does go
 while its scene stays is logged (`js:interpreterDiscarded`, with the reason),
 and when it held handlers the panel says so for a few seconds
 (`reportInterpreterDiscards`). `test_kitchen_sink_esp32.nim` and

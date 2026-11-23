@@ -271,13 +271,30 @@ static uint32_t tone_hz(void)
     return hz;
 }
 
+bool fos_buzzer_sounds(void)
+{
+    return fos_config()->buzzer_pin >= 0 || fos_codec_has_speaker() || fos_led_present();
+}
+
+/* The one gate of Tap and click sounds (fos_config.h): every press sound
+ * (the click family: click_down, click_up, double_down, long_press,
+ * triple_down, reject_down, reject_up, and any new one) and the
+ * loading chirp begin with `if (!clicks_heard()) return;`. The voice chat's
+ * cues and the tones of the console do not. */
+static bool clicks_heard(void)
+{
+    return fos_click_sounds_audible(fos_config()->click_sounds);
+}
+
 void fos_buzzer_click_down(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(tone_hz(), CLICK_MS);
 }
 
 void fos_buzzer_click_up(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(tone_hz() * CLICK_UP_NUM / CLICK_UP_DEN, CLICK_MS);
 }
 
@@ -293,16 +310,19 @@ static uint32_t scaled_hz(uint32_t num, uint32_t den)
 
 void fos_buzzer_triple_down(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(scaled_hz(TRIPLE_DOWN_NUM, TRIPLE_DOWN_DEN), CLICK_MS);
 }
 
 void fos_buzzer_double_down(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(scaled_hz(DOUBLE_DOWN_NUM, DOUBLE_DOWN_DEN), CLICK_MS);
 }
 
 void fos_buzzer_long_press(void)
 {
+    if (!clicks_heard()) return;
     const fos_buzzer_note_t notes[] = {
         {tone_hz(), LONG_HEAD_MS},
         {scaled_hz(1, 2), LONG_TAIL_MS},
@@ -327,6 +347,7 @@ static void loading_tap(void *arg)
 
 void fos_buzzer_loading_begin(void)
 {
+    if (!clicks_heard()) return;
     if (!s_loading_timer || s_loading_rounds != 0) return;
     s_loading_rounds = LOADING_ROUNDS;
     esp_timer_stop(s_loading_timer);
@@ -412,10 +433,12 @@ void fos_buzzer_voice_error(void)
 
 void fos_buzzer_reject_down(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(REJECT_DOWN_HZ, CLICK_MS);
 }
 
 void fos_buzzer_reject_up(void)
 {
+    if (!clicks_heard()) return;
     fos_buzzer_tone(REJECT_UP_HZ, CLICK_MS);
 }

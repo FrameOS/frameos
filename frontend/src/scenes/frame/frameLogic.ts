@@ -316,6 +316,20 @@ export function frameCanUseFastDeploy(frame: FrameType | null | undefined, requi
   return (frame.mode ?? 'rpios') === 'embedded' && frameHasActivityLog(frame)
 }
 
+/** A frame nothing has reached yet: never deployed and never heard from (an
+ * ESP32 not flashed over USB yet, a Pi still being set up). An install or a
+ * push on one saves the scenes and stops there: its first deploy takes them,
+ * and a deploy started now could only fail ("Embedded full deploy is
+ * available after the device has sent at least one boot or render log"). */
+export function frameAwaitsFirstDeploy(frame: FrameType | null | undefined): boolean {
+  if (!frame || isCloudMode()) {
+    return false
+  }
+  return !frame.last_successful_deploy_at && !frame.last_successful_deploy && !frameHasActivityLog(frame)
+}
+
+export const AWAITS_FIRST_DEPLOY_DETAIL = 'Installed. The frame gets it with its first deploy.'
+
 function deployedFrameBaseline(frame: FrameType | null | undefined): Partial<FrameType> | null {
   if (!frame) {
     return null
@@ -493,6 +507,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   event_map: '2026.10.20',
   voice_chat: '2026.10.20',
   touch_beep: '2026.11.6',
+  click_sounds: '2026.11.15',
   cpu_mode: '2026.11.7',
   render_mode: '2026.11.7',
   awake_after_input_seconds: '2026.11.6',
@@ -598,6 +613,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   buzzer_tone_hz: 'Button beep tone',
   voice_chat: 'Voice chat',
   touch_beep: 'Touch beep',
+  click_sounds: 'Tap and click sounds',
   cpu_mode: 'Processor speed',
   render_mode: 'Render scenes',
   mic_clk_pin: 'Microphone clock GPIO',

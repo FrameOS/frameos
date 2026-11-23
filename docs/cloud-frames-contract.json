@@ -322,6 +322,12 @@
       "profiles": {"esp32": {"since": "2026.11.6"}},
       "parity": {"only": "esp32", "why": "The touch panel's feedback lives in the ESP32 firmware's buzzer path (fos_touch.c, fos_buzzer.c); a Pi frame has no buzzer."}
     },
+    "click_sounds": {
+      "$comment": "The sounds a tap and a press make: the touch clicks (with touch_beep on), the button clicks, the double press, the long press, a refused press and the loading chirp (fos_buzzer.c). `silent` mutes them all and `normal` is the buzzer's own; voice chat's cues are the voice chat's and stay. More modes may join the enum. Set from the plane or on the frame page (docs/scene-settings.md \"The frame page\"), where it is adopted back like the rotation. Default `normal`. Live, no reboot. Reported as hardware.clickSounds, and hardware.sounds when the board has a buzzer, a speaker or an LED that follows them.",
+      "rule": {"type": "string", "enum": ["silent", "normal"]},
+      "profiles": {"esp32": {"since": "2026.11.15"}},
+      "parity": {"only": "esp32", "why": "The tap and button feedback lives in the ESP32 firmware's buzzer path (fos_buzzer.c, fos_touch.c, fos_buttons.c); a Pi frame has no buzzer."}
+    },
     "cpu_mode": {
       "$comment": "The chip's clock: `battery` runs it at 160 MHz, `performance` at 240 MHz, `auto` (the default) at 240 on an RGB LCD or a touch panel and 160 on any other board. An e-paper refresh is a long wait (about 20 s on a reTerminal E1002's Spectra 6 panel) that the chip spends idling at whatever clock it runs, so on a battery e-paper frame 240 costs more than the faster render saves (embedded/esp32/README.md \"Processor speed\"). Applied at the next boot: the device reboots to take it. Reported as hardware.cpuMode and hardware.cpuMhz.",
       "rule": {"type": "string", "enum": ["auto", "battery", "performance"]},

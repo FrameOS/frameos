@@ -52,6 +52,9 @@ static struct {
     bool on_render_task;
     int flushes;
     int restarts;
+    int notices; /* fos_restart_notice calls */
+    char notice[32];
+    void *task_arg;
     int delays;
     uint32_t last_delay;
     int tasks;
@@ -177,9 +180,10 @@ void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, cons
 BaseType_t xTaskCreate(TaskFunction_t task, const char *name, uint32_t stack_depth, void *arg,
                        UBaseType_t priority, TaskHandle_t *handle)
 {
-    (void)name; (void)stack_depth; (void)arg; (void)priority; (void)handle;
+    (void)name; (void)stack_depth; (void)priority; (void)handle;
     n.tasks++;
     n.task = task;
+    n.task_arg = arg;
     return n.task_result;
 }
 
@@ -190,6 +194,11 @@ void vTaskDelay(TickType_t ticks)
 }
 
 void esp_restart(void) { n.restarts++; }
+void fos_restart_notice(const char *text)
+{
+    n.notices++;
+    strncpy(n.notice, text ? text : "", sizeof(n.notice) - 1);
+}
 
 /* ------------------------------------------------------------------ checks */
 
@@ -391,6 +400,8 @@ static void test_restart(void)
     reset();
     CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "reboot", "{}") == FOS_EVENT_DONE);
     CHECK(n.flushes == 1 && n.delays == 1 && n.last_delay == 1500 && n.restarts == 1 && n.tasks == 0);
+    /* The panel says so first (fos_restart.h). */
+    CHECK(n.notices == 1 && strcmp(n.notice, "Rebooting...") == 0);
     CHECK(strstr(n.all_logs, "\"event\":\"event:reboot\"") != NULL);
     CHECK(strstr(n.all_logs, "\"origin\":\"schedule\"") != NULL);
 
@@ -400,8 +411,10 @@ static void test_restart(void)
     CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "restart", NULL) == FOS_EVENT_DONE);
     CHECK(n.tasks == 1 && n.restarts == 0 && n.flushes == 0 && n.delays == 0);
     CHECK(n.task != NULL);
-    if (n.task != NULL) n.task(NULL);
+    CHECK(n.notices == 0);
+    if (n.task != NULL) n.task(n.task_arg);
     CHECK(n.delays == 1 && n.last_delay == 750 && n.restarts == 1);
+    CHECK(n.notices == 1 && strcmp(n.notice, "Restarting...") == 0);
 
     /* No task to be had: restart anyway. */
     reset();

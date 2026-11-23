@@ -610,6 +610,8 @@ block the_frame_page:
   doAssert sent.len == 0 or sent[0][0] == evRender, $sent
   doAssert scene.state["frameValues"].len == 0
   doAssert scene.state["page"].getStr() == "frame"
+  # A new rotation restarts the frame: the page says so until it does.
+  doAssert scene.state{"restarting"}.getBool()
   online = true
   image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-frame-online.png")
@@ -874,6 +876,59 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsApply = nil
   frameSettingsAction = nil
   echo "clock and update ok"
+
+block the_frame_page_offers_tap_and_click_sounds:
+  var
+    applied: seq[JsonNode]
+    sounds = true
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.14"}
+      if sounds:
+        result["clickSounds"] = %"normal"
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  discard scene.draw()
+  scene.scrollToEnd()
+  discard scene.draw()
+  proc boxes(): seq[UiRegion] = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)
+  proc optionShown(i: int): bool =
+    uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == OptionBase + i + 1)
+  # The last select is the sounds' (two options); without the fact, the
+  # scale's (seven).
+  scene.tap(boxes()[^1])
+  discard scene.draw()
+  doAssert optionShown(1) and not optionShown(2), "the sounds select has two options"
+  scene.send("tap", tapAt(470, 5)) # closes it
+  discard scene.draw()
+  sounds = false
+  discard scene.draw()
+  scene.scrollToEnd()
+  discard scene.draw()
+  scene.tap(boxes()[^1])
+  discard scene.draw()
+  doAssert optionShown(2), "a frame that makes no sound has no sounds select"
+  scene.send("tap", tapAt(470, 5))
+  discard scene.draw()
+  sounds = true
+  discard scene.draw()
+  scene.scrollToEnd()
+  discard scene.draw()
+  # The last select: Silent, its first option, and Save hands the name over.
+  scene.tap(boxes()[^1])
+  discard scene.draw()
+  scene.tap(regionWith(OptionBase + 0))
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0] == %*{"clickSounds": "silent"}, $applied
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  echo "tap and click sounds ok"
 
 block a_layout_theme:
   # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its

@@ -920,7 +920,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `keyDown` | yes |  | `code` string, `key` string, `repeat` boolean, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is pressed on a keyboard (or held: `repeat`). |
 | `keyUp` | yes |  | `code` string, `key` string, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is released on a keyboard |
 | `textInput` | yes |  | `text` string | Pi, preview | Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). |
-| `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer | all | When a pointer (a finger, a mouse, a pen) moves |
+| `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer, `points`? json | all | When a pointer (a finger, a mouse, a pen) moves. |
 | `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string, `shift`? boolean, `ctrl`? boolean, `alt`? boolean, `meta`? boolean | all | When a pointer button is pressed or a finger touches the panel. |
 | `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is released or a finger lifts |
 | `pointerCancel` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | When a pointer that was down is lost without a release: the queue overflowed, the device went away. |
@@ -1126,6 +1126,8 @@ interface FrameOSUiEvent {
   startY?: number;
   /** A pinch's spread: how far apart the fingers ended over how far apart they began (below 1 drawn together). Absent before 2026.11.10. */
   scale?: number;
+  /** A pointerMove that stands for moves no handler heard (they came while the frame was busy): where those were, x, y, x, y, ... oldest first, from the element's corner as localX and localY. A drawing keeps them all. Absent when there were none, and before 2026.11.15. */
+  points?: number[];
   /** onChange of an <input> or <textarea>: its text now (also as target.value, as in React). */
   value?: string;
   target?: { value: string };
@@ -1150,10 +1152,11 @@ interface FrameOSElementProps {
   onClick?: (event: FrameOSUiEvent) => void;
   onDoubleClick?: (event: FrameOSUiEvent) => void;
   onLongPress?: (event: FrameOSUiEvent) => void;
-  onPointerDown?: (event: FrameOSUiEvent) => void;
-  onPointerUp?: (event: FrameOSUiEvent) => void;
-  /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
-  onPointerMove?: (event: FrameOSUiEvent) => void;
+  /** A press on the element. Like onPointerMove and onPointerUp, returning false asks for no render: what it did shows with the next one (2026.11.15+; a render after every one before). */
+  onPointerDown?: (event: FrameOSUiEvent) => boolean | void;
+  onPointerUp?: (event: FrameOSUiEvent) => boolean | void;
+  /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). e.points has where it passed since the move before. Return false to keep the frame from rendering for it, as a drawing does on e-paper between pieces of a stroke. */
+  onPointerMove?: (event: FrameOSUiEvent) => boolean | void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
   /** Two fingers that began on the element moved, as one event when the first lifts: e.scale, e.startX/startY, e.x/y. Neither finger is a tap or a swipe then. Absent before 2026.11.10. */
@@ -1321,8 +1324,8 @@ interface FrameOSEventPayloads {
   keyUp: { code: string; key: string; shift: boolean; ctrl: boolean; alt: boolean; meta: boolean; linuxCode?: number };
   /** Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). Made by the dispatcher from `keyDown`; a preview forwards the browser's `beforeinput`. */
   textInput: { text: string };
-  /** When a pointer (a finger, a mouse, a pen) moves (not logged) */
-  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number };
+  /** When a pointer (a finger, a mouse, a pen) moves (not logged). A move that stands for others the scene did not hear (they came while it was busy) lists where those were in `points`, x, y, x, y, ... oldest first, in the units of `x` and `y`. */
+  pointerMove: { x: number; y: number; pointerId: number; pointerType: string; buttons: number; points?: any };
   /** When a pointer button is pressed or a finger touches the panel (not logged). The position is on every pointer event. A modifier key held on a keyboard (Linux, the preview) adds `shift`, `ctrl`, `alt` or `meta` as true. */
   pointerDown: { x: number; y: number; button: number; buttons: number; pointerId: number; pointerType: string; shift?: boolean; ctrl?: boolean; alt?: boolean; meta?: boolean };
   /** When a pointer button is released or a finger lifts (not logged) */

@@ -157,6 +157,9 @@ export const cloudFramesContractSettings = {
     "touch_beep": {
       "since": "2026.11.6"
     },
+    "click_sounds": {
+      "since": "2026.11.15"
+    },
     "cpu_mode": {
       "since": "2026.11.7",
       "restart": true
