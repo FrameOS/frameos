@@ -40,6 +40,7 @@
 #include "fos_charger.h"
 #include "fos_codec.h"
 #include "fos_gauge.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
@@ -549,6 +550,8 @@ static void add_hardware_json(cJSON *parent)
      * (a finger is a pointer to the scene, fos_touch.c) and the codec's
      * speaker (the buzzer's notes play there, fos_codec.c). */
     cJSON_AddBoolToObject(hw, "gauge", fos_gauge_present());
+    /* The accelerometer (fos_imu.c): which way is down, nothing more yet. */
+    cJSON_AddBoolToObject(hw, "imu", fos_imu_present());
     cJSON_AddBoolToObject(hw, "touch", fos_touch_present());
     cJSON_AddBoolToObject(hw, "speaker", fos_codec_has_speaker());
     /* The SD card: mounted, or why not (the status page's wording). */

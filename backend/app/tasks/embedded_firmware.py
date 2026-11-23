@@ -200,6 +200,18 @@ EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS = {
     "pwr": -1,
     "det": -1,
 }
+# The Waveshare ESP32-S3-Touch-AMOLED-1.75's TF slot, read in SPI mode: CS
+# GPIO41 (the card's D3), SCK GPIO2, MISO GPIO3 (D0), MOSI GPIO1 (CMD), no power
+# switch and no card-detect contact (Waveshare's wiki table; its BSP drives the
+# same pins as a 1-bit SDMMC bus). fos_board.c's k_sd_pins is the device copy.
+EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS = {
+    "cs": 41,
+    "sck": 2,
+    "miso": 3,
+    "mosi": 1,
+    "pwr": -1,
+    "det": -1,
+}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -222,6 +234,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "seeed_reterminal_e1003": EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS,
     "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "sunton_esp32_8048s070": EMBEDDED_SUNTON_ESP32_8048S070_SD_CARD_PINS,
+    "waveshare_esp32_s3_touch_amoled_1_75": EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS,
     # The Sticky's pins are defined further down; filled in after the table.
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
@@ -345,6 +358,44 @@ EMBEDDED_SUNTON_ESP32_8048S070_EVENT_MAP = [
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the GT911 on
 # the chip's I2C pins, polled (INT unwired), reset GPIO38, no load switch.
 EMBEDDED_SUNTON_ESP32_8048S070_TOUCH = {"touchPins": "sda=19,scl=20,int=-1,rst=38,en=-1"}
+# Waveshare ESP32-S3-Touch-AMOLED-1.75 (and its -B, the same board in a case;
+# ESP32-S3R8, 16 MB flash, 8 MB PSRAM): the round 1.75" 466x466 AMOLED, a
+# CO5300 on QSPI that keeps its own picture. Its wiring (CS12, SCLK38, D0-D3
+# GPIO4-7, reset 39) is the QSPI driver's own board table
+# (embedded/esp32/components/frameos_display/lcd_qspi_amoled.c), so the EPD pin
+# slots carry nothing. Everything else is on one I2C bus, SDA15/SCL14: the
+# CST9217 touch controller (INT GPIO11, reset GPIO40), the ES8311 speaker codec
+# and ES7210 microphone codec (I2S MCLK42, BCLK9, WS45, mic data GPIO10,
+# speaker data GPIO8, amplifier GPIO46), the AXP2101 PMIC (its gauge reads the
+# cell), the PCF85063 clock, the QMI8658 accelerometer and a TCA9554 expander
+# whose P4 is the PWR key (the firmware's own, fos_board_expander_keys: no
+# setting names it). BOOT is GPIO0. Parity with fos_board.c, nothing
+# provisions the touch, codec and bus strings.
+EMBEDDED_WAVESHARE_AMOLED_1_75_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+EMBEDDED_WAVESHARE_AMOLED_1_75_GPIO_BUTTONS = [{"pin": 0, "label": "BOOT"}]
+# PWR works like the Indicator's key (pressed the screen off and on, pressed
+# twice the scene switcher), BOOT held talks (two microphones), the edges
+# swipe. fos_board.c's AMOLED_175_KEYS + ONE_KEY_VOICE("BOOT") is the device copy.
+EMBEDDED_WAVESHARE_AMOLED_1_75_EVENT_MAP = [
+    {"event": "button", "match": {"label": "PWR", "action": "press"}, "emit": "toggleScreen", "as": {}},
+    {"event": "button", "match": {"label": "PWR", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
+]
+EMBEDDED_WAVESHARE_AMOLED_1_75_TOUCH = {"touchPins": "sda=15,scl=14,int=11,rst=40,en=-1"}
+EMBEDDED_WAVESHARE_AMOLED_1_75_CODEC = {
+    "codecPins": "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46",
+    "i2cBuses": "sda=15,scl=14",
+}
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -865,6 +916,25 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
         },
     },
+    # Waveshare ESP32-S3-Touch-AMOLED-1.75 (-B: the same board in a case): the
+    # round 466x466 QSPI AMOLED; see EMBEDDED_WAVESHARE_AMOLED_1_75_PINS.
+    "waveshare_esp32_s3_touch_amoled_1_75": {
+        "device": "amoled.co5300_466x466",
+        "flashSize": "16MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_WAVESHARE_AMOLED_1_75_PINS,
+        "gpioButtons": EMBEDDED_WAVESHARE_AMOLED_1_75_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_WAVESHARE_AMOLED_1_75_EVENT_MAP,
+        **EMBEDDED_WAVESHARE_AMOLED_1_75_TOUCH,
+        **EMBEDDED_WAVESHARE_AMOLED_1_75_CODEC,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "waveshare_esp32_s3_touch_amoled_1_75",
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_WAVESHARE_AMOLED_1_75_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -1123,6 +1193,8 @@ EMBEDDED_EXTRA_PANELS = {
     "LCD_ST7701S_480x480": FOS_PIXEL_RGB565,
     # The Sunton 7" 800x480 EK9716, same ST7701S RGB driver stack.
     "LCD_EK9716_800x480": FOS_PIXEL_RGB565,
+    # The Waveshare 1.75" round CO5300 AMOLED on QSPI (lcd_qspi_amoled.c).
+    "AMOLED_CO5300_466x466": FOS_PIXEL_RGB565,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
@@ -1130,6 +1202,7 @@ EMBEDDED_DEVICE_PANELS = {
     "oled.ssd1306_72x40": "OLED_SSD1306_72x40",
     "lcd.st7701s_480x480": "LCD_ST7701S_480x480",
     "lcd.ek9716_800x480": "LCD_EK9716_800x480",
+    "amoled.co5300_466x466": "AMOLED_CO5300_466x466",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"

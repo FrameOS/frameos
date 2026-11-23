@@ -81,6 +81,18 @@ bool fos_board_power_latch_pins(const char *hardware_preset, int *hold, int *loc
  * `ledPin` / `ledType` in EMBEDDED_HARDWARE_PRESETS. */
 bool fos_board_led(const char *hardware_preset, int *pin, int *type);
 
+/* Keys on the board's I2C IO expander rather than a GPIO (fos_buttons.c
+ * adds them to the configured keys): the expander pin, high while pressed,
+ * and the label the event map matches. The Waveshare
+ * ESP32-S3-Touch-AMOLED-1.75's PWR key is its TCA9554's P4 (SYS_OUT, the
+ * AXP2101's power key conditioned; Waveshare's hardware reference). Fills
+ * at most `max`, returns how many. */
+typedef struct {
+    int pin;
+    const char *label;
+} fos_board_key_t;
+size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max);
+
 /* The board's I2C peripheral buses as the `i2c_buses` spec
  * (`sda=19,scl=20;sda=39,scl=40`), "" for a board without any. The reTerminal
  * E1001/E1002 carry their PCF8563 clock and SHT40 sensor on 19/20 and their

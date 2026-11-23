@@ -4320,11 +4320,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     let device = if owner.frameConfig.isNil: "" else: owner.frameConfig.device
     target.input.slow = not panelIsFast(device)
     target.input.paper = panelIsPaper(device)
-    when not defined(frameosEmbedded):
-      # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
-      target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
-        requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
-        requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
+    # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
+    target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
+      requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
+      requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
     try:
       # Inside a layout a field's keyboard is the frame's (KeyboardDock): its
       # corner here is where the last render put this UI in the scene's canvas.

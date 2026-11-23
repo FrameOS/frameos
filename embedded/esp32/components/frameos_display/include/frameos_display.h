@@ -15,6 +15,7 @@
 #include "esp_err.h"
 #include "lcd_loading.h"
 #include "lcd_splash.h"
+#include "lcd_qspi_amoled.h"
 #include "lcd_st7701s_rgb.h"
 
 typedef enum {
@@ -64,13 +65,17 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* Only the circle inside the panel's square shows and takes touches (the
+ * Waveshare 1.75" AMOLED): the runtime keeps what it draws by itself inside
+ * it (frameos/panel_shape.nim `boardPanelRound`). */
+bool fos_display_round(void);
 /* The panel's power, for turnOn / turnOff / toggleScreen: an LCD's
- * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
+ * backlight, an AMOLED's display on/off. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */
 esp_err_t fos_display_power(bool on);
 /* The panel's step before a deep sleep, after the last refresh: on the
  * PhotoPainter, release the panel's lines and switch its supply (the
- * AXP2101's ALDO4) off. ESP_ERR_NOT_SUPPORTED on boards whose panel supply
+ * AXP2101's ALDO4) off; an AMOLED's controller off and asleep. ESP_ERR_NOT_SUPPORTED on boards whose panel supply
  * the firmware does not own. */
 esp_err_t fos_display_prepare_deep_sleep(void);
 /* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
@@ -107,6 +112,7 @@ void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
  * straight there: every other panel leaves them alone. */
 static inline void fos_display_updating_begin(void)
 {
+    /* A QSPI AMOLED keeps its picture through flash writes: no screen. */
     fos_lcd_st7701s_updating_begin();
 }
 static inline void fos_display_updating_end(bool picture_follows)
@@ -115,12 +121,18 @@ static inline void fos_display_updating_end(bool picture_follows)
 }
 static inline void fos_display_loading_begin(uint32_t since_tick, int rotation)
 {
+    /* Each driver does nothing before its init: one of the two is up. */
     fos_lcd_st7701s_loading_begin(since_tick, rotation);
+    fos_lcd_qspi_loading_begin(since_tick, rotation);
 }
 static inline void fos_display_loading_end(void)
 {
     fos_lcd_st7701s_loading_end();
+    fos_lcd_qspi_loading_end();
 }
+/* The runtime's loading mark (frameos/loading_mark.nim), for whichever LCD
+ * driver runs. */
+void fos_display_set_loading_mark(fos_loading_mark_fn mark);
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device

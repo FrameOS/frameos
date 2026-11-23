@@ -533,6 +533,7 @@ export function frameOffersEdgeGestures(
     deviceEventMap(device) !== null ||
     device === 'lcd.st7701s_480x480' ||
     device === 'lcd.ek9716_800x480' ||
+    device === 'amoled.co5300_466x466' ||
     (rules ?? []).some((rule) => rule.event === 'edgeSwipe')
   )
 }

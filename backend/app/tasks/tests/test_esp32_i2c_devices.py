@@ -20,7 +20,8 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ESP32_DIR = REPO_ROOT / "embedded" / "esp32"
 MAIN_DIR = ESP32_DIR / "main"
-SOURCES = [MAIN_DIR / "fos_charger.c", MAIN_DIR / "fos_rtc.c", MAIN_DIR / "fos_gauge.c", MAIN_DIR / "fos_climate.c"]
+SOURCES = [MAIN_DIR / "fos_charger.c", MAIN_DIR / "fos_rtc.c", MAIN_DIR / "fos_gauge.c", MAIN_DIR / "fos_climate.c",
+           MAIN_DIR / "fos_imu.c"]
 TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_i2c_devices.c"
 
 

@@ -740,6 +740,7 @@ describe("Esp32CloudFlasher", () => {
         "hw:seeed_reterminal_sticky",
         "hw:seeed_sensecap_indicator_d1",
         "hw:sunton_esp32_8048s070",
+        "hw:waveshare_esp32_s3_touch_amoled_1_75",
         "hw:seeed_reterminal_e1001",
         "hw:seeed_reterminal_e1002",
         "hw:seeed_reterminal_e1003",

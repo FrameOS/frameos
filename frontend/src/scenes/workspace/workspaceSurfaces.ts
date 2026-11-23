@@ -738,7 +738,12 @@ export function deviceSupportsDisplayPower(device?: string | null): boolean {
  * frame menu still goes by `deviceSupportsDisplayPower`.
  */
 export function deviceSwitchesDisplay(device?: string | null): boolean {
-  return deviceSupportsDisplayPower(device) || device === 'lcd.st7701s_480x480' || device === 'lcd.ek9716_800x480'
+  return (
+    deviceSupportsDisplayPower(device) ||
+    device === 'lcd.st7701s_480x480' ||
+    device === 'lcd.ek9716_800x480' ||
+    device === 'amoled.co5300_466x466'
+  )
 }
 
 /** The display a frame reports, wherever this control plane keeps it. */

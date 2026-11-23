@@ -23,7 +23,8 @@
 ## the mapping utils/image.nim `rotateDegrees` uses.
 ##
 ## Flash is the ESP32's budget, so it builds only what its one LCD needs:
-## RGB565, no flip, no round panel (`Only565`, `Flips`, `RoundPanels`).
+## RGB565 and no flip (`Only565`, `Flips`); a round panel is the Waveshare
+## 1.75" AMOLED's as much as the HyperPixel 2.1 Round's.
 
 import std/math
 
@@ -44,7 +45,7 @@ type
     panelWidth*, panelHeight*: int32
     rotation*: int32 ## frame.json `rotate`: 0, 90, 180 or 270
     flipX*, flipY*: bool ## frame.json `flip`, applied to the frame before the turn
-    round*: bool ## only the inscribed circle shows (panel_shape.nim `panelIsRound`: the HyperPixel 2.1 Round)
+    round*: bool ## only the inscribed circle shows (panel_shape.nim `panelIsRound`)
 
 const
   LoadingMarkDelayMs* = 200
@@ -69,8 +70,6 @@ const
     ## The ESP32's one LCD is RGB565: the byte-per-channel path is not built.
   Flips = not defined(freertos)
     ## The ESP32 has no frame.json `flip`.
-  RoundPanels = not defined(freertos)
-    ## No ESP32 board is round.
 
 proc loadingMarkTime*(elapsedMs: int64): int32 =
   ## How far into its animation the mark is `elapsedMs` after the switch was
@@ -102,8 +101,7 @@ proc pillOn(view: MarkView): Pill =
   let (w, h) = (10.8'f32 * u, 4.4'f32 * u)
   var x = fw - 8.4'f32 * u # its center, in the frame as the viewer sees it
   var y = 5.2'f32 * u
-  when RoundPanels:
-    if view.round:
+  if view.round:
       # Only the circle inside the square is glass: top middle there, as
       # high as its top corners stay `RoundInset` (or 3 units) inside the rim.
       let reach = min(fw, fh) / 2 - max(RoundInset, 3'f32 * u)
@@ -226,6 +224,7 @@ proc drawLoadingMark*(view: MarkView, tMs: int32, rect: MarkRect, pixels: MarkPi
             d[channel] = uint8(c + 0.5'f32)
 
 when defined(freertos):
+  from ./panel_shape import boardPanelRound
   # The ESP32's RGB LCD (lcd_st7701s_rgb.c): plain values and pointers, on a
   # task the Nim runtime knows nothing about (like resample.nim's rows),
   # never under the runtime's lock, and `quirky` (pushed above), so nothing
@@ -233,14 +232,15 @@ when defined(freertos):
   # no `src` it is where the mark goes, else one frame of it.
   proc loadingMarkEntry(panelWidth, panelHeight, rotation, tMs: int32, rect: ptr MarkRect,
       src: pointer, srcStride: int32, dst: pointer, dstStride: int32) {.cdecl.} =
-    let view = MarkView(panelWidth: panelWidth, panelHeight: panelHeight, rotation: rotation)
+    let view = MarkView(panelWidth: panelWidth, panelHeight: panelHeight, rotation: rotation,
+      round: boardPanelRound)
     if src.isNil:
       rect[] = loadingMarkRect(view)
     else:
       drawLoadingMark(view, tMs, rect[], Rgb565MarkPixels, cast[ptr UncheckedArray[uint8]](src),
         srcStride, cast[ptr UncheckedArray[uint8]](dst), dstStride)
 
-  proc setLoadingMark(mark: pointer) {.importc: "fos_lcd_st7701s_set_loading_mark", cdecl.}
+  proc setLoadingMark(mark: pointer) {.importc: "fos_display_set_loading_mark", cdecl.}
   # The panel's driver draws with it from here on (a thin-client image,
   # without this runtime, has none, and no mark).
   setLoadingMark(cast[pointer](loadingMarkEntry))

@@ -23,8 +23,8 @@ from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
 import frameos/utils/qr
+import frameos/panel_shape
 when not defined(frameosEmbedded):
-  import frameos/panel_shape
   from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
@@ -2357,8 +2357,8 @@ proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInp
     gap = 4'f32
     inner = 4'f32 # the box's padding, each way
     edge = 8'f32
-  # A round panel's corners are not there, and no ESP32 board is round.
-  let margin = when defined(frameosEmbedded): edge else: (if input.round: height / 8 else: edge)
+  # A round panel's corners are not there.
+  let margin = if input.round: height / 8 else: edge
   let
     options = anchor.src.children
     count = options.len
@@ -2431,15 +2431,14 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   var
     lo = edge
     hi = width - edge
-  when not defined(frameosEmbedded):
-    if input.round:
-      # Inside the circle at the row's edge farther from its centre.
-      let
-        radius = max(min(width, height) div 2 - RoundInset, 8)
-        dy = max(abs(y - height div 2), abs(y + popH - height div 2))
-        half = chordHalf(radius, dy) - edge
-      lo = max(lo, width div 2 - half)
-      hi = min(hi, width div 2 + half)
+  if input.round:
+    # Inside the circle at the row's edge farther from its centre.
+    let
+      radius = max(min(width, height) div 2 - RoundInset, 8)
+      dy = max(abs(y - height div 2), abs(y + popH - height div 2))
+      half = chordHalf(radius, dy) - edge
+    lo = max(lo, width div 2 - half)
+    hi = min(hi, width div 2 + half)
   let
     centre = int(r.x + r.w / 2)
     # A letter's row has its symbol right over the key and the rest in order
@@ -2562,13 +2561,12 @@ proc dockedKeys(input: var UiInput, regions: var seq[UiRegion]) =
     gradients = 0
   let kb = int(dock.h - dock.grip)
   emitBackdrop = rgba(0, 0, 0, 0)
-  when not defined(frameosEmbedded):
-    if dock.round:
-      # Rows on no band of their own: the panel under them is the keyboard's.
-      let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
-        ("height", $int(dock.frameH - dock.y))])
-      band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
-      drawn.add band
+  if dock.round:
+    # Rows on no band of their own: the panel under them is the keyboard's.
+    let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
+      ("height", $int(dock.frameH - dock.y))])
+    band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+    drawn.add band
   if dock.grip > 0:
     # A window's bar, in the keys' look: the interpreter drags it, so nothing
     # here hears it.

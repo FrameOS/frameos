@@ -289,22 +289,21 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   var
     gw = max(width - 2 * result.pad, 1)
     gh = max(height - result.y0, 1) # the rows in sight: the list runs to the bottom edge
-  when not defined(frameosEmbedded):
-    if round:
-      result.round = true
-      result.cx = width div 2
-      result.cy = height div 2
-      result.radius = max(min(width, height) div 2 - RoundInset, 8)
-      # Two pixels inside the circle at its corners, whatever the rounding.
-      result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
-      result.x0 = result.cx - result.side div 2
-      result.y0 = result.cy - result.side div 2
-      result.listX = result.x0
-      result.listY = result.y0
-      result.listW = result.side
-      result.listH = result.side
-      gw = result.side
-      gh = result.side
+  if round:
+    result.round = true
+    result.cx = width div 2
+    result.cy = height div 2
+    result.radius = max(min(width, height) div 2 - RoundInset, 8)
+    # Two pixels inside the circle at its corners, whatever the rounding.
+    result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
+    result.x0 = result.cx - result.side div 2
+    result.y0 = result.cy - result.side div 2
+    result.listX = result.x0
+    result.listY = result.y0
+    result.listW = result.side
+    result.listH = result.side
+    gw = result.side
+    gh = result.side
   result.text = clamp(permille(cu, 30), 10, 24)
   result.inner = clamp(permille(cu, 10), 2, 8)
   result.icon = clamp(permille(cu, 100), 20, 64)
@@ -318,13 +317,13 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
 
 proc isRound*(frameConfig: FrameConfig): bool =
   ## Whether the frame's panel shows only the circle inside it
-  ## (frameos/panel_shape.nim); never on an ESP32.
-  when defined(frameosEmbedded): false
-  else: not frameConfig.isNil and panelIsRound(frameConfig.device)
+  ## (frameos/panel_shape.nim): a HyperPixel 2.1 Round on a Pi, the
+  ## Waveshare 1.75" AMOLED on an ESP32 (`boardPanelRound`).
+  not frameConfig.isNil and panelIsRound(frameConfig.device)
 
 proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(width, height, false, unit = unit)
+    switcherGrid(width, height, false, round = isRound(self.frameConfig), unit = unit)
   else:
     switcherGrid(width, height, not sceneSwitcherThumbnail.isNil, round = isRound(self.frameConfig), unit = unit)
 
@@ -878,45 +877,42 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
   header.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
   root.children.add header.role("bar")
 
-when not defined(frameosEmbedded):
-  # No ESP32 board is round (frameos/panel_shape.nim): the firmware
-  # carries the rectangular header alone.
-  proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
-      size, small: int, button: string) =
-    ## A round panel's: the list fills the square inside the circle, the
-    ## title is in the arc above it (12 o'clock) and Close in the one below
-    ## (6). Every box is cut to the chord it sits on, so no corner leaves the
-    ## circle `RoundInset` in from the rim.
-    let
-      gap = grid.gap * 3 # the cells' gap is a file manager's, the chrome's three of it
-      arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
-      rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - gap), 8)
-      top = grid.y0 - gap div 2 - rowH
-      titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
-    var c: string
-    c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
-    c.add " flex items-center justify-center truncate font-bold"
-    c.px("text", size)
-    root.children.add el("div", c, txt("Scenes"))
-    let
-      closeTop = grid.y0 + grid.side + gap div 2
-      closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
-      # The gear left of Close, the two centred on the chord together.
-      gearW = if self.gear: rowH + gap else: 0
-      closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
-      left = grid.cx - (closeW + gearW) div 2
-    c = ""
-    c.at(left + gearW, closeTop, closeW, rowH)
-    c.add " flex items-center justify-center rounded-full"
-    c.px("text", small)
-    c.add button
-    root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
-    if self.gear:
-      let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
-      gear.attrs[0][1].add " absolute"
-      gear.attrs[0][1].px("left", left)
-      gear.attrs[0][1].px("top", closeTop)
-      root.children.add gear
+proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
+    size, small: int, button: string) =
+  ## A round panel's: the list fills the square inside the circle, the
+  ## title is in the arc above it (12 o'clock) and Close in the one below
+  ## (6). Every box is cut to the chord it sits on, so no corner leaves the
+  ## circle `RoundInset` in from the rim.
+  let
+    gap = grid.gap * 3 # the cells' gap is a file manager's, the chrome's three of it
+    arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
+    rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - gap), 8)
+    top = grid.y0 - gap div 2 - rowH
+    titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
+  var c: string
+  c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
+  c.add " flex items-center justify-center truncate font-bold"
+  c.px("text", size)
+  root.children.add el("div", c, txt("Scenes"))
+  let
+    closeTop = grid.y0 + grid.side + gap div 2
+    closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
+    # The gear left of Close, the two centred on the chord together.
+    gearW = if self.gear: rowH + gap else: 0
+    closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
+    left = grid.cx - (closeW + gearW) div 2
+  c = ""
+  c.at(left + gearW, closeTop, closeW, rowH)
+  c.add " flex items-center justify-center rounded-full"
+  c.px("text", small)
+  c.add button
+  root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+  if self.gear:
+    let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
+    gear.attrs[0][1].add " absolute"
+    gear.attrs[0][1].px("left", left)
+    gear.attrs[0][1].px("top", closeTop)
+    root.children.add gear
 
 proc heading(grid: SwitcherGrid, spot: Spot, span: int, title: string, paper: bool): SvgNode =
   ## A category's name over the row it starts, small, with a rule under it
@@ -963,13 +959,10 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     c.px("pb", grid.pad)
   let list = el("div", move c)
   result.children.add list
-  when defined(frameosEmbedded):
-    self.header(result, grid, paper, width, size, small, button)
+  if grid.round:
+    self.roundChrome(result, grid, paper, size, small, button)
   else:
-    if grid.round:
-      self.roundChrome(result, grid, paper, size, small, button)
-    else:
-      self.header(result, grid, paper, width, size, small, button)
+    self.header(result, grid, paper, width, size, small, button)
   if self.entries.len == 0:
     c = ""
     if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)

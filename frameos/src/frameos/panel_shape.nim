@@ -3,7 +3,8 @@
 ## square: nothing drawn in the corners shows and no finger reaches them. What
 ## the frame draws over a scene by itself (the scene switcher, the loading
 ## mark) stays `insideRound`, and an edge swipe there starts at the rim
-## (input_state.nim `edgeAt`). No ESP32 board is round. And two things a
+## (input_state.nim `edgeAt`). The Waveshare ESP32-S3-Touch-AMOLED-1.75's
+## 466x466 AMOLED is round the same way (`boardPanelRound`). And two things a
 ## panel is that scenes and the built-in scenes ask: whether it is fast (a
 ## change shows as it is drawn) and whether it is paper (it draws in inks).
 
@@ -15,9 +16,13 @@ const RoundInset* = 12
   ## bezel covers some of the circle, and a finger at the very edge misses the
   ## glass.
 
+var boardPanelRound* = false
+  ## An ESP32 whose own panel is round (embedded_main at init,
+  ## `fos_display_round`): its frame.json says only "embedded".
+
 proc panelIsRound*(device: string): bool =
   ## Whether only the circle inscribed in the panel shows and takes touches.
-  device == "pimoroni.hyperpixel2r"
+  boardPanelRound or device == "pimoroni.hyperpixel2r" or device == "amoled.co5300_466x466"
 
 proc insideRound*(width, height, x, y: int, inset = 0): bool =
   ## Whether pixel (x, y) of a width x height picture lies inside the circle
