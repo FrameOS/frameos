@@ -3,6 +3,7 @@
     "id": "94e3715d-8a64-54dc-8480-68d3c13ceffc",
     "name": "Google Photos",
     "settings": {
+      "round": true,
       "category": "Photos",
       "refreshInterval": 300,
       "backgroundColor": "#000000",
