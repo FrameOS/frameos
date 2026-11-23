@@ -711,7 +711,7 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   or AI pressed twice: the layout's own binding, while the frame's map leaves
   that free), the layout turns it into a home screen. That screen has the time
   and the date, the battery and the signal, and under the list how to get
-  around, a line each, read off the frame's event map: what AI does (a press,
+  around, a line each, read off the frame's event map: what the Talk key (AI on the case) does (a press,
   twice, held), what UP and DOWN do (in the list they move; held, the map's
   scene back and on) and the swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
