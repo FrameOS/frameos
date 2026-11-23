@@ -57,6 +57,10 @@ esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag
  * for it (fos_scenes_store_wait: false when `timeout_ms` ran out first). */
 bool fos_scenes_store_busy(void);
 bool fos_scenes_store_wait(uint32_t timeout_ms);
+/* The boot's first render is done (or tried): the scene store's sweep, put
+ * off at init so it does not hold the store lock in front of that picture,
+ * goes to the store task now. Render task; once a boot, cheap after. */
+void fos_scenes_first_render_done(void);
 bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark

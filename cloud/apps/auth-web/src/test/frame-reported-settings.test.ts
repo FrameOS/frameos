@@ -26,6 +26,19 @@ describe("settingsWithReported", () => {
     expect(settingsWithReported({}, { clickSounds: "loud" })).toBeUndefined();
   });
 
+  it("takes how long a tap keeps the frame up, set on the frame page; 300 s is the default", () => {
+    expect(settingsWithReported({ rotate: 90 }, { awakeAfterInputSeconds: 60 })).toEqual({
+      rotate: 90,
+      awake_after_input_seconds: 60,
+    });
+    expect(settingsWithReported({ awake_after_input_seconds: 60 }, { awakeAfterInputSeconds: 0 })).toEqual({
+      awake_after_input_seconds: 0,
+    });
+    expect(settingsWithReported({}, { awakeAfterInputSeconds: 300 })).toBeUndefined();
+    expect(settingsWithReported({}, { awakeAfterInputSeconds: 3601 })).toBeUndefined();
+    expect(settingsWithReported({}, { awakeAfterInputSeconds: 1.5 })).toBeUndefined();
+  });
+
   it("ignores a report without them, as older firmware's, and nonsense", () => {
     expect(settingsWithReported({ rotate: 90 }, { platform: "esp32" })).toBeUndefined();
     expect(settingsWithReported({ rotate: 90 }, { rotate: 45 })).toBeUndefined();
