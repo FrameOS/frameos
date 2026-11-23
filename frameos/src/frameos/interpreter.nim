@@ -2604,8 +2604,13 @@ proc keysTake(self, layout: FrameScene, context: ExecutionContext): bool =
   else:
     # A built-in scene's form: its own run hit-tests it.
     rhythmMarkDue(owner)
-    owner.ownRun(owner, ExecutionContext(scene: owner, event: event, payload: inner, parent: context,
-      loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1))
+    # The context first: built in the call, its `scene: owner` was the last
+    # use of `owner`, which ORC moved into it before `owner.ownRun` was read
+    # through the emptied variable (a nil load: every key on the scene
+    # settings' keyboard rebooted an ESP32, 2026-11-23).
+    let run = ExecutionContext(scene: owner, event: event, payload: inner, parent: context,
+      loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1)
+    owner.ownRun(owner, run)
   true
 
 {.pop.}

@@ -1325,7 +1325,9 @@ buzzer's resonance). A board whose NVS predates the keys takes its preset's
 without being reprovisioned. The Waveshare PhotoPainter and 13.3E6 have a
 speaker behind an ES8311 codec instead, which needs an I2S driver: not
 supported yet. The firmware leaves a pin alone that is a display,
-button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
+button, battery or SD pin. The firmware takes the pin at the start of every
+boot and holds it low: a software reset (a panic, a restart) leaves the LEDC
+running, and a tone sounding then went on through the boot. Console: `set buzzer_pin <gpio|-1>`,
 `set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
 every plane: the backend's settings pull carries `buzzerPin` /
 `buzzerToneHz`, the cloud's `set_settings` carries `buzzer_pin` /

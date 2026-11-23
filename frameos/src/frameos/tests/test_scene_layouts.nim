@@ -10,6 +10,7 @@ import ../scene_rhythm
 import ../types
 import ../ui/events as ui_events
 from ../ui/keyboard import keyboardBox
+from ../ui/layout import frameKeyboard
 from ../utils/image import panelToScenePoint
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
@@ -1198,6 +1199,40 @@ suite "a layout around the built-in scenes":
     discard pass(panel)
     check panel.wornLayout.isNil
     chooseLayout("")
+
+  test "a press on the frame's keyboard reaches the settings' own form inside a layout":
+    # keysTake hands it to the built-in scene's run: the context it builds
+    # once took `owner` with it before `owner.ownRun` was read (a nil load
+    # that rebooted a reTerminal Sticky at every key, 2026-11-23).
+    const PW = 480
+    const PH = 400
+    forgetTypedKeys()
+    let panel = sceneSettings.exportedScene.init(SceneSettingsId.SceneId, config, logger(), %*{})
+    sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: "setCurrentScene",
+      loopIndex: 0, loopKey: ".", nextSleep: -1, payload: %*{"state": {
+        "from": "tests/content", "layout": {"sceneId": "tests/uiLayout"},
+        "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false}],
+        "values": {"city": "Oslo"}}}))
+    discard pass(panel, newImage(PW, PH))
+    check not panel.wornLayout.isNil
+    proc press(x, y: float32) =
+      for (event, buttons) in [("pointerDown", 1), ("pointerUp", 0)]:
+        let at = %*{"x": x, "y": y, "pointerId": 0, "pointerType": "mouse", "button": 0, "buttons": buttons}
+        sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: event, payload: at,
+          loopIndex: 0, loopKey: ".", nextSleep: -1))
+    var at = (-1'f32, -1'f32)
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.field in 1'u8 .. 3'u8: at = (r.x.float32 + r.w.float32 / 2, r.y.float32 + r.h.float32 / 2)
+    check at[0] >= 0
+    let hole = panel.wornLayout.holeIn
+    press(hole.x.float32 + at[0], hole.y.float32 + at[1])
+    rhythmClockOverride = 1000.01
+    discard pass(panel, newImage(PW, PH))
+    check frameKeyboard.sceneId == SceneSettingsId
+    let box = keyboardBox(PW, PH)
+    press(PW / 2, (box[0] + box[1] div 2).float32)
+    rhythmClockOverride = 1000.02
+    discard pass(panel, newImage(PW, PH))
 
   test "a layout can give a built-in scene the whole panel":
     let scene = opened("tests/escaping")
