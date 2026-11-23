@@ -483,7 +483,7 @@
 
 - Holding the voice key — the key whose long press the frame's event map
   binds to `voiceChat`: REFRESH on the reTerminal E1001/E1002/E1003 presets
-  (PDM microphone; the E1004 has none), AI on the reTerminal Sticky (PDM
+  (PDM microphone; the E1004 has none), AI (the Go key) on the reTerminal Sticky (PDM
   microphone on the S3's USB pads), KEY1 / BOOT on the Waveshare PhotoPainter
   / 13.3E6 (an ES7210 codec microphone, `fos_codec.c`, whose ES8311 speaker
   plays the buzzer's notes) — streams speech to the frame's control

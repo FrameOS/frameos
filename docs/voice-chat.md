@@ -24,7 +24,7 @@ microphone (MEMSensing MSM261DHP006: clock GPIO42, data GPIO41, power enable
 GPIO38 through a TPS22916 load switch), and the Seeed **reTerminal Sticky**
 (an MSM261DDB020 on clock GPIO19, data GPIO20 — the S3's USB pads, which its
 CH343 UART bridge leaves free — power enable GPIO38; its voice key is the
-**AI** key, GPIO4). The **E1004 has no microphone** (its schematic has none;
+**Go** key, label `AI`, GPIO4: hold Go to talk). The **E1004 has no microphone** (its schematic has none;
 GPIO41/42 are the J2 header's UART there), but a PDM microphone on J2 pins
 41/42 works with the same driver once `mic_pins` names it. The Waveshare
 **PhotoPainter and 13.3E6** have no PDM microphone but an **ES7210 codec

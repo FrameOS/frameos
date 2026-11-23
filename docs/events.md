@@ -748,7 +748,7 @@ the preview alike. There are two, applied in this order:
   is showing. A long press of LEFT is the previous scene and of RIGHT the next
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
   firmware's board table), and the owner may add, change or clear it. The
-  reTerminal Sticky's one front key (AI) pressed once is the scene's (its
+  reTerminal Sticky's one front key (Go to people, label `AI`) pressed once is the scene's (its
   role is `primary`: Enter on a UI, the layout's refresh), twice `back`,
   three times the scene switcher (a `triplePress` rule, so that key waits
   for a third press) and held the voice chat. A frame

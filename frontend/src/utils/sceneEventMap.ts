@@ -45,6 +45,14 @@ export function actionTitle(action: string): string {
   return ACTION_TITLES[action] ?? action
 }
 
+/** What people call a key whose label on the wire is something else: the reTerminal Sticky's `AI` is the Go key. */
+const KEY_TITLES: Record<string, string> = { AI: 'Go' }
+
+/** A key's name to show, by its label (case-insensitive): the label itself unless the key has a name of its own. */
+export function keyTitle(label: string): string {
+  return KEY_TITLES[label.trim().toUpperCase()] ?? label
+}
+
 /** The default role of a label (`buttons.roleByLabel`), or ''. */
 export function defaultButtonRole(label: string): string {
   return buttonRoleByLabel[label.trim().toUpperCase()] ?? ''
@@ -201,7 +209,7 @@ export function parseGestureValue(value: string): ButtonGesture | null {
 }
 
 export function gestureTitle(gesture: ButtonGesture): string {
-  return `${gesture.label} · ${actionTitle(gesture.action)}`
+  return `${keyTitle(gesture.label)} · ${actionTitle(gesture.action)}`
 }
 
 /** What a rule for this listener writes over the payload: every field the listener filters on. */
