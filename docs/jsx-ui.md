@@ -1202,7 +1202,11 @@ y width height viewBox>` of its padding box, whose viewBox the scroll moves
 (FrameOS/pixie draws every element inside it into a view of the canvas
 that is that viewport, and keeps its damage there). Its regions are moved
 by the scroll and cut to the viewport. A scroll repaints the viewport on an
-LCD; what did not change in the tree is still taken back unbuilt.
+LCD; what did not change in the tree is still taken back unbuilt, and the
+children of a viewport that only moved keep their parse: pixie hands their
+elements back moved with it (`parseViewportChildren`), all but a child with
+a clipping box of its own. On the Waveshare 1.75" AMOLED that took a scroll
+frame's parse from 33-45 ms to 6-8 (2026-11-24).
 
 ## Themes
 
