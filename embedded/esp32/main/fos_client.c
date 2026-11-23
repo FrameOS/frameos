@@ -1982,6 +1982,9 @@ static volatile bool s_link_on = false; /* set by the render task, per pass */
 /* The next COMMANDS_BIT is pulled on the render task whatever the link does
  * (fos_client_request_commands_pull_here). __atomic. */
 static bool s_commands_here = false;
+/* The link task's next commands pull reports the ETags of a deploy's set
+ * just taken (fos_client_request_report_pull). __atomic. */
+static bool s_report_owed = false;
 static portMUX_TYPE s_link_mux = portMUX_INITIALIZER_UNLOCKED;
 /* Under s_link_mux. */
 static void *s_link_answer = NULL;
@@ -1993,6 +1996,12 @@ static fos_settings_fetched_t *s_link_settings = NULL;
  * writes it. */
 static fos_scene_set_t *s_link_payload = NULL;
 static char s_link_payload_etag[FOS_SCENES_ETAG_LEN];
+/* An answer that came with a deploy's set (fos_commands_answer_fetched) is
+ * in the mailbox or running: no scenes or settings poll until it has run.
+ * The render task takes a set the poll fetched before the answer's, which is
+ * the change from it; a poll between the two takes would name the first and
+ * download the second again. Under s_link_mux. */
+static bool s_link_sync_running = false;
 static bool s_link_push_wanted = false;
 static char s_link_scene_id[128];
 static fos_display_state_t s_link_state;
@@ -2005,17 +2014,21 @@ static SemaphoreHandle_t s_link_round = NULL;
 
 /* One commands pull into an empty mailbox: true when an answer is waiting
  * for the render task. One answer at a time: the next pull waits until this
- * one has run. */
-static bool link_pull_commands(void)
+ * one has run. An answer asking for a sync (a deploy waiting) is handed over
+ * with the set it asks for, downloaded here by fos_commands_fetch: the render
+ * task draws and takes taps meanwhile. `reporting`: fos_commands_fetch's. */
+static bool link_pull_commands(bool reporting)
 {
     portENTER_CRITICAL(&s_link_mux);
     bool slot_free = s_link_answer == NULL;
     portEXIT_CRITICAL(&s_link_mux);
     if (!slot_free) return false;
-    void *answer = fos_commands_fetch();
+    void *answer = fos_commands_fetch(reporting);
     if (answer == NULL) return false;
+    bool fetched = fos_commands_answer_fetched(answer);
     portENTER_CRITICAL(&s_link_mux);
     s_link_answer = answer;
+    if (fetched) s_link_sync_running = true;
     portEXIT_CRITICAL(&s_link_mux);
     return true;
 }
@@ -2026,13 +2039,14 @@ static bool link_pull_commands(void)
 static void link_round(int64_t *next_poll_us, bool *pull_owed)
 {
     if (!s_link_on || fos_wifi_state() != FOS_WIFI_CONNECTED) return;
-    if (*pull_owed) {
+    if (*pull_owed || __atomic_load_n(&s_report_owed, __ATOMIC_SEQ_CST)) {
         portENTER_CRITICAL(&s_link_mux);
         bool slot_free = s_link_answer == NULL;
         portEXIT_CRITICAL(&s_link_mux);
         if (slot_free) {
             *pull_owed = false;
-            if (link_pull_commands() && s_events) xEventGroupSetBits(s_events, LINK_BIT);
+            bool reporting = __atomic_exchange_n(&s_report_owed, false, __ATOMIC_SEQ_CST);
+            if (link_pull_commands(reporting) && s_events) xEventGroupSetBits(s_events, LINK_BIT);
         }
     }
     frameos_nim_flush_logs();
@@ -2055,8 +2069,8 @@ static void link_round(int64_t *next_poll_us, bool *pull_owed)
     *next_poll_us = now + LINK_POLL_US;
     bool wake = false;
     portENTER_CRITICAL(&s_link_mux);
-    bool payload_free = s_link_payload == NULL;
-    bool settings_free = s_link_settings == NULL;
+    bool payload_free = s_link_payload == NULL && !s_link_sync_running;
+    bool settings_free = s_link_settings == NULL && !s_link_sync_running;
     portEXIT_CRITICAL(&s_link_mux);
     /* One payload at a time, like the commands: the next download waits until
      * the render task has taken this one. */
@@ -2082,7 +2096,7 @@ static void link_round(int64_t *next_poll_us, bool *pull_owed)
             wake = true;
         }
     }
-    if (link_pull_commands()) wake = true;
+    if (link_pull_commands(false)) wake = true;
     if (wake && s_events) xEventGroupSetBits(s_events, LINK_BIT);
 }
 
@@ -2142,23 +2156,44 @@ static void pass_scenes_sync(void)
     if (!fos_client_take_link_payload() && !s_link_on) fos_scenes_sync(false);
 }
 
-static void pass_settings_sync(void)
+bool fos_client_take_link_settings(void)
 {
     portENTER_CRITICAL(&s_link_mux);
     fos_settings_fetched_t *settings = s_link_settings;
     s_link_settings = NULL;
     portEXIT_CRITICAL(&s_link_mux);
-    if (settings != NULL) {
-        fos_settings_apply(settings);
-    } else if (!s_link_on) {
-        fos_settings_sync(false);
-    }
+    if (settings == NULL) return false;
+    fos_settings_apply(settings);
+    return true;
+}
+
+static void pass_settings_sync(void)
+{
+    if (!fos_client_take_link_settings() && !s_link_on) fos_settings_sync(false);
+}
+
+bool fos_client_link_on(void)
+{
+    return s_link_on;
+}
+
+void fos_client_request_report_pull(void)
+{
+    __atomic_store_n(&s_report_owed, true, __ATOMIC_SEQ_CST);
+    if (s_link_task) xTaskNotify(s_link_task, LINK_NOTIFY_PULL, eSetBits);
 }
 
 static bool pass_commands_sync(void)
 {
     void *answer = link_take_answer();
-    if (answer != NULL) return fos_commands_run(answer);
+    if (answer != NULL) {
+        bool ran = fos_commands_run(answer);
+        /* Its set is taken: the link task polls again. */
+        portENTER_CRITICAL(&s_link_mux);
+        s_link_sync_running = false;
+        portEXIT_CRITICAL(&s_link_mux);
+        return ran;
+    }
     return s_link_on ? false : fos_commands_sync();
 }
 
@@ -2196,6 +2231,9 @@ static void link_hand_back(const fos_config_t *config)
     } else {
         ESP_LOGW(TAG, "backend link: its round trip is still running after 30 s");
     }
+    /* A report the link task owed is this task's now: the commands below
+     * run with the link off, and report themselves before the sleep. */
+    __atomic_store_n(&s_report_owed, false, __ATOMIC_SEQ_CST);
     /* A scene payload it downloaded is taken too: the sleep waits for the
      * store task to write it (fos_scenes_store_wait, before the sleep). */
     pass_scenes_sync();

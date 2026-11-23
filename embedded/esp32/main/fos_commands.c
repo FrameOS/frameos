@@ -7,6 +7,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 
+#include "fos_animation.h"
 #include "fos_backend_http.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -107,8 +108,24 @@ static bool run_command(cJSON *command)
     return ctx.applied;
 }
 
+/* A pulled answer, as it goes from the task that pulled it to the render
+ * task that runs it. */
+typedef struct {
+    cJSON *root;
+    /* The pull that reports a sync's ETags: its own `sync` is not made. */
+    bool reporting;
+    /* Its sync was fetched with the pull, on the task that pulled it
+     * (fos_sync_fetch_with_pull): what that brought, for the render task to
+     * take before the commands. `scenes` NULL: unchanged (a 304) or the fetch
+     * failed (logged); `settings` NULL likewise. */
+    bool fetched;
+    fos_scene_set_t *scenes;
+    char scenes_etag[FOS_SCENES_ETAG_LEN];
+    fos_settings_fetched_t *settings;
+} answer_t;
+
 static bool sync_pass(bool after_forced_pull);
-static bool run_answer(cJSON *root, bool after_forced_pull);
+static bool run_answer(answer_t *answer);
 
 bool fos_commands_sync(void)
 {
@@ -154,63 +171,130 @@ static cJSON *pull(void)
     return root;
 }
 
-/* Whether an answer holds anything to run: commands, or a sync to make. */
-static bool answer_has_work(const cJSON *root)
+static bool answer_sync(const cJSON *root)
 {
-    const cJSON *commands = cJSON_GetObjectItem(root, "commands");
-    return cJSON_IsTrue(cJSON_GetObjectItem(root, "sync")) ||
-           (cJSON_IsArray(commands) && cJSON_GetArraySize(commands) > 0);
+    return cJSON_IsTrue(cJSON_GetObjectItem(root, "sync"));
 }
 
-void *fos_commands_fetch(void)
+/* Whether an answer holds anything to run: commands, or a sync to make. */
+static bool answer_has_work(const cJSON *root, bool reporting)
+{
+    const cJSON *commands = cJSON_GetObjectItem(root, "commands");
+    return (answer_sync(root) && !reporting) || (cJSON_IsArray(commands) && cJSON_GetArraySize(commands) > 0);
+}
+
+/* What an answer holds, let go of; the struct itself is the caller's. The
+ * set and the settings are taken by run_answer before the commands, so they
+ * are only here when a fetch brought them and the plan took nothing (it
+ * cannot: fetched means sync and not reporting). */
+static void answer_release(answer_t *answer)
+{
+    cJSON_Delete(answer->root);
+    answer->root = NULL;
+    if (answer->scenes) fos_scenes_take_backend_payload(answer->scenes, answer->scenes_etag);
+    answer->scenes = NULL;
+    if (answer->settings) fos_settings_fetched_free(answer->settings);
+    answer->settings = NULL;
+}
+
+void *fos_commands_fetch(bool reporting)
 {
     cJSON *root = pull();
-    if (root != NULL && !answer_has_work(root)) {
+    if (root == NULL) return NULL;
+    if (!answer_has_work(root, reporting)) {
         cJSON_Delete(root);
-        root = NULL;
+        return NULL;
     }
-    return root;
+    answer_t *answer = calloc(1, sizeof(*answer));
+    if (answer == NULL) {
+        /* Its commands are `sent` now: the backend hands them over again in
+         * a few minutes. */
+        ESP_LOGW(TAG, "no memory for a commands answer");
+        cJSON_Delete(root);
+        return NULL;
+    }
+    answer->root = root;
+    answer->reporting = reporting;
+    if (fos_sync_fetch_with_pull(answer_sync(root), reporting)) {
+        /* A deploy is waiting that this frame's pulls do not hold yet: fetched
+         * here, whatever the store's own rule (a USB-pushed payload skips the
+         * backend pull until a deploy: this is the deploy), and the render
+         * task gets the answer only with its set. It goes on drawing and
+         * taking taps meanwhile: done on the render task, a 35-scene 1.48 MB
+         * deploy froze a reTerminal Sticky for 42 s and dropped 33 taps
+         * (2026-11-23). A set the link task's poll fetched and the render task
+         * has not taken yet is what this fetch names (fos_scenes.c
+         * s_fetched_etag), so it brings what changed since that one. */
+        fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
+        answer->fetched = true;
+        answer->scenes = fos_scenes_backend_fetch(true, answer->scenes_etag, sizeof(answer->scenes_etag), NULL);
+        answer->settings = fos_settings_fetch(true);
+    }
+    return answer;
+}
+
+bool fos_commands_answer_fetched(const void *answer)
+{
+    return answer != NULL && ((const answer_t *)answer)->fetched;
 }
 
 bool fos_commands_run(void *answer)
 {
     if (answer == NULL) return false;
-    return run_answer((cJSON *)answer, false);
+    bool applied = run_answer((answer_t *)answer);
+    free(answer);
+    return applied;
 }
 
-/* One pull of the queue. `after_forced_pull`: this is the second pull of a
- * pass, right after the backend asked for the scenes and settings to be
- * fetched — never a third. */
+/* One pull of the queue, on the render task. `after_forced_pull`: this is
+ * the pull that reports, right after the backend asked for the scenes and
+ * settings to be fetched: never a third. */
 static bool sync_pass(bool after_forced_pull)
 {
     cJSON *root = pull();
     if (root == NULL) return false;
-    return run_answer(root, after_forced_pull);
+    answer_t answer = {.root = root, .reporting = after_forced_pull};
+    return run_answer(&answer);
 }
 
-/* What a pull answered, run on the render task; frees `root`. */
-static bool run_answer(cJSON *root, bool after_forced_pull)
+/* What a pull answered, run on the render task; lets go of what `answer`
+ * holds (answer_release), not of `answer`. */
+static bool run_answer(answer_t *answer)
 {
+    cJSON *root = answer->root;
     cJSON *commands = cJSON_GetObjectItem(root, "commands");
-    /* A deploy is waiting that this frame's pulls do not hold yet: fetch
-     * them now, whatever the store's own rule (a USB-pushed payload skips the
-     * backend pull until a deploy — this is the deploy), and report the new
-     * ETags with one more pull so the backend can record it on this wake. */
-    bool sync_now = cJSON_IsTrue(cJSON_GetObjectItem(root, "sync")) && !after_forced_pull;
+    /* A deploy is waiting that this frame's pulls do not hold yet: its set
+     * goes in BEFORE the commands. A switch queued behind a scenes push (the
+     * editor's preview, the voice chat's show_image) names a scene this frame
+     * does not hold until then: run first, it failed with apply-failed and
+     * the old scene rendered (E1002, 2026-10-24). Then the ETags of what was
+     * taken go back with one more pull, so the backend records the deploy on
+     * this wake. */
+    fos_sync_plan_t plan = fos_sync_plan(answer_sync(root), answer->reporting, answer->fetched, fos_client_link_on());
     int count = cJSON_IsArray(commands) ? cJSON_GetArraySize(commands) : 0;
-    if (sync_now) {
-        /* BEFORE the commands: a switch queued behind a scenes push (the
-         * editor's preview, the voice chat's show_image) names a scene this
-         * frame does not hold until the pull below — run first, it failed
-         * with apply-failed and the old scene rendered (E1002, 2026-10-24). */
-        fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
-        /* The set the link task fetched, before and after a sync that names
-         * it (it waits out a fetch in flight): a 304, not the set again. */
+    if (plan.fetch_here || plan.take_fetched) fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
+    if (plan.fetch_here) {
+        /* Nobody fetched it (a frame about to deep-sleep, the voice relay's
+         * pull here): on this task, now. The set the link task fetched,
+         * before and after a sync that names it (it waits out a fetch in
+         * flight): a 304, not the set again. */
         fos_client_take_link_payload();
         fos_scenes_sync(true);
         fos_client_take_link_payload();
         fos_scenes_apply_pending();
         fos_settings_sync(true);
+    } else if (plan.take_fetched) {
+        /* Fetched with the pull. A set the link task's poll fetched before
+         * it goes first: the pull's fetch named that one, so what it brought
+         * is the change from it. The link task polls no scenes or settings
+         * until this answer has run (fos_client.c s_link_sync_running). */
+        fos_client_take_link_payload();
+        if (answer->scenes) fos_scenes_take_backend_payload(answer->scenes, answer->scenes_etag);
+        answer->scenes = NULL;
+        fos_scenes_apply_pending();
+        fos_client_take_link_settings();
+        if (answer->settings) fos_settings_apply(answer->settings);
+        answer->settings = NULL;
     }
     int applied = 0;
     if (count > 0) {
@@ -229,9 +313,11 @@ static bool run_answer(cJSON *root, bool after_forced_pull)
                  count, applied);
         frameos_nim_log_hook(line);
     }
-    cJSON_Delete(root);
-    /* The ETags of what was just fetched go back with one more pull, so the
-     * backend records the deploy on this wake. */
-    if (sync_now && sync_pass(true)) applied++;
+    answer_release(answer);
+    /* The ETags of what was just taken go back with one more pull, so the
+     * backend records the deploy on this wake: the link task's while it has
+     * the round trips, this task's before a sleep. */
+    if (plan.report_here && sync_pass(true)) applied++;
+    if (plan.report_on_link) fos_client_request_report_pull();
     return applied > 0;
 }

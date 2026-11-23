@@ -1037,7 +1037,15 @@ a small change cost what it should:
   and a restart wait for it). On the E1003 a forced sync held the render task
   13-20 s (the download 6-13 s, the write 6-7 s) and an event sent as it
   began waited up to 11.7 s; now the worst wait is the new set's first
-  render, 3.2 s. A flash write turns the cache off for every erase and page
+  render, 3.2 s. A deploy's own sync goes the same way: a commands answer
+  that says `sync` (a deploy waiting) is handed to the render task only with
+  the set and settings it asks for, downloaded by the link task with the pull
+  (`fos_commands_fetch`); the render task takes them and only then runs the
+  answer's commands, since a switch queued behind the push names a scene
+  from it, and the link task's next pull reports the new ETags so the
+  backend records the deploy (`fos_sync_plan`). Downloaded on the render
+  task, a 35-scene, 1.48 MB deploy froze a reTerminal Sticky's screen and
+  dropped its taps for 42 s (2026-11-23). A flash write turns the cache off for every erase and page
   program and both cores wait it out, so the store task writes 2 KB at a time
   between renders and never while someone taps (`store_pace`); on an RGB LCD,
   which shows "Updating" for the write, as fast as it goes. A cloud push or an
@@ -1055,7 +1063,7 @@ a small change cost what it should:
   under `s_link_round`, and runs the commands it pulled: they would otherwise
   still be in memory as the chip sleeps (`link_hand_back`). The rules are
   host-tested in `fos_animation.c` (`fos_backend_link_on`,
-  `fos_image_push_yields`, `fos_input_hold_applies`) and the threading read
+  `fos_image_push_yields`, `fos_input_hold_applies`, `fos_sync_plan`) and the threading read
   off the source by `test_esp32_backend_link.py`. The picture stream no longer holds the snapshot for the
   whole upload: a snapshot up to 256 KB is copied out, a larger one is read a
   row at a time and a render taking the buffer back ends the stream (it held a

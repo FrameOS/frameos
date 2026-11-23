@@ -224,6 +224,35 @@ bool fos_backend_link_on(bool link_task, bool deep_sleep_now, uint32_t render_at
  * releases the panel right after) and the render task pulls it itself. */
 bool fos_commands_nudge_to_link(bool link_on, bool pull_here);
 
+/* A commands answer that says `sync`: a deploy is waiting that the frame does
+ * not hold. Its set must be in before its commands run (a switch queued
+ * behind a push names a scene from it: run first, it failed and the old scene
+ * rendered, E1002 2026-10-24), and one more pull then reports the new ETags,
+ * so the backend records the deploy. `reporting`: this answer is that pull's,
+ * whose own `sync` is not made (never a third pull).
+ *
+ * The task that pulled the answer downloads the set with it: a 35-scene,
+ * 1.48 MB deploy downloaded on the render task froze a reTerminal Sticky's
+ * screen and dropped its taps for 42 s (2026-11-23). True on the link task
+ * when the answer's set and settings are fetched there, before the answer is
+ * handed to the render task. */
+bool fos_sync_fetch_with_pull(bool sync, bool reporting);
+
+/* What the render task does with such an answer. `fetched_with_pull`: the
+ * link task fetched its set and settings (fos_sync_fetch_with_pull); without
+ * that (a frame about to deep-sleep, the voice relay's pull here) the render
+ * task downloads them itself, as nobody else will before its commands run.
+ * `link_on`: the link task has the round trips now, and the pull that reports
+ * is its (a backend that hung held the render task for the connect timeout);
+ * otherwise this task makes it, before a sleep the link would not see. */
+typedef struct {
+    bool fetch_here;     /* download the set and settings on this task, before the commands */
+    bool take_fetched;   /* take what the link task fetched with the pull, before the commands */
+    bool report_here;    /* one more pull on this task after the commands */
+    bool report_on_link; /* that pull is the link task's */
+} fos_sync_plan_t;
+fos_sync_plan_t fos_sync_plan(bool sync, bool reporting, bool fetched_with_pull, bool link_on);
+
 /* Whether the idle wait goes on at `now_us`: until `wait_until_us`, and past
  * it while the display's own task still refreshes the glass (a timed render
  * waits for it; one somebody asks for leaves the wait by its bit). */

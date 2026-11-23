@@ -328,6 +328,46 @@ static void test_the_backend_link(void)
     CHECK(!fos_commands_nudge_to_link(false, true), "and so it is without the link");
 }
 
+static void test_a_deploy_downloads_off_the_render_task(void)
+{
+    /* The link task pulls an answer that says sync: it downloads the set and
+     * settings itself, before the render task gets the answer (a 1.48 MB
+     * deploy held the Sticky's render task 42 s, 2026-11-23). */
+    CHECK(fos_sync_fetch_with_pull(true, false), "a deploy waiting: fetched with the pull");
+    CHECK(!fos_sync_fetch_with_pull(false, false), "nothing waiting: nothing fetched");
+    CHECK(!fos_sync_fetch_with_pull(true, true), "the pull that reports never syncs again");
+
+    /* The render task runs that answer: it takes the set first and leaves the
+     * report to the link task. */
+    fos_sync_plan_t p = fos_sync_plan(true, false, true, true);
+    CHECK(p.take_fetched && !p.fetch_here, "the link task's set is taken, not fetched again");
+    CHECK(p.report_on_link && !p.report_here, "the report is the link task's pull");
+
+    /* The round trips came back before it ran (a deep sleep comes): the set is
+     * still taken first, and this task reports before the chip sleeps. */
+    p = fos_sync_plan(true, false, true, false);
+    CHECK(p.take_fetched && !p.fetch_here, "fetched with the pull: taken");
+    CHECK(p.report_here && !p.report_on_link, "the link is off: the render task reports");
+
+    /* Pulled on the render task: a frame about to sleep downloads it there,
+     * as nobody else will before the commands run. */
+    p = fos_sync_plan(true, false, false, false);
+    CHECK(p.fetch_here && !p.take_fetched, "no link: the render task downloads it");
+    CHECK(p.report_here && !p.report_on_link, "and reports");
+    /* The voice relay's pull here, with the link on: its render needs the set,
+     * the report can wait for the link task. */
+    p = fos_sync_plan(true, false, false, true);
+    CHECK(p.fetch_here && p.report_on_link && !p.report_here, "the voice relay's pull");
+
+    /* Nothing to sync, or the reporting pull's answer: the commands alone. */
+    p = fos_sync_plan(false, false, false, true);
+    CHECK(!p.fetch_here && !p.take_fetched && !p.report_here && !p.report_on_link, "no sync");
+    p = fos_sync_plan(true, true, false, true);
+    CHECK(!p.fetch_here && !p.take_fetched && !p.report_here && !p.report_on_link, "never a third pull");
+    p = fos_sync_plan(true, true, false, false);
+    CHECK(!p.fetch_here && !p.report_here, "never a third pull, link or not");
+}
+
 static void test_a_timed_render_waits_for_the_glass(void)
 {
     /* The E1002's color refresh is 28.7 s on the display's own task. */
@@ -395,6 +435,7 @@ int main(void)
     test_quick_pictures_go_up_fast();
     test_the_picture_push_gives_way();
     test_the_backend_link();
+    test_a_deploy_downloads_off_the_render_task();
     test_a_timed_render_waits_for_the_glass();
     test_a_layouts_second_is_a_second();
     test_an_animation_is_pictured_once();
