@@ -781,19 +781,25 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
         "busy": 18, "sck": 13, "mosi": 14, "pwr": 47,
     }
-    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes, AI
-    # held talks (docs/voice-chat.md).
+    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes. The
+    # AI key pressed once is the scene's, twice back, three times the scene
+    # list, held it talks (docs/voice-chat.md).
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
     assert [rule["emit"] for rule in frame.event_map] == [
         "setCurrentScene",
         "setCurrentScene",
+        "back",
+        "sceneSwitcher",
         "voiceChat",
         "forward",
         "back",
         "sceneSwitcher",
         "sceneSettings",
     ]
-    assert frame.event_map[2]["match"] == {"label": "AI", "action": "longPress"}
+    assert frame.event_map[2]["match"] == {"label": "AI", "action": "doublePress"}
+    assert frame.event_map[3]["match"] == {"label": "AI", "action": "triplePress"}
+    assert frame.event_map[4]["match"] == {"label": "AI", "action": "longPress"}
+    assert not any(rule["match"] == {"label": "AI", "action": "press"} for rule in frame.event_map)
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48
     assert frame.device_config["buzzerToneHz"] == 4000

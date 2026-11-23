@@ -1083,7 +1083,9 @@ export const buttonRoleByLabel: Record<string, string> = {
   "DOWN": "down",
   "REFRESH": "primary"
 }
-export const buttonActions: readonly string[] = ["press", "doublePress", "longPress"]
+export const buttonActions: readonly string[] = ["press", "doublePress", "triplePress", "longPress"]
+/** The first FrameOS that makes a `triplePress` (`buttons.triplePressSince`): an older one never matches a rule for it. */
+export const buttonTriplePressSince = "2026.11.15"
 export const gpioActions: readonly string[] = ["down", "up"]
 /** The edges of a touch screen an `edgeSwipe` starts from (`gestures.edges`). */
 export const screenEdges: readonly string[] = ["left", "right", "top", "bottom"]
@@ -1186,7 +1188,7 @@ interface FrameOSEventPayloads {
   toggleScreen: Record<string, never>;
   /** A GPIO button going \`down\` or \`up\`, the moment it happens. \`up\` says how long it was held. */
   gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; claimed?: boolean; atMs?: number; level?: number };
-  /** A GPIO button pressed: a \`press\`, a \`doublePress\` or a \`longPress\`, one event per press. */
+  /** A GPIO button pressed: a \`press\`, a \`doublePress\`, a \`triplePress\` or a \`longPress\`, one event per press. */
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };

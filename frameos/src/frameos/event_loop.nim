@@ -139,12 +139,28 @@ proc hasStatePayload*(payload: JsonNode): bool =
   let state = payload{"state"}
   not state.isNil and state.kind == JObject
 
+proc tripleWanted(loop: EventLoop, pin: int, label, role: string): bool =
+  ## Whether the frame's event map or the showing scene's binds this key's
+  ## `triplePress` (a rule whose `match` names the action and fits the key):
+  ## only then does input_state hold a key's pair back for a third press.
+  let probe = %*{"pin": pin, "label": label, "role": role, "action": "triplePress"}
+  let scene = if loop.host.sceneFor.isNil: nil else: loop.host.sceneFor(none(SceneId))
+  for rules in [(if loop.frameConfig.isNil: nil else: loop.frameConfig.eventMap),
+                (if scene.isNil: nil else: scene.eventMap)]:
+    if rules.isNil or rules.kind != JArray:
+      continue
+    for rule in rules.elems:
+      if rule{"match", "action"}.getStr() == "triplePress" and rule.eventMapRuleMatches(evButton, probe):
+        return true
+
 proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
                    laneCapacity = DefaultLaneCapacity): EventLoop =
-  result = EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
+  let loop = EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
     main: initDeque[EventEnvelope](), input: initDeque[EventEnvelope](),
     inputState: initInputState(frameConfig), displayOn: true)
-  result.inputState.keyboardAt = host.keyboardAt
+  loop.inputState.keyboardAt = host.keyboardAt
+  loop.inputState.tripleWanted = proc (pin: int, label, role: string): bool = loop.tripleWanted(pin, label, role)
+  loop
 
 proc pending*(loop: EventLoop): int =
   loop.main.len + loop.input.len

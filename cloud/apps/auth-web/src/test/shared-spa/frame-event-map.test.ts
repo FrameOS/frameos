@@ -31,6 +31,7 @@ import {
   frameSupportsBackForward,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
+  frameSupportsTriplePress,
   gestureCanVoiceChat,
   parseFrameActionValue,
   parseFrameGestureValue,
@@ -38,8 +39,10 @@ import {
   sceneSettingsMinVersion,
   sceneSwitcherMinVersion,
   showSceneStaleSettings,
+  triplePressMinVersion,
   withShowSceneSetting,
 } from "../../../../../../frontend/src/utils/frameEventMap";
+import { triplePressMinVersion as cloudTriplePressMinVersion } from "../../lib/frames";
 
 // The reTerminal preset: the arrows held walk the scenes.
 const leftHeld = { label: "LEFT", action: "longPress" };
@@ -220,6 +223,20 @@ describe("bindings and rules", () => {
     expect(frameSupportsBackForward(backForwardMinVersion, true)).toBe(true);
     expect(frameSupportsBackForward("2026.10.22", true)).toBe(false);
     expect(frameSupportsBackForward(null, false)).toBe(true);
+  });
+
+  it("offers a triple press from the FrameOS that makes one, and the cloud gates on the same floor", () => {
+    expect(triplePressMinVersion).toBe(cloudTriplePressMinVersion);
+    expect(frameSupportsTriplePress(triplePressMinVersion, true)).toBe(true);
+    expect(frameSupportsTriplePress("2026.11.14", true)).toBe(false);
+    expect(frameSupportsTriplePress(null, false)).toBe(true);
+    // The reTerminal Sticky's AI key: twice back, three times the scene list.
+    const thrice = { label: "AI", action: "triplePress" };
+    expect(frameGestureTitle(thrice)).toBe("AI · triple press");
+    expect(bindingRule({ gesture: thrice, action: { kind: "sceneSwitcher" } })).toEqual({
+      event: "button", match: thrice, emit: "sceneSwitcher", as: {},
+    });
+    expect(gestureCanVoiceChat(thrice)).toBe(false);
   });
 
   it("offers the edges as rows on a touch screen, by select value and title", () => {

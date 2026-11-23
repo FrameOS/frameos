@@ -877,7 +877,7 @@
   },
   {
     "name": "button",
-    "description": "A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press.",
+    "description": "A GPIO button pressed: a `press`, a `doublePress`, a `triplePress` or a `longPress`, one event per press.",
     "canListen": true,
     "fields": [
       {
@@ -919,6 +919,7 @@
         "options": [
           "press",
           "doublePress",
+          "triplePress",
           "longPress"
         ]
       },

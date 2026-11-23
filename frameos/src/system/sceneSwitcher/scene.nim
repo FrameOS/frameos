@@ -602,8 +602,8 @@ proc opened(self: SceneSwitcherScene) =
 
 proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## A key, by its role (the input state gives every `button` one): next /
-  ## down and prev / up walk the tiles, a press one step and a double press
-  ## two, so every tap counts; primary (OK, the reTerminal's green REFRESH,
+  ## down and prev / up walk the tiles, a press one step, a double press
+  ## two and a triple press three, so every tap counts; primary (OK, the reTerminal's green REFRESH,
   ## BOOT) shows the highlighted scene (opens the frame page on the gear),
   ## back and menu go back. A long press is the frame's where its event map binds it (walk the
   ## scenes, talk); one it leaves free goes back from the key that opens or
@@ -611,7 +611,7 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   # One way out (no early `return`): each one repeats the clean-up of what
   # was read so far.
   let action = payload{"action"}.getStr()
-  let steps = if action == "press": 1 elif action == "doublePress": 2 else: 0
+  let steps = if action == "press": 1 elif action == "doublePress": 2 elif action == "triplePress": 3 else: 0
   if steps > 0:
     if self.entries.len == 0:
       self.list()

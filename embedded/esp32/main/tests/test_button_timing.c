@@ -82,15 +82,15 @@ static void test_a_fast_double_tap_is_a_double_press(void)
 {
     fos_button_timing_t b;
     fos_button_timing_init(&b, 1, 0);
-    CHECK(!fos_button_timing_press(&b, 1000), "the first press is a press");
+    CHECK(fos_button_timing_press(&b, 1000) == 1, "the first press is a press");
     CHECK(fos_button_timing_release(&b, 1040, NULL) == 40, "held 40 ms");
     CHECK(b.tap_ended, "a short single press may start a double");
-    CHECK(fos_button_timing_press(&b, 1140), "a press 100 ms after the release is the double");
+    CHECK(fos_button_timing_press(&b, 1140) == 2, "a press 100 ms after the release is the double");
     CHECK(fos_button_timing_release(&b, 1180, NULL) == 40, "held 40 ms");
     CHECK(!b.tap_ended, "the double's release starts no third");
-    CHECK(!fos_button_timing_press(&b, 1300), "the third press starts over");
+    CHECK(fos_button_timing_press(&b, 1300) == 1, "the third press starts over");
     fos_button_timing_release(&b, 1340, NULL);
-    CHECK(fos_button_timing_press(&b, 1400), "the fourth pairs with the third");
+    CHECK(fos_button_timing_press(&b, 1400) == 2, "the fourth pairs with the third");
     fos_button_timing_release(&b, 1440, NULL);
 }
 
@@ -100,9 +100,9 @@ static void test_the_double_press_window_is_the_contracts(void)
     fos_button_timing_init(&b, 1, 0);
     fos_button_timing_press(&b, 1000);
     fos_button_timing_release(&b, 1100, NULL);
-    CHECK(!fos_button_timing_press(&b, 1100 + FOS_BUTTON_DOUBLE_PRESS_MS + 1), "one ms late is a press");
+    CHECK(fos_button_timing_press(&b, 1100 + FOS_BUTTON_DOUBLE_PRESS_MS + 1) == 1, "one ms late is a press");
     fos_button_timing_release(&b, 1500, NULL);
-    CHECK(fos_button_timing_press(&b, 1500 + FOS_BUTTON_DOUBLE_PRESS_MS), "on the window is a double");
+    CHECK(fos_button_timing_press(&b, 1500 + FOS_BUTTON_DOUBLE_PRESS_MS) == 2, "on the window is a double");
     fos_button_timing_release(&b, 1900, NULL);
 }
 
@@ -117,7 +117,7 @@ static void test_a_long_press_does_not_start_a_double(void)
     CHECK(fos_button_timing_release(&b, 1000 + L + 100, &long_press) == (uint32_t)(L + 100), "held");
     CHECK(long_press, "held past longPressMs: the up is a longPress");
     CHECK(!b.tap_ended, "a long press ends no tap");
-    CHECK(!fos_button_timing_press(&b, 1000 + L + 200), "the next press is a press");
+    CHECK(fos_button_timing_press(&b, 1000 + L + 200) == 1, "the next press is a press");
     fos_button_timing_release(&b, 1000 + L + 250, NULL);
 }
 
@@ -141,7 +141,7 @@ static void test_the_second_press_of_a_double_makes_no_long_press(void)
     fos_button_timing_init(&b, 1, 0);
     fos_button_timing_press(&b, 1000);
     fos_button_timing_release(&b, 1040, NULL);
-    CHECK(fos_button_timing_press(&b, 1140), "the double");
+    CHECK(fos_button_timing_press(&b, 1140) == 2, "the double");
     bool long_press = true;
     fos_button_timing_release(&b, 3100, &long_press);
     CHECK(!long_press, "a double press held is still a double press");
@@ -180,9 +180,49 @@ static void test_a_held_key_sounds_every_second(void)
     /* The second press of a double press counts nothing. */
     fos_button_timing_press(&b, 20000);
     fos_button_timing_release(&b, 20040, NULL);
-    CHECK(fos_button_timing_press(&b, 20140), "a double");
+    CHECK(fos_button_timing_press(&b, 20140) == 2, "a double");
     CHECK(!fos_button_timing_hold_tick(&b, 20140 + 3 * L), "a held double press is silent");
     fos_button_timing_release(&b, 20140 + 3 * L + 10, NULL);
+}
+
+static void test_a_third_press_only_where_the_map_binds_one(void)
+{
+    const int64_t W = FOS_BUTTON_DOUBLE_PRESS_MS;
+    fos_button_timing_t b;
+    fos_button_timing_init(&b, 1, 0);
+    b.triple = true;
+    CHECK(fos_button_timing_press(&b, 1000) == 1, "the first press");
+    fos_button_timing_release(&b, 1040, NULL);
+    CHECK(fos_button_timing_press(&b, 1140) == 2, "the second");
+    fos_button_timing_release(&b, 1180, NULL);
+    CHECK(b.pair_ended && !b.tap_ended, "a short second press may go on to a third");
+    CHECK(fos_button_timing_busy(&b, 1180 + W, 0), "busy: a doublePress or a triplePress to come");
+    CHECK(fos_button_timing_press(&b, 1180 + W) == 3, "the third, on the window");
+    CHECK(!fos_button_timing_hold_tick(&b, 1180 + W + 3 * FOS_BUTTON_LONG_PRESS_MS), "a held third is silent");
+    bool long_press = true;
+    fos_button_timing_release(&b, 1180 + W + 3 * FOS_BUTTON_LONG_PRESS_MS + 10, &long_press);
+    CHECK(!long_press && !b.pair_ended && !b.tap_ended, "a third press is that and nothing more");
+    CHECK(fos_button_timing_press(&b, 5000) == 1, "the fourth starts over");
+    fos_button_timing_release(&b, 5040, NULL);
+    /* Late, or after a held second press: no third. */
+    CHECK(fos_button_timing_press(&b, 5100) == 2, "a double");
+    fos_button_timing_release(&b, 5140, NULL);
+    CHECK(fos_button_timing_press(&b, 5140 + W + 1) == 1, "one ms late is a press");
+    fos_button_timing_release(&b, 5200, NULL);
+    CHECK(fos_button_timing_press(&b, 5300) == 2, "a double");
+    fos_button_timing_release(&b, 5300 + FOS_BUTTON_LONG_PRESS_MS, NULL);
+    CHECK(!b.pair_ended && !fos_button_timing_busy(&b, 5300 + FOS_BUTTON_LONG_PRESS_MS + 1, 100),
+          "a held second press decides the doublePress at its up");
+    CHECK(fos_button_timing_press(&b, 5300 + FOS_BUTTON_LONG_PRESS_MS + 100) == 1, "and the next starts over");
+    fos_button_timing_release(&b, 7000, NULL);
+    /* A key no rule binds three times: the third starts over, as before. */
+    b.triple = false;
+    fos_button_timing_press(&b, 9000);
+    fos_button_timing_release(&b, 9040, NULL);
+    CHECK(fos_button_timing_press(&b, 9100) == 2, "a double");
+    fos_button_timing_release(&b, 9140, NULL);
+    CHECK(fos_button_timing_press(&b, 9200) == 1, "the third starts over without a rule");
+    fos_button_timing_release(&b, 9240, NULL);
 }
 
 static void test_busy_until_the_dispatcher_has_decided(void)
@@ -201,6 +241,15 @@ static void test_busy_until_the_dispatcher_has_decided(void)
     fos_button_timing_press(&b, 3000);
     fos_button_timing_release(&b, 3000 + FOS_BUTTON_LONG_PRESS_MS + 10, NULL);
     CHECK(!fos_button_timing_busy(&b, 3000 + FOS_BUTTON_LONG_PRESS_MS + 20, 100), "after a long press");
+    /* After a quick pair the window is waited out on every key: a rule of
+     * the showing scene's map (which the button task never sees) can bind a
+     * third press, and a thin client must send the run in one batch. */
+    fos_button_timing_press(&b, 6000);
+    fos_button_timing_release(&b, 6040, NULL);
+    fos_button_timing_press(&b, 6100);
+    fos_button_timing_release(&b, 6140, NULL);
+    CHECK(fos_button_timing_busy(&b, 6140 + W + 100, 100), "after a pair: a third may still come");
+    CHECK(!fos_button_timing_busy(&b, 6140 + W + 101, 100), "decided");
 }
 
 int main(void)
@@ -214,6 +263,7 @@ int main(void)
     test_the_second_press_of_a_double_makes_no_long_press();
     test_a_key_held_at_boot();
     test_a_held_key_sounds_every_second();
+    test_a_third_press_only_where_the_map_binds_one();
     test_busy_until_the_dispatcher_has_decided();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

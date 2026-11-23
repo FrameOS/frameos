@@ -707,7 +707,7 @@ export const cloudFramesContract = {
                 "event"
               ]
             },
-            "maxItems": 8
+            "maxItems": 12
           }
         }
       }

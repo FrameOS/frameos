@@ -7,7 +7,9 @@
 // frameos/relayed_input.nim) exactly as an ESP32's own runtime does. All the
 // board decides is when to send: once every press is decided, with no key
 // down and no short press still inside its double-press window, so a double
-// tap travels as one batch and is one `doublePress`. The debounce and that
+// tap travels as one batch and is one `doublePress`; the window after a pair
+// is waited out too, since an event map may bind a third press (`triplePress`).
+// The debounce and that
 // rule are the ESP32 button task's (fos_button_timing.c), on the contract's
 // numbers. No SDK here: tests/test_pk_buttons.c.
 #ifndef PK_BUTTONS_H

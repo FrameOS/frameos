@@ -1,7 +1,7 @@
 /*
  * One GPIO button's timing, pure: the debounce, and the button layer the Nim
  * dispatcher makes out of the edges (docs/events-contract.json `buttons`:
- * `press`, `doublePress`, `longPress`), mirrored here so the buzzer can sound
+ * `press`, `doublePress`, `triplePress`, `longPress`), mirrored here so the buzzer can sound
  * each event the instant it happens, from the button task, while the render
  * task may be 30 s into a panel refresh.
  * The scene hears the dispatcher's events (frameos/input_state.nim), not
@@ -39,7 +39,10 @@ typedef struct {
     int64_t pressed_at_ms;  /* the press edge's stamp */
     int64_t released_at_ms; /* the last release edge's stamp */
     bool tap_ended;         /* that release ended a short, single press: a double may follow */
-    bool twice;             /* this press is the second of a double press: no long press */
+    bool pair_ended;        /* that release ended a short second press: a third may follow */
+    bool twice;             /* this press is the second (or third) of a run: no long press */
+    bool thrice;            /* this press is the third of a triple press: nothing follows it */
+    bool triple;            /* a rule binds this key's triplePress (fos_buttons.c, from the frame's map) */
     uint32_t seconds;       /* whole FOS_BUTTON_LONG_PRESS_MS this hold has sounded */
 } fos_button_timing_t;
 
@@ -51,11 +54,13 @@ void fos_button_timing_init(fos_button_timing_t *b, int level, int64_t now_ms);
  * `now_ms` (read it back from `changed_at_ms`). */
 fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, int64_t now_ms);
 
-/* Book an accepted press at `at_ms`. True when it is the second press of a
- * double press: within FOS_BUTTON_DOUBLE_PRESS_MS of the previous short
- * press's release. The third press in a row starts over, as in the
- * dispatcher. */
-bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
+/* Book an accepted press at `at_ms`. Which press of a run it is: 2 for the
+ * second press of a double press (within FOS_BUTTON_DOUBLE_PRESS_MS of the
+ * previous short press's release), 3 for the third of a triple press (as
+ * soon after a short second press, on a key whose `triple` is set: the
+ * dispatcher holds such a key's pair back for it), else 1. A third press
+ * on any other key starts over, as in the dispatcher. */
+int fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
 
 /* The key is still down at `now_ms`: true at every whole
  * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...),
@@ -75,5 +80,8 @@ uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *
 /* The dispatcher still has something to decide about this key at `now_ms`:
  * it is down (its `up` decides a `longPress` or a short press), or its
  * last short press is inside the double-press window (a `press` or a
- * `doublePress` is coming). `slack_ms` past the window covers the tick that delivers it. */
+ * `doublePress` is coming), or a short second press is (a `doublePress` or
+ * a `triplePress` may be: the window is waited out after every pair, since
+ * a rule of the showing scene's map, which this task never sees, can bind a
+ * third press too). `slack_ms` past the window covers the tick that delivers it. */
 bool fos_button_timing_busy(const fos_button_timing_t *b, int64_t now_ms, int64_t slack_ms);

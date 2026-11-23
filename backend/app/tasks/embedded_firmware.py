@@ -399,12 +399,15 @@ EMBEDDED_SEEED_STICKY_GPIO_BUTTONS = [
     {"pin": 5, "label": "UP"},
     {"pin": 6, "label": "DOWN"},
 ]
-# UP and DOWN held walk the scene list; the AI key held talks to the frame
-# (docs/voice-chat.md); the edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
-# fos_board.c's STICKY_EVENT_MAP is the device copy.
+# UP and DOWN held walk the scene list; the AI key pressed once is the
+# scene's, twice back, three times the scene list, held it talks to the
+# frame (docs/voice-chat.md); the edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
+# fos_board.c's STICKY_KEYS is the device copy.
 EMBEDDED_SEEED_STICKY_EVENT_MAP = [
     {"event": "button", "match": {"label": "UP", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "button", "match": {"label": "DOWN", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+    {"event": "button", "match": {"label": "AI", "action": "doublePress"}, "emit": "back", "as": {}},
+    {"event": "button", "match": {"label": "AI", "action": "triplePress"}, "emit": "sceneSwitcher", "as": {}},
     {"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}},
     *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]

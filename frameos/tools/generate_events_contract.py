@@ -219,8 +219,10 @@ def load():
         fail("buttons.roles: camelCase identifiers")
     if buttons.get("edges") != ["down", "up"]:
         fail("buttons.edges: down, up (the `gpio` event)")
-    if buttons.get("actions") != ["press", "doublePress", "longPress"]:
-        fail("buttons.actions: press, doublePress, longPress (the `button` event)")
+    if buttons.get("actions") != ["press", "doublePress", "triplePress", "longPress"]:
+        fail("buttons.actions: press, doublePress, triplePress, longPress (the `button` event)")
+    if not VERSION_RE.fullmatch(buttons.get("triplePressSince", "")):
+        fail("buttons.triplePressSince: the first FrameOS that makes a `triplePress`")
     for label, role in buttons["roleByLabel"].items():
         if label != label.upper() or role not in buttons["roles"]:
             fail(f"buttons.roleByLabel.{label}: an upper-case label and one of buttons.roles")
@@ -634,7 +636,7 @@ def gen_c(doc):
         f"#define FOS_SCENE_SETTINGS_WINDOW_PREFIX {c_str(doc['scenes']['settingsWindow'])}",
         "",
         "/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw",
-        " * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's",
+        " * it); `button {action}` (press, doublePress, triplePress, longPress) is the Nim dispatcher's",
         " * (frameos/input_state.nim), like on every host. */",
     ]
     for action in doc["buttons"]["edges"]:
@@ -875,6 +877,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const buttonRoles: readonly string[] = {ts_json(doc['buttons']['roles'], None)}")
     out.append(f"export const buttonRoleByLabel: Record<string, string> = {ts_json(doc['buttons']['roleByLabel'])}")
     out.append(f"export const buttonActions: readonly string[] = {ts_json(doc['buttons']['actions'], None)}")
+    out.append("/** The first FrameOS that makes a `triplePress` (`buttons.triplePressSince`): an older one never matches a rule for it. */")
+    out.append(f"export const buttonTriplePressSince = {ts_json(doc['buttons']['triplePressSince'], None)}")
     out.append(f"export const gpioActions: readonly string[] = {ts_json(doc['buttons']['edges'], None)}")
     out.append("/** The edges of a touch screen an `edgeSwipe` starts from (`gestures.edges`). */")
     out.append(f"export const screenEdges: readonly string[] = {ts_json(doc['gestures']['edges'], None)}")

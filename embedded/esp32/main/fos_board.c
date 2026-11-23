@@ -126,14 +126,20 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}"
-/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
- * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. The edges
- * swipe (TOUCH_EDGE_SWIPES). */
+/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list.
+ * The AI key (Seeed's "AI/Power", GPIO4) is the one key a hand finds: pressed
+ * once it is the scene's (its role is primary: Enter, the layout's refresh),
+ * twice back, three times the scene list, and held it talks to the frame.
+ * The edges swipe (TOUCH_EDGE_SWIPES). */
 #define STICKY_KEYS \
     "{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"doublePress\"}," \
+    "\"emit\":\"back\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}"
 /* The Waveshare boards with a codec microphone (fos_codec.c): the one user

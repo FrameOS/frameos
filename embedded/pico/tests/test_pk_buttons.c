@@ -43,9 +43,14 @@ static void test_a_double_tap_travels_as_one_batch(void)
     CHECK(pk_buttons_busy(&buttons, 1200));
     pk_buttons_sample(&buttons, A, 1200);
     pk_buttons_sample(&buttons, 0, 1260);
-    // The pair is decided on the second down: nothing more to wait for.
+    // A rule of an event map may bind a third press of the key (a
+    // `triplePress`, which the backend's runtime holds the pair back for), so
+    // the pair waits out the window after its second up too: a third tap
+    // travels in the same batch.
     CHECK(buttons.count == 4);
-    CHECK(pk_buttons_ready(&buttons, 1261));
+    CHECK(!pk_buttons_ready(&buttons, 1261));
+    CHECK(!pk_buttons_ready(&buttons, 1260 + FOS_BUTTON_DOUBLE_PRESS_MS + PK_BUTTON_SETTLE_SLACK_MS));
+    CHECK(pk_buttons_ready(&buttons, 1260 + FOS_BUTTON_DOUBLE_PRESS_MS + PK_BUTTON_SETTLE_SLACK_MS + 1));
 }
 
 static void test_a_held_key_is_never_sent_until_it_is_let_go(void)

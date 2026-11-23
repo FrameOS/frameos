@@ -82,7 +82,7 @@ enum CloudFramesContractSource {
             ],
             "type": "object"
           },
-          "maxItems": 8,
+          "maxItems": 12,
           "type": "array"
         },
         "since": "2026.10.20"

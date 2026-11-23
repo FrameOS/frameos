@@ -22,7 +22,7 @@ export interface ButtonListener {
   key: string
   /** The key the listener names: its label, its role, its pin (as text). */
   identity: { label?: string; role?: string; pin?: string }
-  /** The press it filters on, when it does (`press`, `doublePress`, `longPress`). */
+  /** The press it filters on, when it does (`press`, `doublePress`, `triplePress`, `longPress`). */
   action?: string
   /** What the row says: "A", "next (role)", "A · long press". */
   title: string
@@ -37,6 +37,7 @@ export interface ButtonGesture {
 const ACTION_TITLES: Record<string, string> = {
   press: 'press',
   doublePress: 'double press',
+  triplePress: 'triple press',
   longPress: 'long press',
 }
 
@@ -158,12 +159,22 @@ export function buttonsHeardAsIs(listener: ButtonListener, buttons: readonly GPI
   )
 }
 
-/** Every press of every button, in button order: the dialog's choices. */
-export function buttonGestures(buttons: readonly GPIOButton[]): ButtonGesture[] {
+/**
+ * Every press of every button, in button order: the dialog's choices. A
+ * triple press only where the frame's FrameOS makes one (`triplePress`,
+ * frameEventMap.ts `frameSupportsTriplePress`): an older one never matches
+ * a rule for it.
+ */
+export function buttonGestures(
+  buttons: readonly GPIOButton[],
+  { triplePress = true }: { triplePress?: boolean } = {}
+): ButtonGesture[] {
   const gestures: ButtonGesture[] = []
   for (const button of buttons) {
     for (const action of buttonActions) {
-      gestures.push({ label: button.label, action })
+      if (action !== 'triplePress' || triplePress) {
+        gestures.push({ label: button.label, action })
+      }
     }
   }
   return gestures

@@ -3592,6 +3592,257 @@
     ]
    },
    {
+    "name": "a press three times is the event map's only where a rule binds one, and any other key is as fast as before",
+    "why": "A key whose `triplePress` a rule binds (the frame's map, or the showing scene's) holds its second down back: the third down inside doublePressMs of the second up is the `triplePress`, which the map replaces or rewrites like any press. A key no rule binds three times is a `doublePress` on its second down, as before. Edges with no `atMs` are timed when they are delivered, so these taps, sent together, are quick ones.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/triple",
+      "name": "triple",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "eventMap": [
+       {
+        "event": "button",
+        "match": {
+         "label": "KEY1",
+         "action": "triplePress"
+        },
+        "as": {
+         "label": "A",
+         "action": "press"
+        }
+       }
+      ],
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "button",
+      "match": {
+       "label": "AI",
+       "action": "triplePress"
+      },
+      "emit": "render",
+      "as": {}
+     }
+    ],
+    "scene": "fixtures/dispatcher/triple",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 1,
+         "action": "up"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 1,
+         "action": "up"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> render",
+       "render"
+      ],
+      "state": {
+       "heardButton": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 1,
+         "action": "up"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 1,
+         "action": "up"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 6,
+         "label": "KEY1",
+         "level": 1,
+         "action": "up"
+        }
+       }
+      ],
+      "trace": [
+       "mapped scene button",
+       "run triple button {\"pin\":6,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}",
+       "render"
+      ],
+      "state": {
+       "heardButton": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 5,
+         "label": "UP",
+         "level": 0,
+         "action": "down"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 5,
+         "label": "UP",
+         "level": 1,
+         "action": "up"
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "gpio",
+        "payload": {
+         "pin": 5,
+         "label": "UP",
+         "level": 0,
+         "action": "down"
+        }
+       }
+      ],
+      "trace": [
+       "run triple button {\"pin\":5,\"label\":\"UP\",\"role\":\"up\",\"action\":\"doublePress\"}"
+      ]
+     }
+    ]
+   },
+   {
     "name": "a long press bound to voiceChat is the host's device command, not the scene's press",
     "why": "`voiceChat` (docs/voice-chat.md) is a device command only the frame's event map may emit, and only a key's long press makes sense of it. On the frame the firmware reads the binding off the map and opens the microphone while the key is held, claiming the press, so the rule never fires there; a long press the firmware did not take (a `button` said over HTTP, the preview, a Pi) runs through the dispatcher like any mapped press: replaced by `voiceChat` from origin `eventMap`, handed to the host as a device command, never to the scene, with no render. A short press of the same key is still the scene's. Said outright (`POST /event/voiceChat`), it is refused: the map is its only origin.",
     "scenes": [
@@ -5497,7 +5748,7 @@
   ]
  },
  "inputState": {
-  "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels.",
+  "$comment": "The input state (frameos/src/frameos/input_state.nim) alone: its button half, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). A case's `tripleLabels` names the labels a rule of an event map binds a `triplePress` of (event_loop.nim asks the maps; here the case says), so those keys hold a pair back for a third press. `delivered` = exactly what came out, in order: event name, and a subset of the payload. A pointer case sends pointer events (positions on the 0..32767 wire, an 800x480 frame) and expects scene pixels.",
   "cases": [
    {
     "name": "a tap is down and up at once, and a press when its window closes",
@@ -5888,6 +6139,464 @@
          "action": "press",
          "atMs": 1500,
          "durationMs": 50
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "three taps of a key a rule binds three times are one triplePress",
+    "why": "Only a key whose `triplePress` a rule of the frame's or the showing scene's event map binds waits for a third press: its second down is no doublePress yet, and a third down within doublePressMs (350) of the second up is the triplePress, at once, and nothing more (no press, no doublePress, no longPress).",
+    "tripleLabels": [
+     "AI"
+    ],
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1060,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1060
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1060,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 1200,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1200
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1200
+        }
+       }
+      ]
+     },
+     {
+      "at": 1260,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1260
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1260,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 1400,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1400
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1400
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "triplePress",
+         "atMs": 1400
+        }
+       }
+      ]
+     },
+     {
+      "at": 1460,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1460
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1460,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 3000,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "a pair held back for a third press is the doublePress when its window closes",
+    "why": "A key a rule binds three times holds its pair back; when doublePressMs passes after the second up with no third down, the pair is the doublePress, late, carrying its second down's atMs.",
+    "tripleLabels": [
+     "AI"
+    ],
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1060,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1060
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1060,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 1200,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1200
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1200
+        }
+       }
+      ]
+     },
+     {
+      "at": 1260,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1260
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1260,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 1610,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 1611,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "doublePress",
+         "atMs": 1200
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a held second press of a key a rule binds three times is the doublePress at its up",
+    "why": "No third press follows a hold, so the up decides: the pair is the doublePress then, and never a longPress.",
+    "tripleLabels": [
+     "AI"
+    ],
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1060,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 1060
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 1060,
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 1200,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 0,
+        "action": "down",
+        "atMs": 1200
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "down",
+         "level": 0,
+         "atMs": 1200
+        }
+       }
+      ]
+     },
+     {
+      "at": 2700,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "AI",
+        "level": 1,
+        "action": "up",
+        "atMs": 2700
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "atMs": 2700,
+         "durationMs": 1500
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 4,
+         "label": "AI",
+         "role": "primary",
+         "action": "doublePress",
+         "atMs": 1200
         }
        }
       ]

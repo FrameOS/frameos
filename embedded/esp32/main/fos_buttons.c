@@ -74,8 +74,8 @@ static fos_button_timing_t s_timing[FOS_GPIO_BUTTONS_MAX];
 static bool s_release_owed[FOS_GPIO_BUTTONS_MAX];
 /* What this key's press clicked, so the hold and the release sound to
  * match: nothing (held at boot, or no buzzer), a press, the second press of
- * a double press, or a refused press. */
-typedef enum { CLICK_NONE = 0, CLICK_PRESS, CLICK_DOUBLE, CLICK_REFUSED } click_t;
+ * a double press, the third of a triple press, or a refused press. */
+typedef enum { CLICK_NONE = 0, CLICK_PRESS, CLICK_DOUBLE, CLICK_TRIPLE, CLICK_REFUSED } click_t;
 static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
 /* The dispatcher still has a `press`, `doublePress` or `longPress` to
  * deliver for this key (fos_button_timing_busy, 100 ms of slack for the tick
@@ -115,6 +115,16 @@ static void refresh_voice_keys(const fos_config_t *config)
                      voice ? "starts the voice chat" : "is the scene's again");
         }
         s_voice_key[i] = voice;
+    }
+    /* The keys whose pair the dispatcher holds back for a third press: the
+     * third down sounds as one (the labels array is the voice keys', reused). */
+    bound = fos_voice_binding_triple_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        bool triple = false;
+        for (size_t j = 0; j < bound && !triple; j++) {
+            triple = strcasecmp(config->gpio_buttons[i].label, labels[j]) == 0;
+        }
+        s_timing[i].triple = triple;
     }
 }
 
@@ -220,30 +230,33 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
      * task sends (the render task only takes), so the reservation holds. */
     /* Book it either way: the hold is timed from here. A refused press is
      * one the dispatcher never hears, so it pairs with nothing (below). */
-    bool twice = fos_button_timing_press(&s_timing[index], at_ms);
+    int nth = fos_button_timing_press(&s_timing[index], at_ms);
     if (uxQueueSpacesAvailable(s_queue) < releases_owed(count) + 2) {
         /* Not received: say so with the dull click instead of the bright one. */
         log_dropped(fos_config()->gpio_buttons[index].pin);
         s_clicked[index] = CLICK_REFUSED;
-        s_timing[index].twice = false;
+        s_timing[index].twice = s_timing[index].thrice = false;
         fos_buzzer_reject_down();
         return;
     }
     if (!enqueue_event(index, 0, false, at_ms)) {
         s_clicked[index] = CLICK_NONE;
-        s_timing[index].twice = false;
+        s_timing[index].twice = s_timing[index].thrice = false;
         return;
     }
     s_release_owed[index] = true;
     /* Registered: click now, from this task, so the feedback does not wait
      * for the render task (which may be 30 s into a panel refresh). A `down`
      * clicks; the second down of a double press (the dispatcher makes it a
-     * `doublePress`, by the same rule on the same stamps) clicks higher.
+     * `doublePress`, by the same rule on the same stamps) clicks higher, and
+     * the third of a triple press (a key the frame's map binds three times)
+     * higher still.
      * Every `up` is the same lower click. A held key sounds each second
      * (hold_sounds); the `press` a short tap becomes 350 ms after its `up`
      * adds no sound: its clicks were the down and the up. */
-    s_clicked[index] = twice ? CLICK_DOUBLE : CLICK_PRESS;
-    if (twice) fos_buzzer_double_down();
+    s_clicked[index] = nth == 3 ? CLICK_TRIPLE : nth == 2 ? CLICK_DOUBLE : CLICK_PRESS;
+    if (nth == 3) fos_buzzer_triple_down();
+    else if (nth == 2) fos_buzzer_double_down();
     else fos_buzzer_click_down();
 }
 
@@ -273,19 +286,22 @@ static void release_edge(size_t index, int64_t at_ms)
     bool claimed = key_claimed(index);
     click_t clicked = s_clicked[index];
     if (claimed) clicked = CLICK_NONE;
-    /* Only a press the dispatcher heard as one can start a double press:
-     * not a refused one, not a key down since boot, not one a voice hold took. The wake press is one. */
-    if (clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) {
+    /* Only a press the dispatcher heard as one can start a double press (or
+     * go on to a triple): not a refused one, not a key down since boot, not
+     * one a voice hold took. The wake press is one. */
+    bool heard = clicked == CLICK_PRESS || clicked == CLICK_DOUBLE || clicked == CLICK_TRIPLE;
+    if (!heard) {
         s_timing[index].tap_ended = false;
+        s_timing[index].pair_ended = false;
     }
     if (s_release_owed[index]) {
         enqueue_event(index, 1, false, at_ms); /* its slot was reserved */
         s_release_owed[index] = false;
     }
     s_clicked[index] = CLICK_NONE;
-    /* Every up is the same lower click: a tap's, a double press's, a long
-     * press's (its seconds were sounded while it was held). */
-    if (clicked == CLICK_PRESS || clicked == CLICK_DOUBLE) fos_buzzer_click_up();
+    /* Every up is the same lower click: a tap's, a double or triple press's,
+     * a long press's (its seconds were sounded while it was held). */
+    if (heard) fos_buzzer_click_up();
     else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
 }
 

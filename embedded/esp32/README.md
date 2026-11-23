@@ -1256,6 +1256,7 @@ same stamps and the contract's numbers) says so:
 | `gpio` `down` | 1× 14 |
 | `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
 | `doublePress` | its second down is 1.5× 14 instead of 1× |
+| `triplePress` | its third down is 2× 14 instead of 1× (a key the frame's map binds three times) |
 | a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
@@ -1295,7 +1296,9 @@ is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
 was drained, so a tap during a render arrived as a 30 s hold.
 
 A `press` is decided 350 ms after its `up`, and only a tick of the
-dispatcher delivers it. So while a key is down or a tap is in its window
+dispatcher delivers it; so is a pair a `triplePress` rule holds back
+(docs/events.md "Buttons"). So while a key is down, or a tap or a quick pair
+is in its window
 (`fos_buttons_busy`), the idle wait runs in 50 ms slices instead of 1 s ones,
 and a frame about to deep-sleep waits, up to 10 s, until the decision is
 delivered (and renders if the scene asked).
