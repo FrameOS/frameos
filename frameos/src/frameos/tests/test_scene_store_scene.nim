@@ -516,7 +516,9 @@ suite "the Scene store scene":
     # must ask for the frame that shows the field.
     check settle() > 0
     discard draw(scene, config, "search-open")
-    tapped(240, 8 + 38 + 8 + 19) # the field, in the row under the header
+    # On its magnifier, not on the text: what looks like the field is the
+    # field (look="field", UiRegion.labelFor), as a finger found out.
+    tapped(12 + 12 + 8, 8 + 38 + 8 + 19)
     discard settle()
     discard draw(scene, config, "search-field")
     check keyboardShown("scene-store")

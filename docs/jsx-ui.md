@@ -1239,7 +1239,11 @@ role the theme leaves out keeps the element's own look.
 | `keyboard`, `key`, `keyMod`, `keyLit` | the keyboard on the screen, a key, a key that does something else, one lit (shift, held, just typed) |
 
 `page`, `bar`, `muted`, `accent`, `option`, `picked` and `keyboard` are one box
-always (a list's innermost). The samples set no theme on
+always (a list's innermost). A `look="field"` box around one text field (a magnifier
+and an `<input>`, say) is that field to a finger as well: a tap anywhere on it,
+its glyph and padding too, focuses the field as an HTML `<label>` would
+(`UiRegion.labelFor`), with or without a theme. A child of it with a handler
+of its own (a clear button) keeps its taps. The samples set no theme on
 e-paper, where the pages keep their black on white, except High contrast.
 
 On every host, an ESP32 included: there a layout's theme costs about 7 KB of

@@ -339,11 +339,11 @@ proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls or
       # A field: a mouse pressed on it selects as it drags (no mouse on an ESP32).
       (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
-  of "tap": r.field > 0 or r.handlers[ueClick] > 0
+  of "tap": r.field > 0 or r.handlers[ueClick] > 0 or r.labelFor > 0
   of "longPress", "doubleTap":
     # A field: the word there is selected, as on a phone. On a slow panel a
     # hold on what only clicks is its click (dispatchUiEvent).
-    r.typesIn or r.handlers[UiEvent(handlerKind(event))] > 0 or
+    r.typesIn or r.labelFor > 0 or r.handlers[UiEvent(handlerKind(event))] > 0 or
       event == "longPress" and slowPanel and r.handlers[ueClick] > 0
   of "wheel": r.scrolls
   else:
@@ -487,14 +487,19 @@ proc hitAt(target: UiTarget, lx, ly: float32, also: UiEvent): int =
     template r: untyped = target.regions[i]
     if r.overScene(lx, ly):
       return -1
-    if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[also] > 0) and r.inside(lx, ly):
-      return i
+    if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[also] > 0 or r.labelFor > 0) and r.inside(lx, ly):
+      if r.labelFor == 0:
+        return i
+      # Around a field (look="field"): the field's.
+      for f in 0 ..< target.regions.len:
+        if target.regions[f].key == r.labelFor - 1 and target.regions[f].labelFor == 0:
+          return f
   -1
 
 proc regionOf(target: UiTarget, key: int): int =
   ## The last render's region for the element at `key`, -1 when it drew none.
   for i in 0 ..< target.regions.len:
-    if target.regions[i].key == key:
+    if target.regions[i].key == key and target.regions[i].labelFor == 0:
       return i
   -1
 
@@ -1432,7 +1437,7 @@ proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
       ly = (y - target.offsetY) / scale
     for r in target.regions:
       if r.inside(lx, ly):
-        if r.field > 0 or r.scrolls:
+        if r.field > 0 or r.scrolls or r.labelFor > 0:
           return true
         for handler in r.handlers:
           if handler > 0:
@@ -1448,7 +1453,7 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
       continue
     let scale = if target.scale > 0: target.scale else: 1'f32
     for r in target.regions:
-      var takes = r.field > 0 or r.scrolls
+      var takes = r.field > 0 or r.scrolls or r.labelFor > 0
       if not takes:
         for handler in r.handlers:
           if handler > 0:
