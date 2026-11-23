@@ -237,9 +237,10 @@ const svgTypefaceBudget = 8
 
 const svgFontListingSeconds = 30
   ## How long the fonts folder's listing (and the family choices made from
-  ## it) is kept: a font synced onto the frame is found within this, and a
-  ## scene naming forty families does not list the folder forty times (on an
-  ## ESP32 a listing of the card's 61 fonts is a directory read, not free).
+  ## it) is kept: a font synced onto the frame is found by its family within
+  ## this (by its file at once), and a scene naming forty families does not
+  ## list the folder forty times (on an ESP32 a listing of the card's 61 fonts
+  ## is a directory read, not free).
 
 const genericFontFamilies = [
   "sansserif", "serif", "monospace", "cursive", "fantasy", "systemui",
@@ -258,6 +259,9 @@ var svgFontsParsed = 0
   ## How many fonts SVG text has caused to be parsed, against svgTypefaceBudget.
 var svgFontListing: seq[string]
 var svgFontListedAt: MonoTime
+var svgFontArrived: string
+  ## The file name that listed the folder again last (svgFontFileFor): a
+  ## name the listing leaves out whatever it is (a junk file) does it once.
 
 proc setSvgFontAssetsPath*(assetsPath: string) =
   ## Points SVG font resolution at this frame's assets. Called once at config
@@ -306,12 +310,19 @@ proc svgFontFileFor*(family: string, weight = 400, italic = false): string =
     return ""
 
   let now = getMonoTime()
-  if svgFontListing.len == 0 or (now - svgFontListedAt).inSeconds >= svgFontListingSeconds:
+  # A file named that the folder has and its listing does not (downloaded or
+  # synced since) lists the folder again: a font is drawn the moment it is on
+  # the frame, not up to svgFontListingSeconds later.
+  let arrived = name.len < family.len and family.toLowerAscii().endsWith(".ttf") and
+    family != svgFontArrived and '/' notin family and family notin svgFontListing and
+    fileExists(svgFontAssetsPath & "/fonts/" & family)
+  if arrived or svgFontListing.len == 0 or (now - svgFontListedAt).inSeconds >= svgFontListingSeconds:
     let listing = getAvailableFonts(svgFontAssetsPath)
     withLock typefaceLock:
       svgFontListing = listing
       svgFontListedAt = now
       svgFontChoices.clear()
+      svgFontArrived = if arrived: family else: ""
 
   let cacheKey = key & "|" & $weight & "|" & $italic
   if svgFontChoices.hasKey(cacheKey):
