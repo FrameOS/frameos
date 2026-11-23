@@ -33,19 +33,24 @@ describe("scene needs", () => {
     expect(sceneNeeds([{ apps: { a: { sources: { "app.tsx": '<div look="button" />' } } } }])).toEqual([]);
     const chromium = { nodes: [{ type: "app", data: { keyword: "data/chromiumScreenshot" } }] };
     expect(sceneNeeds([chromium])).toEqual(["linux"]);
-    expect(needsOf("Counter")).toEqual(["buttons"]);
+    expect(needsOf("Counter")).toEqual(["buttons", "round"]);
     expect(sceneNeeds([{}], ["shell"])).toEqual(["linux"]);
   });
 
   it("files the samples as their descriptions say", () => {
     expect(needsOf("Star shooter")).toContain("fast");
     // Snake turns into a slow puzzle on e-paper, and says so (settings.needs).
-    expect(needsOf("Snake")).toEqual(["touch", "keys", "buttons"]);
+    expect(needsOf("Snake")).toEqual(["touch", "keys", "buttons", "round"]);
     expect(needsOf("Sudoku")).not.toContain("fast");
     expect(needsOf("Sudoku")).toContain("touch");
     expect(needsOf("Weather")).toEqual([]);
     expect(needsOf("Webcam RSTP")).toEqual(["linux"]);
     expect(needsOf("Windows 98 layout")).not.toContain("fast");
+    // Round: the clocks lay out in the circle, a photo fills it, a layout says nothing.
+    expect(needsOf("Analog clock face")).toContain("round");
+    expect(needsOf("Immich")).toContain("round");
+    expect(needsOf("Webcam RSTP")).not.toContain("round");
+    expect(needsOf("Windows 98 layout")).not.toContain("round");
     for (const name of readdirSync(samples)) {
       if (existsSync(join(samples, name, "scenes.json"))) {
         expect(Array.isArray(needsOf(name))).toBe(true);
@@ -63,6 +68,7 @@ describe("scene needs", () => {
     const asks = (code: string) => ({ apps: { a: { sources: { "app.tsx": code } } } });
     expect(sceneNeeds([asks("const round = context.round === true")])).toEqual(["round"]);
     expect(sceneNeeds([asks("if (app.frame.round) layoutInCircle()")])).toEqual(["round"]);
+    expect(sceneNeeds([asks("const round = context?.round === true")])).toEqual(["round"]);
     // Math.round is no round screen, nor is a layout's own code.
     expect(sceneNeeds([asks("const x = Math.round(w / 2)")])).toEqual([]);
     expect(sceneNeeds([{ ...asks("context.round"), settings: { isLayout: true } }])).toEqual([]);

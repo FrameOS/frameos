@@ -98,7 +98,7 @@ const POINTER_EVENTS = new Set([
 ])
 
 /** Code that asks whether the screen is round (`context.round`, `app.frame.round`). */
-const ROUND_READ = /\b(?:context|frame)\s*\.\s*round\b/
+const ROUND_READ = /\b(?:context|frame)\s*\??\.\s*round\b/
 
 /** A keyboard. */
 const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput'])
