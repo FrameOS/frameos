@@ -1354,7 +1354,9 @@ buzzer's resonance). A board whose NVS predates the keys takes its preset's
 without being reprovisioned. The Waveshare PhotoPainter and 13.3E6 have a
 speaker behind an ES8311 codec instead, which needs an I2S driver: not
 supported yet. The firmware leaves a pin alone that is a display,
-button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
+button, battery or SD pin. The firmware takes the pin at the start of every
+boot and holds it low: a software reset (a panic, a restart) leaves the LEDC
+running, and a tone sounding then went on through the boot. Console: `set buzzer_pin <gpio|-1>`,
 `set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
 every plane: the backend's settings pull carries `buzzerPin` /
 `buzzerToneHz`, the cloud's `set_settings` carries `buzzer_pin` /
@@ -1367,6 +1369,17 @@ with a handler, a field, a box that scrolls, a scene listening for a press)
 it plays the button's down click, and its up click when it lifts; a finger
 added to one already on the glass plays the higher click of a double press.
 A press on nothing is silent, and so is an LCD, whose picture answers at once.
+The click is the touch task's, on core 0, the moment the finger lands: it
+never waits for the render task to finish a render or a panel update. What
+is taken is the press map of the picture showing, which the runtime leaves
+after every render (`docs/server-rendering.md` "The click").
+An edge swipe (the dispatcher's `edgeSwipe`: down within the contract's
+`gestures.edgePx` of an edge, then `swipeMinPx` inward and more inward than
+along) plays four clicks instead, stepping up, or down for a swipe down from
+the top, the moment the finger has gone far enough, and its lift is silent.
+The touch task mirrors the rule (`fos_touch_edge_at` / `fos_touch_edge_step`,
+the distances generated into `fos_events_gen.h`); a press on the frame's
+keyboard is a key, never a swipe (the press map marks it).
 What such a press or a key starts, if it takes over 1.5 s to load, chirps
 quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set touch_beep 0` turns both off, or "Touch beep" in the frame's settings

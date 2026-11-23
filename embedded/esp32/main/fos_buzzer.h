@@ -60,6 +60,10 @@ void fos_buzzer_double_down(void);
 /* The third down of a triple press, in place of the down click: an octave
  * over the press pitch, one step past the double's. */
 void fos_buzzer_triple_down(void);
+/* An edge swipe the touch task saw become one: four clicks stepping up
+ * (`rising`: a swipe up or sideways) or down (a swipe down from the top),
+ * 14 ms each, so a swipe is heard apart from a press's two. */
+void fos_buzzer_swipe(bool rising);
 /* A key held: at every whole longPressMs it stays down, a short note falling
  * to a longer low one. */
 void fos_buzzer_long_press(void);

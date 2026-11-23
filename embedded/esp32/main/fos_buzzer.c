@@ -8,6 +8,7 @@
 
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 #include "fos_codec.h"
@@ -211,9 +212,24 @@ static void stop_tone(void *arg)
 
 static void loading_tap(void *arg);
 
+/* On the way down from esp_restart (a reboot, an update): a tone sounding
+ * then would go on through the restart. No lock: nothing else runs. */
+static void quiet_for_restart(void)
+{
+    if (s_pin >= 0) ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+}
+
 void fos_buzzer_init(void)
 {
     if (s_lock) return;
+    /* A software reset (a panic, esp_restart) resets the CPUs and not the
+     * LEDC or the GPIO matrix: a tone that was sounding when the chip went
+     * down went on sounding through the boot, until the next click took the
+     * pin (a reTerminal Sticky that panicked mid-click shrieked through
+     * "Starting...", 2026-11-23). Take the pin now, first thing in app_main,
+     * idle low; the first click later finds it ready, on any task. */
+    attach(fos_config()->buzzer_pin);
+    esp_register_shutdown_handler(quiet_for_restart);
     s_lock = xSemaphoreCreateMutex();
     const esp_timer_create_args_t args = {
         .callback = stop_tone,
@@ -318,6 +334,21 @@ void fos_buzzer_double_down(void)
 {
     if (!clicks_heard()) return;
     fos_buzzer_tone(scaled_hz(DOUBLE_DOWN_NUM, DOUBLE_DOWN_DEN), CLICK_MS);
+}
+
+void fos_buzzer_swipe(bool rising)
+{
+    if (!clicks_heard()) return;
+    /* 0.7, 0.85, 1 and 1.25 of the press pitch: the release click's, the
+     * press's, and past it. */
+    static const uint8_t steps[4][2] = {{7, 10}, {17, 20}, {1, 1}, {5, 4}};
+    fos_buzzer_note_t notes[4];
+    for (int i = 0; i < 4; i++) {
+        int step = rising ? i : 3 - i;
+        notes[i].freq_hz = scaled_hz(steps[step][0], steps[step][1]);
+        notes[i].duration_ms = CLICK_MS;
+    }
+    fos_buzzer_play(notes, 4);
 }
 
 void fos_buzzer_long_press(void)

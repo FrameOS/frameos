@@ -1255,8 +1255,9 @@ suite "a held key's accents":
     check target.input.accents == ord('u')
     check dismissKeyboard("scene", 7)
     check target.input.accents == 0 and target.input.keyboard and target.input.focus > 0
-    # On e-paper (slow, and in its look) a slide asks for no refresh, but
-    # lifting on a form types it.
+    # On e-paper (slow, and in its look) a slide along the row asks for a
+    # refresh too, so the lit form follows the finger, and lifting on a form
+    # types it.
     target.input.paper = true
     target.input.slow = true
     discard relayout()
@@ -1266,7 +1267,7 @@ suite "a held key's accents":
     check at(s, "longPress")
     discard relayout()
     forms = accentRegions(target.regions)
-    check not at(forms[1], "pointerMove", buttons = 1)
+    check at(forms[1], "pointerMove", buttons = 1)
     check at(forms[1], "pointerUp") # # ß ś š
     check target.input.text == "éäq!?ß"
     forgetUiTarget("scene", 7)

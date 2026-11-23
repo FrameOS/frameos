@@ -723,7 +723,7 @@ block test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press:
 block test_a_press_on_the_keyboard_on_the_screen_is_a_key:
   # A JSX field's keyboard reaches the screen's edges (the SenseCAP
   # Indicator's 480 px: its outer keys are half in the edge band). A press on
-  # it is never held for an edge swipe, and a finger that rolls while it lands
+  # its sides is never held for an edge swipe (its bottom edge is: below), and a finger that rolls while it lands
   # and lifts still types the key it lifts on.
   var state = initInputState(config(480, 480))
   state.keyboardAt = proc (x, y: int): bool = y >= 270
@@ -760,6 +760,25 @@ block test_a_press_on_the_keyboard_on_the_screen_is_a_key:
   state.touch(evPointerMove, 410, 102, 3040, output)
   doAssert output.names == @[evEdgeSwipe], $output.names
   state.touch(evPointerUp, 410, 102, 3080, output)
+  output.setLen(0)
+  # Its bottom edge is the frame's too: a swipe up from it over the keys.
+  state.touch(evPointerDown, 240, 475, 4000, output)
+  doAssert output.names.len == 0, "held: " & $output.names
+  state.touch(evPointerMove, 242, 400, 4040, output)
+  doAssert output.names == @[evEdgeSwipe] and output[0].payload["edge"].getStr() == "bottom", $output.names
+  state.touch(evPointerUp, 242, 400, 4080, output)
+  output.setLen(0)
+  # A key on the bottom row in the band, tapped: held until the lift, then
+  # the key as ever.
+  state.touch(evPointerDown, 240, 475, 5000, output)
+  state.touch(evPointerUp, 240, 475, 5060, output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evTap], $output.names
+  output.setLen(0)
+  # The space bar dragged along the edge: the scene's drag, from where it went down.
+  state.touch(evPointerDown, 240, 475, 6000, output)
+  state.touch(evPointerMove, 300, 474, 6040, output)
+  doAssert output.names == @[evPointerDown, evPointerMove], $output.names
+  state.touch(evPointerUp, 300, 474, 6080, output)
 
 block test_on_a_round_screen_an_edge_swipe_starts_at_the_rim:
   # The HyperPixel 2.1" Round shows and reads only the circle inside its

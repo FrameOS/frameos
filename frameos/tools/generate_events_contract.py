@@ -648,6 +648,11 @@ def gen_c(doc):
         " * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */",
         f"#define FOS_BUTTON_DOUBLE_PRESS_MS {int(doc['buttons']['doublePressMs'])}",
         f"#define FOS_BUTTON_LONG_PRESS_MS {int(doc['buttons']['longPressMs'])}",
+        "/* The dispatcher's edge swipe (`gestures`): what the touch task mirrors for the",
+        " * buzzer, so the swipe's chirp sounds when the swipe is one, not a render later. */",
+        f"#define FOS_GESTURE_EDGE_PX {int(doc['gestures']['edgePx'])}",
+        f"#define FOS_GESTURE_SWIPE_MIN_PX {int(doc['gestures']['swipeMinPx'])}",
+        f"#define FOS_GESTURE_TAP_SLOP_PX {int(doc['gestures']['tapSlopPx'])}",
         "",
     ]
     for event in doc["events"]:

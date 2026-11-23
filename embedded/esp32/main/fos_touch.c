@@ -1,6 +1,9 @@
 #include "fos_touch.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+
+#include "fos_events_gen.h"
 #include <string.h>
 
 int fos_touch_decode(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max)
@@ -130,6 +133,46 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
         return FOS_TOUCH_BEEP_UP;
     }
     return FOS_TOUCH_BEEP_NONE;
+}
+
+void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy, int *sw, int *sh)
+{
+    switch (((rotate % 360) + 360) % 360) {
+    case 90: *sx = y; *sy = width - x - 1; *sw = height; *sh = width; break;
+    case 180: *sx = width - x - 1; *sy = height - y - 1; *sw = width; *sh = height; break;
+    case 270: *sx = height - y - 1; *sy = x; *sw = height; *sh = width; break;
+    default: *sx = x; *sy = y; *sw = width; *sh = height; break;
+    }
+}
+
+fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    const int distance[] = {x, width - 1 - x, y, height - 1 - y};
+    int best = FOS_GESTURE_EDGE_PX;
+    fos_touch_edge_t edge = FOS_TOUCH_EDGE_NONE;
+    for (int i = 0; i < 4; i++) {
+        if (distance[i] < best) {
+            best = distance[i];
+            edge = (fos_touch_edge_t)(FOS_TOUCH_EDGE_LEFT + i);
+        }
+    }
+    return edge;
+}
+
+int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy)
+{
+    int inward, along;
+    switch (edge) {
+    case FOS_TOUCH_EDGE_LEFT: inward = dx; along = dy; break;
+    case FOS_TOUCH_EDGE_RIGHT: inward = -dx; along = dy; break;
+    case FOS_TOUCH_EDGE_TOP: inward = dy; along = dx; break;
+    case FOS_TOUCH_EDGE_BOTTOM: inward = -dy; along = dx; break;
+    default: return -1;
+    }
+    if (inward >= FOS_GESTURE_SWIPE_MIN_PX && inward > abs(along)) return 1;
+    if (abs(along) <= FOS_GESTURE_TAP_SLOP_PX || abs(along) < inward) return 0;
+    return -1;
 }
 
 #ifdef ESP_PLATFORM
@@ -312,36 +355,71 @@ bool fos_touch_finger_down(void)
 }
 
 /* The click of a press something takes, on e-paper, where the picture takes
- * its moment to answer. Asked before the event runs, of what the last render
- * drew. The render task's, so a press during a panel update is heard when
- * that ends. */
-static void play_beep(fos_touch_beep_t beep)
+ * its moment to answer: from this task, the moment the finger lands or
+ * lifts, on its own core. The render task is in a render, a panel update or
+ * (rendered on the server) a pull for a second or more at a time, and a
+ * click that waited for it to dispatch the press came that late: a key typed
+ * on the reTerminal Sticky while the last one drew clicked when the drawing
+ * was done (2026-11-23). Whether the press is taken is the press map's, of
+ * the picture showing (fos_client_press_taken): the plane's with a picture
+ * it rendered, the runtime's after each render here. No map, no click. */
+static uint8_t s_beep_held = 0, s_beeped = 0;
+
+static bool sounds_on_touch(void)
 {
-    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    return fos_config()->touch_beep && !fos_display_is_lcd();
+}
+
+static void click(uint8_t kind, uint8_t id, int taken)
+{
+    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &s_beep_held, &s_beeped);
+    if (beep == FOS_TOUCH_BEEP_NONE || !sounds_on_touch()) return;
     if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
     else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
     else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
 }
 
-static void touch_feedback(const fos_touch_event_t *event)
+/* An edge swipe's chirp, the same way: each finger that went down at an edge
+ * (fos_touch_edge_at; on the frame's keyboard only its bottom edge, as in the
+ * dispatcher) is watched until it is a swipe (fos_touch_edge_step, the
+ * dispatcher's rule), heard at once, or a drag along the edge. A swipe's lift
+ * does not click: its four clicks said it. In the scene's pixels, which the
+ * dispatcher's edges are named in. */
+static fos_touch_edge_t s_edge[FOS_TOUCH_POINTS_MAX];
+static int16_t s_edge_x[FOS_TOUCH_POINTS_MAX], s_edge_y[FOS_TOUCH_POINTS_MAX];
+
+static void scene_point(uint16_t wx, uint16_t wy, int *x, int *y, int *w, int *h)
 {
-    static uint8_t held = 0, beeped = 0;
-    if (event->kind == FOS_TOUCH_MOVE) return;
-    bool captured = event->kind == FOS_TOUCH_DOWN && frameos_nim_press_taken(event->x, event->y);
-    play_beep(fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped));
+    int pw = fos_display_width(), ph = fos_display_height();
+    int px = (int)((int64_t)pw * wx / FOS_TOUCH_WIRE_MAX);
+    int py = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
+    if (px >= pw) px = pw - 1;
+    if (py >= ph) py = ph - 1;
+    fos_touch_scene_point(px, py, pw, ph, fos_config()->rotate, x, y, w, h);
 }
 
-/* The same click for a frame rendered on the server, from the touch task the
- * moment the finger lands or lifts: the render task is in a pull or a panel
- * refresh for a second or more at a time there, and the picture's own press
- * map (its plane's, fos_client_remote_press_taken) says without asking
- * anyone whether the press is taken. A frame that runs its scene here leaves
- * it to touch_feedback, after the runtime's answer. */
-static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
+static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 {
-    static uint8_t held = 0, beeped = 0;
-    int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
-    play_beep(fos_touch_beep_step(kind, id, taken > 0, &held, &beeped));
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
+    fos_touch_edge_t edge = fos_touch_edge_at(x, y, w, h);
+    s_edge[id] = taken == 2 && edge != FOS_TOUCH_EDGE_BOTTOM ? FOS_TOUCH_EDGE_NONE : edge;
+    s_edge_x[id] = (int16_t)x;
+    s_edge_y[id] = (int16_t)y;
+}
+
+static void edge_moved(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    if (s_edge[id] == FOS_TOUCH_EDGE_NONE) return;
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
+    int step = fos_touch_edge_step(s_edge[id], x - s_edge_x[id], y - s_edge_y[id]);
+    if (step == 0) return;
+    if (step > 0) {
+        s_beeped &= (uint8_t)~(1u << id);
+        if (sounds_on_touch()) fos_buzzer_swipe(s_edge[id] != FOS_TOUCH_EDGE_TOP);
+    }
+    s_edge[id] = FOS_TOUCH_EDGE_NONE;
 }
 
 bool fos_touch_process_events(void)
@@ -377,8 +455,7 @@ bool fos_touch_process_events(void)
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a
-         * gesture changed state. */
-        touch_feedback(&event);
+         * gesture changed state. Its click was the touch task's (click). */
         fos_events_dispatch(FOS_ORIGIN_DRIVER, names[event.kind], payload);
         any = true;
     }
@@ -495,7 +572,9 @@ static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
      * was, not only a finger dragged. */
     enqueue(FOS_TOUCH_MOVE, id, wx, wy);
     enqueue(FOS_TOUCH_DOWN, id, wx, wy);
-    remote_click(FOS_TOUCH_DOWN, id, wx, wy);
+    int taken = fos_client_press_taken(wx, wy);
+    click(FOS_TOUCH_DOWN, id, taken);
+    edge_begin(id, wx, wy, taken);
 }
 
 /* A press reported once it settled, where it is then; or, when it glided
@@ -506,6 +585,7 @@ static void report_settled(uint8_t id, int x_max)
     if (fos_touch_glided(s_last_rx[id] - s_first_rx[id], s_last_ry[id] - s_first_ry[id], x_max)) {
         report_down(id, s_first_x[id], s_first_y[id]);
         enqueue(FOS_TOUCH_MOVE, id, s_last_x[id], s_last_y[id]);
+        edge_moved(id, s_last_x[id], s_last_y[id]);
     } else {
         report_down(id, s_last_x[id], s_last_y[id]);
     }
@@ -570,6 +650,7 @@ static void touch_task(void *arg)
                 }
             } else if (moved) {
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+                edge_moved(p->id, wx, wy);
             }
         }
         /* A tap shorter than TOUCH_SETTLE_MS: its press, where it was last,
@@ -590,7 +671,8 @@ static void touch_task(void *arg)
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) {
                 enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
-                remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                click(FOS_TOUCH_UP, (uint8_t)id, 0);
+                s_edge[id] = FOS_TOUCH_EDGE_NONE;
             }
         }
         s_down_mask &= seen; /* a finger still settling is not down yet */
@@ -744,6 +826,10 @@ esp_err_t fos_touch_start(void)
      * PSRAM: internal RAM is the Wi-Fi stack's. Without them a move carries
      * none. */
     s_passed = heap_caps_calloc(FOS_TOUCH_POINTS_MAX, sizeof(fos_touch_passed_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* What click asks a scene that runs here: the press map of every render.
+     * An LCD never clicks (its picture answers at once), and an animation
+     * there would make one every frame for nothing. */
+    if (!fos_display_is_lcd()) frameos_nim_keep_press_map(true);
     s_present = true;
     char line[256];
     snprintf(line, sizeof(line),

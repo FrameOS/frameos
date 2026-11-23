@@ -14,6 +14,7 @@ import ../layout_choice
 import ../types
 import ../js_runtime/app_runtime
 import ../js_runtime/js_io
+from ../ui/events import keyboardShown, forgetTypedKeys
 import ../utils/http_client
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -490,6 +491,37 @@ suite "the Scene store scene":
     scene.tap(40, 27)
     discard draw(scene, config, "square-back")
     check scene.state{"spot"}{"cat"}.getStr() == ""
+    check problems.len == 0
+
+  test "a square screen's search: the button opens the field, a tap on the field the keyboard":
+    # The header of a narrow store has a search button and no field: the
+    # field is a row of its own under it once the button is pressed (the
+    # SenseCAP Indicator's 480x480, 2026-11-23).
+    problems = @[]
+    discard settle()
+    forgetTypedKeys()
+    let config = frame(480, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{}
+    discard draw(scene, config, "search")
+    discard settle()
+    discard draw(scene, config, "search-page")
+    let tapped = proc(x, y: int) =
+      for (event, buttons) in [("pointerDown", 1), ("pointerUp", 0)]:
+        runEvent(scene, ExecutionContext(scene: scene, event: event, loopIndex: 0, loopKey: ".", nextSleep: -1,
+          payload: %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch", "button": 0, "buttons": buttons}))
+      scene.tap(x, y)
+    tapped(480 - 12 - 19, 27) # the search button, right in the header
+    # It changes no state, only the app's own `searchOpen`: the tap itself
+    # must ask for the frame that shows the field.
+    check settle() > 0
+    discard draw(scene, config, "search-open")
+    # On its magnifier, not on the text: what looks like the field is the
+    # field (look="field", UiRegion.labelFor), as a finger found out.
+    tapped(12 + 12 + 8, 8 + 38 + 8 + 19)
+    discard settle()
+    discard draw(scene, config, "search-field")
+    check keyboardShown("scene-store")
     check problems.len == 0
 
   test "e-paper is not offered the scenes that move, and fetches its own page":

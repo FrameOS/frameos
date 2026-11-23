@@ -1339,16 +1339,20 @@ static void press_map_keep(const remote_pull_t *pull)
     __atomic_store_n(&s_press_count, count, __ATOMIC_RELEASE);
 }
 
-int fos_client_remote_press_taken(int wire_x, int wire_y)
+int fos_client_press_taken(int wire_x, int wire_y)
 {
-    if (renders_locally(fos_config()) || !fos_display_present()) return -1;
-    /* The glass's wire position as the panel's pixel, as the plane reads it
+    if (!fos_display_present()) return -1;
+    /* The glass's wire position as the panel's pixel, as the runtime reads it
      * (utils/image.nim pointerToScenePoint). */
     int width = fos_display_width(), height = fos_display_height();
     int x = width * wire_x / FOS_TOUCH_WIRE_MAX;
     int y = height * wire_y / FOS_TOUCH_WIRE_MAX;
     if (x >= width) x = width - 1;
     if (y >= height) y = height - 1;
+    /* A scene that runs here: the map its last render left
+     * (frameos_nim_press_map_takes), read without the runtime's lock, which
+     * the render holds. */
+    if (renders_locally(fos_config())) return frameos_nim_press_map_takes(x, y);
     return fos_press_map_takes(s_press_map, __atomic_load_n(&s_press_count, __ATOMIC_ACQUIRE), x, y) ? 1 : 0;
 }
 
@@ -4518,8 +4522,11 @@ static void client_task(void *arg)
         do {
             /* 50 ms while a button is busy: its `press` is due 350 ms after
              * the tap and its `longPress`es on each second, and only the
-             * process_events below delivers them. */
-            uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+             * process_events below delivers them. A finger on the glass the
+             * same: its `longPress` (a held key's accents) is the tick's, due
+             * 500 ms after it landed, and a second's slice delivered it up to
+             * a second late (the reTerminal Sticky, 2026-11-23). */
+            uint32_t max_slice = fos_buttons_busy() || fos_touch_finger_down() ? 50 : 1000;
             /* A JS app's timer (docs/async-js.md) is run by the tick below,
              * on time: the slice ends when it is due. A request's answer
              * wakes the wait itself (fos_js_io.c). */

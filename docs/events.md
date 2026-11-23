@@ -523,6 +523,8 @@ second, counting the hold out loud; the scene's `longPress` still comes once,
 with the `up`. A `press` adds no sound: its clicks were the down and the up
 (`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
 that something takes clicks the same way, unless the frame's `touch_beep` is off.
+An `edgeSwipe` there is four quick clicks, the moment the finger has gone far
+enough to be one.
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's
 monotonic clock (the one the dispatcher's tick reads: `CLOCK_MONOTONIC` on

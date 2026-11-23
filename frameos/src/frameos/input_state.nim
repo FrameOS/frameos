@@ -602,7 +602,14 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     # The keyboard on the screen reaches the screen's edges: a finger on its
     # outer keys is typing, not swiping, and the key lights up as it goes down.
     rec.onKeys = state.onKeyboard(rec.x, rec.y)
-    rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
+    rec.edge = if rec.pointerType == "mouse": "" else: state.edgeAt(rec.x, rec.y)
+    # On the keyboard only its bottom edge, where it is docked, stays one: a
+    # swipe up from there is the frame's as anywhere (the scene switcher with
+    # the keys up, the reTerminal Sticky 2026-11-23), held like any edge press
+    # until it is a swipe, a tap or a drag along the edge (the space bar's).
+    # The others are typing on the outer keys.
+    if rec.onKeys and rec.edge != "bottom":
+      rec.edge = ""
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
   when not defined(frameosEmbedded):
