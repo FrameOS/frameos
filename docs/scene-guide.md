@@ -54,6 +54,13 @@ A scenes file is a JSON array of scenes. Each scene is
   under a second is `"fast"`). Set it when the scene adapts: a game that
   animates on an LCD and turns into a slow puzzle on e-paper says
   `["touch", "keys", "buttons"]`.
+- `settings.round` (optional): `true` when the scene works on a round screen
+  (see [Round panels](#round-panels)): the store shows it as "Round screen"
+  and gives it first to round frames. Code that reads `context.round` or
+  `app.frame.round` says so by itself; set it on a scene with no code of its
+  own that already reads well in a circle (a photo filling the screen, a
+  centred clock), and `false` on one whose code reads it but should not be
+  offered there.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -863,6 +870,50 @@ SVG"; in a JS app, "No image provided"): `svg` (with a `viewBox`), `g`,
   key figure. Never put pure primaries side by side or use them as large
   fills. Keep text-to-background contrast high so it survives dithering.
 
+## Round panels
+
+Some panels are round: a square canvas (480×480, 466×466) of which only the
+circle inside shows and takes touches (the HyperPixel 2.1" Round, the
+Waveshare 1.75" AMOLED). `context.round` is `true` when the app draws such a
+panel's whole canvas (it is `false` in a window, a split's cell or a layout's
+hole, which are rooms of their own), and `app.frame.round` says the panel is
+round. On every other panel, change nothing: a scene that supports round
+panels looks exactly as before on a rectangle.
+
+- Keep text, numbers and buttons inside the circle, about 12 px in from the
+  rim (the bezel covers the edge, and a finger misses it there). The circle's
+  centre is `(W / 2, H / 2)` and its radius `Math.min(W, H) / 2`. A row of
+  text `y` px from the centre may be `2 * Math.sqrt(r * r - y * y)` wide.
+- A block of UI (a form, a grid, a list) goes in the square inside the
+  circle: `side = Math.floor((Math.min(W, H) / 2 - 12) * Math.SQRT2)`, at
+  `((W - side) / 2, (H - side) / 2)`. Put the title in the arc above it and
+  one or two buttons in the arc below, each as wide as its chord.
+- Better still, use the circle: centre the main figure, put a ring of values
+  or a progress arc along the rim, lay labels around a dial instead of in
+  rows, and let a list's rows near the middle be larger than those near the
+  top and bottom edges. A picture or a background colour may fill the whole
+  square: the corners are drawn, just never seen.
+- A UI that scrolls on a round panel gets its scroll bar along the rim by
+  itself.
+- Say the scene works there: code that reads `context.round` or
+  `app.frame.round` is tagged "Round screen" in the store; a scene without
+  code sets `settings.round: true` (see [A scene](#a-scene)).
+
+```tsx
+export function get(app, context) {
+  const W = context.imageWidth, H = context.imageHeight
+  const round = context.round === true
+  const side = round ? Math.floor((Math.min(W, H) / 2 - 12) * Math.SQRT2) : 0
+  const ui = <div className="flex flex-col gap-2 p-4">…</div>
+  if (!round) return ui
+  return (
+    <div className={`relative w-[${W}px] h-[${H}px]`}>
+      <div className={`absolute left-[${(W - side) >> 1}px] top-[${(H - side) >> 1}px] w-[${side}px] h-[${side}px]`}>{ui}</div>
+    </div>
+  )
+}
+```
+
 ## Small frames
 
 The scene that runs on a Raspberry Pi with hundreds of MB also gets installed
@@ -1406,6 +1457,8 @@ interface FrameOSContext {
   targetHeight?: number;
   /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
   targetFit?: string;
+  /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
+  round?: boolean;
   [key: string]: any;
 }
 
@@ -1748,4 +1801,5 @@ declare const console: {
   string; its `<svg>` uses only the supported tags, and gradients use
   `userSpaceOnUse`.
 - Sizes come from the frame, not from constants.
+- On a round panel (`context.round`) what matters stays inside the circle.
 - Nothing big is embedded as an object literal or kept alive between renders.

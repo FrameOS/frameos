@@ -9,6 +9,7 @@
 //   node --experimental-strip-types frameos/tools/wasm_layout_shots.mjs DIR spec.json OUTDIR
 //
 // spec.json: { "shots": [{
+//   "round": true,                    // a round panel (the board's own, or any board made round)
 //   "name": "sticky-clock",           // OUTDIR/<name>.png
 //   "board": "seeed_reterminal_sticky" (see BOARDS) | { width, height, pixelFormat, canvasBits, palette },
 //   "rotate": 0,                      // the frame's rotation; the picture is the panel turned that way
@@ -63,6 +64,9 @@ const BOARDS = {
   seeed_reterminal_e1001: { width: 800, height: 480, pixelFormat: 1, canvasBits: 8, palette: 'blackWhite', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
   seeed_reterminal_e1002: { width: 800, height: 480, pixelFormat: 7, canvasBits: 32, palette: 'spectra6', eventMap: [...ARROWS, ...VOICE], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
   seeed_reterminal_e1003: { width: 1872, height: 1404, pixelFormat: 8, canvasBits: 4, palette: 'sixteenGray', eventMap: [...ARROWS, ...VOICE, ...SWIPES], buttons: ['REFRESH', 'LEFT', 'RIGHT'] },
+  // Round: only the circle inside the square shows (panel_shape.nim
+  // boardPanelRound). Its picture greys out the corners the glass hides.
+  waveshare_esp32_s3_touch_amoled_1_75: { width: 466, height: 466, pixelFormat: 9, canvasBits: 16, round: true, eventMap: SWIPES, buttons: ['BOOT'] },
   seeed_reterminal_e1004: { width: 1200, height: 1600, pixelFormat: 7, canvasBits: 16, palette: 'spectra6', eventMap: [...ARROWS], buttons: ['RIGHT', 'LEFT', 'REFRESH'] },
 }
 
@@ -122,6 +126,7 @@ async function shoot(shot) {
   const board = typeof shot.board === 'string' ? BOARDS[shot.board] : shot.board
   if (!board) throw new Error(`${shot.name}: unknown board ${shot.board}`)
   const rotate = shot.rotate ?? 0
+  const round = shot.round ?? board.round ?? false
   const problems = []
   const Module = await createFrameOS({
     wasmBinary,
@@ -145,7 +150,7 @@ async function shoot(shot) {
   call('frameos_wasm_set_canvas_bits_per_pixel', null, ['number'], [board.canvasBits])
   const eventMap = shot.eventMap === undefined || shot.eventMap === 'board' ? board.eventMap : shot.eventMap
   const gpioButtons = (board.buttons ?? []).map((label, i) => ({ pin: 3 + i, label }))
-  if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ pixelFormat: board.pixelFormat, eventMap, gpioButtons, rotate })])) {
+  if (!call('frameos_wasm_set_frame', 'boolean', ['string'], [JSON.stringify({ pixelFormat: board.pixelFormat, eventMap, gpioButtons, rotate, round })])) {
     throw new Error(`${shot.name}: set_frame: ${lastError()}`)
   }
   if (shot.renderScale) call('frameos_wasm_set_render_scale', null, ['number'], [shot.renderScale])
@@ -229,6 +234,22 @@ async function shoot(shot) {
   const panel = panelPaletteFor(board.palette)
   if (panel && shot.dither !== false) ditherFrame(rgba, w, h, panel)
   for (let i = 3; i < rgba.length; i += 4) rgba[i] = 255
+  if (round) {
+    // What the glass hides, greyed: panel_shape.insideRound's circle.
+    const d = Math.min(w, h)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dx = 2 * x + 1 - w
+        const dy = 2 * y + 1 - h
+        if (dx * dx + dy * dy > d * d) {
+          const i = (y * w + x) * 4
+          rgba[i] = (rgba[i] >> 2) + 48
+          rgba[i + 1] = (rgba[i + 1] >> 2) + 48
+          rgba[i + 2] = (rgba[i + 2] >> 2) + 48
+        }
+      }
+    }
+  }
   await writeFile(join(outDir, `${shot.name}.png`), png(rgba, w, h))
   const shown = problems.filter((line) => !/^\s*$/.test(line))
   console.log(`${shot.name}: ${w}x${h}${shown.length ? `\n  ${shown.slice(0, 6).join('\n  ')}` : ''}`)

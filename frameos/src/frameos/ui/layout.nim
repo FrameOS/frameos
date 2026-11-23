@@ -22,6 +22,7 @@ import frameos/ui/tree
 from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
+from frameos/panel_shape import RoundInset
 import frameos/utils/qr
 import frameos/panel_shape
 when not defined(frameosEmbedded):
@@ -1524,6 +1525,31 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var emitRim {.threadvar.}: array[3, float32]
+  ## A round panel's whole canvas (UiInput.round): its circle's centre and
+  ## radius, where a list's scroll bar goes along the rim; radius 0 elsewhere.
+
+proc rimBar(cx, cy, r, top, bottom, shown, at: float32): Path =
+  ## A round panel's scroll bar (docs/jsx-ui.md "Round panels"): an arc
+  ## along the rim at the list's right, across its height as far as 45°
+  ## either side of 3 o'clock; `shown` of it is the bar, `at` (0 to 1) how
+  ## far down it has gone.
+  let
+    lo = arcsin(clamp((top - cy) / r, -0.7071, 0.7071))
+    hi = arcsin(clamp((bottom - cy) / r, -0.7071, 0.7071))
+    span = max(hi - lo, 0)
+    len = max(span * shown, min(span, 0.12))
+    a0 = lo + (span - len) * at
+    steps = 12
+  result = newPath()
+  for i in 0 .. steps:
+    let a = a0 + len * i.float32 / steps.float32
+    if i == 0: result.moveTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+    else: result.lineTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+  for i in countdown(steps, 0):
+    let a = a0 + len * i.float32 / steps.float32
+    result.lineTo(cx + (r - 1.5) * cos(a), cy + (r - 1.5) * sin(a))
+  result.closePath()
 var
   linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
   linkQrUrl {.threadvar.}: string ## ... its URL ...
@@ -2159,7 +2185,12 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         let
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
           bar = SvgNode(tag: "path", path: newPath())
-        bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        if emitRim[2] > 0 and vx + vw > emitRim[0]:
+          # On a round panel it runs along the rim, where a corner's bar
+          # would be off the glass.
+          bar.path = rimBar(emitRim[0], emitRim[1], emitRim[2], vy, vy + vh, vh / (vh + n.maxY), sy / n.maxY)
+        else:
+          bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
         bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
@@ -2665,8 +2696,11 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     result.children.add page
   var gradients = 0
   emitBackdrop = rgba(0, 0, 0, 0) # the root is painted over whatever the scene drew
+  # Inside the bezel (RoundInset), as everything the frame draws by itself.
+  emitRim = if input.round: [w / 2, h / 2, min(w, h) / 2 - RoundInset.float32 - 4] else: [0'f32, 0, 0]
   probe(phEmit):
     top.emit(0, 0, 1, result.children, gradients, regions)
+  emitRim = [0'f32, 0, 0]
   if input.open > 0:
     var shown = false
     let anchor = top.fieldIn(input.open - 1)

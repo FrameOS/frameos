@@ -80,6 +80,13 @@
         "optional": true,
         "sandboxes": ["app"],
         "description": "How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+)."
+      },
+      {
+        "name": "round",
+        "type": "boolean",
+        "optional": true,
+        "sandboxes": ["app"],
+        "description": "Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md \"Round panels\"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15."
       }
     ]
   },
