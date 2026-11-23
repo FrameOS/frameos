@@ -161,6 +161,13 @@ for kind, templateDir in walkDir(SamplesDir):
       skipped.add(sceneLabel)
       continue
 
+    # A JSX overlay with see-through paint under anti-aliased edges (a
+    # translucent card behind text over a transparent root) comes out up to 2
+    # levels apart here: fused, it blends onto the canvas step by step;
+    # materialized, onto a transparent image first and then onto the canvas,
+    # and 8-bit source-over is not associative (correct rounding still leaves
+    # 1). Unfusing it would cost a canvas-sized image, so samples keep such
+    # overlays opaque (Weather, painted's card, 2026-11-23).
     let delta = maxChannelDelta(a1, fusedImage)
     doAssert delta == 0,
       sceneLabel & ": fused render differs from materialized (max channel delta " &
