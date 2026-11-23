@@ -226,6 +226,24 @@ int fos_board_charge_enable_pin(const char *hardware_preset)
     return hardware_preset && strcmp(hardware_preset, "seeed_reterminal_sticky") == 0 ? 39 : -1;
 }
 
+/* The reTerminal Sticky's power latch (Seeed's schematic of 2026-06-09, the
+ * Power sheet, "Power up latch"): on battery the 3.3 V buck-boost runs while
+ * the AI/power key is down, and after that only while a 74AHC1G79 D flip-flop
+ * says so. Its Q takes D = PWR_HOLD (GPIO45) on a rising edge of CP =
+ * PWR_LOCK (GPIO46, 1 MOhm to ground), and keeps it for as long as the 3.3 V
+ * rail it latches is up, deep sleep included. USB powers the rail without it.
+ * Never latched, the board died the instant USB came out (2026-11-23: off
+ * Wi-Fi within two seconds, never one line on battery), and a press of the key
+ * got as far as the boot splash. Seeed's Arduino examples drive both pins high
+ * first thing in setup() (`keepPowerOn`). */
+bool fos_board_power_latch_pins(const char *hardware_preset, int *hold, int *lock)
+{
+    bool sticky = hardware_preset && strcmp(hardware_preset, "seeed_reterminal_sticky") == 0;
+    if (hold) *hold = sticky ? 45 : -1;
+    if (lock) *lock = sticky ? 46 : -1;
+    return sticky;
+}
+
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr)
 {
     if (clk) *clk = -1;

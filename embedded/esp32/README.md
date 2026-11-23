@@ -334,7 +334,13 @@ for the two Spectra boards most of the bench work runs on:
   it through a deep sleep (`fos_board_charge_enable_pin`). The red LED beside
   the port is the charger's STAT (CHARGE_STATE, GPIO40, not read): lit while
   it charges, blinking when it holds off (the cell too warm or cold, its
-  safety timer). On the bench
+  safety timer). On the cell the 3.3 V rail runs while the AI/power key is
+  down, and after that only while a 74AHC1G79 flip-flop holds it (the Power
+  sheet's "Power up latch"): `fos_charger_latch_power` sets PWR_HOLD (GPIO45)
+  high and raises PWR_LOCK (GPIO46) first thing in `app_main`, then lets both
+  strapping pins go; the latch keeps the rail through a deep sleep by itself.
+  Without it the board went off the instant USB came out (2026-11-23), and a
+  press of the key got only as far as the boot splash. On the bench
   (2026-11-18) the pin read 1 and the cell sat at 3397 mV and 0 mA for two
   days on USB; driven low, STAT went low at once and the cell rose to
   3768 mV and 32% in twenty minutes. Seeed set the gauge up in tenths (a

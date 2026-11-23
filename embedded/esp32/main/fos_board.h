@@ -64,6 +64,13 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
  * drives it at boot. */
 int fos_board_charge_enable_pin(const char *hardware_preset);
 
+/* The GPIOs of a board's power latch, for a board that stays on battery only
+ * while a flip-flop holds its supply: `hold` is the latch's D, `lock` its
+ * clock, and a rising `lock` with `hold` high latches the board on
+ * (fos_charger_latch_power). The reTerminal Sticky's PWR_HOLD GPIO45 and
+ * PWR_LOCK GPIO46; -1 / -1 and false on every other board. */
+bool fos_board_power_latch_pins(const char *hardware_preset, int *hold, int *lock);
+
 /* The board's status LED for a hardware preset key: its GPIO and how it is
  * lit (fos_led_type_t: 0 high, 1 low, 2 a WS2812 pixel), -1 / 0 for a board
  * without one. The reTerminal E1001/E1002 have a green LED on GPIO6, the

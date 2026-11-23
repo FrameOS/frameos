@@ -48,4 +48,10 @@ esp_err_t fos_charger_read(fos_charger_status_t *out);
  * cable plugged into a sleeping frame charges it. Once at boot; nothing to
  * do on any other board. */
 void fos_charger_enable(const char *hardware_preset);
+/* Latches the board's supply on, where a flip-flop holds it on battery
+ * (fos_board_power_latch_pins: the reTerminal Sticky): PWR_HOLD high, a
+ * rising edge on PWR_LOCK, both pins let go again. The latch then holds
+ * through deep sleep by itself. First thing at boot, so a press of the power
+ * key needs to last only until here. Nothing to do on any other board. */
+void fos_charger_latch_power(const char *hardware_preset);
 #endif

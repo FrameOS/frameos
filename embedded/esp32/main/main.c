@@ -470,6 +470,10 @@ void app_main(void)
     BOOTMEM("start");
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
+    /* A board on battery runs only while its power key is down until this
+     * latches it on (the reTerminal Sticky's flip-flop): before anything
+     * slower, so a short press is enough. */
+    fos_charger_latch_power(config->hardware_preset);
 
     /* Before the wake check below: a button wake clicks the buzzer, and the
      * status LED that follows it (fos_led.c) lights with it. */

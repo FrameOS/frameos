@@ -26,6 +26,7 @@ void fos_charger_decode(uint8_t reg08, uint8_t reg0a, fos_charger_status_t *out)
 #ifdef ESP_PLATFORM
 
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
 
 #include "fos_board.h"
 #include "fos_i2c.h"
@@ -51,6 +52,38 @@ void fos_charger_enable(const char *hardware_preset)
     gpio_set_level((gpio_num_t)pin, 0);
     gpio_hold_en((gpio_num_t)pin);
     gpio_deep_sleep_hold_en();
+}
+
+void fos_charger_latch_power(const char *hardware_preset)
+{
+    int hold = -1, lock = -1;
+    if (!fos_board_power_latch_pins(hardware_preset, &hold, &lock) || hold < 0 || lock < 0) return;
+    /* D high, then CP from low to high: the flip-flop's Q goes high and keeps
+     * the 3.3 V rail on. Q needs nothing more from either pin, so both go
+     * back to inputs: GPIO45 and GPIO46 are strapping pins (VDD_SPI, boot
+     * mode), and left driven high a reset could read them. CP falls to low
+     * through its 1 MOhm then, which a 74AHC1G79 ignores; only a rising
+     * edge with D low would turn the board off. */
+    const gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << hold) | (1ULL << lock),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_hold_dis((gpio_num_t)hold);
+    gpio_hold_dis((gpio_num_t)lock);
+    gpio_set_level((gpio_num_t)lock, 0);
+    gpio_set_level((gpio_num_t)hold, 1);
+    if (gpio_config(&cfg) != ESP_OK) return;
+    gpio_set_level((gpio_num_t)lock, 0);
+    gpio_set_level((gpio_num_t)hold, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level((gpio_num_t)lock, 1);
+    esp_rom_delay_us(10);
+    /* Inputs without pulls (gpio_reset_pin would pull them up). */
+    gpio_set_direction((gpio_num_t)hold, GPIO_MODE_INPUT);
+    gpio_set_direction((gpio_num_t)lock, GPIO_MODE_INPUT);
 }
 
 bool fos_charger_present(void)

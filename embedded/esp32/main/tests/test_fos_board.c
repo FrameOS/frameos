@@ -270,6 +270,21 @@ static void test_charge_enable_pin(void)
     CHECK(fos_board_charge_enable_pin(NULL) == -1, "NULL preset, no pin");
 }
 
+static void test_power_latch_pins(void)
+{
+    /* The Sticky's supply on battery is a flip-flop's: D on GPIO45, its clock
+     * on GPIO46 (Seeed's schematic, Power sheet). Never latched, it died the
+     * instant USB came out. */
+    int hold = 0, lock = 0;
+    CHECK(fos_board_power_latch_pins("seeed_reterminal_sticky", &hold, &lock), "sticky: a power latch");
+    CHECK(hold == 45 && lock == 46, "sticky: PWR_HOLD GPIO45, PWR_LOCK GPIO46");
+    /* GPIO45 is the E-series' buzzer: no latch to pulse there. */
+    CHECK(!fos_board_power_latch_pins("seeed_reterminal_e1001", &hold, &lock), "e1001: no power latch");
+    CHECK(hold == -1 && lock == -1, "e1001: no latch pins");
+    CHECK(!fos_board_power_latch_pins("seeed_reterminal_e1003", NULL, NULL), "e1003: no power latch");
+    CHECK(!fos_board_power_latch_pins(NULL, &hold, &lock) && hold == -1, "NULL preset, no latch");
+}
+
 static void test_leds(void)
 {
     /* The E-series' green LED: GPIO6 on the E1001/E1002, lit low (Seeed's
@@ -415,6 +430,7 @@ int main(void)
     test_event_maps();
     test_mic_pins();
     test_charge_enable_pin();
+    test_power_latch_pins();
     test_leds();
     test_i2c_buses();
     test_rtc_chip();
