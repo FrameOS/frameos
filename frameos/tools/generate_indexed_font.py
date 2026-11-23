@@ -16,24 +16,31 @@ Layout (little-endian, every section 4-byte aligned):
     header      64 bytes: "FOSF", version, metrics, counts, section offsets
     cmap        runs of codepoints mapped to consecutive glyphs:
                 u32 first codepoint, u16 count, u16 first glyph
-    glyphs      8 bytes a glyph: u16 advance, u16 offset in its block,
+    glyphs      7 bytes a glyph: u24 holding the advance (its low 12 bits)
+                and the glyph's offset in its block (the high 12), then
                 i8 x min, y min, x max, y max in units of `boxUnit` font units
                 (rounded outwards; x min -128: no box, outline the glyph)
     blocks      8 bytes a block, and one more at the end: u16 first glyph,
-                u16 raw length, u32 offset of its bytes
+                u16 raw length, u16 stored length, u16 offset of its bytes
     block data  the TrueType glyf records of the glyphs, in glyph order,
                 without the record's own box (its 8 bytes after the contour
-                count, which nothing reads: the glyph table has the box),
-                deflated a block at a time (raw deflate), except a block that
-                holds a glyph of printable ASCII, which is stored as it is
-                and read in place: a block whose stored length is its raw
-                length is not deflated
-    kerning     pixie's pair positioning in lookup order, read in place
-                (`getKerningAdjustment`): a 24-byte prelude naming the right
-                classes of every class subtable at once (runs of glyphs, u16
-                first glyph and u8 id, and per id one u8 class a class
-                subtable), then 24 bytes a subtable, its left glyphs, its
-                pairs or the column of its right class, its rows and entries
+                count, which nothing reads: the glyph table has the box). A
+                block that holds a glyph of printable ASCII is stored as it
+                is and read in place; those come first, and together they
+                are the preset dictionary every other block was deflated
+                against (raw deflate, its window starting with the header's
+                `dictionary` bytes of block data). A block whose stored length
+                is its raw length is not deflated.
+    kerning     pixie's pair positioning, read in place
+                (`getKerningAdjustment`: the first subtable in lookup order
+                that covers the left glyph and has a nonzero entry): a
+                28-byte head, then the glyph pairs (the left glyphs, u16 glyph
+                and u16 first pair, and one more at the end; the pairs, u16
+                right glyph and u8 value), and the class subtables merged
+                into one table: per glyph a row (as a left glyph) and a column
+                (as a right one), runs of glyphs with u16 first glyph, u8 row,
+                u8 column; per row its first entry (u16, one more at the end);
+                the entries, u8 column and u8 value, sorted by column
     values      the kerning values, i16, that entries name by index
 
 `--check` builds the file again and compares, then reads the committed file
@@ -61,11 +68,11 @@ SOURCE = FRAMEOS_ROOT / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf"
 OUTPUT = FRAMEOS_ROOT / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.fosf"
 
 MAGIC = b"FOSF"
-VERSION = 2
+VERSION = 3
 HEADER = 64
 BLOCK_BYTES = 2048
-KERN_TABLE = 24
-KERN_PRELUDE = 24
+GLYPH_BYTES = 7
+KERN_HEAD = 28
 
 
 def align(data: bytearray) -> None:
@@ -113,6 +120,20 @@ def glyph_box(record: bytes, unit: int) -> tuple[int, int, int, int]:
     return box
 
 
+def deflate(raw: bytes, dictionary: bytes) -> bytes:
+    if dictionary:
+        compressor = zlib.compressobj(9, zlib.DEFLATED, -15, 8, zlib.Z_DEFAULT_STRATEGY, dictionary)
+    else:
+        compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    return compressor.compress(raw) + compressor.flush()
+
+
+def inflate(packed: bytes, dictionary: bytes) -> bytes:
+    if dictionary:
+        return zlib.decompressobj(-15, dictionary).decompress(packed)
+    return zlib.decompress(packed, -15)
+
+
 def kerning_tables(font: TTFont, gid: dict[str, int]):
     """pixie's pair positioning subtables, in its order and with its rules:
     lookups of type 2 with an x advance, only nonzero entries, and only the
@@ -157,15 +178,70 @@ def kerning_tables(font: TTFont, gid: dict[str, int]):
     return tables
 
 
-def ranges(items: list[tuple[int, int]]) -> list[tuple[int, int, int]]:
-    """(glyph, value) sorted by glyph -> (first, last, value) runs."""
-    out: list[list[int]] = []
-    for glyph, value in items:
-        if out and glyph == out[-1][1] + 1 and value == out[-1][2]:
-            out[-1][1] = glyph
-        else:
-            out.append([glyph, glyph, value])
-    return [tuple(r) for r in out]
+def merged_kerning(tables, num_glyphs: int):
+    """The subtables as two: every glyph pair subtable merged into one (the
+    first in lookup order that has a pair wins, as when they are asked in
+    turn), and every class subtable merged into one table of rows and columns.
+
+    A glyph's row is what it is as a left glyph in all the class subtables
+    (which cover it, in which class), its column what it is as a right glyph
+    (its class in each); a cell is the value of the first class subtable that
+    covers the left glyph with a nonzero entry for the pair, which is the
+    answer pixie's walk gives once the glyph pairs had none. Rows and columns
+    that hold the same values are one."""
+    kinds = [t[0] for t in tables]
+    if "pairs" in kinds and "classes" in kinds and \
+            kinds.index("classes") < len(kinds) - 1 - kinds[::-1].index("pairs"):
+        raise SystemExit("a glyph pair subtable after a class subtable: the merged tables would change the order")
+    pairs: dict[int, dict[int, int]] = {}
+    for table in tables:
+        if table[0] == "pairs":
+            for glyph, glyph_pairs in table[1]:
+                into = pairs.setdefault(glyph, {})
+                for right, value in glyph_pairs:
+                    into.setdefault(right, value)
+    class_tables = [t for t in tables if t[0] == "classes"]
+    left_maps = [dict(t[1]) for t in class_tables]
+    right_maps = [dict(t[2]) for t in class_tables]
+    row_maps = [[dict(row) for row in t[3]] for t in class_tables]
+    left_keys = [tuple(m.get(glyph) for m in left_maps) for glyph in range(num_glyphs)]
+    right_keys = [tuple(m.get(glyph, 0) for m in right_maps) for glyph in range(num_glyphs)]
+    distinct_left = sorted(set(left_keys), key=left_keys.index)
+    distinct_right = sorted(set(right_keys), key=right_keys.index)
+
+    def cell(left_key, right_key) -> int:
+        for t, (cls1, cls2) in enumerate(zip(left_key, right_key)):
+            if cls1 is None:
+                continue
+            value = row_maps[t][cls1].get(cls2, 0)
+            if value:
+                return value
+        return 0
+
+    # Columns that hold the same values in every row are one column.
+    column_of_key: dict[tuple, int] = {}
+    columns: dict[tuple, int] = {}
+    for right_key in distinct_right:
+        values = tuple(cell(left_key, right_key) for left_key in distinct_left)
+        column_of_key[right_key] = columns.setdefault(values, len(columns))
+    # Rows, over those columns; rows that hold the same entries are one row.
+    column_keys: dict[int, tuple] = {}
+    for right_key, column in column_of_key.items():
+        column_keys.setdefault(column, right_key)
+    row_of_key: dict[tuple, int] = {}
+    rows: dict[tuple, int] = {}
+    for left_key in distinct_left:
+        entries = tuple((column, cell(left_key, column_keys[column]))
+                        for column in range(len(column_keys)) if cell(left_key, column_keys[column]))
+        row_of_key[left_key] = rows.setdefault(entries, len(rows))
+    if len(rows) > 256 or len(column_keys) > 256:
+        raise SystemExit("more than 256 kerning rows or columns: runs name them by a byte")
+    runs: list[tuple[int, int, int]] = []
+    for glyph in range(num_glyphs):
+        cell_ids = (row_of_key[left_keys[glyph]], column_of_key[right_keys[glyph]])
+        if not runs or runs[-1][1:] != cell_ids:
+            runs.append((glyph, *cell_ids))
+    return pairs, runs, list(rows)
 
 
 def build(source: Path) -> bytes:
@@ -194,9 +270,9 @@ def build(source: Path) -> bytes:
     blocks.append((first, bytes(raw)))
     if any(len(raw) > 0xFFFF for _, raw in blocks):
         raise SystemExit("a glyph larger than a block's u16 length")
+    if any(offset > 0xFFF for offset in offsets) or any(advance > 0xFFF for advance in advances):
+        raise SystemExit("an advance or an offset in a block past 12 bits")
 
-    # Kerning.
-    tables = kerning_tables(font, gid)
     values: list[int] = []
     value_index: dict[int, int] = {}
 
@@ -213,105 +289,70 @@ def build(source: Path) -> bytes:
     align(out)
     glyphs_at = len(out)
     for glyph in range(len(order)):
-        out += struct.pack("<HHbbbb", advances[glyph], offsets[glyph], *glyph_box(records[glyph], unit))
+        out += struct.pack("<HBbbbb", advances[glyph] | (offsets[glyph] & 0xF) << 12, offsets[glyph] >> 4,
+                           *glyph_box(records[glyph], unit))
     align(out)
     blocks_at = len(out)
     # Printable ASCII is most of what frames draw: the blocks holding it stay
     # as they are (read in place, nothing inflated, nothing kept in RAM) for
-    # a few KB of flash.
+    # a few KB of flash, and every other block is deflated against them, a
+    # preset dictionary the image holds anyway.
     hot = {gid[name] for codepoint, name in font.getBestCmap().items() if 0x20 <= codepoint <= 0x7E}
-    deflated = []
+    is_hot = []
     for b, (first, raw) in enumerate(blocks):
         last = blocks[b + 1][0] if b + 1 < len(blocks) else len(order)
-        compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
-        packed = compressor.compress(raw) + compressor.flush()
-        if len(packed) >= len(raw) or any(first <= glyph < last for glyph in hot):
-            packed = raw
-        deflated.append(packed)
+        is_hot.append(any(first <= glyph < last for glyph in hot))
+    dictionary = b"".join(raw for (_, raw), h in zip(blocks, is_hot) if h)
+    stored: list[bytes] = []
+    for (first, raw), h in zip(blocks, is_hot):
+        packed = raw if h else deflate(raw, dictionary)
+        stored.append(raw if len(packed) >= len(raw) else packed)
+    # The dictionary first, then the rest in block order.
+    placed = [b for b in range(len(blocks)) if is_hot[b]] + [b for b in range(len(blocks)) if not is_hot[b]]
+    at_of = {}
     at = 0
-    for (first, raw), packed in zip(blocks, deflated):
-        out += struct.pack("<HHI", first, len(raw), at)
-        at += len(packed)
-    out += struct.pack("<HHI", len(order), 0, at)
+    for b in placed:
+        at_of[b] = at
+        at += len(stored[b])
+    if at > 0xFFFF or len(dictionary) > 0xFFFF:
+        raise SystemExit("block data past a u16 offset")
+    for b, (first, raw) in enumerate(blocks):
+        out += struct.pack("<HHHH", first, len(raw), len(stored[b]), at_of[b])
+    out += struct.pack("<HHHH", len(order), 0, 0, at)
     block_data_at = len(out)
-    for packed in deflated:
-        out += packed
+    for b in placed:
+        out += stored[b]
     align(out)
 
-    # The right classes of every class subtable, at once: per glyph the tuple
-    # of its classes (one a class subtable), the distinct tuples numbered and
-    # the glyphs in runs of one tuple. One search finds a glyph's classes in
-    # all of them, and the tuples take half the bytes of a range table each.
-    class_tables = [t for t in tables if t[0] == "classes"]
-    right_maps = [dict(t[2]) for t in class_tables]
-    tuple_ids: dict[tuple, int] = {}
-    tuple_list: list[tuple] = []
-    starts: list[int] = []
-    ids: list[int] = []
-    for glyph in range(len(order)):
-        key = tuple(m.get(glyph, 0) for m in right_maps)
-        if any(c > 255 for c in key):
-            raise SystemExit("a right kerning class past 255")
-        if key not in tuple_ids:
-            tuple_ids[key] = len(tuple_list)
-            tuple_list.append(key)
-        if not ids or ids[-1] != tuple_ids[key]:
-            starts.append(glyph)
-            ids.append(tuple_ids[key])
-    if len(tuple_list) > 256:
-        raise SystemExit("more than 256 right class combinations: runs name them by a byte")
-
+    # Kerning.
+    pairs, kern_runs, rows = merged_kerning(kerning_tables(font, gid), len(order))
     kern_at = len(out)
-    out += bytes(KERN_PRELUDE)
-    headers_at = len(out)
-    out += bytes(KERN_TABLE * len(tables))
-    starts_at = len(out)
-    for glyph in starts:
-        out += struct.pack("<H", glyph)
-    ids_at = len(out)
-    out += bytes(ids)
-    tuples_at = len(out)
-    for key in tuple_list:
-        out += bytes(key)
-    struct.pack_into("<HHHHIII", out, kern_at, len(starts), len(tuple_list), len(class_tables), 0,
-                     starts_at, ids_at, tuples_at)
-    column = 0
-    for t, table in enumerate(tables):
-        align(out)
-        if table[0] == "pairs":
-            lefts = table[1]
-            left_at = len(out)
-            first_pair = 0
-            for glyph, pairs in lefts:
-                out += struct.pack("<HHHH", glyph, first_pair, len(pairs), 0)
-                first_pair += len(pairs)
-            second_at = len(out)
-            for _, pairs in lefts:
-                for right, value in pairs:
-                    out += struct.pack("<HH", right, vindex(value))
-            struct.pack_into("<BBHIHHIII", out, headers_at + t * KERN_TABLE, 1, 0, len(lefts), left_at,
-                             first_pair, 0, second_at, 0, 0)
-        else:
-            _, left, right, rows = table
-            left_ranges = ranges(left)
-            if len(rows) > 0xFFFF or any(cls > 255 for row in rows for cls, _ in row):
-                raise SystemExit("a kerning class past 255")
-            left_at = len(out)
-            for r in left_ranges:
-                out += struct.pack("<HHH", *r)
-            align(out)
-            rows_at = len(out)
-            entry = 0
-            for row in rows:
-                out += struct.pack("<HH", entry, len(row))
-                entry += len(row)
-            entries_at = len(out)
-            for row in rows:
-                for cls, value in row:
-                    out += struct.pack("<BB", cls, vindex(value))
-            struct.pack_into("<BBHIHHIII", out, headers_at + t * KERN_TABLE, 2, 0, len(left_ranges), left_at,
-                             column, len(rows), 0, rows_at, entries_at)
-            column += 1
+    out += bytes(KERN_HEAD)
+    pair_lefts_at = len(out)
+    first_pair = 0
+    for glyph in sorted(pairs):
+        out += struct.pack("<HH", glyph, first_pair)
+        first_pair += len(pairs[glyph])
+    out += struct.pack("<HH", 0xFFFF, first_pair)
+    pairs_at = len(out)
+    for glyph in sorted(pairs):
+        for right, value in sorted(pairs[glyph].items()):
+            out += struct.pack("<HB", right, vindex(value))
+    runs_at = len(out)
+    for run in kern_runs:
+        out += struct.pack("<HBB", *run)
+    rows_at = len(out)
+    entry = 0
+    for row in rows:
+        out += struct.pack("<H", entry)
+        entry += len(row)
+    out += struct.pack("<H", entry)
+    entries_at = len(out)
+    for row in rows:
+        for column, value in row:
+            out += struct.pack("<BB", column, vindex(value))
+    struct.pack_into("<HHHHIIIII", out, kern_at, len(pairs), len(kern_runs), len(rows), 0,
+                     pair_lefts_at, pairs_at, runs_at, rows_at, entries_at)
     if len(values) > 256:
         raise SystemExit("more than 256 kerning values: entries name them by a byte")
     align(out)
@@ -325,7 +366,7 @@ def build(source: Path) -> bytes:
         MAGIC, VERSION, unit, upm,
         hhea.ascent, hhea.descent, hhea.lineGap, getattr(os2, "sCapHeight", 0),
         post.underlinePosition, post.underlineThickness, os2.yStrikeoutPosition, os2.yStrikeoutSize,
-        len(order), len(runs), len(blocks), len(tables), len(values),
+        len(order), len(runs), len(blocks), len(dictionary), len(values),
         cmap_at, glyphs_at, blocks_at, block_data_at, kern_at, values_at, len(out),
     )
     return bytes(out)
@@ -338,86 +379,55 @@ class Indexed:
         self.data = data
         (magic, version, self.unit, self.upm, self.ascender, self.descender, self.line_gap,
          self.cap_height, self.underline_position, self.underline_thickness, self.strikeout_position,
-         self.strikeout_size, self.num_glyphs, self.num_runs, self.num_blocks, self.num_tables,
+         self.strikeout_size, self.num_glyphs, self.num_runs, self.num_blocks, self.dictionary_len,
          self.num_values, self.cmap_at, self.glyphs_at, self.blocks_at, self.block_data_at,
          self.kern_at, self.values_at, self.length) = struct.unpack_from("<4sHHHhhhhhhhhHHHHHIIIIIII", data, 0)
         assert magic == MAGIC and version == VERSION and self.length == len(data)
         self.runs = [struct.unpack_from("<IHH", data, self.cmap_at + 8 * i) for i in range(self.num_runs)]
-        self.blocks = [struct.unpack_from("<HHI", data, self.blocks_at + 8 * i) for i in range(self.num_blocks + 1)]
+        self.blocks = [struct.unpack_from("<HHHH", data, self.blocks_at + 8 * i) for i in range(self.num_blocks + 1)]
         self.values = [struct.unpack_from("<h", data, self.values_at + 2 * i)[0] for i in range(self.num_values)]
         self.mapped = {first + i: glyph + i for first, count, glyph in self.runs for i in range(count)}
+        self.dictionary = data[self.block_data_at : self.block_data_at + self.dictionary_len]
+        (self.pair_lefts, self.kern_runs, self.rows, _, self.pair_lefts_at, self.pairs_at, self.runs_at,
+         self.rows_at, self.entries_at) = struct.unpack_from("<HHHHIIIII", data, self.kern_at)
+        self.lefts = [self.u16(self.pair_lefts_at + 4 * i) for i in range(self.pair_lefts)]
+        self.starts = [self.u16(self.runs_at + 4 * i) for i in range(self.kern_runs)]
 
     def glyph_of(self, codepoint: int) -> int:
         return self.mapped.get(codepoint, -1)
 
     def record(self, glyph: int) -> tuple[int, int, tuple]:
-        advance, offset, *box = struct.unpack_from("<HHbbbb", self.data, self.glyphs_at + 8 * glyph)
-        return advance, offset, tuple(box)
+        word, high, *box = struct.unpack_from("<HBbbbb", self.data, self.glyphs_at + GLYPH_BYTES * glyph)
+        return word & 0xFFF, (word >> 12) | (high << 4), tuple(box)
 
     def glyf(self, glyph: int) -> bytes:
         b = max(i for i in range(self.num_blocks) if self.blocks[i][0] <= glyph)
-        first, raw_len, at = self.blocks[b]
-        packed = self.data[self.block_data_at + at : self.block_data_at + self.blocks[b + 1][2]]
-        raw = packed if len(packed) == raw_len else zlib.decompress(packed, -15)
+        first, raw_len, stored_len, at = self.blocks[b]
+        packed = self.data[self.block_data_at + at : self.block_data_at + at + stored_len]
+        raw = packed if stored_len == raw_len else inflate(packed, self.dictionary)
         assert len(raw) == raw_len
         start = self.record(glyph)[1]
         end = self.record(glyph + 1)[1] if glyph + 1 < self.blocks[b + 1][0] else raw_len
         return raw[start:end]
 
-    def right_classes(self, glyph: int) -> bytes:
-        run_count, tuple_count, width, _, starts_at, ids_at, tuples_at = struct.unpack_from(
-            "<HHHHIII", self.data, self.kern_at)
-        if not hasattr(self, "_starts"):
-            self._starts = [struct.unpack_from("<H", self.data, starts_at + 2 * i)[0] for i in range(run_count)]
-        i = bisect.bisect_right(self._starts, glyph) - 1
-        tid = self.data[ids_at + i]
-        return self.data[tuples_at + tid * width : tuples_at + (tid + 1) * width]
-
-    def tables(self):
-        if hasattr(self, "_tables"):
-            return self._tables
-        self._tables = []
-        for t in range(self.num_tables):
-            (fmt, _, left_count, left_at, second_count, row_count, second_at, rows_at,
-             entries_at) = struct.unpack_from("<BBHIHHIII", self.data, self.kern_at + KERN_PRELUDE + KERN_TABLE * t)
-            if fmt == 1:
-                lefts = {}
-                for i in range(left_count):
-                    glyph, first, count, _ = struct.unpack_from("<HHHH", self.data, left_at + 8 * i)
-                    lefts[glyph] = {r: self.values[v] for r, v in (struct.unpack_from("<HH", self.data, second_at + 4 * j)
-                                                                   for j in range(first, first + count))}
-                self._tables.append((1, lefts))
-            else:
-                left = [struct.unpack_from("<HHH", self.data, left_at + 6 * i) for i in range(left_count)]
-                right = second_count # the column of its class in right_classes
-                rows = []
-                for c in range(row_count):
-                    first, count = struct.unpack_from("<HH", self.data, rows_at + 4 * c)
-                    rows.append({cls: self.values[v] for cls, v in (struct.unpack_from("<BB", self.data, entries_at + 2 * j)
-                                                                    for j in range(first, first + count))})
-                self._tables.append((2, left, right, rows))
-        return self._tables
-
-    @staticmethod
-    def in_ranges(ranges, glyph):
-        i = bisect.bisect_right(ranges, (glyph, 0xFFFF, 0xFFFF)) - 1
-        if i >= 0 and ranges[i][0] <= glyph <= ranges[i][1]:
-            return ranges[i][2]
-        return None
+    def u16(self, at: int) -> int:
+        return struct.unpack_from("<H", self.data, at)[0]
 
     def kerning(self, left: int, right: int) -> int:
-        for table in self.tables():
-            if table[0] == 1:
-                pairs = table[1].get(left)
-                if pairs is not None and right in pairs:
-                    return pairs[right]
-            else:
-                cls1 = self.in_ranges(table[1], left)
-                if cls1 is None:
-                    continue
-                cls2 = self.right_classes(right)[table[2]]
-                if cls2 in table[3][cls1]:
-                    return table[3][cls1][cls2]
+        # The glyph pairs.
+        i = bisect.bisect_left(self.lefts, left)
+        if i < len(self.lefts) and self.lefts[i] == left:
+            first = self.u16(self.pair_lefts_at + 4 * i + 2)
+            stop = self.u16(self.pair_lefts_at + 4 * i + 6)
+            for p in range(first, stop):
+                if self.u16(self.pairs_at + 3 * p) == right:
+                    return self.values[self.data[self.pairs_at + 3 * p + 2]]
+        # The class subtables, merged.
+        row = self.data[self.runs_at + 4 * (bisect.bisect_right(self.starts, left) - 1) + 2]
+        column = self.data[self.runs_at + 4 * (bisect.bisect_right(self.starts, right) - 1) + 3]
+        for e in range(self.u16(self.rows_at + 2 * row), self.u16(self.rows_at + 2 * row + 2)):
+            if self.data[self.entries_at + 2 * e] == column:
+                return self.values[self.data[self.entries_at + 2 * e + 1]]
         return 0
 
 

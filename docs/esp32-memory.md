@@ -383,6 +383,19 @@ nothing from either control plane, which sync raw TTFs (docs/esp32-fonts.md:
 a few hundred bytes a face open, a 30.5 KB page cache made when the first
 card font draws, and the whole OpenType parser out of the image, −32.7 KB).
 
+**Version 3 (2026-11-24): 74,500 → 61,108 bytes, the same RAM.** The eight
+class subtables are one table now (a glyph's row as a left glyph and its
+column as a right one, in runs of glyphs; the cells are what pixie's walk
+answers): 21,020 → 13,780 bytes of kerning, and one search a side instead of
+one a subtable. A glyph's advance and offset share three bytes (7 a glyph,
+not 8). The ASCII blocks stored raw are the preset dictionary every other
+block is deflated against (zlib's `deflateSetDictionary`): 34,314 → 29,374
+bytes of deflated blocks, read where they lie by the inflater (a
+back-reference before the output's first byte reads the dictionary), so a
+block inflates into the same block-sized buffer as before. Every glyph's
+advance, box and outline and all 1,468,944 glyph pairs' kerning read the same
+as version 2's.
+
 ## Gradient fills paint in strips (2026-08-24)
 
 The 16 MB 13.3" (frame 529463b4, fw 2026.8.35) OOM-aborted every Weather
