@@ -222,8 +222,9 @@ several statements in an immediately called function that returns the value.
   `const latNum = Number(lat)`. Never name one `state`, `args`, `context`,
   `console`, `parseTs`, `format` or `now`: the code would see the global.
 - The only globals are `state.<field>`, the arguments, `context` (`event`,
-  `payload`, `loopIndex`, `loopKey`, `hasImage`, and `imageWidth` /
-  `imageHeight`, the canvas being drawn on, undefined outside a render),
+  `payload`, `loopIndex`, `loopKey`, `hasImage`, `imageWidth` /
+  `imageHeight`, the canvas being drawn on, undefined outside a render, and
+  `round`, true on a round panel's whole canvas),
   `console.log/warn/error`, and three time helpers: `now()` (seconds since the
   epoch), `format(ts, pattern)` (text in the frame's time zone) and
   `parseTs(pattern, text)` (seconds).
