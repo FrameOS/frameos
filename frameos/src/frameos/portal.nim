@@ -1784,17 +1784,26 @@ proc connectToWifiDetached*(handle: RuntimeHandle, options: PortalSetupOptions) 
   let frameOS {.cursor.} = frameOSOf(handle)
   connectToWifi(frameOS, options)
 
-proc checkNetwork*(self: FrameOS): bool =
-  # Runs at boot on the runtime's own thread (frameos.nim), before anything
-  # can reload the config, so it reads the runtime's config directly.
-  # A "bootOnly" hotspot needs the connectivity probe even when networkCheck
-  # ("wait for network before rendering") is switched off.
-  if (not self.frameConfig.network.networkCheck and self.frameConfig.network.wifiHotspot != "bootOnly") or
-      self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
-    return false
+type NetworkCheck* = object
+  ## What the boot's network check needs, as values: on a touch screen it runs
+  ## on a thread of its own (startNetworkCheckBehind), and the runtime's
+  ## config stays on the runtime's thread.
+  url*: string
+  timeoutSeconds*: float
+  country*: string
 
-  let url = self.frameConfig.network.networkCheckUrl
-  let timeout = self.frameConfig.network.networkCheckTimeoutSeconds
+proc networkCheckOf*(frameConfig: FrameConfig): NetworkCheck =
+  NetworkCheck(url: frameConfig.network.networkCheckUrl,
+               timeoutSeconds: frameConfig.network.networkCheckTimeoutSeconds,
+               country: effectiveWifiCountry(frameConfig))
+
+proc runNetworkCheck*(handle: RuntimeHandle, check: NetworkCheck): bool =
+  ## Probes `check.url` until it answers 200 or `check.timeoutSeconds` run
+  ## out, repairing the station on the way. On the runtime's thread at boot
+  ## (checkNetwork) or on the boot check's own (startNetworkCheckBehind).
+  let frameOS {.cursor.} = frameOSOf(handle)
+  let url = check.url
+  let timeout = check.timeoutSeconds
   var timer = getMonoTime()
   var attempt = 1
   var diagnosticsLogged = false
@@ -1806,9 +1815,9 @@ proc checkNetwork*(self: FrameOS): bool =
   # the repair itself can run the clock out, and giving up on an address
   # that is seconds old would be the very failure it just fixed.
   var probeAfterRepair = false
-  self.network.status = NetworkStatus.connecting
+  frameOS.network.status = NetworkStatus.connecting
   noteNetworkCheck(NetworkStatus.connecting)
-  self.logger.log(%*{"event": "networkCheck", "url": url})
+  pLog("networkCheck", %*{"url": url})
   while true:
     if not networkCheckProgressHook.isNil:
       let elapsedSeconds = int((getMonoTime() - timer).inSeconds)
@@ -1819,9 +1828,9 @@ proc checkNetwork*(self: FrameOS): bool =
       except CatchableError:
         discard
     if not probeAfterRepair and (getMonoTime() - timer) >= initDuration(milliseconds = int(timeout*1000)):
-      self.network.status = NetworkStatus.timeout
+      frameOS.network.status = NetworkStatus.timeout
       noteNetworkCheck(NetworkStatus.timeout, &"check timed out after {int(timeout)} s")
-      self.logger.log(%*{"event": "networkCheck", "status": "timeout", "seconds": timeout})
+      pLog("networkCheck", %*{"status": "timeout", "seconds": timeout})
       logNetworkDiagnostics("timeout")
       return false
     probeAfterRepair = false
@@ -1829,17 +1838,17 @@ proc checkNetwork*(self: FrameOS): bool =
     try:
       let response = client.get(url)
       if response.status.startsWith("200"):
-        self.network.status = NetworkStatus.connected
+        frameOS.network.status = NetworkStatus.connected
         noteNetworkCheck(NetworkStatus.connected)
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "success"})
+        pLog("networkCheck", %*{"attempt": attempt, "status": "success"})
         return true
       else:
-        self.network.status = NetworkStatus.error
+        frameOS.network.status = NetworkStatus.error
         noteNetworkCheck(NetworkStatus.error, "HTTP " & response.status)
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "failed",
+        pLog("networkCheck", %*{"attempt": attempt, "status": "failed",
             "response": response.status})
     except CatchableError as e:
-      self.network.status = NetworkStatus.error
+      frameOS.network.status = NetworkStatus.error
       noteNetworkCheck(NetworkStatus.error, e.msg)
 
       # Error with SSL certificates. Most likely means the clock is wrong after a long downtime
@@ -1848,14 +1857,14 @@ proc checkNetwork*(self: FrameOS): bool =
       let certificateProblem = e.msg.contains("certificate verify failed") or e.msg.contains("error:0A000086")
       if certificateProblem and not clockSyncTried:
         clockSyncTried = true
-        self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg,
+        pLog("networkCheck", %*{"attempt": attempt, "status": "error", "error": e.msg,
             "action": "syncing clock and trying again"})
         let syncStarted = getMonoTime()
         syncClock()
         timer = timer + (getMonoTime() - syncStarted)
         waitBetweenNetworkAttempts(1000)
         continue
-      self.logger.log(%*{"event": "networkCheck", "attempt": attempt, "status": "error", "error": e.msg})
+      pLog("networkCheck", %*{"attempt": attempt, "status": "error", "error": e.msg})
       if not diagnosticsLogged:
         diagnosticsLogged = true
         logNetworkDiagnostics("first error: " & e.msg)
@@ -1865,14 +1874,14 @@ proc checkNetwork*(self: FrameOS): bool =
 
     # If no wifi configured (first boot?), bail and show the AP
     if attempt == 1:
-      if not anyWifiConfigured(self):
-        self.network.status = NetworkStatus.error
+      if not anyWifiConfigured(frameOS):
+        frameOS.network.status = NetworkStatus.error
         noteNetworkCheck(NetworkStatus.error, "no Wi-Fi network configured")
-        self.logger.log(%*{"event": "networkCheck", "status": "wifi_not_configured"})
+        pLog("networkCheck", %*{"status": "wifi_not_configured"})
         return false
       else:
-        self.network.status = NetworkStatus.connecting
-        self.logger.log(%*{"event": "networkCheck", "status": "wifi_connecting"})
+        frameOS.network.status = NetworkStatus.connecting
+        pLog("networkCheck", %*{"status": "wifi_connecting"})
 
     # The supplicant backend joins once, at startup, with a 15 s association
     # budget. A check that keeps failing while the station is down is the
@@ -1886,8 +1895,8 @@ proc checkNetwork*(self: FrameOS): bool =
       let probe = networkToolProbe()
       if not wpa.stationUp(ctx, device, probe):
         lastStationRepair = getMonoTime()
-        let res = wpa.repairStation(ctx, device, probe, effectiveWifiCountry(self.frameConfig))
-        self.logger.log(%*{"event": "portal:networkBackend:stationRepair", "attempt": attempt,
+        let res = wpa.repairStation(ctx, device, probe, check.country)
+        pLog("portal:networkBackend:stationRepair", %*{"attempt": attempt,
                            "device": device, "ok": res.ok, "detail": res.message})
         if res.ok:
           # Straight back to the probe: the address is seconds old.
@@ -1899,14 +1908,26 @@ proc checkNetwork*(self: FrameOS): bool =
     attempt += 1
   return false
 
-proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
-  ## Called once at startup: pins the configured backend, logs which one won,
-  ## applies the Wi-Fi regulatory domain, and - on the supplicant backend -
-  ## does what NetworkManager autoconnect would have done, i.e. brings the
-  ## saved network back up after a reboot.
+proc checkNetwork*(self: FrameOS): bool =
+  # Runs at boot on the runtime's own thread (frameos.nim), before anything
+  # can reload the config, so it reads the runtime's config directly.
+  # A "bootOnly" hotspot needs the connectivity probe even when networkCheck
+  # ("wait for network before rendering") is switched off.
+  if (not self.frameConfig.network.networkCheck and self.frameConfig.network.wifiHotspot != "bootOnly") or
+      self.frameConfig.network.networkCheckTimeoutSeconds <= 0:
+    return false
+  runNetworkCheck(runtimeHandle(self), networkCheckOf(self.frameConfig))
+
+proc pinNetworkBackend*(frameOS: FrameOS) =
+  ## The configured backend, before anything touches the radio (the frame
+  ## page's scan included). On the runtime's thread.
   if frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
     setNetworkBackendOverride(frameOS.frameConfig.network.networkBackend)
-  let country = effectiveWifiCountry(frameOS.frameConfig)
+
+proc joinSavedNetwork*(country: string) {.gcsafe.} =
+  ## ensureNetworkBackendReady's slow half: applies the Wi-Fi regulatory
+  ## domain and, on the supplicant backend, joins the saved network (up to a
+  ## 15 s association wait and a lease). Any thread, once the backend is pinned.
   if activeNetworkBackend() != nbSupplicant:
     # NetworkManager never sets a regulatory domain; the kernel stays in the
     # world domain (no channel 12/13) unless someone says otherwise.
@@ -1916,6 +1937,14 @@ proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
   pLog("portal:networkBackend:station", %*{"ok": res.ok, "detail": res.message})
   # The repair clock starts when this join finished, not when the process did.
   lastStationRepair = getMonoTime()
+
+proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
+  ## Called once at startup: pins the configured backend, logs which one won,
+  ## applies the Wi-Fi regulatory domain, and - on the supplicant backend -
+  ## does what NetworkManager autoconnect would have done, i.e. brings the
+  ## saved network back up after a reboot.
+  pinNetworkBackend(frameOS)
+  joinSavedNetwork(effectiveWifiCountry(frameOS.frameConfig))
 
 # Link watchdog (supplicant backend; network/supplicant.nim decides, this runs it)
 # ---------------------------------------------------------------------------
@@ -2004,6 +2033,39 @@ proc startLinkWatchdog*(frameOS: FrameOS) =
   pLog("portal:linkWatchdog:start", %*{"intervalSeconds": wpa.linkWatchdogIntervalMs div 1000,
                                         "failuresBeforeRepair": wpa.linkWatchdogFailuresBeforeRepair})
   createThread(linkWatchdogThread, linkWatchdogLoop, runtimeHandle(frameOS))
+
+# The boot's check beside the scene (a touch screen, boot_network.nim)
+# ---------------------------------------------------------------------------
+
+type BootCheckBehind = object
+  handle: RuntimeHandle
+  check: NetworkCheck
+  hotspot: bool
+
+var bootCheckThread: Thread[BootCheckBehind]
+
+proc bootCheckBehindLoop(args: BootCheckBehind) {.thread.} =
+  ## What frameos.nim's boot does before its first render, done after it: the
+  ## supplicant's join, the check, the hotspot when it fails, the watchdog.
+  {.cast(gcsafe).}:
+    let frameOS {.cursor.} = frameOSOf(args.handle)
+    joinSavedNetwork(args.check.country)
+    if args.check.timeoutSeconds > 0 and runNetworkCheck(args.handle, args.check):
+      # The scene drew before the network: once more with it.
+      sendEvent("render", newJObject(), eoSystem)
+    elif args.hotspot:
+      startAp(frameOS, portalRequestConfig(frameOS))
+    startLinkWatchdog(frameOS)
+
+proc startNetworkCheckBehind*(frameOS: FrameOS, hotspot: bool) =
+  ## The boot's network check on a thread of its own, the scene already up.
+  ## On the runtime's thread: the backend is pinned and the check's values
+  ## read here.
+  pinNetworkBackend(frameOS)
+  pLog("networkCheck", %*{"status": "behind", "hotspot": hotspot})
+  createThread(bootCheckThread, bootCheckBehindLoop,
+               BootCheckBehind(handle: runtimeHandle(frameOS), check: networkCheckOf(frameOS.frameConfig),
+                               hotspot: hotspot))
 
 proc setPortalHooksForTest*(
   runHook: PortalRunHook = nil,

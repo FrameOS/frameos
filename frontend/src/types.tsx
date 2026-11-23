@@ -586,6 +586,10 @@ export interface FrameType {
     networkCheck?: boolean
     networkCheckTimeoutSeconds?: number
     networkCheckUrl?: string
+    // A touch screen (a HyperPixel) draws first and checks behind its scene;
+    // true makes it wait and raise its boot hotspot like any other frame
+    // (frameos/src/frameos/boot_network.nim).
+    networkCheckOnTouch?: boolean
     wifiHotspot?: string
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string

@@ -91,6 +91,15 @@ export function NetworkSection(): JSX.Element {
                   />
                 )}
               </Field>
+              {!isEmbeddedMode && frameForm.device?.startsWith('pimoroni.hyperpixel') ? (
+                <Field
+                  name="networkCheckOnTouch"
+                  label="Wait on the touch screen too"
+                  tooltip="A touch screen shows its scene at once and checks the network behind it. Its Wi-Fi is set on the screen: swipe down from the top, then the gear. Turn this on to make it wait for the network, and start the setup hotspot, like any other frame."
+                >
+                  <Switch name="networkCheckOnTouch" fullWidth />
+                </Field>
+              ) : null}
               {!isEmbeddedMode ? (
                 <>
                   <Field

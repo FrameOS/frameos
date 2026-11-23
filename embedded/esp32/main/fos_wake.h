@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -79,3 +80,21 @@ uint32_t fos_wake_slice_ticks(int64_t left_us, uint32_t max_slice_ms, uint32_t t
  * long as the pass took, so it works at most half the time. `left_ms` is what
  * the schedule asked for, `pass_ms` how long the pass ran. At least 1. */
 uint32_t fos_wake_rest_ms(int64_t left_ms, int64_t pass_ms);
+
+/* How a boot treats Wi-Fi (main.c). A board with a touch panel is set up on
+ * its own screen (the frame page, docs/scene-settings.md): it never opens the
+ * setup hotspot, and its first picture waits for the network only on a timer
+ * wake of a sleeping e-paper board, which nobody tapped and whose one picture
+ * before it sleeps again wants its data. Even then a touch or a key ends the
+ * wait. A board with nothing to join opens the frame page when it has no
+ * scene to show. Every other board waits for the join and opens the hotspot
+ * when it fails. `touch`: a touch panel answered at boot; `lcd`: the panel
+ * shows a change at once; `timer_wake`: the deep-sleep timer woke the chip;
+ * `wifi_saved`: a network is stored. */
+typedef struct {
+    bool on_screen;    /* set up on the screen: no hotspot, the boot never waits */
+    bool join_behind;  /* the station joins while the boot and the scene go on */
+    bool wait_first;   /* the first render waits for the join, until a touch or a key */
+    bool frame_page;   /* nothing to join: the frame page when there is no scene */
+} fos_wake_wifi_t;
+fos_wake_wifi_t fos_wake_wifi_plan(bool touch, bool lcd, bool timer_wake, bool wifi_saved);
