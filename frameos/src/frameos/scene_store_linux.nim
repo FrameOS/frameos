@@ -16,13 +16,16 @@
 ##   the runtime reloads, as after a save on its admin page.
 ## - What came from the store is each scene's `origin`, read off the scenes
 ##   on disk (the deployed set and the uploaded one).
+## - Which of them the store has a newer version of is the plane's to say
+##   (`updates`, asked when the store opens, after a change and every
+##   ten minutes while it is read); a frame with no plane lists none.
 ##
 ## Threads: the hooks run on the runner thread and hand the worker values (a
 ## job: the action, its arguments and the backend's address as strings); the
 ## worker reads files and the network and hands back values under
 ## `factsLock`. No ref crosses.
 
-import std/[json, locks, os, strutils, uri]
+import std/[json, locks, os, strutils, times, uri]
 import frameos/types
 import frameos/channels
 import frameos/config
@@ -39,6 +42,7 @@ const
   ScenesMaxBytes = 8 * 1024 * 1024
   AnswerMaxBytes = 8 * 1024
   FetchTimeoutMs = 15_000
+  UpdatesFreshSeconds = 10 * 60.0
 
 type
   Job = object
@@ -56,6 +60,8 @@ type
     previewStore, previewId, previewName, previewFrom: string
     origins: seq[Origin]
     standalone: bool
+    updates: string ## the plane's `updates` list as JSON text; "" not known
+    updatesAsked: float ## when they were last asked for
 
 var
   factsLock: Lock
@@ -108,7 +114,8 @@ proc cloudPanel*(route: string): tuple[url, token: string] =
 
 proc cloudPlane(): tuple[url, token: string] = cloudPanel("scenes")
 
-proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, status, shown: string] =
+proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, status, shown, updates: string] =
+  ## `updates`: the answer's list of updates as JSON text, when it has one.
   try:
     let response = boundedRequestWithHeaders(url, httpMethod = "POST",
       body = $(%*{"action": action, "scene_id": sceneId, "show": show}),
@@ -124,12 +131,14 @@ proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, sta
         code = if response.code == 429: "rate_limited"
                elif response.code == 404: "plane_update_required"
                else: "plane_unavailable"
-      return (code, "", "")
-    ("", answer{"status"}.getStr(), answer{"scene_id"}.getStr())
+      return (code, "", "", "")
+    let updates = answer{"updates"}
+    ("", answer{"status"}.getStr(), answer{"scene_id"}.getStr(),
+      if not updates.isNil and updates.kind == JArray: $updates else: "")
   except CatchableError:
     # No answer is the plane's silence, not the store's: a plane that could
     # not reach the store says `store_unavailable` itself.
-    ("plane_unavailable", "", "")
+    ("plane_unavailable", "", "", "")
 
 # ----------------------------------------------------------------- the disk
 
@@ -228,6 +237,24 @@ proc removeHere(store, id, show: string): string =
 
 # ----------------------------------------------------------------- the work
 
+proc askUpdates(job: Job) =
+  ## The plane's list of the store scenes on this frame it has newer
+  ## versions of, kept for the facts. Asked by no one: nothing on the page
+  ## changes when it cannot be had.
+  let cloud = cloudPlane()
+  var answer: tuple[error, status, shown, updates: string]
+  if cloud.url.len > 0:
+    answer = askPlane(cloud.url, cloud.token, "updates", "", true)
+  elif job.backendUrl.len > 0:
+    answer = askPlane(job.backendUrl & "/api/panel/scenes", job.backendKey, "updates", "", true)
+  else:
+    return
+  if answer.error.len > 0:
+    log(%*{"event": "sceneStore:error", "action": "updates", "error": answer.error})
+  elif answer.updates.len > 0:
+    withLock factsLock:
+      facts.updates = answer.updates
+
 proc work(job: var Job, error, done: var string) =
   ## The job's work. `error` gets a code for the page, `done` what worked.
   var status, previewId: string
@@ -240,6 +267,7 @@ proc work(job: var Job, error, done: var string) =
   case job.action
   of "scan":
     done = ""
+    askUpdates(job)
   else:
     var previewFrom, previewStore: string
     withLock factsLock:
@@ -251,10 +279,10 @@ proc work(job: var Job, error, done: var string) =
     if cloud.url.len > 0:
       let answer = askPlane(cloud.url, cloud.token, job.action,
         if job.action == "discard": previewFrom else: job.store, job.show)
-      (error, status, previewId) = answer
+      (error, status, previewId) = (answer.error, answer.status, answer.shown)
     elif job.backendUrl.len > 0 and not local:
       let answer = askPlane(job.backendUrl & "/api/panel/scenes", job.backendKey, job.action, job.store, job.show)
-      (error, status, previewId) = answer
+      (error, status, previewId) = (answer.error, answer.status, answer.shown)
     else:
       # This frame's own: a frame with no plane, or a backend's preview.
       case job.action
@@ -278,6 +306,9 @@ proc work(job: var Job, error, done: var string) =
           facts.previewFrom = job.origin
         elif job.action == "discard" or facts.previewStore == job.store:
           facts.previewStore = ""
+      # What changed the plane's list: its updates are asked for again.
+      if job.action in ["install", "update", "updateAll", "remove"]:
+        askUpdates(job)
 
 proc run(job: Job): bool {.gcsafe.} =
   ## True when the app has news: what it asked for is done, or a re-read
@@ -288,6 +319,9 @@ proc run(job: Job): bool {.gcsafe.} =
       job = job
       error = ""
       done = job.action
+      updatesBefore = ""
+    withLock factsLock:
+      updatesBefore = facts.updates
     try:
       work(job, error, done)
     except Exception as e:
@@ -301,7 +335,7 @@ proc run(job: Job): bool {.gcsafe.} =
     except Exception:
       discard
     withLock factsLock:
-      result = job.action != "scan" or origins != facts.origins
+      result = job.action != "scan" or origins != facts.origins or facts.updates != updatesBefore
       facts.origins = origins
       # A re-read is nobody's: what the page says, and a tap waiting behind
       # it, stay as they are.
@@ -356,20 +390,29 @@ proc linuxSceneStoreRead*(scene: string): string {.nimcall, gcsafe, raises: [].}
       var
         f: StoreFacts
         opened = false
+      let
+        backend = backendOf(config)
+        plane = cloudPlane().url.len > 0 or backend.url.len > 0
       withLock factsLock:
         # Opened again: what came from the store is read again (a push may
-        # have changed the scenes since), off this thread.
-        opened = asker != scene and facts.busy.len == 0
+        # have changed the scenes since), off this thread; and the plane's
+        # updates while it is read, now and then.
+        opened = facts.busy.len == 0 and (asker != scene or
+          (plane and epochTime() - facts.updatesAsked > UpdatesFreshSeconds))
+        if opened:
+          facts.updatesAsked = epochTime()
         asker = scene
         f = facts
       if opened:
-        queue(Job(action: "scan"))
+        queue(Job(action: "scan", backendUrl: backend.url, backendKey: backend.key))
       let installed = newJArray()
       for origin in f.origins:
         installed.add %*{"id": origin.id, "store": origin.store, "v": origin.version}
       var answer = %*{"url": storeBase(), "version": installedFrameOSVersion(), "busy": f.busy,
-        "error": f.error, "done": f.done, "installed": installed,
-        "removeAny": cloudPlane().url.len == 0 and backendOf(config).url.len == 0}
+        "error": f.error, "done": f.done, "installed": installed, "removeAny": not plane}
+      if plane and f.updates.len > 0:
+        try: answer["updates"] = parseJson(f.updates)
+        except CatchableError: discard
       answer["preview"] = if f.previewStore.len > 0:
         %*{"store": f.previewStore, "id": f.previewId, "name": f.previewName} else: newJNull()
       result = $answer
@@ -392,7 +435,7 @@ proc linuxSceneStoreAction*(scene, action, argsText: string) {.nimcall, gcsafe, 
         # One thing at a time: the app says what is running.
         if facts.busy.len > 0:
           return
-        if action notin ["preview", "install", "update", "remove", "discard"]:
+        if action notin ["preview", "install", "update", "updateAll", "remove", "discard"]:
           return
         facts.busy = job.action
         facts.error = ""

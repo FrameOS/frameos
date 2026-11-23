@@ -8,9 +8,10 @@ would be gone at the next deploy.
 The frame's bearer is its `server_api_key`, as on `/api/log` and the
 `/embedded` routes; a Pi, which does not know its id here, posts to
 `/api/panel/scenes` and the key says which frame it is. Body: {"action": "install" | "preview" | "update" |
-"remove" | "discard", "scene_id": "<store scene uuid>", "show"?: false} (for
+"updateAll" | "updates" | "remove" | "discard", "scene_id": "<store scene uuid>", "show"?: false} (for
 "discard", the runtime id of the scene to go back to; `show: false` installs
-without switching to it, so the store stays on the panel). Each action is what the workspace's
+without switching to it, so the store stays on the panel; "updates" and
+"updateAll" name no scene). Each action is what the workspace's
 button does: the saved list changes and the frame gets it the way a
 "Deploy scenes & settings" sends it (`api_frame_set_next_scene`, which knows
 every kind of frame), showing the scene the person tapped. A preview is the
@@ -20,12 +21,16 @@ previews on its own, as the editor's previews do there.
 What a frame may do is narrower than what its owner may: public store scenes
 only, fetched from this backend's store (never sent by the device); no
 service key is granted (a store scene gets the groups the owner allowed in
-the frame's settings, as for any store scene, docs/cloud-frames.md); nothing
-while the owner has the settings on the frame's screen turned off.
+the frame's settings, as for any store scene, docs/cloud-frames.md), and an
+update that asks for more than the copy it replaces (a permission, a
+settings key: panel_code's `grants_widened_by`) is the owner's
+(`needs_owner`); nothing while the owner has the settings on the frame's
+screen turned off.
 
 The cloud's twin is cloud/apps/auth-web/src/lib/panel-scenes.ts."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from http import HTTPStatus
@@ -47,11 +52,15 @@ from . import api_public
 
 __all__ = ["api_frame_panel_scenes", "api_panel_scenes"]
 
-PANEL_ACTIONS = ("install", "update", "remove", "preview", "discard")
+PANEL_ACTIONS = ("install", "update", "updateAll", "updates", "remove", "preview", "discard")
 STORE_SCENE_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 MAX_STORE_SCENES_BYTES = 4 * 1024 * 1024
+MAX_STORE_LISTING_BYTES = 64 * 1024
 MAX_RUNTIME_ID_CHARS = 128
 PANEL_ACTIONS_PER_15_MIN = 60
+# `updates` is a read the store's host asks when the store opens: a bucket of
+# its own, so reading never costs a tap.
+PANEL_READS_PER_15_MIN = 120
 
 
 def _frame_from_bearer(db: Session, frame_id: int | None, authorization: str | None) -> Frame:
@@ -66,8 +75,8 @@ def _frame_from_bearer(db: Session, frame_id: int | None, authorization: str | N
     return frame
 
 
-def _refused(error: str, status: int) -> JSONResponse:
-    return JSONResponse({"ok": False, "error": error}, status_code=status)
+def _refused(error: str, status: int, **detail: Any) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": error, **detail}, status_code=status)
 
 
 def store_provider_url(db: Session) -> str | None:
@@ -121,12 +130,107 @@ async def fetch_store_scenes(provider_url: str, store_scene_id: str) -> list[dic
     return scenes
 
 
+async def fetch_store_listing(provider_url: str, store_scene_id: str) -> dict[str, Any] | None:
+    """The store's listing for frames of one scene ({name, version, ...}, what
+    the Scene store's tiles compare with): None for a scene the store offers
+    no frame (private, pulled, unfiled, running shell commands)."""
+    url = f"{provider_url}/api/store/device/scenes/{store_scene_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15, transport=guarded_transport()) as client:
+            async with client.stream("GET", url) as response:
+                if response.status_code == HTTPStatus.NOT_FOUND:
+                    return None
+                if response.status_code != HTTPStatus.OK:
+                    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="store_unavailable")
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > MAX_STORE_LISTING_BYTES:
+                        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="store_unavailable")
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="store_unavailable") from error
+    try:
+        listing = json.loads(bytes(body))
+    except ValueError:
+        return None
+    if not isinstance(listing, dict) or not isinstance(listing.get("version"), int):
+        return None
+    return listing
+
+
 def _object(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
 def _store_scene_of(scene: Any) -> str:
     return str(_object(_object(scene).get("origin")).get("storeSceneId") or "").lower()
+
+
+def _version_of(scene: Any) -> int | None:
+    try:
+        return int(str(_object(_object(scene).get("origin")).get("version")))
+    except ValueError:
+        return None
+
+
+def _grants_of(scenes: list[Any]) -> tuple[set[str], set[str]]:
+    """What a store scene's scenes ask for together (panel_code's
+    `declared_grants`, each scene's)."""
+    from app.api.panel_code import declared_grants
+
+    permissions: set[str] = set()
+    settings: set[str] = set()
+    for scene in scenes:
+        asked, keys = declared_grants(scene)
+        permissions |= asked
+        settings |= keys
+    return permissions, settings
+
+
+def update_widens(installed: list[Any], new_scenes: list[Any]) -> list[str]:
+    """What the new version asks for beyond the copies the frame holds:
+    permissions by name, settings keys as `key:<namespace>`. A frame may move
+    a scene to a version that asks for nothing more; the rest is its owner's
+    (docs/scene-store.md, `needs_owner`)."""
+    from app.api.panel_code import grants_widened_by
+
+    return grants_widened_by(_grants_of(installed), _grants_of(new_scenes))
+
+
+async def scene_updates(provider_url: str, saved: list[Any]) -> list[dict[str, Any]]:
+    """Each public store scene the frame holds that the store has a newer
+    version of, in the frame's order: {store, name, from, to, scenes (the new
+    version's), widens (update_widens)}. A scene the store no longer offers a
+    frame is left out."""
+    by_store: dict[str, list[dict[str, Any]]] = {}
+    for scene in saved:
+        store = _store_scene_of(scene)
+        if STORE_SCENE_ID.match(store):
+            by_store.setdefault(store, []).append(scene)
+    listings = await asyncio.gather(*(fetch_store_listing(provider_url, store) for store in by_store))
+    found: list[dict[str, Any]] = []
+    for (store, copies), listing in zip(by_store.items(), listings):
+        held = min((version for version in map(_version_of, copies) if version is not None), default=None)
+        if listing is None or held is None or listing["version"] <= held:
+            continue
+        try:
+            scenes = await fetch_store_scenes(provider_url, store)
+        except HTTPException as error:
+            if error.detail == "store_unavailable":
+                raise
+            continue
+        version = _version_of(scenes[0])
+        if version is None or version <= held:
+            continue
+        found.append({
+            "store": store,
+            "name": str(listing.get("name") or copies[0].get("name") or ""),
+            "from": held,
+            "to": version,
+            "scenes": scenes,
+            "widens": update_widens(copies, scenes),
+        })
+    return found
 
 
 def _merge_field_values(installed: Any, fields: Any) -> Any:
@@ -270,16 +374,21 @@ async def api_frame_panel_scenes(
 
 async def _panel_scenes(request: Request, id: int | None, authorization: str | None, db: Session, redis: Redis):
     frame = _frame_from_bearer(db, id, authorization)
-    if await hit_rate_limit(
-        redis, "panel-scenes", str(frame.id), limit=PANEL_ACTIONS_PER_15_MIN, window_seconds=15 * 60
-    ):
-        return _refused("rate_limited", HTTPStatus.TOO_MANY_REQUESTS)
-    if frame.frame_settings_on_screen is False:
-        return _refused("panel_locked", HTTPStatus.FORBIDDEN)
     try:
         body = json.loads((await request.body())[: 4 * 1024] or b"{}")
     except ValueError:
         body = None
+    reading = isinstance(body, dict) and body.get("action") == "updates"
+    if await hit_rate_limit(
+        redis,
+        "panel-scenes-read" if reading else "panel-scenes",
+        str(frame.id),
+        limit=PANEL_READS_PER_15_MIN if reading else PANEL_ACTIONS_PER_15_MIN,
+        window_seconds=15 * 60,
+    ):
+        return _refused("rate_limited", HTTPStatus.TOO_MANY_REQUESTS)
+    if frame.frame_settings_on_screen is False:
+        return _refused("panel_locked", HTTPStatus.FORBIDDEN)
     if not isinstance(body, dict) or body.get("action") not in PANEL_ACTIONS:
         return _refused("invalid_action", HTTPStatus.BAD_REQUEST)
     action = body["action"]
@@ -303,6 +412,40 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             if back_to:
                 await _show(db, redis, frame, back_to)
             return {"ok": True, "status": "queued"}
+
+        if action in ("updates", "updateAll"):
+            provider = store_provider_url(db)
+            if not provider:
+                return _refused("store_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+            found = await scene_updates(provider, saved)
+            if action == "updates":
+                return {
+                    "ok": True,
+                    "updates": [
+                        {
+                            "store": row["store"],
+                            "name": row["name"],
+                            "from": row["from"],
+                            "to": row["to"],
+                            **({"owner": True} if row["widens"] else {}),
+                        }
+                        for row in found
+                    ],
+                }
+            # Every update the frame may take, in one save and one push; one
+            # that asks for more stays the owner's.
+            movable = [row for row in found if not row["widens"]]
+            owners = len(found) - len(movable)
+            if not movable:
+                return {"ok": True, "status": "up_to_date", "updated": 0, "kept": owners}
+            scenes = saved
+            for row in movable:
+                scenes = updated_scenes(scenes, row["store"], row["scenes"])
+            names = ", ".join(row["name"] or row["store"] for row in movable)
+            await _save(db, redis, frame, scenes, f"Updated on the frame's screen: {names}")
+            showing = await _active_scene(redis, frame)
+            await _show(db, redis, frame, showing or str(saved[0].get("id")))
+            return {"ok": True, "status": "queued", "updated": len(movable), "kept": owners}
 
         store_scene_id = raw_id.lower()
         if not STORE_SCENE_ID.match(store_scene_id):
@@ -363,6 +506,9 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             version = str((scenes[0].get("origin") or {}).get("version") or "")
             if all(str((scene.get("origin") or {}).get("version") or "") == version for scene in installed):
                 return {"ok": True, "status": "up_to_date", "version": version}
+            widens = update_widens(installed, scenes)
+            if widens:
+                return _refused("needs_owner", HTTPStatus.FORBIDDEN, needs=widens)
             await _save(
                 db, redis, frame, updated_scenes(saved, store_scene_id, scenes),
                 f"Updated on the frame's screen: {installed[0].get('name') or installed[0].get('id')} to version {version}",

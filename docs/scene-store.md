@@ -41,13 +41,14 @@ frame's credential) and two bridge calls.
   busy, error, done,     // the action running, the last one's refusal, the last that worked
   installed: [{ id, store, v }], // every scene on the frame from the store
   preview: { store, id, name } | null,
+  updates?: [{ store, name, from, to, owner? }], // the plane's: below
   removeAny,             // a frame with no plane may delete any scene
   previewOnly? }         // the browser preview's host: Preview, never Install
 ```
 
 `frameos.storeAction(action, args)` asks for work and returns at once:
 `preview {store, name}`, `install {store, name, show}`,
-`update {store}`, `remove {store}`, `discard`. One runs at a time (one asked
+`update {store}`, `updateAll`, `remove {store}`, `discard`. One runs at a time (one asked
 while another runs is dropped: `busy` says what runs). The host does it off
 the render task and renders the scene that asked again when it is done, if
 that scene still shows (the Pi checks `shownSceneId()`, the ESP32
@@ -194,7 +195,9 @@ over goes into a URL path on the ESP32, so it must be a UUID or nothing.
 |---|---|---|
 | `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
 | `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it |
-| `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is) |
+| `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is); `needs_owner` when that version asks for more (below) |
+| `updates` | none | reads, changes nothing: `{"ok": true, "updates": [{store, name, from, to, owner?}]}`, each public store scene the frame holds with a newer version it can run, in the frame's order |
+| `updateAll` | none | moves every one of `updates` without `owner` in ONE push (`{"status", "updated", "kept"}`: `kept` the ones left to the owner) |
 | `remove` | the same | takes it off the list and pushes the rest |
 | `discard` | the runtime id to go back to | ends the preview and pushes the list, showing that scene (the store) |
 
@@ -215,9 +218,16 @@ What a frame may ask is narrower than what its owner may:
   never widen a grant (`docs/cloud-frames.md`, "Scenes the frame already
   had"); the answer's `needs_settings_groups` says what it asks for, and the
   owner allows it where grants are made.
+- **An update asks for nothing more.** A version whose apps ask for a
+  permission or a settings key the version the frame holds did not (the code
+  editor's rule: backend `panel_code.grants_widened_by`, cloud
+  `panel-code-grants.ts`) is refused (`needs_owner`, with `needs`), listed with
+  `owner: true` and left out of `updateAll`: the owner updates it in the
+  workspace, where access is granted.
 - **Nothing while the settings on the frame's screen are off** (`panel_locked`).
 - **A frame keeps one scene** (`last_scene`).
-- Sixty changes a quarter of an hour per frame.
+- Sixty changes a quarter of an hour per frame, and 120 `updates` reads in a
+  bucket of their own, so reading never costs a tap.
 
 A refusal is `{"ok": false, "error": <code>}`, and the app says it in words
 (`WORDS` in its `app.tsx`).
@@ -240,6 +250,27 @@ sceneId}` (`scene-origin.ts`), and the frame keeps it. The host reads it off
 each scene: the ESP32 from each scene's file, found by its keys without parsing
 the scene, cached by the content hash the index already has; the Pi from its
 scenes on disk. That is what "on frame" and Update are measured against.
+
+### What has updates
+
+Which of them the store has a newer version of is the plane's to say: it
+knows which version it sent (the cloud's `assigned_scene_state`, a backend's
+`origin.version` on `frame.scenes`), which the frame may run (the cloud leaves
+out a version that needs a newer FrameOS or runs shell commands, a backend
+what the store's listing for frames does not offer) and which asks for more.
+The host asks `updates` with the re-read of what came from the store (when the
+store opens, after the scenes changed), after a change it asked for, and every
+ten minutes while the store is read, and keeps the answer as it came
+(`updates` in the facts; the ESP32 asks it once, never three times, and never
+pulls commands after it). An old plane refuses the action, and the facts have
+no `updates`. A frame with no plane has none: the app lists nothing.
+
+`updateAll` is one push however many scenes move: the cloud's
+`updateAssignedScenesToLatest` with every scene it may take (the workspace's
+"Update all scenes"), a backend's saved list changed once and sent once. Each
+scene keeps its install's id, name, field values, button map and layout, as
+`update` does; the deploy progress moves as for any push, and an ESP32 gets
+the set the way it gets every set (a patch, in parts, or whole).
 
 ### Trying a layout
 
@@ -340,6 +371,14 @@ kept.
   refresh) and takes a page's covers before its one refresh. A grey or black
   and white panel (`app.frame.color === false`) gets the high-contrast look,
   as e-paper does. A layout has Try instead of Preview (above).
+- **Updates first.** Where the plane lists updates, an Updates entry with
+  their count tops the categories (the side panel of a wide window, the front
+  of a narrow one) on both sides. It opens a list: each scene's name and
+  "Version 2 to 4" with Update, Update all where more than one may be taken
+  here, and in place of Update the words for one only the owner may take. A
+  scene's page offers no Update for that one either. With no plane (or in the
+  browser preview) there is no entry, and a spot left on it opens the
+  categories.
 - **Keys alone** (a frame with buttons and no glass) cannot drive it yet: the
   JSX layer has no focus for keys (`docs/ui-todo.md`).
 
