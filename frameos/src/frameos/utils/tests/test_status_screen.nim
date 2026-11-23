@@ -1,5 +1,5 @@
-import std/[strutils, unittest]
-import pixie
+import std/[math, strutils, unittest]
+import pixie, pixie/fileformats/svg
 import ../status_screen
 
 suite "status screen":
@@ -34,6 +34,23 @@ suite "status screen":
     check a == b
     check a != c
     check frameosMark(40, white, true, 0.0) == frameosMark(40, white, true, -1.0)
+
+  test "the mark's compacted markup draws exactly as the file":
+    # compactSvgMarkup only drops spaces, trailing zeros and repeated command
+    # letters: every size draws the same pixels as the file's own markup.
+    let original = frameosMarkFile.substr(frameosMarkFile.find("<svg"))
+    check frameosMarkSvg.len < original.len - 250
+    for h in 8 .. 220:
+      let
+        w = max(int(round(h.float * 464.0 / 544.0)), 8)
+        a = newImage(parseSvg(frameosMarkSvg, w, h))
+        b = newImage(parseSvg(original, w, h))
+      var differing = 0
+      for y in 0 ..< h:
+        for x in 0 ..< w:
+          if a[x, y] != b[x, y]:
+            inc differing
+      check differing == 0
 
   test "text output lists the bar before the footer":
     let screen = StatusScreen(status: "Ready", rows: @[("Name", "uus2w")],
