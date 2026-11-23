@@ -59,6 +59,26 @@ describe("scene needs", () => {
     expect(sceneNeeds([stated], ["shell"])).toEqual(["touch", "linux"]);
   });
 
+  it("reads a round screen from code that asks whether it is one, or from settings.round either way", () => {
+    const asks = (code: string) => ({ apps: { a: { sources: { "app.tsx": code } } } });
+    expect(sceneNeeds([asks("const round = context.round === true")])).toEqual(["round"]);
+    expect(sceneNeeds([asks("if (app.frame.round) layoutInCircle()")])).toEqual(["round"]);
+    // Math.round is no round screen, nor is a layout's own code.
+    expect(sceneNeeds([asks("const x = Math.round(w / 2)")])).toEqual([]);
+    expect(sceneNeeds([{ ...asks("context.round"), settings: { isLayout: true } }])).toEqual([]);
+    // Said by the scene: a photo that fills the screen has no code to ask.
+    expect(sceneNeeds([{ settings: { round: true } }])).toEqual(["round"]);
+    expect(sceneNeeds([{ ...asks("context.round"), settings: { round: false } }])).toEqual([]);
+    // Stated needs keep it: round is no need of its own.
+    expect(sceneNeeds([{ ...asks("context.round"), settings: { needs: ["touch", "round"] } }])).toEqual([
+      "touch",
+      "round",
+    ]);
+    expect(sceneNeeds([{ settings: { needs: ["round"] } }])).toEqual([]);
+    // And it rules nothing out.
+    expect(sceneFitsFrame(["round"], { fast: false, linux: false })).toBe(true);
+  });
+
   it("rules out only what a frame cannot run", () => {
     expect(sceneFitsFrame(["fast", "touch"], { fast: false })).toBe(false);
     expect(sceneFitsFrame(["touch", "keys"], { fast: false, linux: false })).toBe(true);

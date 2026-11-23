@@ -15,6 +15,11 @@
  * - `buttons`: it is used with the frame's own buttons (GPIO `button` events).
  * - `linux`: it runs a program on a Linux frame (Chromium, FFmpeg, a shell
  *   command), which an ESP32 and a cloud-managed frame refuse.
+ * - `round`: no need but a fit: it works on a round screen too (only the
+ *   circle inside the panel shows: docs/scene-guide.md "Round panels"). Read
+ *   from code that asks `context.round` or `app.frame.round`, or said by
+ *   `settings.round` (which wins either way). It rules nothing out; a round
+ *   frame's own store puts it first.
  *
  * A scene that knows better says so: `settings.needs`, a list of these, is
  * taken as it is for that scene (a game that turns into a slow puzzle on
@@ -30,8 +35,8 @@
  * under its stricter tsconfig.
  */
 
-export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux'
-export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux']
+export type SceneNeed = 'fast' | 'touch' | 'keys' | 'buttons' | 'linux' | 'round'
+export const SCENE_NEEDS: readonly SceneNeed[] = ['fast', 'touch', 'keys', 'buttons', 'linux', 'round']
 
 const needLabels: Record<SceneNeed, string> = {
   fast: 'Fast screen',
@@ -39,6 +44,7 @@ const needLabels: Record<SceneNeed, string> = {
   keys: 'Keyboard',
   buttons: 'Buttons',
   linux: 'Pi only',
+  round: 'Round screen',
 }
 
 const needDescriptions: Record<SceneNeed, string> = {
@@ -48,6 +54,7 @@ const needDescriptions: Record<SceneNeed, string> = {
   buttons: "Used with the frame's own buttons.",
   linux:
     'Runs a program on the frame (Chromium, FFmpeg or a shell command): a Raspberry Pi only, not an ESP32 or a cloud-managed frame.',
+  round: 'Made for round screens too: it keeps inside the circle. It looks the same on any other screen.',
 }
 
 export function sceneNeedLabel(need: SceneNeed): string {
@@ -89,6 +96,9 @@ const POINTER_EVENTS = new Set([
   'touchMove',
   'touchEnd',
 ])
+
+/** Code that asks whether the screen is round (`context.round`, `app.frame.round`). */
+const ROUND_READ = /\b(?:context|frame)\s*\.\s*round\b/
 
 /** A keyboard. */
 const KEY_EVENTS = new Set(['keyDown', 'keyUp', 'textInput'])
@@ -187,10 +197,14 @@ function refreshIntervalOf(scene: Record<string, unknown>): number | null {
 export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] = []): SceneNeed[] {
   const needs = new Set<SceneNeed>()
   for (const entry of scenesOf(scene)) {
+    const round = settingsOf(entry).round
+    if (round === true || (round !== false && !isLayout(entry) && codeOf(entry).some((text) => ROUND_READ.test(text)))) {
+      needs.add('round')
+    }
     const stated = settingsOf(entry).needs
     if (Array.isArray(stated)) {
       for (const need of stated) {
-        if (isSceneNeed(need)) {
+        if (isSceneNeed(need) && need !== 'round') {
           needs.add(need)
         }
       }
@@ -231,6 +245,23 @@ export function sceneNeedsForScene(scene: unknown, riskFlags: readonly string[] 
     needs.add('linux')
   }
   return SCENE_NEEDS.filter((need) => needs.has(need))
+}
+
+export type SceneRoundChoice = 'auto' | 'yes' | 'no'
+
+/** The scene settings' "Round screens" select: what `settings.round` says, else what the code does. */
+export function sceneRoundChoice(round: unknown): SceneRoundChoice {
+  return round === true ? 'yes' : round === false ? 'no' : 'auto'
+}
+
+/** `settings.round` for a choice of that select (undefined: read it from the code). */
+export function sceneRoundFromChoice(choice: unknown): boolean | undefined {
+  return choice === 'yes' ? true : choice === 'no' ? false : undefined
+}
+
+/** Whether a scene's own code asks if the screen is round: what "Automatic" means. */
+export function sceneCodeReadsRound(scene: unknown): boolean {
+  return scenesOf(scene).some((entry) => !isLayout(entry) && codeOf(entry).some((text) => ROUND_READ.test(text)))
 }
 
 /** What a whole scenes.json needs: the union over its scenes. */

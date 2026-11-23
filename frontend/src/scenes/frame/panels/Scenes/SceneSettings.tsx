@@ -28,6 +28,7 @@ import {
   sceneRenderScaleFromSelect,
   sceneRenderScaleSelectValue,
 } from '../../../../utils/renderScale'
+import { sceneRoundChoice, sceneRoundFromChoice } from '../../../../utils/sceneNeeds'
 import {
   SCENE_WINDOW_SIZE_HELP,
   sceneWindowSizeFromSelect,
@@ -87,6 +88,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     iconProblem,
     iconUploadError,
     categoryOptions,
+    roundOptions,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -230,6 +232,24 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                     value={sceneWindowSizeSelectValue(value)}
                     onChange={(next) => onChange(sceneWindowSizeFromSelect(next))}
                     options={windowSizeOptions}
+                  />
+                )}
+              </Field>
+            )}
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="round"
+                label={<SceneSettingsLabel>Round screens</SceneSettingsLabel>}
+                tooltip="Whether the scene works on a round screen (only the circle inside the panel shows). The store marks it Round screen and offers it first to round frames. Automatic: it does when its code asks context.round or app.frame.round. Square and rectangular screens see no difference."
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    name="round"
+                    className="h-10"
+                    value={sceneRoundChoice(value)}
+                    onChange={(next) => onChange(sceneRoundFromChoice(next))}
+                    options={roundOptions}
                   />
                 )}
               </Field>

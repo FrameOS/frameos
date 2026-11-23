@@ -1144,6 +1144,13 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 </div>
 ```
 
+- **Its bar**: a thin bar at its right edge says where in what it holds it
+  shows. On a round panel's whole canvas (`UiInput.round`: the circle inside
+  the square shows) the bar of a box whose right edge is right of the
+  centre is an arc along the rim instead, `RoundInset` and a little in from
+  it, across the box's height as far as 45° either side of 3 o'clock
+  (`rimBar` in `ui/layout.nim`): every UI that scrolls gets it, the built-in
+  scenes' and every app's. The app does nothing for it.
 - **A finger drags it**: once a press on it moves past the tap's slop
   along the way it scrolls, the content follows the finger and nothing is
   pressed (from where the box is at each move, so a `scrollTop` the app set

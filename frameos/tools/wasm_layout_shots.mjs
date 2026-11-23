@@ -221,7 +221,8 @@ async function shoot(shot) {
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
     } else if (kind === 'state') {
-      call('frameos_wasm_set_scene_state', 'boolean', ['string'], [JSON.stringify(args[0])])
+      // The state of the scene showing (its public fields).
+      call('frameos_wasm_set_scene_state', 'boolean', ['string', 'string'], [first.id, JSON.stringify(args[0])])
     } else if (kind === 'input') {
       call('frameos_wasm_device_input', 'number', ['string'], [JSON.stringify(args[0])])
     }
