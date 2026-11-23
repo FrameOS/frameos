@@ -262,12 +262,15 @@ knows which version it sent (the cloud's `assigned_scene_state`, a backend's
 `origin.version` on `frame.scenes`), which the frame may run (the cloud leaves
 out a version that needs a newer FrameOS or runs shell commands, a backend
 what the store's listing for frames does not offer) and which asks for more.
-The host asks `updates` with the re-read of what came from the store (when the
-store opens, after the scenes changed), after a change it asked for, and every
-ten minutes while the store is read, and keeps the answer as it came
-(`updates` in the facts; the ESP32 asks it once, never three times, and never
-pulls commands after it). An old plane refuses the action, and the facts have
-no `updates`. A frame with no plane has none: the app lists nothing.
+The host asks `updates` when a read of its facts finds the answer five
+minutes old (or another plane's), after a change it asked for, and on an
+ESP32 with the re-read after a push changed its scenes, and keeps the answer
+as it came (`updates` in the facts; the ESP32 asks it once, never three
+times, and never pulls commands after it). The Pi re-reads what came from the
+store when another scene reads the facts, at most every half a minute: on a
+desktop two readers may show at once. An old plane refuses
+the action, and the facts have no `updates`. A frame with no plane has none:
+the app lists nothing.
 
 `updateAll` is one push however many scenes move: the cloud's
 `updateAssignedScenesToLatest` with every scene it may take (the workspace's

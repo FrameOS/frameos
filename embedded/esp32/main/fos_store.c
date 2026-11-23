@@ -21,9 +21,9 @@
  * - What came from the store is read off each scene's file once (its
  *   `origin`), kept by the content hash the index has for it.
  * - Which of them the store has a newer version of is the plane's to say
- *   (`updates`, its answer kept as it came): asked with each re-read, after a
- *   change, and every ten minutes while the store is read. A frame with no
- *   plane lists none.
+ *   (`updates`, its answer kept as it came): asked with each re-read (the
+ *   scenes changed), after a change asked here, and when a read finds it five
+ *   minutes old. A frame with no plane lists none.
  */
 #include "fos_store.h"
 
@@ -58,7 +58,7 @@ static const char *TAG = "fos_store";
 
 #define DEFAULT_STORE_URL "https://cloud.frameos.net"
 #define ANSWER_MAX 4096
-#define UPDATES_FRESH_US (10LL * 60 * 1000 * 1000)
+#define UPDATES_FRESH_US (5LL * 60 * 1000 * 1000)
 /* A store scene's scenes.json: its scenes, each no more than a slot holds. */
 #define SCENES_MAX (2 * FOS_SCENE_STORE_MAX_BYTES)
 #define SPLIT_MAX 8

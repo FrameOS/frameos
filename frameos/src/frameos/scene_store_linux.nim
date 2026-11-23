@@ -17,8 +17,9 @@
 ## - What came from the store is each scene's `origin`, read off the scenes
 ##   on disk (the deployed set and the uploaded one).
 ## - Which of them the store has a newer version of is the plane's to say
-##   (`updates`, asked when the store opens, after a change and every
-##   ten minutes while it is read); a frame with no plane lists none.
+##   (`updates`, asked again when a read finds the answer five minutes old
+##   or from another plane, and after a change); a frame with no plane lists
+##   none.
 ##
 ## Threads: the hooks run on the runner thread and hand the worker values (a
 ## job: the action, its arguments and the backend's address as strings); the
@@ -42,12 +43,14 @@ const
   ScenesMaxBytes = 8 * 1024 * 1024
   AnswerMaxBytes = 8 * 1024
   FetchTimeoutMs = 15_000
-  UpdatesFreshSeconds = 10 * 60.0
+  UpdatesFreshSeconds = 5 * 60.0
+  ScanEverySeconds = 30.0
 
 type
   Job = object
     action, store, id, name, origin: string
     show: bool ## an install's: show it once it is on the frame
+    updates: bool ## a scan's: ask the plane for its updates too
     backendUrl, backendKey: string ## the frame's backend, when it has one
 
   Origin = object
@@ -61,7 +64,8 @@ type
     origins: seq[Origin]
     standalone: bool
     updates: string ## the plane's `updates` list as JSON text; "" not known
-    updatesAsked: float ## when they were last asked for
+    updatesPlane: string ## the plane they are from
+    updatesAsked, scanned: float ## when they were last asked for, the scenes read
 
 var
   factsLock: Lock
@@ -242,18 +246,19 @@ proc askUpdates(job: Job) =
   ## versions of, kept for the facts. Asked by no one: nothing on the page
   ## changes when it cannot be had.
   let cloud = cloudPlane()
-  var answer: tuple[error, status, shown, updates: string]
-  if cloud.url.len > 0:
-    answer = askPlane(cloud.url, cloud.token, "updates", "", true)
-  elif job.backendUrl.len > 0:
-    answer = askPlane(job.backendUrl & "/api/panel/scenes", job.backendKey, "updates", "", true)
-  else:
+  let url = if cloud.url.len > 0: cloud.url
+            elif job.backendUrl.len > 0: job.backendUrl & "/api/panel/scenes"
+            else: ""
+  if url.len == 0:
     return
+  let answer = askPlane(url, if cloud.url.len > 0: cloud.token else: job.backendKey, "updates", "", true)
+  withLock factsLock:
+    facts.updatesAsked = epochTime()
+    if answer.updates.len > 0:
+      facts.updates = answer.updates
+      facts.updatesPlane = url
   if answer.error.len > 0:
     log(%*{"event": "sceneStore:error", "action": "updates", "error": answer.error})
-  elif answer.updates.len > 0:
-    withLock factsLock:
-      facts.updates = answer.updates
 
 proc work(job: var Job, error, done: var string) =
   ## The job's work. `error` gets a code for the page, `done` what worked.
@@ -267,7 +272,8 @@ proc work(job: var Job, error, done: var string) =
   case job.action
   of "scan":
     done = ""
-    askUpdates(job)
+    if job.updates:
+      askUpdates(job)
   else:
     var previewFrom, previewStore: string
     withLock factsLock:
@@ -392,25 +398,35 @@ proc linuxSceneStoreRead*(scene: string): string {.nimcall, gcsafe, raises: [].}
         opened = false
       let
         backend = backendOf(config)
-        plane = cloudPlane().url.len > 0 or backend.url.len > 0
+        cloud = cloudPlane().url
+        planeUrl = if cloud.len > 0: cloud elif backend.url.len > 0: backend.url & "/api/panel/scenes" else: ""
+        now = epochTime()
+      var ask = false
       withLock factsLock:
-        # Opened again: what came from the store is read again (a push may
-        # have changed the scenes since), off this thread; and the plane's
-        # updates while it is read, now and then.
-        opened = facts.busy.len == 0 and (asker != scene or
-          (plane and epochTime() - facts.updatesAsked > UpdatesFreshSeconds))
+        # Opened by another scene: what came from the store is read again (a
+        # push may have changed the scenes since), off this thread, at most
+        # every half a minute (the frame page reads it too, and on a desktop
+        # both show); and the plane's updates once they are five minutes old
+        # or another plane's.
+        ask = planeUrl.len > 0 and (facts.updatesPlane != planeUrl or now - facts.updatesAsked > UpdatesFreshSeconds)
+        opened = facts.busy.len == 0 and (ask or (asker != scene and now - facts.scanned > ScanEverySeconds))
         if opened:
-          facts.updatesAsked = epochTime()
+          facts.scanned = now
+          if ask:
+            facts.updatesAsked = now
+            if facts.updatesPlane != planeUrl:
+              facts.updates = ""
+              facts.updatesPlane = planeUrl
         asker = scene
         f = facts
       if opened:
-        queue(Job(action: "scan", backendUrl: backend.url, backendKey: backend.key))
+        queue(Job(action: "scan", updates: ask, backendUrl: backend.url, backendKey: backend.key))
       let installed = newJArray()
       for origin in f.origins:
         installed.add %*{"id": origin.id, "store": origin.store, "v": origin.version}
       var answer = %*{"url": storeBase(), "version": installedFrameOSVersion(), "busy": f.busy,
-        "error": f.error, "done": f.done, "installed": installed, "removeAny": not plane}
-      if plane and f.updates.len > 0:
+        "error": f.error, "done": f.done, "installed": installed, "removeAny": planeUrl.len == 0}
+      if planeUrl.len > 0 and f.updatesPlane == planeUrl and f.updates.len > 0:
         try: answer["updates"] = parseJson(f.updates)
         except CatchableError: discard
       answer["preview"] = if f.previewStore.len > 0:
