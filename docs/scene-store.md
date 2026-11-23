@@ -355,7 +355,8 @@ kept.
   read fails (2026.11.15+; a runtime before says `[]`). It then says "The TF
   card cannot be read right now." with Try again, keeps the spot (folder, page,
   picture open), never keeps that answer, and lists again every 5 s, six
-  times. A listing is kept 30 s otherwise, and not when the clock went back
+  times (counted in the spot, on disk, so a frame that deep-sleeps between
+  tries stops too). A listing is kept 30 s otherwise, and not when the clock went back
   (a frame sets it once online). **Reload** in the header, and opening a place
   from the top, drop what was read (the listing, sizes, thumbnails) and list
   the folder again.

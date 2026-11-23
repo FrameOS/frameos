@@ -374,11 +374,21 @@ suite "the Files scene":
     check scene.spot{"dir"}.getStr() == "Saved"
     check scene.spot{"open"}.getStr() == "Saved/kept.png"
     check context.nextSleep > 0 and context.nextSleep <= 5
+    # Six tries in all, counted in the spot (kept on disk), so a frame that
+    # sleeps between them stops too.
+    for i in 0 ..< 6:
+      let again = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: newImage(800, 480),
+        hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard render(scene, again)
+      rhythmClockOverride += 1.0
+      check (again.nextSleep > 0 and again.nextSleep <= 5) == (i < 5)
+    check scene.spot{"tries"}.getInt() == 6
     # The storage comes: the next render shows the picture it was on.
     picture(internal / "Saved" / "kept.png", "#dc2626", 600, 400)
     let viewer = draw(scene, config, "readable-again")
     let red = viewer[400, 240]
     check red.r > 180 and red.g < 80
+    check scene.spot{"tries"}.isNil
     check problems.len == 0
     if problems.len > 0: echo problems
 
