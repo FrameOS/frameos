@@ -697,6 +697,80 @@ suite "js app runtime":
     check own["internal"].len == 0
     check own["read"].kind == JNull
 
+  test "strict: a storage that cannot be read is null, an empty or missing folder []":
+    let assetsDir = getTempDir() / "frameos-js-strict-test"
+    let missingDir = getTempDir() / "frameos-js-strict-missing"
+    removeDir(assetsDir)
+    removeDir(missingDir)
+    createDir(assetsDir / "Empty")
+    writeFile(assetsDir / "one.txt", "1")
+    defer:
+      removeDir(assetsDir)
+      storageInternalPath = ""
+      storageCardMounted = false
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/strict".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 30.NodeId, nodeName: "jsStrict", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = """export function get(app, context) {
+            const strict = { shallow: true, strict: true }
+            return {
+              top: frameos.listAssets("", strict),
+              empty: frameos.listAssets("Empty", strict),
+              missing: frameos.listAssets("Nope", strict),
+              internal: frameos.listAssets("", { ...strict, storage: "internal" }),
+              internalLoose: frameos.listAssets("", { shallow: true, storage: "internal" }),
+            }
+          }""",
+        assetGrant = assetGrantFromConfig(%*{"permissions": ["assets"]})
+      )
+      runtime.get(owner, %*{}, context).asJson()
+    proc listedStrictly(dir: string): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = "export function get() { return { listed: frameos.listAssets(" & $(%dir) &
+          ", { shallow: true, strict: true }) } }",
+        assetGrant = assetGrantFromConfig(%*{"permissions": ["assets"]})
+      )
+      runtime.get(owner, %*{}, context).asJson()["listed"]
+
+    # The internal storage named, but its folder not there (an ESP32's flash
+    # not mounted): null when asked strictly, [] as before when not.
+    storageInternalPath = missingDir
+    storageCardMounted = true
+    let answer = run()
+    check answer["top"].mapIt(it.getStr()) == @["Empty/", "one.txt"]
+    check answer["empty"].len == 0
+    check answer["missing"].kind == JArray and answer["missing"].len == 0
+    check answer["internal"].kind == JNull
+    check answer["internalLoose"].kind == JArray and answer["internalLoose"].len == 0
+    # A folder that cannot be opened (a read error on a card): null, not empty.
+    createDir(assetsDir / "Locked")
+    setFilePermissions(assetsDir / "Locked", {})
+    var opens = true
+    try:
+      for _ in walkDir(assetsDir / "Locked", checkDir = true): discard
+    except OSError:
+      opens = false
+    if not opens: # not when the tests run as root
+      check listedStrictly("Locked").kind == JNull
+    setFilePermissions(assetsDir / "Locked", {fpUserRead, fpUserWrite, fpUserExec})
+    # The card taken out from under the app: its root is gone.
+    removeDir(assetsDir)
+    check run()["top"].kind == JNull
+    # On a Pi (no card), an assets folder not made yet is only empty.
+    storageCardMounted = false
+    check run()["top"].kind == JArray and run()["top"].len == 0
+
   test "a symlink out of the assets folder is not a way out of the sandbox":
     let assetsDir = getTempDir() / "frameos-js-symlink-test"
     let outsideDir = getTempDir() / "frameos-js-symlink-outside"

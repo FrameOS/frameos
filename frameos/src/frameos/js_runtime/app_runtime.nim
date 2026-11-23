@@ -1,4 +1,5 @@
 import std/[algorithm, base64, json, monotimes, options, os, sequtils, streams, strformat, strutils, tables, times]
+from std/posix import Stat, stat, errno, ENOENT, ENOTDIR
 import frameos/utils/memory
 import pixie
 import pixie/fileformats/svg
@@ -1549,7 +1550,7 @@ type AssetOptions = object
   ## every exit of one proc, and every exit destroyed them all: 625 cleanup
   ## calls, 14.8 KB of the ESP32 image for this one bridge.
   storage, entry, background: string
-  shallow, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
+  shallow, strict, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
   offset, length, width, height, maskOffset, maskLength: int
   pixels, mask: RawPixels
 
@@ -1569,6 +1570,7 @@ proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} 
   result.entry = options{"entry"}.getStr()
   result.background = options{"background"}.getStr()
   result.shallow = options{"shallow"}.getBool(false)
+  result.strict = options{"strict"}.getBool(false)
   result.text = options{"text"}.getBool(false)
   result.keep = options{"keep"}.getBool(false)
   result.contain = options{"fit"}.getStr("cover") == "contain"
@@ -1603,18 +1605,41 @@ proc logAssetSliceTooBig(e: JsAppEvalEnv, what: string, size: int64, readMax: in
     " bytes, over the " & $readMax & " byte limit; read it in chunks" &
     " with {offset, length}")
 
+proc storageGone(e: JsAppEvalEnv, storage: string): bool =
+  ## A storage the frame lists (`app.frame.storages`) whose folder is not
+  ## there: a card that is not mounted any more, an internal storage that is not.
+  if storage == "internal":
+    return storageInternalPath.len > 0 and not dirExists(storageInternalPath)
+  if storage.len == 0 or storage == "assets":
+    let config = e.owner.frameConfig
+    return storageCardMounted and not dirExists(
+      if config == nil or config.assetsPath == "": "/srv/assets" else: config.assetsPath)
+
+proc unreadable(path: string): bool =
+  ## A folder whose stat failed for another reason than not being there: a
+  ## card that answered a read with an error.
+  var st: Stat
+  stat(path.cstring, st) != 0 and errno != ENOENT and errno != ENOTDIR
+
 proc assetsList(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
   let options = assetOptions(ctx, data)
   let root = assetsRoot(e, options.storage)
   let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = options.storage)
   var files: seq[string] = @[]
+  # `strict`: null when the storage cannot be read (a card that is not
+  # mounted, a read that failed), which an app can tell from an empty
+  # folder. A folder that is not there is still [].
+  if options.strict and (storageGone(e, options.storage) or
+      (dir.len > 0 and not dirExists(dir) and unreadable(dir))):
+    return jsNull(ctx)
   if dir.len > 0 and dirExists(dir):
     # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
     # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
     if options.shallow:
       # One folder's entries, as a browser walks a card a folder at a
-      # time (a recursive walk of a large SD card takes seconds).
-      for kind, entry in walkDir(dir, relative = false):
+      # time (a recursive walk of a large SD card takes seconds). A read
+      # that fails raises under `strict` (jsAssets answers null).
+      for kind, entry in walkDir(dir, relative = false, checkDir = options.strict):
         let name = entry.extractFilename
         if kind in {pcDir, pcLinkToDir} and not isJunkDirName(name):
           files.add(entry[(root.len + 1)..^1] & "/")
@@ -3457,7 +3482,8 @@ const appJsPrelude* = compactJs("""
       mul: (dst, a, b, start, end) => jsTypedOps(3, dst, a, b, start ?? 0, end ?? -1) === true,
       convolve: (dst, src, width, kernel, shift) => jsTypedOps(4, dst, src, width, kernel, shift ?? 0) === true,
     },
-    listAssets: (dir, options) => __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || [],
+    listAssets: (dir, options) =>
+      __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || (options && options.strict ? null : []),
     assetExists: (path, options) => __frameosAsset("exists", path, options ? JSON.stringify(options) : "") === true,
     assetSize: (path, options) => __frameosAsset("size", path, options ? JSON.stringify(options) : "") ?? -1,
     readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,

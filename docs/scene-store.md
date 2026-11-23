@@ -350,6 +350,15 @@ kept.
 - `frameos.listAssets(dir, { shallow: true })` lists one folder (folders end in
   `/`), so a large SD card is walked a folder at a time; a runtime before
   2026.11.8 lists every file below and the app reads the folders off the paths.
+- **A storage that cannot be read is not an empty folder.** The app lists with
+  `strict: true`, which answers null when the storage's root is not there or a
+  read fails (2026.11.15+; a runtime before says `[]`). It then says "The TF
+  card cannot be read right now." with Try again, keeps the spot (folder, page,
+  picture open), never keeps that answer, and lists again every 5 s, six
+  times. A listing is kept 30 s otherwise, and not when the clock went back
+  (a frame sets it once online). **Reload** in the header, and opening a place
+  from the top, drop what was read (the listing, sizes, thumbnails) and list
+  the folder again.
 - **Thumbnails or a list**, two buttons in its header. Thumbnails are
   `frameos.loadAssetImage(path, { keep: true, width, height })`: decoded at the
   tile's size (a JPEG scaled as it decodes, `readImageIntoTarget`), one a pass

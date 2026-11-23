@@ -1592,8 +1592,13 @@ declare const frameos: {
     convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
   };
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
-   * ending in "/" (FrameOS 2026.11.8+). */
-  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
+   * ending in "/" (FrameOS 2026.11.8+). A storage that cannot be read lists nothing; with strict it is null instead,
+   * which an app can tell from an empty folder: a TF card not mounted, a read that failed (FrameOS 2026.11.15+). */
+  listAssets(
+    dir: string | undefined,
+    options: { shallow?: boolean; storage?: "assets" | "internal"; strict: true }
+  ): string[] | null;
+  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal"; strict?: false }): string[];
   assetExists(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   assetSize(path: string, options?: { storage?: "assets" | "internal" }): number;
   /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its

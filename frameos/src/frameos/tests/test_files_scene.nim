@@ -15,6 +15,8 @@ import ../file_transfer_hooks
 import ../file_transfer_preview
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
+# The header's Reload button on an 800x480 frame, left of the grid and list toggles.
+const ReloadX = 534
 
 let assets = getTempDir() / "frameos-files-scene-" & $epochTime().int
 
@@ -346,6 +348,62 @@ suite "the Files scene":
     check scene.spot{"storage"}.getStr() == "assets"
     check problems.len == 0
     if problems.len > 0: echo problems
+
+  test "a storage that cannot be read says so, keeps where you were, and is listed again":
+    problems = @[]
+    let internal = getTempDir() / "frameos-files-unready-" & $epochTime().int
+    removeDir(internal)
+    storageInternalPath = internal
+    storageCardMounted = true
+    defer:
+      storageInternalPath = ""
+      storageCardMounted = false
+      removeDir(internal)
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"storage": "internal", "dir": "Saved", "page": 1, "open": "Saved/kept.png"}
+    var image = newImage(config.width, config.height)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: image,
+      hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    image = render(scene, context)
+    let dir = getEnv("FRAMEOS_ASSET_SHOTS")
+    if dir.len > 0:
+      image.writeFile(dir / "unreadable.png")
+    # Not an empty folder: the spot stays, and it is tried again in a moment.
+    check scene.spot{"storage"}.getStr() == "internal"
+    check scene.spot{"dir"}.getStr() == "Saved"
+    check scene.spot{"open"}.getStr() == "Saved/kept.png"
+    check context.nextSleep > 0 and context.nextSleep <= 5
+    # The storage comes: the next render shows the picture it was on.
+    picture(internal / "Saved" / "kept.png", "#dc2626", 600, 400)
+    let viewer = draw(scene, config, "readable-again")
+    let red = viewer[400, 240]
+    check red.r > 180 and red.g < 80
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "Reload lists the folder showing again":
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "photos/2024", "page": 1, "view": "list"}
+    discard draw(scene, config, "reload-before")
+    # The one row: snow.png.
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/snow.png"
+    scene.swipe("down")
+    discard draw(scene, config, "reload-closed")
+    # A picture that came since: the listing kept is the one before.
+    picture(assets / "photos" / "2024" / "rain.png", "#64748b")
+    defer: removeFile(assets / "photos" / "2024" / "rain.png")
+    discard draw(scene, config, "reload-kept")
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/snow.png"
+    scene.swipe("down")
+    discard draw(scene, config, "reload-closed-again")
+    scene.tap(ReloadX, 30)
+    discard draw(scene, config, "reload-after")
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/rain.png"
 
   test "on a frame there is no Upload or Download: the host has none":
     check fileTransfer.isNil
