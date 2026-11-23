@@ -552,12 +552,16 @@ proc blurField(target: UiTarget) =
   target.selectPointer = -1
   target.inputOnly = true
 
-proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
+template backCloses(target: UiTarget): bool =
+  ## Something up that the frame's `back` puts away (`closeForBack`).
+  target.input.focus > 0 or target.input.open > 0 or target.input.link.len > 0
+
+proc closeForBack(target: UiTarget): bool =
   ## `back` while a field has the keyboard or a <select> its list, as on a
   ## phone: the field lets go and the keyboard goes away, or the list closes.
-  ## With a key's accents up, those go first. False when none was up.
-  let target = uiTarget(sceneId, nodeId, create = false)
-  if target.isNil or (target.input.focus == 0 and target.input.open == 0 and target.input.link.len == 0):
+  ## A link's QR code goes first, then a selection made by touch or a key's
+  ## accents, the field keeping the keyboard. False when none was up.
+  if not target.backCloses:
     return false
   if target.input.link.len > 0:
     target.input.link = "" # a link's QR code goes first
@@ -574,9 +578,27 @@ proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
     target.input.accents = 0
     target.inputOnly = true
     return true
+  if target.input.open > 0 and target.input.ring > 0:
+    target.input.ring = target.input.open # the keys' ring back on the <select>, as Escape leaves it
   target.input.open = 0
   target.blurField()
   true
+
+proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
+  ## `closeForBack` for one UI (a built-in scene's form).
+  let target = uiTarget(sceneId, nodeId, create = false)
+  not target.isNil and target.closeForBack()
+
+proc uiBack*(sceneIds: openArray[string], dry = false): bool =
+  ## The frame's `back` for the UIs of `sceneIds` (the scene showing and the
+  ## layout it wears), before anything else hears it (interpreter.runEvent):
+  ## while one has a field with the keyboard, a <select>'s list or a link's
+  ## code up, that goes away (`closeForBack`) and the `back` goes no further.
+  ## True when it did (with `dry`, would).
+  for id in sceneIds:
+    for target in targets:
+      if target.sceneId == id and target.backCloses:
+        return dry or target.closeForBack()
 
 proc openLink(target: UiTarget, key: int) =
   ## A tap on a link: the host opens it if it can (a browser tab), else its

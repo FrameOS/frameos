@@ -22,11 +22,11 @@ const
   Desk = (w: 800, h: 480)
   Win98 = "layout-windows-98"
 
-proc jsxScene(id, source: string, extra = ""): JsonNode =
+proc jsxScene(id, source: string, extra = "", events: seq[string] = @[]): JsonNode =
   let app = %*{"origin": "ui", "name": "ui", "category": "data", "version": "1.0.0", "fields": [],
     "output": [{"name": "image", "type": "image"}], "sources": {"app.tsx": source,
       "config.json": $(%*{"name": "ui", "category": "data", "output": [{"name": "image", "type": "image"}],
-        "fields": []})}}
+        "fields": [], "events": events})}}
   result = %*{"id": id, "name": id, "settings": {"execution": "interpreted", "refreshInterval": 3000,
       "backgroundColor": "#000000"},
     "fields": [], "apps": {"ui": app},
@@ -49,6 +49,24 @@ export function get(app) {
       <div className="h-[20px] bg-[#0000ff]" />
     </div>
   )
+}
+"""
+
+# The bars again, counting the frame's `back` it hears.
+const backBarsLayout = """
+export function get(app) {
+  return (
+    <div className="flex flex-col w-full h-full">
+      <div className="h-[30px] bg-[#ff0000]" />
+      <yield />
+      <div className="h-[20px] bg-[#0000ff]" />
+    </div>
+  )
+}
+export function onEvent(app, context) {
+  if (context.event !== 'back') return false
+  frameos.setState('backs', (app.state.backs || 0) + 1)
+  return true
 }
 """
 
@@ -81,6 +99,25 @@ export function get(app) {
 }
 """
 
+# The form, with a page before it that the frame's `back` goes back to.
+const backFormUi = """
+let text = ''
+export function get(app) {
+  return (
+    <div className="flex flex-col w-full h-full bg-white">
+      <div className="flex-1 bg-[#22c55e]" />
+      <input className="h-[40px] px-2 bg-[#fde047] text-black" value={text}
+        onChange={(e) => { text = e.value; frameos.setState('text', text) }} />
+    </div>
+  )
+}
+export function onEvent(app, context) {
+  if (context.event !== 'back') return false
+  frameos.setState('backs', (app.state.backs || 0) + 1)
+  return true
+}
+"""
+
 # A field at the top of the window, the rest a page to tap on.
 const windowFormUi = """
 let text = ''
@@ -110,6 +147,9 @@ let scenes = %*[
     "backgroundColor": "#000000", "isLayout": true}}"""),
   jsxScene("tests/form", formUi, """{"layout": {"sceneId": "tests/bars"}}"""),
   jsxScene("tests/bareForm", formUi),
+  jsxScene("tests/backBars", backBarsLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
+    "backgroundColor": "#000000", "isLayout": true}}""", @["back"]),
+  jsxScene("tests/backForm", backFormUi, """{"layout": {"sceneId": "tests/backBars"}}""", @["back"]),
   jsxScene("tests/search", searchLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
     "backgroundColor": "#000000", "isLayout": true}}"""),
   win98,
@@ -268,6 +308,41 @@ suite "the frame's keyboard on a small screen":
     check frameKeyboard.sceneId == ""
     check holeOf(scene.wornLayout, scene) == (0, 30, Small.w, Small.h - 50)
     check after.color(10, Small.h - 10) == colored("#0000ff")
+    check problems.len == 0
+
+  test "the frame's back puts the keyboard away, and the scene and its layout hear nothing of it":
+    # A Sticky's AI key pressed twice, a swipe in from the left edge: as on a
+    # phone, back with the keyboard up is the keyboard's.
+    forgetTypedKeys()
+    let config = configOf(Small)
+    let scene = init("tests/backForm".SceneId, config, logger(config), %*{})
+    discard pass(scene, Small)
+    let layout = scene.wornLayout
+    check not layout.isNil
+    proc back(): seq[string] =
+      runEvent(scene, ExecutionContext(scene: scene, event: "back", payload: %*{}, loopIndex: 0, loopKey: ".",
+        nextSleep: -1))
+      settle()
+    # Nothing up: back is the scene's, and its layout's.
+    discard back()
+    check scene.state{"backs"}.getInt() == 1 and layout.state{"backs"}.getInt() == 1
+    discard scene.tap(100, float(Small.h - 20 - 20))
+    check keyboardShown("tests/backForm")
+    pass(scene, Small).shot("back-1-keyboard")
+    check frameKeyboard.sceneId == "tests/backForm"
+    let heard = back()
+    check not keyboardShown("tests/backForm")
+    check uiTarget("tests/backForm", 2, create = false).input.focus == 0
+    check "render" in heard
+    check scene.state{"backs"}.getInt() == 1 and layout.state{"backs"}.getInt() == 1
+    let after = pass(scene, Small)
+    after.shot("back-2-gone")
+    check frameKeyboard.sceneId == ""
+    check holeOf(layout, scene) == (0, 30, Small.w, Small.h - 50)
+    check after.color(10, Small.h - 10) == colored("#0000ff")
+    # The keyboard gone, back is the scene's again.
+    discard back()
+    check scene.state{"backs"}.getInt() == 2 and layout.state{"backs"}.getInt() == 2
     check problems.len == 0
 
   test "on a canvas kept between renders, a key's row leaves nothing over the layout":

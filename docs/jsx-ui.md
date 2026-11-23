@@ -708,6 +708,14 @@ export function get(app) {
   landed. A tap anywhere else (a button, the page) takes it away and then
   does what it does; so do Enter in an `<input>` (a `<textarea>` gets a new
   line) and Escape.
+- **The frame's `back`** (a swipe in from the left edge, a reTerminal
+  Sticky's AI key pressed twice) puts the keyboard away as Escape does, and
+  goes no further: the scene, its layout and their apps never hear that
+  `back`, so it does not also leave the page or the scene. A key's accents
+  or a selection made by touch go first, the keyboard staying; an open
+  `<select>`'s list and a link's code go too. Every host, from
+  `interpreter.runEvent` (`ui/events.nim` `uiBack`); a built-in scene puts
+  its own away.
 - **The keyboard is on the screen** when the frame has none of its own: a
   US layout under the UI, which is laid out in what is left and scrolled so
   the field shows. Its pages are letters (shift for one capital, shift
@@ -1069,8 +1077,8 @@ export function get(app) {
   holds, `active:` for the press. The list's box is the select's background
   and corners with a thin line of its text color around it.
 - **While it is up nothing else answers**: a tap on an option picks it and
-  closes the list, a tap anywhere else, the frame's `back` in a built-in scene
-  or Escape closes it. A drag scrolls the list and picks nothing.
+  closes the list, a tap anywhere else, the frame's `back` or Escape closes
+  it. A drag scrolls the list and picks nothing.
 - **On a round panel** it keeps an eighth of the height from the top and the
   bottom.
 
@@ -1106,7 +1114,7 @@ URL in a new tab instead.
   block) the run of text it is in: a tap anywhere on that text opens the first
   link there. Two links in one sentence want two elements.
 - **While the code is up nothing else answers**: a tap anywhere on it, the
-  frame's `back` in a built-in scene or Escape puts it away. A field's
+  frame's `back` or Escape puts it away. A field's
   keyboard and an open `<select>` go first. A board its plane renders keeps
   it between pulls (`lastingUiInput`).
 - `<a>` has no look of its own: give it `underline`, a color, or a button's
