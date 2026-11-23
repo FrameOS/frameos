@@ -766,7 +766,8 @@ export function get(app) {
   symbol is typed. Sliding sideways moves the light
   along the row by how far the finger went (`UiInput.accentFrom`), at any
   height from above the row to a couple of rows below it (no need to go up
-  onto the row); a row without a symbol (`$` on the symbols page) is
+  onto the row), and the light follows on e-paper too (a touch e-paper
+  draws it in a partial update); a row without a symbol (`$` on the symbols page) is
   centred on its key and lights the form nearest the finger's x. Lifting
   types the lit one. Slid far away from the row, nothing is lit, and lifted
   there the row stays up for a tap on one. Lifted or tapped anywhere else,

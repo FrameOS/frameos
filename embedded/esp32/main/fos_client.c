@@ -4264,8 +4264,11 @@ static void client_task(void *arg)
         do {
             /* 50 ms while a button is busy: its `press` is due 350 ms after
              * the tap and its `longPress`es on each second, and only the
-             * process_events below delivers them. */
-            uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+             * process_events below delivers them. A finger on the glass the
+             * same: its `longPress` (a held key's accents) is the tick's, due
+             * 500 ms after it landed, and a second's slice delivered it up to
+             * a second late (the reTerminal Sticky, 2026-11-23). */
+            uint32_t max_slice = fos_buttons_busy() || fos_touch_finger_down() ? 50 : 1000;
             /* A JS app's timer (docs/async-js.md) is run by the tick below,
              * on time: the slice ends when it is due. A request's answer
              * wakes the wait itself (fos_js_io.c). */

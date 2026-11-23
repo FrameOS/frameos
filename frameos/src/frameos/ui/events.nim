@@ -1626,8 +1626,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
         let near = target.accentNear(lx, ly)
         target.input.accentX = if near == -1: -1 else: lx
         if near >= -1 and near != target.input.accentLit:
-          # A slow panel shows which once the finger lifts on it.
-          moved = not target.input.slow
+          # On every panel: only a touch screen slides, and a touch e-paper
+          # draws its partial update in a fraction of a second. Shown only at
+          # the lift, a slide along the row looked dead (the reTerminal
+          # Sticky, 2026-11-23); the moves a refresh sits on fold into one.
+          moved = true
       elif released:
         target.holdPointer = -1
         # Lifted on the row's x, the accent there; far from it, or before a
