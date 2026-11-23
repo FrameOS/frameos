@@ -12,7 +12,7 @@ import frameos/channels
 const debounce = 30000
 const lineFlag = LG_SET_PULL_UP
 # Both edges, as `down` and `up`: the hardware layer a scene can hear as it
-# is, and what the dispatcher makes `press`, `doublePress` and `longPress` out
+# is, and what the dispatcher makes `press`, `doublePress`, `triplePress` and `longPress` out
 # of (frameos/input_state.nim). Each edge says when this thread saw it
 # (`atMs`, the monotonic clock the dispatcher's tick reads), so a hold is
 # measured from the edge and not from when the runner got round to it. The

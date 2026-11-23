@@ -552,13 +552,18 @@ provisioned over the USB console instead (below) and never sees the portal;
 the frame's HTTPS certificate — the same per-frame material the Linux
 runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull.
 
-A **touch LCD** (the SenseCAP Indicator: a touch panel found at boot on an
-RGB LCD, `touch_setup` in `main.c`) has no portal and does not wait for
-Wi-Fi: it starts its scenes at once and joins the stored network in the
+A **touch board** (a touch panel found at boot: the SenseCAP Indicator's and
+the Sunton's LCDs, and the fast e-paper of the reTerminal Sticky and E1003,
+`touch_setup` in `main.c`) has no portal and does not wait for Wi-Fi: it
+starts its scenes at once and joins the stored network in the
 background (`fos_wifi_start_background`), retrying quickly and then every
 30 s for as long as it takes. What a boot that waited does once online (SNTP,
 log upload, the `bootup` line, the OTA check) runs the first time the station
-gets an address. The network is set on the screen: a swipe down from the top
+gets an address, and the scene renders again. A deep sleep waits up to 45 s
+after boot for that join (`sleep:held` `wifi`), so a battery frame woken by a
+tap does not go back to sleep before its picture had the network; a sleeping
+e-paper board's timer wake, which nobody tapped, waits for Wi-Fi first like
+every other board. The network is set on the screen: a swipe down from the top
 opens the settings panel, whose gear opens the frame page with the Wi-Fi
 status, the networks in range by name and a password field, the rotation, the
 scale, and Render again and Reboot (`fos_frame_settings.c`,
@@ -944,12 +949,33 @@ detected on `battery_pin` (cell voltage above ~2.5 V — the best power-source
 signal we have; no supported board exposes VBUS on a readable pin, so a
 plugged-in-and-charging frame counts as "on battery" too, which just means it
 sleeps while charging). Without a configured battery pin the flag never fires
-and the frame stays connected.
+and the frame stays connected. A board whose charger or fuel gauge says where
+its power comes from (the reTerminal E-series, the Sticky) counts USB as not
+on battery, and its idle wait looks every 5 s: USB pulled out makes a pass at
+once, which goes to sleep, not the scene's next render an interval away.
+
+A frame going to sleep on e-paper with a fast waveform (the reTerminal Sticky
+and E1003) puts a small sleep mark in the scene's top-right corner first: a
+crescent moon with a "z" on a white tile, drawn over a copy of the last
+picture in the fast waveform (`draw_sleep_mark` in `fos_client.c`,
+`fos_panel_draw_sleep_mark`), never into `/image` or a push. It is drawn once a
+picture (a check-in wake that drew nothing leaves it there, `s_sleep_mark_on_glass`
+in RTC memory), and the first render after a wake draws over it, an unchanged
+scene included. An LCD goes dark asleep and a classic panel's full refresh
+costs too much for a mark: neither draws it. A tap or a key that wakes a frame
+asleep under its moon turns the moon into a spinner at once
+(`fos_client_wake_mark_begin`, `fos_panel_draw_wake_mark`: a frame at a time in
+the fast waveform over the tile alone, the glass outside it unknown after the
+sleep and equal in both buffers so not driven) and starts the quiet loading
+chirp (`touch_beep` on), until the first render puts the scene up: the boot is
+seconds, and a frame that answers nothing gets tapped again and again. How
+long a tap keeps the frame up is `awake_input` below, on the frame page too.
 
 `awake_input` (`awake_after_input_seconds` on the control planes, seconds, default
 300, 0 = off) keeps a deep-sleeping frame up after a press or a tap, as an awake
 frame with its interpreters and partial updates, so the next one is answered at
-once; a nearly flat cell still sleeps.
+once, and sleeps when the window closes (not at the scene's next render); a
+nearly flat cell still sleeps.
 
 `wake_check` (seconds, 0 = off, floored to 60) makes a deep-sleeping frame
 wake at least this often to check the control plane for queued commands. The
@@ -1262,6 +1288,7 @@ same stamps and the contract's numbers) says so:
 | `gpio` `down` | 1× 14 |
 | `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
 | `doublePress` | its second down is 1.5× 14 instead of 1× |
+| `triplePress` | its third down is 2× 14 instead of 1× (a key the frame's map binds three times) |
 | a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
@@ -1301,7 +1328,9 @@ is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
 was drained, so a tap during a render arrived as a 30 s hold.
 
 A `press` is decided 350 ms after its `up`, and only a tick of the
-dispatcher delivers it. So while a key is down or a tap is in its window
+dispatcher delivers it; so is a pair a `triplePress` rule holds back
+(docs/events.md "Buttons"). So while a key is down, or a tap or a quick pair
+is in its window
 (`fos_buttons_busy`), the idle wait runs in 50 ms slices instead of 1 s ones,
 and a frame about to deep-sleep waits, up to 10 s, until the decision is
 delivered (and renders if the scene asked).

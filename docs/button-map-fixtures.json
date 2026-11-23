@@ -306,6 +306,72 @@
     },
     {
       "rule": {
+        "event": "button",
+        "match": {
+          "label": "AI",
+          "action": "doublePress"
+        },
+        "emit": "back",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "AI",
+            "action": "doublePress"
+          },
+          "action": {
+            "kind": "back"
+          }
+        },
+        "gestureTitle": "AI \u00b7 double press",
+        "actionTitle": "Back",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "AI",
+            "action": "doublePress"
+          },
+          "emit": "back",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
+        "event": "button",
+        "match": {
+          "label": "AI",
+          "action": "triplePress"
+        },
+        "emit": "sceneSwitcher",
+        "as": {}
+      },
+      "expect": {
+        "binding": {
+          "gesture": {
+            "label": "AI",
+            "action": "triplePress"
+          },
+          "action": {
+            "kind": "sceneSwitcher"
+          }
+        },
+        "gestureTitle": "AI \u00b7 triple press",
+        "actionTitle": "Scene switcher",
+        "rule": {
+          "event": "button",
+          "match": {
+            "label": "AI",
+            "action": "triplePress"
+          },
+          "emit": "sceneSwitcher",
+          "as": {}
+        }
+      }
+    },
+    {
+      "rule": {
         "event": "edgeSwipe",
         "match": {
           "edge": "left"

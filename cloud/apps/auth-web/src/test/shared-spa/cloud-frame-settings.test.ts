@@ -100,6 +100,7 @@ import {
   frameSupportsHardwareSettings,
   frameSupportsInputSettings,
   frameSettingsRefusal,
+  triplePressMinVersion,
   gpioButtonRolesMinVersion,
   hardwareFrameSettingKeys,
   hardwareFrameSettingsMinVersion,
@@ -814,6 +815,27 @@ describe("cloud settings push", () => {
     expect(frameSettingsRefusal({ frameosVersion: "2026.9.23", hardware: { platform: "esp32-s3" } }, withRole)).toEqual({
       error: "invalid_settings",
     });
+  });
+
+  it("gates a triple press, and an ESP32 map past eight rules, on the triple press's floor", () => {
+    const esp32 = (frameosVersion: string) => ({ frameosVersion, hardware: { platform: "esp32-s3" } });
+    const linux = (frameosVersion: string) => ({ frameosVersion, hardware: { platform: "pi" } });
+    const rule = (label: string, action: string, emit: string) => ({ event: "button", match: { label, action }, emit, as: {} });
+    const triple = { event_map: [rule("AI", "triplePress", "sceneSwitcher")] };
+    const newer = { error: "settings_need_newer_firmware", minFrameosVersion: triplePressMinVersion };
+    expect(frameSettingsRefusal(esp32("2026.11.14"), triple)).toEqual(newer);
+    expect(frameSettingsRefusal(linux("2026.11.14"), triple)).toEqual(newer);
+    expect(frameSettingsRefusal(esp32(triplePressMinVersion), triple)).toBeNull();
+    expect(frameSettingsRefusal(linux(triplePressMinVersion), triple)).toBeNull();
+    // Nine rules of no triple press: an older ESP32 keeps eight at most.
+    const nine = { event_map: Array.from({ length: 9 }, (_, index) => rule(`K${index}`, "longPress", "render")) };
+    expect(frameSettingsRefusal(esp32("2026.11.14"), nine)).toEqual(newer);
+    expect(frameSettingsRefusal(esp32(triplePressMinVersion), nine)).toBeNull();
+    expect(frameSettingsRefusal(esp32("2026.11.14"), { event_map: nine.event_map.slice(0, 8) })).toBeNull();
+    expect(frameSettingsRefusal(linux("2026.11.14"), nine)).toBeNull();
+    // Past the contract's twelve: invalid on any firmware.
+    const thirteen = { event_map: Array.from({ length: 13 }, (_, index) => rule(`K${index}`, "press", "render")) };
+    expect(frameSettingsRefusal(esp32(triplePressMinVersion), thirteen)).toEqual({ error: "invalid_settings" });
   });
 
   it("only includes the extended batch for firmware that knows it", () => {

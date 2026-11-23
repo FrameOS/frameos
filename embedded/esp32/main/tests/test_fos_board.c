@@ -190,6 +190,10 @@ static void test_event_maps(void)
     CHECK(strstr(sticky, "\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
           "DOWN held is next");
     CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL, "AI held talks");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"doublePress\"},\"emit\":\"back\"") != NULL, "AI twice is back");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "AI three times is the scene list");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"press\"") == NULL, "AI once is the scene's");
     CHECK(sticky[0] == '[' && sticky[strlen(sticky) - 1] == ']' && strlen(sticky) < 1024, "a JSON list that fits");
     /* The Waveshare codec boards: their one user key held talks. */
     CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"),

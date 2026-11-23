@@ -426,9 +426,17 @@ def test_old_scene_files_are_emptied_off_the_render_task():
         "store_lock()", "if (!s_patch_pending && !s_store_changing)", "fos_scene_store_sweep()", "store_unlock()")]
     assert order == sorted(order), "the sweep waits for the apply of a change made since"
     assert "store_sweep();" in fns["store_task"]
-    # The boot's sweep holds the lock the store's `between` lets go.
+    # The boot's sweep lists the directory under the lock a render reads its
+    # scene under (4.7 s of the Sticky's 24 MB /state): the boot only marks it
+    # due, and the first render hands it to the store task, swept in place
+    # under the lock only where there is no task.
     init = fns["fos_scenes_init"]
-    assert init.index("store_lock();") < init.index("fos_scene_store_sweep();") < init.index("store_unlock();")
+    assert "s_boot_sweep_due = true;" in init and "fos_scene_store_sweep();" not in init
+    done = fns["fos_scenes_first_render_done"]
+    assert done.index("s_boot_sweep_due = false;") < done.index("if (!store_sweep_behind())")
+    assert done.index("store_lock();") < done.index("fos_scene_store_sweep();") < done.index("store_unlock();")
+    client = _source("fos_client.c")
+    assert "if (s_render_attempts > 0) fos_scenes_first_render_done();" in client
     store = _functions(_source("fos_scene_store.c"))
     assert "if (s_hooks.between) s_hooks.between();" in store["fos_scene_store_sweep"]
     assert store["apply_and_retire"].count("if (s_hooks.between) s_hooks.between();") == 2

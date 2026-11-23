@@ -1279,7 +1279,7 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
   ## The key an event is to a UI, and how many times; none (0) for any other.
   ## A frame's button, by its role: next and down are Tab, prev and up
   ## Shift+Tab, primary (a reTerminal's green key) Enter, back and menu
-  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one and a double press two, so every tap counts
+  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one, a double press two and a triple press three, so every tap counts
   ## however quickly they come, and a long press is the frame's event map's
   ## (walk the scenes, talk), never a key. A keyboard's Tab, Shift+Tab, Enter
   ## and Escape, once; with Ctrl, Alt or Cmd held, the scene's own.
@@ -1289,6 +1289,7 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
     result.times = case payload{"action"}.getStr()
       of "press", "": 1
       of "doublePress": 2
+      of "triplePress": 3
       else: 0
     case payload{"role"}.getStr()
     of "next", "down": result.key = "Tab"

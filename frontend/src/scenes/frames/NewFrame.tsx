@@ -307,9 +307,10 @@ const TOUCH_EDGE_SWIPES: EventMapRule[] = [
 ]
 // The E1003 has the E1001's keys and microphone, and a touch screen.
 const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VOICE_EVENT_MAP, ...TOUCH_EDGE_SWIPES]
-// The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
-// the AI key held talks, the edges swipe. Mirrors EMBEDDED_SEEED_STICKY_EVENT_MAP
-// and fos_board.c.
+// The reTerminal Sticky's three keys: UP and DOWN held walk the scene list;
+// the AI key pressed once is the scene's (role primary), twice back, three
+// times the scene list, held it talks; the edges swipe. Mirrors
+// EMBEDDED_SEEED_STICKY_EVENT_MAP and fos_board.c.
 const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   {
@@ -318,6 +319,8 @@ const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
     emit: 'setCurrentScene',
     as: { direction: 'next' },
   },
+  { event: 'button', match: { label: 'AI', action: 'doublePress' }, emit: 'back', as: {} },
+  { event: 'button', match: { label: 'AI', action: 'triplePress' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]

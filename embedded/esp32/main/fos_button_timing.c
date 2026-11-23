@@ -23,15 +23,18 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
     return level == 0 ? FOS_BUTTON_EDGE_PRESS : FOS_BUTTON_EDGE_RELEASE;
 }
 
-bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms)
+int fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms)
 {
-    bool twice = b->tap_ended && at_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS;
+    bool in_window = at_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS;
+    int nth = !in_window ? 1 : b->tap_ended ? 2 : b->pair_ended && b->triple ? 3 : 1;
     b->tap_ended = false;
+    b->pair_ended = false;
     b->down = true;
     b->pressed_at_ms = at_ms;
-    b->twice = twice;
+    b->twice = nth > 1;
+    b->thrice = nth == 3;
     b->seconds = 0;
-    return twice;
+    return nth;
 }
 
 bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms)
@@ -50,9 +53,12 @@ uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *
     bool long_hold = held >= FOS_BUTTON_LONG_PRESS_MS;
     if (long_press) *long_press = b->down && long_hold && !b->twice;
     b->tap_ended = b->down && !long_hold && !b->twice;
+    /* A short second press: a third may follow it (a third press, never). */
+    b->pair_ended = b->down && !long_hold && b->twice && !b->thrice;
     b->down = false;
     b->released_at_ms = at_ms;
     b->twice = false;
+    b->thrice = false;
     if (held < 1) held = 1;
     return held > UINT32_MAX ? UINT32_MAX : (uint32_t)held;
 }
@@ -60,5 +66,5 @@ uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *
 bool fos_button_timing_busy(const fos_button_timing_t *b, int64_t now_ms, int64_t slack_ms)
 {
     if (b->down) return true;
-    return b->tap_ended && now_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS + slack_ms;
+    return (b->tap_ended || b->pair_ended) && now_ms - b->released_at_ms <= FOS_BUTTON_DOUBLE_PRESS_MS + slack_ms;
 }

@@ -19,7 +19,7 @@
 // the cloud's node test suite exercises it directly.
 import type { EventMapRule, FrameScene, StateField } from '../types'
 import { cloudFrameSupportsSettingsFrom, isEventMapRule } from './cloudFrameSettings'
-import { contractEventSpecs, screenEdges } from './eventsContract.gen'
+import { buttonTriplePressSince, contractEventSpecs, screenEdges } from './eventsContract.gen'
 import { type ButtonGesture, gestureTitle, gestureValue, parseGestureValue } from './sceneEventMap'
 import { coerceStateFieldValue } from './showIf'
 
@@ -137,6 +137,21 @@ export function frameSupportsBackForward(frameosVersion: string | null | undefin
     return true
   }
   return cloudFrameSupportsSettingsFrom(backForwardMinVersion, frameosVersion)
+}
+
+/** The first FrameOS that makes a `triplePress` (the contract's `buttons.triplePressSince`). */
+export const triplePressMinVersion: string = buttonTriplePressSince
+
+/**
+ * Whether a frame on this FrameOS makes a triple press, so a row may bind
+ * one, as `frameSupportsSceneSwitcher`. The cloud refuses a map with one for
+ * an older frame (`settings_need_newer_firmware`).
+ */
+export function frameSupportsTriplePress(frameosVersion: string | null | undefined, cloud: boolean): boolean {
+  if (!cloud && (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0)) {
+    return true
+  }
+  return cloudFrameSupportsSettingsFrom(triplePressMinVersion, frameosVersion)
 }
 
 /** What this frame can do with a press, as far as the actions on offer go. */

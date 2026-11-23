@@ -86,6 +86,8 @@ static volatile bool s_patch_pending = false;
 static volatile bool s_store_changing = false;
 static bool store_split_behind(void);
 static bool store_sweep_behind(void);
+/* The boot's sweep, left for after its first render (fos_scenes_init). */
+static bool s_boot_sweep_due = false;
 static void store_split_stored(void);
 static bool backend_set_written(uint32_t timeout_ms);
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
@@ -1753,9 +1755,12 @@ esp_err_t fos_scenes_init(void)
      * files a change left for a sweep that never came. Under the lock: the
      * sweep lets it go after each file (store_between_hook). */
     if (fos_scene_store_recover_index()) ESP_LOGW(TAG, "scene index recovered");
-    store_lock();
-    fos_scene_store_sweep();
-    store_unlock();
+    /* The sweep lists the directory to learn the slot files, under the store
+     * lock a render reads its scene's files under: 4.7 s of the 24 MB /state
+     * on the reTerminal Sticky in front of its first picture (2026-11-23).
+     * It waits for that picture (fos_scenes_first_render_done); nothing
+     * before it needs the listing, a put learns the slot files itself. */
+    s_boot_sweep_due = true;
     load_etag();
     /* Restore the stored scenes' source BEFORE any task can ask: main() calls
      * fos_cloud_start() after this, and its boot-time apply_network_policy()
@@ -2743,6 +2748,17 @@ static bool store_split_behind(void)
 static bool store_sweep_behind(void)
 {
     return store_wanted_behind(&s_store_sweep_wanted);
+}
+
+void fos_scenes_first_render_done(void)
+{
+    if (!s_boot_sweep_due) return;
+    s_boot_sweep_due = false;
+    if (!store_sweep_behind()) {
+        store_lock();
+        fos_scene_store_sweep();
+        store_unlock();
+    }
 }
 
 /* `set` to the store task, which frees it; false (and `set` still the

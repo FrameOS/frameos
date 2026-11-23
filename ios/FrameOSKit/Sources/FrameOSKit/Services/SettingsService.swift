@@ -331,10 +331,16 @@ extension FrameOSService {
     }
 
     /// How many rules the frame's button map holds: an ESP32 keeps it in a
-    /// 1 KB slot (the contract's esp32 rule, maxItems 8), the rest 32.
+    /// 1 KB slot (the contract's esp32 rule, maxItems 12; eight on firmware
+    /// before the triple press, which the cloud keeps to), the rest 32.
     public func eventMapLimit(_ frame: Frame) -> Int {
         let contract = CloudSettingsContract.shared
-        return contract.maxItems("event_map", profile: CloudSettingsContract.profile(for: frame)) ?? 32
+        let profile = CloudSettingsContract.profile(for: frame)
+        let limit = contract.maxItems("event_map", profile: profile) ?? 32
+        if profile == "esp32" && !ButtonBindings.supportsTriplePress(frame, cloud: kind == .cloud) {
+            return min(limit, 8)
+        }
+        return limit
     }
 
     /// Replace the frame's button map. An empty list is a choice and stays

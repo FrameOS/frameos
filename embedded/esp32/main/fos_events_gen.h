@@ -24,12 +24,13 @@
 #define FOS_SCENE_SETTINGS_WINDOW_PREFIX "system/sceneSettings#"
 
 /* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw
- * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's
+ * it); `button {action}` (press, doublePress, triplePress, longPress) is the Nim dispatcher's
  * (frameos/input_state.nim), like on every host. */
 #define FOS_GPIO_ACTION_DOWN "down"
 #define FOS_GPIO_ACTION_UP "up"
 #define FOS_BUTTON_ACTION_PRESS "press"
 #define FOS_BUTTON_ACTION_DOUBLE_PRESS "doublePress"
+#define FOS_BUTTON_ACTION_TRIPLE_PRESS "triplePress"
 #define FOS_BUTTON_ACTION_LONG_PRESS "longPress"
 /* The dispatcher's button timing (`buttons` in the contract): what the button task
  * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */
