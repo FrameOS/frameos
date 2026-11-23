@@ -847,8 +847,10 @@ On the HyperPixel 2.1 Round (`frameos/panel_shape.nim` `panelIsRound`) only
 the circle inside the 480x480 square is glass, so the pill sits at the top
 middle instead, as high as its top corners stay 14 px inside the rim.
 `test_loading_mark.nim` checks that every pixel it touches there is 12 px
-inside the circle, at every turn. No ESP32 board is round, so that is not
-built there.
+inside the circle, at every turn. The Waveshare ESP32-S3-Touch-AMOLED-1.75's
+466x466 AMOLED is round the same way: the firmware says so at init
+(`fos_display_round`, `panel_shape.boardPanelRound`) and its mark sits there
+too.
 
 **On a Pi** (`frameos/loading_mark_panel.nim`, the framebuffer family only:
 HDMI, DPI, the HyperPixels) a thread of its own draws the mark straight into

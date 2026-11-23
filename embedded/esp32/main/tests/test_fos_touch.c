@@ -237,6 +237,15 @@ static void test_edge_swipe(void)
     CHECK(fos_touch_edge_at(1, 5, 800, 480) == FOS_TOUCH_EDGE_LEFT, "a corner: the nearest");
     CHECK(fos_touch_edge_at(400, 240, 800, 480) == FOS_TOUCH_EDGE_NONE, "the middle");
     CHECK(fos_touch_edge_at(0, 0, 80, 80) == FOS_TOUCH_EDGE_NONE, "too small a panel has no edges");
+    /* A round panel (the AMOLED 1.75's 466x466): the rim, by its quarter. */
+    CHECK(fos_touch_edge_at_round(233, 2, 466, 466) == FOS_TOUCH_EDGE_TOP, "round: the top of the rim");
+    CHECK(fos_touch_edge_at_round(233, 463, 466, 466) == FOS_TOUCH_EDGE_BOTTOM, "round: the bottom of the rim");
+    CHECK(fos_touch_edge_at_round(3, 233, 466, 466) == FOS_TOUCH_EDGE_LEFT, "round: the left of the rim");
+    CHECK(fos_touch_edge_at_round(70, 70, 466, 466) == FOS_TOUCH_EDGE_LEFT || fos_touch_edge_at_round(70, 70, 466, 466) == FOS_TOUCH_EDGE_TOP,
+          "round: the rim at the top left");
+    CHECK(fos_touch_edge_at_round(233, 233, 466, 466) == FOS_TOUCH_EDGE_NONE, "round: the middle");
+    CHECK(fos_touch_edge_at_round(120, 120, 466, 466) == FOS_TOUCH_EDGE_NONE, "round: inside the band");
+    CHECK(fos_touch_edge_at(70, 70, 466, 466) == FOS_TOUCH_EDGE_NONE, "the square's rule misses the rim there");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 3, -10) == 0, "a little up: not yet");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 10, -FOS_GESTURE_SWIPE_MIN_PX) == 1, "far enough up: a swipe");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_TOP, 0, FOS_GESTURE_SWIPE_MIN_PX + 5) == 1, "down from the top");
@@ -246,9 +255,61 @@ static void test_edge_swipe(void)
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_RIGHT, -FOS_GESTURE_SWIPE_MIN_PX, 0) == 1, "in from the right");
 }
 
+/* The Hynitron CST92xx (the AMOLED 1.75's CST9217): two five-byte records,
+ * the second after the count and the ack byte. */
+static void test_decode_cst92(void)
+{
+    fos_touch_point_t points[FOS_TOUCH_POINTS_MAX];
+    uint8_t r[FOS_TOUCH_CST92_REPORT_BYTES];
+    /* One finger down at (233, 400): x 0x0E9, y 0x190. */
+    memset(r, 0, sizeof(r));
+    r[0] = 0x06; /* id 0, down */
+    r[1] = 0x0E;
+    r[2] = 0x19;
+    r[3] = 0x90;
+    r[5] = 0x01;
+    r[6] = FOS_TOUCH_CST92_ACK;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == 1, "one finger");
+    CHECK(points[0].id == 0 && points[0].x == 233 && points[0].y == 400, "point %u (%u,%u)", points[0].id,
+          points[0].x, points[0].y);
+    /* A second finger at (10, 20), id 1, after the two extra bytes. */
+    r[5] = 0x02;
+    r[7] = 0x16;
+    r[8] = 0x00;
+    r[9] = 0x01;
+    r[10] = 0xA4;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == 2, "two fingers");
+    CHECK(points[1].id == 1 && points[1].x == 10 && points[1].y == 20, "second point %u (%u,%u)", points[1].id,
+          points[1].x, points[1].y);
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, 1) == 1, "capped to the caller's room");
+    /* The first finger lifted (event 0): only the second is down. */
+    r[0] = 0x01; /* id 0, not down */
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == 1, "a lifted finger is not down");
+    /* All lifted. */
+    r[0] = 0x00;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == 0, "no finger");
+    /* The host's own ack read back: nothing new. */
+    r[0] = FOS_TOUCH_CST92_ACK;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == -1, "stale report");
+    /* All 0xFF between reports while a finger moves: nothing new, no lift. */
+    uint8_t blank[FOS_TOUCH_CST92_REPORT_BYTES];
+    memset(blank, 0xFF, sizeof(blank));
+    CHECK(fos_touch_decode_cst92(blank, sizeof(blank), points, FOS_TOUCH_POINTS_MAX) == -1, "blank read");
+    /* No ack byte where it belongs: noise, not a lift. */
+    r[0] = 0x06;
+    r[6] = 0x00;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == -1, "no ack byte");
+    r[6] = FOS_TOUCH_CST92_ACK;
+    r[5] = 0x05;
+    CHECK(fos_touch_decode_cst92(r, sizeof(r), points, FOS_TOUCH_POINTS_MAX) == -1, "count past two refused");
+    CHECK(fos_touch_decode_cst92(r, 7, points, FOS_TOUCH_POINTS_MAX) == -1, "short buffer");
+    CHECK(fos_touch_decode_cst92(NULL, 0, points, 1) == -1, "NULL report");
+}
+
 int main(void)
 {
     test_edge_swipe();
+    test_decode_cst92();
     test_passed();
     test_touch_beep();
     test_decode();

@@ -19,7 +19,7 @@ import embedded_scene
 import embedded_runtime
 import frameos/scene_rhythm
 from frameos/apps import applyServiceSettings
-from frameos/panel_shape import boardPanelFormat
+from frameos/panel_shape import boardPanelFormat, boardPanelRound
 import frameos/utils/asset_colors
 import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
@@ -589,6 +589,7 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 # `except CatchableError` lets through. So these handlers catch `Exception`.
 proc displayPresent(): bool {.importc: "fos_display_present", cdecl.}
 proc displayFormat(): cint {.importc: "fos_display_format", cdecl.}
+proc displayRound(): bool {.importc: "fos_display_round", cdecl.}
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
     rotate: cint): bool {.exportc, cdecl.} =
@@ -602,6 +603,9 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   # look (panel_shape.nim): the canvas cannot say, an event has none and a
   # 13.3" color e-paper on 8 MB draws in RGB565 like an LCD.
   boardPanelFormat = if displayPresent(): displayFormat().int else: 0
+  # Only the circle inside the square shows (the Waveshare 1.75" AMOLED): the
+  # built-in scenes, the keyboard and the edge swipes keep inside it.
+  boardPanelRound = displayPresent() and displayRound()
   try:
     when defined(memProbe): memProbe("INIT start")
     armEmergencyReserve()

@@ -32,8 +32,7 @@ import frameos/scene_icon
 import frameos/ui/events as ui_events
 from frameos/ui/layout import frameKeyboard, KeyboardDock
 from frameos/ui/keyboard import keyboardHeight, keyboardBox
-when not defined(frameosEmbedded):
-  from frameos/panel_shape import panelIsRound
+from frameos/panel_shape import panelIsRound
 when not defined(frameosEmbedded):
   import frameos/cursor_shape
   export cursor_shape
@@ -2504,8 +2503,7 @@ proc placeKeys(self, layout: FrameScene, canvas: Image): int =
     k.sceneId = owner
     k.frameW = w
     k.frameH = h
-    when not defined(frameosEmbedded):
-      k.round = not floating and panelIsRound(self.frameConfig.device)
+    k.round = not floating and panelIsRound(self.frameConfig.device)
     if floating:
       let rows = keyboardHeight(int(h / scale)).float32 * scale
       k.grip = round(clamp(rows / scale / 10, 12, 24)) * scale

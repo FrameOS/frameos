@@ -89,6 +89,11 @@ const boardChoices = [
     value: 'hw:sunton_esp32_8048s070',
     platform: genericPlatform,
   },
+  {
+    label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
+    value: 'hw:waveshare_esp32_s3_touch_amoled_1_75',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',

@@ -24,6 +24,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'esp32_c3_042_oled'
   | 'seeed_sensecap_indicator_d1'
   | 'sunton_esp32_8048s070'
+  | 'waveshare_esp32_s3_touch_amoled_1_75'
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
@@ -430,6 +431,7 @@ export interface FrameType {
         | 'seeed_reterminal_e1004'
         | 'seeed_reterminal_sticky'
         | 'sunton_esp32_8048s070'
+        | 'waveshare_esp32_s3_touch_amoled_1_75'
       pins?: {
         cs?: number
         sck?: number

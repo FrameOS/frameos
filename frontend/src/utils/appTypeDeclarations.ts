@@ -354,6 +354,11 @@ interface FrameOSApp {
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
      * undefined before, so treat undefined as color). The same in every phase, as fast. */
     color?: boolean;
+    /** Whether only the circle inside the panel's square shows and takes touches, as on the HyperPixel 2.1 Round
+     * and the Waveshare ESP32-S3-Touch-AMOLED-1.75. The corners are drawn but never seen, so an app that draws the
+     * whole panel keeps its text and buttons inside the circle, or inside the square inside it (FrameOS
+     * 2026.11.15+; undefined before, so treat undefined as square). */
+    round?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;

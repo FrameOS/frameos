@@ -41,7 +41,24 @@ static const struct {
     [FOS_I2C_ES8311] = {"es8311", 0x18},
     [FOS_I2C_ES7210] = {"es7210", 0x40},
     [FOS_I2C_AXP2101] = {"axp2101", 0x34},
+    [FOS_I2C_TCA9554] = {"tca9554", 0x20},
+    [FOS_I2C_QMI8658] = {"qmi8658", 0x6b},
 };
+
+/* Two chips FrameOS knows answer at 0x6b: the reTerminal E-series' SY6974B
+ * charger and the AMOLED 1.75's QMI8658 IMU, whose WHO_AM_I (register 0)
+ * reads 0x05. The charger's register 0 is its input current limit (0x17 out
+ * of reset on the BQ2560x map): never 0x05 with a cell's worth of current. A
+ * chip that reads the other's answer is not that chip. */
+#define QMI8658_WHO_AM_I 0x05
+
+static bool identity_ok(size_t chip, i2c_master_dev_handle_t dev)
+{
+    if (chip != FOS_I2C_QMI8658 && chip != FOS_I2C_SY6974B) return true;
+    uint8_t reg = 0x00, who = 0;
+    if (i2c_master_transmit_receive(dev, &reg, 1, &who, 1, I2C_XFER_TIMEOUT_MS) != ESP_OK) return false;
+    return (who == QMI8658_WHO_AM_I) == (chip == FOS_I2C_QMI8658);
+}
 
 static SemaphoreHandle_t s_lock = NULL;
 static i2c_master_bus_handle_t s_buses[FOS_I2C_BUSES_MAX];
@@ -115,10 +132,13 @@ static void probe_bus_locked(i2c_master_bus_handle_t bus, uint8_t index)
             .device_address = k_chips[c].address,
             .scl_speed_hz = I2C_SPEED_HZ,
         };
-        if (i2c_master_bus_add_device(bus, &dev_config, &s_devices[c]) == ESP_OK) {
-            s_device_bus[c] = (int8_t)index;
-        } else {
+        if (i2c_master_bus_add_device(bus, &dev_config, &s_devices[c]) != ESP_OK) {
             s_devices[c] = NULL;
+        } else if (!identity_ok(c, s_devices[c])) {
+            i2c_master_bus_rm_device(s_devices[c]);
+            s_devices[c] = NULL;
+        } else {
+            s_device_bus[c] = (int8_t)index;
         }
     }
 }
@@ -291,4 +311,9 @@ void fos_i2c_summary(char *out, size_t out_len)
     }
     if (s_bus_count == 0) snprintf(out, out_len, "none");
     xSemaphoreGive(s_lock);
+}
+
+esp_err_t fos_i2c_expander_input(uint8_t *value)
+{
+    return fos_i2c_read(FOS_I2C_TCA9554, 0x00, value, 1);
 }

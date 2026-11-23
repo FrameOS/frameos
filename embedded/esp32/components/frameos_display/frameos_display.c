@@ -16,6 +16,7 @@
 #include "fos_refresh_queue.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
+#include "lcd_qspi_amoled.h"
 #include "lcd_st7701s_rgb.h"
 #include "photo_painter_pmic.h"
 
@@ -166,6 +167,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
      * table, like the PhotoPainter's PMIC and the E1004's panel tuning;
      * without a preset the panel names the board. */
     fos_lcd_st7701s_select_board(config->hardware_preset, entry->name);
+    fos_lcd_qspi_select_board(config->hardware_preset, entry->name);
 
     if (photo_painter) {
         esp_err_t pmic_err = fos_photo_painter_enable_epd_power(s_lend_i2c_bus);
@@ -199,12 +201,14 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
      * (a lit white screen instead of a dark one until Wi-Fi), and its IO
      * expander's I2C bus exists before the touch controller next to it
      * asks to join (fos_display_shared_i2c_bus, fos_touch_start). */
-    if (entry->bus == FOS_PANEL_BUS_RGB) {
+    if (entry->bus == FOS_PANEL_BUS_RGB || entry->bus == FOS_PANEL_BUS_QSPI) {
         /* The driver's board table is the glass's truth: a panel entry
          * whose size disagrees with the selected board would size the
-         * render target and the backend's picture wrong. */
+         * render target and the backend's picture wrong. A QSPI AMOLED
+         * comes up now too: its splash instead of a dark glass. */
         int drv_w = 0, drv_h = 0;
-        fos_lcd_st7701s_size(&drv_w, &drv_h);
+        if (entry->bus == FOS_PANEL_BUS_QSPI) fos_lcd_qspi_size(&drv_w, &drv_h);
+        else fos_lcd_st7701s_size(&drv_w, &drv_h);
         if (drv_w != entry->width || drv_h != entry->height) {
             ESP_LOGE(TAG, "panel %s is %dx%d but the board's glass is %dx%d",
                      entry->name, entry->width, entry->height, drv_w, drv_h);
@@ -256,18 +260,37 @@ int fos_display_bus(void)
 
 bool fos_display_is_lcd(void)
 {
-    return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
+    return s_panel && (s_panel->bus == FOS_PANEL_BUS_RGB || s_panel->bus == FOS_PANEL_BUS_QSPI);
+}
+
+/* The QSPI AMOLED's driver (lcd_qspi_amoled.c) rather than the RGB LCD's:
+ * the same calls, a controller that keeps its own picture. */
+static bool is_qspi(void)
+{
+    return s_panel && s_panel->bus == FOS_PANEL_BUS_QSPI;
+}
+
+bool fos_display_round(void)
+{
+    return is_qspi() && fos_lcd_qspi_round();
 }
 
 esp_err_t fos_display_power(bool on)
 {
     if (!fos_display_is_lcd()) return ESP_ERR_NOT_SUPPORTED;
-    return fos_lcd_st7701s_backlight(on);
+    return is_qspi() ? fos_lcd_qspi_power(on) : fos_lcd_st7701s_backlight(on);
 }
 
 void fos_display_boot_status(fos_lcd_splash_status_t status)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
+    if (is_qspi()) fos_lcd_qspi_splash_status(status);
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
+}
+
+void fos_display_set_loading_mark(fos_loading_mark_fn mark)
+{
+    fos_lcd_st7701s_set_loading_mark(mark);
+    fos_lcd_qspi_set_loading_mark(mark);
 }
 
 uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
@@ -275,29 +298,33 @@ uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
     if (len) *len = 0;
     if (generation) *generation = 0;
     if (!fos_display_is_lcd()) return NULL;
-    uint8_t *target = fos_lcd_st7701s_back_buffer(generation);
+    uint8_t *target = is_qspi() ? fos_lcd_qspi_back_buffer(generation) : fos_lcd_st7701s_back_buffer(generation);
     if (target && len) *len = fos_display_buffer_size();
     return target;
 }
 
 void fos_display_mark_written(const uint8_t *buf)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
+    if (is_qspi()) fos_lcd_qspi_mark_written(buf);
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
 }
 
 int64_t fos_display_buffer_generation(const uint8_t *buf)
 {
+    if (is_qspi()) return fos_lcd_qspi_buffer_generation(buf);
     return fos_display_is_lcd() ? fos_lcd_st7701s_buffer_generation(buf) : -1;
 }
 
 void fos_display_release_render_target(void)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();
+    if (is_qspi()) fos_lcd_qspi_release_back_buffer();
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();
 }
 
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf))
 {
     fos_lcd_st7701s_set_before_write_hook(hook);
+    fos_lcd_qspi_set_before_write_hook(hook);
 }
 
 esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus)
@@ -387,8 +414,11 @@ size_t fos_display_canvas_bytes(void)
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    /* An RGB LCD scans three frame buffers of its own (lcd_st7701s_rgb.c). */
-    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 3u * fos_display_buffer_size() : 0u;
+    /* An RGB LCD scans three frame buffers of its own (lcd_st7701s_rgb.c), a
+     * QSPI AMOLED keeps two (lcd_qspi_amoled.c). */
+    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB    ? 3u * fos_display_buffer_size()
+                     : s_panel->bus == FOS_PANEL_BUS_QSPI ? 2u * fos_display_buffer_size()
+                                                          : 0u;
     return fos_display_canvas_bytes() + fos_display_buffer_size() + lcd_fbs + FOS_RENDER_PSRAM_RESERVE;
 }
 
@@ -399,7 +429,8 @@ static esp_err_t ensure_module(void)
      * as SCL/SDA; bringing up the EPD SPI module on the same GPIOs would take
      * them away. An RGB LCD brings up its own peripheral and has no SPI pins
      * at all. */
-    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB ||
+                    s_panel->bus == FOS_PANEL_BUS_QSPI)) {
         s_module_ready = true;
         return ESP_OK;
     }
@@ -412,7 +443,8 @@ static esp_err_t ensure_module(void)
 
 esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
 {
-    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB ||
+                    s_panel->bus == FOS_PANEL_BUS_QSPI)) {
         return ESP_ERR_INVALID_STATE;
     }
     int shared = DEV_SPI_Bus_Share(miso_pin);
@@ -733,6 +765,9 @@ void fos_display_park(void)
 
 esp_err_t fos_display_prepare_deep_sleep(void)
 {
+    /* An AMOLED's controller off and asleep: a few microamps instead of a
+     * lit glass the chip's sleep would leave on. */
+    if (is_qspi()) return fos_lcd_qspi_prepare_deep_sleep();
     if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
     /* Never under a waveform: a refresh still running finishes first, or its
      * supply goes with the high voltage on. */

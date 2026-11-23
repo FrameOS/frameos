@@ -48,6 +48,36 @@ int fos_touch_decode_ft(const uint8_t *report, size_t len, fos_touch_point_t *po
     return out;
 }
 
+int fos_touch_decode_cst92(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max)
+{
+    if (!report || len < FOS_TOUCH_CST92_REPORT_BYTES) return -1;
+    /* The host's own ack read back: no report since the last read. */
+    if (report[0] == FOS_TOUCH_CST92_ACK) return -1;
+    /* Nothing between reports: every byte 0xFF. */
+    bool blank = true;
+    for (size_t i = 0; i < FOS_TOUCH_CST92_REPORT_BYTES && blank; i++) blank = report[i] == 0xFF;
+    if (blank) return -1;
+    /* A report has its ack byte; a read without one is noise, not a lift
+     * (read as a lift, a drag came apart in pieces on the bench). A lift is
+     * a report with no finger down in it, or a finger gone silent
+     * (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+    if (report[6] != FOS_TOUCH_CST92_ACK) return -1;
+    if (report[0] == 0x00) return 0;
+    int count = report[5] & 0x7F;
+    if (count > FOS_TOUCH_CST92_POINTS_MAX) return -1;
+    int out = 0;
+    for (int i = 0; i < count && (size_t)out < max; i++) {
+        const uint8_t *rec = report + i * 5 + (i ? 2 : 0);
+        int id = rec[0] >> 4;
+        if ((rec[0] & 0x0F) != FOS_TOUCH_CST92_EVENT_DOWN || id >= FOS_TOUCH_POINTS_MAX) continue;
+        points[out].id = (uint8_t)id;
+        points[out].x = (uint16_t)((rec[1] << 4) | (rec[3] >> 4));
+        points[out].y = (uint16_t)((rec[2] << 4) | (rec[3] & 0x0F));
+        out++;
+    }
+    return out;
+}
+
 int fos_touch_wire(int value, int max)
 {
     if (max <= 1) return 0;
@@ -145,6 +175,19 @@ void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int 
     }
 }
 
+fos_touch_edge_t fos_touch_edge_at_round(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    /* input_state.nim edgeAt on a round panel: the rim, the edge band in
+     * from the circle (panel_shape.insideRound, in half pixels), named for
+     * the quarter it is in. */
+    int diameter = (width < height ? width : height) - 2 * FOS_GESTURE_EDGE_PX;
+    long dx = 2L * x + 1 - width, dy = 2L * y + 1 - height;
+    if (diameter > 0 && dx * dx + dy * dy <= (long)diameter * diameter) return FOS_TOUCH_EDGE_NONE;
+    if ((dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)) return dx < 0 ? FOS_TOUCH_EDGE_LEFT : FOS_TOUCH_EDGE_RIGHT;
+    return dy < 0 ? FOS_TOUCH_EDGE_TOP : FOS_TOUCH_EDGE_BOTTOM;
+}
+
 fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
 {
     if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
@@ -240,8 +283,8 @@ static const char *TAG = "fos_touch";
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
 
-typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1 } controller_t;
-static const char *const k_controller_names[] = {"gt911", "ft6x36"};
+typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2 } controller_t;
+static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx"};
 
 static bool s_present = false;
 static i2c_master_bus_handle_t s_bus = NULL;
@@ -279,6 +322,13 @@ static int s_last_raw_x = -1, s_last_raw_y = -1;
 static fos_touch_passed_t *s_passed = NULL;
 static uint8_t s_passed_owned = 0;
 static bool s_woke = false;
+/* The last report a CST92xx sent (not its ack read back): the console's. */
+static uint8_t s_last_report[FOS_TOUCH_CST92_REPORT_BYTES];
+/* When the CST92xx last sent a report (esp_timer ms). */
+static int64_t s_cst92_report_ms = 0;
+/* What the touch task has seen, for the console: interrupts, reads, reads
+ * with nothing new, reports by what they held, moves queued. */
+static volatile uint32_t s_n_irq = 0, s_n_read = 0, s_n_stale = 0, s_n_none = 0, s_n_fingers = 0, s_n_moves = 0;
 
 /* ------------------------------------------------------------- the queue */
 
@@ -402,7 +452,7 @@ static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 {
     int x, y, w, h;
     scene_point(wx, wy, &x, &y, &w, &h);
-    fos_touch_edge_t edge = fos_touch_edge_at(x, y, w, h);
+    fos_touch_edge_t edge = fos_display_round() ? fos_touch_edge_at_round(x, y, w, h) : fos_touch_edge_at(x, y, w, h);
     s_edge[id] = taken == 2 && edge != FOS_TOUCH_EDGE_BOTTOM ? FOS_TOUCH_EDGE_NONE : edge;
     s_edge_x[id] = (int16_t)x;
     s_edge_y[id] = (int16_t)y;
@@ -486,6 +536,7 @@ static void IRAM_ATTR on_irq(void *arg)
 {
     (void)arg;
     BaseType_t woke = pdFALSE;
+    s_n_irq++;
     xSemaphoreGiveFromISR(s_irq, &woke);
     if (woke) portYIELD_FROM_ISR();
 }
@@ -547,9 +598,54 @@ static bool probe_ft(uint8_t addr)
     return ft_read(FOS_TOUCH_FT_REG_TOUCHES, &count, 1) == ESP_OK;
 }
 
+/* The Hynitron CST92xx: a plain reset (its INT is an output from the start,
+ * no address to strap), then the report register answers. */
+#define TOUCH_CST92_ADDR 0x5a
+
+static void reset_cst92(const fos_touch_pins_t *pins)
+{
+    /* Its INT is open-drain, low on a report (SensorLib's example reads it
+     * with a pull-up, falling edge): an input with the pull-up from here on,
+     * or no edge reaches the task. */
+    if (pins->irq >= 0) {
+        gpio_set_direction((gpio_num_t)pins->irq, GPIO_MODE_INPUT);
+        gpio_set_pull_mode((gpio_num_t)pins->irq, GPIO_PULLUP_ONLY);
+    }
+    if (pins->rst < 0) return;
+    gpio_set_direction((gpio_num_t)pins->rst, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pins->rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level((gpio_num_t)pins->rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+static bool probe_cst92(void)
+{
+    if (i2c_master_probe(s_bus, TOUCH_CST92_ADDR, TOUCH_I2C_TIMEOUT_MS) != ESP_OK) return false;
+    if (!attach(TOUCH_CST92_ADDR, TOUCH_I2C_HZ)) return false;
+    uint8_t report[FOS_TOUCH_CST92_REPORT_BYTES];
+    return reg_read(FOS_TOUCH_CST92_REG_REPORT, report, sizeof(report)) == ESP_OK;
+}
+
 /* One report from whichever controller is there: the fingers down. */
 static int read_points(fos_touch_point_t *points)
 {
+    if (s_controller == CTRL_CST92XX) {
+        uint8_t report[FOS_TOUCH_CST92_REPORT_BYTES];
+        if (reg_read(FOS_TOUCH_CST92_REG_REPORT, report, sizeof(report)) != ESP_OK) return -1;
+        int count = fos_touch_decode_cst92(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
+        if (count >= 0) {
+            memcpy(s_last_report, report, sizeof(s_last_report));
+            s_cst92_report_ms = esp_timer_get_time() / 1000;
+        } else if ((s_down_mask | s_settling_mask) && esp_timer_get_time() / 1000 - s_cst92_report_ms >= FOS_TOUCH_CST92_SILENT_LIFT_MS) {
+            /* Down, and silent since: lifted (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+            count = 0;
+        }
+        /* Every read is acked: the next read without a new report then
+         * finds the ack where a report would start. */
+        reg_write_byte(FOS_TOUCH_CST92_REG_REPORT, FOS_TOUCH_CST92_ACK);
+        return count;
+    }
     if (s_controller == CTRL_FT6X36) {
         uint8_t report[FOS_TOUCH_FT_REPORT_BYTES];
         if (ft_read(FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report)) != ESP_OK) return -1;
@@ -599,9 +695,27 @@ static void touch_task(void *arg)
         uint32_t wait_ms = (s_down_mask | s_settling_mask) ? TOUCH_POLL_HELD_MS
                            : s_polled                      ? TOUCH_POLL_NO_IRQ_MS
                                                            : TOUCH_POLL_IDLE_MS;
-        xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms));
-        int count = read_points(points);
-        if (count < 0) continue; /* nothing new, or a failed read */
+        bool irq = xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms)) == pdTRUE;
+        int count;
+        if (s_controller == CTRL_CST92XX && !s_polled && !irq) {
+            /* The CST92xx is read on its interrupt alone: a read (and its
+             * ack) between two reports costs the next one (the bench, a drag
+             * in pieces, 2026-11-23). Without one it is only asked whether a
+             * finger has gone silent (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+            count = (s_down_mask | s_settling_mask) &&
+                            esp_timer_get_time() / 1000 - s_cst92_report_ms >= FOS_TOUCH_CST92_SILENT_LIFT_MS
+                        ? 0
+                        : -1;
+        } else {
+            count = read_points(points);
+        }
+        s_n_read++;
+        if (count < 0) {
+            s_n_stale++;
+            continue; /* nothing new, or a failed read */
+        }
+        if (count == 0) s_n_none++;
+        else s_n_fingers++;
         int64_t now_ms = esp_timer_get_time() / 1000;
         uint8_t seen = 0;
         for (int i = 0; i < count; i++) {
@@ -649,6 +763,7 @@ static void touch_task(void *arg)
                     else report_down(p->id, wx, wy);
                 }
             } else if (moved) {
+                s_n_moves++;
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
                 edge_moved(p->id, wx, wy);
             }
@@ -766,6 +881,13 @@ esp_err_t fos_touch_start(void)
     static const uint8_t gt_addresses[] = {0x5d, 0x14};
     static const uint8_t ft_addresses[] = {0x48, 0x38};
     int attempts = pins->rst >= 0 ? 3 : 1;
+    /* A Hynitron CST92xx first, after a reset of its own: the Goodix one
+     * below holds INT low through the reset to pick an address. */
+    reset_cst92(pins);
+    if (probe_cst92()) {
+        s_addr = TOUCH_CST92_ADDR;
+        s_controller = CTRL_CST92XX;
+    }
     for (int attempt = 0; attempt < attempts && s_addr == 0; attempt++) {
         reset_controller(pins);
         for (size_t i = 0; i < sizeof(gt_addresses) && s_addr == 0; i++) {
@@ -782,7 +904,7 @@ esp_err_t fos_touch_start(void)
         }
     }
     if (s_addr == 0) {
-        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5d, 0x14, 0x48 or 0x38\"}");
+        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
         drop_bus();
         return ESP_ERR_NOT_FOUND;
     }
@@ -806,7 +928,9 @@ esp_err_t fos_touch_start(void)
         /* Any edge: the controller's trigger polarity is its configuration's,
          * and a poll follows either way. */
         gpio_install_isr_service(0); /* ESP_ERR_INVALID_STATE when already installed: fine */
-        gpio_set_intr_type((gpio_num_t)pins->irq, GPIO_INTR_ANYEDGE);
+        /* The CST92xx pulls its line low per report: the falling edge alone
+         * (any edge read every report twice, once between reports). */
+        gpio_set_intr_type((gpio_num_t)pins->irq, s_controller == CTRL_CST92XX ? GPIO_INTR_NEGEDGE : GPIO_INTR_ANYEDGE);
         gpio_isr_handler_add((gpio_num_t)pins->irq, on_irq, NULL);
         gpio_intr_enable((gpio_num_t)pins->irq);
     }
@@ -908,5 +1032,15 @@ void fos_touch_print_status(void)
            s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
            s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);
+    if (s_controller == CTRL_CST92XX) {
+        printf("touch_report:");
+        for (size_t i = 0; i < sizeof(s_last_report); i++) printf(" %02x", s_last_report[i]);
+        printf(" (int GPIO %d reads %d)\n", (int)pins->irq, pins->irq >= 0 ? gpio_get_level((gpio_num_t)pins->irq) : -1);
+    }
+    {
+        printf("touch_seen:  irq %lu, reads %lu (stale %lu, none %lu, fingers %lu), moves %lu\n",
+               (unsigned long)s_n_irq, (unsigned long)s_n_read, (unsigned long)s_n_stale, (unsigned long)s_n_none,
+               (unsigned long)s_n_fingers, (unsigned long)s_n_moves);
+    }
 }
 #endif /* ESP_PLATFORM */

@@ -450,6 +450,27 @@ const SUNTON_ESP32_8048S070_SD_CARD_ASSETS: NonNullable<
   pins: { cs: 10, sck: 12, miso: 13, mosi: 11, pwr: -1, det: -1 },
   maxFrequencyKHz: 20000,
 }
+// The Waveshare ESP32-S3-Touch-AMOLED-1.75's AMOLED is wired by the firmware's
+// board table too, and its TF slot reads in SPI mode on CS41/SCK2/MISO3/MOSI1.
+const WAVESHARE_AMOLED_1_75_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
+const WAVESHARE_AMOLED_1_75_SD_CARD_ASSETS: NonNullable<
+  NonNullable<NewFrameFormType['device_config']>['sdCardAssets']
+> = {
+  enabled: true,
+  preset: 'waveshare_esp32_s3_touch_amoled_1_75',
+  mountPath: '/srv/assets',
+  pins: { cs: 41, sck: 2, miso: 3, mosi: 1, pwr: -1, det: -1 },
+  maxFrequencyKHz: 20000,
+}
 // The SenseCAP Indicator's LCD is wired by the firmware's board table: no EPD pins.
 const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: -1,
@@ -473,6 +494,14 @@ const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
 const SUNTON_ESP32_8048S070_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BOOT', action: 'press' }, emit: 'toggleScreen', as: {} },
   { event: 'button', match: { label: 'BOOT', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  ...TOUCH_EDGE_SWIPES,
+]
+// The AMOLED 1.75's PWR key (on its IO expander, the firmware's own) works like
+// the Indicator's key, BOOT held talks into its microphones, the edges swipe.
+const WAVESHARE_AMOLED_1_75_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'PWR', action: 'press' }, emit: 'toggleScreen', as: {} },
+  { event: 'button', match: { label: 'PWR', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'button', match: { label: 'BOOT', action: 'longPress' }, emit: 'voiceChat', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
@@ -678,6 +707,17 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     gpioButtons: [{ pin: 0, label: 'BOOT' }],
     eventMap: SUNTON_ESP32_8048S070_EVENT_MAP,
     sdCardAssets: SUNTON_ESP32_8048S070_SD_CARD_ASSETS,
+  },
+  waveshare_esp32_s3_touch_amoled_1_75: {
+    label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'amoled.co5300_466x466',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: WAVESHARE_AMOLED_1_75_PINS,
+    gpioButtons: [{ pin: 0, label: 'BOOT' }],
+    eventMap: WAVESHARE_AMOLED_1_75_EVENT_MAP,
+    sdCardAssets: WAVESHARE_AMOLED_1_75_SD_CARD_ASSETS,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

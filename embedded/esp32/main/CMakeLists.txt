@@ -11,6 +11,7 @@ idf_component_register(
         "fos_charger.c"
         "fos_climate.c"
         "fos_gauge.c"
+        "fos_imu.c"
         "fos_touch.c"
         "fos_usb_pads.c"
         "fos_usj_attach.c"

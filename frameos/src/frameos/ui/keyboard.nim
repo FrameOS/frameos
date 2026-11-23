@@ -32,14 +32,13 @@
 ## On a round panel (frameos/panel_shape.nim) the keyboard sits higher, its
 ## last row where the circle is still wide enough for it, and every row is
 ## cut to the chord it sits on, its keys narrower where the circle is. No
-## ESP32 board is round: the firmware carries the rectangle alone.
+## round ESP32 board (the Waveshare 1.75" AMOLED) gets the same.
 
 import std/unicode
 import pixie/fileformats/svg
 import frameos/ui/theme
 import frameos/ui/tree
-when not defined(frameosEmbedded):
-  import frameos/panel_shape
+import frameos/panel_shape
 
 {.push overflowChecks: off, rangeChecks: off, boundChecks: off, fieldChecks: off, stackTrace: off,
   lineTrace: off, raises: [].}
@@ -102,10 +101,9 @@ proc keyboardBox*(width, height: int, round = false): (int, int) =
   ## the way from the circle's centre to its rim, and the UI above it.
   let tall = keyboardHeight(height)
   result = (height - tall, tall)
-  when not defined(frameosEmbedded):
-    if round:
-      let radius = max(min(width, height) div 2 - RoundInset, 8)
-      result[0] = max(min(height div 2 + radius * 4 div 5, height) - tall, 0)
+  if round:
+    let radius = max(min(width, height) div 2 - RoundInset, 8)
+    result[0] = max(min(height div 2 + radius * 4 div 5, height) - tall, 0)
 
 proc icon*(d: string, filled: bool, size: int): SvgNode =
   var c = "shrink-0"
@@ -254,25 +252,24 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       c.px("h", rowH)
       rowUnit = unit
       var across = 0
-      when not defined(frameosEmbedded):
-        if round:
-          # As wide as the circle is at the row's edge farther from its
-          # centre, and the row's keys in units that fit there: a character
-          # one, enter two, the others one and a half, space at least three.
-          let
-            radius = max(min(width, canvasHeight) div 2 - RoundInset, 8)
-            y0 = top + pad + rowIndex * (rowH + gap) - canvasHeight div 2
-          across = min(max(2 * chordHalf(radius, max(abs(y0), abs(y0 + rowH))) - 4, 8), width - 2 * pad)
-          var
-            halves = 0
-            keys = 0
-          for j in i + 1 ..< text.len:
-            if text[j] == '\n': break
-            inc keys
-            let code = ord(text[j])
-            halves += (if text[j] == ' ': 6 elif code == ord(kEnter): 4
-              elif code < 32 and page != kpNumbers: 3 else: 2)
-          rowUnit = max(min(unit, (across - (keys - 1) * gap) * 2 div max(halves, 1)), 8)
+      if round:
+        # As wide as the circle is at the row's edge farther from its
+        # centre, and the row's keys in units that fit there: a character
+        # one, enter two, the others one and a half, space at least three.
+        let
+          radius = max(min(width, canvasHeight) div 2 - RoundInset, 8)
+          y0 = top + pad + rowIndex * (rowH + gap) - canvasHeight div 2
+        across = min(max(2 * chordHalf(radius, max(abs(y0), abs(y0 + rowH))) - 4, 8), width - 2 * pad)
+        var
+          halves = 0
+          keys = 0
+        for j in i + 1 ..< text.len:
+          if text[j] == '\n': break
+          inc keys
+          let code = ord(text[j])
+          halves += (if text[j] == ' ': 6 elif code == ord(kEnter): 4
+            elif code < 32 and page != kpNumbers: 3 else: 2)
+        rowUnit = max(min(unit, (across - (keys - 1) * gap) * 2 div max(halves, 1)), 8)
       # As wide as the page's widest row (its `cols` keys), not the panel: on a
       # wide panel the keys stop growing, and a row as wide as the panel gave
       # the space bar all of what they left (the reTerminal E1003, 2026-11-21).

@@ -17,13 +17,15 @@
 ## with the layout's fields, the keyboard on the screen and a list that
 ## scrolls: no QuickJS. On a round panel (frameos/panel_shape.nim) the name,
 ## Cancel and Save sit in the top arc and the list is as wide as the circle
-## lets it be, as the switcher's tiles are; no ESP32 board is round. Flash is the budget on an ESP32 (AGENTS.md): one
+## lets it be, as the switcher's tiles are (a HyperPixel Round, the Waveshare
+## 1.75" AMOLED), a gear between them, and the frame page is the square
+## panel's page in the square inside the circle. Flash is the budget on an ESP32 (AGENTS.md): one
 ## handler for everything (numbered), classes appended in place, and no Nim
 ## checks in this module (every index is guarded by its loop): JSON arrays
 ## are read through `elems` once their kind is known, since json's `[]` and
 ## `items` bring their own asserts in with them.
 
-import std/[json, options, parseutils, strutils, tables, times]
+import std/[json, math, options, parseutils, strutils, tables, times]
 import pixie
 import pixie/fileformats/svg
 import frameos/types
@@ -885,55 +887,57 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
   result.children.add buttons
 
-when not defined(frameosEmbedded):
-  proc box(c: var string, x, y, w, h: int) =
-    c.add "absolute"
-    c.px("left", x)
-    c.px("top", y)
-    c.px("w", w)
-    c.px("h", h)
+proc box(c: var string, x, y, w, h: int) =
+  c.add "absolute"
+  c.px("left", x)
+  c.px("top", y)
+  c.px("w", w)
+  c.px("h", h)
 
-  proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, height: int, title: string,
-      keyboardTop: int) =
-    ## A round panel's: the scene's name in the top arc, Cancel and Save
-    ## under it, and the fields in a list as wide as the circle is where the
-    ## list ends, everything `RoundInset` in from the rim. With the keyboard
-    ## up (on the circle's lower half, ui/keyboard.nim) the name makes way
-    ## for the buttons and the list ends above the keys.
-    let
-      cx = width div 2
-      cy = height div 2
-      radius = max(min(width, height) div 2 - RoundInset, 8)
-      rowH = look.line * 4 div 5
-      keys = keyboardTop < height
-    # The first row's top edge, where the circle is 45% of its width wide.
-    var
-      y = cy - chordHalf(radius, radius * 45 div 100)
-      half: int
-      c: string
-    # The name is hidden, not left out: an element's key is its place in the
-    # tree, and the field with the keyboard has to keep its own.
-    half = max(chordHalf(radius, cy - y) - 2, 4)
-    c.box(cx - half, y, 2 * half, rowH)
-    c.add(if keys: " hidden" else: " flex items-center justify-center")
-    root.children.add el("div", move c, el("span", "truncate font-bold", SvgNode(text: title)))
-    if not keys:
-      y += rowH + look.gap div 2
-    half = max(chordHalf(radius, cy - y) - 2, 4)
-    c.box(cx - half, y, 2 * half, rowH)
-    c.add " flex items-center justify-center"
-    c.px("gap", look.gap)
-    let buttons = el("div", move c)
-    buttons.children.add look.button("Cancel", HCancel, false)
-    buttons.children.add look.button("Save", HSave, true)
-    root.children.add buttons
+proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, height: int, title: string,
+    keyboardTop: int, gear: bool) =
+  ## A round panel's: the scene's name in the top arc, Cancel and Save
+  ## under it, and the fields in a list as wide as the circle is where the
+  ## list ends, everything `RoundInset` in from the rim. With the keyboard
+  ## up (on the circle's lower half, ui/keyboard.nim) the name makes way
+  ## for the buttons and the list ends above the keys. With `gear` the gear
+  ## that opens the frame page sits between Cancel and Save.
+  let
+    cx = width div 2
+    cy = height div 2
+    radius = max(min(width, height) div 2 - RoundInset, 8)
+    rowH = look.line * 4 div 5
+    keys = keyboardTop < height
+  # The first row's top edge, where the circle is 45% of its width wide.
+  var
+    y = cy - chordHalf(radius, radius * 45 div 100)
+    half: int
+    c: string
+  # The name is hidden, not left out: an element's key is its place in the
+  # tree, and the field with the keyboard has to keep its own.
+  half = max(chordHalf(radius, cy - y) - 2, 4)
+  c.box(cx - half, y, 2 * half, rowH)
+  c.add(if keys: " hidden" else: " flex items-center justify-center")
+  root.children.add el("div", move c, el("span", "truncate font-bold", SvgNode(text: title)))
+  if not keys:
     y += rowH + look.gap div 2
-    # As far below the centre as it starts above it, or to the keyboard.
-    let bottom = if keys: keyboardTop - look.gap div 2 else: 2 * cy - y
-    half = max(chordHalf(radius, max(abs(y - cy), abs(bottom - cy))) - 2, 4)
-    c.box(cx - half, y, 2 * half, max(bottom - y, 1))
-    c.add " overflow-y-auto"
-    root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
+  half = max(chordHalf(radius, cy - y) - 2, 4)
+  c.box(cx - half, y, 2 * half, rowH)
+  c.add " flex items-center justify-center"
+  c.px("gap", look.gap)
+  let buttons = el("div", move c)
+  buttons.children.add look.button("Cancel", HCancel, false)
+  if gear:
+    buttons.children.add look.gear(false, named = false)
+  buttons.children.add look.button("Save", HSave, true)
+  root.children.add buttons
+  y += rowH + look.gap div 2
+  # As far below the centre as it starts above it, or to the keyboard.
+  let bottom = if keys: keyboardTop - look.gap div 2 else: 2 * cy - y
+  half = max(chordHalf(radius, max(abs(y - cy), abs(bottom - cy))) - 2, 4)
+  c.box(cx - half, y, 2 * half, max(bottom - y, 1))
+  c.add " overflow-y-auto"
+  root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
     keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
@@ -955,10 +959,25 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # every pixel, so a key repaints only what it changed.
   if not paper: c.add " bg-zinc-950 text-white"
   result = el("div", move c).role("page")
-  when not defined(frameosEmbedded):
-    if round:
-      self.roundTree(look, result, width, height, title, min(keyboardTop, height))
-      return
+  if round:
+    if not info.isNil and self.onFrame():
+      # The frame page (Wi-Fi, rotation, scale, restart): the page as on a
+      # square panel, in the square inside the circle, cut short above the
+      # keyboard while it is up.
+      let
+        radius = max(min(width, height) div 2 - RoundInset, 8)
+        side = max(int(float(radius) * sqrt(2.0)) - 4, 8)
+        x0 = width div 2 - side div 2
+        y0 = height div 2 - side div 2
+        h = if keyboardTop < height: max(min(side, keyboardTop - look.gap div 2 - y0), look.line) else: side
+      c = ""
+      c.box(x0, y0, side, h)
+      result.children.add el("div", move c,
+        self.tree(side, h, paper, title, false, high(int), info, unit))
+    else:
+      self.roundTree(look, result, width, height, title, min(keyboardTop, height),
+        gear = not info.isNil and not self.panelWindow())
+    return
   c = "shrink-0 flex items-center"
   c.px("h", look.line * 3 div 2)
   c.px("px", look.pad)
@@ -1015,7 +1034,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     let target = uiTarget(self.uiId, SettingsNode, create = false)
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
       keyboardTop = keyboardBox(roomW, roomH, true)[0]
-  let info = if round: nil else: frameInfo()
+  let info = frameInfo()
   if info.isNil and self.onFrame():
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,

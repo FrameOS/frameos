@@ -122,6 +122,9 @@ NATIVE_DEVICE_DIMENSIONS = {
     "lcd.st7701s_480x480": (480, 480),
     # The Sunton ESP32-8048S070's RGB LCD (embedded/esp32 LCD_EK9716_800x480); no Pi driver.
     "lcd.ek9716_800x480": (800, 480),
+    # The Waveshare ESP32-S3-Touch-AMOLED-1.75's round QSPI AMOLED (embedded/esp32
+    # AMOLED_CO5300_466x466); no Pi driver.
+    "amoled.co5300_466x466": (466, 466),
     "pimoroni.inky_impression_7_3": (800, 480),
     "pimoroni.inky_impression_7_color": (800, 480),
     "pimoroni.inky_impression_5_7": (600, 448),

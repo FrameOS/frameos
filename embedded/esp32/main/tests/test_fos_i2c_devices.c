@@ -20,6 +20,7 @@
 #include "fos_charger.h"
 #include "fos_climate.h"
 #include "fos_gauge.h"
+#include "fos_imu.h"
 #include "fos_rtc.h"
 
 static int g_failures = 0;
@@ -247,8 +248,23 @@ static void test_climate_decode(void)
     CHECK(fos_climate_decode(room, &t, NULL) && t == 2500, "humidity not wanted");
 }
 
+/* The QMI8658 at +/-4 g: int16 little-endian, 8192 counts a g. */
+static void test_imu_decode(void)
+{
+    int x = 1, y = 1, z = 1;
+    const uint8_t flat[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x20}; /* z = 8192 */
+    fos_imu_decode(flat, &x, &y, &z);
+    CHECK(x == 0 && y == 0 && z == 1000, "flat on its back: %d %d %d", x, y, z);
+    const uint8_t tilted[6] = {0x00, 0xF0, 0x00, 0x10, 0xFF, 0x7F}; /* -4096, 4096, 32767 */
+    fos_imu_decode(tilted, &x, &y, &z);
+    CHECK(x == -500 && y == 500 && z == 3999, "signs and range: %d %d %d", x, y, z);
+    fos_imu_decode(flat, NULL, NULL, &z);
+    CHECK(z == 1000, "an axis left out");
+}
+
 int main(void)
 {
+    test_imu_decode();
     test_charger_decode();
     test_rtc_decode_and_encode();
     test_rtc_pcf85063();

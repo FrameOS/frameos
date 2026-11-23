@@ -87,6 +87,10 @@ def build_groups():
     lcd_devices = [
         {"value": "lcd.st7701s_480x480", "label": 'ST7701S 4.0" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator)'},
         {"value": "lcd.ek9716_800x480", "label": 'EK9716 7.0" IPS LCD 800x480 (ESP32 RGB, Sunton ESP32-8048S070)'},
+        {
+            "value": "amoled.co5300_466x466",
+            "label": 'CO5300 1.75" round AMOLED 466x466 (ESP32 QSPI, Waveshare ESP32-S3-Touch-AMOLED-1.75)',
+        },
     ]
 
     return [

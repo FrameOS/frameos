@@ -325,8 +325,10 @@ bigger with it than without: the module's code 8.6 KB and its strings
 `fos_scenes.c`) 0.8 KB. The first version was 20.8 KB. What keeps it there:
 
 - No new layout code: the JSX layer it draws with is already in the image.
-- The firmware gets no keyboard and no round panel (`frameosEmbedded`; no
-  ESP32 board is round) and no pictures, integer arithmetic, and
+- The firmware gets no keyboard (`frameosEmbedded`) and no pictures, and its
+  one round board (the Waveshare 1.75" AMOLED, `boardPanelRound`) the round
+  list and chrome a Pi's HyperPixel Round gets (about 4.8 KB of flash with
+  the keyboard's and the settings' round layouts, 2026-11-23); integer arithmetic, and
   no Nim checks in the module (every index is guarded by the loop or the test
   that reaches it).
 - Class names are appended in place, one call each, and a class that

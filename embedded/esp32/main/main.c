@@ -50,6 +50,7 @@
 #include "fos_rtc.h"
 #include "fos_cpu.h"
 #include "fos_codec.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "fos_usb_pads.h"
 #include "fos_voice.h"
@@ -508,6 +509,8 @@ void app_main(void)
      * have answered on the bus: the speaker the buzzer's notes play on and
      * the microphone the voice chat listens with. */
     fos_codec_init();
+    /* The accelerometer, where the board has one (fos_imu.c). */
+    fos_imu_init();
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
