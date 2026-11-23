@@ -836,6 +836,14 @@ proc reportInterpreterDiscards*(host: SingleSceneHost, context: ExecutionContext
 
 {.pop.}
 
+proc residentScenes(host: SingleSceneHost): seq[FrameScene] =
+  ## The scene showing and the layout it wears: what the next render runs,
+  ## unless a switch drops them first (settleIdleJsAppRuntimes).
+  if not host.scene.isNil:
+    result.add host.scene
+    if not host.scene.wornLayout.isNil:
+      result.add host.scene.wornLayout
+
 proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## One render pass of the resident scene, then whatever it (and an `init` or
   ## `open` before it) dispatched: delivered now that the run is over. A
@@ -862,7 +870,7 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # it runs as one (under its simulated memory limit), and as a Pi does
   # otherwise.
   if runsAsEmbedded():
-    discard settleIdleJsAppRuntimes(host.keepJsRuntimes)
+    discard settleIdleJsAppRuntimes(host.keepJsRuntimes, host.residentScenes())
     # A covered scene holds more than its interpreters (its nodes' images):
     # it goes when render memory is short, or on a frame that keeps nothing.
     if not host.covered.isNil and (not host.keepJsRuntimes or not roomToCover()):

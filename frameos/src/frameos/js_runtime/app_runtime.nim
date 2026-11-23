@@ -318,7 +318,21 @@ when defined(frameosEmbedded):
         noteInterpreterDiscard(other, "other app")
         teardownJsRuntime(other)
 
-proc releaseIdleJsAppRuntimes*(reason = "", keepAnswering = false): bool {.discardable.} =
+proc spared(runtime: JsAppRuntime, spare: openArray[FrameScene]): bool =
+  ## Whether `runtime` belongs to one of `spare`: its context's scene, or for
+  ## an app with an interpreter of its own, the scene it was built for.
+  for scene in spare:
+    if scene.isNil:
+      continue
+    if not runtime.host.isNil:
+      if FrameScene(runtime.host) == scene:
+        return true
+    elif runtime.sceneId.len > 0 and runtime.sceneId == scene.id.string:
+      return true
+  false
+
+proc releaseIdleJsAppRuntimes*(reason = "", keepAnswering = false,
+    spare: openArray[FrameScene] = []): bool {.discardable.} =
   ## Drop every JS app interpreter that is not mid-call. The single-scene host
   ## calls it after every render (single_scene_host.renderScene) on an ESP32
   ## that deep-sleeps, and on one that stays awake (the editor's preview
@@ -344,8 +358,11 @@ proc releaseIdleJsAppRuntimes*(reason = "", keepAnswering = false): bool {.disca
   ## Apps in their scene's context go with the whole of it, the scene's
   ## program included (evaluated again on its next run), and only when none
   ## of them is held and the program is not running.
+  ##
+  ## `spare`: scenes whose interpreters stay whatever the reason
+  ## (settleIdleJsAppRuntimes: the scene showing and the layout it wears).
   for runtime in liveJsRuntimes:
-    if not runtime.ready:
+    if not runtime.ready or runtime.spared(spare):
       continue
     let scene = runtime.host
     var held = jsRuntimeStack.contains(runtime) or (keepAnswering and runtime.jsxMemo.handlers > 0)
@@ -386,7 +403,7 @@ proc idleJsAppRuntimesAnswerPointer(): bool =
       return true
   false
 
-proc settleIdleJsAppRuntimes*(keep: bool): bool =
+proc settleIdleJsAppRuntimes*(keep: bool, resident: openArray[FrameScene] = []): bool =
   ## After a render on the single-scene host. `keep` (an ESP32 that does not
   ## deep-sleep): the idle interpreters stay for the next render while there
   ## is room, and it calls into them instead of building QuickJS and compiling
@@ -402,6 +419,25 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
       keepIdleInterpreters(holdingPictures = idleJsAppRuntimesHoldPictures(),
         answeringPointer = idleJsAppRuntimesAnswerPointer()):
     return true
+  #
+  # `resident`: the scene showing and the layout it wears, on a host that
+  # keeps one scene. What runs next is the next pass of that scene, which
+  # builds these same interpreters again before anything it decodes or draws
+  # (an app's get() runs in them), or a switch, which drops them with the
+  # scene (single_scene_host.dropScene). Letting them go now lowers no
+  # render's low point: it frees memory only between renders, where the
+  # reserve under the headroom is what the firmware's own buffers draw on,
+  # and it costs the next render the build. A reTerminal E1004, whose
+  # headroom never reaches the floors (1.66 MB at best beside its 3.84 MB
+  # canvas), gave up interpreters of 157-366 KB after every render of every
+  # scene with code (docs/esp32-memory.md, 2026-11-23). They stay while the
+  # headroom is above that reserve. The rest (another window's, a covered
+  # scene's) go by the floors as before, and a decode, a fill or a block
+  # that finds memory short still releases every idle one
+  # (renderMemoryReleaseHook).
+  if keep and resident.len > 0 and availableRenderHeadroomBytes() > 0:
+    releaseIdleJsAppRuntimes("low memory", spare = resident)
+    return hasIdleJsAppRuntimes()
   releaseIdleJsAppRuntimes(if keep: "low memory" else: "")
   false
 

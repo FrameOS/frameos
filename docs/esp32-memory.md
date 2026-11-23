@@ -654,6 +654,68 @@ large at the lows: Wi-Fi TX buffers while the board sends a big answer or
 its picture (up to ~26 KB), and the HTTP server's stacks (next section).
 +592 bytes of flash.
 
+## The scene showing keeps its interpreters (2026-11-23)
+
+The hardware bench's reTerminal E1004 (8 MB PSRAM, a 3.84 MB 565 canvas that
+also holds the packed picture) logged `js:interpreterDiscarded` "low memory"
+after nearly every render of a scene with code: 53 in a run of the benchmark
+and scenes suites, 122 in the 2026.11.14 full run, about 16 in every
+benchmark run on every build. The scenes' pictures and taps were fine; each
+next render built the interpreter again.
+
+What the settle saw (a probe logging every `keepIdleInterpreters` call, the
+interpreters' heap and the cycle's PSRAM low-water mark,
+`heap_caps_monitor_local_minimum_free_size_start`):
+
+| | |
+| --- | --- |
+| Headroom at the settle (free PSRAM less `EmbeddedReserveBytes`) | 0.48-1.50 MB; 1.66 MB with nothing kept at all |
+| Floor it was held to | 2 MB after a render that "decoded" (every discard), 1 MB otherwise |
+| The interpreters let go | 157-366 KB (`heapBytes`) |
+| What letting them go freed | 110-260 KB |
+
+So on this board the 2 MB floor could not be met by anything, and the 1 MB
+one only by the smallest scenes. Two things made it every render:
+
+- **The interpreters at the settle are the scene showing's.** On a host that
+  keeps one scene, what runs next is the next pass of that scene, which builds
+  them again before anything it decodes or draws (an app's get() runs in
+  them), or a switch, which drops them with the scene (`dropScene`). Letting
+  them go lowers no render's low point. Measured with the same probe on both
+  builds, every scene's low point per render cycle was the same within 20 KB
+  with them kept (Big typographic clock 1,587 / 1,578 KB free, Visited world
+  map 1,926 / 1,925, Map 151 / 152, Flights above me 1,558 / 1,575); only the
+  free memory between renders was lower, by the interpreters.
+- **A whole SVG drawn once counts as a decode** (`renderSvgIntoTarget` asks
+  `refreshDecodeBudgetInto()` with `forDecode`, which `svg_frames.nim`'s damage
+  path does not), so a scene that only draws an SVG met the 2 MB floor too.
+  Left as it is: with the rule below it no longer decides anything for the
+  scene showing, and the same flag clears pixie's caches before the raster
+  on a board that is short.
+
+`settleIdleJsAppRuntimes` is now given the scene showing and the layout it
+wears (`single_scene_host.residentScenes`), and keeps their interpreters
+while the headroom is above the reserve. The rest (another window's, a
+covered scene's) go by the floors as before, and a decode, a fill or a block
+that finds memory short still releases every idle one, these included
+(`renderMemoryReleaseHook`).
+
+On the E1004 (bench, the same scene set, `--full`):
+
+| Suite | Discards before | After |
+| --- | --- | --- |
+| benchmark | 16 | 0 |
+| scenes | 37 | 0 |
+| desktop | 0 | 0 |
+| code | 0 | 0 |
+
+The desktop and code suites had none to lose: their scenes hold a UI's
+handlers, which already stayed. No emergency reserve spent, no abort, on
+either build. The renders lost the
+build: Bench: baseline 534 -> 471 ms, Flights above me 7.1 -> 5.3 s, Year
+progress 2.6 -> 2.4 s, the rest 0-4 % (`render N ms` medians of the scenes
+suite). +368 bytes of flash.
+
 ## What a loaded scene keeps (2026-11-21)
 
 A loaded scene used to keep every app's source twice:
