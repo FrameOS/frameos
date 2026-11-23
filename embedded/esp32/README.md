@@ -952,7 +952,9 @@ sleeps while charging). Without a configured battery pin the flag never fires
 and the frame stays connected. A board whose charger or fuel gauge says where
 its power comes from (the reTerminal E-series, the Sticky) counts USB as not
 on battery, and its idle wait looks every 5 s: USB pulled out makes a pass at
-once, which goes to sleep, not the scene's next render an interval away.
+once, not the scene's next render an interval away. The cable coming out, and a
+cold boot on the cell (the power key), count as a tap: someone has the frame
+in hand, so it stays up `awake_input` before it sleeps.
 
 A frame going to sleep on e-paper with a fast waveform (the reTerminal Sticky
 and E1003) puts a small sleep mark in the scene's top-right corner first: a
@@ -963,12 +965,14 @@ picture (a check-in wake that drew nothing leaves it there, `s_sleep_mark_on_gla
 in RTC memory), and the first render after a wake draws over it, an unchanged
 scene included. An LCD goes dark asleep and a classic panel's full refresh
 costs too much for a mark: neither draws it. A tap or a key that wakes a frame
-asleep under its moon turns the moon into a spinner at once
-(`fos_client_wake_mark_begin`, `fos_panel_draw_wake_mark`: a frame at a time in
-the fast waveform over the tile alone, the glass outside it unknown after the
-sleep and equal in both buffers so not driven) and starts the quiet loading
-chirp (`touch_beep` on), until the first render puts the scene up: the boot is
-seconds, and a frame that answers nothing gets tapped again and again. How
+asleep under its moon turns the moon into a loading ring at once
+(`fos_client_wake_mark_begin`, `fos_panel_draw_wake_mark`, one update in the
+fast waveform) and starts the quiet loading chirp (`touch_beep` on), until the
+first render puts the scene up: the boot is seconds, and a frame that answers
+nothing gets tapped again and again. Once, not a spinner: after a deep sleep
+the glass outside the tile is unknown (both buffers say white there) and the
+SSD1677 drives the whole panel on a partial update whatever its RAM window
+says, so every frame greyed the picture, and a spinner left it grey by its end. How
 long a tap keeps the frame up is `awake_input` below, on the frame page too.
 
 `awake_input` (`awake_after_input_seconds` on the control planes, seconds, default

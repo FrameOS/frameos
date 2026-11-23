@@ -2527,17 +2527,19 @@ static void forget_display_state(void)
     nvs_close(nvs);
 }
 
-/* ------------------------------------------------------- the wake spinner */
+/* ---------------------------------------------------------- the wake mark */
 
 /* A tap or a key woke a frame asleep under its moon (draw_sleep_mark): the
  * boot to the first picture is seconds (9 on the reTerminal Sticky), and a
  * person at a frame that answers nothing taps again and again. So the moon
- * turns into a spinner at once, a frame at a time in the fast waveform over
- * just its tile (the glass outside it is unknown after a deep sleep, and
- * equal in both buffers it is not driven), and the quiet loading chirp
- * plays, until the first render puts the scene up. */
-#define WAKE_MARK_MAX_US (30 * 1000000LL)
-#define WAKE_MARK_FRAME_MS 120
+ * turns into a loading ring at once, and the quiet loading chirp plays
+ * (every 1.3 s) until the first render puts the scene up.
+ *
+ * Once, not a spinner: the glass outside the tile is unknown after a deep
+ * sleep, so both buffers say white there, and the SSD1677 drives the whole
+ * panel on every partial update whatever its RAM window says
+ * (EPD_3in97.c): each frame nudged the picture's black pixels towards white,
+ * and a spinner left the Sticky's picture grey by its end (2026-11-23). */
 static volatile bool s_wake_mark_stop = false;
 static SemaphoreHandle_t s_wake_mark_done = NULL;
 
@@ -2557,13 +2559,9 @@ static void wake_mark_task(void *arg)
         };
         fos_panel_surface_t next = on_glass;
         next.buf = buf;
-        int64_t until_us = esp_timer_get_time() + WAKE_MARK_MAX_US;
-        bool drawn = fos_panel_draw_sleep_mark(&on_glass, NULL);
-        for (int frame = 0; drawn && !s_wake_mark_stop && esp_timer_get_time() < until_us; frame++) {
-            fos_panel_draw_wake_mark(&next, frame, NULL);
-            if (fos_display_quick_update(buf, prev, len) != ESP_OK) break;
-            memcpy(prev, buf, len);
-            vTaskDelay(pdMS_TO_TICKS(WAKE_MARK_FRAME_MS));
+        if (fos_panel_draw_sleep_mark(&on_glass, NULL) && !s_wake_mark_stop &&
+            fos_panel_draw_wake_mark(&next, 0, NULL)) {
+            fos_display_quick_update(buf, prev, len);
         }
     }
     free(buf);
@@ -2590,8 +2588,8 @@ void fos_client_wake_mark_begin(void)
     }
 }
 
-/* Before anything else puts pixels on the panel: the spinner's last frame
- * is on the glass and its task is gone. */
+/* Before anything else puts pixels on the panel: the ring is on the glass
+ * and its task is gone. */
 static void wake_mark_stop(void)
 {
     if (!s_wake_mark_done) return;
@@ -3962,6 +3960,15 @@ static void client_task(void *arg)
             fos_power_decision_t power;
             fos_power_decide(&power_in, &s_power_state, &power);
             bool battery_critical = power.critical;
+            /* Someone has the frame in hand: the cable just came out (the last
+             * pass had USB), or its key switched it on (a cold boot on the
+             * cell). They are likely to use it within the minute, so it
+             * counts as a tap: up for `awake_input`, not asleep the moment
+             * it is unplugged (2026-11-23). */
+            if (power_in.usb_power == 0 &&
+                (s_pass_usb_power == 1 || (s_pass_usb_power == -1 && esp_reset_reason() == ESP_RST_POWERON))) {
+                note_input_awake();
+            }
             /* A frame someone is using is an awake frame, its interpreters
              * and its partial updates too. A cell that is nearly flat still
              * goes to sleep. */
