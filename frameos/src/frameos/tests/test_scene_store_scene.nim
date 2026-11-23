@@ -9,6 +9,7 @@ import pixie
 import ../channels
 import ../interpreter
 import ../scene_rhythm
+import ../render_probe
 import ../scene_store_hooks
 import ../layout_choice
 import ../types
@@ -492,6 +493,42 @@ suite "the Scene store scene":
     discard draw(scene, config, "square-back")
     check scene.state{"spot"}{"cat"}.getStr() == ""
     check problems.len == 0
+
+  test "a square screen's grid scrolls on the tree it built, and builds again only past it":
+    # A drag on an ESP32 is a render a move: get() and the walk were most of
+    # one (the Waveshare 1.75" AMOLED, 2026-11-24). While the rows built
+    # cover what shows, onScroll returns false and the frame lays out the
+    # tree it has; past them, or near the end of the pages there are, get().
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    withLock requestsLock: requests = @[]
+    let config = frame(480, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"cat": "featured"}
+    discard draw(scene, config, "grid")
+    discard settle()
+    discard draw(scene, config, "grid-page")
+    check requested("page=1").len == 1
+    proc ranGet(notches: float, name: string): bool =
+      scene.wheel(240, 300, notches)
+      probeOn = true
+      probeReset()
+      discard draw(scene, config, name)
+      result = " get " in " " & probeSummary()
+      probeOn = false
+    # Three rows across, eight to a page of 24: a screen and more each way
+    # of what shows is built.
+    check not ranGet(1.0, "grid-down-1")
+    check not ranGet(1.0, "grid-down-2")
+    check not ranGet(-1.0, "grid-up")
+    check requested("page=2").len == 0
+    # Down to where the next page is wanted: get() asks for it.
+    check ranGet(9.0, "grid-far")
+    discard settle()
+    check requested("page=2").len == 1
+    check problems.len == 0
+    if problems.len > 0: echo problems
 
   test "a square screen's search: the button opens the field, a tap on the field the keyboard":
     # The header of a narrow store has a search button and no field: the
