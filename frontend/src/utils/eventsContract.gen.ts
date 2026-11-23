@@ -1132,7 +1132,7 @@ export const keyboardLayouts: readonly { id: string; label: string }[] = [
 export const defaultKeyboardLayout = 'us'
 
 /** `context` keys per JavaScript sandbox. */
-export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight"]
+export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight", "round"]
 export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit", "round"]
 
 /** Ambient declarations for the Monaco editors: event names and payloads. */
@@ -1220,6 +1220,8 @@ export const codeContextMembers = `  /** The name of the event this run is handl
   imageWidth?: number;
   /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
+  /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
+  round?: boolean;
 `
 
 /** The members of a JavaScript app's `FrameOSContext`. */

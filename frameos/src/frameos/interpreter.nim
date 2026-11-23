@@ -1,7 +1,7 @@
 import frameos/types
 import frameos/values
 import frameos/spool
-from frameos/apps as frameos_apps import spoolDir
+from frameos/apps as frameos_apps import spoolDir, renderWidth, renderHeight
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage,
   renderSvgIntoTarget
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
@@ -1557,6 +1557,13 @@ proc contextValue(ctx: ptr JSContext, context: ExecutionContext, key: string): J
       nimIntToJS(ctx, (if key == "imageWidth": context.image.width else: context.image.height).int32)
     else:
       jsUndefined(ctx)
+  of "round":
+    # The run draws a round panel's whole canvas (app_runtime's context.round):
+    # a scene's graph can split another way there.
+    let config = if context.scene.isNil: nil else: context.scene.frameConfig
+    nimBoolToJS(ctx, not config.isNil and panelIsRound(config.device) and context.hasImage and
+      not context.image.isNil and context.image.width == config.renderWidth() and
+      context.image.height == config.renderHeight())
   else: jsUndefined(ctx)
 
 proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, argc: int,
