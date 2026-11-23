@@ -60,6 +60,7 @@ static const char *TAG = "fos_http";
 #define FOS_HTTPS_WARN_INTERNAL_FREE (96 * 1024)
 #define FOS_HTTPS_MIN_INTERNAL_FREE (48 * 1024)
 #define FOS_HTTPS_MIN_INTERNAL_BLOCK (40 * 1024)
+#define FOS_HTTPD_STACK_BYTES (11 * 1024)
 #define FOS_HTTP_MUTATION_KEEP_AWAKE_MS (3 * 60 * 1000u)
 #define FOS_HTTP_UPLOAD_SCENE_ID_LEN 128
 
@@ -3058,7 +3059,11 @@ static void configure_httpd_defaults(httpd_config_t *config)
     config->recv_wait_timeout = 5;
     config->send_wait_timeout = 5;
     config->lru_purge_enable = true;
-    config->stack_size = 8192;
+    /* Sized from the measured peak (docs/esp32-memory.md, "Task stacks"): a
+     * one-scene put (`POST /api/frames/<id>/scenes`, the scene parsed and
+     * written to its slot on this task) used 7,537 of the 8,192 bytes this
+     * stack had. Peak + 50 %, the rule for every stack sized from a probe. */
+    config->stack_size = FOS_HTTPD_STACK_BYTES;
 #if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
     /* HTTP handlers update SPIFFS state. SPI flash operations disable cache,
      * so the httpd task stack must remain in internal RAM. */
@@ -3103,7 +3108,9 @@ esp_err_t fos_http_start(bool portal_mode)
                  * browser cannot starve the renderer or AES write path. */
                 tls_config.httpd.max_open_sockets = FOS_HTTPS_MAX_OPEN_SOCKETS;
                 tls_config.httpd.backlog_conn = FOS_HTTPS_BACKLOG_CONN;
-                tls_config.httpd.stack_size = 12288;
+                /* The same handlers, and the TLS handshake (4.6 KB) never
+                 * deeper than the scene put (7.3 KB): the same size. */
+                tls_config.httpd.stack_size = FOS_HTTPD_STACK_BYTES;
                 tls_config.port_secure = frame_config->tls_port > 0 ? frame_config->tls_port : 8443;
                 tls_config.servercert = (const uint8_t *)frame_config->tls_server_cert;
                 tls_config.servercert_len = strlen(frame_config->tls_server_cert) + 1;
