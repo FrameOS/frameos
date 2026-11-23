@@ -233,6 +233,8 @@ interface FrameOSUiEvent {
   startY?: number;
   /** A pinch's spread: how far apart the fingers ended over how far apart they began (below 1 drawn together). Absent before 2026.11.10. */
   scale?: number;
+  /** A pointerMove that stands for moves no handler heard (they came while the frame was busy): where those were, x, y, x, y, ... oldest first, from the element's corner as localX and localY. A drawing keeps them all. Absent when there were none, and before 2026.11.15. */
+  points?: number[];
   /** onChange of an <input> or <textarea>: its text now (also as target.value, as in React). */
   value?: string;
   target?: { value: string };
@@ -257,10 +259,11 @@ interface FrameOSElementProps {
   onClick?: (event: FrameOSUiEvent) => void;
   onDoubleClick?: (event: FrameOSUiEvent) => void;
   onLongPress?: (event: FrameOSUiEvent) => void;
-  onPointerDown?: (event: FrameOSUiEvent) => void;
-  onPointerUp?: (event: FrameOSUiEvent) => void;
-  /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
-  onPointerMove?: (event: FrameOSUiEvent) => void;
+  /** A press on the element. Like onPointerMove and onPointerUp, returning false asks for no render: what it did shows with the next one (2026.11.15+; a render after every one before). */
+  onPointerDown?: (event: FrameOSUiEvent) => boolean | void;
+  onPointerUp?: (event: FrameOSUiEvent) => boolean | void;
+  /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). e.points has where it passed since the move before. Return false to keep the frame from rendering for it, as a drawing does on e-paper between pieces of a stroke. */
+  onPointerMove?: (event: FrameOSUiEvent) => boolean | void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
   /** Two fingers that began on the element moved, as one event when the first lifts: e.scale, e.startX/startY, e.x/y. Neither finger is a tap or a swipe then. Absent before 2026.11.10. */

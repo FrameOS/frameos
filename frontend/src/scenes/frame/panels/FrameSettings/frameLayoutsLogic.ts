@@ -34,6 +34,7 @@ export const LAYOUT_STARTER_GROUPS: LayoutGroup<LayoutStarter>[] = layoutGroups(
 export interface frameLayoutsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  addedStarterNames: Set<string>
   advancedOpen: boolean
   commonLayoutId: string | null
   contentScenes: FrameScene[]
@@ -82,6 +83,7 @@ export interface frameLayoutsLogicMeta {
   __keaTypeGenInternalSelectorTypes: {
     scenes: (frameForm: Partial<FrameType>, frame: FrameType) => FrameScene[]
     layouts: (scenes: FrameScene[]) => FrameScene[]
+    addedStarterNames: (layouts: FrameScene[]) => Set<string>
     layoutGroups: (layouts: FrameScene[]) => LayoutGroup<FrameScene>[]
     contentScenes: (scenes: FrameScene[]) => FrameScene[]
     commonLayoutId: (contentScenes: FrameScene[], layouts: FrameScene[]) => string | null
@@ -133,6 +135,19 @@ export const frameLayoutsLogic = kea<frameLayoutsLogicType>([
       (frameForm: Partial<FrameType>, frame: FrameType): FrameScene[] => frameForm?.scenes ?? frame?.scenes ?? [],
     ],
     layouts: [(s) => [s.scenes], (scenes: FrameScene[]): FrameScene[] => layoutScenes(scenes)],
+    /** The starters already on the frame (by the name a starter's scene has),
+     * ticked in the New layout list, which stays open for the next one. */
+    addedStarterNames: [
+      (s) => [s.layouts],
+      (layouts: FrameScene[]): Set<string> => {
+        const names = new Set(layouts.map((layout) => layout.name))
+        return new Set(
+          LAYOUT_STARTERS.filter((starter) => names.has(starter.scene.name ?? starter.name)).map(
+            (starter) => starter.name
+          )
+        )
+      },
+    ],
     /** The select's choices: the desktops, then the full screen layouts. */
     layoutGroups: [
       (s) => [s.layouts],

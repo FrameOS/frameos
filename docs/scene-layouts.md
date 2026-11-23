@@ -693,13 +693,14 @@ fastest it renders, whatever the chrome's clock says.
 
 ## Made for a device: the reTerminal layouts
 
-Two samples are made for one family of frames, and know where its keys are
-on the case (Seeed's drawings), so what a key does is written beside the key:
-what a press does, and under it, smaller, what holding it does.
-Each reads `app.frame.eventMap` for what the keys do, and falls back to the
-map the planes give that board. The keys' places are in one table at the top
-of each app (as a share of the glass, the panel unturned), and the side they
-are on follows `app.frame.rotate`; a "Keys are on the" field overrides it.
+Two samples are made for one family of frames. The E-series one knows where
+its keys are on the case (Seeed's drawings), so what a key does is written
+beside the key: what a press does, and under it, smaller, what holding it
+does; the keys' places are in a table at the top of the app (as a share of
+the glass, the panel unturned), the side they are on follows
+`app.frame.rotate`, and a "Keys are on the" field overrides it. The Sticky's
+tells it in words on its home screen instead. Each reads `app.frame.eventMap`
+for what the keys do, and falls back to the map the planes give that board.
 Both give the settings the whole panel, and draw only when the scene draws:
 on e-paper the chrome never wakes the frame sooner than its scene would
 (`scene_rhythm.nim`).
@@ -709,15 +710,16 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   edge. The scene gets the whole glass. When the scene list is open (a swipe up,
   or AI pressed twice: the layout's own binding, while the frame's map leaves
   that free), the layout turns it into a home screen. That screen has the time
-  and the date, the battery and the signal, the swipes and a tab beside each
-  key with what it does in the list: UP and DOWN move (held, a page), AI
-  opens (held, talks). AI's `primary` role is the contract's
-  (`buttons.roleByLabel`). "Around the scene" also offers a rail beside the
-  keys. The rail has a tab per key, a tap on it a press of that key (a
-  `button` dispatched with the key's label and role), plus Scenes, Settings,
-  the time and the battery. The third choice is a status bar. A press of AI
-  that the frame's map leaves to the scene also draws the picture again
-  (`render`), so the layout calls it Refresh.
+  and the date, the battery and the signal, and under the list how to get
+  around, a line each, read off the frame's event map: what the Talk key (AI on the case) does (a press,
+  twice, held), what UP and DOWN do (in the list they move; held, the map's
+  scene back and on) and the swipes. That is the one place the layout teaches
+  the keys: a rail of tabs beside them on every scene was its first look, and
+  nobody used it (removed 2026-11-23; an install that chose it gets the whole
+  glass). AI's `primary` role is the contract's (`buttons.roleByLabel`).
+  "Around the scene" also offers a status bar. A press of AI that the frame's
+  map leaves to the scene also draws the picture again (`render`), so the
+  help calls it refresh.
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
   the edge with the keys holds the scene's name, the signal, the battery and
@@ -744,7 +746,7 @@ Both are on the store's Device layouts shelf (`settings.devices` names the
 boards), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
-E-series' hint under the name; the Sticky's date, swipe help and rail buttons),
+E-series' hint under the name; the Sticky's date and its help under the list),
 whether the Refresh key or AI draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size

@@ -1,6 +1,6 @@
 {
   "name": "Sketchbook",
-  "description": "Draw with a finger in a calm palette of pens, and keep your drawings as SVG files in the assets folder.",
+  "description": "Draw smooth strokes with a finger in a calm palette of pens, shown while you draw even on e-paper, and keep your drawings as SVG files in the assets folder.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

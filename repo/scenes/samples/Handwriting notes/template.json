@@ -1,6 +1,6 @@
 {
   "name": "Handwriting notes",
-  "description": "Handwritten notebooks on a touch screen, with pens, a highlighter and an eraser. Every page is saved as an SVG in the assets folder.",
+  "description": "Handwritten notebooks on a touch screen, in smooth ink that keeps every point of a stroke, with pens, a highlighter and an eraser. Every page is saved as an SVG in the assets folder.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

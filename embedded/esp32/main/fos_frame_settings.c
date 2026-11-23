@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 
+#include "fos_buzzer.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -151,6 +152,11 @@ char *fos_frame_settings_json(void)
              fos_wifi_scanning() ? "true" : "false", config->wifi_pass[0] ? "true" : "false",
              (unsigned)config->rotate, config->render_scale_milli / 1000.0);
     put(&out, line);
+    /* A frame that makes sounds (a buzzer, a codec's speaker, an LED that
+     * follows them) offers its Tap and click sounds; the page has the words. */
+    if (fos_buzzer_sounds()) {
+        put_pair(&out, "clickSounds", fos_config_click_sounds_name(config->click_sounds));
+    }
     int battery = fos_client_battery_percent();
     if (battery >= 0) {
         snprintf(line, sizeof(line), ",\"battery\":{\"percent\":%d}", battery);
@@ -186,16 +192,20 @@ static void restart_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(1500)); /* the log line goes out first */
+    /* After the page's own redraw (the render task serves the notice from its
+     * wait): a reTerminal Sticky going blank without a word for ten seconds
+     * after Save looked like a crash (2026-11-22). */
+    fos_restart_notice("Restarting...");
     esp_restart();
 }
 
 /* One `settings:frame` line for what was saved, with the values a control
  * plane adopts (a backend reads it from the log, app/models/log.py; the cloud
  * follows the hardware report instead). Never the network's name. */
-static void log_applied(const char *changes, bool rotate, bool scale)
+static void log_applied(const char *changes, bool rotate, bool scale, bool sounds)
 {
     const fos_config_t *config = fos_config();
-    char line[224];
+    char line[288];
     int n = snprintf(line, sizeof(line), "{\"event\":\"settings:frame\",\"source\":\"esp32\",\"origin\":\"panel\","
                      "\"changes\":\"%s\"", changes);
     if (rotate && n > 0 && n < (int)sizeof(line)) {
@@ -203,6 +213,10 @@ static void log_applied(const char *changes, bool rotate, bool scale)
     }
     if (scale && n > 0 && n < (int)sizeof(line)) {
         n += snprintf(line + n, sizeof(line) - n, ",\"renderScale\":%g", config->render_scale_milli / 1000.0);
+    }
+    if (sounds && n > 0 && n < (int)sizeof(line)) {
+        n += snprintf(line + n, sizeof(line) - n, ",\"clickSounds\":\"%s\"",
+                      fos_config_click_sounds_name(config->click_sounds));
     }
     if (n > 0 && n < (int)sizeof(line) - 1) strlcat(line, "}", sizeof(line));
     frameos_nim_log_hook(line);
@@ -263,6 +277,17 @@ void fos_frame_settings_apply(const char *json)
         config->render_scale_milli = value;
         scale = true;
     }
+    /* Tap and click sounds: live (fos_buzzer.c reads it at every click); the
+     * planes adopt it like the rotation (the settings:frame line, the
+     * hardware report). */
+    const cJSON *click_sounds = cJSON_GetObjectItem(root, "clickSounds");
+    uint8_t mode = 0;
+    bool sounds = false;
+    if (cJSON_IsString(click_sounds) && fos_config_parse_click_sounds(click_sounds->valuestring, &mode) &&
+        mode != config->click_sounds) {
+        config->click_sounds = mode;
+        sounds = true;
+    }
     /* The clock, in the frame's own time zone, and on the board's battery
      * clock too so the next cold boot starts right. */
     const cJSON *clock_text = cJSON_GetObjectItem(root, "clock");
@@ -280,6 +305,7 @@ void fos_frame_settings_apply(const char *json)
     cJSON_Delete(root);
 
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
+    if (sounds) strlcat(changes, "clickSounds,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
     if (restart) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
@@ -290,7 +316,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale);
+    log_applied(changes, restart, scale, sounds);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -306,6 +332,8 @@ void fos_frame_settings_apply(const char *json)
     } else if (clock_changed) {
         fos_client_render_now();
     }
+    /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
+    if (sounds && !scale) fos_cloud_request_state();
     if (wifi) {
         err = fos_wifi_start_background();
         if (err != ESP_OK) ESP_LOGW(TAG, "joining \"%s\" failed to start: %s", config->wifi_ssid, esp_err_to_name(err));

@@ -362,6 +362,19 @@ describe("SceneInfoPanel", () => {
     expect(screen.queryByRole("link", { name: "Weather" })).toBeNull();
   });
 
+  it("lists what the scene asks of the frame as its Permissions, the store's tags", () => {
+    render(<SceneInfoPanel {...info} scene={{ ...info.scene, riskFlags: ["assets", "assets-write", "code"] }} />);
+    const row = screen.getByText("Permissions").closest(".scene-facts__row");
+    expect(row?.textContent).toContain("reads & writes files");
+    expect(row?.textContent).toContain("reads and changes this frame's scenes");
+    expect(screen.getByText(/read the code and the settings of every scene on the frame/)).toBeTruthy();
+  });
+
+  it("has no Permissions row for a scene that asks for nothing", () => {
+    render(<SceneInfoPanel {...info} />);
+    expect(screen.queryByText("Permissions")).toBeNull();
+  });
+
   it("has no heading element when it is given none", () => {
     render(<SceneInfoPanel {...info} />);
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();

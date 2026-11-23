@@ -870,6 +870,12 @@ proc translatedPayload(payload: JsonNode, dx, dy: float32): JsonNode =
   for i, key in ["x", "y", "startX", "startY"]:
     if result.hasKey(key):
       result[key] = %(result[key].getFloat() - (if (i and 1) == 0: dx else: dy))
+  # A coalesced move's `points` (x, y, ...) move with it.
+  let points = result{"points"}
+  if not points.isNil and points.kind == JArray:
+    for i in 0 ..< points.len:
+      if points[i].kind in {JInt, JFloat}:
+        points.elems[i] = %(points[i].getFloat() - (if (i and 1) == 0: dx else: dy))
 
 var uiPresses {.threadvar.}: seq[(string, int)]
   ## (layout, pointer) for each press a layout's UI took over a scene it

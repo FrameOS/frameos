@@ -18,7 +18,8 @@ import {
   DEFAULT_TIMEZONE_UPDATE_HOUR,
   DEFAULT_TIMEZONE_UPDATE_URL,
 } from '../../../frameLogic'
-import type { GPIOButton, Palette } from '../../../../../types'
+import type { ClickSounds, GPIOButton, Palette } from '../../../../../types'
+import { CLICK_SOUND_OPTIONS } from '../../../../../utils/clickSounds'
 import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
 import { useFrameSettings, type StatusLedType } from '../frameSettingsContext'
 import { microphonePinPlaceholder } from '../../../../../utils/voiceChat'
@@ -282,6 +283,7 @@ export function GpioButtonsSection(): JSX.Element {
               and what it may do appear once the frame has a microphone. */}
           <H6 id="frame-settings-gpio-extras">Buzzer, LED and microphone</H6>
           <div className="pl-2 @md:pl-8 space-y-2">
+            <ClickSoundsField />
             <ButtonBeepField />
             <StatusLedField />
             <MicrophoneField />
@@ -291,6 +293,38 @@ export function GpioButtonsSection(): JSX.Element {
         </>
       ) : null}
     </>
+  )
+}
+
+/**
+ * The sounds of a tap and a press (`click_sounds`): silent, or the board's
+ * own. Only on a board that makes sounds; also set on the frame's own screen
+ * (its frame page), which this follows.
+ */
+function ClickSoundsField(): JSX.Element | null {
+  const { clickSounds, setClickSounds } = useFrameSettings()
+  if (!clickSounds) {
+    return null
+  }
+  return (
+    <fieldset disabled={clickSounds.disabledReason !== undefined} className="min-w-0 space-y-1 @md:flex @md:gap-2">
+      <Label className="@md:w-1/3">
+        Tap and click sounds
+        <Tooltip
+          title={
+            clickSounds.disabledReason ??
+            'The clicks of a tap on the screen and a press of a button, and the quiet chirp while something you asked for loads. Silent turns them all off; the voice chat keeps its own sounds. Also set on the frame itself, on its settings page. Applies without a restart.'
+          }
+        />
+      </Label>
+      <div className="w-full">
+        <Select
+          value={clickSounds.value}
+          options={CLICK_SOUND_OPTIONS}
+          onChange={(value) => setClickSounds(value as ClickSounds)}
+        />
+      </div>
+    </fieldset>
   )
 }
 

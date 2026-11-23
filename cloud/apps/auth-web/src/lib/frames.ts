@@ -539,6 +539,12 @@ export const esp32RenderModeFrameSettingsMinVersion = "2026.11.7";
 export const esp32RenderModeFrameSettingKeys = new Set<string>(
   [...contractSettingKeysSince("esp32", esp32RenderModeFrameSettingsMinVersion)].filter((key) => key === "render_mode"),
 );
+// 2026.11.15: `click_sounds`, the sounds of a tap and a press (silent or the
+// buzzer's own). Live, no reboot; set on the frame page too, and adopted.
+export const esp32ClickSoundsFrameSettingsMinVersion = "2026.11.15";
+export const esp32ClickSoundsFrameSettingKeys = new Set<string>(
+  contractSettingKeysSince("esp32", esp32ClickSoundsFrameSettingsMinVersion),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
@@ -642,18 +648,21 @@ export function mergeFrameSettings(
 
 // The settings a frame reports in its hello and `state` `hardware` (what it
 // has now: changed on its own screen, docs/scene-settings.md "What a control
-// plane learns", or set before it was linked), by the mirror's key. A plane
-// that leaves the page on adopts what the person at the frame chose.
-const reportedFrameSettings: ReadonlyArray<readonly [string, string]> = [
-  ["rotate", "rotate"],
-  ["renderScale", "render_scale"],
+// plane learns", or set before it was linked), by the mirror's key, with the
+// device's default. A plane that leaves the page on adopts what the person at
+// the frame chose.
+const reportedFrameSettings: ReadonlyArray<readonly [string, string, unknown]> = [
+  ["rotate", "rotate", 0],
+  ["renderScale", "render_scale", 0],
+  // The sounds of a tap and a press (2026.11.15), set on the frame page too.
+  ["clickSounds", "click_sounds", "normal"],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is
 // nothing to change. The mirror follows the device: without this the Settings
 // panel showed a rotation the frame no longer had, and the next save pushed it
-// back. A key the mirror never had is the device's default (0) and stays
-// unwritten while the device reports 0. The hub leaves the mirror alone while
+// back. A key the mirror never had is the device's default and stays
+// unwritten while the device reports that. The hub leaves the mirror alone while
 // a push is on its way.
 export function settingsWithReported(
   stored: unknown,
@@ -665,12 +674,12 @@ export function settingsWithReported(
   const settings = readFrameSettings(stored);
   const next: Record<string, unknown> = { ...settings };
   let changed = false;
-  for (const [reported, key] of reportedFrameSettings) {
+  for (const [reported, key, fallback] of reportedFrameSettings) {
     const value = (hardware as Record<string, unknown>)[reported];
     if (value === undefined || !allowedFrameSettings.get(key)!(value)) {
       continue;
     }
-    if (settings[key] === value || (settings[key] === undefined && value === 0)) {
+    if (settings[key] === value || (settings[key] === undefined && value === fallback)) {
       continue;
     }
     next[key] = value;

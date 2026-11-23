@@ -69,6 +69,40 @@ int fos_touch_move_slot(const fos_touch_event_t *queue, size_t capacity, size_t 
     return -1;
 }
 
+void fos_touch_passed_add(fos_touch_passed_t *passed, uint16_t x, uint16_t y)
+{
+    if (passed->count >= FOS_TOUCH_PASSED_MAX) {
+        uint8_t kept = 0;
+        for (uint8_t i = 0; i + 1 < passed->count; i += 2, kept++) {
+            passed->xy[2 * kept] = passed->xy[2 * i];
+            passed->xy[2 * kept + 1] = passed->xy[2 * i + 1];
+        }
+        uint8_t newest = (uint8_t)(passed->count - 1);
+        passed->xy[2 * kept] = passed->xy[2 * newest];
+        passed->xy[2 * kept + 1] = passed->xy[2 * newest + 1];
+        passed->count = (uint8_t)(kept + 1);
+    }
+    passed->xy[2 * passed->count] = x;
+    passed->xy[2 * passed->count + 1] = y;
+    passed->count++;
+}
+
+int fos_touch_passed_json(const fos_touch_passed_t *passed, char *buf, size_t size)
+{
+    if (!passed || passed->count == 0 || size == 0) return 0;
+    int len = snprintf(buf, size, ",\"points\":[");
+    for (uint8_t i = 0; i < 2 * passed->count && len > 0 && (size_t)len < size; i++) {
+        len += snprintf(buf + len, size - (size_t)len, i ? ",%u" : "%u", passed->xy[i]);
+    }
+    if (len <= 0 || (size_t)len + 2 > size) {
+        buf[0] = '\0';
+        return 0;
+    }
+    buf[len++] = ']';
+    buf[len] = '\0';
+    return len;
+}
+
 bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, int panel_height)
 {
     if (touch_x_max <= 0 || touch_y_max <= 0 || panel_width <= 0 || panel_height <= 0) return false;
@@ -101,6 +135,7 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
 #ifdef ESP_PLATFORM
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -196,6 +231,10 @@ static uint16_t s_first_x[FOS_TOUCH_POINTS_MAX], s_first_y[FOS_TOUCH_POINTS_MAX]
 static int16_t s_last_rx[FOS_TOUCH_POINTS_MAX], s_last_ry[FOS_TOUCH_POINTS_MAX];
 static uint16_t s_last_x[FOS_TOUCH_POINTS_MAX], s_last_y[FOS_TOUCH_POINTS_MAX];
 static int s_last_raw_x = -1, s_last_raw_y = -1;
+/* Each finger's passed positions (PSRAM, from fos_touch_start; NULL: moves
+ * carry none) and which fingers' a queued move owns. */
+static fos_touch_passed_t *s_passed = NULL;
+static uint8_t s_passed_owned = 0;
 static bool s_woke = false;
 
 /* ------------------------------------------------------------- the queue */
@@ -207,6 +246,8 @@ static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
     if (kind == FOS_TOUCH_MOVE) {
         int merge = fos_touch_move_slot(s_queue, TOUCH_QUEUE_LEN, s_head, s_count, id);
         if (merge >= 0) {
+            /* Where it was goes on with the move, in `points`. */
+            if (s_queue[merge].carries) fos_touch_passed_add(&s_passed[id], s_queue[merge].x, s_queue[merge].y);
             s_queue[merge].x = x;
             s_queue[merge].y = y;
             s_queue[merge].at_ms = at_ms;
@@ -225,12 +266,20 @@ static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
     slot->x = x;
     slot->y = y;
     slot->at_ms = at_ms;
+    /* One queued move a finger owns its passed positions: another (behind a
+     * press or a release of that finger) carries none. */
+    uint8_t bit = (uint8_t)(1u << id);
+    slot->carries = kind == FOS_TOUCH_MOVE && s_passed && id < FOS_TOUCH_POINTS_MAX && !(s_passed_owned & bit);
+    if (slot->carries) {
+        s_passed_owned |= bit;
+        s_passed[id].count = 0;
+    }
     s_count++;
     portEXIT_CRITICAL(&s_queue_lock);
     fos_client_wake_for_events();
 }
 
-static bool dequeue(fos_touch_event_t *out)
+static bool dequeue(fos_touch_event_t *out, fos_touch_passed_t *passed)
 {
     portENTER_CRITICAL(&s_queue_lock);
     if (s_count == 0) {
@@ -238,6 +287,12 @@ static bool dequeue(fos_touch_event_t *out)
         return false;
     }
     *out = s_queue[s_head];
+    passed->count = 0;
+    if (out->carries) {
+        *passed = s_passed[out->id];
+        s_passed[out->id].count = 0;
+        s_passed_owned &= (uint8_t)~(1u << out->id);
+    }
     s_head = (uint8_t)((s_head + 1) % TOUCH_QUEUE_LEN);
     s_count--;
     portEXIT_CRITICAL(&s_queue_lock);
@@ -299,8 +354,9 @@ bool fos_touch_process_events(void)
      * and two fingers report every 10 ms, so draining until empty held the
      * render off for seconds (305 moves, 4.3 s between frames, 2026-11-08). */
     uint8_t budget = s_count;
-    while (budget-- > 0 && dequeue(&event)) {
-        char payload[160];
+    fos_touch_passed_t passed;
+    while (budget-- > 0 && dequeue(&event, &passed)) {
+        char payload[160 + 12 * FOS_TOUCH_PASSED_MAX];
         /* The wire position, the finger (pointer ids from 1: 0 is the one
          * mouse cursor), `touch`, and for a down or an up the primary
          * button, what is held after it and when the glass said so
@@ -308,9 +364,12 @@ bool fos_touch_process_events(void)
          * between renders, and a tap is timed by its own two reports, not
          * by when they were delivered (docs/events.md "Pointer"). */
         if (event.kind == FOS_TOUCH_MOVE) {
+            /* And where the finger passed since the last move delivered. */
+            char points[12 * FOS_TOUCH_PASSED_MAX + 16];
+            if (fos_touch_passed_json(&passed, points, sizeof(points)) == 0) points[0] = '\0';
             snprintf(payload, sizeof(payload),
-                     "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"buttons\":1}",
-                     event.x, event.y, event.id + 1);
+                     "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"buttons\":1%s}",
+                     event.x, event.y, event.id + 1, points);
         } else {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"button\":0,\"buttons\":%d,\"atMs\":%lld}",
@@ -681,6 +740,10 @@ esp_err_t fos_touch_start(void)
 #else
     if (xTaskCreate(touch_task, "fos_touch", 3072, NULL, 6, NULL) != pdPASS) return ESP_ERR_NO_MEM;
 #endif
+    /* A coalesced move's passed positions (docs/events.md "Pointer"), in
+     * PSRAM: internal RAM is the Wi-Fi stack's. Without them a move carries
+     * none. */
+    s_passed = heap_caps_calloc(FOS_TOUCH_POINTS_MAX, sizeof(fos_touch_passed_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     s_present = true;
     char line[256];
     snprintf(line, sizeof(line),

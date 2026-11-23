@@ -4,7 +4,8 @@ The settings panel's frame page (docs/scene-settings.md "The frame page") sets
 the rotation and the render scale on the device, and says so in one log line:
 `{"event": "settings:frame", "origin": "panel", "rotate": 90, "renderScale":
 1.5, ...}` (the ESP32's fos_frame_settings.c, the Pi's
-frame_settings_linux.nim). The row takes them, so the next deploy keeps what
+frame_settings_linux.nim), and on a board that has them the sounds of a tap
+and a press (`clickSounds`, the row's device_config). The row takes them, so the next deploy keeps what
 the person chose, and so does the deploy baseline, so the drawer does not offer
 to deploy what the frame already has. The cloud follows the hello's hardware
 report instead (frames.ts `settingsWithReported`).
@@ -20,6 +21,7 @@ from app.models.frame import Frame
 from app.utils.render_scale import MAX_RENDER_SCALE, normalize_render_scale
 
 ROTATIONS = (0, 90, 180, 270)
+CLICK_SOUNDS = ("silent", "normal")  # embedded_firmware.EMBEDDED_CLICK_SOUNDS
 
 
 def _rotation(value: Any) -> int | None:
@@ -46,6 +48,13 @@ def panel_settings_changes(frame: Frame, log: dict[str, Any]) -> dict[str, Any]:
     scale = _scale(log.get("renderScale"))
     if scale is not None and scale != normalize_render_scale(frame.render_scale):
         changes["render_scale"] = scale
+    sounds = log.get("clickSounds")
+    device_config = frame.device_config if isinstance(frame.device_config, dict) else {}
+    held = device_config.get("clickSounds", device_config.get("click_sounds"))
+    if isinstance(sounds, str) and sounds in CLICK_SOUNDS and sounds != (held or "normal"):
+        config = {key: value for key, value in device_config.items() if key != "click_sounds"}
+        config["clickSounds"] = sounds
+        changes["device_config"] = config
     snapshot = frame.last_successful_deploy if isinstance(frame.last_successful_deploy, dict) else None
     if changes and snapshot:
         baseline = dict(snapshot)

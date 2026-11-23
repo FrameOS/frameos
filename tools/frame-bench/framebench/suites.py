@@ -865,6 +865,186 @@ def suite_desktop(ctx, frame, layouts=None):
     return {'desktop': results, 'issues': issues}
 
 
+def _console_rotate(con):
+    """The rotation the board has now: the console `status` says it."""
+    for line in con.command('status', 3):
+        m = re.match(r'rotate:\s+(\d+)', line.strip())
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _asked_restart(con, frame, t, where, rotate=None):
+    """A restart the step asked for (a new rotation restarts the firmware,
+    fos_frame_settings.c / fos_settings.c): ONE boot, woken by `restart`,
+    the runtime up at the rotation asked for, and a picture after. A panic, a
+    watchdog or a second boot is the crash a person saw as "it crashed, and
+    came back rotated ten seconds later" (the reTerminal Sticky, 2026-11-22).
+    Returns (measurements, issues); the asked-for boot leaves `con.boots`."""
+    issues = []
+    t_boot, _, _ = con.wait_for(lambda x: '"event":"bootup"' in x, 120)
+    if not t_boot:
+        return {'restart_ms': None}, [issue('fail', 'no_restart', where, 'the board did not restart within 120 s')]
+    t_done, _, _ = wait_render(con, render_timeout(frame) + 60)
+    con.idle(3)  # the wake line goes out after the first pass's logs
+    lines = con.history_since(t)
+    causes = [(event(x) or {}).get('cause') for x in lines if '"event":"wake"' in x]
+    turned = [int(m.group(1)) for x in lines for m in [re.search(r'nim runtime initialized: \S+ rotate=(\d+)', x)] if m]
+    boots = [b for b in con.boots if b >= t]
+    # The notice it drew before going (fos_restart.h): on a board that has the
+    # fast waveform or an LCD, `ESP_OK`; nothing on firmware before it.
+    notices = [(event(x) or {}).get('status') for x in lines if '"event":"restart:notice"' in x]
+    out = {'restart_ms': round((t_boot - t) * 1000), 'to_render_ms': round((t_done - t) * 1000) if t_done else None,
+           'wake': causes[-1] if causes else None, 'rotate': turned[-1] if turned else None, 'boots': len(boots),
+           'notice': notices[-1] if notices else None}
+    if notices and notices[-1] != 'ESP_OK':
+        issues.append(issue('note', 'restart_notice', where, f'the restart notice was not drawn: {notices[-1]}'))
+    if out['restart_ms'] > 25000:
+        issues.append(issue('slow', 'restart_slow', where, f"{out['restart_ms']} ms from the ask to the boot"))
+    issues += [i for i in incidents_since(con, t, where) if i['kind'] not in ('reboot', 'ota_mid_run')]
+    if any(c not in (None, 'restart') for c in causes):
+        issues.append(issue('crash', 'restart_cause', where, f"woke by {', '.join(str(c) for c in causes)}, not the restart asked for"))
+    if len(boots) > 1:
+        issues.append(issue('crash', 'restart_loop', where, f'{len(boots)} boots for one restart'))
+    if not t_done:
+        issues.append(issue('fail', 'restart_no_render', where, 'no picture after the restart'))
+    if rotate is not None and out['rotate'] is not None and out['rotate'] != rotate:
+        issues.append(issue('fail', 'rotate_not_applied', where, f"came back at rotate={out['rotate']}, asked {rotate}"))
+    con.boots = [b for b in con.boots if b < t]  # asked for
+    return out, issues
+
+
+def drag(con, x_frac, y0_frac, y1_frac, steps=8):
+    """A finger dragged on the glass (wire coordinates, as `tap`)."""
+    x = int(32767 * x_frac)
+    con.send('event pointerDown {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","button":0,"buttons":1}'
+             % (x, int(32767 * y0_frac)))
+    for i in range(1, steps + 1):
+        time.sleep(0.05)
+        y = y0_frac + (y1_frac - y0_frac) * i / steps
+        con.send('event pointerMove {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","buttons":1}' % (x, int(32767 * y)))
+    time.sleep(0.05)
+    con.send('event pointerUp {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","button":0,"buttons":0}'
+             % (x, int(32767 * y1_frac)))
+
+
+def _switcher_pages(ctx, frame, rounds=2, pages=3):
+    """The scene switcher opened and scrolled a screenful at a time, a few
+    rounds: a reTerminal Sticky stopped at its second page, mid-refresh, the
+    panel left grey and the board answering nothing until a reset (twice on
+    2026-11-22, the release 2026.11.14). Each step must end its render; a
+    render that starts and never ends is the hang. Returns (results, issues)."""
+    con = ctx.console(frame)
+    out, issues = [], []
+    t0 = time.time()
+    for r in range(rounds):
+        where = f'switcher round {r + 1}'
+        con.drain()
+        con.send('event sceneSwitcher')
+        t_open, _, _ = wait_scene_render(con, render_timeout(frame), lambda x: 'system/sceneSwitcher' in x or '"Scene switcher"' in x)
+        steps = []
+        for p in range(pages):
+            con.drain()
+            t = time.time()
+            drag(con, 0.5, 0.8, 0.2)
+            t_done, line, got = wait_render(con, render_timeout(frame))
+            started = [x for _, x in got if ' started: scene ' in x]
+            steps.append({'page': p + 2, 'ms': round((t_done - t) * 1000) if t_done else None})
+            if not t_done and started:
+                issues.append(issue('crash', 'render_stuck', where, f'page {p + 2}: {started[-1][:160]} and no end in {render_timeout(frame)} s'))
+                break
+            con.idle(1.5)
+        con.drain()
+        con.send('event sceneSwitcher')  # the same command again goes back
+        wait_render(con, render_timeout(frame))
+        out.append({'round': r + 1, 'opened': bool(t_open), 'pages': steps})
+    alive = any('frame_id' in x for x in con.command('status', 4))
+    if not alive:
+        issues.append(issue('crash', 'no_answer', 'switcher pages', 'the console stopped answering after the switcher pages'))
+    issues += incidents_since(con, t0, 'switcher pages')
+    return out, issues
+
+
+def suite_settings(ctx, frame):
+    """What a person changes on a frame that it takes a while to show: the
+    rotation (a restart: there and back, nothing else may happen on the way)
+    and the layout every scene wears (each layout the frame holds, then none,
+    pushed one after another). Both crashed for someone, or looked as if
+    they did (the reTerminal Sticky and a reTerminal, 2026-11-22)."""
+    if frame['kind'] != 'local':
+        return {'skipped': 'a board rendered on its plane draws no rotation or layout of its own', 'issues': []}
+    con = ctx.console(frame)
+    be, fid = ctx.backend, frame.get('backend_frame')
+    out, issues = {'rotate': [], 'layouts': []}, []
+
+    # The rotation: through the frame's backend when it has one (the settings
+    # it pushes win over the console's, and turn the board back), else the
+    # console's `set rotate` and a restart.
+    start = (be.frame(fid).get('rotate') if be and fid else None)
+    if start is None:
+        start = _console_rotate(con)
+    if start is None:
+        issues.append(issue('note', 'rotate_unknown', 'rotate', 'the board did not say its rotation: not turned'))
+    else:
+        start = int(start) % 360
+        for target in ((start + 90) % 360, start):
+            where = f'rotate {target}'
+            con.drain()
+            t = time.time()
+            if be and fid:
+                be.update_frame(fid, {'rotate': target})
+                be.push(fid)
+            else:
+                con.command(f'set rotate {target}', 2)
+                con.send('restart')
+            got, found = _asked_restart(con, frame, t, where, rotate=target)
+            out['rotate'].append({'to': target, **got})
+            issues += found
+            if got.get('restart_ms') is None:
+                break
+
+    # The scene switcher a screenful at a time, on a touch board.
+    if frame.get('touch'):
+        out['switcher'], found = _switcher_pages(ctx, frame)
+        issues += found
+    else:
+        out['switcher_skipped'] = 'no touch: the pages are a drag on the glass'
+
+    # The layout around every scene: each the frame holds, then none.
+    if not be or not fid:
+        out['layouts_skipped'] = 'needs the backend frame'
+    else:
+        original = be.frame(fid).get('scenes') or []
+        layouts = [s for s in original if (s.get('settings') or {}).get('isLayout')]
+        picks = [l['id'] for l in layouts]
+        if sampled(ctx, frame):
+            kept = [l for l in picks if in_turn(ctx, l)] or picks[:1]
+            if len(kept) < len(picks):
+                issues.append(issue('note', 'sampled', 'settings', f"slow panel: {len(picks) - len(kept)} layout(s) left for another run's turn"))
+            picks = kept
+        try:
+            for lid in picks + [None]:
+                where = f"layout {next((l.get('name') for l in layouts if l['id'] == lid), lid) or 'none'}"
+                scenes = []
+                for s in original:
+                    s = dict(s)
+                    if not (s.get('settings') or {}).get('isLayout'):
+                        if lid:
+                            s['layout'] = {'sceneId': lid}
+                        else:
+                            s.pop('layout', None)
+                    scenes.append(s)
+                t0 = time.time()
+                took, line, _ = _push_and_wait(ctx, frame, scenes, catalog_ok=True)
+                out['layouts'].append({'layout': lid, 'push_ms': took})
+                if took is None:
+                    issues.append(issue('fail', 'layout_push', where, 'the device did not take the pushed scenes: ' + (line or 'timeout')[:200]))
+                issues += incidents_since(con, t0, where)
+        finally:
+            _push_and_wait(ctx, frame, original, catalog_ok=True)
+    return {**out, 'issues': issues}
+
+
 CODE_EDITOR_ID = 'code-editor'
 # A thrown frameos.code (or a native the runtime does not have) reaches the
 # log as one of these when it escapes the app; what the editor catches it
@@ -1009,12 +1189,14 @@ SUITES = {
     'reboot': suite_reboot,
     'thin': suite_thin,
     'desktop': suite_desktop,
+    'settings': suite_settings,
 }
 # What `--suites default` runs per frame kind.
 DEFAULT = {
     # `benchmark` right after the restart: its memory reading (heapinfo's
     # minimum since boot) then covers the boot and the benchmark alone.
-    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'storm', 'soak', 'offline'],
+    'local': ['status', 'reboot', 'benchmark', 'scenes', 'builtin', 'input', 'desktop', 'code', 'settings', 'storm', 'soak',
+              'offline'],
     'thin': ['status', 'thin'],
     'pico': ['thin'],
 }

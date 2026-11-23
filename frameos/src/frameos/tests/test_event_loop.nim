@@ -1,5 +1,6 @@
 import std/[json, monotimes, options, os, strutils, tables]
 import ../channels
+import ../driver_abi
 import ../event_loop
 import ../events
 import ../input_state
@@ -280,5 +281,42 @@ block a_full_lane_drops_and_counts:
     host.loop.enqueue(eoDriver, "mouseMove", %*{"x": i, "y": i})
   doAssert host.loop.pending == 1
   localEventSink = nil
+
+block a_long_wait_keeps_the_drags_shape_in_bounded_points:
+  # A drag that piles up while a scene is busy: every move it replaced is in
+  # `points`, thinned past MovePointsMax pairs, the newest kept.
+  let logs = new(seq[JsonNode])
+  let host = newRecordingHost("fixtures/dispatcher/points".SceneId, logs)
+  for i in 0 ..< 200:
+    host.loop.enqueue(eoDriver, "pointerMove", %*{"x": i * 100, "y": 0, "pointerId": 1, "pointerType": "touch"})
+  doAssert host.loop.pending == 1
+  let payload = host.loop.inputLaneForTest()[0].payload
+  let points = payload["points"]
+  doAssert points.len div 2 <= MovePointsMax and points.len div 2 > MovePointsMax div 2, $points.len
+  doAssert points[0].getInt() == 0 # the first move stays
+  doAssert points[^2].getInt() == 199 * 100 - 100 # the one before this move stays
+  var last = -1
+  for i in 0 ..< points.len div 2:
+    doAssert points[2 * i].getInt() > last # in order, oldest first
+    last = points[2 * i].getInt()
+  discard host.loop.drain()
+  localEventSink = nil
+
+when not defined(frameosEmbedded):
+  block a_drivers_coalesced_moves_carry_their_positions:
+    # The Linux evdev path: structs, no JSON until delivery.
+    let loop = newEventLoop(EventHost(), FrameConfig(width: 800, height: 480, rotate: 0, scalingMode: "cover",
+      saveAssets: %*false))
+    for i in 0 ..< 4:
+      loop.enqueueInput(eoDriver, DriverInputEvent(kind: ord(dikPointerAbs).cint, pointerId: 1,
+        pointerType: ord(dptTouch).cint, x: cint(PointerWireMax div 8 * (i + 1)), y: cint(PointerWireMax div 2)))
+    doAssert loop.pending == 1
+    let envelope = loop.inputLaneForTest()[0]
+    doAssert envelope.trail.len == 6
+    var output: seq[InputDelivery]
+    loop.inputState.applyDriverInput(envelope.input, eoDriver, getMonoTime(), output, envelope.trail)
+    doAssert output.len == 1 and output[0].name == "pointerMove"
+    doAssert output[0].payload["x"].getInt() == 399
+    doAssert output[0].payload["points"] == %*[99, 239, 199, 239, 299, 239], $output[0].payload
 
 echo "test_event_loop: ok"

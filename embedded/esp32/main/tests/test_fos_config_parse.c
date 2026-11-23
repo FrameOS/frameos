@@ -192,6 +192,32 @@ static void test_cpu_mode(void)
     CHECK(fos_config_render_mhz(200, false, false) == 240, "a stray stored value renders as auto");
 }
 
+static void test_click_sounds(void)
+{
+    uint8_t m = 9;
+    CHECK(fos_config_parse_click_sounds("silent", &m) && m == FOS_CLICK_SOUNDS_SILENT, "silent -> %u", m);
+    CHECK(fos_config_parse_click_sounds("normal", &m) && m == FOS_CLICK_SOUNDS_NORMAL, "normal -> %u", m);
+    CHECK(fos_config_parse_click_sounds("0", &m) && m == FOS_CLICK_SOUNDS_SILENT, "0 -> %u", m);
+    CHECK(fos_config_parse_click_sounds("1", &m) && m == FOS_CLICK_SOUNDS_NORMAL, "1 -> %u", m);
+    CHECK(fos_config_parse_click_sounds("normal", NULL), "NULL out crashed?");
+    m = 9;
+    CHECK(!fos_config_parse_click_sounds("beepy", &m) && m == 9, "an unknown mode accepted / out touched");
+    CHECK(!fos_config_parse_click_sounds("2", &m), "2 accepted");
+    CHECK(!fos_config_parse_click_sounds("Silent", &m), "case is not ignored: the wire's names are lower case");
+    CHECK(!fos_config_parse_click_sounds("", &m), "empty accepted");
+    CHECK(!fos_config_parse_click_sounds(NULL, &m), "NULL accepted");
+    /* A plane's value: a mode this firmware does not have yet is normal. */
+    CHECK(fos_config_click_sounds_or_normal("silent") == FOS_CLICK_SOUNDS_SILENT, "silent");
+    CHECK(fos_config_click_sounds_or_normal("beepy") == FOS_CLICK_SOUNDS_NORMAL, "beepy");
+    CHECK(fos_config_click_sounds_or_normal(NULL) == FOS_CLICK_SOUNDS_NORMAL, "NULL");
+    CHECK(strcmp(fos_config_click_sounds_name(FOS_CLICK_SOUNDS_SILENT), "silent") == 0, "name 0");
+    CHECK(strcmp(fos_config_click_sounds_name(FOS_CLICK_SOUNDS_NORMAL), "normal") == 0, "name 1");
+    CHECK(strcmp(fos_config_click_sounds_name(200), "normal") == 0, "an out-of-range byte reads normal");
+    /* The one gate: silent mutes, every other mode is heard. */
+    CHECK(!fos_click_sounds_audible(FOS_CLICK_SOUNDS_SILENT), "silent heard");
+    CHECK(fos_click_sounds_audible(FOS_CLICK_SOUNDS_NORMAL), "normal muted");
+}
+
 static void test_normalize_rotate(void)
 {
     uint16_t r = 999;
@@ -459,6 +485,7 @@ int main(void)
     test_led_type_names();
     test_cpu_mode();
     test_normalize_rotate();
+    test_click_sounds();
     test_normalize_scaling_mode();
     test_normalize_render_scale();
     test_parse_gpio_buttons();

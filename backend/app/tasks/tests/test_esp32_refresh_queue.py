@@ -54,7 +54,9 @@ def _functions(text: str) -> dict[str, str]:
 
 
 # A panel entry point waits for the refresh task with one of these first.
-_WAITS = ("refresh_wait()", "fos_display_park()", "fos_refresh_queue_busy(")
+# fos_display_refreshing() is fos_refresh_queue_busy on the display's queue.
+_WAITS = ("refresh_wait()", "refresh_shutdown()", "fos_display_park()", "fos_refresh_queue_busy(",
+          "fos_display_refreshing()")
 
 
 def test_nothing_talks_to_the_panel_while_a_picture_is_owed():

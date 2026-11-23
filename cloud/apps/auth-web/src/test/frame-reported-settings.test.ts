@@ -19,6 +19,13 @@ describe("settingsWithReported", () => {
     expect(settingsWithReported({}, { rotate: 0, renderScale: 0 })).toBeUndefined();
   });
 
+  it("takes the tap and click sounds set on the frame page; normal is the default", () => {
+    expect(settingsWithReported({ rotate: 90 }, { clickSounds: "silent" })).toEqual({ rotate: 90, click_sounds: "silent" });
+    expect(settingsWithReported({ click_sounds: "silent" }, { clickSounds: "normal" })).toEqual({ click_sounds: "normal" });
+    expect(settingsWithReported({}, { clickSounds: "normal" })).toBeUndefined();
+    expect(settingsWithReported({}, { clickSounds: "loud" })).toBeUndefined();
+  });
+
   it("ignores a report without them, as older firmware's, and nonsense", () => {
     expect(settingsWithReported({ rotate: 90 }, { platform: "esp32" })).toBeUndefined();
     expect(settingsWithReported({ rotate: 90 }, { rotate: 45 })).toBeUndefined();
