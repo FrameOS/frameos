@@ -311,7 +311,7 @@ suite "the frame's keyboard on a small screen":
     check problems.len == 0
 
   test "the frame's back puts the keyboard away, and the scene and its layout hear nothing of it":
-    # A Sticky's AI key pressed twice, a swipe in from the left edge: as on a
+    # A Sticky's Action key pressed twice, a swipe in from the left edge: as on a
     # phone, back with the keyboard up is the keyboard's.
     forgetTypedKeys()
     let config = configOf(Small)

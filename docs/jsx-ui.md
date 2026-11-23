@@ -709,7 +709,7 @@ export function get(app) {
   does what it does; so do Enter in an `<input>` (a `<textarea>` gets a new
   line) and Escape.
 - **The frame's `back`** (a swipe in from the left edge, a reTerminal
-  Sticky's AI key pressed twice) puts the keyboard away as Escape does, and
+  Sticky's Action key pressed twice) puts the keyboard away as Escape does, and
   goes no further: the scene, its layout and their apps never hear that
   `back`, so it does not also leave the page or the scene. A key's accents
   or a selection made by touch go first, the keyboard staying; an open
