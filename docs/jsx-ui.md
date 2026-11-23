@@ -1176,7 +1176,12 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   panel, once the finger lifts): `e.scrollTop` and `e.scrollLeft` (also on
   `e.target`, as React's), in the UI's pixels. A scroll the layout makes
   itself (a caret brought into sight) is heard with the next event (a key,
-  a tap): the layout runs inside a render, where no handler can.
+  a tap): the layout runs inside a render, where no handler can. Like any
+  handler it runs `get()` again, unless it returns `false` and set no
+  signal: then it changed nothing `get()` reads, and the box scrolls on the
+  tree laid out last, as one with no `onScroll` does (2026.11.15+; a
+  `get()` after every one before). A virtualized list returns `false` while
+  the rows it built still cover what shows.
 - **`scrollTop={y}`** scrolls the box to `y` when the app changes it (a file
   opened at the top, or where it was left), kept in range; the same value
   render after render leaves the box where a finger took it, as a browser

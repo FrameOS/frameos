@@ -4136,16 +4136,21 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     if not owner.scene.isNil:
       let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
       if not target.isNil:
+        let refused = JS_IsException(returned) == 0 and jsIsBool(returned) and
+          not toNimBool(ctx, returned)
         # Signals set: the components that read them may do (partialRender).
-        # Nothing set: what changed is anyone's guess, get() runs.
+        # Nothing set: what changed is anyone's guess, get() runs. A scroll
+        # handler that returns false and set none changed nothing get()
+        # reads: the box scrolls on the tree it has (a list whose rows built
+        # still cover what shows, docs/jsx-ui.md "Scrolling and clipping").
         if JS_IsException(returned) == 0 and signalMarks() != marks:
           target.partial = true
-        else:
+        elif not (refused and name == "scroll"):
           target.full = true
         # A pointer handler that returns false asks for no render: what it
         # changed shows with the next one (docs/jsx-ui.md "Events").
-        target.declined = name.startsWith("pointer") and jsIsBool(returned) and
-          not toNimBool(ctx, returned)
+        target.declined = refused and (name.startsWith("pointer") or
+          name == "scroll" and signalMarks() == marks)
     if JS_IsException(returned) != 0:
       frameos_apps.logError(owner, "JS app handler failed: " &
         runtime.appText(mappedJsExceptionDetails(ctx).message))
@@ -4845,6 +4850,9 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
     runtime.init(owner, configJson)
   if not owner.scene.isNil:
     let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+    # A handler ran since the last render and changed what get() reads: no
+    # pointer's render after it may lay the old tree out again.
+    let handled = not target.isNil and target.full
     if not target.isNil and (target.partial or target.full):
       # Handlers ran since the last render: when every one set signals and
       # nothing else asks for a new tree (the same config, a render sooner
@@ -4863,7 +4871,7 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # Only the pointer asked for this render: the last tree with the new
       # pointer, while nothing else can have changed what get() returns (the
       # same config, a render sooner than the scene's own interval).
-      if not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
+      if not handled and not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
           inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
         return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
   try:
