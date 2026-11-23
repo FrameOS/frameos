@@ -96,8 +96,28 @@ typedef struct {
     uint8_t id;
     uint16_t x; /* wire units */
     uint16_t y;
+    uint8_t carries; /* a move that owns its finger's passed positions (fos_touch_passed_t) */
     int64_t at_ms; /* esp_timer, when the controller reported it */
 } fos_touch_event_t;
+
+/* Where a finger was between its last move delivered and the queued move that
+ * stands for those since (docs/events.md "Pointer": a coalesced move's
+ * `points`), wire units, oldest first: a drawing scene keeps every point of a
+ * stroke made while it rendered. */
+#define FOS_TOUCH_PASSED_MAX 32
+typedef struct {
+    uint8_t count;
+    uint16_t xy[2 * FOS_TOUCH_PASSED_MAX];
+} fos_touch_passed_t;
+
+/* A move merged into the queued one: where that one was joins its passed
+ * positions. Past FOS_TOUCH_PASSED_MAX every other one goes, from the oldest,
+ * and the newest stays, so a long render keeps the stroke's shape. Pure. */
+void fos_touch_passed_add(fos_touch_passed_t *passed, uint16_t x, uint16_t y);
+
+/* The passed positions as `,"points":[x,y,...]` into `buf` (NUL-terminated):
+ * its length, 0 when there are none or they do not fit. Pure. */
+int fos_touch_passed_json(const fos_touch_passed_t *passed, char *buf, size_t size);
 
 /* The queue slot a new move of finger `id` replaces: that finger's newest
  * event, when it is a move. -1 for none: its newest event is a press or a

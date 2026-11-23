@@ -152,6 +152,37 @@ describe("preview pointer input, package and frontend", () => {
     ]);
   });
 
+  it("keeps where a drag passed while a frame waited, in points", () => {
+    // A drawing scene keeps every point of a stroke: moves the page queued
+    // for one animation frame, and the browser's own coalesced ones, go with
+    // the move that is sent, oldest first, as a frame's coalesced move says.
+    const drag = (attach: typeof packagePointer.attachPointerInput): Sent => {
+      const sent: Sent = [];
+      const frames: FrameRequestCallback[] = [];
+      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+      const canvas = new FakeCanvas();
+      attach(canvas as unknown as HTMLCanvasElement, (name, payload) => sent.push([name, payload]), {
+        inputV2: () => true,
+      });
+      canvas.dispatchEvent(pointer("pointerdown", { button: 0, buttons: 1, clientX: 40, clientY: 110 }));
+      canvas.dispatchEvent(pointer("pointermove", { buttons: 1, clientX: 90, clientY: 110 }));
+      const coalesced = pointer("pointermove", { buttons: 1, clientX: 190, clientY: 110 });
+      Object.assign(coalesced, {
+        getCoalescedEvents: () => [{ clientX: 140, clientY: 110 }, { clientX: 190, clientY: 110 }],
+      });
+      canvas.dispatchEvent(coalesced);
+      frames.splice(0).forEach((callback) => callback(0));
+      return sent.filter(([name]) => name === "pointerMove");
+    };
+    const fromPackage = drag(packagePointer.attachPointerInput);
+    expect(drag(frontendPointer.attachPointerInput)).toEqual(fromPackage);
+    const mouse = { pointerId: 0, pointerType: "mouse" };
+    expect(fromPackage).toEqual([
+      ["pointerMove", { x: 0, y: 0, ...mouse, buttons: 1 }],
+      ["pointerMove", { x: 9830, y: 0, ...mouse, buttons: 1, points: [3277, 0, 6553, 0] }],
+    ]);
+  });
+
   it("never leaves a scene holding a press the page let go of", () => {
     // The editor's preview dragged a list, let go off the canvas and came
     // back: the scene was still dragging (2026-11-07). Each way a release can

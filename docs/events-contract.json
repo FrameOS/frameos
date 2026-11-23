@@ -218,7 +218,7 @@
       "name": "pointerMove",
       "class": "input",
       "device": "pointer",
-      "description": "When a pointer (a finger, a mouse, a pen) moves (not logged)",
+      "description": "When a pointer (a finger, a mouse, a pen) moves (not logged). A move that stands for others the scene did not hear (they came while it was busy) lists where those were in `points`, x, y, x, y, ... oldest first, in the units of `x` and `y`.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -226,7 +226,8 @@
         {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
-        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"}
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
+        {"name": "points", "label": "Points passed", "type": "json", "required": false, "catalog": false}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",

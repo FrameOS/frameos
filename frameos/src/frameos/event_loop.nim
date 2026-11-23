@@ -64,6 +64,7 @@ type
       # would be 10 KB of an ESP32's RAM.
       hasInput*: bool   ## `input` is the message and `payload` nil
       input*: DriverInputEvent
+      trail*: seq[int32] ## an absolute move's: the wire positions of the moves coalesced into it
 
   EventHost* = object
     ## The four things a host does for the dispatcher…
@@ -149,6 +150,11 @@ proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
 proc pending*(loop: EventLoop): int =
   loop.main.len + loop.input.len
 
+when defined(testing):
+  proc inputLaneForTest*(loop: EventLoop): seq[EventEnvelope] =
+    for envelope in loop.input:
+      result.add envelope
+
 proc log(loop: EventLoop, entry: JsonNode) =
   if not loop.host.log.isNil:
     loop.host.log(entry)
@@ -187,6 +193,27 @@ proc laneFull(loop: EventLoop, envelope: EventEnvelope, lane: var Deque[EventEnv
     loop.inputState.pointerInputLost = true
   inc loop.dropped
 
+proc carryPoints(older, newer: JsonNode) =
+  ## A move that replaces a queued one (`coalesce: latest`) carries where that
+  ## one was, and what it carried, in `points` before its own (docs/events.md
+  ## "Pointer"), at most MovePointsMax of them.
+  let (x, y) = (older{"x"}, older{"y"})
+  if x.isNil or y.isNil or x.kind != JInt or y.kind != JInt:
+    return
+  var flat: seq[JsonNode]
+  proc addPoints(payload: JsonNode) =
+    let points = payload{"points"}
+    if not points.isNil and points.kind == JArray:
+      for i in 0 ..< points.len div 2:
+        flat.add points[2 * i]
+        flat.add points[2 * i + 1]
+  addPoints(older)
+  flat.add x
+  flat.add y
+  addPoints(newer)
+  thinPoints(flat)
+  newer["points"] = %flat
+
 proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonNode,
               target = none(SceneId)) =
   ## Appends one event. The contract's `coalesce: latest` is applied here: a
@@ -208,6 +235,9 @@ proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonN
       lane[].peekLast.target == target and lane[].peekLast.origin == origin and
       not lane[].peekLast.isStructInput and
       lane[].peekLast.payload{"pointerId"}.getInt(0) == envelope.payload{"pointerId"}.getInt(0):
+    # The positions it replaces go on in `points`, oldest first: a drawing
+    # scene keeps every point of a stroke that came while it was busy.
+    carryPoints(lane[].peekLast.payload, envelope.payload)
     lane[].peekLast = envelope
     return
   if lane[].len >= loop.laneCapacity:
@@ -246,7 +276,12 @@ when not defined(frameosEmbedded):
         return
       if last.input.kind == event.kind and event.kind == ord(dikPointerAbs).cint and
           last.input.pointerId == event.pointerId:
+        var trail = move(last.trail)
+        trail.add last.input.x.int32
+        trail.add last.input.y.int32
+        thinPoints(trail)
         last[] = envelope
+        last.trail = move(trail)
         return
     if loop.input.len >= loop.laneCapacity:
       loop.laneFull(envelope, loop.input, eventPolicy(name))
@@ -687,7 +722,7 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
     deliveries.add(InputDelivery(name: envelope.name, payload: envelope.payload, origin: envelope.origin))
   elif envelope.isStructInput:
     when not defined(frameosEmbedded):
-      loop.inputState.applyDriverInput(envelope.input, envelope.origin, envelope.tMono, deliveries)
+      loop.inputState.applyDriverInput(envelope.input, envelope.origin, envelope.tMono, deliveries, envelope.trail)
   elif not loop.inputState.applyNamedInput(envelope.name, envelope.payload, envelope.origin,
       envelope.tMono, deliveries):
     return loop.deliver(envelope, eventPolicy(envelope.name))

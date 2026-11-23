@@ -1438,3 +1438,59 @@ suite "jsx selection by touch":
     check target.input.focus > 0 and target.input.sel == 0 and not target.input.menu
     check dismissKeyboard(id, 1)
     check target.input.focus == 0
+
+suite "jsx pointer handlers that batch":
+  # A drawing app keeps every point of a stroke and draws them a few at a
+  # time (the Sketchbook, Handwriting notes): its onPointerMove returns false
+  # when it wants no render, and a move a queue coalesced hands it the
+  # positions it stands for in `points`, in the element's pixels.
+  const pad = """
+    let heard = []
+    let every = 3
+    export function get(app) {
+      frameos.setState('heard', heard)
+      return (
+        <div className="p-[10px] bg-white">
+          <div className="w-[100px] h-[60px] bg-slate-200"
+            onPointerDown={(e) => { heard.push(['down', e.localX, e.localY]) }}
+            onPointerMove={(e) => { heard.push(['move', e.localX, e.localY, e.points || []]); return heard.length % every === 0 }}
+            onPointerUp={(e) => { heard.push(['up']); return false }}
+            onClick={() => false} />
+        </div>
+      )
+    }
+  """
+
+  test "a pointer handler that returns false asks for no render; any other value does":
+    let id = "tests/jsx-batch"
+    let ui = newUi(pad, id)
+    discard ui.render()
+    proc touch(x, y: int): JsonNode =
+      %*{"x": x, "y": y, "pointerId": 1, "pointerType": "touch", "buttons": 1}
+    check dispatchUiEvent(id, "pointerDown", touch(20, 20)) # undefined: a render
+    check not dispatchUiEvent(id, "pointerMove", touch(30, 20)) # 2 heard
+    check dispatchUiEvent(id, "pointerMove", touch(40, 20)) # 3 heard: true
+    check not dispatchUiEvent(id, "pointerMove", touch(50, 20))
+    check not dispatchUiEvent(id, "pointerUp", touch(50, 20))
+    # Only a pointer handler says so: a click's false is a value, not a wish.
+    check dispatchUiEvent(id, "tap", touch(50, 20))
+    discard ui.render()
+    let heard = ui.scene.state{"heard"}
+    check heard.len == 5
+    check heard[0] == %*["down", 10, 10]
+    check heard[4] == %*["up"]
+
+  test "a move's coalesced points reach the handler in the element's pixels":
+    let id = "tests/jsx-batch-points"
+    let ui = newUi(pad, id)
+    discard ui.render()
+    check dispatchUiEvent(id, "pointerDown", %*{"x": 20, "y": 20, "pointerId": 1, "pointerType": "touch", "buttons": 1})
+    discard dispatchUiEvent(id, "pointerMove", %*{"x": 60, "y": 30, "pointerId": 1, "pointerType": "touch",
+      "buttons": 1, "points": [30, 22, 40, 25, 50, 28]})
+    # Captured: outside the box, the points go negative as localX does.
+    discard dispatchUiEvent(id, "pointerMove", %*{"x": 5, "y": 5, "pointerId": 1, "pointerType": "touch",
+      "buttons": 1, "points": [8, 6]})
+    discard ui.render()
+    let heard = ui.scene.state{"heard"}
+    check heard[1] == %*["move", 50, 20, [20, 12, 30, 15, 40, 18]]
+    check heard[2] == %*["move", -5, -5, [-2, -4]]
