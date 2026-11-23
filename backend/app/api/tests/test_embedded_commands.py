@@ -730,3 +730,32 @@ async def test_the_frame_page_click_sounds_land_in_device_config(_pub, async_cli
     await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'clickSounds': 'normal'})
     db.refresh(frame)
     assert frame.device_config["clickSounds"] == "silent"
+
+
+@pytest.mark.asyncio
+@patch("app.models.log.publish_message", new_callable=AsyncMock)
+async def test_the_frame_page_time_awake_lands_in_device_config(_pub, async_client, db, redis):
+    frame = await _embedded_frame(async_client, db)
+    frame.device_config = {"hardwarePreset": "seeed_reterminal_sticky", "awake_after_input_seconds": 300,
+                           "clickSounds": "silent"}
+    db.commit()
+    await process_log(db, redis, frame, {
+        'event': 'settings:frame', 'source': 'esp32', 'origin': 'panel', 'changes': 'awakeAfterInputSeconds',
+        'awakeAfterInputSeconds': 60,
+    })
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "seeed_reterminal_sticky", "clickSounds": "silent",
+                                   "awakeAfterInputSeconds": 60}
+    # Out of range, not a whole number, or from anyone but the page: nothing.
+    for value in (-1, 3601, 30.5, True):
+        await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel',
+                                             'awakeAfterInputSeconds': value})
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'scene', 'awakeAfterInputSeconds': 0})
+    db.refresh(frame)
+    assert frame.device_config["awakeAfterInputSeconds"] == 60
+    # The default on a frame that never had one changes nothing either.
+    frame.device_config = {"hardwarePreset": "seeed_reterminal_sticky"}
+    db.commit()
+    await process_log(db, redis, frame, {'event': 'settings:frame', 'origin': 'panel', 'awakeAfterInputSeconds': 300})
+    db.refresh(frame)
+    assert frame.device_config == {"hardwarePreset": "seeed_reterminal_sticky"}

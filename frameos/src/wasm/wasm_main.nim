@@ -868,36 +868,14 @@ proc frameos_wasm_press_map(): cstring {.exportc, cdecl.} =
   try:
     if host.scene.isNil or frameConfig.isNil:
       return pressMapBuffer.cstring
-    let
-      canvasW = frameConfig.width
-      canvasH = frameConfig.height
-      turned = boardRotate in [90, 270]
-      panelW = if turned: canvasH else: canvasW
-      panelH = if turned: canvasW else: canvasH
-    var entries = 0
-    for entry in pressMap(host.scene, canvasW, canvasH):
-      if entries == PressMapMaxEntries:
-        break
-      let
-        x0 = clamp(floor(entry.box[0]).int, 0, canvasW)
-        y0 = clamp(floor(entry.box[1]).int, 0, canvasH)
-        x1 = clamp(ceil(entry.box[2]).int, 0, canvasW)
-        y1 = clamp(ceil(entry.box[3]).int, 0, canvasH)
-      if x1 <= x0 or y1 <= y0:
-        continue
-      # The scene's canvas back onto the panel: utils/image panelToScenePoint
-      # the other way round.
-      let (px0, py0, px1, py1) = case boardRotate
-        of 90: (panelW - y1, x0, panelW - y0, x1)
-        of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
-        of 270: (y0, panelH - x1, y1, panelH - x0)
-        else: (x0, y0, x1, y1)
-      if entries > 0:
+    # The board's flip is not the plane's to undo: as before, rotation alone.
+    for entry in panelPressMap(host.scene, frameConfig.width, frameConfig.height, boardRotate, "",
+        PressMapMaxEntries):
+      if pressMapBuffer.len > 0:
         pressMapBuffer.add ';'
       if not entry.taken:
         pressMapBuffer.add '!'
-      pressMapBuffer.add &"{px0},{py0},{px1},{py1}"
-      entries += 1
+      pressMapBuffer.add &"{entry.x0},{entry.y0},{entry.x1},{entry.y1}"
   except Exception:
     pressMapBuffer = ""
   pressMapBuffer.cstring

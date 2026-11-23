@@ -938,7 +938,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
 | `gpio` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `claimed`? boolean, `atMs`? integer, `level`? integer | all | A GPIO button going `down` or `up`, the moment it happens. |
-| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. |
+| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress`, a `triplePress` or a `longPress`, one event per press. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes | `swap`? boolean | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
@@ -1247,6 +1247,11 @@ interface FrameOSApp {
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
      * undefined before, so treat undefined as color). The same in every phase, as fast. */
     color?: boolean;
+    /** Whether only the circle inside the panel's square shows and takes touches, as on the HyperPixel 2.1 Round
+     * and the Waveshare ESP32-S3-Touch-AMOLED-1.75. The corners are drawn but never seen, so an app that draws the
+     * whole panel keeps its text and buttons inside the circle, or inside the square inside it (FrameOS
+     * 2026.11.15+; undefined before, so treat undefined as square). */
+    round?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;
@@ -1298,7 +1303,7 @@ interface FrameOSApp {
     theme?: Record<string, string | string[]>;
     /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
      * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
-     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * "triplePress", "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
      * the frame has none (the preview of a scene) (FrameOS 2026.11.14+; undefined before). */
     eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
@@ -1360,7 +1365,7 @@ interface FrameOSEventPayloads {
   toggleScreen: Record<string, never>;
   /** A GPIO button going `down` or `up`, the moment it happens. `up` says how long it was held. */
   gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; claimed?: boolean; atMs?: number; level?: number };
-  /** A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. */
+  /** A GPIO button pressed: a `press`, a `doublePress`, a `triplePress` or a `longPress`, one event per press. */
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };

@@ -113,12 +113,34 @@ static void test_other_rules_and_keys(void)
     CHECK(n == 0, "by role or a rewrite: not a voice key, got %zu", n);
 }
 
+static void test_the_keys_bound_three_times(void)
+{
+    char labels[4][FOS_VOICE_BINDING_LABEL_LEN];
+    /* The reTerminal Sticky's AI key: pressed twice back, three times the
+     * scene list, held talks. Only the triplePress rule counts, whatever it
+     * emits (a rewrite too); a rule naming no action does not. */
+    size_t n = fos_voice_binding_triple_labels(
+        "[{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"doublePress\"},\"emit\":\"back\",\"as\":{}},"
+        "{\"event\":\"button\",\"match\":{\"label\":\"ai\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\",\"as\":{}},"
+        "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\",\"as\":{}},"
+        "{\"event\":\"button\",\"match\":{\"label\":\"UP\"},\"emit\":\"render\"},"
+        "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"triplePress\"},\"as\":{\"label\":\"A\"}}]",
+        labels, 4);
+    CHECK(n == 2, "AI and DOWN, got %zu", n);
+    CHECK(n == 2 && strcmp(labels[0], "AI") == 0 && strcmp(labels[1], "DOWN") == 0, "upper-cased, in map order");
+    CHECK(fos_voice_binding_labels("[{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"},"
+                                   "\"emit\":\"voiceChat\"}]", labels, 4) == 0,
+          "a triple press bound to voiceChat is no voice key");
+    CHECK(fos_voice_binding_triple_labels("", labels, 4) == 0, "no map, no keys");
+}
+
 int main(void)
 {
     test_the_reterminal_map();
     test_nothing_without_a_map();
     test_the_first_matching_rule_wins();
     test_other_rules_and_keys();
+    test_the_keys_bound_three_times();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

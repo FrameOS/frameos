@@ -8,7 +8,7 @@ import Foundation
 /// Rules the section did not write are kept as they are.
 public struct ButtonBinding: Hashable, Sendable, Identifiable {
     public enum Gesture: Hashable, Sendable {
-        /// A press of a button: its label and `press` / `doublePress` / `longPress`.
+        /// A press of a button: its label and `press` / `doublePress` / `triplePress` / `longPress`.
         case button(label: String, action: String)
         /// A swipe in from an edge of a touch screen: left, right, top, bottom.
         case edge(String)
@@ -60,10 +60,24 @@ public enum ButtonBindings {
     static let sceneLessEmits: Set<String> = ["back", "forward", "sceneSwitcher", "sceneSettings", "render", "turnOn",
                                               "turnOff", "toggleScreen", "voiceChat"]
 
+    /// The first FrameOS that makes a `triplePress` (the events contract's
+    /// `buttons.triplePressSince`; the SPA's triplePressMinVersion). The same
+    /// release lets an ESP32 keep twelve rules of its map where it kept eight.
+    public static let triplePressMinVersion = "2026.11.15"
+
+    /// The SPA's frameSupportsTriplePress: a backend frame that reported no
+    /// version gets the runtime with its next deploy.
+    public static func supportsTriplePress(_ frame: Frame, cloud: Bool) -> Bool {
+        if !cloud && (frame.frameosVersion ?? "").trimmingCharacters(in: .whitespaces).isEmpty { return true }
+        return CloudSettingsContract.supports(from: triplePressMinVersion, frameosVersion: frame.frameosVersion)
+    }
+
     /// The contract's `screenEdges` (docs/events-contract.json).
     public static let screenEdges = ["left", "right", "top", "bottom"]
 
-    static let pressTitles = ["press": "press", "doublePress": "double press", "longPress": "long press"]
+    static let pressTitles = [
+        "press": "press", "doublePress": "double press", "triplePress": "triple press", "longPress": "long press",
+    ]
     static let edgeTitles = ["left": "Swipe in from the left", "right": "Swipe in from the right",
                              "top": "Swipe down from the top", "bottom": "Swipe up from the bottom"]
 

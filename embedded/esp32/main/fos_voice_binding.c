@@ -1,6 +1,7 @@
 #include "fos_voice_binding.h"
 
 #include <ctype.h>
+#include <stdbool.h>
 #include <string.h>
 #include <strings.h> /* strcasecmp: POSIX, not in <string.h> under strict C11 (glibc) */
 
@@ -23,8 +24,11 @@ static int label_index(char labels[][FOS_VOICE_BINDING_LABEL_LEN], size_t count,
     return -1;
 }
 
-size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
-                                size_t max)
+/* The labels the first rule matching their `wanted` press binds to `emit`
+ * (NULL: to anything at all). With `any_action`, a rule naming no action
+ * matches every press, the wanted one included. */
+static size_t bound_labels(const char *event_map_json, const char *wanted, bool any_action, const char *emit_name,
+                           char labels[][FOS_VOICE_BINDING_LABEL_LEN], size_t max)
 {
     if (!event_map_json || !event_map_json[0] || max == 0) return 0;
     cJSON *rules = cJSON_Parse(event_map_json);
@@ -47,18 +51,31 @@ size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VO
         const cJSON *label = cJSON_GetObjectItem(match, "label");
         const cJSON *action = cJSON_GetObjectItem(match, "action");
         if (!cJSON_IsString(label) || !label->valuestring[0]) continue;
-        /* A rule on this label's long press: with no `action` it matches
-         * every press of the key, the long one included. */
-        if (cJSON_IsString(action) && strcmp(action->valuestring, "longPress") != 0) continue;
+        /* A rule on this label's wanted press: with no `action` it matches
+         * every press of the key, the wanted one included (where that counts). */
+        if (cJSON_IsString(action) && strcmp(action->valuestring, wanted) != 0) continue;
         if (action != NULL && !cJSON_IsString(action)) continue;
+        if (action == NULL && !any_action) continue;
         if (label_index(seen, seen_count, label->valuestring) >= 0) continue;
         if (seen_count < sizeof(seen) / sizeof(seen[0])) {
             upper_copy(seen[seen_count++], label->valuestring, FOS_VOICE_BINDING_LABEL_LEN);
         }
         const cJSON *emit = cJSON_GetObjectItem(rule, "emit");
-        if (!cJSON_IsString(emit) || strcmp(emit->valuestring, FOS_EVENT_VOICE_CHAT) != 0) continue;
+        if (emit_name && (!cJSON_IsString(emit) || strcmp(emit->valuestring, emit_name) != 0)) continue;
         if (count < max) upper_copy(labels[count++], label->valuestring, FOS_VOICE_BINDING_LABEL_LEN);
     }
     cJSON_Delete(rules);
     return count;
+}
+
+size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
+                                size_t max)
+{
+    return bound_labels(event_map_json, FOS_BUTTON_ACTION_LONG_PRESS, true, FOS_EVENT_VOICE_CHAT, labels, max);
+}
+
+size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
+                                       size_t max)
+{
+    return bound_labels(event_map_json, FOS_BUTTON_ACTION_TRIPLE_PRESS, false, NULL, labels, max);
 }

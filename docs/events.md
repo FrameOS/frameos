@@ -462,8 +462,8 @@ pointers plugged in after boot are found (inotify on `/dev/input`).
   a scene that wants the key itself: a counter that counts every tap,
   hold-to-show.
 - **`button {pin, label, role, action, durationMs?, wake?, atMs?}`:
-  `press`, `doublePress`, `longPress`.** What the person meant, and each press
-  is exactly one of them. `press` is a short press, once
+  `press`, `doublePress`, `triplePress`, `longPress`.** What the person meant,
+  and each press is exactly one of them. `press` is a short press, once
   it is over and `buttons.doublePressMs` (350) has passed since its `up` with
   no second down, so it arrives 350 ms after the release. `doublePress` is the
   second down inside that window; the pair is that and nothing more (no
@@ -471,12 +471,31 @@ pointers plugged in after boot are found (inotify on `/dev/input`).
   `up` of a press held at least `buttons.longPressMs` (1000), once, right
   after that `up`, with the same `durationMs`; nothing is
   delivered while a key is held, and a long press is not also a `press`.
+- **`triplePress`, only where a rule binds one** (since 2026.11.15,
+  `buttons.triplePressSince`). A key that a rule of the frame's event map or
+  of the showing scene's names a `triplePress` of (`match.action`, and the
+  rule fits the key: `input_state.tripleWanted`, asked by `event_loop.nim`)
+  holds its pair back: its second down is no `doublePress` yet. A third down
+  within `doublePressMs` (350) of the second `up` is the `triplePress`, at
+  once, and nothing more (no `press`, no `doublePress`, no `longPress`; a
+  fourth down starts over). When that window closes with no third down, the
+  pair is the `doublePress`, 350 ms after the second release; a second press
+  held at least `longPressMs` is the `doublePress` at its `up`, since no
+  third follows a hold. So binding three presses of a key costs that key's
+  double press 350 ms, and every other key is as fast as before: a key no
+  rule binds three times makes no `triplePress` and its third down starts
+  over. A scene cannot ask for one itself (a filter on an event node is not
+  a rule); a scene's map can. On the ESP32 the button task reads the
+  frame's map for those keys (`fos_voice_binding_triple_labels`) only to
+  sound the third down.
 
 A tap is therefore `gpio` `down`, `gpio` `up`, then `button` `press`; a
-double tap `down`, `up`, `down` with a `doublePress`, `up`; a 2.2 s hold
+double tap `down`, `up`, `down` with a `doublePress`, `up`; three taps of a
+key bound three times `down`, `up`, `down`, `up`, `down` with a
+`triplePress`, `up`; a 2.2 s hold
 `down`, then `up` and a `longPress` (`durationMs` 2200) together. **A `button`
-listener with no `action` filter hears every press, double press and long
-press**, once each: a scene that reacts to a button listens for `button` and
+listener with no `action` filter hears every press, double press, triple
+press and long press**, once each: a scene that reacts to a button listens for `button` and
 branches on `action` if it cares; one that must count every tap listens for
 `gpio` `down`. Producers until 2026.10.16 sent their edges as `button` (with
 `level`, as the action `down` / `up`, and before that named `press` /
@@ -485,8 +504,9 @@ branches on `action` if it cares; one that must count every tap listens for
 dispatcher still takes such a `button` as the `gpio` edge it is. Until
 2026.10.16 a `button` listener with no `action` filter heard `press` only.
 
-**A JSX UI takes the buttons as keys** (docs/jsx-ui.md "Keys"): a `press`
-or `doublePress` of a `next` / `down` key is Tab (once or twice), of `prev` /
+**A JSX UI takes the buttons as keys** (docs/jsx-ui.md "Keys"): a `press`,
+`doublePress` or `triplePress` of a `next` / `down` key is Tab (once, twice or
+three times), of `prev` /
 `up` Shift+Tab, of `primary` (and `refresh`) Enter and of `back` / `menu` Escape,
 over the elements
 its UI and its layout's have to press, unless the scene's own code took it
@@ -495,19 +515,24 @@ for it). A scene with nothing to press hears its buttons as before, and a long
 press is never a key.
 
 Each event has its sound on an ESP32 with a buzzer, at the instant it
-happens: a click on `down`, a lower one on every `up`, and a higher click
-for the second `down` of a `doublePress`. While a key is held a short falling pair sounds at every whole
+happens: a click on `down`, a lower one on every `up`, a higher click
+for the second `down` of a `doublePress`, and one an octave over the press
+for the third `down` of a `triplePress` (a key the frame's map binds three
+times; one only a scene's map binds clicks as a first press). While a key is held a short falling pair sounds at every whole
 second, counting the hold out loud; the scene's `longPress` still comes once,
 with the `up`. A `press` adds no sound: its clicks were the down and the up
 (`embedded/esp32/README.md`, "Button beep"). On e-paper a press on the glass
 that something takes clicks the same way, unless the frame's `touch_beep` is off.
+An `edgeSwipe` there is four quick clicks, the moment the finger has gone far
+enough to be one.
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's
 monotonic clock (the one the dispatcher's tick reads: `CLOCK_MONOTONIC` on
 Linux, `esp_timer` on the ESP32), on `down` and `up` and passed on to the
-`press` and `doublePress` they make. Every rule is timed from it: the hold
-from the `down`'s `atMs` to the `up`'s, the double-press window between an
-`up` and the next `down`, and the layer advances to an edge's time before the
+`press`, `doublePress` and `triplePress` they make. Every rule is timed from
+it: the hold from the `down`'s `atMs` to the `up`'s, the double-press window
+between an `up` and the next `down` (and the triple-press window, the same
+350 ms, between the second `up` and a third `down`), and the layer advances to an edge's time before the
 edge applies, never to the moment it was delivered. An ESP32 drains its button
 queue only between render passes, so a tap made during a 30 s refresh used to
 arrive as a 30 s hold; now it is a tap, two taps in that time a
@@ -526,11 +551,12 @@ Pi asks lgpio for 30 ms of steady level. Until 2026.10.16 they waited 80 ms and
 `embedded/pico`) has no dispatcher: its scene runs in the backend's wasm
 runtime, a fresh process per render pull. So the board keeps its edges, each
 with its `atMs` on the board's clock, and once every press they belong to is
-decided (no key down, no tap inside its window: the ESP32's rule, shared in
-`fos_button_timing.c`) sends them as the body of its next pull, `POST
+decided (no key down, no tap or pair inside its window: the ESP32's rule,
+shared in `fos_button_timing.c`, which waits out the window after every
+quick pair, since a rule it cannot see may bind a third press) sends them as the body of its next pull, `POST
 /api/frames/{id}/embedded/render`. The runtime delivers them as the
 `driver`'s, every `atMs` moved onto its own clock (`frameos/relayed_input.nim`),
-so the same `press`, `doublePress` and `longPress` come out of them before the
+so the same `press`, `doublePress`, `triplePress` and `longPress` come out of them before the
 render, and the backend writes what the scene heard into the frame's log. The
 Inky Frame's five buttons have no GPIO of their own (a shift register reads
 them): they are pin `-1`, labelled `A` to `E`.
@@ -563,7 +589,7 @@ Linux frames), and `buttons.roleByLabel` is the default for a button without
 one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `AI` primary, `KEY1` next,
 `LEFT` prev, `RIGHT` next, `OK` primary, `HOME` menu, `EXIT` back, …). `wake:
 true` marks the `down` that booted an ESP32 out of deep sleep, and the
-`press`, `doublePress` or `longPress` it becomes: that press is a press like
+`press`, `doublePress`, `triplePress` or `longPress` it becomes: that press is a press like
 any other, so holding the key that woke the frame is a long press and a quick
 second tap a double press. An ESP32 cannot see its keys while it boots (0.75
 s on an E1002), so the button task's first look decides the stamps: a key still down
@@ -721,7 +747,11 @@ the preview alike. There are two, applied in this order:
   panel's "Button actions"): what a button does on this frame, whatever scene
   is showing. A long press of LEFT is the previous scene and of RIGHT the next
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
-  firmware's board table), and the owner may add, change or clear it. A frame
+  firmware's board table), and the owner may add, change or clear it. The
+  reTerminal Sticky's one front key (AI) pressed once is the scene's (its
+  role is `primary`: Enter on a UI, the layout's refresh), twice `back`,
+  three times the scene switcher (a `triplePress` rule, so that key waits
+  for a third press) and held the voice chat. A frame
   never given one runs its device's: every HyperPixel (`pimoroni.hyperpixel*`)
   takes an edge swipe in from the left as `back`, from the right as
   `forward`, up from the bottom as the scene switcher and down from the top
@@ -775,7 +805,8 @@ came. A rule does one of two things:
   public fields set under the row (`state`, left out when none is: a field
   left alone keeps the scene's own), applied to that scene's public state as
   a schedule entry's are. On an ESP32 the whole map is compact JSON in a 1 KB
-  slot (`FOS_EVENT_MAP_LEN`), and those settings are what fills it: the
+  slot (`FOS_EVENT_MAP_LEN`), twelve rules at most (eight before 2026.11.15,
+  which the cloud keeps to for an older board), and those settings are what fills it: the
   section says so before a longer one is saved, which the cloud's frame
   refuses and a backend's ignores. The emitted event is a normal
   envelope: the allow-list is asked of `eventMap` like any origin, and what the

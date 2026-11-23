@@ -222,7 +222,7 @@ const CloudContractSettings* = @[
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.10.20"),
     ProfileSpec(profile: "esp32", since: "2026.10.20", hasRule: true, rule:
-      Rule(kind: rkArray, maxItems: 8, children: @[
+      Rule(kind: rkArray, maxItems: 12, children: @[
         Rule(kind: rkObject, required: @["event"], keys: @[
           KeyRule(name: "event", rule:
             Rule(kind: rkString, minLen: 1, maxLen: 63)),

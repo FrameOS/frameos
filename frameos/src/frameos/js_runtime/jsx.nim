@@ -265,6 +265,9 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     if at > 0:
       swap(node.attrs[0], node.attrs[at])
     node = node.role(look)
+    if look == "field":
+      # A tap anywhere on it is its text field's (ui/layout UiRegion.labelFor).
+      node.attrs.add(("look", look))
   into.add node
   if memoId >= 0:
     if memoId == 0:

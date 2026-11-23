@@ -63,7 +63,7 @@ def test_the_link_task_only_fetches():
     for applies in ("fos_scenes_sync(", "fos_settings_sync(", "fos_settings_apply(", "fos_commands_run(",
                     "fos_commands_sync(", "fos_scenes_apply_pending_selection(", "frameos_nim_render"):
         assert applies not in body, f"fos_client.c: the backend link task calls {applies}"
-    for fetches in ("fos_scenes_backend_fetch(", "fos_settings_fetch(false)", "fos_commands_fetch()",
+    for fetches in ("fos_scenes_backend_fetch(", "fos_settings_fetch(false)", "fos_commands_fetch(",
                     "push_image_state(", "frameos_nim_flush_logs()"):
         assert fetches in body, f"fos_client.c: the backend link task no longer does {fetches}"
     # Starts nothing unless the render task left the round trips to it.
@@ -76,11 +76,11 @@ def test_one_commands_answer_at_a_time_and_it_always_runs():
     only a look. So the link task pulls only into an empty mailbox, and the
     render task runs an answer it finds whatever the mode."""
     body = CLIENT["link_pull_commands"]
-    fetch = body.index("fos_commands_fetch()")
+    fetch = body.index("fos_commands_fetch(reporting)")
     assert "if (!slot_free) return false;" in body[:fetch] and "s_link_answer == NULL" in body, (
         "fos_client.c: the link task pulls commands over an answer that has not run"
     )
-    assert "fos_commands_fetch()" not in CLIENT["link_round"], "link_round pulls commands around the mailbox"
+    assert "fos_commands_fetch(" not in CLIENT["link_round"], "link_round pulls commands around the mailbox"
     sync = CLIENT["pass_commands_sync"]
     take = sync.index("link_take_answer()")
     assert take < sync.index("s_link_on"), "pass_commands_sync must run a pulled answer before asking the mode"
@@ -186,6 +186,53 @@ def test_one_scenes_fetch_at_a_time_and_a_fetched_set_is_named():
     assert commands.find("fos_client_take_link_payload()", sync) != -1
 
 
+def test_a_deploy_is_downloaded_with_the_pull_and_taken_before_the_commands():
+    """A deploy's pull answer says `sync`, and its set must be in before its
+    commands run: a switch queued behind a push names a scene from it (E1002,
+    2026-10-24). The render task used to download it right there, before the
+    commands: a 35-scene, 1.48 MB deploy froze a reTerminal Sticky's screen
+    and dropped its taps for 42 s (2026-11-23). The link task now downloads it
+    with the pull and hands the answer over with its set; the render task
+    takes that set (after one the poll fetched before it) and only then runs
+    the commands. Where each step runs is host-tested (fos_sync_plan)."""
+    commands = _functions(_strip_comments(COMMANDS_C.read_text()))
+    fetch = commands["fos_commands_fetch"]
+    pulled = fetch.index("pull()")
+    asked = fetch.index("fos_sync_fetch_with_pull(")
+    assert pulled < asked < fetch.index("fos_scenes_backend_fetch(true,") < fetch.index("return answer;")
+    assert "fos_settings_fetch(true)" in fetch
+    for applies in ("fos_scenes_sync(", "fos_scenes_take_backend_payload(", "fos_scenes_apply_pending",
+                    "fos_settings_sync(", "fos_settings_apply(", "run_command(", "run_answer("):
+        assert applies not in fetch, f"fos_commands.c: the link task's fetch calls {applies}"
+    run = commands["run_answer"]
+    plan = run.index("fos_sync_plan(")
+    taken = run.index("if (plan.take_fetched)")
+    slot = run.index("fos_client_take_link_payload()", taken)
+    own = run.index("fos_scenes_take_backend_payload(answer->scenes", taken)
+    first_command = run.index("run_command(command)")
+    assert plan < taken < slot < own < run.index("fos_scenes_apply_pending()", own) < first_command, (
+        "fos_commands.c: the commands run before the set fetched with the pull is in"
+    )
+    assert taken < run.index("fos_settings_apply(answer->settings)") < first_command
+    report = run.index("fos_client_request_report_pull()")
+    assert first_command < report and first_command < run.index("sync_pass(true)"), (
+        "the ETags of the set are reported before the commands ran"
+    )
+    # The link task polls no scenes or settings while such an answer waits or
+    # runs: it would name the poll's set, not the answer's, and fetch it again.
+    link = CLIENT["link_pull_commands"]
+    assert "fos_commands_answer_fetched(answer)" in link and "s_link_sync_running = true" in link
+    poll = CLIENT["link_round"]
+    assert "s_link_payload == NULL && !s_link_sync_running" in poll
+    assert "s_link_settings == NULL && !s_link_sync_running" in poll
+    pass_commands = CLIENT["pass_commands_sync"]
+    assert pass_commands.index("fos_commands_run(answer)") < pass_commands.index("s_link_sync_running = false")
+    # The report is the link task's pull, with `reporting` set: never a third.
+    assert "link_pull_commands(reporting)" in poll and "__atomic_exchange_n(&s_report_owed, false" in poll
+    assert "s_report_owed" in CLIENT["link_hand_back"]
+    assert "fos_client_link_on()" in run
+
+
 def test_the_render_task_uses_the_tested_rules():
     """The rules host-tested in test_fos_animation.c are the ones that run."""
     assert "fos_input_hold_applies(" in CLIENT["hold_applies"]
@@ -250,10 +297,11 @@ def test_settings_are_fetched_on_the_link_task_and_applied_on_the_render_task():
         assert applies not in fetch, f"fos_settings.c: the fetch half (any task) calls {applies}"
     assert "fos_settings_changed" not in (ESP32_DIR / "main" / "fos_settings.h").read_text()
     pass_settings = CLIENT["pass_settings_sync"]
-    assert pass_settings.index("s_link_settings") < pass_settings.index("s_link_on"), (
+    assert pass_settings.index("fos_client_take_link_settings()") < pass_settings.index("s_link_on"), (
         "pass_settings_sync must apply what the link task fetched before asking the mode"
     )
-    assert "fos_settings_apply(settings)" in pass_settings
+    take = CLIENT["fos_client_take_link_settings"]
+    assert take.index("s_link_settings = NULL") < take.index("fos_settings_apply(settings)")
 
 
 def test_a_commands_nudge_is_the_link_tasks_pull_while_it_has_the_round_trips():

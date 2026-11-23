@@ -221,6 +221,22 @@ bool fos_commands_nudge_to_link(bool link_on, bool pull_here)
     return link_on && !pull_here;
 }
 
+bool fos_sync_fetch_with_pull(bool sync, bool reporting)
+{
+    return sync && !reporting;
+}
+
+fos_sync_plan_t fos_sync_plan(bool sync, bool reporting, bool fetched_with_pull, bool link_on)
+{
+    fos_sync_plan_t plan = {0};
+    if (!sync || reporting) return plan;
+    plan.fetch_here = !fetched_with_pull;
+    plan.take_fetched = fetched_with_pull;
+    plan.report_on_link = link_on;
+    plan.report_here = !link_on;
+    return plan;
+}
+
 bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing)
 {
     return now_us < wait_until_us || panel_refreshing;

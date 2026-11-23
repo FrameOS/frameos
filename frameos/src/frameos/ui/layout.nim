@@ -23,8 +23,8 @@ from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
 import frameos/utils/qr
+import frameos/panel_shape
 when not defined(frameosEmbedded):
-  import frameos/panel_shape
   from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
@@ -54,6 +54,11 @@ type
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
     field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input, 4 a <select>
+    labelFor*: int
+      ## A `look="field"` box around one text field (its glyph, its padding):
+      ## that field's key + 1, so a tap anywhere on what looks like the field
+      ## is the field's, as an HTML <label> is (ui/events.hitAt). Under the
+      ## box's children; 0 for every other region.
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
     scene*: bool
       ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
@@ -228,6 +233,7 @@ type
     handlers: array[UiEvent, int]
     hover, active, group: bool
     field: uint8          # an <input>, a <textarea> or a <select> (UiRegion.field) ...
+    fieldBox: bool        # look="field": a tap on it is its one text field's (UiRegion.labelFor)
     value: string         # ... and its text
     keep: bool            # ukText: a field's text, its spaces kept as typed
     maxX, maxY: float32   # a box that clips: how much of it is out of sight ...
@@ -670,6 +676,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   let flags = classFlags(classes)
   result.pointer = flags.pointer
   result.key = key
+  result.fieldBox = n.attr("look") == "field"
   result.hover = flags.hover
   result.active = flags.active
   result.group = flags.group
@@ -2156,6 +2163,16 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
+    if n.fieldBox:
+      # The one text field inside, if one: the box answers for it where its
+      # children take nothing, so its region goes under theirs.
+      var only = -1
+      for i in firstRegion ..< regions.len:
+        if regions[i].field in 1'u8 .. 3'u8:
+          only = (if only == -1: i else: -2)
+      if only >= 0:
+        regions.insert(UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
+          labelFor: regions[only].key + 1), firstRegion)
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
     n.emittedAt = at
@@ -2340,8 +2357,8 @@ proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInp
     gap = 4'f32
     inner = 4'f32 # the box's padding, each way
     edge = 8'f32
-  # A round panel's corners are not there, and no ESP32 board is round.
-  let margin = when defined(frameosEmbedded): edge else: (if input.round: height / 8 else: edge)
+  # A round panel's corners are not there.
+  let margin = if input.round: height / 8 else: edge
   let
     options = anchor.src.children
     count = options.len
@@ -2414,15 +2431,14 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   var
     lo = edge
     hi = width - edge
-  when not defined(frameosEmbedded):
-    if input.round:
-      # Inside the circle at the row's edge farther from its centre.
-      let
-        radius = max(min(width, height) div 2 - RoundInset, 8)
-        dy = max(abs(y - height div 2), abs(y + popH - height div 2))
-        half = chordHalf(radius, dy) - edge
-      lo = max(lo, width div 2 - half)
-      hi = min(hi, width div 2 + half)
+  if input.round:
+    # Inside the circle at the row's edge farther from its centre.
+    let
+      radius = max(min(width, height) div 2 - RoundInset, 8)
+      dy = max(abs(y - height div 2), abs(y + popH - height div 2))
+      half = chordHalf(radius, dy) - edge
+    lo = max(lo, width div 2 - half)
+    hi = min(hi, width div 2 + half)
   let
     centre = int(r.x + r.w / 2)
     # A letter's row has its symbol right over the key and the rest in order
@@ -2545,13 +2561,12 @@ proc dockedKeys(input: var UiInput, regions: var seq[UiRegion]) =
     gradients = 0
   let kb = int(dock.h - dock.grip)
   emitBackdrop = rgba(0, 0, 0, 0)
-  when not defined(frameosEmbedded):
-    if dock.round:
-      # Rows on no band of their own: the panel under them is the keyboard's.
-      let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
-        ("height", $int(dock.frameH - dock.y))])
-      band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
-      drawn.add band
+  if dock.round:
+    # Rows on no band of their own: the panel under them is the keyboard's.
+    let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
+      ("height", $int(dock.frameH - dock.y))])
+    band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+    drawn.add band
   if dock.grip > 0:
     # A window's bar, in the keys' look: the interpreter drags it, so nothing
     # here hears it.

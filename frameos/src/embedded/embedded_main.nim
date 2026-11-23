@@ -19,7 +19,7 @@ import embedded_scene
 import embedded_runtime
 import frameos/scene_rhythm
 from frameos/apps import applyServiceSettings
-from frameos/panel_shape import boardPanelFormat
+from frameos/panel_shape import boardPanelFormat, boardPanelRound
 import frameos/utils/asset_colors
 import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
@@ -589,6 +589,7 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 # `except CatchableError` lets through. So these handlers catch `Exception`.
 proc displayPresent(): bool {.importc: "fos_display_present", cdecl.}
 proc displayFormat(): cint {.importc: "fos_display_format", cdecl.}
+proc displayRound(): bool {.importc: "fos_display_round", cdecl.}
 
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
     rotate: cint): bool {.exportc, cdecl.} =
@@ -602,6 +603,9 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   # look (panel_shape.nim): the canvas cannot say, an event has none and a
   # 13.3" color e-paper on 8 MB draws in RGB565 like an LCD.
   boardPanelFormat = if displayPresent(): displayFormat().int else: 0
+  # Only the circle inside the square shows (the Waveshare 1.75" AMOLED): the
+  # built-in scenes, the keyboard and the edge swipes keep inside it.
+  boardPanelRound = displayPresent() and displayRound()
   try:
     when defined(memProbe): memProbe("INIT start")
     armEmergencyReserve()
@@ -1078,12 +1082,24 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
   ## redraw; clears the flag.
   takeRenderRequested()
 
-proc fos_nim_press_taken_impl(wireX, wireY: cint): bool {.exportc, cdecl.} =
-  ## Whether something on the frame takes a press at this position on the glass.
+proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr UncheckedArray[uint8];
+                            maxEntries: cint): cint {.exportc, cdecl.} =
+  ## The press map after a render (embedded_runtime.panelPressMapNow) into the
+  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, in `taken` 1 or 0, and
+  ## 2 on the frame's keyboard (taken, and never an edge swipe).
+  ## How many entries, -1 when it could not be made.
   try:
-    pressTaken(wireX.int, wireY.int)
+    var count = 0
+    for entry in panelPressMapNow(maxEntries.int):
+      boxes[4 * count] = uint16(clamp(entry.x0, 0, 0xFFFF))
+      boxes[4 * count + 1] = uint16(clamp(entry.y0, 0, 0xFFFF))
+      boxes[4 * count + 2] = uint16(clamp(entry.x1, 0, 0xFFFF))
+      boxes[4 * count + 3] = uint16(clamp(entry.y1, 0, 0xFFFF))
+      taken[count] = if entry.keys: 2'u8 elif entry.taken: 1'u8 else: 0'u8
+      count += 1
+    count.cint
   except Exception:
-    false
+    -1
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):

@@ -58,6 +58,8 @@ idf_component_register(
         "oled_ssd1306.c"
         "it8951.c"
         "lcd_st7701s_rgb.c"
+        "lcd_qspi_amoled.c"
+        "lcd_qspi_box.c"
         "lcd_splash.c"
         "lcd_loading.c"
         "${FRAMEOS_GENERATED_DIR}/frameos_panel_table.c"
@@ -66,7 +68,7 @@ idf_component_register(
         "include"
         "${FRAMEOS_GENERATED_DIR}"
         "${FRAMEOS_VENDOR_DIR}"
-    PRIV_REQUIRES driver esp_timer esp_lcd esp_driver_i2c esp_driver_gpio
+    PRIV_REQUIRES driver esp_timer esp_lcd esp_driver_i2c esp_driver_gpio esp_driver_spi
 )
 
 if(NOT CMAKE_SCRIPT_MODE_FILE AND vendor_srcs)

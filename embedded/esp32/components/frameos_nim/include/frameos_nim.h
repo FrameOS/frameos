@@ -246,8 +246,15 @@ bool frameos_nim_scene_awaited(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
-/* Whether something on the frame takes a press at this glass position (0..32767). */
-bool frameos_nim_press_taken(int wire_x, int wire_y);
+/* Keep the press map of every render (true: a board with touch, from
+ * fos_touch_start), so that frameos_nim_press_map_takes can answer. */
+void frameos_nim_keep_press_map(bool keep);
+/* Whether a press at panel pixel (x, y) lands on something the picture the
+ * last render drew does something with: 1 taken, 2 taken by the frame's
+ * keyboard (a key: never an edge swipe), 0 not, -1 no map (none
+ * kept, or no render yet). No lock, any task: the touch task's click
+ * (docs/server-rendering.md "The click"). */
+int frameos_nim_press_map_takes(int x, int y);
 /* Time passing for the dispatcher's input state (a held button is a
  * `longPress` at every whole second, a short press whose double-press window
  * closed a `press`): true when it made an event, in which case the

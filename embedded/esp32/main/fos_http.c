@@ -38,6 +38,7 @@
 #include "fos_charger.h"
 #include "fos_codec.h"
 #include "fos_gauge.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
@@ -709,7 +710,7 @@ char *fos_http_status_json(void)
         "\"charger\":{\"present\":%s,\"usbPower\":%s,\"charging\":%s,\"chargeDone\":%s},"
         "\"led\":{\"pin\":%d,\"type\":\"%s\"},"
         "\"i2c\":{\"buses\":\"%s\",\"rtc\":%s,\"rtcTimeLoaded\":%s,\"climateSensor\":%s,"
-        "\"gauge\":%s,\"touch\":%s,\"codecMic\":%s,\"codecSpeaker\":%s},"
+        "\"gauge\":%s,\"touch\":%s,\"codecMic\":%s,\"codecSpeaker\":%s,\"imu\":%s},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -753,6 +754,7 @@ char *fos_http_status_json(void)
         fos_rtc_time_loaded() ? "true" : "false", fos_i2c_present(FOS_I2C_SHT4X) ? "true" : "false",
         fos_gauge_present() ? "true" : "false", fos_touch_present() ? "true" : "false",
         fos_codec_has_mic() ? "true" : "false", fos_codec_has_speaker() ? "true" : "false",
+        fos_imu_present() ? "true" : "false",
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,

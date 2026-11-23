@@ -32,8 +32,7 @@ import frameos/scene_icon
 import frameos/ui/events as ui_events
 from frameos/ui/layout import frameKeyboard, KeyboardDock
 from frameos/ui/keyboard import keyboardHeight, keyboardBox
-when not defined(frameosEmbedded):
-  from frameos/panel_shape import panelIsRound
+from frameos/panel_shape import panelIsRound
 when not defined(frameosEmbedded):
   import frameos/cursor_shape
   export cursor_shape
@@ -2215,6 +2214,7 @@ type PressRect* = object
   ## whether a press there is taken. The first entry a press lands in answers.
   box*: array[4, float32]
   taken*: bool
+  keys*: bool ## the frame's keyboard: a press there is a key, never an edge swipe
 
 proc clipped(box, clip: array[4, float32]): array[4, float32] =
   [max(box[0], clip[0]), max(box[1], clip[1]), min(box[2], clip[2]), min(box[3], clip[3])]
@@ -2256,7 +2256,7 @@ proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   var all: seq[PressRect]
   for box in keysShown:
     if box[2] > 0:
-      all.add PressRect(box: [box[0], box[1], box[0] + box[2], box[1] + box[3]], taken: true)
+      all.add PressRect(box: [box[0], box[1], box[0] + box[2], box[1] + box[3]], taken: true, keys: true)
   pressMapIn(scene, 0, 0, [0'f32, 0, width.float32, height.float32], nil, 0, all)
   for entry in all:
     var said = true
@@ -2270,6 +2270,51 @@ proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   # A press that lands in nothing is not taken: untaken entries at the end say nothing.
   while result.len > 0 and not result[^1].taken:
     result.setLen(result.len - 1)
+
+type PanelPressRect* = object
+  ## A press map entry on the panel: whole pixels, x1 and y1 past the last.
+  x0*, y0*, x1*, y1*: int
+  taken*: bool
+  keys*: bool ## the frame's keyboard (PressRect.keys)
+
+proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: string;
+                    maxEntries: int): seq[PanelPressRect] =
+  ## pressMap on the panel's pixels, the canvas turned back by the frame's
+  ## rotation and flip (utils/image panelToScenePoint the other way round),
+  ## cut at `maxEntries`: a press past the cut is not clicked at, nothing
+  ## worse. What a plane sends a board with its picture
+  ## (wasm_main frameos_wasm_press_map) and what an ESP32 that runs its scene
+  ## keeps after every render for its touch task (embedded_main
+  ## fos_nim_press_map_impl): both click at a press without asking anyone.
+  let
+    turn = ((rotate mod 360) + 360) mod 360
+    turned = turn in [90, 270]
+    panelW = if turned: canvasH else: canvasW
+    panelH = if turned: canvasW else: canvasH
+  proc down(v: float32): int = int(v)
+  proc up(v: float32): int =
+    result = int(v)
+    if result.float32 < v: result += 1
+  for entry in pressMap(scene, canvasW, canvasH):
+    if result.len == maxEntries:
+      break
+    var
+      x0 = clamp(down(entry.box[0]), 0, canvasW)
+      y0 = clamp(down(entry.box[1]), 0, canvasH)
+      x1 = clamp(up(entry.box[2]), 0, canvasW)
+      y1 = clamp(up(entry.box[3]), 0, canvasH)
+    if x1 <= x0 or y1 <= y0:
+      continue
+    if flip in ["horizontal", "both"]:
+      (x0, x1) = (canvasW - x1, canvasW - x0)
+    if flip in ["vertical", "both"]:
+      (y0, y1) = (canvasH - y1, canvasH - y0)
+    let (px0, py0, px1, py1) = case turn
+      of 90: (panelW - y1, x0, panelW - y0, x1)
+      of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
+      of 270: (y0, panelH - x1, y1, panelH - x0)
+      else: (x0, y0, x1, y1)
+    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken, keys: entry.keys)
 
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns
@@ -2458,8 +2503,7 @@ proc placeKeys(self, layout: FrameScene, canvas: Image): int =
     k.sceneId = owner
     k.frameW = w
     k.frameH = h
-    when not defined(frameosEmbedded):
-      k.round = not floating and panelIsRound(self.frameConfig.device)
+    k.round = not floating and panelIsRound(self.frameConfig.device)
     if floating:
       let rows = keyboardHeight(int(h / scale)).float32 * scale
       k.grip = round(clamp(rows / scale / 10, 12, 24)) * scale
@@ -2560,8 +2604,13 @@ proc keysTake(self, layout: FrameScene, context: ExecutionContext): bool =
   else:
     # A built-in scene's form: its own run hit-tests it.
     rhythmMarkDue(owner)
-    owner.ownRun(owner, ExecutionContext(scene: owner, event: event, payload: inner, parent: context,
-      loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1))
+    # The context first: built in the call, its `scene: owner` was the last
+    # use of `owner`, which ORC moved into it before `owner.ownRun` was read
+    # through the emptied variable (a nil load: every key on the scene
+    # settings' keyboard rebooted an ESP32, 2026-11-23).
+    let run = ExecutionContext(scene: owner, event: event, payload: inner, parent: context,
+      loopIndex: context.loopIndex, loopKey: context.loopKey, nextSleep: -1)
+    owner.ownRun(owner, run)
   true
 
 {.pop.}

@@ -113,8 +113,8 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `clock` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), `awakeAfterInputSeconds` (0 to 3600: only on a frame that deep-sleeps), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
@@ -158,6 +158,12 @@ What the page holds, top to bottom:
   no restart; NVS `click_sounds`, default normal; the console's `set
   click_sounds silent|normal`. A plane's `touch_beep` (e-paper touch clicks)
   still works as it did, under it.
+- **Stay awake after a press or tap** (an ESP32 that deep-sleeps: `deep_sleep`
+  or `deep_sleep_on_battery`): how long a press or a tap keeps it up before it
+  sleeps again, the web app's Power choices (Sleep as soon as it can, 1, 5, 10,
+  30 minutes; `AwakeAfterInput` in the scene) and the frame's own value when
+  it is none of them. Live, no restart; NVS `awake_input`, default 300 s; the
+  console's `set awake_input <seconds>`.
 - **Date and time** (an ESP32): the frame's clock in its own time zone, as
   YYYY-MM-DD HH:MM. Saved to the system clock and the board's battery clock
   where it has one. A frame that reaches the internet goes back to network time
@@ -237,6 +243,12 @@ was off can still be fixed at the frame, the device has the last word:
   mirror. The planes set it the other way as `clickSounds` (a backend's
   settings pull) and `click_sounds` (the cloud's `set_settings`), `silent` or
   `normal`; a name the firmware does not know is normal.
+- **Stay awake after a press or tap: the plane adopts it** the same way: the
+  `settings:frame` line carries `"awakeAfterInputSeconds": 60`, and the
+  hardware report `hardware.awakeAfterInputSeconds`. A backend keeps it in the
+  row's `device_config` (`awakeAfterInputSeconds`, which its settings pull
+  sends back), the cloud as `awake_after_input_seconds`; 300 is the default
+  neither writes.
 - **Flashing an ESP32 again** erases its network, and the browser flasher sends
   the plane's stored one (the backend's Network settings).
 
@@ -289,14 +301,17 @@ gets a dark form that shows presses; e-paper black on white, no press shown
 A scene with no field to show says so: "This scene has no settings."
 
 **A round panel** (`frameos/panel_shape.nim` `panelIsRound`: the HyperPixel
-2.1" Round) keeps the form inside its circle, `RoundInset` (12 px) in from
-the rim, as the switcher does: the scene's name in the top arc, Cancel and
-Save centred under it, and the list as wide as the circle is where the list
+2.1" Round, the Waveshare ESP32-S3-Touch-AMOLED-1.75) keeps the form inside
+its circle, `RoundInset` (12 px) in from the rim, as the switcher does: the
+scene's name in the top arc, Cancel and Save centred under it with the gear
+between them where the host offers the frame page, and the list as wide as the circle is where the list
 ends (as far below the centre as it starts above it). With the keyboard up
 it sits on the circle's lower half (`docs/jsx-ui.md`), the name makes way
 for the buttons, and the list ends above the keys. `test_scene.nim` checks
-every hit region and every pixel drawn, the keyboard down and up. No ESP32
-board is round: the firmware carries the rectangular form alone.
+every hit region and every pixel drawn, the keyboard down and up. The frame
+page there is the square panel's page laid out in the square inside the
+circle (cut short above the keyboard while it is up): a round touch board
+joins Wi-Fi on it like any other touch board.
 
 ## The scene
 

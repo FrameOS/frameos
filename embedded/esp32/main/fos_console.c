@@ -34,6 +34,7 @@
 #include "fos_charger.h"
 #include "fos_codec.h"
 #include "fos_gauge.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "lcd_st7701s_rgb.h"
 #include "esp_private/esp_clk.h"
@@ -254,6 +255,15 @@ static int cmd_status(int argc, char **argv)
         printf("\n");
     } else {
         printf("buttons:     (none configured)\n");
+    }
+    {
+        /* The board's own keys on its IO expander (fos_board_expander_keys). */
+        fos_board_key_t keys[4];
+        size_t key_count = fos_board_expander_keys(config->hardware_preset, keys, 4);
+        for (size_t i = 0; i < key_count; i++) {
+            printf("%s%s (IO expander P%d)", i ? ", " : "board_keys:  ", keys[i].label, keys[i].pin);
+        }
+        if (key_count) printf("\n");
     }
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
@@ -743,6 +753,17 @@ static int cmd_set(int argc, char **argv)
              * (fos_board_touch_pins); the microSD slot on its own SPI bus
              * (fos_board_sd_pins). USB is a CH340 on UART0. */
             { "sunton_esp32_8048s070", "LCD_EK9716_800x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT",
+              -1, 2.0f, -1, 0, 0 },
+            /* Waveshare ESP32-S3-Touch-AMOLED-1.75 (and its -B, the same
+             * board in a case; ESP32-S3R8, 16 MB flash): the round 466x466
+             * CO5300 AMOLED on QSPI, its wiring the driver's own board
+             * table (lcd_qspi_amoled.c), so no EPD pins; BOOT on GPIO0 and
+             * the PWR key on the IO expander's P4 (fos_board_expander_keys).
+             * Touch, the codec, the clock, the SD slot and the bus come
+             * from fos_board.c; the battery is the AXP2101's gauge. */
+            { "waveshare_esp32_s3_touch_amoled_1_75", "AMOLED_CO5300_466x466",
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT",
               -1, 2.0f, -1, 0, 0 },
@@ -2085,6 +2106,24 @@ static void print_utc(const char *label, time_t t)
 /* `i2c [sync]`: probe the configured buses again and say what answered,
  * with the clock's and the charger's readings. `sync` writes the system
  * time to the clock first (what an SNTP sync does) and says how it went. */
+static int cmd_imu(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    int x = 0, y = 0, z = 0;
+    if (!fos_imu_present()) {
+        printf("imu: none\n");
+        return 1;
+    }
+    esp_err_t err = fos_imu_read(&x, &y, &z);
+    if (err != ESP_OK) {
+        printf("imu: read failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    printf("imu: qmi8658 x=%d y=%d z=%d mg\n", x, y, z);
+    return 0;
+}
+
 static int cmd_i2c(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -2258,6 +2297,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
+        {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
         {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
         {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},

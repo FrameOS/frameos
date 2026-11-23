@@ -708,11 +708,49 @@ def test_embedded_hardware_preset_for_sunton_esp32_8048s070():
     assert "touch_pins" not in settings
 
 
+def test_embedded_hardware_preset_for_waveshare_esp32_s3_touch_amoled_1_75():
+    frame = Frame(id=17, embedded={"hardwarePreset": "waveshare_esp32_s3_touch_amoled_1_75"})
+    ensure_embedded_frame_defaults(frame)
+    # The round 1.75" 466x466 AMOLED on QSPI: 16-bit colour, rendered
+    # on-device on the S3R8's 8 MB (16 MB of flash).
+    assert frame.device == "amoled.co5300_466x466"
+    assert embedded_panel_for_frame(frame) == "AMOLED_CO5300_466x466"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "16MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("AMOLED_CO5300_466x466") == FOS_PIXEL_RGB565
+    # The glass's wiring is the QSPI driver's own board table: no EPD pins.
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    # BOOT is the one GPIO key; PWR sits on the IO expander and is the
+    # firmware's own (fos_board_expander_keys), so only the map names it.
+    assert embedded_gpio_buttons_for_frame(frame) == [(0, "BOOT")]
+    assert frame.event_map[:3] == [
+        {"event": "button", "match": {"label": "PWR", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "PWR", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "button", "match": {"label": "BOOT", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    ]
+    assert [rule["event"] for rule in frame.event_map[3:]] == ["edgeSwipe"] * 4
+    assert "batteryPin" not in frame.device_config
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "AMOLED_CO5300_466x466"
+    assert settings["gpio_buttons"] == "0:BOOT"
+    # The touch panel, the codec and the bus are the board's own (fos_board.c).
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["waveshare_esp32_s3_touch_amoled_1_75"]
+    assert preset["touchPins"] == "sda=15,scl=14,int=11,rst=40,en=-1"
+    assert preset["codecPins"] == "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46"
+    assert preset["i2cBuses"] == "sda=15,scl=14"
+    assert "touch_pins" not in settings
+
+
 def test_embedded_panel_for_lcd_device_without_preset():
     frame = Frame(id=14, device="lcd.st7701s_480x480", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
     frame = Frame(id=16, device="lcd.ek9716_800x480", embedded={"platform": "esp32-s3"})
     assert embedded_panel_for_frame(frame) == "LCD_EK9716_800x480"
+    frame = Frame(id=18, device="amoled.co5300_466x466", embedded={"platform": "esp32-s3"})
+    assert embedded_panel_for_frame(frame) == "AMOLED_CO5300_466x466"
 
 
 def test_embedded_hardware_preset_for_trmnl_bwry():
@@ -781,19 +819,25 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
         "busy": 18, "sck": 13, "mosi": 14, "pwr": 47,
     }
-    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes, AI
-    # held talks (docs/voice-chat.md).
+    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes. The
+    # AI key pressed once is the scene's, twice back, three times the scene
+    # list, held it talks (docs/voice-chat.md).
     assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
     assert [rule["emit"] for rule in frame.event_map] == [
         "setCurrentScene",
         "setCurrentScene",
+        "back",
+        "sceneSwitcher",
         "voiceChat",
         "forward",
         "back",
         "sceneSwitcher",
         "sceneSettings",
     ]
-    assert frame.event_map[2]["match"] == {"label": "AI", "action": "longPress"}
+    assert frame.event_map[2]["match"] == {"label": "AI", "action": "doublePress"}
+    assert frame.event_map[3]["match"] == {"label": "AI", "action": "triplePress"}
+    assert frame.event_map[4]["match"] == {"label": "AI", "action": "longPress"}
+    assert not any(rule["match"] == {"label": "AI", "action": "press"} for rule in frame.event_map)
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48
     assert frame.device_config["buzzerToneHz"] == 4000

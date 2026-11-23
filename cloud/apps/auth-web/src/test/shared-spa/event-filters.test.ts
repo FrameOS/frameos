@@ -45,7 +45,7 @@ describe("event node filters", () => {
     const action = eventFilterControl("button", fields.find((f) => f.name === "action")!);
     expect(action.kind === "select" && action.options.map((o) => o.value)).toEqual(["", ...buttonActions]);
     // What the person meant is `button`; the line's own down and up are `gpio`.
-    expect(buttonActions).toEqual(["press", "doublePress", "longPress"]);
+    expect(buttonActions).toEqual(["press", "doublePress", "triplePress", "longPress"]);
     const edge = eventFilterControl("gpio", fieldsOf("gpio").find((f) => f.name === "action")!);
     expect(edge.kind === "select" && edge.options.map((o) => o.value)).toEqual(["", ...gpioActions]);
     expect(gpioActions).toEqual(["down", "up"]);

@@ -86,6 +86,21 @@ bool fos_panel_notice_box(const fos_panel_surface_t *s, const char *text, int sc
 void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
                            const char *text);
 
+/* The deep sleep mark: a crescent moon with a "z", black on a white tile
+ * with a black border, in the scene's top-right corner, sized to the
+ * panel's shorter side (32 px on a 480 px one). Drawn over the last picture
+ * as a frame goes to sleep (fos_client.c), so someone at the frame sees it
+ * is asleep, not frozen; the first render after the wake draws over it.
+ * Fills `box` (may be NULL) with where it went. False when the surface is
+ * too small for it. */
+bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_t *box);
+/* The same tile while a sleeping frame wakes to a tap or a key: a loading
+ * ring of eight dots, `frame` the leading one (any int, taken mod 8), drawn
+ * over the moon until the scene's first picture (fos_client.c, once: every
+ * partial update after a deep sleep greys the picture around it). Same placement and
+ * size as the sleep mark; false when that does not fit. */
+bool fos_panel_draw_wake_mark(const fos_panel_surface_t *s, int frame, fos_panel_code_box_t *box);
+
 #ifdef __cplusplus
 }
 #endif

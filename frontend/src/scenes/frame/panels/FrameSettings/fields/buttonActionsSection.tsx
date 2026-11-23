@@ -31,6 +31,7 @@ import {
   frameSupportsBackForward,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
+  frameSupportsTriplePress,
   gestureCanVoiceChat,
   parseFrameActionValue,
   parseFrameGestureValue,
@@ -177,7 +178,8 @@ export function ButtonActionsSection(): JSX.Element {
   const { bindings, others } = frameBindings(rules)
   // A touch screen's rows include the swipes in from its edges.
   const touch = frameOffersEdgeGestures(frame.hardware?.touch, device, [...rules, ...(reported ?? [])])
-  const gestures: FrameGesture[] = [...buttonGestures(buttons), ...(touch ? edgeGestures() : [])]
+  const triplePress = frameSupportsTriplePress(frame.frameos_version, cloudProfile)
+  const gestures: FrameGesture[] = [...buttonGestures(buttons, { triplePress }), ...(touch ? edgeGestures() : [])]
   // What this frame can do with a press: Display on / off only where the
   // device switches the panel (not e-paper), Voice chat only on a frame with a
   // microphone, and then for a long press alone, the scene switcher from the
