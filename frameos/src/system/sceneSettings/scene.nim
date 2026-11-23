@@ -262,6 +262,12 @@ const ClickSounds = [("silent", "Silent"), ("normal", "Normal")]
   ## fos_config.h keeps them as FOS_CLICK_SOUNDS_*): a new mode is one more
   ## entry here and its name on the host.
 
+const AwakeAfterInput = [("0", "Sleep as soon as it can"), ("60", "1 minute"), ("300", "5 minutes"),
+                         ("600", "10 minutes"), ("1800", "30 minutes")]
+  ## How long a tap keeps a deep-sleeping frame up, in seconds: the web app's
+  ## Power choices (PowerSettingsFields.tsx), with the frame's own value
+  ## added when it is none of them.
+
 proc scaleLabel(scale: string): string =
   scale & "\xc3\x97"
 
@@ -388,6 +394,20 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(value, label)
     sounds.put("options", options)
     result.elems.add sounds
+  if not info{"awakeAfterInputSeconds"}.isNil:
+    # Only a frame that deep-sleeps: the host says so by handing it over.
+    var awake = field("awakeAfterInputSeconds", "Stay awake after a press or tap", "integer")
+    options = newJArray()
+    let seconds = $info{"awakeAfterInputSeconds"}.getInt(300)
+    var listed = false
+    for (value, label) in AwakeAfterInput:
+      options.elems.add option(value, label)
+      if value == seconds:
+        listed = true
+    if not listed:
+      options.elems.add option(seconds, seconds & " seconds")
+    awake.put("options", options)
+    result.elems.add awake
   if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")

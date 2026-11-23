@@ -525,6 +525,9 @@ static void add_hardware_json(cJSON *parent)
      * offer the setting only then. */
     cJSON_AddBoolToObject(hw, "sounds", fos_buzzer_sounds());
     cJSON_AddStringToObject(hw, "clickSounds", fos_config_click_sounds_name(config->click_sounds));
+    /* How long a tap keeps a deep-sleeping frame up, set on its screen too:
+     * the cloud's mirror follows it (frames.ts reportedFrameSettings). */
+    cJSON_AddNumberToObject(hw, "awakeAfterInputSeconds", (double)config->awake_after_input_sec);
     /* The clock setting and the clock it gave (main.c, at boot). */
     cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
     cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));

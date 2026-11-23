@@ -4,9 +4,11 @@
  * Boot: NVS config → display select → Wi-Fi (STA, or captive-portal
  * provisioning when unconfigured) → SNTP → HTTP server + render loop
  * (Nim runtime on-device, or thin client fetching backend bitmaps) → OTA.
- * A touch LCD (the SenseCAP Indicator) does not wait for Wi-Fi and has no
- * portal: it joins in the background and is set up on its own screen
- * (the settings panel's Frame tab, fos_frame_settings.c).
+ * A touch board (an LCD like the SenseCAP Indicator, or a fast e-paper like
+ * the reTerminal Sticky) does not wait for Wi-Fi and has no portal: it draws
+ * first, joins in the background and is set up on its own screen (the
+ * settings panel's Frame tab, fos_frame_settings.c). A sleeping e-paper
+ * board's timer wake still waits for the network.
  *
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
@@ -28,6 +30,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -399,7 +402,7 @@ static void on_portal_exit(void)
     online_steps(SNTP_TIMEOUT_MS);
 }
 
-/* A touch LCD's boot went on without Wi-Fi (app_main, touch_setup): the
+/* A touch board's boot went on without Wi-Fi (app_main, touch_setup): the
  * steps an online boot takes before its first render, run the first time the
  * station gets an address. Later addresses (a lost link back) need none. */
 static bool s_online_steps_done = false;
@@ -408,7 +411,8 @@ static void on_wifi_online(void)
 {
     if (__atomic_exchange_n(&s_online_steps_done, true, __ATOMIC_SEQ_CST)) return;
     ESP_LOGI(TAG, "Wi-Fi up after boot (%s)", fos_wifi_ip());
-    /* An LCD renders without the clock and again when it comes. */
+    /* It rendered without the clock (an LCD; e-paper has a clock chip or
+     * the time a deep sleep kept) and renders again when it comes. */
     fos_wifi_set_late_time_hook(action_render_now);
     online_steps(0);
 }
@@ -586,6 +590,7 @@ void app_main(void)
         fos_assets_cleanup_stale_uploads();
     }
     boot_splash_start();
+    fos_client_wake_mark_begin();
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
      * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
@@ -649,10 +654,18 @@ void app_main(void)
     scene_state_write_behind();
     frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
-    /* A touch LCD is set up on its own screen, so it neither waits for
+    /* A touch board is set up on its own screen, so it neither waits for
      * Wi-Fi nor opens a hotspot: the settings panel (a swipe down from the
-     * top) has the network, and the frame joins it in the background. */
-    bool touch_setup = fos_touch_present() && fos_display_is_lcd();
+     * top) has the network, and the frame joins it in the background while
+     * its first picture is drawn. Every touch panel is a fast one (an LCD,
+     * or e-paper with a partial waveform: the reTerminal Sticky and E1003),
+     * and a tap that woke a sleeping Sticky waited ~11 s for Wi-Fi before the
+     * scene even started (2026-11-23). A sleeping e-paper board's timer wake
+     * is nobody's tap: it waits for the network as a classic panel does, so
+     * the one picture it draws before sleeping again has its data. */
+    bool woke_by_timer = esp_reset_reason() == ESP_RST_DEEPSLEEP &&
+                         esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+    bool touch_setup = fos_touch_present() && (fos_display_is_lcd() || !woke_by_timer);
     fos_frame_settings_init();
     fos_store_init();
     fos_code_init();
@@ -731,6 +744,7 @@ void app_main(void)
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
     boot_splash_wait();
+    fos_client_set_render_first(touch_setup);
     fos_client_start();
 
     BOOTMEM("after-client-start");

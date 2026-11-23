@@ -682,6 +682,9 @@ const reportedFrameSettings: ReadonlyArray<readonly [string, string, unknown]> =
   ["renderScale", "render_scale", 0],
   // The sounds of a tap and a press (2026.11.15), set on the frame page too.
   ["clickSounds", "click_sounds", "normal"],
+  // How long a tap keeps a deep-sleeping ESP32 up, set on the frame page too
+  // (the firmware's default, 300 s).
+  ["awakeAfterInputSeconds", "awake_after_input_seconds", 300],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is

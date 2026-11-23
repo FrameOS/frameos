@@ -930,6 +930,62 @@ block the_frame_page_offers_tap_and_click_sounds:
   frameSettingsApply = nil
   echo "tap and click sounds ok"
 
+block the_frame_page_offers_how_long_a_tap_keeps_it_awake:
+  var
+    applied: seq[JsonNode]
+    awake = %300
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.14"}
+      if not awake.isNil:
+        result["awakeAfterInputSeconds"] = awake
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  proc boxes(): seq[UiRegion] = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)
+  proc optionShown(i: int): bool =
+    uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == OptionBase + i + 1)
+  proc openLast() =
+    discard scene.draw()
+    scene.scrollToEnd()
+    discard scene.draw()
+    scene.tap(boxes()[^1])
+    discard scene.draw()
+  # A frame that deep-sleeps: the last select is the time awake, its five
+  # choices (5 minutes held: no sixth).
+  discard scene.draw()
+  scene.scrollToEnd()
+  if previews.len > 0: scene.draw().writeFile(previews / "frame-awake.png")
+  openLast()
+  if previews.len > 0: scene.draw().writeFile(previews / "frame-awake-open.png")
+  doAssert optionShown(4) and not optionShown(5), "five choices for 300 s"
+  scene.send("tap", tapAt(470, 5))
+  # A value of its own (45 s from the console) is a sixth.
+  awake = %45
+  openLast()
+  doAssert optionShown(5) and not optionShown(6), "45 s added as a sixth choice"
+  scene.send("tap", tapAt(470, 5))
+  # A frame that never sleeps has no such row: the last select is the
+  # scale's, seven or more.
+  awake = nil
+  openLast()
+  doAssert optionShown(6), "no time-awake select on a frame that does not sleep"
+  scene.send("tap", tapAt(470, 5))
+  awake = %300
+  # Sleep as soon as it can, the first choice, and Save hands the seconds over.
+  openLast()
+  scene.tap(regionWith(OptionBase + 0))
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0] == %*{"awakeAfterInputSeconds": 0}, $applied
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  echo "time awake after a tap ok"
+
 block a_layout_theme:
   # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its
   # colors, Cancel as boxes inside each other that take its press as a whole.

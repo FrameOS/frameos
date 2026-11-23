@@ -157,6 +157,12 @@ char *fos_frame_settings_json(void)
     if (fos_buzzer_sounds()) {
         put_pair(&out, "clickSounds", fos_config_click_sounds_name(config->click_sounds));
     }
+    /* A frame that deep-sleeps offers how long a tap keeps it up; the page
+     * has the words. */
+    if (config->deep_sleep || config->deep_sleep_on_battery) {
+        snprintf(line, sizeof(line), ",\"awakeAfterInputSeconds\":%lu", (unsigned long)config->awake_after_input_sec);
+        put(&out, line);
+    }
     int battery = fos_client_battery_percent();
     if (battery >= 0) {
         snprintf(line, sizeof(line), ",\"battery\":{\"percent\":%d}", battery);
@@ -202,7 +208,7 @@ static void restart_task(void *arg)
 /* One `settings:frame` line for what was saved, with the values a control
  * plane adopts (a backend reads it from the log, app/models/log.py; the cloud
  * follows the hardware report instead). Never the network's name. */
-static void log_applied(const char *changes, bool rotate, bool scale, bool sounds)
+static void log_applied(const char *changes, bool rotate, bool scale, bool sounds, bool awake)
 {
     const fos_config_t *config = fos_config();
     char line[288];
@@ -218,6 +224,10 @@ static void log_applied(const char *changes, bool rotate, bool scale, bool sound
         n += snprintf(line + n, sizeof(line) - n, ",\"clickSounds\":\"%s\"",
                       fos_config_click_sounds_name(config->click_sounds));
     }
+    if (awake && n > 0 && n < (int)sizeof(line)) {
+        n += snprintf(line + n, sizeof(line) - n, ",\"awakeAfterInputSeconds\":%lu",
+                      (unsigned long)config->awake_after_input_sec);
+    }
     if (n > 0 && n < (int)sizeof(line) - 1) strlcat(line, "}", sizeof(line));
     frameos_nim_log_hook(line);
 }
@@ -231,7 +241,7 @@ void fos_frame_settings_apply(const char *json)
     }
     fos_config_t *config = fos_config();
     bool wifi = false, restart = false, scale = false;
-    char changes[64] = "";
+    char changes[96] = "";
     s_refused[0] = '\0';
 
     const cJSON *ssid = cJSON_GetObjectItem(root, "wifiSsid");
@@ -288,6 +298,15 @@ void fos_frame_settings_apply(const char *json)
         config->click_sounds = mode;
         sounds = true;
     }
+    /* How long a tap keeps a deep-sleeping frame up: live (fos_client.c reads
+     * it every pass), adopted by the planes like the sounds. */
+    const cJSON *awake_after = cJSON_GetObjectItem(root, "awakeAfterInputSeconds");
+    bool awake = false;
+    if (cJSON_IsNumber(awake_after) && awake_after->valuedouble >= 0 && awake_after->valuedouble <= 3600 &&
+        (uint32_t)awake_after->valuedouble != config->awake_after_input_sec) {
+        config->awake_after_input_sec = (uint32_t)awake_after->valuedouble;
+        awake = true;
+    }
     /* The clock, in the frame's own time zone, and on the board's battery
      * clock too so the next cold boot starts right. */
     const cJSON *clock_text = cJSON_GetObjectItem(root, "clock");
@@ -306,6 +325,7 @@ void fos_frame_settings_apply(const char *json)
 
     if (clock_changed) strlcat(changes, "clock,", sizeof(changes));
     if (sounds) strlcat(changes, "clickSounds,", sizeof(changes));
+    if (awake) strlcat(changes, "awakeAfterInputSeconds,", sizeof(changes));
     if (wifi) strlcat(changes, "wifi,", sizeof(changes));
     if (restart) strlcat(changes, "rotate,", sizeof(changes));
     if (scale) strlcat(changes, "renderScale,", sizeof(changes));
@@ -316,7 +336,7 @@ void fos_frame_settings_apply(const char *json)
         ESP_LOGW(TAG, "frame settings not saved: %s", esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "frame settings from the panel: %s", changes);
-    log_applied(changes, restart, scale, sounds);
+    log_applied(changes, restart, scale, sounds, awake);
     if (restart || (wifi && fos_wifi_state() == FOS_WIFI_PORTAL)) {
         /* The runtime sizes its canvas at init (fos_settings.c does the same
          * for a rotation from a plane), and a frame on the setup hotspot
@@ -333,7 +353,7 @@ void fos_frame_settings_apply(const char *json)
         fos_client_render_now();
     }
     /* The cloud's mirror follows the hardware report (hardware.clickSounds). */
-    if (sounds && !scale) fos_cloud_request_state();
+    if ((sounds || awake) && !scale) fos_cloud_request_state();
     if (wifi) {
         err = fos_wifi_start_background();
         if (err != ESP_OK) ESP_LOGW(TAG, "joining \"%s\" failed to start: %s", config->wifi_ssid, esp_err_to_name(err));
