@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "fos_touch.h"
+#include "fos_events_gen.h"
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -210,8 +211,29 @@ static void test_passed(void)
     CHECK(fos_touch_passed_json(&passed, buf, sizeof(buf)) > 0, "a full set fits the payload's room");
 }
 
+static void test_edge_swipe(void)
+{
+    /* The dispatcher's rule (input_state.nim edgeAt / edgeTravel). */
+    CHECK(fos_touch_edge_at(400, 2, 800, 480) == FOS_TOUCH_EDGE_TOP, "near the top");
+    CHECK(fos_touch_edge_at(400, 479, 800, 480) == FOS_TOUCH_EDGE_BOTTOM, "the last row is the bottom");
+    CHECK(fos_touch_edge_at(400, 479 - FOS_GESTURE_EDGE_PX, 800, 480) == FOS_TOUCH_EDGE_NONE, "past the band");
+    CHECK(fos_touch_edge_at(0, 240, 800, 480) == FOS_TOUCH_EDGE_LEFT, "the left");
+    CHECK(fos_touch_edge_at(799, 240, 800, 480) == FOS_TOUCH_EDGE_RIGHT, "the right");
+    CHECK(fos_touch_edge_at(1, 5, 800, 480) == FOS_TOUCH_EDGE_LEFT, "a corner: the nearest");
+    CHECK(fos_touch_edge_at(400, 240, 800, 480) == FOS_TOUCH_EDGE_NONE, "the middle");
+    CHECK(fos_touch_edge_at(0, 0, 80, 80) == FOS_TOUCH_EDGE_NONE, "too small a panel has no edges");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 3, -10) == 0, "a little up: not yet");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 10, -FOS_GESTURE_SWIPE_MIN_PX) == 1, "far enough up: a swipe");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_TOP, 0, FOS_GESTURE_SWIPE_MIN_PX + 5) == 1, "down from the top");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_TOP, 0, -30) == 0, "out past the edge: nothing");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 60, -50) == -1, "more along than inward: a drag");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_LEFT, 30, FOS_GESTURE_TAP_SLOP_PX + 20) == -1, "along the left edge");
+    CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_RIGHT, -FOS_GESTURE_SWIPE_MIN_PX, 0) == 1, "in from the right");
+}
+
 int main(void)
 {
+    test_edge_swipe();
     test_passed();
     test_touch_beep();
     test_decode();

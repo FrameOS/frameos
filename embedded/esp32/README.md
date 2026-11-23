@@ -1344,6 +1344,13 @@ The click is the touch task's, on core 0, the moment the finger lands: it
 never waits for the render task to finish a render or a panel update. What
 is taken is the press map of the picture showing, which the runtime leaves
 after every render (`docs/server-rendering.md` "The click").
+An edge swipe (the dispatcher's `edgeSwipe`: down within the contract's
+`gestures.edgePx` of an edge, then `swipeMinPx` inward and more inward than
+along) plays four clicks instead, stepping up, or down for a swipe down from
+the top, the moment the finger has gone far enough, and its lift is silent.
+The touch task mirrors the rule (`fos_touch_edge_at` / `fos_touch_edge_step`,
+the distances generated into `fos_events_gen.h`); a press on the frame's
+keyboard is a key, never a swipe (the press map marks it).
 What such a press or a key starts, if it takes over 1.5 s to load, chirps
 quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set touch_beep 0` turns both off, or "Touch beep" in the frame's settings

@@ -155,7 +155,8 @@ bool fos_client_relay_event(const char *origin, const char *name, const char *pa
  * fos_touch_wire) lands on something the picture showing does something
  * with (docs/server-rendering.md "The click"): by the press map its plane
  * sent with it when it was rendered on the server, by the one the runtime
- * left after its last render when the scene runs here. 1 taken, 0 not, -1
+ * left after its last render when the scene runs here. 1 taken, 2 taken by
+ * the frame's keyboard (the runtime's map alone says so), 0 not, -1
  * no map (no panel, or no render yet). Any task, no lock. */
 int fos_client_press_taken(int wire_x, int wire_y);
 /* Rendered on the server: a pointer pressed (true) or lifted through the

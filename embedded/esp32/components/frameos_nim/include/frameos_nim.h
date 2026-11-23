@@ -250,7 +250,8 @@ bool frameos_nim_render_requested(void);
  * fos_touch_start), so that frameos_nim_press_map_takes can answer. */
 void frameos_nim_keep_press_map(bool keep);
 /* Whether a press at panel pixel (x, y) lands on something the picture the
- * last render drew does something with: 1 taken, 0 not, -1 no map (none
+ * last render drew does something with: 1 taken, 2 taken by the frame's
+ * keyboard (a key: never an edge swipe), 0 not, -1 no map (none
  * kept, or no render yet). No lock, any task: the touch task's click
  * (docs/server-rendering.md "The click"). */
 int frameos_nim_press_map_takes(int x, int y);

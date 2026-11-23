@@ -35,6 +35,11 @@
  * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */
 #define FOS_BUTTON_DOUBLE_PRESS_MS 350
 #define FOS_BUTTON_LONG_PRESS_MS 1000
+/* The dispatcher's edge swipe (`gestures`): what the touch task mirrors for the
+ * buzzer, so the swipe's chirp sounds when the swipe is one, not a render later. */
+#define FOS_GESTURE_EDGE_PX 24
+#define FOS_GESTURE_SWIPE_MIN_PX 48
+#define FOS_GESTURE_TAP_SLOP_PX 16
 
 #define FOS_EVENT_INIT "init"
 #define FOS_EVENT_RENDER "render"

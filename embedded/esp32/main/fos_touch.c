@@ -1,6 +1,9 @@
 #include "fos_touch.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+
+#include "fos_events_gen.h"
 #include <string.h>
 
 int fos_touch_decode(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max)
@@ -130,6 +133,36 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
         return FOS_TOUCH_BEEP_UP;
     }
     return FOS_TOUCH_BEEP_NONE;
+}
+
+fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    const int distance[] = {x, width - 1 - x, y, height - 1 - y};
+    int best = FOS_GESTURE_EDGE_PX;
+    fos_touch_edge_t edge = FOS_TOUCH_EDGE_NONE;
+    for (int i = 0; i < 4; i++) {
+        if (distance[i] < best) {
+            best = distance[i];
+            edge = (fos_touch_edge_t)(FOS_TOUCH_EDGE_LEFT + i);
+        }
+    }
+    return edge;
+}
+
+int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy)
+{
+    int inward, along;
+    switch (edge) {
+    case FOS_TOUCH_EDGE_LEFT: inward = dx; along = dy; break;
+    case FOS_TOUCH_EDGE_RIGHT: inward = -dx; along = dy; break;
+    case FOS_TOUCH_EDGE_TOP: inward = dy; along = dx; break;
+    case FOS_TOUCH_EDGE_BOTTOM: inward = -dy; along = dx; break;
+    default: return -1;
+    }
+    if (inward >= FOS_GESTURE_SWIPE_MIN_PX && inward > abs(along)) return 1;
+    if (abs(along) <= FOS_GESTURE_TAP_SLOP_PX || abs(along) < inward) return 0;
+    return -1;
 }
 
 #ifdef ESP_PLATFORM
@@ -320,15 +353,58 @@ bool fos_touch_finger_down(void)
  * was done (2026-11-23). Whether the press is taken is the press map's, of
  * the picture showing (fos_client_press_taken): the plane's with a picture
  * it rendered, the runtime's after each render here. No map, no click. */
-static void click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
+static uint8_t s_beep_held = 0, s_beeped = 0;
+
+static bool sounds_on_touch(void)
 {
-    static uint8_t held = 0, beeped = 0;
-    int taken = kind == FOS_TOUCH_DOWN ? fos_client_press_taken(wx, wy) : 0;
-    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &held, &beeped);
-    if (beep == FOS_TOUCH_BEEP_NONE || !fos_config()->touch_beep || fos_display_is_lcd()) return;
+    return fos_config()->touch_beep && !fos_display_is_lcd();
+}
+
+static void click(uint8_t kind, uint8_t id, int taken)
+{
+    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &s_beep_held, &s_beeped);
+    if (beep == FOS_TOUCH_BEEP_NONE || !sounds_on_touch()) return;
     if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
     else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
     else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
+}
+
+/* An edge swipe's chirp, the same way: each finger that went down at an edge
+ * (fos_touch_edge_at, not on the frame's keyboard) is watched until it is a
+ * swipe (fos_touch_edge_step, the dispatcher's rule), heard at once, or a
+ * drag along the edge. A swipe's lift does not click: its four clicks said
+ * it. The panel's pixels: the scene's, turned. */
+static fos_touch_edge_t s_edge[FOS_TOUCH_POINTS_MAX];
+static int16_t s_edge_x[FOS_TOUCH_POINTS_MAX], s_edge_y[FOS_TOUCH_POINTS_MAX];
+
+static void panel_point(uint16_t wx, uint16_t wy, int *x, int *y)
+{
+    *x = (int)((int64_t)fos_display_width() * wx / FOS_TOUCH_WIRE_MAX);
+    *y = (int)((int64_t)fos_display_height() * wy / FOS_TOUCH_WIRE_MAX);
+}
+
+static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
+{
+    int x, y;
+    panel_point(wx, wy, &x, &y);
+    s_edge[id] = taken == 2 ? FOS_TOUCH_EDGE_NONE
+                            : fos_touch_edge_at(x, y, fos_display_width(), fos_display_height());
+    s_edge_x[id] = (int16_t)x;
+    s_edge_y[id] = (int16_t)y;
+}
+
+static void edge_moved(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    if (s_edge[id] == FOS_TOUCH_EDGE_NONE) return;
+    int x, y;
+    panel_point(wx, wy, &x, &y);
+    int step = fos_touch_edge_step(s_edge[id], x - s_edge_x[id], y - s_edge_y[id]);
+    if (step == 0) return;
+    if (step > 0) {
+        s_beeped &= (uint8_t)~(1u << id);
+        if (sounds_on_touch()) fos_buzzer_swipe(s_edge[id] != FOS_TOUCH_EDGE_TOP);
+    }
+    s_edge[id] = FOS_TOUCH_EDGE_NONE;
 }
 
 bool fos_touch_process_events(void)
@@ -481,7 +557,9 @@ static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
      * was, not only a finger dragged. */
     enqueue(FOS_TOUCH_MOVE, id, wx, wy);
     enqueue(FOS_TOUCH_DOWN, id, wx, wy);
-    click(FOS_TOUCH_DOWN, id, wx, wy);
+    int taken = fos_client_press_taken(wx, wy);
+    click(FOS_TOUCH_DOWN, id, taken);
+    edge_begin(id, wx, wy, taken);
 }
 
 /* A press reported once it settled, where it is then; or, when it glided
@@ -492,6 +570,7 @@ static void report_settled(uint8_t id, int x_max)
     if (fos_touch_glided(s_last_rx[id] - s_first_rx[id], s_last_ry[id] - s_first_ry[id], x_max)) {
         report_down(id, s_first_x[id], s_first_y[id]);
         enqueue(FOS_TOUCH_MOVE, id, s_last_x[id], s_last_y[id]);
+        edge_moved(id, s_last_x[id], s_last_y[id]);
     } else {
         report_down(id, s_last_x[id], s_last_y[id]);
     }
@@ -556,6 +635,7 @@ static void touch_task(void *arg)
                 }
             } else if (moved) {
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+                edge_moved(p->id, wx, wy);
             }
         }
         /* A tap shorter than TOUCH_SETTLE_MS: its press, where it was last,
@@ -576,7 +656,8 @@ static void touch_task(void *arg)
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) {
                 enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
-                click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                click(FOS_TOUCH_UP, (uint8_t)id, 0);
+                s_edge[id] = FOS_TOUCH_EDGE_NONE;
             }
         }
         s_down_mask &= seen; /* a finger still settling is not down yet */

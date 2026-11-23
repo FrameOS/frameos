@@ -2215,6 +2215,7 @@ type PressRect* = object
   ## whether a press there is taken. The first entry a press lands in answers.
   box*: array[4, float32]
   taken*: bool
+  keys*: bool ## the frame's keyboard: a press there is a key, never an edge swipe
 
 proc clipped(box, clip: array[4, float32]): array[4, float32] =
   [max(box[0], clip[0]), max(box[1], clip[1]), min(box[2], clip[2]), min(box[3], clip[3])]
@@ -2256,7 +2257,7 @@ proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   var all: seq[PressRect]
   for box in keysShown:
     if box[2] > 0:
-      all.add PressRect(box: [box[0], box[1], box[0] + box[2], box[1] + box[3]], taken: true)
+      all.add PressRect(box: [box[0], box[1], box[0] + box[2], box[1] + box[3]], taken: true, keys: true)
   pressMapIn(scene, 0, 0, [0'f32, 0, width.float32, height.float32], nil, 0, all)
   for entry in all:
     var said = true
@@ -2275,6 +2276,7 @@ type PanelPressRect* = object
   ## A press map entry on the panel: whole pixels, x1 and y1 past the last.
   x0*, y0*, x1*, y1*: int
   taken*: bool
+  keys*: bool ## the frame's keyboard (PressRect.keys)
 
 proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: string;
                     maxEntries: int): seq[PanelPressRect] =
@@ -2313,7 +2315,7 @@ proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: stri
       of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
       of 270: (y0, panelH - x1, y1, panelH - x0)
       else: (x0, y0, x1, y1)
-    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken)
+    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken, keys: entry.keys)
 
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns

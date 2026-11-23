@@ -724,7 +724,7 @@ int frameos_nim_press_map_takes(int x, int y)
     /* The first entry a press lands in answers; a press in none is not
      * taken. */
     for (int i = 0; i < count; i++, box += 4) {
-        if (x >= box[0] && y >= box[1] && x < box[2] && y < box[3]) return s_press_taken[buffer][i] ? 1 : 0;
+        if (x >= box[0] && y >= box[1] && x < box[2] && y < box[3]) return s_press_taken[buffer][i];
     }
     return 0;
 }

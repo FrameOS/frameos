@@ -1081,7 +1081,8 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
 proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr UncheckedArray[uint8];
                             maxEntries: cint): cint {.exportc, cdecl.} =
   ## The press map after a render (embedded_runtime.panelPressMapNow) into the
-  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, 1 or 0 in `taken`.
+  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, in `taken` 1 or 0, and
+  ## 2 on the frame's keyboard (taken, and never an edge swipe).
   ## How many entries, -1 when it could not be made.
   try:
     var count = 0
@@ -1090,7 +1091,7 @@ proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr Unchec
       boxes[4 * count + 1] = uint16(clamp(entry.y0, 0, 0xFFFF))
       boxes[4 * count + 2] = uint16(clamp(entry.x1, 0, 0xFFFF))
       boxes[4 * count + 3] = uint16(clamp(entry.y1, 0, 0xFFFF))
-      taken[count] = if entry.taken: 1'u8 else: 0'u8
+      taken[count] = if entry.keys: 2'u8 elif entry.taken: 1'u8 else: 0'u8
       count += 1
     count.cint
   except Exception:

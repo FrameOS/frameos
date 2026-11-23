@@ -326,6 +326,21 @@ void fos_buzzer_double_down(void)
     fos_buzzer_tone(scaled_hz(DOUBLE_DOWN_NUM, DOUBLE_DOWN_DEN), CLICK_MS);
 }
 
+void fos_buzzer_swipe(bool rising)
+{
+    if (!clicks_heard()) return;
+    /* 0.7, 0.85, 1 and 1.25 of the press pitch: the release click's, the
+     * press's, and past it. */
+    static const uint8_t steps[4][2] = {{7, 10}, {17, 20}, {1, 1}, {5, 4}};
+    fos_buzzer_note_t notes[4];
+    for (int i = 0; i < 4; i++) {
+        int step = rising ? i : 3 - i;
+        notes[i].freq_hz = scaled_hz(steps[step][0], steps[step][1]);
+        notes[i].duration_ms = CLICK_MS;
+    }
+    fos_buzzer_play(notes, 4);
+}
+
 void fos_buzzer_long_press(void)
 {
     if (!clicks_heard()) return;
