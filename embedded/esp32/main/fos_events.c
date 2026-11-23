@@ -175,8 +175,8 @@ static void log_event_line(const char *event, fos_event_origin_t origin, const c
 
 static void restart_task(void *arg)
 {
-    (void)arg;
     vTaskDelay(pdMS_TO_TICKS(FOS_EVENT_RESTART_DELAY_MS));
+    fos_restart_notice((const char *)arg);
     esp_restart();
 }
 
@@ -192,15 +192,16 @@ static void restart_task(void *arg)
  * stacks of the httpd, WebSocket and console tasks (nor belongs under the
  * runtime lock, when this runs as the Nim hook); the cloud's log tap has
  * carried the line already. */
-static void restart_firmware(bool on_render_task)
+static void restart_firmware(bool on_render_task, const char *notice)
 {
     if (on_render_task) {
+        fos_restart_notice(notice);
         frameos_nim_flush_logs();
         vTaskDelay(pdMS_TO_TICKS(FOS_EVENT_RESTART_FLUSH_MS));
         esp_restart();
         return;
     }
-    if (xTaskCreate(restart_task, "fos_restart", FOS_RESTART_TASK_STACK, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(restart_task, "fos_restart", FOS_RESTART_TASK_STACK, (void *)notice, 5, NULL) != pdPASS) {
         esp_restart();
     }
 }
@@ -220,7 +221,8 @@ static bool run_runtime_command(fos_event_origin_t origin, const char *command,
     if (strcmp(command, FOS_EVENT_RESTART) == 0 || strcmp(command, FOS_EVENT_REBOOT) == 0) {
         log_event_line(strcmp(command, FOS_EVENT_REBOOT) == 0 ? "event:reboot" : "event:restart",
                        origin, command, NULL);
-        restart_firmware(on_render_task);
+        restart_firmware(on_render_task,
+                         strcmp(command, FOS_EVENT_REBOOT) == 0 ? "Rebooting..." : "Restarting...");
         return true;
     }
     if (strcmp(command, FOS_EVENT_UPLOAD_SCENES) == 0) {

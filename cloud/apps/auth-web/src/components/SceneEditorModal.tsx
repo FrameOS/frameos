@@ -139,6 +139,9 @@ type SceneEditorModalProps = {
   /** Where Back goes when there is no same-origin page to go back to: the
    * store front. */
   backUrl?: string | undefined;
+  /** Other origins whose pages Back returns to with the browser's own back
+   * (the cloud's store), keeping their scroll. */
+  backOrigins?: string[] | undefined;
   /** The workspace inside another site's page (`/s/<slug>?embed=1`, on
    * frameos.net's front page). */
   embed?: SceneEditorEmbed | undefined;
@@ -259,12 +262,28 @@ type NavigationApi = {
 // Whether the browser has a page to go back to: a self-hosted backend's
 // scene library links here too, and its back should land there, not on the
 // store front. (A back is only ever to where this tab has been.)
-function canGoBack(): boolean {
+/** Whether Back can be the browser's own: a same-origin page before this one,
+ * or the page that led here on one of `backOrigins` (the cloud's store at
+ * cloud.frameos.net/scenes leads to scenes.frameos.net/s/…). The Navigation
+ * API lists same-origin entries only, so that second page has index 0; a push
+ * of the store front instead went through its redirect to a fresh store, the
+ * scroll lost. */
+export function canGoBack(backOrigins: readonly string[] = []): boolean {
   const navigation = (window as unknown as { navigation?: NavigationApi }).navigation;
-  if (navigation?.currentEntry) {
-    return navigation.currentEntry.index > 0;
+  if (navigation?.currentEntry && navigation.currentEntry.index > 0) {
+    return true;
   }
-  return window.history.length > 1;
+  if (window.history.length > 1 && document.referrer) {
+    try {
+      const from = new URL(document.referrer).origin;
+      if (from === window.location.origin || backOrigins.includes(from)) {
+        return true;
+      }
+    } catch {
+      // not a URL
+    }
+  }
+  return navigation?.currentEntry ? false : window.history.length > 1;
 }
 
 /** The listing the page recorded for a version (null: the latest) — the
@@ -364,6 +383,7 @@ export function SceneEditorModal({
   pinnedVersion = null,
   info,
   backUrl = "/",
+  backOrigins,
   embed,
 }: SceneEditorModalProps) {
   const router = useRouter();
@@ -927,7 +947,7 @@ export function SceneEditorModal({
   // Back: to the page that led here (the store, My scenes, a publisher
   // page, a backend's scene library), else to the store front.
   function goBack() {
-    if (canGoBack()) {
+    if (canGoBack(backOrigins)) {
       window.history.back();
       return;
     }

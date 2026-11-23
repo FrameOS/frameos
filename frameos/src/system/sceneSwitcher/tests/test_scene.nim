@@ -906,5 +906,44 @@ block on_a_desktop_a_pick_keeps_the_list_open:
   builtInScenesStay = false
   builtInsAway.setLen(0)
 
+block the_header_searches_the_scenes:
+  # A search field in the header keeps the scenes whose name or category
+  # holds what is typed, the first of them lit; Enter shows it, and the
+  # switcher opened again lists them all.
+  listed = entries(20)
+  sent.setLen(0)
+  frameSettingsRead = nil
+  let scene = newSwitcher(config(800, 480, "framebuffer"), opener = "scene-1")
+  discard scene.draw(newImage(800, 480))
+  var field = -1
+  for i, r in uiTarget(SceneSwitcherId, 1).regions:
+    if r.field == 1:
+      field = i
+  doAssert field >= 0, "a search field in the header"
+  let r = uiTarget(SceneSwitcherId, 1).regions[field]
+  doAssert r.y + r.h <= switcherGrid(800, 480, thumbnails = false).headerH.float32, $r
+  scene.send("tap", %*{"x": r.x + r.w / 2, "y": r.y + r.h / 2, "pointerId": 1, "pointerType": "mouse"})
+  doAssert sent.len == 0, $sent
+  scene.send("textInput", %*{"text": "CLOCK"})
+  doAssert scene.state{"query"}.getStr() == "CLOCK"
+  doAssert scene.entries.len == 1 and scene.entries[0].name == "Kitchen clock", $scene.entries.len
+  doAssert scene.highlightedId() == "scene-2"
+  discard scene.draw(newImage(800, 480))
+  # Nothing matches: the list says so.
+  scene.send("textInput", %*{"text": "zzz"})
+  doAssert scene.entries.len == 0
+  discard scene.draw(newImage(800, 480))
+  scene.send("keyDown", %*{"key": "Backspace", "code": "Backspace"})
+  scene.send("keyDown", %*{"key": "Backspace", "code": "Backspace"})
+  scene.send("keyDown", %*{"key": "Backspace", "code": "Backspace"})
+  doAssert scene.state{"query"}.getStr() == "CLOCK", scene.state{"query"}.getStr()
+  sent.setLen(0)
+  scene.send("keyDown", %*{"key": "Enter", "code": "Enter"})
+  doAssert sent.len == 1 and sent[0][0] == evSetCurrentScene and sent[0][1]{"sceneId"}.getStr() == "scene-2", $sent
+  # Opened again: no search, every scene.
+  scene.send("keyDown", %*{"key": "Escape", "code": "Escape"})
+  scene.send("open", %*{"sceneId": SceneSwitcherId})
+  doAssert scene.entries.len == 20 and not scene.state.hasKey("query")
+
 localEventSink = nil
 echo "scene switcher: ok"

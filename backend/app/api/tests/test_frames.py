@@ -2531,6 +2531,33 @@ async def test_api_frame_new_embedded_waveshare_13in3e6_preset(async_client):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_new_embedded_sticky_starts_rotated(async_client):
+    """The reTerminal Sticky stands portrait on a landscape panel: a new frame
+    starts at 270, and a later PATCH (which runs the preset again) keeps what
+    the owner set."""
+    payload = {
+        "mode": "embedded",
+        "name": "Sticky",
+        "frame_host": "",
+        "server_host": "backend.local",
+        "platform": "esp32-s3",
+        "embedded": {"hardwarePreset": "seeed_reterminal_sticky"},
+        "network": {"wifiSSID": "", "wifiPassword": ""},
+    }
+
+    response = await async_client.post('/api/frames/new', json=payload)
+
+    assert response.status_code == 200
+    frame = response.json()['frame']
+    assert frame['rotate'] == 270
+
+    response = await async_client.post(f"/api/frames/{frame['id']}", json={"rotate": 0})
+    assert response.status_code == 200
+    response = await async_client.get(f"/api/frames/{frame['id']}")
+    assert response.json()['frame']['rotate'] == 0
+
+
+@pytest.mark.asyncio
 async def test_api_frame_new_embedded_waveshare_photopainter_preset(async_client):
     payload = {
         "mode": "embedded",

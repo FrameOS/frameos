@@ -1178,6 +1178,10 @@ suite "jsx selection":
     # Select all, and what is typed replaces it.
     check dispatchUiEvent(id, "keyDown", key("a", "KeyA", meta = true))
     check target.input.selected == (0, 6)
+    # As a keyboard sends it: the key's keyDown (shift held for a capital),
+    # then its text. The keyDown let the selection go, and "Z" went after it.
+    discard dispatchUiEvent(id, "keyDown", key("Z", "KeyZ", shift = true))
+    check target.input.selected == (0, 6)
     check dispatchUiEvent(id, "textInput", %*{"text": "Zoe"})
     check ui.scene.state{"name"}.getStr() == "Zoe"
     discard ui.render()

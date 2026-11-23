@@ -309,13 +309,16 @@ export interface ChatDrawerSelection {
   chatId?: string | null
 }
 
-/** The Add scene drawer's pages: the actions, its two scene lists, or the
- * photo album installer. Kept in the URL (`drawerPage`). */
-export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos' | 'layouts'
+/** The Add scene drawer's pages: the actions, its scene lists (the store,
+ * the private ones, the starred ones), the photo album installer or the
+ * layouts. Kept in the URL (`drawerPage`). */
+export type AddScenePage = 'actions' | 'store' | 'saved' | 'starred' | 'photos' | 'layouts'
+
+const ADD_SCENE_LIST_PAGES: readonly AddScenePage[] = ['store', 'saved', 'starred', 'photos', 'layouts']
 
 function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
   const page = searchValue(search, 'drawerPage')
-  return page === 'store' || page === 'saved' || page === 'photos' || page === 'layouts' ? page : 'actions'
+  return ADD_SCENE_LIST_PAGES.find((candidate) => candidate === page) ?? 'actions'
 }
 
 /** The `q` (scene search) of the Add scene drawer, if the URL carries one. */

@@ -63,6 +63,7 @@
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
 #include "fos_commands.h"
+#include "fos_restart.h"
 
 static const char *TAG = "fos_client";
 
@@ -90,11 +91,13 @@ static const char *TAG = "fos_client";
  * after it the scene (E1002, E1003). And left set, it was a key to
  * image_push_write, so every boot's first picture push to a backend gave up. */
 #define START_RENDER_LOOP_BIT BIT7
+/* A restart is coming and its notice waits for this task (fos_restart_notice). */
+#define RESTART_NOTICE_BIT BIT8
 /* One bit each: the sum of distinct powers of two is their OR. */
 _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT + FRAME_DUE_BIT +
-                SCENE_RENDER_BIT + LINK_BIT + START_RENDER_LOOP_BIT) ==
+                SCENE_RENDER_BIT + LINK_BIT + START_RENDER_LOOP_BIT + RESTART_NOTICE_BIT) ==
                    (RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | FRAME_DUE_BIT |
-                    SCENE_RENDER_BIT | LINK_BIT | START_RENDER_LOOP_BIT),
+                    SCENE_RENDER_BIT | LINK_BIT | START_RENDER_LOOP_BIT | RESTART_NOTICE_BIT),
                "fos_client event group bits must be distinct");
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -2506,6 +2509,94 @@ static bool repaint_snapshot(bool with_notice)
     return true;
 }
 
+/* ------------------------------------------------------ the restart notice */
+
+/* fos_restart.h. The render task starts drawing it within TAKE of the ask or
+ * not at all, and the caller waits WAIT at the most: a partial update and the
+ * panel's sleep after it are well under a second. */
+#define RESTART_NOTICE_TEXT_LEN 24
+#define RESTART_NOTICE_TAKE_US 1000000
+#define RESTART_NOTICE_WAIT_MS 2000
+static char s_restart_notice_text[RESTART_NOTICE_TEXT_LEN];
+static volatile int64_t s_restart_notice_asked_us = 0; /* 0: none asked */
+static SemaphoreHandle_t s_restart_notice_done = NULL;
+
+static bool restart_notice_drawable(void)
+{
+    return fos_display_present() && (fos_display_is_lcd() || fos_display_supports_partial());
+}
+
+/* The last image with `text` in a band across it, in the fast waveform.
+ * Render task. Nothing when there is no stored image to draw it over. */
+static void draw_restart_notice(const char *text)
+{
+    const char *status = "no-snapshot";
+    /* Timed: a restart never waits on a reader of the snapshot (/image). */
+    if (!restart_notice_drawable()) return;
+    if (s_snapshot_lock && xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(200)) == pdTRUE) {
+        size_t len = s_last_frame ? s_last_frame_len : 0;
+        int width = s_last_frame_width, height = s_last_frame_height;
+        fos_pixel_format_t format = s_last_frame_format;
+        uint8_t *copy = len ? fos_big_malloc(len) : NULL;
+        if (copy) memcpy(copy, s_last_frame, len);
+        xSemaphoreGive(s_snapshot_lock);
+        if (len && !copy) status = "no-memory";
+        fos_panel_surface_t surface = {
+            .buf = copy, .width = width, .height = height, .format = format, .rotate = fos_config()->rotate,
+        };
+        fos_panel_code_box_t box;
+        if (copy && fos_panel_notice_box(&surface, text, width >= 600 ? 3 : 2, 1, &box)) {
+            fos_panel_draw_notice(&surface, &box, text);
+            esp_err_t err = fos_display_quick_update(copy, NULL, len);
+            /* The glass shows what no stored hash describes: the first render
+             * after the restart draws, even an unchanged scene. */
+            if (err == ESP_OK) forget_display_state();
+            /* The image has no esp_err_to_name table: the reasons by name. */
+            status = err == ESP_OK ? "ok" : err == ESP_ERR_NOT_SUPPORTED ? "no-fast-waveform"
+                     : err == ESP_ERR_INVALID_SIZE ? "size" : err == ESP_ERR_INVALID_STATE ? "no-panel" : "error";
+        }
+        free(copy);
+    }
+    /* On the console at once (a restart follows), and for the bench. */
+    ESP_LOGW(TAG, "restart notice: %s", status);
+    char line[96];
+    snprintf(line, sizeof(line), "{\"event\":\"restart:notice\",\"source\":\"esp32\",\"status\":\"%s\"}", status);
+    frameos_nim_log_hook(line);
+}
+
+/* A notice another task asked for, from this task's waits. */
+static void serve_restart_notice(void)
+{
+    int64_t asked = s_restart_notice_asked_us;
+    if (asked == 0) return;
+    s_restart_notice_asked_us = 0;
+    if (esp_timer_get_time() - asked <= RESTART_NOTICE_TAKE_US) {
+        char text[RESTART_NOTICE_TEXT_LEN];
+        portENTER_CRITICAL(&s_notice_lock);
+        strlcpy(text, s_restart_notice_text, sizeof(text));
+        portEXIT_CRITICAL(&s_notice_lock);
+        draw_restart_notice(text);
+    }
+    if (s_restart_notice_done) xSemaphoreGive(s_restart_notice_done);
+}
+
+void fos_restart_notice(const char *text)
+{
+    if (!text || !text[0] || !restart_notice_drawable()) return;
+    if (fos_client_on_render_task()) {
+        draw_restart_notice(text);
+        return;
+    }
+    if (!s_events || !s_restart_notice_done) return;
+    xSemaphoreTake(s_restart_notice_done, 0); /* one an earlier ask left */
+    portENTER_CRITICAL(&s_notice_lock);
+    strlcpy(s_restart_notice_text, text, sizeof(s_restart_notice_text));
+    portEXIT_CRITICAL(&s_notice_lock);
+    s_restart_notice_asked_us = esp_timer_get_time();
+    xEventGroupSetBits(s_events, RESTART_NOTICE_BIT);
+    xSemaphoreTake(s_restart_notice_done, pdMS_TO_TICKS(RESTART_NOTICE_WAIT_MS));
+}
+
 /* The notice has been on the panel long enough. Render task. */
 static bool notice_expired(void)
 {
@@ -3061,6 +3152,7 @@ static void render_failure_recover(const char *scene_name)
     frameos_nim_flush_logs();
     /* Give the log upload and any USB reader a moment before the reset. */
     vTaskDelay(pdMS_TO_TICKS(1500));
+    fos_restart_notice("Restarting...");
     esp_restart();
 }
 
@@ -3315,7 +3407,7 @@ static void run_held_network(const fos_config_t *config)
 static void animation_wait(fos_config_t *config, int64_t wait_us)
 {
     const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
-                                LINK_BIT;
+                                LINK_BIT | RESTART_NOTICE_BIT;
     bool armed = false;
     if (wait_us > 0 && s_frame_timer) {
         esp_timer_stop(s_frame_timer);
@@ -3327,6 +3419,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
             ? xEventGroupWaitBits(s_events, signals | FRAME_DUE_BIT, pdTRUE, pdFALSE,
                                   pdMS_TO_TICKS(armed ? 1000 : 100))
             : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
+        if (bits & RESTART_NOTICE_BIT) serve_restart_notice();
         bool nim = renders_locally(config);
         /* A nudge: the link task's pull while it has the round trips, this
          * task's otherwise and for the voice relay, whose release expects
@@ -4192,9 +4285,10 @@ static void client_task(void *arg)
             fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
-                    LINK_BIT,
+                    LINK_BIT | RESTART_NOTICE_BIT,
                 pdTRUE, pdFALSE,
                 fos_wake_slice_ticks(slice_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
+            if (bits & RESTART_NOTICE_BIT) serve_restart_notice();
             bool nim = renders_locally(config);
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
@@ -4322,6 +4416,7 @@ void fos_client_start(void)
     if (s_events) return;
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
+    s_restart_notice_done = xSemaphoreCreateBinary();
     /* Before any producer: HTTP, the cloud and the console start later. */
     s_relay_lock = xSemaphoreCreateMutexStatic(&s_relay_lock_buf);
     frameos_nim_set_display_power_hook(display_power);

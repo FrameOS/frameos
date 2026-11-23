@@ -228,6 +228,16 @@ bool fos_display_supports_partial(void);
  * it was. */
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
                              bool *partial);
+/* A notice just before a restart (fos_restart.h) or as a board boots: an LCD
+ * draws it at once, an e-paper with a partial waveform takes it in the fast
+ * one and is put to sleep after it (no restart under a waveform), anything
+ * else not at all (ESP_ERR_NOT_SUPPORTED): a full refresh is seconds the
+ * restart would wait out. Never waits for a refresh already running.
+ * `previous`: what the glass shows, NULL for the copy the driver keeps (none
+ * before the first full refresh). Where it is not known (a boot), a buffer
+ * equal to `buf` but for the pixels to draw drives those pixels alone: the
+ * rest of the old picture stays. Not on a controller that keeps the picture. */
+esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, size_t len);
 /* Put a panel left awake after a partial update into deep sleep: before the
  * chip's own, or (the _if_idle one, from the render task's wait) once nothing
  * has been drawn for a while, clearing any ghosts it was left with first. */

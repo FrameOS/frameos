@@ -49,6 +49,33 @@ bool fos_config_normalize_rotate(double value, uint16_t *out)
     return true;
 }
 
+static const char *const k_click_sounds[FOS_CLICK_SOUNDS_LAST + 1] = {"silent", "normal"};
+
+bool fos_config_parse_click_sounds(const char *text, uint8_t *out)
+{
+    if (text == NULL) return false;
+    for (uint8_t mode = 0; mode <= FOS_CLICK_SOUNDS_LAST; mode++) {
+        char digit[2] = {(char)('0' + mode), '\0'};
+        if (strcmp(text, k_click_sounds[mode]) == 0 || strcmp(text, digit) == 0) {
+            if (out != NULL) *out = mode;
+            return true;
+        }
+    }
+    return false;
+}
+
+uint8_t fos_config_click_sounds_or_normal(const char *text)
+{
+    uint8_t mode = FOS_CLICK_SOUNDS_NORMAL;
+    fos_config_parse_click_sounds(text, &mode);
+    return mode;
+}
+
+const char *fos_config_click_sounds_name(uint8_t mode)
+{
+    return k_click_sounds[mode <= FOS_CLICK_SOUNDS_LAST ? mode : FOS_CLICK_SOUNDS_NORMAL];
+}
+
 bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len)
 {
     static const char *modes[] = { "contain", "cover", "stretch", "center" };

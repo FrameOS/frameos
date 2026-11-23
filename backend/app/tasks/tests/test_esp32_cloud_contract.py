@@ -110,5 +110,6 @@ def test_single_plane_settings_carry_a_parity_reason():
     # same buzzer); 18 with `cpu_mode` (2026.11.7: the chip's clock, set at
     # boot; a Pi's is the kernel governor's); 19 with `render_mode` (the same
     # release: where an ESP32's scenes run, docs/server-rendering.md; a Pi
-    # always renders on its own runtime).
-    assert by_plane.get("esp32", 0) <= 19, by_plane
+    # always renders on its own runtime); 20 with `click_sounds` (2026.11.15:
+    # silent or the buzzer's own clicks, the same buzzer path).
+    assert by_plane.get("esp32", 0) <= 20, by_plane

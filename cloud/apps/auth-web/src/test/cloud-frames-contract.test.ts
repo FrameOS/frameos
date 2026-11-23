@@ -108,7 +108,9 @@ describe("settings parity between the device planes", () => {
     // `cpu_mode` (2026.11.7): the chip's clock, set at boot; a Pi's is the
     // kernel governor's. 19 with `render_mode` (2026.11.7): where the scenes
     // run (docs/server-rendering.md); a Pi always renders on its own runtime.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(19);
+    // 20 with `click_sounds` (2026.11.15): silent or the buzzer's own clicks,
+    // the same buzzer path; a Pi has no buzzer.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(20);
   });
 });
 

@@ -12,6 +12,8 @@ import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32TouchBeep,
+  cloudFrameSupportsEsp32ClickSounds,
+  esp32ClickSoundsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
   cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32VoiceChat,
@@ -47,7 +49,9 @@ import { timezoneOptions } from '../../../../decorators/timezones'
 import type { DeepPartial } from 'kea-forms'
 import type { PowerSettingsValues, RenderOnServerChoice } from '../../../../components/PowerSettingsFields'
 import { backendFrameRenderMode, cloudFrameRenderMode, frameCanRenderItself } from '../../../../utils/renderOnServer'
+import { clickSoundsOf, frameHasSounds } from '../../../../utils/clickSounds'
 import type {
+  ClickSounds,
   FrameEmbeddedHardwarePreset,
   FrameErrorBehaviorMode,
   FrameType,
@@ -187,6 +191,14 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     touchBeepDisabledReason: string | undefined
   } | null
   setButtonBeep: (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }) => void
+  /**
+   * ESP32 boards that make sounds (utils/clickSounds.ts), null elsewhere:
+   * the sounds of a tap and a press, silent or normal. The cloud pushes
+   * `click_sounds`; the backend keeps `clickSounds` in device_config for the
+   * settings poll. Also set on the frame page, which both planes adopt.
+   */
+  clickSounds: { value: ClickSounds; disabledReason: string | undefined } | null
+  setClickSounds: (value: ClickSounds) => void
   /**
    * ESP32 only, null elsewhere: the PDM microphone's clock, data and power
    * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
@@ -509,6 +521,9 @@ export function FrameSettingsProvider({
     if (!frameForm.max_http_response_bytes || frameForm.max_http_response_bytes === DEFAULT_MAX_HTTP_RESPONSE_BYTES) {
       nextValues.max_http_response_bytes = EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES
     }
+    if (presetConfig.rotate !== undefined) {
+      nextValues.rotate = presetConfig.rotate
+    }
     setFrameFormValues(nextValues)
   }
 
@@ -689,6 +704,46 @@ export function FrameSettingsProvider({
           touchBeepDisabledReason: undefined,
         }
       : null
+  // The sounds of a tap and a press: only where the board makes any.
+  const hasSounds =
+    buttonBeep !== null &&
+    frameHasSounds(
+      esp32CloudProfile
+        ? {
+            reportedSounds: frame.hardware?.sounds,
+            hardwarePreset: frame.hardware?.hardwarePreset,
+            buzzerPin: frameForm.buzzer_pin,
+            reportedBuzzerPin: frame.hardware?.buzzerPin,
+          }
+        : {
+            hardwarePreset: embeddedHardwarePreset,
+            buzzerPin: powerDeviceConfig.buzzerPin ?? powerDeviceConfig.buzzer_pin,
+          }
+    )
+  const clickSounds: FrameSettingsContextValue['clickSounds'] = !hasSounds
+    ? null
+    : esp32CloudProfile
+      ? {
+          value: clickSoundsOf(frameForm.click_sounds ?? frame.hardware?.clickSounds),
+          disabledReason: cloudFrameSupportsEsp32ClickSounds(frame.frameos_version)
+            ? undefined
+            : `Tap and click sounds need FrameOS ${esp32ClickSoundsCloudFrameSettingsMinVersion} or newer on the frame.`,
+        }
+      : {
+          value: clickSoundsOf(powerDeviceConfig.clickSounds ?? powerDeviceConfig.click_sounds),
+          disabledReason: undefined,
+        }
+  const setClickSounds = (value: ClickSounds): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({ click_sounds: value })
+      return
+    }
+    // The camelCase key wins, as for the power keys: drop a snake_case copy.
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    delete next.click_sounds
+    next.clickSounds = value
+    setFrameFormValues({ device_config: next })
+  }
   const setButtonBeep = (patch: { pin?: number; toneHz?: number; touchBeep?: boolean }): void => {
     if (esp32CloudProfile) {
       setFrameFormValues({
@@ -1014,6 +1069,8 @@ export function FrameSettingsProvider({
     reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
     buttonBeep,
     setButtonBeep,
+    clickSounds,
+    setClickSounds,
     microphone,
     setMicrophonePins,
     statusLed,

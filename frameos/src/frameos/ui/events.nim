@@ -879,6 +879,11 @@ proc moveCaret(target: UiTarget, key: string, extend = false) =
   ## where the caret was; without it a selection lets go, left or right of
   ## it putting the caret at that end, as on a desktop.
   template i: untyped = target.input
+  if key notin ["ArrowLeft", "ArrowRight", "Home", "End", "ArrowUp", "ArrowDown"]:
+    # Any other key's keyDown (a letter: its text comes as `textInput` next)
+    # leaves the selection alone, so the text typed replaces it. Letting go
+    # here made a typed letter go after the selected text instead.
+    return
   let (a, z) = i.selected
   i.handles = false
   i.menu = false

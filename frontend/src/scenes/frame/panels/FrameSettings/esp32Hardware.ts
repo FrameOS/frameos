@@ -408,6 +408,9 @@ export interface Esp32HardwarePresetConfig {
   sdCardAssets?: Esp32SdCardAssets
   /** A carrier board for many panels: `device` is only the default, and picking another keeps the preset. */
   panelSelectable?: boolean
+  /** The rotation the board is held at, set when the preset is picked: the
+   * Sticky's 3.97" panel is landscape, and the board stands portrait. */
+  rotate?: number
 }
 
 // Mirrors EMBEDDED_HARDWARE_PRESETS in backend/app/tasks/embedded_firmware.py
@@ -519,6 +522,7 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     device: 'waveshare.EPD_3in97',
     flashSize: '32MB',
     psramMB: 8,
+    rotate: 270,
     pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
     sdCardAssets: {
       enabled: true,
