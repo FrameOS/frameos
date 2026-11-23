@@ -96,14 +96,14 @@ suite "the Code editor sample":
       if not report["ok"].getBool():
         checkpoint($report)
       check report["ok"].getBool()
-      check report["counts"]["total"].getInt() >= 9
+      check report["counts"]["total"].getInt() >= 16
 
-  test "it asks for the code and for nothing else":
+  test "it asks for the code and the frame's folders, and for nothing else":
     let config = parseJson(sample["apps"]["codeEditor"]["sources"]["config.json"].getStr())
-    check config["permissions"] == %*["code"]
+    check config["permissions"] == %*["code", "assets", "assets-write"]
     check codeGrantFromConfig(config)
     check not frameGrantFromConfig(config)
-    check assetGrantFromConfig(config) == agOwnFolder
+    check assetGrantFromConfig(config) == agReadWrite
 
 suite "frameos.code":
   setup:
@@ -220,6 +220,30 @@ suite "the Code editor scene":
     check scene.state["open"].getStr() == ""
     check problems.len == 0
     if problems.len > 0: echo problems
+
+  test "opens a folder of the assets, and a file typed into is saved to it":
+    # The asset calls for real: a folder on disk, a file in it opened from
+    # the explorer's spot, typed into and saved (the tab bar's Save).
+    let root = getTempDir() / "code-editor-folder"
+    removeDir(root)
+    createDir(root / "notes")
+    writeFile(root / "notes" / "todo.txt", "milk\neggs")
+    let config = testConfig()
+    let scene = load(config, %*{"spot": {"view": "code", "folder": {"storage": "assets", "path": "code-editor-folder"},
+      "file": "notes/todo.txt", "expanded": ["notes"]}})
+    discard draw(scene, config, "folder-open")
+    discard draw(scene, config, "folder")
+    scene.send("tap", %*{"x": 600, "y": 70, "pointerId": 0, "pointerType": "touch"})
+    discard draw(scene, config, "folder-focused")
+    scene.send("textInput", %*{"text": " and bread"})
+    discard draw(scene, config, "folder-typed")
+    scene.send("tap", %*{"x": 768, "y": 18, "pointerId": 0, "pointerType": "touch"})
+    discard draw(scene, config, "folder-saved")
+    let saved = readFile(root / "notes" / "todo.txt")
+    check "and bread" in saved and "eggs" in saved and saved != "milk\neggs"
+    check problems.len == 0
+    if problems.len > 0: echo problems
+    removeDir(root)
 
   test "draws a narrow portrait screen and e-paper":
     for (width, height) in [(480, 800), (296, 128)]:

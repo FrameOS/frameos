@@ -2,10 +2,12 @@
 
 *Written 2026-11-16.*
 
-A scene's code, read and changed on the frame itself, and an AI that writes
-scenes from a request typed there. It is a scene, the **Code editor** sample
+A scene's code, read and changed on the frame itself, an AI that writes
+scenes from a request typed there, and the text files in the frame's folders
+(below, "A folder"). It is a scene, the **Code editor** sample
 (`repo/scenes/samples/Code editor`, scene id `code-editor`), one JSX app
-(`codeEditor`) on one bridge call, `frameos.code`. It runs wherever a JS app
+(`codeEditor`) on one bridge call, `frameos.code`, and the asset calls every
+app has. It runs wherever a JS app
 runs: a Raspberry Pi, an ESP32, the browser preview (which reads and asks
 nothing of a plane: `previewOnly`).
 
@@ -60,8 +62,26 @@ nothing of a plane: `previewOnly`).
   above them; **Save** installs it (a change replaces the scene, a new scene
   goes on the list and shows), **Discard** drops it, and a further request
   changes the draft.
-- **Where it is** (the scene open, the file, the draft's name) is a private
-  disk field, `spot`; the files' edits, what is being typed, where each file
+- **A folder.** **Open folder…** (the start page, or the activity bar's
+  folder) walks the frame's storages and their folders (the assets folder,
+  and beside it an ESP32's internal storage when a card is in:
+  `app.frame.storages`) and opens the folder showing as the work, as VS Code
+  opens a folder: its tree in the explorer, each folder opened and closed in
+  place, and any text file in it opened in the same editor as a scene's files
+  (pictures, fonts and archives are listed dimmed and not opened; a file over
+  256 KB on an ESP32, 2 MB elsewhere, is not opened either). **Save** writes
+  each changed file back; the explorer's buttons make a new file (empty, and
+  open) or folder in the folder last opened there, list it again, and close
+  it (a folder with unsaved files says so once). Only the assets folder is
+  written to (`writeAsset` reaches it alone): another storage is read only.
+  The last five folders opened are on the start page. All of it is the asset
+  calls (`frameos.listAssets`, `readAsset`, `writeAsset`, `makeAssetFolder`),
+  which need the app's `"assets-write"` permission and nothing of the frame
+  page: the folders open where the scenes are off (FrameOS 2026.11.12+, the
+  first to write text with `writeAsset`).
+- **Where it is** (the scene or folder open, the file, the draft's name, the
+  folders open in the tree and the ones opened lately) is a private disk
+  field, `spot`; the files' edits, what is being typed, where each file
   is scrolled to and the draft are kept with `frameos.remember`, so they
   outlast an interpreter the frame let go (scrolling writes nothing to flash).
 
@@ -136,6 +156,9 @@ each hook was a proc and a bridge in the ESP32's flash. An app on a runtime
 without a host gets null.
 
 ## Who may use it
+
+(This is `frameos.code`. The folders are the asset calls', under the app's
+`"assets-write"`, which the editor asks for too.)
 
 Only an app whose config.json `"permissions"` has `"code"`: the owner's yes is
 installing the scene, whose tags say "reads and changes this frame's scenes"
