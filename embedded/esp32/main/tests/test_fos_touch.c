@@ -237,6 +237,15 @@ static void test_edge_swipe(void)
     CHECK(fos_touch_edge_at(1, 5, 800, 480) == FOS_TOUCH_EDGE_LEFT, "a corner: the nearest");
     CHECK(fos_touch_edge_at(400, 240, 800, 480) == FOS_TOUCH_EDGE_NONE, "the middle");
     CHECK(fos_touch_edge_at(0, 0, 80, 80) == FOS_TOUCH_EDGE_NONE, "too small a panel has no edges");
+    /* A round panel (the AMOLED 1.75's 466x466): the rim, by its quarter. */
+    CHECK(fos_touch_edge_at_round(233, 2, 466, 466) == FOS_TOUCH_EDGE_TOP, "round: the top of the rim");
+    CHECK(fos_touch_edge_at_round(233, 463, 466, 466) == FOS_TOUCH_EDGE_BOTTOM, "round: the bottom of the rim");
+    CHECK(fos_touch_edge_at_round(3, 233, 466, 466) == FOS_TOUCH_EDGE_LEFT, "round: the left of the rim");
+    CHECK(fos_touch_edge_at_round(70, 70, 466, 466) == FOS_TOUCH_EDGE_LEFT || fos_touch_edge_at_round(70, 70, 466, 466) == FOS_TOUCH_EDGE_TOP,
+          "round: the rim at the top left");
+    CHECK(fos_touch_edge_at_round(233, 233, 466, 466) == FOS_TOUCH_EDGE_NONE, "round: the middle");
+    CHECK(fos_touch_edge_at_round(120, 120, 466, 466) == FOS_TOUCH_EDGE_NONE, "round: inside the band");
+    CHECK(fos_touch_edge_at(70, 70, 466, 466) == FOS_TOUCH_EDGE_NONE, "the square's rule misses the rim there");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 3, -10) == 0, "a little up: not yet");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 10, -FOS_GESTURE_SWIPE_MIN_PX) == 1, "far enough up: a swipe");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_TOP, 0, FOS_GESTURE_SWIPE_MIN_PX + 5) == 1, "down from the top");
@@ -244,6 +253,8 @@ static void test_edge_swipe(void)
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_BOTTOM, 60, -50) == -1, "more along than inward: a drag");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_LEFT, 30, FOS_GESTURE_TAP_SLOP_PX + 20) == -1, "along the left edge");
     CHECK(fos_touch_edge_step(FOS_TOUCH_EDGE_RIGHT, -FOS_GESTURE_SWIPE_MIN_PX, 0) == 1, "in from the right");
+}
+
 /* The Hynitron CST92xx (the AMOLED 1.75's CST9217): two five-byte records,
  * the second after the count and the ack byte. */
 static void test_decode_cst92(void)

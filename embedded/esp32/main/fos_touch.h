@@ -179,6 +179,10 @@ void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int 
  * panel, the nearest in a corner; none on a panel too small to spare four
  * edge widths across. Pure. */
 fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height);
+/* The same on a round panel (fos_display_round), as the dispatcher reads it
+ * (input_state.nim edgeAt): the rim, within FOS_GESTURE_EDGE_PX of the circle
+ * inside the square, named for the quarter it is in. Pure. */
+fos_touch_edge_t fos_touch_edge_at_round(int x, int y, int width, int height);
 /* A press that began at that edge and is now (dx, dy) from where it began:
  * 1 an edge swipe (FOS_GESTURE_SWIPE_MIN_PX inward, more inward than along),
  * -1 no longer one (it went along the edge: a drag the scene gets), 0 not

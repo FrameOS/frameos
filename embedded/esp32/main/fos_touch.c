@@ -175,6 +175,19 @@ void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int 
     }
 }
 
+fos_touch_edge_t fos_touch_edge_at_round(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    /* input_state.nim edgeAt on a round panel: the rim, the edge band in
+     * from the circle (panel_shape.insideRound, in half pixels), named for
+     * the quarter it is in. */
+    int diameter = (width < height ? width : height) - 2 * FOS_GESTURE_EDGE_PX;
+    long dx = 2L * x + 1 - width, dy = 2L * y + 1 - height;
+    if (diameter > 0 && dx * dx + dy * dy <= (long)diameter * diameter) return FOS_TOUCH_EDGE_NONE;
+    if ((dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)) return dx < 0 ? FOS_TOUCH_EDGE_LEFT : FOS_TOUCH_EDGE_RIGHT;
+    return dy < 0 ? FOS_TOUCH_EDGE_TOP : FOS_TOUCH_EDGE_BOTTOM;
+}
+
 fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
 {
     if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
@@ -439,7 +452,7 @@ static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 {
     int x, y, w, h;
     scene_point(wx, wy, &x, &y, &w, &h);
-    fos_touch_edge_t edge = fos_touch_edge_at(x, y, w, h);
+    fos_touch_edge_t edge = fos_display_round() ? fos_touch_edge_at_round(x, y, w, h) : fos_touch_edge_at(x, y, w, h);
     s_edge[id] = taken == 2 && edge != FOS_TOUCH_EDGE_BOTTOM ? FOS_TOUCH_EDGE_NONE : edge;
     s_edge_x[id] = (int16_t)x;
     s_edge_y[id] = (int16_t)y;
