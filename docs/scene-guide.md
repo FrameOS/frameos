@@ -690,7 +690,9 @@ export function get(app, context) {
   text holding the link is its target. Style it yourself (`underline`).
 - Lists longer than the screen: give the box a height (`flex-1` in a
   column, `h-*`, `max-h-*`) and `overflow-y-auto`, and a finger (or a wheel)
-  scrolls it; no paging needed on an LCD. `overflow-hidden` clips.
+  scrolls it; no paging needed on an LCD. A frame's next and prev buttons
+  walk what there is to press in it and turn it a page at a time, so it
+  reads on a frame with buttons alone (e-paper) too. `overflow-hidden` clips.
 - Not there: rounded clipping, shadows, transforms, `z-*`, momentum when a
   list is flung, text selection. `docs/jsx-ui.md` has the full list.
 

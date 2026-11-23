@@ -1008,6 +1008,21 @@ where they got to. A long press stays the frame's event map's (a reTerminal's
 arrows held walk the scenes, its green key held talks). A UI with nothing to
 press hears neither keys nor buttons.
 
+**A frame's buttons turn pages.** On an element in a box that scrolls
+([Scrolling](#scrolling-and-clipping)), while the box has more below, `next`
+goes to the next element only when it shows whole there. When it does not (it
+is cut off at the bottom, or the walk would leave the box for the scene's
+header or the layout's bar), the box scrolls down a page instead, its height
+less an eighth so the reader keeps their place, and the ring goes to the first
+element the new page shows below the one it was on. With nothing to press on
+the new page it stays where it was while that shows, else it rings the box
+itself. Only at the box's end does `next` go on past it. `prev` mirrors it
+upward. A box that scrolls with nothing to press showing in it is a stop of
+its own, so a long text pages too. Presses that come before the new page is
+drawn (a double press, taps while e-paper refreshes) go on from where the ring
+lands, one element each. A keyboard's Tab walks on without pages and brings
+what it goes to into sight by what that needs, as a browser does.
+
 **The scene's own code hears them first.** A scene or a layout with an event
 node for `keyDown` or `button` keeps every one of them. A JS app subscribed to
 them (`"events"` in its config.json) hears each one before the keys move,
@@ -1025,10 +1040,15 @@ switcher's highlight is its focus (Tab moves it a tile), and the scene
 settings' form walks alone, without the layout around it.
 
 The ring is `UiInput.ring` (the element's key + 1, kept with the UI's input
-like a field's focus), drawn by `ui/layout.nim` `ring` over the UI and under
-the keyboard; an element gone from the next render takes the ring with it and
-Tab starts over from the top. `ui/tests/test_ui_keys.nim` and
-`tests/test_frame_keys.nim` are where a rule gets its test.
+like a field's focus, and between a plane's pulls), drawn by `ui/layout.nim`
+`ring` over the UI and under the keyboard; an element gone from the next
+render takes the ring with it and Tab starts over from the top. A page is
+turned in two halves: `ui/events.nim` `turnPage` decides from the regions
+(each knows the box around it that scrolls, `UiRegion.scroller`) and scrolls
+the box, and the next layout's `turnPage`, before `reveal`, knows every
+element in the box, shown or not, and moves the ring (`UiInput.turn`).
+`ui/tests/test_ui_keys.nim` and `tests/test_frame_keys.nim` are where a rule
+gets its test.
 
 ## Select boxes
 

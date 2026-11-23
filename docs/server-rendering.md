@@ -401,7 +401,8 @@ once the scene is open and before the drawing that comes ahead of a tap):
 
 - `targets`: what a JSX UI holds (`UiTarget.input`, `ui/events.nim`): the
   field with the focus, its caret and text, the keyboard and its page and
-  shift, a list's scroll, an open select. Not a pointer's passing marks
+  shift, a list's scroll, an open select, the keys' ring (without it every
+  `next` of the board's buttons started over from the top). Not a pointer's passing marks
   (hover, a press, a key's flash), nor a UI the pull did not draw.
 - `apps`: each JS app's `frameos.remember` values (`JsAppRuntime.memory`),
   by scene and node, for the apps the pull built. A board keeps them until

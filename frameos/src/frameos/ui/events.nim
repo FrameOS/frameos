@@ -162,15 +162,16 @@ when not defined(frameosEmbedded):
   proc lastingUiInput*(): JsonNode =
     ## What every UI on the glass keeps between pictures — the field with the
     ## keyboard, its caret and text, the keyboard's page and shift, the open
-    ## <select>, how far each box is scrolled — for a host that draws each
-    ## picture in a fresh process: the wasm runtime a control plane renders a
-    ## frame with (docs/server-rendering.md, "Kept between pulls"), which
-    ## hands it back with the next pull (`restoreLastingUiInput`). What the
-    ## pointer is doing this moment (hover, press, a key's light, its
-    ## accents, a caret yet to be placed) is not kept: the pull that carried
-    ## it is over. A UI this process did not draw (no regions) is not on the
-    ## glass any more and is left out. `{}` when nothing is kept. Not in the
-    ## firmware: a device keeps its UIs in its own memory.
+    ## <select>, how far each box is scrolled, the keys' ring — for a host
+    ## that draws each picture in a fresh process: the wasm runtime a control
+    ## plane renders a frame with (docs/server-rendering.md, "Kept between
+    ## pulls"), which hands it back with the next pull
+    ## (`restoreLastingUiInput`). What the pointer is doing this moment
+    ## (hover, press, a key's light, its accents, a caret yet to be placed)
+    ## is not kept: the pull that carried it is over. A UI this process did
+    ## not draw (no regions) is not on the glass any more and is left out.
+    ## `{}` when nothing is kept. Not in the firmware: a device keeps its UIs
+    ## in its own memory.
     var kept = newJArray()
     for target in targets:
       if target.regions.len == 0:
@@ -180,7 +181,7 @@ when not defined(frameosEmbedded):
       for (key, x, y) in i.scrolls:
         if (x != 0 or y != 0) and scrolls.len < MaxKeptScrolls:
           scrolls.add %*[newJInt(key), newJFloat(x.float), newJFloat(y.float)]
-      if i.focus <= 0 and i.open <= 0 and i.link.len == 0 and scrolls.len == 0:
+      if i.focus <= 0 and i.open <= 0 and i.link.len == 0 and i.ring <= 0 and scrolls.len == 0:
         continue
       var entry = newJObject()
       entry["sceneId"] = newJString(target.sceneId)
@@ -198,6 +199,8 @@ when not defined(frameosEmbedded):
         entry["open"] = newJInt(i.open)
       if i.link.len > 0:
         entry["link"] = newJString(i.link)
+      if i.ring > 0:
+        entry["ring"] = newJInt(i.ring)
       if scrolls.len > 0:
         entry["scrolls"] = scrolls
       kept.add entry
@@ -242,6 +245,7 @@ when not defined(frameosEmbedded):
         i.sel = 0
         i.keyboard = false
       i.open = max(entry{"open"}.getInt(), 0)
+      i.ring = max(entry{"ring"}.getInt(), 0)
       let link = entry{"link"}.getStr()
       if link.isLink:
         i.link = link
@@ -323,12 +327,45 @@ template stop(r: UiRegion, list: bool): bool =
   if list: r.handlers[ueClick] - 1 >= OptionBase
   else: r.field > 0 or r.handlers[ueClick] > 0 and r.handlers[ueClick] - 1 <= LinkOpen
 
+template pages(r: UiRegion): bool =
+  ## A box that scrolls up and down (not a field's text): the keys turn its pages.
+  r.scrollY > 0 and r.field == 0
+
+proc regionOf(target: UiTarget, key: int): int
+
+proc inBox(target: UiTarget, i, box: int): bool =
+  ## Whether the region at `i` is inside the box that scrolls at `box`.
+  let key = int32(target.regions[box].key + 1)
+  var j = i
+  for _ in 0 ..< 64:
+    let s = target.regions[j].scroller
+    if s == key:
+      return true
+    if s <= 0:
+      return false
+    j = target.regionOf(s - 1)
+    if j < 0:
+      return false
+
+proc stops(target: UiTarget, i: int, list: bool): bool =
+  ## Whether Tab stops at region `i`: an element to press, or a box that
+  ## scrolls with nothing to press showing in it, whose pages the keys turn.
+  template r: untyped = target.regions[i]
+  if r.stop(list):
+    return true
+  if list or not r.pages:
+    return false
+  for j in i + 1 ..< target.regions.len:
+    if target.regions[j].stop(false) and target.inBox(j, i):
+      return false
+  true
+
 proc walkable(target: UiTarget): bool =
   ## Whether the keys have somewhere to go in the UI.
   if target.input.ring > 0 or target.input.focus > 0 or target.input.open > 0 or target.input.link.len > 0:
     return true
-  for r in target.regions:
-    if r.stop(false):
+  for i in 0 ..< target.regions.len:
+    if target.stops(i, false):
       return true
 
 proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
@@ -1101,13 +1138,74 @@ when not defined(frameosEmbedded):
 # then takes the ring away. The UIs of a scene and of the layout it wears are
 # one walk, so there is one ring on the frame, never one in each.
 
+proc pageBox(target: UiTarget, i: int, back: bool): int =
+  ## The box that scrolls around the region at `i` (or that region, a box
+  ## that scrolls), the innermost with more to show down (up with `back`);
+  ## -1 for none.
+  var j = if target.regions[i].pages: i
+    elif target.regions[i].scroller > 0: target.regionOf(target.regions[i].scroller - 1)
+    else: -1
+  for _ in 0 ..< 64:
+    if j < 0:
+      break
+    let
+      r = target.regions[j]
+      y = target.input.scrolled(r.key)[1]
+    if (if back: y > 0.5 else: y < r.scrollY - 0.5):
+      return j
+    j = if r.scroller > 0: target.regionOf(r.scroller - 1) else: -1
+  -1
+
+proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
+  ## A frame's next (prev with `back`) on an element in a box that scrolls,
+  ## while the box has more that way: the element Tab would go to next is
+  ## not on the page (it is outside the box, or cut off at its edge), so the
+  ## box scrolls a page instead (its height less an eighth, so the reader
+  ## keeps their place), and the next layout rings the first element on it
+  ## (ui/layout.nim `turnPage`). At the box's end Tab goes on as before.
+  let
+    (u, k) = stops[current]
+    t = list[u]
+    s = t.pageBox(k, back)
+  if s < 0:
+    return false
+  let (nu, nk) = stops[next]
+  if nu == u and nk != s and t.inBox(nk, s):
+    let
+      n = t.regions[nk]
+      topShows = n.visible[1] <= n.y + 0.5
+      bottomShows = n.visible[3] >= n.y + n.h - 0.5
+      # Taller than the box: whole it never shows, its near end is enough.
+      tall = n.h > t.regions[s].h
+    if (if back: topShows or tall and bottomShows else: bottomShows or tall and topShows):
+      return false
+  let
+    box = t.regions[s]
+    c = t.regions[k]
+    (sx, sy) = t.input.scrolled(box.key)
+    page = max(float32(int(box.h * 0.875 + 0.5)), 1)
+  if t.input.focus > 0:
+    t.blurField()
+  t.input.ring = c.key + 1
+  t.input.scrollTo(box.key, sx, if back: max(sy - page, 0) else: min(sy + page, box.scrollY))
+  t.input.turn = box.key + 1
+  t.input.turnBack = back
+  # Where the ring was, in the box's own pixels: on the box itself, its page's
+  # top edge (its bottom edge going back).
+  t.input.turnFrom = if k == s: (if back: sy + box.h else: sy) else: c.y - box.y + sy
+  t.input.turnSteps = 0
+  t.inputOnly = true
+  t.scrolledBy(box)
+  true
+
 proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
   ## Tab once: the ring to the next element of the UIs in `list` (the one
   ## before with `back`), from where it is, else from the focused field, else
   ## from the top (or the bottom). One stop per element, however many regions
   ## it drew. Typed on a keyboard, a field it lands on takes the keys too; a
-  ## frame's button only rings it, and Enter gives it the keyboard. `dry`:
-  ## whether it would, and nothing done.
+  ## frame's button only rings it (Enter gives it the keyboard), and turns
+  ## the pages of a box that scrolls (`turnPage`). `dry`: whether it would,
+  ## and nothing done.
   var at = -1
   for i, t in list:
     if t.input.open > 0:
@@ -1127,7 +1225,9 @@ proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
       continue
     let here = if i != at: -1 elif t.input.ring > 0: t.input.ring - 1 else: t.input.focus - 1
     for j, r in t.regions:
-      if not r.stop(listUp):
+      # The element ringed is on the walk whatever it is: a box whose page
+      # the keys turned (`turnPage`) is ringed with things to press in it.
+      if (i != at or r.key != here) and not t.stops(j, listUp):
         continue
       var seen = false
       for (u, k) in stops:
@@ -1140,10 +1240,20 @@ proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
         stops.add (i, j)
   if stops.len == 0 or dry:
     return stops.len > 0
+  if not typed and not listUp:
+    for t in list:
+      if t.input.turn > 0:
+        # A page turned that no layout has shown yet: from where the ring
+        # lands on it, one more element on (back: one less).
+        if t.input.turnBack == back: inc t.input.turnSteps
+        elif t.input.turnSteps > 0: dec t.input.turnSteps
+        return true
   let next =
     if current < 0: (if back: stops.len - 1 else: 0)
     elif back: (current + stops.len - 1) mod stops.len
     else: (current + 1) mod stops.len
+  if not typed and not listUp and current >= 0 and turnPage(list, stops, current, next, back):
+    return true
   let (u, k) = stops[next]
   for i, t in list:
     if i != u:
@@ -1254,6 +1364,7 @@ proc escape(list: seq[UiTarget], typed, dry: bool): bool =
     if t.input.ring > 0:
       if not dry:
         t.input.ring = 0
+        t.input.turn = 0
         t.inputOnly = true
       return true
 
@@ -1517,6 +1628,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     # A finger or a mouse: the keys' ring goes, on every UI (docs/jsx-ui.md
     # "Keys"), as a browser's focus ring does after a click.
     for target in targets:
+      target.input.turn = 0
       if target.input.ring > 0:
         target.input.ring = 0
         target.inputOnly = true
