@@ -16,6 +16,14 @@
 
 static const char *TAG = "fos_status";
 
+/* Only the circle inside the panel shows. The display component's answer
+ * (PR #990, the round Waveshare AMOLED) replaces this default when it is
+ * linked in; until then no panel is round. */
+__attribute__((weak)) bool fos_display_round(void)
+{
+    return false;
+}
+
 esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const char *ip)
 {
     if (!fos_display_present()) return ESP_ERR_INVALID_STATE;
@@ -41,7 +49,7 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const
     if (!codes) codes = malloc(2 * sizeof(fos_qr_t));
     /* White on e-paper; on an LCD white on black, as a Pi's hotspot screen. */
     fos_portal_screen_layout_t layout =
-        fos_portal_screen_draw(&surface, ssid, psk, ip, fos_display_is_lcd(), codes);
+        fos_portal_screen_draw(&surface, ssid, psk, ip, fos_display_is_lcd(), fos_display_round(), codes);
     free(codes);
 
     esp_err_t err = fos_display_blit(buf, len);

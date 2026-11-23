@@ -86,7 +86,8 @@ extern void fos_nim_set_colors_impl(const char *json);
 extern void fos_nim_set_palette_impl(const char *json);
 extern void fos_nim_set_event_map_impl(const char *json);
 extern void fos_nim_set_status_info_impl(const char *info_json);
-extern void fos_nim_set_portal_screen_impl(const char *ssid, const char *pass, const char *ip, int dark);
+extern void fos_nim_set_portal_screen_impl(const char *ssid, const char *pass, const char *ip, int dark,
+                                           int round);
 extern void fos_nim_set_time_zone_impl(const char *time_zone);
 extern const char *fos_nim_load_tz_data_impl(const char *slice_json, const char *time_zone);
 extern double fos_nim_scene_interval_impl(void);
@@ -1208,11 +1209,11 @@ void frameos_nim_set_status_info(const char *info_json)
     nim_lock_give();
 }
 
-bool frameos_nim_set_portal_screen(const char *ssid, const char *pass, const char *ip, bool dark)
+bool frameos_nim_set_portal_screen(const char *ssid, const char *pass, const char *ip, bool dark, bool round)
 {
     if (!s_nim_ready) return false;
     if (!nim_lock_take()) return false;
-    fos_nim_set_portal_screen_impl(ssid, pass, ip, dark ? 1 : 0);
+    fos_nim_set_portal_screen_impl(ssid, pass, ip, dark ? 1 : 0, round ? 1 : 0);
     nim_lock_give();
     return true;
 }

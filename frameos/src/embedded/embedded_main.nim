@@ -404,14 +404,14 @@ proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
   if infoJson != nil and infoJson.len > 0:
     setStatusInfo($infoJson)
 
-proc fos_nim_set_portal_screen_impl(ssid, pass, ip: cstring; dark: cint) {.exportc, cdecl.} =
+proc fos_nim_set_portal_screen_impl(ssid, pass, ip: cstring; dark, round: cint) {.exportc, cdecl.} =
   ## The next render is the setup hotspot's screen (embedded_scene.nim
   ## renderPortalInto) with these facts; a nil `ssid` ends that. fos_client.c
   ## sets it around one render while the portal is up.
   if ssid == nil:
     clearPortalScreen()
   else:
-    setPortalScreen($ssid, (if pass == nil: "" else: $pass), (if ip == nil: "" else: $ip), dark != 0)
+    setPortalScreen($ssid, (if pass == nil: "" else: $pass), (if ip == nil: "" else: $ip), dark != 0, round != 0)
 
 proc framePalette(default: seq[(int, int, int)]): seq[(int, int, int)] =
   ## The panel's table with frame.json's `palette` fitted onto it

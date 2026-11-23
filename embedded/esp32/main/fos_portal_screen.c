@@ -72,9 +72,9 @@ static void draw_mark(const pen_t *pen, int x, int y, int scale)
 
 /* The header every FrameOS status screen shares (frameos/utils/status_screen.nim
  * draws the same with pixie): the mark, "FrameOS" beside it and one status
- * line under the wordmark, centred. Measured (`pen` NULL) or drawn; returns
- * its height. */
-static int header(const pen_t *pen, int sw, int y, int scale, const char *status)
+ * line under the wordmark, centred, no further left than `x`. Measured
+ * (`pen` NULL) or drawn; returns its height, its width in `*width`. */
+static int header(const pen_t *pen, int sw, int x, int y, int scale, const char *status, int *width)
 {
     const int title_scale = scale + 1;
     const int title_h = 7 * title_scale;
@@ -83,13 +83,13 @@ static int header(const pen_t *pen, int sw, int y, int scale, const char *status
     const int mark_scale = max_int(1, (text_h + FOS_LOGO_H / 2) / FOS_LOGO_H);
     const int mark_h = FOS_LOGO_H * mark_scale;
     const int header_h = max_int(mark_h, text_h);
+    const int mark_w = FOS_LOGO_W * mark_scale + scale * 4;
+    const int status_scale = fos_panel_fit_scale(status, scale, sw - 2 * x - mark_w);
+    const int text_w = max_int(fos_panel_text_width("FrameOS", title_scale),
+                               fos_panel_text_width(status, status_scale));
+    if (width) *width = mark_w + text_w;
     if (pen != NULL) {
-        const int mark_w = FOS_LOGO_W * mark_scale + scale * 4;
-        const int edge = max_int(2, sw / 40);
-        const int status_scale = fos_panel_fit_scale(status, scale, sw - 2 * edge - mark_w);
-        const int text_w = max_int(fos_panel_text_width("FrameOS", title_scale),
-                                   fos_panel_text_width(status, status_scale));
-        const int x = max_int(edge, (sw - mark_w - text_w) / 2);
+        x = max_int(x, (sw - mark_w - text_w) / 2);
         draw_mark(pen, x, y + (header_h - mark_h) / 2, mark_scale);
         const int text_y = y + (header_h - text_h) / 2;
         ink_text(pen, "FrameOS", x + mark_w, text_y, title_scale);
@@ -111,6 +111,7 @@ typedef struct {
     fos_portal_screen_layout_t arrangement;
     bool header;
     int header_scale;
+    int header_y;
     int scale;  /* caption text */
     int x, y, w, h; /* the area under the header */
     int card_w, card_h;
@@ -195,57 +196,105 @@ static bool try_plan(plan_t *plan, fos_portal_screen_layout_t arrangement, const
     return true;
 }
 
-/* The codes first: the largest caption whose codes are within a fifth of
+/* The plan for the rectangle (ax, ay, aw, ah), with or without the header:
+ * the codes first, the largest caption whose codes are within a fifth of
  * the largest the arrangement gives (so captions do not shrink to scale 1
- * for a few pixels of code). The header, sized by the panel alone, only if
- * the codes are readable with it. */
-static bool make_plan(plan_t *best, const fos_panel_surface_t *s, const texts_t *t, const fos_qr_t codes[2])
+ * for a few pixels of code). False when no code a phone reads fits. */
+static bool plan_area(plan_t *best, int sw, int small, int ax, int ay, int aw, int ah, bool with_header,
+                      const texts_t *t, const fos_qr_t codes[2])
+{
+    const int base_scale = max_int(1, min_int(6, small / 150));
+    const int header_scale = max_int(1, min_int(5, small / 160));
+    const fos_portal_screen_layout_t arrangements[2] = {FOS_PORTAL_SCREEN_COLUMNS, FOS_PORTAL_SCREEN_ROWS};
+    int header_w = 0;
+    const int header_h = header(NULL, sw, ax, 0, header_scale, STATUS, &header_w);
+    if (with_header && header_w > aw) return false;
+    plan_t candidates[2 * 6];
+    int count = 0;
+    for (int scale = base_scale; scale >= 1; scale--) {
+        plan_t plan = {0};
+        plan.header = with_header;
+        plan.header_scale = header_scale;
+        plan.header_y = ay;
+        plan.x = ax;
+        plan.y = ay + (with_header ? header_h + small / 40 : 0);
+        plan.w = aw;
+        plan.h = ay + ah - plan.y;
+        if (plan.w <= 0 || plan.h <= 0) continue;
+        for (int a = 0; a < 2; a++) {
+            plan_t candidate = plan;
+            if (!try_plan(&candidate, arrangements[a], t, codes, scale)) continue;
+            candidates[count++] = candidate;
+        }
+    }
+    if (count == 0) return false;
+    /* The arrangement that suits the rectangle's shape unless the other's
+     * codes come out a tenth larger (two codes side by side on a tall panel
+     * leave half of it empty); then the caption size within it. */
+    fos_portal_screen_layout_t arrangement = aw >= ah ? FOS_PORTAL_SCREEN_COLUMNS : FOS_PORTAL_SCREEN_ROWS;
+    int largest_of[3] = {0, 0, 0};
+    for (int i = 0; i < count; i++) {
+        largest_of[candidates[i].arrangement] = max_int(largest_of[candidates[i].arrangement], candidates[i].extent);
+    }
+    const fos_portal_screen_layout_t other =
+        arrangement == FOS_PORTAL_SCREEN_COLUMNS ? FOS_PORTAL_SCREEN_ROWS : FOS_PORTAL_SCREEN_COLUMNS;
+    if (largest_of[other] * 10 > largest_of[arrangement] * 11) arrangement = other;
+    const int largest = largest_of[arrangement];
+    int pick = -1;
+    for (int i = 0; i < count; i++) {
+        if (candidates[i].arrangement != arrangement || candidates[i].extent * 5 < largest * 4) continue;
+        if (pick < 0 || candidates[i].scale > candidates[pick].scale) pick = i;
+    }
+    *best = candidates[pick];
+    return true;
+}
+
+/* The header only if the codes are readable with it. On a round panel
+ * everything stays inside a rectangle inscribed in its circle, of the shape
+ * that gives the largest codes, in the middle of the circle. */
+static bool make_plan(plan_t *best, const fos_panel_surface_t *s, const texts_t *t, const fos_qr_t codes[2],
+                      bool round)
 {
     const int sw = fos_panel_scene_width(s);
     const int sh = fos_panel_scene_height(s);
     const int small = min_int(sw, sh);
     const int margin = max_int(6, small / 20);
-    const int base_scale = max_int(1, min_int(6, small / 150));
-    const int header_scale = max_int(1, min_int(5, small / 160));
-    const fos_portal_screen_layout_t arrangements[2] = {FOS_PORTAL_SCREEN_COLUMNS, FOS_PORTAL_SCREEN_ROWS};
+    /* Width and height of a rectangle in a circle of diameter 1000, at
+     * aspects 2, 1.6, 1.3 and 1 (a square last). */
+    static const int16_t INSCRIBED[4][2] = {{894, 447}, {848, 530}, {793, 610}, {707, 707}};
+    const int diameter = small - 2 * max_int(12, margin / 2); /* clear of the bezel */
     for (int with_header = 1; with_header >= 0; with_header--) {
-        plan_t candidates[2 * 6];
-        int count = 0;
-        for (int scale = base_scale; scale >= 1; scale--) {
-            plan_t plan = {0};
-            plan.header = with_header;
-            plan.header_scale = header_scale;
-            plan.x = margin;
-            plan.y = margin;
-            if (with_header) plan.y += header(NULL, sw, 0, header_scale, STATUS) + margin;
-            plan.w = sw - 2 * margin;
-            plan.h = sh - plan.y - margin;
-            if (plan.w <= 0 || plan.h <= 0) continue;
-            for (int a = 0; a < 2; a++) {
-                plan_t candidate = plan;
-                if (!try_plan(&candidate, arrangements[a], t, codes, scale)) continue;
-                candidates[count++] = candidate;
+        if (!round) {
+            if (plan_area(best, sw, small, margin, margin, sw - 2 * margin, sh - 2 * margin, with_header, t,
+                          codes)) {
+                return true;
+            }
+            continue;
+        }
+        bool found = false;
+        for (int i = 0; i < 4; i++) {
+            const int aw = diameter * INSCRIBED[i][0] / 1000;
+            const int ah = diameter * INSCRIBED[i][1] / 1000;
+            plan_t plan;
+            if (plan_area(&plan, sw, small, (sw - aw) / 2, (sh - ah) / 2, aw, ah, with_header, t, codes) &&
+                (!found || plan.extent > best->extent)) {
+                *best = plan;
+                found = true;
             }
         }
-        if (count == 0) continue;
-        /* The arrangement that suits the panel's shape unless the other's
-         * codes come out a tenth larger (two codes side by side on a tall
-         * panel leave half of it empty); then the caption size within it. */
-        fos_portal_screen_layout_t arrangement = sw >= sh ? FOS_PORTAL_SCREEN_COLUMNS : FOS_PORTAL_SCREEN_ROWS;
-        int largest_of[3] = {0, 0, 0};
-        for (int i = 0; i < count; i++) {
-            largest_of[candidates[i].arrangement] = max_int(largest_of[candidates[i].arrangement], candidates[i].extent);
+        if (!found) continue;
+        /* In the middle of the circle: the room left under the captions,
+         * half of it above the content instead. */
+        const int caption_h = max_int(caption_height(&best->captions[0], best->scale),
+                                      caption_height(&best->captions[1], best->scale));
+        const int slack = (best->card_h - (best->extent + 3 * best->scale + caption_h)) / 2;
+        const int top = best->header ? best->header_y : best->y + slack;
+        const int bottom = best->y + best->h - slack;
+        const int shift = (sh - bottom - top) / 2;
+        if (shift > 0) {
+            best->header_y += shift;
+            best->y += shift;
         }
-        const fos_portal_screen_layout_t other =
-            arrangement == FOS_PORTAL_SCREEN_COLUMNS ? FOS_PORTAL_SCREEN_ROWS : FOS_PORTAL_SCREEN_COLUMNS;
-        if (largest_of[other] * 10 > largest_of[arrangement] * 11) arrangement = other;
-        const int largest = largest_of[arrangement];
-        int pick = -1;
-        for (int i = 0; i < count; i++) {
-            if (candidates[i].arrangement != arrangement || candidates[i].extent * 5 < largest * 4) continue;
-            if (pick < 0 || candidates[i].scale > candidates[pick].scale) pick = i;
-        }
-        *best = candidates[pick];
         return true;
     }
     return false;
@@ -278,7 +327,7 @@ static void draw_plan(const pen_t *pen, const plan_t *plan, const fos_qr_t codes
     const int sw = fos_panel_scene_width(pen->s);
     const int scale = plan->scale;
     if (plan->header) {
-        header(pen, sw, plan->x, plan->header_scale, STATUS);
+        header(pen, sw, plan->x, plan->header_y, plan->header_scale, STATUS, NULL);
     }
     const int gap = 3 * scale;
     const int caption_h = max_int(caption_height(&plan->captions[0], scale),
@@ -316,8 +365,8 @@ static void draw_text_only(const pen_t *pen, const texts_t *t)
     const int avail = sw - 2 * margin;
     const int gap = scale * 2;
     int y = margin;
-    if (header(NULL, sw, 0, scale, STATUS) * 3 < sh) {
-        y += header(pen, sw, margin, scale, STATUS) + gap * 2;
+    if (header(NULL, sw, margin, 0, scale, STATUS, NULL) * 3 < sh) {
+        y += header(pen, sw, margin, margin, scale, STATUS, NULL) + gap * 2;
     }
     const char *lines[4] = {"Join the Wi-Fi", t->ssid_line, t->psk_line, NULL};
     char open_line[80];
@@ -332,7 +381,7 @@ static void draw_text_only(const pen_t *pen, const texts_t *t)
 }
 
 fos_portal_screen_layout_t fos_portal_screen_draw(const fos_panel_surface_t *s, const char *ssid,
-                                                  const char *psk, const char *ip, bool dark,
+                                                  const char *psk, const char *ip, bool dark, bool round,
                                                   fos_qr_t scratch[2])
 {
     if (s == NULL || s->buf == NULL) return FOS_PORTAL_SCREEN_TEXT;
@@ -359,7 +408,7 @@ fos_portal_screen_layout_t fos_portal_screen_draw(const fos_panel_surface_t *s, 
     plan_t plan;
     if (scratch != NULL && fos_portal_wifi_code(texts.ssid_line, psk, wifi_code, sizeof(wifi_code)) &&
         fos_qr_encode(wifi_code, &scratch[0]) && fos_qr_encode(url_line, &scratch[1]) &&
-        make_plan(&plan, s, &texts, scratch)) {
+        make_plan(&plan, s, &texts, scratch, round)) {
         draw_plan(&pen, &plan, scratch);
         return plan.arrangement;
     }

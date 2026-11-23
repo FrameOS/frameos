@@ -242,7 +242,7 @@ static void test_screen(void)
                                                .rotate = rotate};
                 const bool dark = format == FOS_PIXEL_RGB565;
                 fos_portal_screen_layout_t layout =
-                    fos_portal_screen_draw(&s, "FrameOS-1A2B", "abcdefghjk", "192.168.4.1", dark, codes);
+                    fos_portal_screen_draw(&s, "FrameOS-1A2B", "abcdefghjk", "192.168.4.1", dark, false, codes);
                 const int sw = fos_panel_scene_width(&s);
                 const int sh = fos_panel_scene_height(&s);
 
@@ -285,7 +285,7 @@ static void test_screen(void)
     uint8_t *buf = calloc(1, buffer_len(800, 480, FOS_PIXEL_1BPP));
     memset(buf, 0xFF, buffer_len(800, 480, FOS_PIXEL_1BPP));
     const fos_panel_surface_t s = {.buf = buf, .width = 800, .height = 480, .format = FOS_PIXEL_1BPP};
-    CHECK(fos_portal_screen_draw(&s, "FrameOS-1A2B", "abcdefghjk", "192.168.4.1", false, NULL) ==
+    CHECK(fos_portal_screen_draw(&s, "FrameOS-1A2B", "abcdefghjk", "192.168.4.1", false, false, NULL) ==
               FOS_PORTAL_SCREEN_TEXT,
           "no scratch: text");
     int ink = 0;
@@ -299,7 +299,7 @@ static void test_screen(void)
     buf = malloc(buffer_len(800, 480, FOS_PIXEL_1BPP));
     memset(buf, 0xFF, buffer_len(800, 480, FOS_PIXEL_1BPP));
     const fos_panel_surface_t open = {.buf = buf, .width = 800, .height = 480, .format = FOS_PIXEL_1BPP};
-    CHECK(fos_portal_screen_draw(&open, "FrameOS-1A2B", "", NULL, false, codes) == FOS_PORTAL_SCREEN_COLUMNS,
+    CHECK(fos_portal_screen_draw(&open, "FrameOS-1A2B", "", NULL, false, false, codes) == FOS_PORTAL_SCREEN_COLUMNS,
           "open hotspot: columns");
     fos_portal_wifi_code("FrameOS-1A2B", "", wifi_code, sizeof(wifi_code));
     fos_qr_encode(wifi_code, &wifi);
@@ -310,11 +310,74 @@ static void test_screen(void)
     if (dump) printf("dumped %d screens to %s\n", g_dumped, dump);
 }
 
+/* frameos/panel_shape.nim insideRound: pixel (x, y) inside the circle
+ * inscribed in a side x side square, `inset` in from its rim. */
+static bool inside_round(int side, int x, int y, int inset)
+{
+    const int diameter = side - 2 * inset;
+    const int dx = 2 * x + 1 - side;
+    const int dy = 2 * y + 1 - side;
+    return dx * dx + dy * dy <= diameter * diameter;
+}
+
+/* A round panel (the Waveshare 1.75" AMOLED's 466x466, a 480x480, a larger
+ * one): nothing drawn outside the circle, clear of the bezel, and both codes
+ * there to read, in every format and rotation. */
+static void test_round(void)
+{
+    const char *dump = getenv("FOS_PORTAL_DUMP");
+    fos_qr_t *codes = malloc(2 * sizeof(fos_qr_t));
+    static fos_qr_t wifi, url;
+    char wifi_code[200];
+    fos_portal_wifi_code("FrameOS-1A2B", "abcdefghjk", wifi_code, sizeof(wifi_code));
+    fos_qr_encode(wifi_code, &wifi);
+    fos_qr_encode("http://192.168.4.1/", &url);
+    const int sides[] = {466, 480, 720};
+    for (size_t si = 0; si < sizeof(sides) / sizeof(sides[0]); si++) {
+        for (size_t fi = 0; fi < sizeof(FORMATS) / sizeof(FORMATS[0]); fi++) {
+            for (int rotate = 0; rotate < 360; rotate += 90) {
+                const int side = sides[si];
+                const fos_pixel_format_t format = FORMATS[fi];
+                const size_t len = buffer_len(side, side, format);
+                uint8_t *buf = malloc(len);
+                memset(buf, fos_panel_white_fill(format), len);
+                const fos_panel_surface_t s = {.buf = buf, .width = side, .height = side, .format = format,
+                                               .rotate = rotate};
+                const bool dark = format == FOS_PIXEL_RGB565;
+                fos_portal_screen_layout_t layout =
+                    fos_portal_screen_draw(&s, "FrameOS-1A2B", "abcdefghjk", "192.168.4.1", dark, true, codes);
+                CHECK(layout != FOS_PORTAL_SCREEN_TEXT, "round %d fmt %d rot %d: has the codes", side, format,
+                      rotate);
+                int outside = 0;
+                for (int y = 0; y < side; y++) {
+                    for (int x = 0; x < side; x++) {
+                        if (black_at(&s, x, y) != dark && !inside_round(side, x, y, 12)) outside++;
+                    }
+                }
+                CHECK(outside == 0, "round %d fmt %d rot %d: %d pixels drawn outside the circle", side, format,
+                      rotate, outside);
+                if (format == FOS_PIXEL_1BPP) {
+                    CHECK(count_codes(&s, &wifi) == 1, "round %d rot %d: the Wi-Fi code", side, rotate);
+                    CHECK(count_codes(&s, &url) == 1, "round %d rot %d: the page's code", side, rotate);
+                }
+                if (dump && rotate == 0 && (format == FOS_PIXEL_1BPP || format == FOS_PIXEL_RGB565)) {
+                    char name[64];
+                    snprintf(name, sizeof(name), "portal_round_%d_%s", side, dark ? "lcd" : "epaper");
+                    dump_pgm(&s, dump, name);
+                }
+                free(buf);
+            }
+        }
+    }
+    free(codes);
+}
+
 int main(void)
 {
     test_qr_vectors();
     test_wifi_code();
     test_screen();
+    test_round();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

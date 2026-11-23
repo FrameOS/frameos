@@ -1139,7 +1139,9 @@ on white for e-ink.
   status screen's header over the two QR codes of the Pi's hotspot scene
   (`system/wifiHotspot`), one that joins the hotspot and one that opens the
   setup page, each with its network, password or address under it. Black on
-  white on e-paper, white on black on an LCD. Where the runtime renders, it
+  white on e-paper, white on black on an LCD; on a round panel
+  (`fos_display_round`) all of it inside a rectangle inscribed in the
+  circle. Where the runtime renders, it
   is `embedded_scene.nim` `renderPortalInto`, in the runtime's font; on a
   board without one (a C3, a panel too large for its PSRAM) the same layout
   in C and its 5x7 font (`fos_portal_screen.c`, `fos_qr.c` being

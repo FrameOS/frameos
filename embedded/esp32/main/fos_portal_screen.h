@@ -37,10 +37,12 @@ typedef enum {
     FOS_PORTAL_SCREEN_ROWS,     /* one above the other */
 } fos_portal_screen_layout_t;
 
-/* Paints the whole surface. `scratch` is two QR buffers (the codes are
- * encoded before anything is laid out, so both are sized together). */
+/* Paints the whole surface. `round`: only the circle inside the panel shows
+ * (fos_display_round), and everything stays in it. `scratch` is two QR
+ * buffers (the codes are encoded before anything is laid out, so both are
+ * sized together). */
 fos_portal_screen_layout_t fos_portal_screen_draw(const fos_panel_surface_t *s, const char *ssid,
-                                                  const char *psk, const char *ip, bool dark,
+                                                  const char *psk, const char *ip, bool dark, bool round,
                                                   fos_qr_t scratch[2]);
 
 /* The Wi-Fi join code a phone's camera reads (`WIFI:T:WPA;S:…;P:…;;`, with

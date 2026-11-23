@@ -2,6 +2,7 @@ import std/[os, strutils, unittest]
 import pixie
 import frameos/utils/qr
 import frameos/utils/status_screen
+import frameos/panel_shape
 import ../embedded_scene
 
 # What an ESP32 shows before it has scenes (the status screen), and while its
@@ -20,9 +21,9 @@ proc readsBack(canvas: Image; plan: PortalPlan; i: int; qr: QrCode): bool =
         return false
   true
 
-proc planFor(w, h: int; pass = "abcdefghjk"; ip = "192.168.4.1"): (PortalPlan, array[2, QrCode]) =
+proc planFor(w, h: int; pass = "abcdefghjk"; ip = "192.168.4.1"; round = false): (PortalPlan, array[2, QrCode]) =
   let codes = [qrEncode(wifiJoinCode("FrameOS-1A2B", pass)), qrEncode(portalUrl(ip))]
-  (planPortal(w, h, [codes[0].size, codes[1].size], portalCaptions("FrameOS-1A2B", pass, ip)), codes)
+  (planPortal(w, h, [codes[0].size, codes[1].size], portalCaptions("FrameOS-1A2B", pass, ip), round), codes)
 
 suite "the ESP32's portal screen":
   test "the hotspot's join code escapes what the format reserves":
@@ -53,6 +54,29 @@ suite "the ESP32's portal screen":
           createDir(shots)
           canvas.writeFile(shots / ("portal_" & $w & "x" & $h & (if dark: "_lcd" else: "_epaper") & ".png"))
     check not portalScreenOn()
+
+  test "a round panel keeps everything inside its circle":
+    let shots = getEnv("FRAMEOS_PORTAL_SHOTS")
+    for side in [466, 480, 720]:
+      for dark in [false, true]:
+        setPortalScreen("FrameOS-1A2B", "abcdefghjk", "192.168.4.1", dark, round = true)
+        let canvas = renderPortalInto(newImage(side, side))
+        clearPortalScreen()
+        let (plan, codes) = planFor(side, side, round = true)
+        check plan.unit[0] >= 2 and plan.unit[1] >= 2
+        check canvas.readsBack(plan, 0, codes[0])
+        check canvas.readsBack(plan, 1, codes[1])
+        # Every pixel that is not the background lies inside the circle,
+        # clear of the bezel (RoundInset, less a pixel of antialiasing).
+        var outside = 0
+        for y in 0 ..< side:
+          for x in 0 ..< side:
+            if not insideRound(side, side, x, y, RoundInset - 2) and ((canvas[x, y].r < 128) != dark):
+              inc outside
+        check outside == 0
+        if shots.len > 0:
+          createDir(shots)
+          canvas.writeFile(shots / ("portal_round_" & $side & (if dark: "_lcd" else: "_epaper") & ".png"))
 
   test "a panel too small for a code gets the facts as text":
     let (plan, _) = planFor(72, 40)

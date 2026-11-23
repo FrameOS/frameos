@@ -2642,7 +2642,7 @@ static void show_portal_screen(void)
     /* The runtime when it is up, whatever renders the scenes: the portal
      * needs no plane, and a frame set to render on its plane has the runtime
      * all the same (main.c starts it wherever the panel fits). */
-    if (frameos_nim_set_portal_screen(ssid, psk, ip, fos_display_is_lcd())) {
+    if (frameos_nim_set_portal_screen(ssid, psk, ip, fos_display_is_lcd(), fos_display_round())) {
         fos_pixel_format_t format = fos_display_format();
         size_t len = fos_display_buffer_size();
         size_t target_len = 0;
@@ -2659,7 +2659,7 @@ static void show_portal_screen(void)
             fos_display_wait_for(fos_framebuffer_reserved_buffer());
             rendered = frameos_nim_render_alloc(&buf, &len, format) == 0;
         }
-        frameos_nim_set_portal_screen(NULL, NULL, NULL, false);
+        frameos_nim_set_portal_screen(NULL, NULL, NULL, false, false);
         if (rendered) {
             esp_err_t err = fos_display_blit(buf, len);
             shown = err == ESP_OK;
