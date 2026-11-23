@@ -45,8 +45,8 @@ export function actionTitle(action: string): string {
   return ACTION_TITLES[action] ?? action
 }
 
-/** What people call a key whose label on the wire is something else: the reTerminal Sticky's `AI` is the Go key. */
-const KEY_TITLES: Record<string, string> = { AI: 'Go' }
+/** What people call a key whose label on the wire is something else: the reTerminal Sticky's `AI` is the Action key. */
+const KEY_TITLES: Record<string, string> = { AI: 'Action' }
 
 /** A key's name to show, by its label (case-insensitive): the label itself unless the key has a name of its own. */
 export function keyTitle(label: string): string {

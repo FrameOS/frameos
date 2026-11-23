@@ -706,26 +706,26 @@ on e-paper the chrome never wakes the frame sooner than its scene would
 (`scene_rhythm.nim`).
 
 - **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
-  upright, its panel turned 270, with three keys on its right edge: Go on top
+  upright, its panel turned 270, with three keys on its right edge: Action on top
   (Seeed prints AI on it, and `AI` stays its label in event maps, NVS and the
-  fixtures), then UP and DOWN. Go goes: a press is the scene's (`primary`, the
-  contract's `buttons.roleByLabel`: what is picked opens), twice goes back,
-  three times goes home to the scene list, and held it talks (the board's
-  preset map). People are told "Go" everywhere a key is named for them: the
+  fixtures), then UP and DOWN. Once it is the scene's (`primary`, the
+  contract's `buttons.roleByLabel`: what is picked opens), twice it goes back,
+  thrice it goes home to the scene list, and held it talks (the board's
+  preset map). People are told "Action" everywhere a key is named for them: the
   layout's help, and the SPA's and the iOS app's button rows (`keyTitle`,
   pinned by `docs/button-map-fixtures.json`). The scene gets the whole glass.
-  When the scene list is open (a swipe up, Go pressed three times, or twice
+  When the scene list is open (a swipe up, Action pressed thrice, or twice
   where the frame's map leaves that free: the layout's own binding), the
   layout turns it into a home screen. That screen has the time
   and the date, the battery and the signal, and under the list how to get
-  around, a line each, read off the frame's event map: what Go does (a press,
-  twice, three times, held: "go", "go back", "go home", "talk"), what UP and
+  around, a line each, read off the frame's event map: what Action does (once,
+  twice, thrice, held: "go", "go back", "go home", "talk"), what UP and
   DOWN do (in the list they move; held, the map's scene back and on) and the
   swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
   glass).
-  "Around the scene" also offers a status bar. A press of Go that the frame's
+  "Around the scene" also offers a status bar. A press of Action that the frame's
   map leaves to the scene also draws the picture again (`render`).
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
@@ -754,7 +754,7 @@ boards), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
 E-series' hint under the name; the Sticky's date and its help under the list),
-whether the Refresh key or Go draws the picture again when pressed (off: the
+whether the Refresh key or Action draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
