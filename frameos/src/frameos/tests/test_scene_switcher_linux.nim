@@ -15,7 +15,7 @@ block the_list_is_the_frames_scene_order_with_names:
     {"id": "tests/switcher/b", "name": "Bravo", "settings": {"execution": "interpreted"},
      "nodes": [], "edges": [], "fields": []},
     {"id": "tests/switcher/a", "name": "Alpha", "settings": {"execution": "interpreted", "icon": "M12 2L2 22h20z",
-      "category": "Art & galleries"},
+      "category": "Art & galleries", "opens": "pdf"},
      "nodes": [], "edges": [], "fields": []},
   ]}
   discard updateUploadedScenesFromPayload(payload, persistPayload = false)
@@ -23,9 +23,12 @@ block the_list_is_the_frames_scene_order_with_names:
   doAssert listed.len >= 2, $listed
   # The pushed set's order, not the alphabet's.
   doAssert listed[0] == SwitcherEntry(id: "tests/switcher/b", name: "Bravo"), $listed
-  # With its icon and category (docs/scene-icons.md) where it has them.
+  # With its icon and category (docs/scene-icons.md) and the file types it
+  # opens (docs/scene-guide.md "Opening files") where it has them.
   doAssert listed[1] == SwitcherEntry(id: "tests/switcher/a", name: "Alpha", icon: "M12 2L2 22h20z",
-    category: "Art & galleries"), $listed
+    category: "Art & galleries", opens: "pdf"), $listed
+  doAssert listingItem(listed[1]){"opens"}.getStr() == "pdf"
+  doAssert listingItem(listed[0]){"opens"}.isNil
   for entry in listed:
     doAssert entry.id != SceneSwitcherId and entry.id != "system/index", "no system scene is a tile"
   installSceneSwitcherHooks()

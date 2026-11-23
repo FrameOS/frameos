@@ -622,6 +622,7 @@ block windowed_listing_carries_window_sizes:
   sized[1]["settings"]["icon"] = %" M12 2L2 22h20z "
   sized[0]["settings"]["icon"] = %"<svg/>"
   sized[1]["settings"]["category"] = %" Real time "
+  sized[1]["settings"]["opens"] = %"pdf epub"
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($sized)))
   let fromId = "fixtures/dispatcher/switchFrom".SceneId
   let toId = "fixtures/dispatcher/switchTo".SceneId
@@ -642,15 +643,18 @@ block windowed_listing_carries_window_sizes:
   doAssert listed[1]{"icon"}.getStr() == "M12 2L2 22h20z", $listed
   doAssert listed[0]{"category"}.isNil, $listed
   doAssert listed[1]{"category"}.getStr() == " Real time ", $listed
+  doAssert listed[0]{"opens"}.isNil, $listed
+  doAssert listed[1]{"opens"}.getStr() == "pdf epub", $listed
   # A scene in the order that is not loaded: its id alone.
   doAssert listed[2] == %*{"id": "fixtures/dispatcher/gone", "name": ""}, $listed
   sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
     @[SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To", windowSize: "640x480", icon: "M0 0h24v24H0z",
-      category: "Weather")]
+      category: "Weather", opens: "txt")]
   listed = windowSceneListing()
   doAssert listed.len == 1 and listed[0]{"windowSize"}.getStr() == "640x480", $listed
   doAssert listed[0]{"icon"}.getStr() == "M0 0h24v24H0z", $listed
   doAssert listed[0]{"category"}.getStr() == "Weather", $listed
+  doAssert listed[0]{"opens"}.getStr() == "txt", $listed
   w.setWindowed(false)
   sceneSwitcherListing = listing
   replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))

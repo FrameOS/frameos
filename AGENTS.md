@@ -257,6 +257,12 @@
   icon's `keep_text`); the desktops trim it and group by the text itself
   (`grouped`), and a store version whose scene names a store title is filed
   under it. A new repo sample names its category.
+- `settings.opens` is the file types a scene opens, their extensions as text
+  ("pdf", "txt md json"), listed the same way (`opens`; an ESP32's index keeps
+  128 bytes or fewer). The Files app sends such a file to the first scene that
+  names its kind as `setCurrentScene {sceneId, state: {file: "<storage>:<path>"}}`:
+  a scene that says `opens` has the public field `file` and sets it back to
+  "" once open (docs/scene-guide.md, docs/scene-store.md "The Files app").
 
 ## Scene settings on the frame: `docs/scene-settings.md`
 

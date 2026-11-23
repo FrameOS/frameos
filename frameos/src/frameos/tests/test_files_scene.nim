@@ -13,6 +13,7 @@ import ../types
 import ../ui/theme
 import ../file_transfer_hooks
 import ../file_transfer_preview
+import ../channels
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 # The header's Reload button on an 800x480 frame, left of the grid and list toggles.
@@ -114,6 +115,7 @@ suite "the Files scene":
         opened = true
         break
       if scene.spot{"dir"}.getStr() == "fonts":
+        discard draw(scene, config, "fonts")
         scene.tap(36, 30) # up
         discard draw(scene, config, "back-up")
     check opened
@@ -414,6 +416,57 @@ suite "the Files scene":
     discard draw(scene, config, "reload-after")
     scene.tap(200, 60 + 24)
     check scene.spot{"open"}.getStr() == "photos/2024/rain.png"
+
+  test "a file that is no picture opens in the scene that opens its kind, or says none does":
+    problems = @[]
+    let papers = getTempDir() / "frameos-files-open-" & $epochTime().int
+    createDir(papers)
+    writeFile(papers / "manual.pdf", "%PDF-1.4")
+    writeFile(papers / "notes.txt", "hello")
+    writeFile(papers / "song.mp3", "ID3")
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      {.cast(gcsafe).}:
+        result = %*[{"id": "asset-browser", "name": "Files"},
+          {"id": "pdf-viewer", "name": "PDF viewer", "opens": "pdf"},
+          {"id": "code-editor", "name": "Code editor", "opens": "txt md, .JSON"}]
+    defer:
+      windowSceneListing = nil
+      removeDir(papers)
+    proc sent(): seq[JsonNode] =
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "setCurrentScene": result.add message[2]
+    discard sent()
+    let config = frame(800, 480)
+    config.assetsPath = papers
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "", "page": 1, "view": "list"}
+    let before = draw(scene, config, "open-with")
+    # The rows: manual.pdf, notes.txt, song.mp3.
+    proc row(i: int): int = 60 + 48 * i + 24
+    scene.tap(200, row(0))
+    var asked = sent()
+    check asked.len == 1
+    if asked.len == 1:
+      check asked[0]{"sceneId"}.getStr() == "pdf-viewer"
+      check asked[0]{"state"}{"file"}.getStr() == "assets:manual.pdf"
+    scene.tap(200, row(1))
+    asked = sent()
+    check asked.len == 1 and asked[0]{"sceneId"}.getStr() == "code-editor"
+    # Nothing opens an .mp3: a card says so, and a tap anywhere puts it away.
+    scene.tap(200, row(2))
+    check sent().len == 0
+    let card = draw(scene, config, "cannot-open")
+    check card[400, 240] != before[400, 240]
+    scene.tap(200, row(1))
+    check sent().len == 0
+    let gone = draw(scene, config, "cannot-open-gone")
+    check gone[400, 240] == before[400, 240]
+    scene.tap(200, row(1))
+    check sent().len == 1
+    check problems.len == 0
+    if problems.len > 0: echo problems
 
   test "on a frame there is no Upload or Download: the host has none":
     check fileTransfer.isNil

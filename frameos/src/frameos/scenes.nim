@@ -302,14 +302,15 @@ proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
         return some(interpreted.name)
     return none(string)
 
-proc getSceneListing*(sceneId: SceneId): tuple[windowSize, icon, category: string] =
+proc getSceneListing*(sceneId: SceneId): tuple[windowSize, icon, category, opens: string] =
   ## What `app.frame.scenes` and the scene switcher list beside the scene's
   ## name (docs/scene-icons.md): its own window size on a desktop
-  ## (`settings.windowSize`), its icon and its category, "" each for none.
+  ## (`settings.windowSize`), its icon, its category and the file types it
+  ## opens, "" each for none.
   withLock sceneRegistryLock:
     let scene = uploadedScenes.getOrDefault(sceneId, interpretedScenes.getOrDefault(sceneId, nil))
     if not scene.isNil:
-      return (scene.windowSize, scene.icon, scene.category)
+      return (scene.windowSize, scene.icon, scene.category, scene.opens)
 
 proc dynamicSceneCount*(): int =
   ## How many interpreted scenes this frame holds (deployed and uploaded; an

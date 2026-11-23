@@ -392,8 +392,10 @@ interface FrameOSApp {
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
      * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+     * (FrameOS 2026.11.10+). opens is the file types the scene opens, their extensions as the scene's
+     * settings.opens has them ("pdf", "txt md json"), where it names some. Such a file goes to the scene with
+     * setCurrentScene, its public field file set to "<storage>:<path>" (FrameOS 2026.11.15+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string; opens?: string }[];
     /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
      * window without their going back, so still open beside the scene showing, their page and edits as they were.
      * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes

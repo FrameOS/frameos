@@ -448,6 +448,9 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
 /* A category is a name ("Photos", docs/scene-icons.md "Category"), listed as
  * it is: the store keeps one of a heading's length out of the index. */
 #define CATEGORY_MAX_LEN 128
+/* The file types a scene opens ("pdf", "txt md json", docs/scene-guide.md),
+ * listed as they are for the Files app: as long as a category at most. */
+#define OPENS_MAX_LEN 128
 
 /* A setting kept in the index: text no longer than `max` bytes once its ends
  * are trimmed, and not empty. */
@@ -492,6 +495,8 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         }
         /* Its icon: the switcher's tile and app.frame.scenes, read off the index. */
         keep_text(entry, settings, "icon", ICON_MAX_LEN);
+        /* The file types it opens: app.frame.scenes, for the Files app. */
+        keep_text(entry, settings, "opens", OPENS_MAX_LEN);
     }
     /* Its category: a desktop groups its scene lists by it, and the frame
      * page its layouts. */
