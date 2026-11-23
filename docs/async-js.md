@@ -213,6 +213,15 @@ is only faster where it can be.
   (`jsAsyncStart`) and keeps its resolver in a JS map under it. The pump
   settles each answer and each timer that is over (`__frameosSettle`), and
   the job queue runs, which is the awaiting code going on to its next await.
+- **A body is its own string.** A fetch's answer reaches the prelude as an
+  object whose `body` is a JS string made from the bytes that came
+  (`answerToJS`, as `httpRequest`'s blocking answer does), never escaped
+  into JSON text and parsed back out: that held a 512 KB page about seven
+  times over, two bytes a character past Latin-1, and GitHub's front page
+  did not fit a reTerminal Sticky (2026-11-24, `docs/esp32-memory.md`). A
+  body the interpreter has no room for, or an answer that cannot be read,
+  rejects its promise (`fetch failed: out of memory ...`), never leaves it
+  pending.
 - **The bridge needs to know whose code it is running.** `frameos.setState`,
   `dispatch` and the rest find the app and scene through the environment of
   the call in progress; the pump builds one for each settle (the app, its

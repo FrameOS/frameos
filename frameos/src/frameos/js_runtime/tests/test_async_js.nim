@@ -8,6 +8,7 @@ import pixie
 import frameos/channels
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/js_io
+import frameos/js_runtime/runtime
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
@@ -32,8 +33,17 @@ let pngBytes = block:
   image.fill(rgba(255, 0, 0, 255))
   image.encodeImage(PngFormat)
 
+# A page whose text JSON would escape (quotes, backslashes, control
+# characters) with characters past Latin-1 and outside the BMP, 600 KB of it.
+let bigBody = block:
+  var s = ""
+  while s.len < 600_000:
+    s.add "<p class=\"x\">a \\ b\t\"c\"\nΩmega … 🙂 </script>\r\n"
+  s
+
 # The network: `?ms=N` answers after N ms, `/fail` does not answer at all,
-# `/missing` is a 404, `.png` is an 8x6 picture, `/json` a JSON body.
+# `/missing` is a 404, `.png` is an 8x6 picture, `/json` a JSON body, `/big`
+# bigBody and `/huge` four of it.
 # `networkMost` is the most requests it has held at once (reset by a test).
 var networkNow, networkMost: Atomic[int]
 
@@ -58,6 +68,9 @@ jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
       return JsIoResult(code: 200, body: pngBytes, headers: @[("Content-Type", "image/png")])
   if "/json" in request.url:
     return JsIoResult(code: 200, body: """{"temp": 21}""", headers: @[("Content-Type", "application/json")])
+  if "/big" in request.url or "/huge" in request.url:
+    {.cast(gcsafe).}:
+      return JsIoResult(code: 200, body: if "/huge" in request.url: bigBody.repeat(4) else: bigBody)
   var header = ""
   for (name, value) in request.headers:
     if name == "x-test": header = value
@@ -512,6 +525,57 @@ suite "async JavaScript":
     check a.render() == "false:5:5"
     check jsAsyncPending() == 0
     check jsIoInFlight() == 0
+
+  test "a body arrives whole, as its own string: quotes, escapes and characters past Latin-1":
+    let a = app("""
+      let viaFetch = ""
+      export function get() {
+        fetch("https://page.test/big").then((r) => r.text()).then((t) => { viaFetch = t })
+        const t = frameos.useFetch("https://page.test/big?again", { as: "text" })
+        return t.loading ? "loading" : (t.data === viaFetch ? t.data : "differ")
+      }
+    """, "bigbody")
+    check a.render() == "loading"
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+    check a.render() == bigBody
+
+  test "where nothing pumps, a body arrives whole too, from httpRequest, fetch and useFetch":
+    asyncPumped = false
+    defer: asyncPumped = true
+    jsHttpRequestHook = proc(url, httpMethod, body: string, headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      {.cast(gcsafe).}:
+        (200, bigBody)
+    jsHttpHookHeaders = "Content-Type: text/html\nX-Thing: a\nX-Thing: b\n"
+    defer:
+      jsHttpRequestHook = nil
+      jsHttpHookHeaders = ""
+    let a = app("""
+      let viaFetch = ""
+      export function get() {
+        fetch("https://page.test/x").then((r) => r.text()).then((t) => { viaFetch = t })
+        const h = frameos.httpRequest("https://page.test/y")
+        const t = frameos.useFetch("https://page.test/z", { as: "text" })
+        const same = h.body === t.data && t.data === viaFetch
+        return same ? `${h.status}|${h.headers["x-thing"]}|${t.status}|${h.body}` : "differ"
+      }
+    """, "bigblocking")
+    discard a.render()
+    check a.render() == "200|a, b|200|" & bigBody
+
+  test "a body the interpreter has no room for rejects its fetch, never leaves it waiting":
+    let a = app("""
+      export function get() {
+        const t = frameos.useFetch("https://page.test/huge", { as: "text" })
+        return t.loading ? "loading" : String(t.error)
+      }
+    """, "noroom")
+    check a.render() == "loading"
+    # The scene's heap held to what it holds now and 256 KB: the 2.4 MB page
+    # cannot be made a string in it.
+    discard sceneHeapBudgetFor("tests/noroom", sceneHeapBudgetUsedBytes("tests/noroom") + 256 * 1024)
+    defer: discard sceneHeapBudgetFor("tests/noroom", sceneJsHeapLimitBytes(config))
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0)
+    check a.render().startsWith("fetch failed: out of memory")
 
   test "fetch and the timers are promises and functions, and get() may start one":
     let a = app("""
