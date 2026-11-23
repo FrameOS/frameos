@@ -1,0 +1,10 @@
+{
+  "name": "The news, painted",
+  "description": "Every morning the day's headlines become one painting, an allegory of the news in a new style each day, with a museum placard saying what it is after. Needs an OpenAI API key.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

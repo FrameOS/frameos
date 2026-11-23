@@ -1,0 +1,10 @@
+{
+  "name": "Tarot of the day",
+  "description": "A tarot card drawn each morning, upright or reversed, painted fresh in the deck style you pick, with a short, light-hearted reading. For fun. Needs an OpenAI API key.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

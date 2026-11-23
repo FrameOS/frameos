@@ -1,0 +1,610 @@
+[
+  {
+    "id": "story-of-the-day",
+    "name": "Story of the day",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "paint",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": -420
+        },
+        "data": {
+          "keyword": "storyteller",
+          "config": {}
+        }
+      },
+      {
+        "id": "state-genre",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -700
+        },
+        "data": {
+          "keyword": "genre",
+          "value": "a cozy mystery"
+        }
+      },
+      {
+        "id": "state-hero",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -630
+        },
+        "data": {
+          "keyword": "hero",
+          "value": ""
+        }
+      },
+      {
+        "id": "state-chapters",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -560
+        },
+        "data": {
+          "keyword": "chapters",
+          "value": "7"
+        }
+      },
+      {
+        "id": "state-illustration",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -490
+        },
+        "data": {
+          "keyword": "illustration",
+          "value": "storybook"
+        }
+      },
+      {
+        "id": "state-textModel",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -420
+        },
+        "data": {
+          "keyword": "textModel",
+          "value": "gpt-6.1-terra"
+        }
+      },
+      {
+        "id": "state-imageModel",
+        "type": "state",
+        "position": {
+          "x": -320,
+          "y": -350
+        },
+        "data": {
+          "keyword": "imageModel",
+          "value": "gpt-image-2"
+        }
+      },
+      {
+        "id": "tall",
+        "type": "code",
+        "position": {
+          "x": 160,
+          "y": -160
+        },
+        "data": {
+          "codeJS": "(context.imageHeight || 0) > (context.imageWidth || 0)",
+          "codeArgs": [],
+          "codeOutputs": [
+            {
+              "name": "tall",
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      {
+        "id": "which",
+        "type": "app",
+        "position": {
+          "x": 320,
+          "y": 0
+        },
+        "data": {
+          "keyword": "logic/ifElse",
+          "config": {}
+        }
+      },
+      {
+        "id": "rows",
+        "type": "app",
+        "position": {
+          "x": 640,
+          "y": -120
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "2",
+            "columns": "1",
+            "height_ratios": "1 1"
+          }
+        }
+      },
+      {
+        "id": "columns",
+        "type": "app",
+        "position": {
+          "x": 640,
+          "y": 120
+        },
+        "data": {
+          "keyword": "render/split",
+          "config": {
+            "rows": "1",
+            "columns": "2",
+            "width_ratios": "1 1"
+          }
+        }
+      },
+      {
+        "id": "picture-rows",
+        "type": "app",
+        "position": {
+          "x": 960,
+          "y": -200
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "cover"
+          }
+        }
+      },
+      {
+        "id": "page-rows",
+        "type": "app",
+        "position": {
+          "x": 960,
+          "y": -100
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "picture-columns",
+        "type": "app",
+        "position": {
+          "x": 960,
+          "y": 100
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "cover"
+          }
+        }
+      },
+      {
+        "id": "page-columns",
+        "type": "app",
+        "position": {
+          "x": 960,
+          "y": 200
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      },
+      {
+        "id": "view-rows",
+        "type": "app",
+        "position": {
+          "x": 1280,
+          "y": -100
+        },
+        "data": {
+          "keyword": "storyPage",
+          "config": {}
+        }
+      },
+      {
+        "id": "view-columns",
+        "type": "app",
+        "position": {
+          "x": 1280,
+          "y": 200
+        },
+        "data": {
+          "keyword": "storyPage",
+          "config": {}
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "state-genre-edge",
+        "source": "state-genre",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/genre",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-hero-edge",
+        "source": "state-hero",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/hero",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-chapters-edge",
+        "source": "state-chapters",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/chapters",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-illustration-edge",
+        "source": "state-illustration",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/illustration",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-textModel-edge",
+        "source": "state-textModel",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/textModel",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "state-imageModel-edge",
+        "source": "state-imageModel",
+        "target": "paint",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/imageModel",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "flow",
+        "source": "render",
+        "target": "which",
+        "sourceHandle": "next",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "tall-which",
+        "source": "tall",
+        "target": "which",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/condition",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "then-rows",
+        "source": "which",
+        "target": "rows",
+        "sourceHandle": "field/thenNode",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "else-columns",
+        "source": "which",
+        "target": "columns",
+        "sourceHandle": "field/elseNode",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "rows-1",
+        "source": "rows",
+        "target": "picture-rows",
+        "sourceHandle": "field/render_functions[1][1]",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "rows-2",
+        "source": "rows",
+        "target": "page-rows",
+        "sourceHandle": "field/render_functions[2][1]",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "columns-1",
+        "source": "columns",
+        "target": "picture-columns",
+        "sourceHandle": "field/render_functions[1][1]",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "columns-2",
+        "source": "columns",
+        "target": "page-columns",
+        "sourceHandle": "field/render_functions[1][2]",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "id": "paint-rows",
+        "source": "paint",
+        "target": "picture-rows",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "paint-columns",
+        "source": "paint",
+        "target": "picture-columns",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "view-rows-image",
+        "source": "view-rows",
+        "target": "page-rows",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "id": "view-columns-image",
+        "source": "view-columns",
+        "target": "page-columns",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "fields": [
+      {
+        "name": "genre",
+        "label": "Kind of story",
+        "type": "select",
+        "value": "a cozy mystery",
+        "options": [
+          {
+            "value": "a cozy mystery",
+            "label": "Cozy mystery"
+          },
+          {
+            "value": "a fairy tale",
+            "label": "Fairy tale"
+          },
+          {
+            "value": "a space adventure",
+            "label": "Space adventure"
+          },
+          {
+            "value": "a ghost story that is more charming than scary",
+            "label": "Gentle ghost story"
+          },
+          {
+            "value": "a seaside adventure",
+            "label": "Seaside adventure"
+          },
+          {
+            "value": "a slice-of-life story",
+            "label": "Slice of life"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "hero",
+        "label": "Hero (optional)",
+        "type": "string",
+        "value": "",
+        "description": "Who the next story is about: \"a retired lighthouse keeper named Ilse\".",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "chapters",
+        "label": "Chapters a story",
+        "type": "integer",
+        "value": "7",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "illustration",
+        "label": "Illustrated as",
+        "type": "select",
+        "value": "storybook",
+        "options": [
+          {
+            "value": "storybook",
+            "label": "Ink and watercolor"
+          },
+          {
+            "value": "gouache",
+            "label": "Picture-book gouache"
+          },
+          {
+            "value": "engraving",
+            "label": "Victorian engraving"
+          },
+          {
+            "value": "anime",
+            "label": "Hand-painted animation"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "textModel",
+        "label": "Text model",
+        "type": "string",
+        "value": "gpt-6.1-terra",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "imageModel",
+        "label": "Image model",
+        "type": "select",
+        "value": "gpt-image-2",
+        "options": [
+          {
+            "value": "gpt-image-2",
+            "label": "gpt-image-2"
+          },
+          {
+            "value": "gpt-image-1.5",
+            "label": "gpt-image-1.5"
+          },
+          {
+            "value": "gpt-image-1",
+            "label": "gpt-image-1"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "chapter",
+        "label": "Latest picture",
+        "type": "json",
+        "value": "{}",
+        "persist": "disk"
+      }
+    ],
+    "settings": {
+      "execution": "interpreted",
+      "category": "AI & generative",
+      "refreshInterval": 3600,
+      "backgroundColor": "#f6f0e4",
+      "windowSize": "800x480",
+      "icon": "M18,22A2,2 0 0,0 20,20V4C20,2.89 19.1,2 18,2H12V9L9.5,7.5L7,9V2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18Z"
+    },
+    "apps": {
+      "storyteller": {
+        "name": "Storyteller",
+        "category": "data",
+        "description": "Writes and illustrates the day's chapter.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "genre",
+            "label": "Kind of story",
+            "type": "select",
+            "value": "a cozy mystery",
+            "options": [
+              "a cozy mystery",
+              "a fairy tale",
+              "a space adventure",
+              "a ghost story that is more charming than scary",
+              "a seaside adventure",
+              "a slice-of-life story"
+            ]
+          },
+          {
+            "name": "hero",
+            "label": "Hero (optional)",
+            "type": "string",
+            "value": ""
+          },
+          {
+            "name": "chapters",
+            "label": "Chapters a story",
+            "type": "integer",
+            "value": "7"
+          },
+          {
+            "name": "illustration",
+            "label": "Illustrated as",
+            "type": "select",
+            "value": "storybook",
+            "options": [
+              "storybook",
+              "gouache",
+              "engraving",
+              "anime"
+            ]
+          },
+          {
+            "name": "textModel",
+            "label": "Text model",
+            "type": "string",
+            "value": "gpt-6.1-terra"
+          },
+          {
+            "name": "imageModel",
+            "label": "Image model",
+            "type": "select",
+            "value": "gpt-image-2",
+            "options": [
+              "gpt-image-2",
+              "gpt-image-1.5",
+              "gpt-image-1"
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Storyteller\",\n  \"category\": \"data\",\n  \"description\": \"Writes and illustrates the day's chapter.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"genre\",\n      \"label\": \"Kind of story\",\n      \"type\": \"select\",\n      \"value\": \"a cozy mystery\",\n      \"options\": [\n        \"a cozy mystery\",\n        \"a fairy tale\",\n        \"a space adventure\",\n        \"a ghost story that is more charming than scary\",\n        \"a seaside adventure\",\n        \"a slice-of-life story\"\n      ]\n    },\n    {\n      \"name\": \"hero\",\n      \"label\": \"Hero (optional)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    },\n    {\n      \"name\": \"chapters\",\n      \"label\": \"Chapters a story\",\n      \"type\": \"integer\",\n      \"value\": \"7\"\n    },\n    {\n      \"name\": \"illustration\",\n      \"label\": \"Illustrated as\",\n      \"type\": \"select\",\n      \"value\": \"storybook\",\n      \"options\": [\n        \"storybook\",\n        \"gouache\",\n        \"engraving\",\n        \"anime\"\n      ]\n    },\n    {\n      \"name\": \"textModel\",\n      \"label\": \"Text model\",\n      \"type\": \"string\",\n      \"value\": \"gpt-6.1-terra\"\n    },\n    {\n      \"name\": \"imageModel\",\n      \"label\": \"Image model\",\n      \"type\": \"select\",\n      \"value\": \"gpt-image-2\",\n      \"options\": [\n        \"gpt-image-2\",\n        \"gpt-image-1.5\",\n        \"gpt-image-1\"\n      ]\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ],\n  \"settings\": [\n    \"openAI\"\n  ]\n}\n",
+          "app.ts": "// Story of the day: a story told one illustrated chapter a day. Each day's\n// chapter carries on from a running summary of the ones before it, and when a\n// story reaches its last chapter, the next day starts a new one. Needs an\n// OpenAI API key.\nimport { apiKey, askJson, paint, pictureFor, readRecord, sizeFor, dayKey } from './ai'\n\nconst SYSTEM = `You write a serialized story for a picture frame on someone's wall: one short chapter a day.\nWrite warm, vivid, well-paced prose for adults and children alike, with a small hook at the end of each chapter.\nKeep the cast, places and facts consistent with the summary of the story so far. Never use real people.\nAnswer JSON only:\n{\"storyTitle\": \"the story's title (keep it once set)\", \"chapterTitle\": \"this chapter's title, at most 5 words\",\n\"text\": \"the chapter, 110 to 140 words, in two or three short paragraphs separated by blank lines\",\n\"summary\": \"the whole story so far, this chapter included, in at most 120 words\",\n\"illustration\": \"a prompt for this chapter's illustration, 40 to 70 words: the scene, the characters' look, the light. No text.\"}`\n\nconst STYLES: Record<string, string> = {\n  storybook: 'a classic storybook illustration in ink and watercolor',\n  gouache: 'a rich gouache painting like a modern picture book',\n  engraving: 'a Victorian engraving, finely cross-hatched',\n  anime: 'a soft hand-painted animation background with characters',\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const now = new Date()\n  return pictureFor(app, 'chapter', dayKey(now), 'ai-scenes/story-of-the-day', (path) => {\n    const key = apiKey()\n    const before = readRecord(app.state.chapter)\n    const last = before && before.text && before.text.chapter ? before.text : null\n    const total = Math.max(3, Math.min(30, Number(app.config.chapters) || 7))\n    const fresh = !last || last.chapter >= (last.total || total)\n    const chapter = fresh ? 1 : last.chapter + 1\n    const genre = String(app.config.genre || 'a cozy mystery')\n    const hero = String(app.config.hero || '').trim()\n    const ask = fresh\n      ? `Begin a new story: ${genre}${hero ? `, about ${hero}` : ''}. This is chapter 1 of ${total}. Invent a title.`\n      : `Continue \"${last.storyTitle}\" (${genre}). The story so far: ${last.summary}\\n\\nWrite chapter ${chapter} of ${total}.` +\n        (chapter === total ? ' It is the last chapter: bring the story to a satisfying end.' : '')\n    const written = askJson(key, String(app.config.textModel || 'gpt-6.1-terra'), SYSTEM, ask)\n    const style = STYLES[String(app.config.illustration)] || STYLES.storybook\n    const width = context.targetWidth || context.imageWidth || app.frame.width\n    const height = context.targetHeight || context.imageHeight || app.frame.height\n    const model = String(app.config.imageModel || 'gpt-image-2')\n    paint(key, model, `${written.illustration}\\n\\nDrawn as ${style}. No text or lettering.`, sizeFor(model, width, height, app.frame.embedded), path, app.frame.embedded)\n    return {\n      storyTitle: String(written.storyTitle || (last && !fresh ? last.storyTitle : 'A story')),\n      chapterTitle: String(written.chapterTitle || ''),\n      text: String(written.text || ''),\n      summary: String(written.summary || ''),\n      chapter,\n      total,\n    }\n  })\n}\n",
+          "record.ts": "// The record of an AI scene's latest picture, as its state holds it, and the\n// words for dates. The views read it; they ask for no files.\n\n// The record as state holds it: an object, or its JSON from a saved field.\nexport function readRecord(value: any): any {\n  if (!value) return null\n  if (typeof value === 'string') {\n    try {\n      return JSON.parse(value)\n    } catch (e) {\n      return null\n    }\n  }\n  return typeof value === 'object' ? value : null\n}\n\nexport const pad = (n: number) => String(n).padStart(2, '0')\nexport const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n",
+          "ai.ts": "import { readRecord } from './record'\nexport { readRecord, pad, dayKey, WEEKDAYS, MONTHS } from './record'\n\n// What the AI scenes share: OpenAI's text and image calls, and the record of\n// the latest picture, kept in the scene's state so a restart shows it again\n// rather than paying for another. The picture is written straight from the\n// reply into the scene's own folder (httpRequest's saveBase64Field): it never\n// becomes a JS string, which on an ESP32 would not fit.\n\nexport type Record = {\n  key: string // which period it is for: a day, or a day and an hour\n  path: string // the picture, in the scene's own folder\n  text: any // what the scene says beside it\n  error?: string\n  triedAt?: number\n}\n\n// After a failed attempt, wait this long before paying for another.\nconst RETRY_MS = 30 * 60000\n\nexport function apiKey() {\n  const key = frameos.getSetting('openAI', 'apiKey')\n  if (!key) throw new Error('Add an OpenAI API key in the frame settings')\n  return key\n}\n\nfunction failure(r: any) {\n  if (!r.status) return r.error || 'no answer from OpenAI'\n  try {\n    const json = JSON.parse(r.body)\n    return (json.error && json.error.message) || `OpenAI said ${r.status}`\n  } catch (e) {\n    return `OpenAI said ${r.status}`\n  }\n}\n\n// One chat turn that answers a JSON object.\nexport function askJson(key: string, model: string, system: string, user: string) {\n  const r = frameos.httpRequest('https://api.openai.com/v1/chat/completions', {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify({\n      model,\n      response_format: { type: 'json_object' },\n      messages: [\n        { role: 'system', content: system },\n        { role: 'user', content: user },\n      ],\n    }),\n    timeoutMs: 120000,\n  })\n  if (r.status !== 200) throw new Error(failure(r))\n  const content = JSON.parse(r.body).choices[0].message.content\n  return JSON.parse(content)\n}\n\n// The image size for the box the picture fills: wide, tall or square. An\n// ESP32 asks for the smaller sizes, at low quality, as JPEG.\nexport function sizeFor(model: string, width: number, height: number, embedded: boolean) {\n  const ratio = width / Math.max(1, height)\n  const small = embedded && model === 'gpt-image-2'\n  if (ratio > 1.2) return small ? '1024x640' : '1536x1024'\n  if (ratio < 0.83) return small ? '640x1024' : '1024x1536'\n  return '1024x1024'\n}\n\n// Paints the prompt into path. Throws with OpenAI's reason if it cannot.\nexport function paint(key: string, model: string, prompt: string, size: string, path: string, embedded: boolean) {\n  const r = frameos.httpRequest('https://api.openai.com/v1/images/generations', {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify({ model, prompt, size, n: 1, quality: embedded ? 'low' : 'medium', output_format: 'jpeg', output_compression: 82 }),\n    timeoutMs: 300000,\n    saveBase64Field: { field: 'b64_json', path },\n  })\n  if (r.status !== 200) throw new Error(failure(r))\n  if (r.saveError) throw new Error(`could not keep the picture: ${r.saveError}`)\n  if (!r.saved) {\n    // A runtime that does not save fields hands the picture over inline.\n    const b64 = JSON.parse(r.body).data[0].b64_json\n    if (!b64 || !frameos.writeAsset(path, b64)) throw new Error('could not keep the picture')\n  }\n}\n\n// The picture for this period: the one already made, or a new one from\n// make(), which paints into the path it is given and returns the words.\n// The record goes into the scene's state under stateKey.\nexport function pictureFor(app: FrameOSApp, stateKey: string, key: string, folder: string, make: (path: string) => any) {\n  const record = readRecord(app.state[stateKey])\n  if (record && record.key === key && record.path && !record.error) {\n    const image = frameos.loadAssetImage(record.path)\n    if (image) return image\n  }\n  if (record && record.key === key && record.error && record.triedAt && Date.now() - record.triedAt < RETRY_MS) {\n    throw new Error(record.error)\n  }\n  const path = `${folder}/${key.replace(/[^0-9A-Za-z-]/g, '-')}.jpg`\n  try {\n    const text = make(path)\n    const fresh: Record = { key, path, text }\n    if (record && record.path && record.path !== path) frameos.deleteAsset(record.path)\n    frameos.setState(stateKey, fresh)\n    const image = frameos.loadAssetImage(path)\n    if (!image) throw new Error('the picture did not load')\n    return image\n  } catch (e) {\n    const message = e && e.message ? e.message : String(e)\n    // A missing key is no attempt: once it is added, the next render paints.\n    const missingKey = message.startsWith('Add an OpenAI')\n    const failed: Record = { ...(record || { path: '', text: null }), key, error: message, triedAt: missingKey ? undefined : Date.now() }\n    frameos.setState(stateKey, failed)\n    throw e\n  }\n}\n\n"
+        }
+      },
+      "storyPage": {
+        "name": "Story page",
+        "category": "data",
+        "description": "The chapter, set like a book.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Story page\",\n  \"category\": \"data\",\n  \"description\": \"The chapter, set like a book.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// The page beside the day's illustration: the story's title, the chapter's\n// number and title, and the chapter itself, set like a book.\nimport { readRecord } from './record'\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const W = context.imageWidth ?? app.frame.width\n  const H = context.imageHeight ?? app.frame.height\n  const record = readRecord(app.state.chapter)\n  const text = record && record.text\n  const u = Math.min(W, H) / 100\n  const pad = Math.round(u * 6)\n\n  if (!text) {\n    return (\n      <div className={`flex flex-col w-full h-full bg-[#f6f0e4] p-[${pad}px] justify-center`}>\n        <div className={`font-[Cormorant_Garamond] font-bold text-[${Math.round(u * 7)}px] text-[#2a2118]`}>Once upon a time…</div>\n        <div className={`font-[Cormorant_Garamond] text-[${Math.round(u * 4.5)}px] text-[#6d5d4b] mt-[${Math.round(u * 2)}px]`}>\n          {record && record.error ? record.error : 'The first chapter is written in the morning. Add an OpenAI API key in the frame settings.'}\n        </div>\n      </div>\n    )\n  }\n\n  // As big as the chapter allows: shorter text, bigger type.\n  const words = String(text.text).split(/\\s+/).length\n  const area = (W - pad * 2) * (H - pad * 2 - u * 22)\n  const body = Math.round(Math.max(u * 3, Math.min(u * 5.2, Math.sqrt(area / (words * 4.6)))))\n  const paragraphs = String(text.text).split(/\\n\\s*\\n/).map((p) => p.trim()).filter(Boolean)\n\n  return (\n    <div className={`flex flex-col w-full h-full bg-[#f6f0e4] px-[${pad}px] py-[${Math.round(pad * 0.8)}px]`}>\n      <div className={`font-[Cormorant_Garamond] uppercase text-[${Math.round(u * 2.8)}px] text-[#9b7b55]`}>\n        {`${text.storyTitle} · Chapter ${text.chapter} of ${text.total}`}\n      </div>\n      <div className={`font-[Cormorant_Garamond] font-bold text-[${Math.round(u * 6.4)}px] leading-tight text-[#2a2118] mt-[${Math.round(u)}px]`}>\n        {text.chapterTitle}\n      </div>\n      <div className={`h-[2px] w-[${Math.round(u * 12)}px] bg-[#9b7b55] mt-[${Math.round(u * 2)}px] mb-[${Math.round(u * 2.2)}px]`} />\n      <div className=\"flex flex-col flex-1 min-h-0 overflow-hidden\">\n        {paragraphs.map((p) => (\n          <div className={`font-[Cormorant_Garamond] text-[${body}px] leading-snug text-[#2a2118] mb-[${Math.round(body * 0.6)}px]`}>{p}</div>\n        ))}\n      </div>\n      {text.chapter === text.total ? (\n        <div className={`font-[Cormorant_Garamond] font-bold text-[${Math.round(u * 3.4)}px] text-[#9b7b55] text-center`}>The End</div>\n      ) : null}\n    </div>\n  )\n}\n",
+          "record.ts": "// The record of an AI scene's latest picture, as its state holds it, and the\n// words for dates. The views read it; they ask for no files.\n\n// The record as state holds it: an object, or its JSON from a saved field.\nexport function readRecord(value: any): any {\n  if (!value) return null\n  if (typeof value === 'string') {\n    try {\n      return JSON.parse(value)\n    } catch (e) {\n      return null\n    }\n  }\n  return typeof value === 'object' ? value : null\n}\n\nexport const pad = (n: number) => String(n).padStart(2, '0')\nexport const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`\nexport const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\nexport const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n"
+        }
+      }
+    }
+  }
+]

@@ -1,0 +1,10 @@
+{
+  "name": "Word of the day",
+  "description": "A real word worth knowing every morning, with how to say it, what it means, where it comes from and a sentence using it, beside an illustration of it. Needs an OpenAI API key.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}

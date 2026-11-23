@@ -1,0 +1,10 @@
+{
+  "name": "Story of the day",
+  "description": "A story told one illustrated chapter a day: each chapter picks up where yesterday's left off, and when a story ends, a new one begins. Pick the kind of story and its hero. Needs an OpenAI API key.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 600,
+  "scenes": "./scenes.json",
+  "frameosVersion": "2026.11.14"
+}
