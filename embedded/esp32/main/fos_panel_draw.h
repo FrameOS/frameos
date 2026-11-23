@@ -94,9 +94,10 @@ void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_bo
  * Fills `box` (may be NULL) with where it went. False when the surface is
  * too small for it. */
 bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_t *box);
-/* The same tile while a sleeping frame wakes to a tap or a key: a spinner of
- * eight dots, `frame` the leading one (any int, taken mod 8), drawn over the
- * moon until the scene's first picture (fos_client.c). Same placement and
+/* The same tile while a sleeping frame wakes to a tap or a key: a loading
+ * ring of eight dots, `frame` the leading one (any int, taken mod 8), drawn
+ * over the moon until the scene's first picture (fos_client.c, once: every
+ * partial update after a deep sleep greys the picture around it). Same placement and
  * size as the sleep mark; false when that does not fit. */
 bool fos_panel_draw_wake_mark(const fos_panel_surface_t *s, int frame, fos_panel_code_box_t *box);
 
