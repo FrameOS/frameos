@@ -519,6 +519,65 @@ block test_a_tap_waits_for_a_second_one:
   state.tick(at(3000), output)
   doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "button:doublePress", "gpio:up"], $output.kinds
 
+block test_a_third_press_is_waited_for_only_where_a_rule_binds_one:
+  # Only a key whose `triplePress` a rule binds (event_loop.nim asks the
+  # maps) holds its pair back: the second down is no doublePress yet, a third
+  # down inside the window after the second up is the triplePress, and a
+  # window that closes makes the pair the doublePress, late. Every other key
+  # is as fast as before (the test above).
+  var state = initInputState(config(800, 480))
+  state.tripleWanted = proc (pin: int, label, role: string): bool = label == "AI"
+  var output: seq[InputDelivery]
+  proc edge(state: var InputState, label, action: string, ms: int, output: var seq[InputDelivery]) =
+    discard state.applyNamedInput(evGpio, %*{"pin": 4, "label": label, "action": action}, eoDriver, at(ms), output)
+  # Three taps: down, up, down (no doublePress), up, down = triplePress, up.
+  state.edge("AI", "down", 0, output)
+  state.edge("AI", "up", 60, output)
+  state.edge("AI", "down", 200, output)
+  state.edge("AI", "up", 260, output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "gpio:up"], $output.kinds
+  doAssert state.buttonsBusy == 1
+  state.edge("AI", "down", 400, output)
+  state.edge("AI", "up", 460, output)
+  state.tick(at(3000), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "gpio:up", "gpio:down", "button:triplePress",
+    "gpio:up"], $output.kinds
+  doAssert output[5].payload["role"].getStr() == "primary" and state.buttonsBusy == 0
+  # Two taps and the window closes: the doublePress, once it has.
+  output.setLen(0)
+  state.edge("AI", "down", 5000, output)
+  state.edge("AI", "up", 5060, output)
+  state.edge("AI", "down", 5200, output)
+  state.edge("AI", "up", 5260, output)
+  state.tick(at(5260 + ButtonDoublePressMs), output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "gpio:up"], $output.kinds
+  state.tick(at(5260 + ButtonDoublePressMs + 1), output)
+  doAssert output.kinds[^1] == "button:doublePress" and state.buttonsBusy == 0, $output.kinds
+  # The second press held: no third comes after a hold, so its up decides
+  # the doublePress (never a longPress).
+  output.setLen(0)
+  state.edge("AI", "down", 8000, output)
+  state.edge("AI", "up", 8060, output)
+  state.edge("AI", "down", 8200, output)
+  state.edge("AI", "up", 8200 + ButtonLongPressMs + 500, output)
+  doAssert output.kinds == @["gpio:down", "gpio:up", "gpio:down", "gpio:up", "button:doublePress"], $output.kinds
+  # A fourth tap starts over: one press of its own.
+  output.setLen(0)
+  for (action, ms) in [("down", 12000), ("up", 12050), ("down", 12150), ("up", 12200), ("down", 12300),
+                       ("up", 12350), ("down", 12450), ("up", 12500)]:
+    state.edge("AI", action, ms, output)
+  state.tick(at(13000), output)
+  doAssert output.kinds.filterIt(it.startsWith("button")) == @["button:triplePress", "button:press"], $output.kinds
+  # A key no rule binds three times: the doublePress at the second down, and
+  # the third down starts over.
+  output.setLen(0)
+  for (action, ms) in [("down", 20000), ("up", 20050), ("down", 20150), ("up", 20200), ("down", 20300),
+                       ("up", 20350)]:
+    state.edge("UP", action, ms, output)
+  doAssert output.kinds[3] == "button:doublePress", $output.kinds
+  state.tick(at(21000), output)
+  doAssert output.kinds.filterIt(it.startsWith("button")) == @["button:doublePress", "button:press"], $output.kinds
+
 block test_someone_elses_press_is_delivered_as_said:
   # HTTP, the cloud, a schedule or a scene: no line moved, nothing to time.
   var state = initInputState(config(800, 480))
@@ -756,6 +815,11 @@ block test_the_corpus:
   var ran = 0
   for c in fixtures["inputState"]["cases"]:
     var state = initInputState(config(800, 480))
+    var tripleLabels: seq[string]
+    for label in c{"tripleLabels"}.getElems():
+      tripleLabels.add(label.getStr())
+    if tripleLabels.len > 0:
+      state.tripleWanted = proc (pin: int, label, role: string): bool = label in tripleLabels
     for step in c["steps"]:
       var output: seq[InputDelivery]
       let now = at(step["at"].getInt())

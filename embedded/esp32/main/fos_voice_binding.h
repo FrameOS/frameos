@@ -28,3 +28,12 @@
  * unparsable one, or one without such a rule. */
 size_t fos_voice_binding_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
                                 size_t max);
+
+/* The labels a rule naming `triplePress` matches (whatever it does with
+ * it): the keys whose pair the dispatcher holds back for a third press, so
+ * the button task can sound the third down as one (fos_button_timing.h
+ * `triple`). A rule with no `action` does not count, as in event_loop.nim.
+ * A rule of the showing scene's map is not here: such a third press sounds
+ * as a first. */
+size_t fos_voice_binding_triple_labels(const char *event_map_json, char labels[][FOS_VOICE_BINDING_LABEL_LEN],
+                                       size_t max);

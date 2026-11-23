@@ -12,6 +12,7 @@ import {
   buttonMapRules,
   buttonsHeardAsIs,
   frameButtons,
+  gestureTitle,
   gestureValue,
   sceneButtonListeners,
   withSceneEventMap,
@@ -96,12 +97,21 @@ describe("rules from choices and back", () => {
   const refreshLong = gestureValue({ label: "REFRESH", action: "longPress" });
 
   it("offers every press of every button", () => {
-    expect(buttonGestures(buttons).slice(0, 4)).toEqual([
+    expect(buttonGestures(buttons).slice(0, 5)).toEqual([
+      { label: "REFRESH", action: "press" },
+      { label: "REFRESH", action: "doublePress" },
+      { label: "REFRESH", action: "triplePress" },
+      { label: "REFRESH", action: "longPress" },
+      { label: "LEFT", action: "press" },
+    ]);
+    // A triple press only where the frame's FrameOS makes one.
+    expect(buttonGestures(buttons, { triplePress: false }).slice(0, 4)).toEqual([
       { label: "REFRESH", action: "press" },
       { label: "REFRESH", action: "doublePress" },
       { label: "REFRESH", action: "longPress" },
       { label: "LEFT", action: "press" },
     ]);
+    expect(gestureTitle({ label: "AI", action: "triplePress" })).toBe("AI · triple press");
   });
 
   it("writes one rule per mapped listener, with every field the listener filters on in `as`", () => {

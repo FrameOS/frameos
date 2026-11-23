@@ -45,6 +45,10 @@
  * pitch, so the two taps are heard as one double press. */
 #define DOUBLE_DOWN_NUM 3
 #define DOUBLE_DOWN_DEN 2
+/* The third down of a triple press: an octave over the press pitch, the
+ * next step up from the double's. */
+#define TRIPLE_DOWN_NUM 2
+#define TRIPLE_DOWN_DEN 1
 /* A key held, at every whole second it stays down: a short note at the
  * press pitch falling to a longer one an octave down, a "dun" that counts
  * the hold out loud. */
@@ -274,7 +278,7 @@ bool fos_buzzer_sounds(void)
 
 /* The one gate of Tap and click sounds (fos_config.h): every press sound
  * (the click family: click_down, click_up, double_down, long_press,
- * reject_down, reject_up, and any new one such as a triple_down) and the
+ * triple_down, reject_down, reject_up, and any new one) and the
  * loading chirp begin with `if (!clicks_heard()) return;`. The voice chat's
  * cues and the tones of the console do not. */
 static bool clicks_heard(void)
@@ -302,6 +306,12 @@ static uint32_t scaled_hz(uint32_t num, uint32_t den)
     if (hz < FOS_BUZZER_TONE_HZ_MIN) return FOS_BUZZER_TONE_HZ_MIN;
     if (hz > FOS_BUZZER_TONE_HZ_MAX) return FOS_BUZZER_TONE_HZ_MAX;
     return hz;
+}
+
+void fos_buzzer_triple_down(void)
+{
+    if (!clicks_heard()) return;
+    fos_buzzer_tone(scaled_hz(TRIPLE_DOWN_NUM, TRIPLE_DOWN_DEN), CLICK_MS);
 }
 
 void fos_buzzer_double_down(void)

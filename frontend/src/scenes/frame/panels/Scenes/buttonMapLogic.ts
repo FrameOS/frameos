@@ -3,6 +3,8 @@ import type { DeepPartial } from 'kea-forms'
 
 import type { EventMapRule, FrameId, FrameScene, FrameType, GPIOButton } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import { frameSupportsTriplePress } from '../../../../utils/frameEventMap'
 import {
   type ButtonGesture,
   type ButtonListener,
@@ -81,7 +83,7 @@ export interface buttonMapLogicMeta {
     scene: (frameForm: Partial<FrameType>, frame: FrameType) => FrameScene | null
     buttons: (frame: FrameType, frameForm: Partial<FrameType>) => GPIOButton[]
     listeners: (scene: FrameScene | null) => ButtonListener[]
-    gestures: (buttons: GPIOButton[]) => ButtonGesture[]
+    gestures: (buttons: GPIOButton[], frame: FrameType) => ButtonGesture[]
     conflicts: (listeners: ButtonListener[], choices: Record<string, string>) => string[]
     rules: (listeners: ButtonListener[], choices: Record<string, string>, custom: EventMapRule[]) => EventMapRule[]
     changed: (rules: EventMapRule[], scene: FrameScene | null) => boolean
@@ -156,8 +158,9 @@ export const buttonMapLogic = kea<buttonMapLogicType>([
       (scene: buttonMapLogicValues['scene']): ButtonListener[] => sceneButtonListeners(scene),
     ],
     gestures: [
-      (s) => [s.buttons],
-      (buttons: buttonMapLogicValues['buttons']): ButtonGesture[] => buttonGestures(buttons),
+      (s) => [s.buttons, s.frame],
+      (buttons: buttonMapLogicValues['buttons'], frame: buttonMapLogicValues['frame']): ButtonGesture[] =>
+        buttonGestures(buttons, { triplePress: frameSupportsTriplePress(frame?.frameos_version, isCloudMode()) }),
     ],
     conflicts: [
       (s) => [s.listeners, s.choices],

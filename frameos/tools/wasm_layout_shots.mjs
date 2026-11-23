@@ -54,6 +54,8 @@ const SWIPES = [
 const STICKY_KEYS = [
   { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'button', match: { label: 'DOWN', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+  { event: 'button', match: { label: 'AI', action: 'doublePress' }, emit: 'back', as: {} },
+  { event: 'button', match: { label: 'AI', action: 'triplePress' }, emit: 'sceneSwitcher', as: {} },
   { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
 ]
 const BOARDS = {

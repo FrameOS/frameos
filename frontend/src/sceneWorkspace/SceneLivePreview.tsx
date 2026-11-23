@@ -301,7 +301,7 @@ function forwardPointer(
 
 // A scene's "button" is held like the frame's key: down when the pointer (or
 // Space / Enter) presses it, up when it lets go, so a scene that listens for
-// `down`, `up`, `doublePress` or `longPress` can be driven from here. The
+// `down`, `up`, `doublePress`, `triplePress` or `longPress` can be driven from here. The
 // pointer is captured, so letting go off the button is still the release.
 function heldButtonHandlers(
   previewRef: RefObject<FrameOSPreview | null>,
