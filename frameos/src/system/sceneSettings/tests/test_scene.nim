@@ -11,6 +11,7 @@ import frameos/utils/font
 import system/sceneSwitcher/scene as switcher
 import system/sceneSettings/scene as settings
 import frameos/layout_choice
+import frameos/scene_store_hooks
 import frameos/ui/theme
 from frameos/events import settingsWindowId
 
@@ -915,6 +916,52 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsApply = nil
   frameSettingsAction = nil
   echo "clock and update ok"
+
+block the_frame_page_updates_the_store_scenes:
+  # The store scenes with a newer version, as the scene store's host has them
+  # from the control plane (docs/scene-store.md "What has updates"): a line,
+  # and Update scenes asks twice and hands the host `updateAll`.
+  var
+    storeFacts = %*{"busy": "", "updates": [
+      {"store": "a", "name": "Rain radar", "from": 1, "to": 2},
+      {"store": "b", "name": "Terminal", "from": 1, "to": 2, "owner": true}]}
+    storeAsked: seq[(string, string)]
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "version": "2026.11.5", "updateState": 2}
+  sceneStoreRead = proc (asker: string): string {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: $storeFacts
+  sceneStoreAction = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: storeAsked.add((asker, action))
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  discard scene.draw()
+  scene.scrollTo(2000)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "frame-scene-updates.png")
+  scene.tap(regionWith(20007))
+  doAssert storeAsked.len == 0, "it asks twice"
+  discard scene.draw()
+  scene.scrollTo(2000)
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "frame-scene-updates-again.png")
+  scene.tap(regionWith(20007))
+  doAssert storeAsked == @[(SceneSettingsId, "updateAll")], $storeAsked
+  # While they update, and with only the owner's left, nothing to press.
+  storeFacts["busy"] = %"updateAll"
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  storeFacts["busy"] = %""
+  storeFacts["updates"] = %*[storeFacts["updates"][1]]
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  # No plane (no `updates`): no line, no button.
+  storeFacts.delete("updates")
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  sceneStoreRead = nil
+  sceneStoreAction = nil
+  frameSettingsRead = nil
+  echo "scene updates ok"
 
 block the_frame_page_offers_tap_and_click_sounds:
   var
