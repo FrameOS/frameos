@@ -30,10 +30,13 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+
+#include "frameos_nim.h"
 
 #include "fos_backend_http.h"
 #include "fos_client.h"
@@ -325,13 +328,34 @@ bool fos_store_plane(const char *route, char *url, size_t len, char *auth, size_
     return *pending;
 }
 
+/* A tap is worth a few tries while the plane is not reached: a frame in a
+ * hand loses its Wi-Fi for seconds at a time, and a backend on a laptop that
+ * has just woken takes a moment to answer (the reTerminal Sticky, 2026-11-23:
+ * every Install and Preview said the store did not answer). Only a request
+ * that never reached the plane goes again: one it may have taken (sent, and
+ * no answer came) is never asked twice. Three tries are about 20 s at most
+ * against a host that is not there (a 5 s connect each). */
+#define PLANE_TRIES 3
+#define PLANE_RETRY_MS 3000
+
+/* What the store says it could not do, on the frame's log: the plane's word
+ * or ours, and how the last try went. */
+static void log_refusal(const char *action, const char *error, int status, esp_err_t err, int tries)
+{
+    char line[192];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"sceneStore:error\",\"source\":\"esp32\",\"action\":\"%s\",\"error\":\"%s\","
+             "\"httpStatus\":%d,\"tries\":%d,\"espErrName\":\"%s\"}",
+             action, error, status, tries, err == ESP_OK ? "OK" : fos_http_err_name(err));
+    frameos_nim_log_hook(line);
+}
+
 /* Ask the plane. An error code for the page, NULL when it took it;
  * `status` gets its "status" (queued, up_to_date) and `scene_id` the
  * runtime id a preview shows. */
 static const char *ask_plane(const char *url, const char *auth, bool backend, const char *action, const char *scene_id,
                              bool show, char *status, size_t status_len, char *shown, size_t shown_len)
 {
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return "offline";
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "action", action);
     cJSON_AddStringToObject(body, "scene_id", scene_id);
@@ -341,20 +365,45 @@ static const char *ask_plane(const char *url, const char *auth, bool backend, co
     if (text == NULL) return "no_room";
     fos_http_request_t req = {.url = url, .auth = auth, .body = text, .timeout_ms = 30000};
     fos_http_response_t res = {0};
-    esp_err_t err = fos_http_fetch(&req, ANSWER_MAX, &res);
+    esp_err_t err = ESP_FAIL;
+    bool online = false;
+    int tries = 0;
+    while (tries < PLANE_TRIES) {
+        if (tries > 0) vTaskDelay(pdMS_TO_TICKS(PLANE_RETRY_MS));
+        tries++;
+        online = fos_wifi_state() == FOS_WIFI_CONNECTED;
+        if (!online) continue;
+        /* An error is a request the plane never took: no connection, or
+         * the body not sent whole. */
+        err = fos_http_fetch(&req, ANSWER_MAX, &res);
+        if (err == ESP_OK) break;
+    }
     cJSON_free(text);
     static char refused[WORD_LEN];
-    const char *error = err != ESP_OK || res.status == 0 ? "store_unavailable" : NULL;
+    /* No answer is the plane's silence, not the store's: a plane that could
+     * not reach the store says so itself (`store_unavailable`). */
+    const char *error = !online && err != ESP_OK         ? "offline"
+                        : err != ESP_OK || res.status <= 0 ? "plane_unavailable"
+                                                         : NULL;
     cJSON *answer = res.body ? cJSON_ParseWithLength(res.body, res.body_len) : NULL;
     if (error == NULL && res.status != 200) {
+        /* The plane's own word (its letters alone, as fos_code.c reads
+         * one), else one for its status: a 404 with no word of the plane's
+         * is a plane from before the route. */
         const cJSON *code = cJSON_GetObjectItem(answer, "error");
-        /* A 404 with no word of the plane's is a plane from before the route. */
-        snprintf(refused, sizeof(refused), "%s", cJSON_IsString(code) ? code->valuestring
-                                                 : res.status == 429 ? "rate_limited"
-                                                 : res.status == 404 ? "plane_update_required"
-                                                                     : "store_unavailable");
+        size_t n = 0;
+        for (const char *c = cJSON_IsString(code) ? code->valuestring : ""; *c && n < sizeof(refused) - 1; c++) {
+            if (isalnum((unsigned char)*c) || *c == '_') refused[n++] = *c;
+        }
+        refused[n] = '\0';
+        if (n == 0) {
+            snprintf(refused, sizeof(refused), "%s", res.status == 429   ? "rate_limited"
+                                                     : res.status == 404 ? "plane_update_required"
+                                                                         : "plane_unavailable");
+        }
         error = refused;
     }
+    if (error != NULL) log_refusal(action, error, res.status, err, tries);
     copy_arg(answer, "status", status, status_len);
     copy_arg(answer, "scene_id", shown, shown_len);
     cJSON_Delete(answer);

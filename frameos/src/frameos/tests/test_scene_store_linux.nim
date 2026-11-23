@@ -82,6 +82,25 @@ block a_store_scene_is_removed_from_the_frames_own_scenes:
   doAssert waitIdle(){"error"}.getStr() == "last_scene"
   doAssert loadScenePayload().len == 1
 
+block a_plane_that_does_not_answer_is_not_the_store:
+  # A backend that is not there (the laptop running it asleep, 2026-11-23):
+  # the page says the control plane did not answer, never that the store did
+  # not, and nothing is installed here instead.
+  writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": true, "width": 800, "height": 480,
+    "serverHost": "0.0.0.0", "serverPort": 9, "serverScheme": "http", "serverApiKey": "key"}))
+  noteFrameConfigChanged()
+  doAssert not read(){"removeAny"}.getBool(true), "a frame with a backend asks it"
+  act("install", %*{"store": Radar})
+  var facts: JsonNode
+  for i in 0 ..< 3000:
+    facts = read()
+    if facts{"busy"}.getStr() == "":
+      break
+    sleep(10)
+  doAssert facts{"busy"}.getStr() == "", "the worker never finished"
+  doAssert facts{"error"}.getStr() == "plane_unavailable", $facts
+  doAssert loadScenePayload().len == 1, "nothing installed on the frame's own"
+
 block the_lock_hides_the_page:
   writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": false, "width": 800, "height": 480}))
   noteFrameConfigChanged()

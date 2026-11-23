@@ -123,11 +123,13 @@ proc askPlane(url, token, action, sceneId: string, show: bool): tuple[error, sta
         # A 404 with no word of the plane's is a plane from before the route.
         code = if response.code == 429: "rate_limited"
                elif response.code == 404: "plane_update_required"
-               else: "store_unavailable"
+               else: "plane_unavailable"
       return (code, "", "")
     ("", answer{"status"}.getStr(), answer{"scene_id"}.getStr())
   except CatchableError:
-    ("store_unavailable", "", "")
+    # No answer is the plane's silence, not the store's: a plane that could
+    # not reach the store says `store_unavailable` itself.
+    ("plane_unavailable", "", "")
 
 # ----------------------------------------------------------------- the disk
 

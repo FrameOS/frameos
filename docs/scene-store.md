@@ -180,8 +180,15 @@ for the voice chat). A Pi does not know its id on the backend and posts to
 answers 404 with no `error` of its own is older than this route: both hosts
 report `plane_update_required`, and the app says the plane needs a newer
 version (it said the store did not answer, which sent people to the wrong
-place). A store id the app hands over goes into a URL path on the ESP32, so it
-must be a UUID or nothing.
+place). A plane that does not answer at all (asleep, unreachable, an error
+with no word of its own) is `plane_unavailable`, "The control plane did not
+answer", never `store_unavailable`: that word is the plane's, for a store it
+could not reach itself. Saying the store did not answer sent a Sticky's owner
+to the store while the laptop running its backend slept (2026-11-23). The
+ESP32 tries a request that never reached the plane three times, 3 s apart
+(a frame in a hand drops its Wi-Fi for seconds), never one the plane may have
+taken, and logs each refusal as `sceneStore:error`. A store id the app hands
+over goes into a URL path on the ESP32, so it must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
