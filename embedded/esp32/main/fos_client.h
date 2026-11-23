@@ -65,6 +65,15 @@ void fos_client_keep_awake_ms(uint32_t ms);
 /* A scene payload the link task downloaded, taken into the runtime now (the
  * render task only). False when none was waiting. */
 bool fos_client_take_link_payload(void);
+/* Settings the link task fetched, applied now (the render task only). False
+ * when none were waiting. */
+bool fos_client_take_link_settings(void);
+/* The backend link task has the round trips this pass (fos_backend_link_on). */
+bool fos_client_link_on(void);
+/* One more commands pull on the link task, soon: it reports the ETags of a
+ * deploy's set just taken, so the backend records the deploy, and its own
+ * `sync` is not made (fos_commands_fetch's `reporting`). Render task. */
+void fos_client_request_report_pull(void);
 /* The voice session's hold on the panel (docs/voice-chat.md): from the
  * hold until the answer, no render starts. What arrives meanwhile — the
  * chat's scene switch, then the state for the new scene — is applied as it
