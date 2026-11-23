@@ -64,7 +64,6 @@
 #include "fos_scene_state.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
-#include "fos_status_screen.h"
 #include "fos_tz.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
@@ -901,7 +900,8 @@ void app_main(void)
         s_blink_period_ms = 400;
         fos_wifi_start_portal();
         fos_http_start(true);
-        fos_status_screen_show_portal(fos_wifi_ap_ssid(), fos_wifi_ap_psk(), fos_wifi_ip());
+        /* Its screen is the render task's (fos_client.c show_portal_screen),
+         * in the runtime's font where there is one, as soon as it resumes. */
         /* Registered after the portal httpd is up, so a station that comes
          * back right away still ends with httpd in status mode (a recovery
          * before this line is replayed by the call). */

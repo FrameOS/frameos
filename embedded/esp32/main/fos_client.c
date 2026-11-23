@@ -56,6 +56,7 @@
 #include "fos_scene_state.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
+#include "fos_status_screen.h"
 #include "fos_tz.h"
 #include "fos_wake.h"
 #include "fos_wifi.h"
@@ -2212,32 +2213,26 @@ static void push_status_info(void)
     fos_config_t *config = fos_config();
     char name[2 * FOS_STR_LEN];
     char panel[2 * FOS_STR_LEN];
-    char ssid[96];
-    char pass[2 * 64 + 1];
     char cloud_url[2 * FOS_URL_LEN];
     char backend_url[2 * FOS_URL_LEN];
     json_escape_value(config->hostname, name, sizeof(name));
     json_escape_value(config->panel, panel, sizeof(panel));
+    /* The hotspot's facts are not here: while it is up the portal's own
+     * screen shows (show_portal_screen). */
     bool portal = fos_wifi_state() == FOS_WIFI_PORTAL;
-    json_escape_value(portal ? fos_wifi_ap_ssid() : "", ssid, sizeof(ssid));
-    /* The hotspot's passphrase, for the QR a phone joins by (embedded_scene.nim):
-     * it is on the panel already, and only while the portal is up. */
-    json_escape_value(portal ? fos_wifi_ap_psk() : "", pass, sizeof(pass));
     json_escape_value(config->cloud_url, cloud_url, sizeof(cloud_url));
     json_escape_value(config->backend_url, backend_url, sizeof(backend_url));
     const esp_app_desc_t *app = esp_app_get_description();
 
     /* Worst case of every %s below plus the fixed JSON: gcc's
      * -Wformat-truncation wants the destination to hold it outright. */
-    char info[sizeof(name) + sizeof(panel) + sizeof(ssid) + sizeof(pass) + sizeof(cloud_url) + sizeof(backend_url) +
+    char info[sizeof(name) + sizeof(panel) + sizeof(cloud_url) + sizeof(backend_url) +
               4 * 64 + 256];
     snprintf(info, sizeof(info),
              "{\"name\":\"%s\",\"panel\":\"%s\",\"ip\":\"%s\","
-             "\"portal\":%s,\"portal_ssid\":\"%s\",\"portal_pass\":\"%s\",\"portal_ip\":\"%s\","
              "\"cloud_url\":\"%s\",\"cloud_state\":\"%s\",\"cloud_connected\":%s,"
              "\"backend_url\":\"%s\",\"version\":\"%s\",\"setup_on_screen\":%s}",
              name, panel, portal ? "" : fos_wifi_ip(),
-             portal ? "true" : "false", ssid, pass, portal ? fos_wifi_ip() : "",
              cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
              backend_url, app ? app->version : "",
              /* main.c's touch_setup: no portal, the settings panel instead. */
@@ -2629,6 +2624,56 @@ static void notice_overlay_forget(notice_overlay_t *ov)
 /* `quiet`: an animation's in-between frame (fos_animation.h) — none of the
  * render:* lines, no render announce, no backend push. */
 static bool picture_push_wanted(const char *scene_id);
+
+/* The setup hotspot's screen (docs/cloud-frames.md "What the panel shows
+ * before a scene arrives"), drawn once when the portal comes up. Through the
+ * runtime where there is one, in its font (embedded_scene.nim
+ * renderPortalInto); else, or when that fails, in C (fos_portal_screen.c).
+ * Not a render: no snapshot (the passphrase stays off /image and the backend
+ * push), no render count, and no OTA mark, since a new image that cannot
+ * join the stored network must still roll back (main.c). */
+static void show_portal_screen(void)
+{
+    if (!fos_display_present()) return;
+    const char *ssid = fos_wifi_ap_ssid();
+    const char *psk = fos_wifi_ap_psk();
+    const char *ip = fos_wifi_ip();
+    bool shown = false;
+    /* The runtime when it is up, whatever renders the scenes: the portal
+     * needs no plane, and a frame set to render on its plane has the runtime
+     * all the same (main.c starts it wherever the panel fits). */
+    if (frameos_nim_set_portal_screen(ssid, psk, ip, fos_display_is_lcd())) {
+        fos_pixel_format_t format = fos_display_format();
+        size_t len = fos_display_buffer_size();
+        size_t target_len = 0;
+        uint32_t generation = 0;
+        uint8_t *buf = fos_display_render_target(&target_len, &generation);
+        bool in_panel = buf != NULL && target_len == len;
+        bool rendered;
+        if (in_panel) {
+            rendered = frameos_nim_render_panel(buf, len, format, generation) == 0;
+            if (!rendered) fos_display_release_render_target();
+        } else {
+            if (buf) fos_display_release_render_target();
+            buf = NULL;
+            fos_display_wait_for(fos_framebuffer_reserved_buffer());
+            rendered = frameos_nim_render_alloc(&buf, &len, format) == 0;
+        }
+        frameos_nim_set_portal_screen(NULL, NULL, NULL, false);
+        if (rendered) {
+            esp_err_t err = fos_display_blit(buf, len);
+            shown = err == ESP_OK;
+            if (!shown) ESP_LOGW(TAG, "portal screen: blit failed: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGW(TAG, "portal screen: the runtime did not draw it; the plain one instead");
+        }
+        if (!in_panel && buf) fos_framebuffer_release(buf);
+        /* The glass no longer shows the last render (its hash, its ETag). */
+        if (rendered) fos_client_note_panel_drawn();
+        if (shown) ESP_LOGI(TAG, "portal screen drawn: ssid=%s ip=%s", ssid, ip);
+    }
+    if (!shown) fos_status_screen_show_portal(ssid, psk, ip);
+}
 
 static esp_err_t render_once(bool quiet)
 {
@@ -3522,6 +3567,7 @@ static void client_task(void *arg)
             s_next_render_due = 0;
         }
     }
+    bool portal_screen_shown = false;
     while (true) {
         /* The provisioning portal owns the panel: its screen carries the
          * hotspot name and passphrase, and the first scene render painted
@@ -3531,9 +3577,14 @@ static void client_task(void *arg)
          * portal is left for good. Signals that arrive meanwhile (a button,
          * a schedule tick) are honoured by the pass after that. */
         if (fos_wifi_state() == FOS_WIFI_PORTAL) {
+            if (!portal_screen_shown) {
+                portal_screen_shown = true;
+                show_portal_screen();
+            }
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
+        portal_screen_shown = false;
         int64_t cycle_start = esp_timer_get_time();
         s_tl_pass_us = cycle_start;
         int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;

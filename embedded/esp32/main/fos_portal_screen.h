@@ -5,6 +5,12 @@
  * second opens the setup page, each with what it says written under it for
  * whoever types instead.
  *
+ * This is the C copy, in the 5x7 font, for a board whose runtime does not
+ * draw it (a C3, a panel too large for the runtime, a failed render): where it
+ * renders, the runtime draws the same layout in its own font
+ * (frameos/src/embedded/embedded_scene.nim renderPortalInto; fos_client.c
+ * show_portal_screen picks). Keep the two alike.
+ *
  * Black on white on e-paper; white on black on an LCD (`dark`), the QR codes
  * on white tiles either way, since not every phone reads a light-on-dark
  * code. A panel too small for a code a phone can read (modules under two

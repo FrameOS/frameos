@@ -404,6 +404,15 @@ proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
   if infoJson != nil and infoJson.len > 0:
     setStatusInfo($infoJson)
 
+proc fos_nim_set_portal_screen_impl(ssid, pass, ip: cstring; dark: cint) {.exportc, cdecl.} =
+  ## The next render is the setup hotspot's screen (embedded_scene.nim
+  ## renderPortalInto) with these facts; a nil `ssid` ends that. fos_client.c
+  ## sets it around one render while the portal is up.
+  if ssid == nil:
+    clearPortalScreen()
+  else:
+    setPortalScreen($ssid, (if pass == nil: "" else: $pass), (if ip == nil: "" else: $ip), dark != 0)
+
 proc framePalette(default: seq[(int, int, int)]): seq[(int, int, int)] =
   ## The panel's table with frame.json's `palette` fitted onto it
   ## (fos_nim_set_palette_impl keeps the list in frameConfig): the colours
@@ -425,6 +434,11 @@ proc panelPaletteForFormat(pixelFormat: int): seq[(int, int, int)] =
   else: @[]
 
 proc renderFrameImage(): tuple[image: Image, source: string] =
+  if portalScreenOn():
+    # The setup hotspot's screen, for the one render the portal asks for
+    # (fos_nim_set_portal_screen_impl): never a scene's.
+    rhythmForgetCanvases()
+    return (renderPortalInto(renderCanvas()), "portal screen")
   let interpreted = renderCurrentScene()
   if interpreted.isSome:
     # The frame-wide colour correction, once on the finished canvas.

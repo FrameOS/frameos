@@ -63,9 +63,11 @@ main/                     boot orchestration + platform modules
   fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGB565, luma or 4-bit grey by panel) and dither/pack
-  fos_status_screen.c     puts the portal screen on the panel (buffer, blit)
-  fos_portal_screen.c     the portal screen: the hotspot's join code and the setup page's, as QR
-                          codes with what they say under them, like the Pi's hotspot scene (host-tested)
+  fos_status_screen.c     puts the C portal screen on the panel (buffer, blit)
+  fos_portal_screen.c     the portal screen in C, for a board whose runtime does not draw it
+                          (embedded_scene.nim renderPortalInto does, in its font): the hotspot's
+                          join code and the setup page's as QR codes, like the Pi's hotspot scene
+                          (host-tested)
   fos_qr.c                QR encoder, byte mode, level L: frameos/utils/qr.nim in C (host-tested)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
                           aware: the portal screen and the local network access code box (host-tested)
