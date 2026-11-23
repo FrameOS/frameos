@@ -789,6 +789,8 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
      * clears busy when this returns. */
     s_ota_busy = true;
     wait_for_render_idle(src, FOS_OTA_RENDER_WAIT_MAX_MS);
+    /* A minute of download and a restart: the panel says so the whole time. */
+    fos_restart_notice("Updating...");
 
     /* Resumes within itself (fos_ota_download.c); one call is the run's download. */
     err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
@@ -796,6 +798,7 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
     if (err == ESP_OK) {
         s_ota_failures = 0;
         vTaskDelay(pdMS_TO_TICKS(750)); /* flush the verified line */
+        fos_restart_notice("Updating...");
         esp_restart();
         return ESP_OK;
     }
@@ -961,6 +964,7 @@ static void ota_reboot_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(FOS_OTA_REBOOT_DELAY_MS));
+    fos_restart_notice("Updating...");
     esp_restart();
 }
 

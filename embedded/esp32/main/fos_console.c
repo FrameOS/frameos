@@ -1,3 +1,4 @@
+#include "fos_restart.h"
 #include "fos_console.h"
 #include "fos_heap_walk.h"
 
@@ -314,6 +315,8 @@ static int cmd_status(int argc, char **argv)
         printf("buzzer:      GPIO %d, %u Hz\n", (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz);
     }
     else printf("buzzer:      none\n");
+    printf("click_sounds: %s (touch_beep=%d)\n", fos_config_click_sounds_name(config->click_sounds),
+           config->touch_beep ? 1 : 0);
     if (config->led_pin >= 0) {
         printf("led:         GPIO %d, %s%s\n", (int)config->led_pin, fos_config_led_type_name(config->led_type),
                fos_led_present() ? "" : " (pin refused, see boot log)");
@@ -546,7 +549,7 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|awake_input|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|mic_pins|voice_chat|"
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|touch_beep|click_sounds|mic_pins|voice_chat|"
                "cpu_mode|led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
@@ -1145,6 +1148,13 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
     else if (strcmp(key, "touch_beep") == 0) config->touch_beep = atoi(value) != 0;
+    else if (strcmp(key, "click_sounds") == 0) {
+        /* Live: the next click reads it (fos_buzzer.c). */
+        if (!fos_config_parse_click_sounds(value, &config->click_sounds)) {
+            printf("click_sounds: silent or normal (0 or 1)\n");
+            return 1;
+        }
+    }
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
@@ -1184,6 +1194,7 @@ static int cmd_wifi(int argc, char **argv)
         return 1;
     }
     printf("wifi credentials saved, restarting...\n");
+    fos_restart_notice("Restarting...");
     esp_restart();
     return 0;
 }
@@ -1777,6 +1788,7 @@ static int cmd_usb_api(int argc, char **argv)
         usb_api_ok(subcommand);
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(250)); /* let the marker flush */
+        fos_restart_notice("Restarting...");
         esp_restart();
         return 0;
     }
@@ -1841,6 +1853,7 @@ static int cmd_usb_api(int argc, char **argv)
         usb_api_ok(subcommand);
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(250));
+        fos_restart_notice("Restarting...");
         esp_restart();
         return 0;
     }
@@ -1988,6 +2001,7 @@ static int cmd_usb_api(int argc, char **argv)
 
 static int cmd_restart(int argc, char **argv)
 {
+    fos_restart_notice("Restarting...");
     esp_restart();
     return 0;
 }

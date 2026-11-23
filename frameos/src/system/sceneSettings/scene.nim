@@ -257,6 +257,11 @@ proc option(value, label: string): JsonNode =
   result.put("value", newJString(value))
   result.put("label", newJString(label))
 
+const ClickSounds = [("silent", "Silent"), ("normal", "Normal")]
+  ## Tap and click sounds, by the names every wire uses (an ESP32's
+  ## fos_config.h keeps them as FOS_CLICK_SOUNDS_*): a new mode is one more
+  ## entry here and its name on the host.
+
 proc scaleLabel(scale: string): string =
   scale & "\xc3\x97"
 
@@ -374,6 +379,15 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(step, scaleLabel(step))
   scale.put("options", options)
   result.elems.add scale
+  if not info{"clickSounds"}.isNil:
+    # Only a frame that makes them (a buzzer, a speaker, an LED that follows
+    # them): the host says so by handing the mode over.
+    var sounds = field("clickSounds", "Tap and click sounds", "string")
+    options = newJArray()
+    for (value, label) in ClickSounds:
+      options.elems.add option(value, label)
+    sounds.put("options", options)
+    result.elems.add sounds
   if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")

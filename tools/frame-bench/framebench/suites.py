@@ -891,8 +891,16 @@ def _asked_restart(con, frame, t, where, rotate=None):
     causes = [(event(x) or {}).get('cause') for x in lines if '"event":"wake"' in x]
     turned = [int(m.group(1)) for x in lines for m in [re.search(r'nim runtime initialized: \S+ rotate=(\d+)', x)] if m]
     boots = [b for b in con.boots if b >= t]
+    # The notice it drew before going (fos_restart.h): on a board that has the
+    # fast waveform or an LCD, `ESP_OK`; nothing on firmware before it.
+    notices = [(event(x) or {}).get('status') for x in lines if '"event":"restart:notice"' in x]
     out = {'restart_ms': round((t_boot - t) * 1000), 'to_render_ms': round((t_done - t) * 1000) if t_done else None,
-           'wake': causes[-1] if causes else None, 'rotate': turned[-1] if turned else None, 'boots': len(boots)}
+           'wake': causes[-1] if causes else None, 'rotate': turned[-1] if turned else None, 'boots': len(boots),
+           'notice': notices[-1] if notices else None}
+    if notices and notices[-1] != 'ESP_OK':
+        issues.append(issue('note', 'restart_notice', where, f'the restart notice was not drawn: {notices[-1]}'))
+    if out['restart_ms'] > 25000:
+        issues.append(issue('slow', 'restart_slow', where, f"{out['restart_ms']} ms from the ask to the boot"))
     issues += [i for i in incidents_since(con, t, where) if i['kind'] not in ('reboot', 'ota_mid_run')]
     if any(c not in (None, 'restart') for c in causes):
         issues.append(issue('crash', 'restart_cause', where, f"woke by {', '.join(str(c) for c in causes)}, not the restart asked for"))
@@ -903,6 +911,57 @@ def _asked_restart(con, frame, t, where, rotate=None):
     if rotate is not None and out['rotate'] is not None and out['rotate'] != rotate:
         issues.append(issue('fail', 'rotate_not_applied', where, f"came back at rotate={out['rotate']}, asked {rotate}"))
     con.boots = [b for b in con.boots if b < t]  # asked for
+    return out, issues
+
+
+def drag(con, x_frac, y0_frac, y1_frac, steps=8):
+    """A finger dragged on the glass (wire coordinates, as `tap`)."""
+    x = int(32767 * x_frac)
+    con.send('event pointerDown {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","button":0,"buttons":1}'
+             % (x, int(32767 * y0_frac)))
+    for i in range(1, steps + 1):
+        time.sleep(0.05)
+        y = y0_frac + (y1_frac - y0_frac) * i / steps
+        con.send('event pointerMove {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","buttons":1}' % (x, int(32767 * y)))
+    time.sleep(0.05)
+    con.send('event pointerUp {"x":%d,"y":%d,"pointerId":1,"pointerType":"touch","button":0,"buttons":0}'
+             % (x, int(32767 * y1_frac)))
+
+
+def _switcher_pages(ctx, frame, rounds=2, pages=3):
+    """The scene switcher opened and scrolled a screenful at a time, a few
+    rounds: a reTerminal Sticky stopped at its second page, mid-refresh, the
+    panel left grey and the board answering nothing until a reset (twice on
+    2026-11-22, the release 2026.11.14). Each step must end its render; a
+    render that starts and never ends is the hang. Returns (results, issues)."""
+    con = ctx.console(frame)
+    out, issues = [], []
+    t0 = time.time()
+    for r in range(rounds):
+        where = f'switcher round {r + 1}'
+        con.drain()
+        con.send('event sceneSwitcher')
+        t_open, _, _ = wait_scene_render(con, render_timeout(frame), lambda x: 'system/sceneSwitcher' in x or '"Scene switcher"' in x)
+        steps = []
+        for p in range(pages):
+            con.drain()
+            t = time.time()
+            drag(con, 0.5, 0.8, 0.2)
+            t_done, line, got = wait_render(con, render_timeout(frame))
+            started = [x for _, x in got if ' started: scene ' in x]
+            steps.append({'page': p + 2, 'ms': round((t_done - t) * 1000) if t_done else None})
+            if not t_done and started:
+                issues.append(issue('crash', 'render_stuck', where, f'page {p + 2}: {started[-1][:160]} and no end in {render_timeout(frame)} s'))
+                break
+            con.idle(1.5)
+        con.drain()
+        con.send('event sceneSwitcher')  # the same command again goes back
+        wait_render(con, render_timeout(frame))
+        out.append({'round': r + 1, 'opened': bool(t_open), 'pages': steps})
+    alive = any('frame_id' in x for x in con.command('status', 4))
+    if not alive:
+        issues.append(issue('crash', 'no_answer', 'switcher pages', 'the console stopped answering after the switcher pages'))
+    issues += incidents_since(con, t0, 'switcher pages')
     return out, issues
 
 
@@ -943,6 +1002,13 @@ def suite_settings(ctx, frame):
             issues += found
             if got.get('restart_ms') is None:
                 break
+
+    # The scene switcher a screenful at a time, on a touch board.
+    if frame.get('touch'):
+        out['switcher'], found = _switcher_pages(ctx, frame)
+        issues += found
+    else:
+        out['switcher_skipped'] = 'no touch: the pages are a drag on the glass'
 
     # The layout around every scene: each the frame holds, then none.
     if not be or not fid:

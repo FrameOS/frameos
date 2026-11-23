@@ -113,8 +113,8 @@ runtime; a JS app the owner lets have them reads and uses the same three
 
 | Hook | What |
 |---|---|
-| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
-| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clock` |
+| `frameSettingsRead` | on every render: nil when the host offers no page (the preview, a round panel) or the frame's control plane turned it off (below); else `wifi` (`state`: connected, connecting, notFound, auth, hotspot, unset, off; `ssid`, `hotspot`, `rssi`, `ip`, `networks` in range, `scanning`, `password`: one is saved; absent: no Wi-Fi to set here), `rotate`, `renderScale`, `managedBy`, `version`, `actions` (device commands besides Render again and Reboot: `restart` on a Pi), `note` (what the last Save could not do), `clickSounds` (`silent`, `normal`: only on a frame that makes sounds), and on an ESP32 `clock` and `updateState` (0 idle, 1 checking, 2 current, 3 available, 4 failed, 5 installing; `fos_ota_check_t`) with `updateVersion` |
+| `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `clock` |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
@@ -148,6 +148,16 @@ What the page holds, top to bottom:
   as it is. Below 1 everything is drawn smaller. The scale is the frame's: a
   scene with its own (`settings.renderScale`, a `renderScale` field) keeps
   it. The settings panel and the scene switcher follow it too (below).
+- **Tap and click sounds**: Silent or Normal (`ClickSounds` in the scene, a
+  list so another mode is one entry and its name on the host), only on a frame
+  whose host hands `clickSounds` over: an ESP32 with a buzzer, a codec's
+  speaker or a status LED that follows the notes (`fos_buzzer_sounds`). Silent
+  mutes a press's feedback (the touch and key clicks, a double press, a
+  held key, a refused press, the loading chirp: one gate, `clicks_heard` in
+  `fos_buzzer.c`); the voice chat's cues and the restart notice stay. Live,
+  no restart; NVS `click_sounds`, default normal; the console's `set
+  click_sounds silent|normal`. A plane's `touch_beep` (e-paper touch clicks)
+  still works as it did, under it.
 - **Date and time** (an ESP32): the frame's clock in its own time zone, as
   YYYY-MM-DD HH:MM. Saved to the system clock and the board's battery clock
   where it has one. A frame that reaches the internet goes back to network time
@@ -220,6 +230,13 @@ was off can still be fixed at the frame, the device has the last word:
     "settings:frame", "origin": "panel", "rotate": 90, "renderScale": 1.5}`
     onto the row and the deploy baseline, so the drawer offers nothing to
     deploy for them (`backend/app/utils/frame_settings_adopt.py`).
+- **Tap and click sounds: the plane adopts them** like the rotation: the
+  `settings:frame` line carries `"clickSounds": "silent"` when it changed,
+  and an ESP32 sends a `state` with `hardware.clickSounds` (and
+  `hardware.sounds`, whether the board makes any sound at all) for the cloud's
+  mirror. The planes set it the other way as `clickSounds` (a backend's
+  settings pull) and `click_sounds` (the cloud's `set_settings`), `silent` or
+  `normal`; a name the firmware does not know is normal.
 - **Flashing an ESP32 again** erases its network, and the browser flasher sends
   the plane's stored one (the backend's Network settings).
 

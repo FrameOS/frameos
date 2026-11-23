@@ -104,6 +104,7 @@ static void load_defaults(void)
     memset(&cfg->codec_pins, -1, sizeof(cfg->codec_pins));
     cfg->voice_chat = true;
     cfg->touch_beep = true;
+    cfg->click_sounds = FOS_CLICK_SOUNDS_NORMAL;
     cfg->cpu_mode = FOS_CPU_AUTO;
     cfg->led_pin = -1;
     cfg->led_type = FOS_LED_GPIO;
@@ -318,6 +319,7 @@ esp_err_t fos_config_init(void)
     }
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) cfg->voice_chat = u8 != 0;
     if (nvs_get_u8(nvs, "touch_beep", &u8) == ESP_OK) cfg->touch_beep = u8 != 0;
+    if (nvs_get_u8(nvs, "click_sounds", &u8) == ESP_OK && u8 <= FOS_CLICK_SOUNDS_LAST) cfg->click_sounds = u8;
     if (nvs_get_u8(nvs, "cpu_mode", &u8) == ESP_OK && u8 <= FOS_CPU_PERFORMANCE) cfg->cpu_mode = u8;
     /* The touch panel and the audio codec the same way: stored, else the
      * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
@@ -464,6 +466,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", cfg->voice_chat ? 1 : 0), "voice");
     FOS_NVS_SET(nvs_set_u8(nvs, "touch_beep", cfg->touch_beep ? 1 : 0), "touch_beep");
+    FOS_NVS_SET(nvs_set_u8(nvs, "click_sounds", cfg->click_sounds), "click_sounds");
     FOS_NVS_SET(nvs_set_u8(nvs, "cpu_mode", cfg->cpu_mode), "cpu_mode");
     char touch_pins[FOS_STR_LEN];
     fos_config_format_touch_pins(&cfg->touch_pins, touch_pins, sizeof(touch_pins));

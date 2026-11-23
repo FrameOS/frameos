@@ -1,5 +1,6 @@
 #include "fos_cloud.h"
 #include "fos_restart.h"
+#include "fos_buzzer.h"
 #include "fos_cloud_contract.h"
 #include "fos_cloud_contract_gen.h"
 #include "fos_json_guard.h"
@@ -519,6 +520,11 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     cJSON_AddBoolToObject(hw, "touchBeep", config->touch_beep);
+    /* Tap and click sounds, and whether the board makes any sound at all (a
+     * buzzer, a codec's speaker, an LED that follows the notes): the planes
+     * offer the setting only then. */
+    cJSON_AddBoolToObject(hw, "sounds", fos_buzzer_sounds());
+    cJSON_AddStringToObject(hw, "clickSounds", fos_config_click_sounds_name(config->click_sounds));
     /* The clock setting and the clock it gave (main.c, at boot). */
     cJSON_AddStringToObject(hw, "cpuMode", fos_config_cpu_mode_name(config->cpu_mode));
     cJSON_AddNumberToObject(hw, "cpuMhz", (double)(esp_clk_cpu_freq() / 1000000));
@@ -1524,6 +1530,7 @@ static void ws_reboot_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(750)); /* let the ack flush first */
+    fos_restart_notice("Restarting...");
     esp_restart();
 }
 
@@ -2732,6 +2739,12 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *touch_beep = cJSON_GetObjectItem(settings, "touch_beep");
     if (touch_beep != NULL) {
         config->touch_beep = cJSON_IsTrue(touch_beep);
+    }
+    /* Tap and click sounds ("silent", "normal"; a newer mode is normal here).
+     * Live: fos_buzzer.c reads it at every click. */
+    const cJSON *click_sounds = cJSON_GetObjectItem(settings, "click_sounds");
+    if (cJSON_IsString(click_sounds)) {
+        config->click_sounds = fos_config_click_sounds_or_normal(click_sounds->valuestring);
     }
     const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
     if (voice_chat != NULL) {

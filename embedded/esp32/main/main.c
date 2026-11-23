@@ -42,6 +42,7 @@
 #include "fos_climate.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
+#include "fos_panel_draw.h"
 #include "fos_rtc.h"
 #include "fos_cpu.h"
 #include "fos_codec.h"
@@ -215,6 +216,67 @@ static void log_ring_flush_on_restart(void)
     /* esp_restart: the lines explaining why go out before the reset. A
      * panic never gets here; those are lost with the ring. */
     fos_log_ring_flush(500);
+}
+
+/* A boot on e-paper is alive on the glass within a second or two: a band
+ * with the name over the picture the panel kept, in the fast waveform, while
+ * Wi-Fi joins. Its glass is not known yet (no full refresh this boot), so the
+ * band alone is driven: the previous picture handed to the driver is the
+ * band inverted, the rest equal (fos_display_quick_update). Not after a deep
+ * sleep's timer (the picture just changes, once), nor on an LCD (its splash),
+ * nor where only a full refresh can draw. The render task waits for it. */
+static SemaphoreHandle_t s_boot_splash_done = NULL;
+
+static void boot_splash_task(void *arg)
+{
+    (void)arg;
+    size_t len = fos_display_buffer_size();
+    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *prev = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf && prev) {
+        memset(buf, fos_panel_white_fill(fos_display_format()), len);
+        const fos_panel_surface_t surface = {
+            .buf = buf, .width = fos_display_width(), .height = fos_display_height(),
+            .format = fos_display_format(), .rotate = fos_config()->rotate,
+        };
+        fos_panel_code_box_t box;
+        const char *text = "FrameOS - Starting...";
+        if (fos_panel_notice_box(&surface, text, surface.width >= 600 ? 3 : 2, 1, &box)) {
+            fos_panel_draw_notice(&surface, &box, text);
+            memcpy(prev, buf, len);
+            size_t stride = ((size_t)surface.width + 7u) / 8u;
+            for (int y = box.py; y < box.py + box.ph && y < surface.height; y++) {
+                for (int x = box.px / 8; x <= (box.px + box.pw - 1) / 8 && (size_t)x < stride; x++) {
+                    prev[(size_t)y * stride + (size_t)x] ^= 0xFF;
+                }
+            }
+            esp_err_t err = fos_display_quick_update(buf, prev, len);
+            if (err != ESP_OK) ESP_LOGW(TAG, "boot splash: %s", esp_err_to_name(err));
+        }
+    }
+    free(buf);
+    free(prev);
+    xSemaphoreGive(s_boot_splash_done);
+    vTaskDelete(NULL);
+}
+
+static void boot_splash_start(void)
+{
+    if (!fos_display_present() || fos_display_is_lcd() || !fos_display_supports_partial() ||
+        fos_display_format() != FOS_PIXEL_1BPP || esp_reset_reason() == ESP_RST_DEEPSLEEP) {
+        return;
+    }
+    s_boot_splash_done = xSemaphoreCreateBinary();
+    if (!s_boot_splash_done) return;
+    if (xTaskCreate(boot_splash_task, "fos_splash", 4096, NULL, 4, NULL) != pdPASS) {
+        vSemaphoreDelete(s_boot_splash_done);
+        s_boot_splash_done = NULL;
+    }
+}
+
+static void boot_splash_wait(void)
+{
+    if (s_boot_splash_done) xSemaphoreTake(s_boot_splash_done, pdMS_TO_TICKS(3000));
 }
 
 static void scene_state_flush_on_restart(void)
@@ -503,6 +565,7 @@ void app_main(void)
     } else {
         fos_assets_cleanup_stale_uploads();
     }
+    boot_splash_start();
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
      * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
@@ -647,6 +710,7 @@ void app_main(void)
     BOOTMEM("after-wifi");
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
+    boot_splash_wait();
     fos_client_start();
 
     BOOTMEM("after-client-start");
