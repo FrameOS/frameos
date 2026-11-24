@@ -247,7 +247,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
             return ESP_ERR_INVALID_ARG;
         }
         s_module_ready = true;
-        if (entry->driver_init() != 0) {
+        if (fos_panel_init(entry) != 0) {
             ESP_LOGE(TAG, "panel %s failed to start", entry->name);
             s_panel = NULL;
             s_module_ready = false;
@@ -505,7 +505,7 @@ static esp_err_t refresh_in_place(const uint8_t *buf)
         s_panel->sleep();
         s_panel_awake = false;
     }
-    if (s_panel->driver_init() != 0) {
+    if (fos_panel_init(s_panel) != 0) {
         DEV_SPI_Release();
         ESP_LOGE(TAG, "panel init failed");
         return ESP_FAIL;
@@ -1044,7 +1044,7 @@ esp_err_t fos_display_clear(void)
     if (err != ESP_OK) return err;
     fos_display_park();
     DEV_SPI_Acquire();
-    if (s_panel->driver_init() != 0) {
+    if (fos_panel_init(s_panel) != 0) {
         DEV_SPI_Release();
         return ESP_FAIL;
     }

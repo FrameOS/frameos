@@ -1321,3 +1321,316 @@ the SVG reader's fast parser learns entities, text and CDATA and the Nim
 - Literal pools are not the problem they look like: 79 KB of them, of which
   16 KB repeat a value another pool in reach already holds. The linker merges
   what it can.
+
+---
+
+# A sweep of everything before the release after 2026.11.14 (2026-11-24)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`, fresh `ci_build_image.sh` builds in
+`frameos-esp32-ci-local`. Main at eae3bfe32 builds at 3,211,392 bytes, the
+same as its CI artifact; v2026.11.14 was 3,176,736. Six areas looked at side
+by side (newlib, link-level duplicates, the C shell and ESP-IDF, the Nim
+runtime, pixie with the apps and the font, QuickJS), each cut measured
+against that build, then all of them together rebased on main at 0e152c3dc
+(3,222,384 bytes built the same way).*
+
+**Main at 0e152c3dc 3,222,384 → 3,094,640 bytes (−127,744, −4.0%). OTA slot
+89.4% → 85.9% full, 382 KB → 510 KB free.** No behaviour change: the same
+output on the panel, in the logs and on the wire, every check and assertion
+still there. What changes something is in "Measured, needs a decision" with its number.
+
+By subsystem, main at 0e152c3dc against the branch (`firmware-size.json`
+of both builds; the link order written again from the branch's build: 6,740
+long calls → 6,576, −688 bytes of it):
+
+| Subsystem | Main | Branch | Δ |
+|---|---:|---:|---:|
+| FrameOS core (Nim) | 1,180,609 | 1,143,592 | −37,017 |
+| libc / libm / newlib | 91,245 | 62,331 | −28,914 |
+| Display drivers (C) | 91,391 | 76,568 | −14,823 |
+| Embedded font | 74,527 | 61,135 | −13,392 |
+| Nim stdlib | 131,953 | 118,619 | −13,334 |
+| ESP-IDF misc | 185,408 | 179,252 | −6,156 |
+| fos_* firmware shell (C) | 237,484 | 234,401 | −3,083 |
+| QuickJS | 360,845 | 358,486 | −2,359 |
+| FrameOS apps (Nim) | 56,271 | 54,366 | −1,905 |
+| mbedTLS + certificates | 122,324 | 120,506 | −1,818 |
+| String pool | 135,762 | 134,247 | −1,515 |
+| Storage | 90,004 | 88,547 | −1,457 |
+| the rest (Wi-Fi, lwIP, Monocypher, Nim packages) | 441,038 | 440,473 | −565 |
+
+## What the release's +34.7 KB was
+
+Feature code, per merge from main's CI artifacts:
+
+| PR | Δ app bytes | What |
+|---|---:|---|
+| #990 Waveshare AMOLED 1.75 | +12,368 | `lcd_qspi_amoled.c` 3.6 KB, the round chrome in the built-in scenes and the UI (settings +1.6, `ui` +1.1, switcher +1.0), its touch and IMU |
+| #983 Add scene drawer, installs on an unflashed ESP32 | +5,504 | switcher +1.6, settings +1.1, `fos_client` +0.7, `main` +0.5 |
+| #984 + #986 the scene showing keeps its interpreters | +4,128 | |
+| #987 touch clicks from the touch task | +3,792 | `fos_touch` +2.3 |
+| #988 a sleeping frame shows it sleeps | +3,280 | |
+| #985 the triple press | +2,592 | `input_state`, `event_loop` |
+| #989 a deploy's set downloads on the link task | +624 | |
+| the other 20 merges, #971's link order (−1,168) among them | +2,368 | |
+
+## The cuts
+
+Against eae3bfe32, alone or as one step of its area's series (full builds,
+or a relink of the same objects where the cut is a link step). Together they
+come to less than the sum: the
+vendor `Debug()` shim and the panel helper fold reach some of the same driver
+bytes, and the check pass leaves the identical-code fold a little less to do.
+
+| Cut | Saves |
+|---|---:|
+| **Link level** | |
+| One copy of each function the Nim archive holds more than once (`tools/fold_identical_code.py`) | −20,416 |
+| The e-paper drivers' identical static helpers, once (`components/frameos_display/fold_panel_helpers.py`) | −9,808 |
+| One panel-table wrapper per body; `fos_big_malloc` one copy | −736 |
+| **Nim runtime** | |
+| No error check after a call that cannot raise (`tools/drop_nim_dead_checks.py`) | ≈ −23,500 |
+| One exit out of `jsGetAppFrame`, `planImageEdge`, `trySpillCachedImage` | ≈ −2,100 |
+| One back-shift delete for every `Table` pair (`fosTableBackShift`) | −983 |
+| **newlib** | |
+| The `printf` family through `fos_printf.c`: no `_svfprintf_r`, `_dtoa_r` | −15,824 |
+| `tzset`'s `siscanf` through `fos_sscanf.c`: no scanf engine | −7,984 |
+| NVS's `new[] (std::nothrow)` without libstdc++'s exception runtime | −1,504 |
+| **The C shell and ESP-IDF** | |
+| No termios in the VFS, no Digital Signature peripheral in esp-tls (Kconfig) | −7,897 |
+| The shell's, the display layer's and the Nim glue's calls to ROM and IRAM through veneers (`main/fos_veneers.h`) | −6,864 |
+| The panel table holds the drivers' own functions, 28-byte rows | −3,506 |
+| A failed assert calls `__assert_func` with no arguments, image-wide (`main/fos_assert.h`) | −2,432 |
+| The vendor drivers' `Debug()`: only the busy-timeout message, which is the one acted on | −2,023 |
+| The console's line states in `.bss`, not 1 KB of stored zeros | −1,047 |
+| **pixie, the font** | |
+| The built-in face: kerning as one class table, 7-byte glyph rows, ASCII as the other blocks' deflate dictionary | −13,392 |
+| pixie's SVG presentation attributes read from one table | −2,083 |
+| No `/etc/localtime` symlink lookup on the ESP32 (`readlink` always fails there) | −887 |
+| WebP's lossless tables as bytes | −772 |
+| chroma's color names three bytes a color | −475 |
+| The status mark's SVG compacted at compile time | −325 |
+| **QuickJS** | |
+| `JS_ReadObject` takes only the tags the image's own bytecode holds | −1,824 |
+| Its asserts through a call with no arguments (`fos_qjs_assert.h`) | −624 |
+
+### No check after a call that cannot raise
+
+Under `--exceptions:goto` without `--panics:on` Nim writes `if
+(NIM_UNLIKELY(*nimErr_)) goto L;` after every call to a proc it does not know
+to be non-raising, and it knows that for few: a lifted hook only when nothing
+it calls may raise, which no type that contains itself passes. JsonNode's
+`=destroy` had 2,606 call sites, 2,308 of them checked; pixie's Image's 404.
+`drop_nim_dead_checks.py` (run by `build_nim.sh` before the two folds) asks
+the question again over the whole nimcache: a function is clean when nothing
+it reaches sets the flag (`raiseExceptionAux` is the one place that does),
+makes an indirect call (closure, proc variable or field, RTTI), or calls C
+outside a short allowlist (memory, string and math functions, quickjs.h's
+value inlines). Four ORC primitives whose `raiseOverflow` branch cannot be
+taken count as clean. A check goes when the statement before it calls only
+clean functions and the flag cannot be pending: walking back to the previous
+check crosses no unchecked call that is not clean and no label, loop head or
+`case`. 5,621 checks in the build; every bounds, overflow and range check
+still runs and raises where it did. Pinned by
+`test_esp32_drop_nim_dead_checks.py` (what is clean, what goes, a program
+that prints the same at -O0 and -O2); 24 Nim suites built through the pass
+on the host pass.
+
+### Identical functions
+
+`ld.bfd` has no ICF. `fold_identical_code.py` runs on `libframeos_nim.a` as it
+is made (POST_BUILD) and decides on the compiled objects: same bytes, same
+literal pools, same relocations, refined to a fixed point as lld does. Each
+group is renamed to one name in every object (objcopy) and made weak, and
+`--gc-sections` drops the rest: 201 groups, 833 functions. Only a global alone
+in its section that nothing outside the archive names folds, and only when
+every use is a call or a Nim type descriptor's (whose `destructor` and
+`traceImpl` the runtime only calls or tests against nil): an app table, a
+native, a closure keeps its own. The hot modules are passed with `--keep`.
+13 Nim suites run from a folded archive on the host print what they printed.
+
+The panel drivers' copies are `static`, so they fold in the source: the copy
+step writes the vendor files with each helper that is token for token
+another driver's (`SendCommand`, `SendData`, `ReadBusy` shapes…) as a
+`static inline` forwarder to one definition, 264 helpers to 25, and GCC
+inlines the forwarders, so the same bytes go on the bus in the same order
+(`test_esp32_fold_panel_helpers.py` records every pin write, byte and wait of
+three drivers before and after). The vendored files stay as they are for the
+Pi.
+
+### newlib's formatter and scanner
+
+`fos_printf.c` formats for `snprintf`, `vsnprintf`, `sprintf`, `asprintf`,
+`vasprintf` (`--wrap`; the FILE wraps were already there): integers through
+QuickJS's `u64toa_radix`, doubles through `js_dtoa` with C's ties-to-even
+read off the double's bits, and newlib's quirks kept (`%g` of an integer
+below 1e15, `%05s`, `%p` of NULL). `fos_sscanf.c` answers `tzset`'s
+`siscanf` with a copy of newlib's integer and string engine, quirks
+included. The oracle was newlib itself: the toolchain's `sys.qemu.specs` and
+`qemu-system-xtensa -machine esp32s3 -semihosting -kernel x.elf`, both in
+`frameos-esp32-ci-local`, run a bare test program against the image's exact
+newlib. 1,846,176 format/value pairs and 400,099 TZ strings (every shape
+`posixTzRule` writes, J/D/M rules, `<+0330>-3:30`, broken ones) came out the
+same. `test_fos_printf.c` and `test_fos_sscanf.c` run in the firmware job
+against the C library, newlib's differences pinned.
+
+### Veneers for the shell
+
+The shell's calls to ROM (`strcmp`, `memset`…) and IRAM (`esp_log`, `free`,
+`esp_timer`, FreeRTOS) were all six-byte long calls. `main/fos_veneers.h`,
+forced into the shell's, the display layer's and the Nim glue's C, sends 43
+functions to `l32r a9, <target>; jx a9` in flash beside them (in
+`fos_printf.c`), and each call is a three-byte `CALL8`. A `CALL8` leaves a9
+free until the callee's `ENTRY` and `JX` keeps `PS.CALLINC`, so the callee
+runs as if called directly. Files with IRAM code (`fos_led`, `fos_mic`,
+`fos_touch`) are left out (`test_esp32_veneers.py` holds every `IRAM_ATTR`
+file to the list); the RGB panel's frame-done callback in
+`lcd_st7701s_rgb.c` is flash code in an interrupt that is masked while the
+flash is busy, so it may. A veneer costs a taken jump, about 10 ns; none of
+these callers is a pixel loop.
+
+## On a board
+
+Main at 0e152c3dc (A) and the branch (B) flashed in turn on the same board in
+one session (A B A B), the bench's benchmark suite each time (medians of the
+warm renders, ms):
+
+| | SenseCAP B | SenseCAP A | E1002 B | E1002 A |
+|---|---:|---:|---:|---:|
+| raster | 2163 / 2153 | 2216 / 2220 | 2318 / 2319 | 2410 / 2423 |
+| image | 1552 / 1566 | 1612 / 1617 | 1845 / 1850 | 1900 / 1900 |
+| JSON (cpu) | 640 / 643 | 607 / 611 | 537 / 533 | 492 / 494 |
+| float (cpu) | 1199 / 1194 | 1196 / 1194 | 1107 / 1108 | 1123 / 1115 |
+| int, str, base, UI | the same within 1.5% | | | |
+
+The raster and image benchmarks are 2.5–4% faster on both boards, and the
+JSON one 5% (SenseCAP) to 8.5% (E1002) slower: one binary on both boards, so
+a property of this image, and nothing in the change touches QuickJS's JSON
+path. It is where its functions land (the 2026-11-22 link order alone moved
+the same benchmark 0.5–4.6%); worth a look with the next `link_order.py`
+pass. Pixel toys and Slideshow with motion on the SenseCAP, in turn: 20.2 /
+20.1 fps (B) against 16.9 / 20.1 (A), 11.6 / 11.4 against 10.1 / 11.9.
+Status, reboot, builtin, input, storm and the scenes suite ran clean on the
+SenseCAP; on the E1002 the full sequence (status, reboot, benchmark,
+builtin, storm) passed twice on each image, and builtin alone three times
+each. One earlier B run there stalled 186 s after a scene settings render
+until the next console line arrived: the E1002 did the same on 2026-11-20
+(a scene switcher close), before any of this, so it is the E1002's own
+(worth its own look), not this change's.
+
+## Measured, needs a decision
+
+| Lever | Saves | Cost |
+|---|---:|---|
+| Raise sites without proc name, file and line | −12,496 (before relaxation) | `getStackTrace(e)` is empty: the `stacktrace` of the interpreter's and event loop's error lines, and JS's `nimStack`, go |
+| Veneers for the Nim runtime's calls too | ≈ −6,000 (−12,768 measured for every non-hot caller, soft-float helpers included, −7,920 without them; the shell's −6,864 of that is in) | a taken jump per call: bench `asset_colors` (337 soft-float calls), `status_screen`, `ui/events`, `ui/layout`, pixie's `svg` first |
+| The preludes' bytecode deflated | −9,899 | an inflate at each interpreter, program and scene context start (72 / 14 / 13 µs on x86, est. 1.5–2 ms on the S3, not measured); up to 14.6 KB held for it |
+| `strtod` through QuickJS's `js_atod` | −8,688 | not correctly rounded past 38 significant digits (a number written within 1e-38 of a halfway point parses to the other neighbour); "1e", inf/nan and hex need a wrapper. Not recommended |
+| `ESP_SYSTEM_MEMPROT_FEATURE` off | ≈ −7,400 | the S3's IRAM/DRAM permission hardening, an exploit mitigation. Not recommended |
+| Allocation as unable to raise (counted) | ≈ −4,000 | an OverflowDefect from a size computation seen one check later |
+| `MBEDTLS_GCM_SUPPORT_NON_AES_CIPHER`, `CCM_C`, `ECDSA_DETERMINISTIC`, `KEY_EXCHANGE_RSA` off | ≈ −3,200 / −1,700 / −900 / −700 | suites a server might still pick (ARIA-GCM, CCM, static RSA); random-k ECDSA on the HTTPS server |
+| `strerror` for the ~30 errnos the stacks raise | ≈ −2,000 | other errnos' log text |
+| QuickJS asserts compiled out (`NDEBUG`) | −1,424 | a broken invariant runs on instead of rebooting |
+| `LWIP_IP4_FRAG` / `IP6_FRAG` off | −650 | no datagram larger than the MTU (TCP unaffected) |
+
+## Kept: QuickJS's built-ins (owner, 2026-11-24)
+
+Measured as relinks of main with `quickjs_hot.c` patched, each alone: Atomics
+−6,560, Proxy −5,280, the ES2025 Set methods −4,096, `Uint8Array`
+base64/hex −3,904, Iterator helpers −3,248, dynamic `import()` −2,560,
+WeakRef/FinalizationRegistry −1,504, `Math.sumPrecise` −1,440, Reflect −992,
+`groupBy` −928, `RegExp.escape` −512, the SharedArrayBuffer constructor
+−320; all but Proxy and Reflect together −23,792. No repo app or scene uses
+them, and the owner keeps them: "they seem useful". Proxy is no longer only a
+scene's either: the programs' kit (`__S`, `__C`) and the app prelude
+(`__frameosProxy`) use it. Do not propose these again.
+
+## The Nim apps, by what would leave
+
+What nothing else reaches once the app leaves the registry (call graph of
+the nimcache objects); `data/localImage` is retired by #979.
+
+| App | Bytes | A JavaScript replacement |
+|---|---:|---|
+| `render/text` | 17,907 (`utils/text` 12.2 KB is its alone) | hard: JSX or SVG text lays out and strokes otherwise, the pixels change |
+| `render/zoomPan` | 10,400 (`utils/resample` 4.5 KB, an -O2 module) | a per-frame resample in JS is too slow |
+| `render/split` | 8,468 | core layout |
+| `render/image` | 4,229 | core |
+| `data/downloadUrl` | 3,882 | easy (`fetchText`) |
+| `render/svg` | 3,383 | easy (`frameos.svg`) |
+| `data/xmlToJson` | 2,764 | easy; with the SVG reader's std/xml path, 12,874 together (the fast parser must learn entities, text and CDATA first) |
+| `render/gradient` | 2,763 | easy, pixels differ |
+| `data/qr` | 2,275 | kept on purpose (the access key) |
+| `data/rotateImage`, `resizeImage`, `newImage`, `downloadImage`, `render/color`, `opacity` | 1,878 / 1,179 / 1,101 / 1,740 / 1,053 / 1,037 | the image apps also feed the planner's zero-copy target fusions, which a JS app would lose |
+
+All fifteen: 64,557. The small image apps together: 10,861.
+
+## Rethinking: what is left in the architecture
+
+Estimated from the program apps' ratio (8,650 B of Nim became 1,760 B of
+bytecode), not built:
+
+- The scene settings (35.7 KB) and switcher (17.6 KB) as kit bytecode: −35 to
+  −42 KB. They would need a QuickJS context (a realm of the shared runtime on
+  an 8 MB board) and open slower the first time, and they are the way out of
+  a scene that exhausted the JS heap: that is why they are Nim.
+- The scene compiler as kit bytecode: −14 to −18 KB (more than the 8–12 KB
+  estimated on 2026-11-14), the graph compiled at each scene start by an
+  interpreter, which a deep sleeper pays at every wake.
+- The status screen as bytecode: −12 to −15 KB, but it is drawn at boot and
+  after failures and must not need QuickJS. Not recommended.
+
+## Counted, not built
+
+- The check pass with exact control flow instead of a walk back: ≤ 1,018 more
+  checks, about 4 KB. Single exits for the next 20 procs with the most
+  cleanup before an early return: 2–4 KB.
+- system's per-type instances: `setLen` 142 / 7.1 KB, `delete` 20 / 5.9 KB
+  (each builds its IndexDefect message: a shared raiser ≈ −1.8 KB, a system
+  patch), `add` 120 / 5.5 KB; `options.get`'s 19 UnpackDefect sites ≈ 1 KB.
+- What the fold leaves: 123 groups, 7.9 KB (GCC's local `$isra`/`$constprop`
+  clones, which a rename cannot reach; the registry's `initScene` ×52, whose
+  addresses the app table takes; IDF's own).
+- The LCD splash's tables deflated and inflated by the ROM's tinfl: −3.2 KB
+  net, ~6 KB of PSRAM and the decoder while it shows.
+- `fos_config.c`'s load and save as a field table: −1.5 to −2 KB.
+- FreeRTOS's `port_IntStack`: 3 KB of stored zeros in `.data` (IDF puts
+  `DRAM_ATTR` on an uninitialised array); an IDF patch.
+- The status mark's path in relative coordinates: −0.7 KB, if float32
+  accumulation stays pixel-identical.
+- About 3.1 KB of `__atomic_*` helpers in IRAM serve QuickJS's Atomics alone
+  (kept with it).
+
+## Looked at, not worth it
+
+- `-Oz` (on QuickJS, on main): the same code as `-Os`. `-fmerge-all-constants`
+  on QuickJS: nothing. `-mno-target-align` on `quickjs_hot.c`: −192.
+- QuickJS's six -O2 functions back to -Os: −8,336, of which `JS_CallInternal`
+  is 7,885; the parser, emitter and reader are -Os already.
+- A nil guard before ref and seq destroys so GCC drops those of still-nil
+  locals: +10,887.
+- Minifying the preludes' locals: −119. Their `__frameos*` globals renamed:
+  ≈ −300, but a scene can see them. Their JS source is not in the image.
+- libm (31.5 KB): QuickJS's `Math` and pixie's float32 loops; nothing to fold.
+- The string pool (133.9 KB, 5,254 strings): FrameOS's own 55.4 KB (the
+  console's help 13.6 KB, user-facing), IDF 18.9, QuickJS 15.9, HTTP and
+  WebSocket 10.6, mbedTLS 10.4, Nim's C 9.2, display 5.6, lwIP and Wi-Fi
+  2.7; near-duplicates in ours under 1 KB.
+- `ESP_WIFI_NVS_ENABLED` off: the code is inside the blob, nothing moves.
+  ALPN off: `esp_http_client` always calls its setter. Loopback,
+  `SPIFFS_USE_MTIME`, dynamic log levels, CMAC, PEM, PKCS5: in use.
+- Padding between flash text sections: 21.3 KB, the 4-byte alignment that
+  `CALL8` targets and `L32R` literals need.
+- Time-zone data: there is none in the image (an ESP32 runs UTC until its
+  zone's slice arrives); regrouping the 2.5 KB of aliases ≈ −200.
+
+## Tools for the next pass
+
+- **newlib as an oracle**: `xtensa-esp32s3-elf-gcc -specs=sys.qemu.specs` and
+  `qemu-system-xtensa -machine esp32s3 -semihosting -kernel x.elf` run a
+  bare program against the image's own newlib.
+- A relink's line from `ninja -t commands` starts with `: && `: strip it
+  before adding objects. Keep the archive name `libframeos_quickjs.a`, or the
+  link order misses QuickJS's objects and the image grows ~6 KB.
+- `drop_nim_dead_checks.py`, `fold_identical_code.py --report` and the
+  map's cross-reference table answer "who calls this" without a disassembler.

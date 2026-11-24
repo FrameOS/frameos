@@ -206,7 +206,51 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
   ## alias below is the by-design case for every scene that draws one image
   ## straight onto the canvas, so it fires on nearly every render and used to
   ## read like a failure in the logs ("imageSpill:refused", 2026-10-12).
-  proc refuse(reason: string, debugOnly = false): ImageSpool =
+  ## One way out: a refusal names its `reason` and leaves `spill`, and the
+  ## strings live out here, so leaving destroys nothing (a `return` per
+  ## refusal destroyed all of them again, docs/esp32-image-size.md).
+  var
+    reason, dir, shortfall: string
+    debugOnly = false
+    bytes = 0
+  block spill:
+    if imageSpillDisabled:
+      reason = "spill disabled after an earlier storage failure"
+      break spill
+    if aliasesCanvas(image, context):
+      reason = "value aliases the live canvas"
+      debugOnly = true
+      break spill
+    # The disk tier exists for canvas-shaped values. A native-resolution decode
+    # that some unfused shape materialized (tens of MB) would cost a huge write
+    # on every miss and could never be read back under the render budget anyway.
+    bytes = image.byteSize
+    var cap = 4 * cachedImageMemoryLimit()
+    if context != nil and context.hasImage and not context.image.isNil:
+      # The disk tier stores RGBX rows whatever the canvas format, so the cap
+      # is the canvas's pixel count at 4 bytes, not its own byte size.
+      cap = max(cap, context.image.width * context.image.height * 4)
+    if bytes > cap:
+      reason = $(bytes div 1024) & "K is over the " & $(cap div 1024) & "K spill cap"
+      break spill
+    # Room on the storage, with its own reason: this is the everyday answer on
+    # the ESP32's generic 8 MB layout (a 1 MB state partition, no SD card) and
+    # it must neither disable the tier — free space comes and goes — nor read
+    # as a storage failure.
+    dir = spoolScratchDir(spoolDir(scene.frameConfig))
+    if dir.len == 0:
+      reason = "no writable spill storage"
+      break spill
+    shortfall = spoolHeadroomShortfall(dir, image.width * image.height * 4)
+    if shortfall.len > 0:
+      reason = shortfall
+      break spill
+    result = spillImageToSpool(image, "node" & $nodeId.int & "-cache.rgbx",
+      spoolDir(scene.frameConfig))
+    if result.isNil:
+      imageSpillDisabled = true
+      reason = "storage write failed; disk tier disabled until scenes reload"
+  if reason.len > 0:
     if not debugOnly or scene.frameConfig.debug:
       scene.logger.log(%*{
         "event": "interpreter:cache:imageSpill:skipped",
@@ -214,39 +258,7 @@ proc trySpillCachedImage(scene: InterpretedFrameScene, nodeId: NodeId,
         "nodeId": nodeId.int,
         "reason": reason
       })
-    nil
-
-  if imageSpillDisabled:
-    return refuse("spill disabled after an earlier storage failure")
-  if aliasesCanvas(image, context):
-    return refuse("value aliases the live canvas", debugOnly = true)
-  # The disk tier exists for canvas-shaped values. A native-resolution decode
-  # that some unfused shape materialized (tens of MB) would cost a huge write
-  # on every miss and could never be read back under the render budget anyway.
-  let bytes = image.byteSize
-  var cap = 4 * cachedImageMemoryLimit()
-  if context != nil and context.hasImage and not context.image.isNil:
-    # The disk tier stores RGBX rows whatever the canvas format, so the cap
-    # is the canvas's pixel count at 4 bytes, not its own byte size.
-    cap = max(cap, context.image.width * context.image.height * 4)
-  if bytes > cap:
-    return refuse($(bytes div 1024) & "K is over the " &
-      $(cap div 1024) & "K spill cap")
-  # Room on the storage, with its own reason: this is the everyday answer on
-  # the ESP32's generic 8 MB layout (a 1 MB state partition, no SD card) and
-  # it must neither disable the tier — free space comes and goes — nor read
-  # as a storage failure.
-  let dir = spoolScratchDir(spoolDir(scene.frameConfig))
-  if dir.len == 0:
-    return refuse("no writable spill storage")
-  let shortfall = spoolHeadroomShortfall(dir, image.width * image.height * 4)
-  if shortfall.len > 0:
-    return refuse(shortfall)
-  result = spillImageToSpool(image, "node" & $nodeId.int & "-cache.rgbx",
-    spoolDir(scene.frameConfig))
-  if result.isNil:
-    imageSpillDisabled = true
-    return refuse("storage write failed; disk tier disabled until scenes reload")
+    return nil
   scene.logger.log(%*{
     "event": "interpreter:cache:imageSpill",
     "sceneId": scene.id.string,

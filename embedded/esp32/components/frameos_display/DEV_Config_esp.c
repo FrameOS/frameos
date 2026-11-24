@@ -387,3 +387,12 @@ void DEV_Module_Exit(void)
     DEV_Digital_Write(EPD_RST_PIN, 0);
     s_initialized = false;
 }
+
+/* The static helpers several vendor drivers write the same (SendCommand,
+ * SendData, the resets, ...), once: fold_panel_helpers.py writes them when
+ * it copies the drivers into the build (CMakeLists.txt). Here they stand
+ * beside the drivers in the link order and beside the DEV_ functions they
+ * call, so a driver's call to one stays a short CALL8. */
+#if __has_include("fos_epd_folded.inc")
+#include "fos_epd_folded.inc"
+#endif

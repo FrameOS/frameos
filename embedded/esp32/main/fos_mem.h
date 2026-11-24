@@ -9,7 +9,11 @@
 // for the Wi-Fi/TLS stacks. On PSRAM-less chips (the ESP32-C3 thin clients)
 // the same call sites use the internal heap — "no PSRAM" must mean "small
 // heap", not "every allocation fails". Callers handle NULL either way.
-static inline void *fos_big_malloc(size_t size)
+//
+// A C99 inline definition: where GCC does not inline it, the call goes to
+// the one external copy main.c makes (`extern inline`), not to a private
+// copy in each of the ten files that kept one (docs/esp32-image-size.md).
+inline void *fos_big_malloc(size_t size)
 {
     if (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) > 0) {
         return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

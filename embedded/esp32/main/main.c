@@ -81,6 +81,9 @@
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
 
+/* The one external copy of fos_mem.h's inline fos_big_malloc. */
+extern inline void *fos_big_malloc(size_t size);
+
 static const char *TAG = "frameos";
 
 #define WIFI_CONNECT_TIMEOUT_MS 45000
