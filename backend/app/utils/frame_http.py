@@ -278,10 +278,17 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
 # `http:write` origin may not emit.
 _CONTROL_EVENT_NAMES = REFUSED_BY_ORIGIN["http:write"]
 
+# What a Linux frame answers in full only to an admin session or this key
+# (server/auth.nim `hasControlReadAccess`): the scene JSON itself, and the
+# secret-typed fields of a scene's public state, which the access key no
+# longer reads. A runtime from before that rule ignores the header and takes
+# the `?k=` these GETs still carry.
+_CONTROL_READ_PATHS = ("/getUploadedScenes", "/state", "/states")
+
 
 def _is_control_path(path: str) -> bool:
     bare = path.split("?", 1)[0].rstrip("/")
-    if bare in ("/uploadScenes", "/reload"):
+    if bare in ("/uploadScenes", "/reload") or bare in _CONTROL_READ_PATHS:
         return True
     if bare.startswith("/event/"):
         return bare[len("/event/") :] in _CONTROL_EVENT_NAMES

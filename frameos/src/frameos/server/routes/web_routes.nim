@@ -353,17 +353,23 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/states", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    # Secret-typed fields only for an admin session or the backend: the
+    # access key sets a scene's fields, it does not read the tokens in them.
+    let full = hasControlReadAccess(request)
+    if not full and not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      let payload = frameStatesPayload()
+      let payload = frameStatesPayload(exposeSecrets = full)
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "states": payload.states})
   )
 
   router.get("/getUploadedScenes", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    # The scene JSON itself, every node's config with what was typed into it:
+    # an admin session or the backend's bearer, never the access key that is
+    # printed on the frame's QR code (auth.nim `hasControlReadAccess`).
+    if not hasControlReadAccess(request):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
@@ -373,12 +379,13 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/state", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    let full = hasControlReadAccess(request)
+    if not full and not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      let payload = frameStatePayload()
+      let payload = frameStatePayload(exposeSecrets = full)
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "state": payload.state})
   )
 

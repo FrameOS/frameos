@@ -5834,6 +5834,136 @@
       "current": "fixtures/dispatcher/gearB"
      }
     ]
+   },
+   {
+    "name": "the access key presses nothing on the scene settings",
+    "why": "The HTTP write door (the frame access key, or `public` access: origin `http:write`) is for a frame's scenes: it may open the settings as it may switch a scene, but the panel is the frame's own, its frame page restarts, updates and re-joins the frame, and a key handed out to pick scenes must not reach that. So while a scene runs on an event from that origin the frame offers no page (frame_settings_hooks.nim), and the scene settings take no input at all: the same press from a driver goes back, the access key's is run and does nothing.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/settingsA",
+      "name": "settingsA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": [
+       {
+        "name": "name",
+        "label": "Name",
+        "type": "string",
+        "value": "Ann",
+        "access": "public",
+        "persist": "memory"
+       },
+       {
+        "name": "token",
+        "label": "Token",
+        "type": "string",
+        "value": "x",
+        "access": "private",
+        "persist": "memory"
+       }
+      ]
+     },
+     {
+      "id": "fixtures/dispatcher/settingsB",
+      "name": "settingsB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/settingsA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "sceneSettings"
+       }
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "BACK",
+         "role": "back",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSettings button"
+      ],
+      "current": "system/sceneSettings"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "keyDown",
+        "payload": {
+         "key": "Escape",
+         "code": "Escape"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSettings keyDown"
+      ],
+      "current": "system/sceneSettings"
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "button",
+        "payload": {
+         "label": "BACK",
+         "role": "back",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSettings button",
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/settingsA"
+     }
+    ]
    }
   ]
  },

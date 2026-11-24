@@ -1106,6 +1106,12 @@ proc settingsOwnRun(self: FrameScene, context: ExecutionContext) {.nimcall.} =
   ## payload is read with `{}` alone, which answers nil for what is missing.
   let self = SceneSettingsScene(self)
   let payload = context.payload
+  # Input that came through the HTTP write door (the frame access key,
+  # frame_settings_hooks.nim): this panel is the frame's own, and a key
+  # handed out to pick scenes presses nothing on it. The host's own events
+  # (the switch, open, close, the render) are never sent under that flag.
+  if framePageWithheld:
+    return
   case context.event
   of "setCurrentScene":
     # Opened from a scene (the dispatcher always says which, `from`): afresh,

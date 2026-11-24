@@ -156,7 +156,17 @@ with its node id), the scheduler, the hub client's `scene_event`, the cloud's
 event route and schedule validator. What it comes to:
 
 - The frame access key is printed on the frame's QR code. It may pick a scene;
-  it may not `reload`, `restart`, `reboot` or `uploadScenes`.
+  it may not `reload`, `restart`, `reboot` or `uploadScenes`. Nor may it reach
+  them by way of the screen: its key and pointer events are for scenes, so
+  while a scene runs on an event from `http:write` the frame offers no page
+  (`frame_settings_hooks.nim`: the frame page's three hooks are nil for that
+  run, as when the control plane turned the page off, for the frame page and
+  for an app with `frameos.frame` alike), and the scene settings take no
+  input from it at all. Opening them, as switching a scene, it may. Over the
+  frame's HTTP API the key also reads neither the scene JSON
+  (`GET /getUploadedScenes`) nor the value of a field marked `secret`
+  (`/state`, `/states`, the control page): those take an admin session or the
+  backend's `serverApiKey`.
 - A scene is untrusted code (anyone's store scene). Same four.
 - A schedule is data nobody validated. It may switch, render, power, reload
   and reboot; it may not `uploadScenes`.

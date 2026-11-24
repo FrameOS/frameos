@@ -1,8 +1,9 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, tables, unittest]
 
 import zippy
 
 import ../../[channels, types]
+import ../../scenes
 import ./helpers/http_harness
 import ../[auth, state]
 from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest
@@ -349,7 +350,8 @@ suite "web route behavior":
     let config = defaultFrameConfig()
     configureServerState(config)
 
-    for path in ["/static/foo.js", stableImageAssetPath, "/image", "/states", "/state", "/ws", "/ws/admin"]:
+    for path in ["/static/foo.js", stableImageAssetPath, "/image", "/states", "/state", "/getUploadedScenes", "/ws",
+                 "/ws/admin"]:
       let response = httpRequest(server.port, "GET", path)
       check response.status == 401
 
@@ -425,6 +427,72 @@ suite "web route behavior":
     let (backendReceived, backendPayload) = eventChannel.tryRecv()
     check backendReceived
     check backendPayload[1] == "setCurrentScene"
+
+  test "the scene JSON and secret fields take an admin session or the backend, never the access key":
+    # The access key is printed on the frame's QR code for whoever should
+    # pick a scene and set its fields. It reads neither the scenes themselves
+    # (node config, with the links and tokens typed into it) nor the value of
+    # a field marked secret.
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    configureServerState(config)
+    let adminLogin = httpRequest(server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}))
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+
+    for headers in [@[("Authorization", "Bearer test-key")], @[("Cookie", ACCESS_COOKIE & "=test-key")]]:
+      check httpRequest(server.port, "GET", "/getUploadedScenes", headers = headers).status == 401
+    check httpRequest(server.port, "GET", "/getUploadedScenes?k=test-key").status == 401
+    for headers in [@[("Authorization", "Bearer api")], @[("Cookie", adminCookie)]]:
+      let scenes = httpRequest(server.port, "GET", "/getUploadedScenes", headers = headers)
+      check scenes.status == 200
+      check parseJson(scenes.body).hasKey("scenes")
+
+    var target = "".SceneId
+    for id, _ in exportedScenes:
+      target = id
+      break
+    require target.string.len > 0
+    let before = exportedScenes[target].publicStateFields
+    exportedScenes[target].publicStateFields = @[
+      StateField(name: "city", label: "City", fieldType: "string", value: %""),
+      StateField(name: "token", label: "Token", fieldType: "string", value: %"", secret: true),
+    ]
+    refreshExportedScenes()
+    setLastPublicSceneId(target)
+    updateLastPublicState(FrameScene(id: target, state: %*{"city": "Tallinn", "token": "s3cret-value"}))
+
+    for path in ["/states", "/state"]:
+      let viaKey = httpRequest(server.port, "GET", path & "?k=test-key")
+      check viaKey.status == 200
+      check viaKey.body.contains("Tallinn")
+      check not viaKey.body.contains("s3cret-value")
+      for headers in [@[("Authorization", "Bearer api")], @[("Cookie", adminCookie)]]:
+        let full = httpRequest(server.port, "GET", path, headers = headers)
+        check full.status == 200
+        check full.body.contains("Tallinn")
+        check full.body.contains("s3cret-value")
+
+    # The control page writes no secret into its form, and says which field
+    # is one so its script sends nothing for a field left empty.
+    let page = httpRequest(server.port, "GET", "/c?k=test-key")
+    check page.status == 200
+    check page.body.contains("Tallinn")
+    check not page.body.contains("s3cret-value")
+    check page.body.contains("type='password' id='token'")
+    check page.body.contains("\"secret\":true")
+
+    # `public` access is the access key with nobody asked for it.
+    config.frameAccess = "public"
+    configureServerState(config)
+    check httpRequest(server.port, "GET", "/getUploadedScenes").status == 401
+    let publicStates = httpRequest(server.port, "GET", "/states")
+    check publicStates.status == 200
+    check not publicStates.body.contains("s3cret-value")
+
+    exportedScenes[target].publicStateFields = before
+    refreshExportedScenes()
 
   test "control-plane verbs refuse the frame access key and public mode":
     # The access key is printed on the frame's QR code: it may pick a scene,

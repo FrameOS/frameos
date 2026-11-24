@@ -233,6 +233,44 @@ block dispatch_now_reports_what_came_of_it:
   doAssert not host.loop.dispatchNow(eoHttpWrite, "setCurrentScene", %*{"sceneId": "fixtures/dispatcher/nowhere"})
   localEventSink = nil
 
+block the_frame_page_is_withheld_from_a_run_on_the_access_keys_event:
+  # The HTTP write door (origin `http:write`: the frame access key, `public`
+  # access) is for scenes. While a scene runs on an event from it the frame
+  # offers no page (frame_settings_hooks.nim): the hooks every reader asks
+  # are nil, so neither the frame page nor an app with `frameos.frame` (a
+  # terminal) restarts, updates or re-joins the frame on what the key sent.
+  # Any other origin runs with the page as the host offers it.
+  let logs = new(seq[JsonNode])
+  let host = newRecordingHost("fixtures/dispatcher/voiceKey".SceneId, logs)
+  discard host.sceneInstance(host.current)
+  discard host.loop.drain()
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} = newJObject()
+  frameSettingsApply = proc (changes: JsonNode) {.nimcall, gcsafe, raises: [].} = discard
+  frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} = discard
+  var offered: seq[bool]
+  let run = host.loop.host.runScene
+  host.loop.host.runScene = proc (scene: FrameScene, event: string, payload: JsonNode) =
+    offered.add(not frameSettingsRead.isNil and not frameSettingsApply.isNil and not frameSettingsAction.isNil)
+    doAssert framePageWithheld == frameSettingsRead.isNil
+    run(scene, event, payload)
+  for origin in [eoHttpWrite, eoDriver, eoHttpAdmin, eoHttpWrite]:
+    host.loop.enqueue(origin, "button", %*{"label": "REFRESH", "action": "press"})
+    discard host.loop.drain()
+  doAssert offered == @[false, true, true, false], $offered
+  # Back as they were once the run is over...
+  doAssert not framePageWithheld
+  doAssert not frameSettingsRead.isNil and not frameSettingsApply.isNil and not frameSettingsAction.isNil
+  # ...and after a run that never came back (an ESP32's out-of-memory abort
+  # jumps over every `finally`): the host's recovery puts them back.
+  withholdFramePage()
+  doAssert frameSettingsRead.isNil
+  host.loop.resetAfterAbort()
+  doAssert not framePageWithheld and not frameSettingsRead.isNil
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+  localEventSink = nil
+
 block a_payload_is_an_object:
   # `payload{"state"}` is nil without the key, and `.kind` on nil took an ESP32
   # down on the bench (a scene's setCurrentScene carries no state). Hosts ask

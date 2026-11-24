@@ -33,6 +33,7 @@ import ./driver_abi
 import ./input_state
 import ./event_map
 import ./scene_rhythm
+import ./frame_settings_hooks
 from ./ui/events as uiEvents import uiTimerDue, uiTimersPending
 
 export events
@@ -310,11 +311,22 @@ proc stateHash(scene: FrameScene): Hash =
   if scene.isNil or scene.state.isNil: 0.Hash else: hash(scene.state)
 
 proc runOnScene(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode,
-                policy: EventPolicy, fromRender: bool) =
+                policy: EventPolicy, fromRender: bool, origin: EventOrigin) =
   ## One run of the scene, then the render rule for that event.
   let watchState = policy.renderAfter == raIfStateChanged and not fromRender
   let before = if watchState: stateHash(scene) else: 0.Hash
-  loop.host.runScene(scene, name, payload)
+  if origin == eoHttpWrite:
+    # The access key speaks to scenes, never to the frame: for this run the
+    # frame offers no page (frame_settings_hooks.nim), so neither the frame
+    # page nor an app with `frameos.frame` restarts, updates or re-joins the
+    # frame on what the key sent.
+    withholdFramePage()
+    try:
+      loop.host.runScene(scene, name, payload)
+    finally:
+      offerFramePage()
+  else:
+    loop.host.runScene(scene, name, payload)
   case policy.renderAfter
   of raAlways: loop.renderWanted = true
   of raIfStateChanged:
@@ -393,7 +405,7 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
     return loop.refused(envelope, "undeclared", scene.id.string)
   if not loop.sceneMapped(envelope.origin, scene, envelope.name, payload):
     return true
-  loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
+  loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender, envelope.origin)
   true
 
 proc isBuiltIn(scene: FrameScene): bool =
@@ -572,7 +584,8 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
     current.state.put("goneBack", newJBool(true))
   if safe and not current.isNil and current.id.string == sceneId:
     # Already up (the pull before this one opened it): no switch to make.
-    loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender)
+    loop.runOnScene(current, evSetCurrentScene, payload, eventPolicy(evSetCurrentScene), envelope.fromRender,
+      eoSystem)
     result = true
   elif next.len == 0 and current.isBuiltIn:
     # Nothing to go back to (an ESP32 given no scene yet, which opened the
@@ -718,7 +731,7 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if not loop.sceneMapped(delivery.origin, scene, delivery.name, payload):
     return true
   if loop.listens(scene, delivery.name):
-    loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender)
+    loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender, delivery.origin)
     result = true
   # The old names are pointer events' (docs/events-contract.json `aliasOf`),
   # on every host: store scenes are immutable, and a touch scene written for
@@ -726,7 +739,7 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   for index in 0 ..< eventAliasCount(delivery.name):
     let alias = eventAlias(delivery.name, index)
     if loop.listens(scene, alias):
-      loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender)
+      loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender, delivery.origin)
       result = true
 
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
@@ -895,6 +908,9 @@ proc resetAfterAbort*(loop: EventLoop) =
   loop.handlingFromRender = false
   loop.hostRunDepth = 0
   loop.watching = false
+  # A run on the access key's event that never came back: the frame page's
+  # hooks, which `runOnScene` holds for such a run.
+  offerFramePage()
 
 template hostRun*(loop: EventLoop, body: untyped) =
   ## Around the host's own runs of a scene — its render, its init — so that

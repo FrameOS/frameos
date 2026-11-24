@@ -77,6 +77,9 @@
             var el = document.getElementById(field.name);
             if (!el) { return undefined; }
             var raw = el.value;
+            // A secret field is never written into this page: empty means
+            // "leave it as it is", so nothing is sent for it.
+            if (field.secret && raw === '') { return undefined; }
             if (field.type === 'integer') { return parseInt(raw); }
             if (field.type === 'float') { return parseFloat(raw); }
             if (field.type === 'boolean') { return raw === 'true'; }
