@@ -267,6 +267,18 @@ describe("lintScenes", () => {
     ).toEqual([expect.stringContaining('role "backgroundColor" but type "string"')]);
   });
 
+  it("accepts one fullScreen role on a boolean field and rejects the rest", () => {
+    const full = { name: "fullScreen", role: "fullScreen", type: "boolean", value: "true", access: "public" };
+    expect(messages([scene({ fields: [full] })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([scene({ settings: { fullScreen: true } })])).toEqual({ errors: [], warnings: [] });
+    expect(
+      messages([scene({ fields: [full, { ...full, name: "bare" }] })]).errors,
+    ).toEqual([expect.stringContaining('"fullScreen" and "bare" both have role "fullScreen"')]);
+    expect(
+      messages([scene({ fields: [{ ...full, type: "string" }] })]).errors,
+    ).toEqual([expect.stringContaining('role "fullScreen" but type "string"')]);
+  });
+
   it("accepts one renderScale role and a settings.renderScale up to 4", () => {
     const zoom = { name: "zoom", role: "renderScale", type: "float", value: "1.5" };
     const seconds = { name: "seconds", role: "refreshInterval", type: "float", value: "600" };

@@ -369,6 +369,11 @@ interface FrameOSApp {
      * frame's then, at the bottom of the panel with the layout laid out above it (on a desktop, a window over the
      * others); returning a bare <yield /> gives the scene all the room it leaves (FrameOS 2026.11.14+; undefined before). */
     typing?: boolean;
+    /** True in a layout's app while the scene it wraps asks for the whole panel, by its field with role "fullScreen"
+     * (a boolean the person at the frame sets in the scene's settings), else by its settings.fullScreen. Return a
+     * bare <yield /> then, as a reader or a photo wants no bar around it (FrameOS 2026.11.15+; undefined before, and
+     * whenever it is false). */
+    fullScreen?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
      * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;

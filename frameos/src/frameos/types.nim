@@ -420,6 +420,11 @@ type
     ## (0 = none). Without either the frame's applies.
     renderScaleKey*: string
     renderScaleSetting*: float
+    ## Whether the scene asks its layout for the whole panel (full_screen.nim):
+    ## the state key of a field with role fullScreen ("" = none), and
+    ## `settings.fullScreen`.
+    fullScreenKey*: string
+    fullScreenSetting*: bool
     backgroundColor*: Color
     ## The state key of a field with role backgroundColor, "" = none: its
     ## color is the background over `backgroundColor` (scene_background.nim).
@@ -446,6 +451,9 @@ type
     ## On a layout: the scene it wraps has the keyboard on the screen up
     ## (`app.frame.typing`), as its last render pass found.
     typing*: bool
+    ## On a layout: the scene it wraps asks for the whole panel
+    ## (`app.frame.fullScreen`, full_screen.nim), as its last render pass found.
+    wrapsFullScreen*: bool
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -590,6 +598,8 @@ type
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
     renderScaleSetting*: float ## see FrameScene.renderScaleSetting
+    fullScreenKey*: string ## see FrameScene.fullScreenKey
+    fullScreenSetting*: bool ## see FrameScene.fullScreenSetting
     backgroundColorKey*: string ## see FrameScene.backgroundColorKey
 
   # Imported node from scenes.json
@@ -615,6 +625,9 @@ type
     ## What the scene's JSX is laid out for, over the frame's (render_scale.nim);
     ## 0 or absent = the frame's.
     renderScale*: float
+    ## The scene asks its layout for the whole panel, unless a field with role
+    ## fullScreen says otherwise (full_screen.nim).
+    fullScreen*: bool
     ## Present on the scenes the split-screen drawer generates. The runtime
     ## only asks whether it is there, so the value is skipped, not parsed
     ## (interpreter.nim's parseHook).

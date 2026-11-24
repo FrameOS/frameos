@@ -66,6 +66,8 @@ const REFRESH_INTERVAL_FIELD_NAME = "refreshInterval";
 const RENDER_SCALE_ROLE = "renderScale";
 /** Mirrors frontend/src/utils/sceneBackground.ts (frameos/src/frameos/scene_background.nim). */
 const BACKGROUND_COLOR_ROLE = "backgroundColor";
+/** Mirrors frontend/src/utils/fullScreen.ts (frameos/src/frameos/full_screen.nim). */
+const FULL_SCREEN_ROLE = "fullScreen";
 const MAX_RENDER_SCALE = 4;
 const RENDER_SCALE_FIELD_TYPES = new Set(["float", "integer", "select"]);
 
@@ -600,6 +602,7 @@ export function lintScene(
   let refreshIntervalRoleField: string | null = null;
   let renderScaleRoleField: string | null = null;
   let backgroundColorRoleField: string | null = null;
+  let fullScreenRoleField: string | null = null;
   const rawFields = Array.isArray(scene.fields) ? scene.fields : [];
   rawFields.forEach((raw, index) => {
     const field = obj(raw);
@@ -650,8 +653,25 @@ export function lintScene(
     // "renderScale" makes its value the scene's render scale, over
     // settings.renderScale; again the runtime takes the first.
     // "backgroundColor" makes its color the scene's background, over
-    // settings.backgroundColor; the first one again.
-    if (field.role === BACKGROUND_COLOR_ROLE) {
+    // settings.backgroundColor; the first one again. "fullScreen" makes a
+    // boolean ask the frame's layout for the whole panel, over
+    // settings.fullScreen; the first one again.
+    if (field.role === FULL_SCREEN_ROLE) {
+      if (fullScreenRoleField) {
+        push(
+          "error",
+          `Scene fields "${fullScreenRoleField}" and "${name}" both have role "${FULL_SCREEN_ROLE}"; only one field can say full screen.`,
+        );
+      } else {
+        fullScreenRoleField = name;
+      }
+      if (type && type !== "boolean") {
+        push(
+          "error",
+          `Scene field "${name}" has role "${FULL_SCREEN_ROLE}" but type "${type}"; full screen is a boolean field.`,
+        );
+      }
+    } else if (field.role === BACKGROUND_COLOR_ROLE) {
       if (backgroundColorRoleField) {
         push(
           "error",
@@ -685,7 +705,7 @@ export function lintScene(
       if (field.role !== REFRESH_INTERVAL_ROLE) {
         push(
           "error",
-          `Scene field "${name}" has unknown role "${String(field.role)}". Allowed: ${REFRESH_INTERVAL_ROLE}, ${RENDER_SCALE_ROLE}, ${BACKGROUND_COLOR_ROLE}.`,
+          `Scene field "${name}" has unknown role "${String(field.role)}". Allowed: ${REFRESH_INTERVAL_ROLE}, ${RENDER_SCALE_ROLE}, ${BACKGROUND_COLOR_ROLE}, ${FULL_SCREEN_ROLE}.`,
         );
       } else {
         if (refreshIntervalRoleField) {

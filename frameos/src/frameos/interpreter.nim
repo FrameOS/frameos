@@ -22,6 +22,7 @@ import frameos/events
 import frameos/planner
 import frameos/refresh_interval
 import frameos/render_scale
+import frameos/full_screen
 import frameos/scene_background
 import frameos/runtime_diagnostics
 import frameos/render_probe
@@ -1945,6 +1946,8 @@ proc initScene(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     refreshIntervalDefault: exportedScene.refreshIntervalDefault,
     renderScaleKey: exportedScene.renderScaleKey,
     renderScaleSetting: exportedScene.renderScaleSetting,
+    fullScreenKey: exportedScene.fullScreenKey,
+    fullScreenSetting: exportedScene.fullScreenSetting,
     backgroundColor: exportedScene.backgroundColor,
     backgroundColorKey: exportedScene.backgroundColorKey,
     state: %*{},
@@ -2714,6 +2717,12 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         if typing != layout.typing:
           layout.typing = typing
           rhythmMarkDue(layout)
+        # The scene asks for the whole panel, or no longer does (its settings
+        # on the frame changed it): the layout draws again, and may give it.
+        let full = sceneWantsFullScreen(self)
+        if full != layout.wrapsFullScreen:
+          layout.wrapsFullScreen = full
+          rhythmMarkDue(layout)
         # The keyboard is the frame's then (KeyboardDock): docked, the layout
         # is laid out in what it leaves above it.
         let
@@ -3007,6 +3016,7 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "backgroundColor", "background_color": result.backgroundColor = parseHtmlColor(readText(s, i))
     of "refreshInterval", "refresh_interval": result.refreshInterval = readNumber(s, i)
     of "renderScale", "render_scale": result.renderScale = readNumber(s, i)
+    of "fullScreen", "full_screen": result.fullScreen = readFlag(s, i)
     # The split drawer's layout is the editor's; the runtime only asks
     # whether it is there.
     of "splitScreenLayout", "split_screen_layout":
@@ -3159,6 +3169,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     renderScaleKey: renderScaleFieldKey(scene.fields),
     # Out of range is ignored where it is read (sceneRenderScale).
     renderScaleSetting: settings.renderScale,
+    # Whether it asks its layout for the whole panel: a role field, else the
+    # setting (full_screen.nim).
+    fullScreenKey: fullScreenFieldKey(scene.fields),
+    fullScreenSetting: settings.fullScreen,
     # Its background from a role field, over the setting (scene_background).
     backgroundColorKey: backgroundColorFieldKey(scene.fields),
     init: init,
