@@ -13,8 +13,11 @@ import ../types
 import ../ui/theme
 import ../file_transfer_hooks
 import ../file_transfer_preview
+import ../channels
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
+# The header's Reload button on an 800x480 frame, left of the grid and list toggles.
+const ReloadX = 534
 
 let assets = getTempDir() / "frameos-files-scene-" & $epochTime().int
 
@@ -112,6 +115,7 @@ suite "the Files scene":
         opened = true
         break
       if scene.spot{"dir"}.getStr() == "fonts":
+        discard draw(scene, config, "fonts")
         scene.tap(36, 30) # up
         discard draw(scene, config, "back-up")
     check opened
@@ -344,6 +348,123 @@ suite "the Files scene":
     scene.tap(240, 240)
     discard draw(scene, config, "card")
     check scene.spot{"storage"}.getStr() == "assets"
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "a storage that cannot be read says so, keeps where you were, and is listed again":
+    problems = @[]
+    let internal = getTempDir() / "frameos-files-unready-" & $epochTime().int
+    removeDir(internal)
+    storageInternalPath = internal
+    storageCardMounted = true
+    defer:
+      storageInternalPath = ""
+      storageCardMounted = false
+      removeDir(internal)
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"storage": "internal", "dir": "Saved", "page": 1, "open": "Saved/kept.png"}
+    var image = newImage(config.width, config.height)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: image,
+      hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    image = render(scene, context)
+    let dir = getEnv("FRAMEOS_ASSET_SHOTS")
+    if dir.len > 0:
+      image.writeFile(dir / "unreadable.png")
+    # Not an empty folder: the spot stays, and it is tried again in a moment.
+    check scene.spot{"storage"}.getStr() == "internal"
+    check scene.spot{"dir"}.getStr() == "Saved"
+    check scene.spot{"open"}.getStr() == "Saved/kept.png"
+    check context.nextSleep > 0 and context.nextSleep <= 5
+    # Six tries in all, counted in the spot (kept on disk), so a frame that
+    # sleeps between them stops too.
+    for i in 0 ..< 6:
+      let again = ExecutionContext(scene: scene, event: "render", payload: %*{}, image: newImage(800, 480),
+        hasImage: true, loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard render(scene, again)
+      rhythmClockOverride += 1.0
+      check (again.nextSleep > 0 and again.nextSleep <= 5) == (i < 5)
+    check scene.spot{"tries"}.getInt() == 6
+    # The storage comes: the next render shows the picture it was on.
+    picture(internal / "Saved" / "kept.png", "#dc2626", 600, 400)
+    let viewer = draw(scene, config, "readable-again")
+    let red = viewer[400, 240]
+    check red.r > 180 and red.g < 80
+    check scene.spot{"tries"}.isNil
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "Reload lists the folder showing again":
+    let config = frame(800, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "photos/2024", "page": 1, "view": "list"}
+    discard draw(scene, config, "reload-before")
+    # The one row: snow.png.
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/snow.png"
+    scene.swipe("down")
+    discard draw(scene, config, "reload-closed")
+    # A picture that came since: the listing kept is the one before.
+    picture(assets / "photos" / "2024" / "rain.png", "#64748b")
+    defer: removeFile(assets / "photos" / "2024" / "rain.png")
+    discard draw(scene, config, "reload-kept")
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/snow.png"
+    scene.swipe("down")
+    discard draw(scene, config, "reload-closed-again")
+    scene.tap(ReloadX, 30)
+    discard draw(scene, config, "reload-after")
+    scene.tap(200, 60 + 24)
+    check scene.spot{"open"}.getStr() == "photos/2024/rain.png"
+
+  test "a file that is no picture opens in the scene that opens its kind, or says none does":
+    problems = @[]
+    let papers = getTempDir() / "frameos-files-open-" & $epochTime().int
+    createDir(papers)
+    writeFile(papers / "manual.pdf", "%PDF-1.4")
+    writeFile(papers / "notes.txt", "hello")
+    writeFile(papers / "song.mp3", "ID3")
+    windowSceneListing = proc(): JsonNode {.closure, gcsafe.} =
+      {.cast(gcsafe).}:
+        result = %*[{"id": "asset-browser", "name": "Files"},
+          {"id": "pdf-viewer", "name": "PDF viewer", "opens": "pdf"},
+          {"id": "code-editor", "name": "Code editor", "opens": "txt md, .JSON"}]
+    defer:
+      windowSceneListing = nil
+      removeDir(papers)
+    proc sent(): seq[JsonNode] =
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "setCurrentScene": result.add message[2]
+    discard sent()
+    let config = frame(800, 480)
+    config.assetsPath = papers
+    let scene = load(config)
+    scene.state["spot"] = %*{"dir": "", "page": 1, "view": "list"}
+    let before = draw(scene, config, "open-with")
+    # The rows: manual.pdf, notes.txt, song.mp3.
+    proc row(i: int): int = 60 + 48 * i + 24
+    scene.tap(200, row(0))
+    var asked = sent()
+    check asked.len == 1
+    if asked.len == 1:
+      check asked[0]{"sceneId"}.getStr() == "pdf-viewer"
+      check asked[0]{"state"}{"file"}.getStr() == "assets:manual.pdf"
+    scene.tap(200, row(1))
+    asked = sent()
+    check asked.len == 1 and asked[0]{"sceneId"}.getStr() == "code-editor"
+    # Nothing opens an .mp3: a card says so, and a tap anywhere puts it away.
+    scene.tap(200, row(2))
+    check sent().len == 0
+    let card = draw(scene, config, "cannot-open")
+    check card[400, 240] != before[400, 240]
+    scene.tap(200, row(1))
+    check sent().len == 0
+    let gone = draw(scene, config, "cannot-open-gone")
+    check gone[400, 240] == before[400, 240]
+    scene.tap(200, row(1))
+    check sent().len == 1
     check problems.len == 0
     if problems.len > 0: echo problems
 

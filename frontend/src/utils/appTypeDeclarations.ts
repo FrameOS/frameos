@@ -392,8 +392,10 @@ interface FrameOSApp {
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
      * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+     * (FrameOS 2026.11.10+). opens is the file types the scene opens, their extensions as the scene's
+     * settings.opens has them ("pdf", "txt md json"), where it names some. Such a file goes to the scene with
+     * setCurrentScene, its public field file set to "<storage>:<path>" (FrameOS 2026.11.15+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string; opens?: string }[];
     /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
      * window without their going back, so still open beside the scene showing, their page and edits as they were.
      * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes
@@ -608,8 +610,13 @@ declare const frameos: {
     convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
   };
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
-   * ending in "/" (FrameOS 2026.11.8+). */
-  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
+   * ending in "/" (FrameOS 2026.11.8+). A storage that cannot be read lists nothing; with strict it is null instead,
+   * which an app can tell from an empty folder: a TF card not mounted, a read that failed (FrameOS 2026.11.15+). */
+  listAssets(
+    dir: string | undefined,
+    options: { shallow?: boolean; storage?: "assets" | "internal"; strict: true }
+  ): string[] | null;
+  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal"; strict?: false }): string[];
   assetExists(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   assetSize(path: string, options?: { storage?: "assets" | "internal" }): number;
   /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its

@@ -263,6 +263,26 @@ suite "the PDF viewer scene":
     check scene.spot{"problem"}.getStr().contains("Not a PDF")
     noProblems()
 
+  test "opens the .pdf files another scene hands it (settings.opens), where each was left":
+    problems = @[]
+    let sample = parseFile(Samples / "PDF viewer" / "scenes.json")[0]
+    check sample["settings"]["opens"].getStr() == "pdf"
+    let config = frame(800, 480)
+    let scene = load(config)
+    discard draw(scene, config, "library")
+    # What the Files app sends: the public field `file`, applied with the switch.
+    scene.state["file"] = %"assets:Docs/report.pdf"
+    discard draw(scene, config, "handed")
+    check scene.spot{"view"}.getStr() == "doc"
+    check scene.spot{"doc"}.getStr() == "assets:Docs/report.pdf"
+    check scene.state{"file"}.getStr() == ""
+    # One that is no PDF: the library, saying why.
+    scene.state["file"] = %"assets:Docs/not-a.pdf"
+    discard draw(scene, config, "handed-not-a-pdf")
+    check scene.spot{"view"}.getStr() == "library"
+    check scene.spot{"problem"}.getStr().contains("Not a PDF")
+    noProblems()
+
   test "a page at the screen's width, read a part at a time, with its shapes, words and pictures":
     problems = @[]
     let config = frame(800, 480)

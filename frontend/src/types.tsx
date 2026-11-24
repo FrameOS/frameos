@@ -1360,6 +1360,9 @@ export interface FrameSceneSettings {
   /** It works on a round screen (true) or is not offered for one (false); unset = what its code says
    * (utils/sceneNeeds.ts `round`, docs/scene-guide.md "Round panels"). */
   round?: boolean
+  /** The file types it opens, their extensions as text ("pdf", "txt md json"): the Files app hands
+   * such a file to its public field `file` as "<storage>:<path>" (docs/scene-guide.md "Opening files"). */
+  opens?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

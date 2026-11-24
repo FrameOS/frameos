@@ -585,6 +585,7 @@ type
     windowSize*: string ## `settings.windowSize`, "WxH": the size it opens at in a desktop's window
     icon*: string ## `settings.icon` as read by scene_icon.nim: one path in 0 0 24 24, "" for none
     category*: string ## `settings.category`, its name ("Photos") as the scene has it, "" for none
+    opens*: string ## `settings.opens`, the file types it opens ("pdf") as the scene has it, "" for none
     layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
@@ -633,6 +634,10 @@ type
     ## Its category, by its name ("Photos"), as the scene has it: the runtime
     ## only hands it to a desktop (`app.frame.scenes`).
     category*: string
+    ## The file types it opens, their extensions ("pdf", "txt md"), as the
+    ## scene has them: the runtime only lists them (`app.frame.scenes`), and
+    ## the Files app hands such a file to the scene's public field `file`.
+    opens*: string
 
   SplitLayoutMarker* = object
     present*: bool
