@@ -2202,9 +2202,28 @@ proc damageRects*(
   ## two (a progress bar's ramp stretched to its new width) differs however
   ## equal the rest of it is. `full` when bounds cannot be measured. No
   ## boxes when nothing differs.
+  ##
+  ## A nested `<svg>` many of whose elements differ (a box that scrolled:
+  ## every line in it moved) is damage whole, its viewport one box, and the
+  ## rest of what is in it is passed over without a look: matching a
+  ## thousand moved glyphs one by one, each with a look `Resync` ahead and a
+  ## box of its own to join, was 390 ms of a scrolled page's frame on an
+  ## ESP32-S3 against 20 ms of raster (2026-11-24). A few that differ (a row
+  ## ticked in a list) stay boxes of their own.
   if previous.isNil or next.isNil or width <= 0 or height <= 0:
     return (true, @[(0, 0, width, height)])
-  const Resync = 8
+  const
+    Resync = 8
+    WholeAfter = 8 # elements of one viewport that differ before it is damage whole
+  var
+    whole = rect(0, 0, -1, -1) # the viewport that is: w < 0 for none
+    missed = rect(0, 0, -1, -1) # the viewport of the last element that differed
+    misses = 0                  # how many in a row differed in it
+  template inWhole(element: SvgElement): bool =
+    whole.w >= 0 and element.props.clip.w >= 0 and
+      element.props.clip.x >= whole.x and element.props.clip.y >= whole.y and
+      element.props.clip.x + element.props.clip.w <= whole.x + whole.w and
+      element.props.clip.y + element.props.clip.h <= whole.y + whole.h
   template a: untyped = previous.elements
   template b: untyped = next.elements
   var changedGradients: seq[string]
@@ -2223,6 +2242,18 @@ proc damageRects*(
   var boxes: seq[Rect]
   proc add(boxes: var seq[Rect], svg: Svg, i: int) {.raises: [PixieError].} =
     let element = svg.elements[i]
+    if element.props.clip.w >= 0:
+      if inWhole(element):
+        return
+      if element.props.clip == missed:
+        inc misses
+        if misses > WholeAfter:
+          whole = missed
+          boxes.addBox(whole)
+          return
+      else:
+        missed = element.props.clip
+        misses = 1
     if element.props.display and element.props.opacity > 0:
       # An element scrolled out of its viewport paints nothing anywhere.
       let bounds = element.paintBounds()
@@ -2231,6 +2262,13 @@ proc damageRects*(
   try:
     var i, j = 0
     while i < a.len or j < b.len:
+      if whole.w >= 0:
+        # In a viewport that is damage whole: nothing in it needs a look.
+        let (i0, j0) = (i, j)
+        while i < a.len and inWhole(a[i]): inc i
+        while j < b.len and inWhole(b[j]): inc j
+        if i != i0 or j != j0:
+          continue
       if i < a.len and j < b.len and same(i, j):
         inc i
         inc j

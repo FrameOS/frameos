@@ -93,11 +93,111 @@ proc likeOf(context: ExecutionContext): Image =
   result = newImageLike(like, 1, 1)
   result.ditherStores = like.ditherStores
 
+# A response in pieces: `fetch(url, { onChunk })` (docs/async-js.md). The
+# body goes to the prelude's __frameosChunk a piece at a time, each a JS
+# string of its own, so it is never one string, and on an ESP32 never held
+# at all. Where promises are pumped the pieces come from the I/O between
+# renders (pumpJsAsync); where nothing pumps, jsFetchStream makes the request
+# and hands them over inside the call.
+import frameos/utils/piece_text
+import frameos/utils/html_slim
+
+type StreamText = object
+  ## A streamed body on its way to its app: its bytes as text and, where the
+  ## app asked (`slim: {…}`, docs/html-slim.md), HTML slimmed here, so the
+  ## markup the app has no use for is never a JS string.
+  text: PieceText
+  decided: bool       ## whether this body is HTML is known
+  slim: ref HtmlSlim  ## what the app asked HTML slimmed by; nil without, and for a body that is not HTML
+
+proc slimAsked(options: JsonNode): ref HtmlSlim =
+  let asked = options{"slim"}
+  if not asked.isNil and asked.kind == JObject:
+    new(result)
+    result[].initHtmlSlim()
+    for list in SlimList:
+      result[].ask(list, asked{$list}.getStr())
+
+proc bodyIsHtml(head, start: string): bool =
+  ## By the answer's Content-Type where it has one, else by its first
+  ## letter: markup, and no feed's.
+  let lower = head.toLowerAscii()
+  let at = lower.find("\ncontent-type:")
+  if at >= 0:
+    let html = lower.find("html", at)
+    return html >= 0 and lower.find('\n', at + 1) notin at ..< html
+  var i = 0
+  while i < start.len and start[i] in {' ', '\t', '\r', '\n', '\xEF', '\xBB', '\xBF'}: inc i
+  if i >= start.len or start[i] != '<': return false
+  let first = start[i ..< min(start.len, i + 600)].toLowerAscii()
+  first.find("<rss") < 0 and first.find("<feed") < 0 and first.find("<rdf:rdf") < 0
+
+const
+  StreamPieceBytes = 16 * 1024
+  StreamMaxBytes = 16 * 1024 * 1024
+    ## A streamed body ends here, with an error (fos_js_io.c STREAM_MAX_BYTES).
+  StreamMaxSeconds = 120
+
+proc requestHeaders(options: JsonNode): seq[SimpleHttpHeader] =
+  let headersNode = options{"headers"}
+  if not headersNode.isNil and headersNode.kind == JObject:
+    for name, value in headersNode.pairs:
+      result.add((name, value.getStr($value)))
+
+proc streamPieceBytes(options: JsonNode): int =
+  clamp(options{"chunkBytes"}.getInt(StreamPieceBytes), 2048, 65536)
+
+proc streamHeaders(options: JsonNode): seq[SimpleHttpHeader] =
+  ## A streamed request's headers: it asks for gzip, which is inflated as it
+  ## comes, unless the app said what it accepts (the browser's own fetch
+  ## does both for the wasm runtime).
+  result = requestHeaders(options)
+  when not defined(frameosWasm):
+    for (name, _) in result:
+      if cmpIgnoreCase(name, "Accept-Encoding") == 0:
+        return
+    result.add(("Accept-Encoding", "gzip"))
+
+proc chunkArgs(ctx: ptr JSContext, id: int, state: var StreamText, raw: openArray[char], code: int,
+    answerHead: string, bytes: int, done: bool, error: string): array[7, JSValue] =
+  ## __frameosChunk's arguments, the caller's to free: the piece as text, the
+  ## answer's status (0: there was none) and, with the first piece, its head
+  ## as the prelude reads it: the URL it came from on a line, then its
+  ## headers. A piece the interpreter has no room for ends the body there,
+  ## with why.
+  var
+    text = pieceText(state.text, raw, done)
+    head = answerHead
+  if not state.decided:
+    state.decided = true
+    if not state.slim.isNil:
+      if bodyIsHtml(head, text):
+        # Told with the head, as a header of the runtime's own: the pieces are slimmed.
+        if head.len > 0 and head[^1] != '\n': head.add '\n'
+        head.add "frameos-slim: html\n"
+      else:
+        state.slim = nil
+  if not state.slim.isNil:
+    var slimmed = newStringOfCap(text.len div 4 + 64)
+    state.slim[].push(text, done, slimmed)
+    text = move(slimmed)
+  var
+    textValue = nimStringToJS(ctx, text)
+    why = error
+    last = done
+  if JS_IsException(textValue) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    textValue = nimStringToJS(ctx, "")
+    why = describeJsError("out of memory")
+    last = true
+  [nimIntToJS(ctx, id.int32), textValue, nimIntToJS(ctx, code.int32), nimStringToJS(ctx, head),
+    nimIntToJS(ctx, bytes.int32), nimBoolToJS(ctx, last), nimStringToJS(ctx, redactedUrlsIn(why))]
+
 when jsAsyncOn:
   import frameos/js_runtime/js_io
 
   type
-    AsyncKind = enum akFetch, akSleep, akUrlImage
+    AsyncKind = enum akFetch, akSleep, akUrlImage, akStream
     AsyncWait = object
       ## A promise an app waits on (or an `<img src>` loading): what settles
       ## it, and who to settle it in. `ctx` is the interpreter that asked: one
@@ -117,6 +217,8 @@ when jsAsyncOn:
       ready: bool ## answered already (`answer`), settled at the next pump
       answer: string
       failed: bool
+      text: StreamText ## akStream: its body's text so far
+      bytes: int      ## akStream: bytes of the body handed over
 
   const
     MaxAsyncWaitsPerApp* = 32
@@ -165,12 +267,6 @@ when jsAsyncOn:
         asyncWaits.del(i)
         return true
     false
-
-  proc requestHeaders(options: JsonNode): seq[SimpleHttpHeader] =
-    let headersNode = options{"headers"}
-    if not headersNode.isNil and headersNode.kind == JObject:
-      for name, value in headersNode.pairs:
-        result.add((name, value.getStr($value)))
 
   proc fetchRequest(e: JsAppEvalEnv, url: string, options: JsonNode): JsIoRequest =
     ## `fetch`'s init, for the I/O: no render deadline caps it (no render
@@ -276,12 +372,26 @@ when jsAsyncOn:
         discard
       wait.kind = akSleep
       wait.dueAt = getMonoTime() + initDuration(milliseconds = int(clamp(seconds, 0.0, 86_400.0) * 1000))
-    of "fetch":
+    of "fetch", "stream":
       wait.options = optionsArg(ctx, optionsJson)
       wait.kind = akFetch
       var request = fetchRequest(e, toNimString(ctx, arg), wait.options)
       request.id = id
+      if kindName == "stream":
+        # `fetch(url, { onChunk })`: the answer to come in pieces. The body
+        # is never held, so the scene's response ceiling is not its limit.
+        when not defined(frameosEmbedded):
+          if not asyncPumped:
+            return nimIntToJS(ctx, 0) # the request is made in the call (jsFetchStream)
+        wait.kind = akStream
+        wait.text.slim = slimAsked(wait.options)
+        request.pieceBytes = streamPieceBytes(wait.options)
+        request.headers = streamHeaders(wait.options)
+        request.maxBytes = StreamMaxBytes
+        request.maxSeconds = StreamMaxSeconds
       if not submitJsIo(request):
+        if wait.kind == akStream:
+          return nimIntToJS(ctx, 0)
         wait.ready = true
         wait.answer = """{"status":0,"error":"too many requests in flight"}"""
     else:
@@ -291,10 +401,12 @@ when jsAsyncOn:
     nimIntToJS(ctx, id.int32)
 
   proc jsAsyncCancel(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
-    ## clearTimeout / clearInterval: the wait goes now (a request in flight
-    ## is dropped when it answers).
+    ## clearTimeout / clearInterval, an aborted fetch: the wait goes now. A
+    ## streamed request stops being read (js_io.cancelJsIo); another in
+    ## flight is dropped when it answers.
     var wait: AsyncWait
-    discard popWait(toNimFloat(ctx, id).int, wait)
+    if popWait(toNimFloat(ctx, id).int, wait) and wait.kind == akStream:
+      cancelJsIo(wait.id)
     jsUndefSentinel(ctx)
 
   proc startUrlImage(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
@@ -312,10 +424,11 @@ when jsAsyncOn:
       kind: akUrlImage, url: url, width: width, height: height, fit: fit, like: likeOf(context))
     true
 
-  proc runAsync(wait: AsyncWait, fnName: string, args: openArray[JSValueConst]): bool =
+  proc runAsync(wait: AsyncWait, fnName: string, args: openArray[JSValueConst], said: ptr bool = nil): bool =
     ## Enter an app's interpreter outside a render: settle a promise, then run
     ## what that lets run, up to the next await.
-    ## False when the interpreter it was waiting in is gone.
+    ## False when the interpreter it was waiting in is gone. `said`: whether
+    ## the function returned something true.
     if not wait.alive():
       return false
     let runtime = wait.runtime
@@ -328,6 +441,8 @@ when jsAsyncOn:
           if JS_IsException(value) != 0:
             frameos_apps.logError(wait.owner, "async code failed: " &
               runtime.appText(mappedJsExceptionDetails(ctx).message))
+          elif said != nil:
+            said[] = JS_ToBool(ctx, value) > 0
           JS_FreeValue(ctx, value)
           runtime.js.runPendingJobs()
         if runtime.js.deadlineTripped():
@@ -353,6 +468,40 @@ when jsAsyncOn:
 
   proc settle(id: int, wait: AsyncWait, json: string, failed: bool): bool =
     settle(id, wait, nimStringToJS(wait.ctx, json), failed)
+
+  proc streamAnswer(answer: var JsIoResult, inCall = false): bool =
+    ## What the I/O read of a streamed body, to its app: a piece, or its
+    ## end. A stream nobody waits for any more is stopped. The wait is out
+    ## of the list while the app runs (an abort in onChunk finds none, and
+    ## the prelude says stop). `inCall`: the app is in the fetch() call that
+    ## asked (nothing pumps promises) and is called as it is; true when that
+    ## call is ending with an exception.
+    let last = answer.kind == jkEnd
+    var wait: AsyncWait
+    if not popWait(answer.id, wait) or not wait.alive():
+      if not last:
+        cancelJsIo(answer.id)
+      return
+    wait.bytes += answer.piece.len
+    let ctx = wait.ctx
+    var args = chunkArgs(ctx, answer.id, wait.text, answer.piece, answer.code, answer.head,
+      wait.bytes, last, answer.error)
+    var go = false
+    if inCall:
+      let value = callGlobalFunction(ctx, "__frameosChunk", args)
+      if JS_IsException(value) != 0:
+        result = true
+      else:
+        go = JS_ToBool(ctx, value) > 0
+      JS_FreeValue(ctx, value)
+    else:
+      discard runAsync(wait, "__frameosChunk", args, addr go)
+    for arg in args:
+      JS_FreeValue(ctx, arg)
+    if go:
+      asyncWaits.add wait
+    elif not last:
+      cancelJsIo(answer.id) # its onChunk wants no more, or its interpreter went
 
   when defined(frameosEmbedded):
     proc fos_js_io_wake_if_waiting() {.importc, cdecl.}
@@ -385,6 +534,10 @@ when jsAsyncOn:
       var (ok, answer) = takeJsIoResult()
       if not ok:
         break
+      if answer.kind != jkWhole:
+        discard streamAnswer(answer)
+        inc result
+        continue
       var wait: AsyncWait
       if not popWait(answer.id, wait) or not wait.alive():
         releaseJsIoResult(answer)
@@ -398,7 +551,7 @@ when jsAsyncOn:
         inc result
         if not wait.owner.scene.isNil and not redraw.anyIt(it.scene == wait.owner.scene):
           redraw.add((wait.owner.scene, wait.owner.nodeId.int))
-      of akSleep:
+      of akSleep, akStream:
         releaseJsIoResult(answer)
     # Timers over, and answers made at once.
     let now = getMonoTime()
@@ -448,6 +601,126 @@ else:
     nimIntToJS(ctx, 0)
 
   proc jsAsyncCancel(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
+    jsUndefSentinel(ctx)
+
+when defined(frameosEmbedded):
+  proc jsFetchStream(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue, id: JSValue): JSValue {.nimcall.} =
+    ## `fetch(url, { onChunk })` on a frame nothing pumps promises on (one
+    ## that sleeps between renders): the I/O task was asked as ever
+    ## (jsAsyncStart, under `id`), and its pieces are taken and handed to
+    ## the app here, before this returns, so a get() that asked has the
+    ## whole answer when its fetch() call is over. No wait under `id` (it
+    ## could not start), or the render's time up, is the prelude's rejection.
+    let waitId = toNimFloat(ctx, id).int
+    var threw = false
+    while true:
+      var waits = false
+      for wait in asyncWaits:
+        if wait.id == waitId:
+          waits = true
+      if not waits:
+        break
+      var (ok, answer) = takeJsIoResult(100)
+      if ok:
+        if answer.kind == jkWhole:
+          releaseJsIoResult(answer) # nobody's: nothing else asks while nothing pumps
+        elif streamAnswer(answer, true):
+          threw = true
+      elif renderDeadlineRemainingMs() == 0:
+        var gone: AsyncWait
+        discard popWait(waitId, gone)
+        cancelJsIo(waitId)
+    if threw:
+      return JS_Throw(ctx, JS_GetException(ctx))
+    jsUndefSentinel(ctx)
+
+else:
+  type StreamCall = object
+    ## A streamed fetch made inside the app's call (jsFetchStream).
+    ctx: ptr JSContext
+    id, bytes, code: int
+    text: StreamText
+    error: string
+    stopped: bool ## the app wants no more, or its call is ending
+    threw: bool   ## ... with an exception of its own (its deadline)
+
+  proc hand(call: var StreamCall, raw: openArray[char], head: string, done: bool) =
+    ## One piece to the app, now.
+    call.bytes += raw.len
+    var args = chunkArgs(call.ctx, call.id, call.text, raw, call.code, head, call.bytes, done, call.error)
+    let value = callGlobalFunction(call.ctx, "__frameosChunk", args)
+    if JS_IsException(value) != 0:
+      call.threw = true
+      call.stopped = true
+    elif JS_ToBool(call.ctx, value) <= 0:
+      call.stopped = true
+    JS_FreeValue(call.ctx, value)
+    for arg in args:
+      JS_FreeValue(call.ctx, arg)
+
+  proc jsFetchStream(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue, id: JSValue): JSValue {.nimcall.} =
+    ## `fetch(url, { onChunk })` where nothing pumps promises (the wasm
+    ## runtime; a test of a frame that sleeps): the request is made here and
+    ## every piece of its body handed to __frameosChunk before this returns,
+    ## so a get() that asked has the whole answer when its fetch() call is
+    ## over. The body comes whole and is cut up (an ESP32, above, takes the
+    ## pieces as they come off the socket).
+    let urlStr = toNimString(ctx, url)
+    var call = StreamCall(ctx: ctx, id: toNimFloat(ctx, id).int)
+    try:
+      let
+        options = optionsArg(ctx, optionsJson)
+        httpMethod = options{"method"}.getStr("GET").toUpperAscii()
+        body = options{"body"}.getStr("")
+        headers = streamHeaders(options)
+        pieceBytes = streamPieceBytes(options)
+        timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
+      call.text.slim = slimAsked(options)
+      var
+        resBody = ""
+        head = "\n"
+        answered = false
+      when defined(testing):
+        if jsHttpRequestHook != nil:
+          (call.code, resBody) = jsHttpRequestHook(urlStr, httpMethod, body, headers)
+          head.add jsHttpHookHeaders
+          answered = true
+      if not answered:
+        var res = boundedRequestWithHeaders(urlStr, httpMethod = httpMethod, body = body, headers = headers,
+          timeoutMs = timeoutMs, maxBytes = StreamMaxBytes,
+          maxSeconds = capToRenderDeadline(StreamMaxSeconds * 1000).float / 1000.0, wantHeaders = true)
+        call.code = res.code
+        resBody = move(res.body)
+        when defined(frameosWasm):
+          head.add res.headers
+        else:
+          head = res.url & "\n"
+          if not res.headers.isNil:
+            for name, value in res.headers.pairs:
+              head.add name & ": " & value & "\n"
+      when not defined(frameosWasm):
+        try:
+          resBody = inflatedBody(resBody, head)
+        except CatchableError:
+          resBody = ""
+          call.error = "the answer does not inflate"
+      var at = 0
+      while at < resBody.len and not call.stopped:
+        let n = min(pieceBytes, resBody.len - at)
+        hand(call, resBody.toOpenArray(at, at + n - 1), head, false)
+        head = ""
+        at += n
+      if not call.stopped:
+        hand(call, [], head, true)
+    except CatchableError as err:
+      # No answer at all: fetch rejects. None any more: the body ends here, with why.
+      call.error = err.msg
+      if call.bytes == 0:
+        call.code = 0
+      if not call.stopped:
+        hand(call, [], "", true)
+    if call.threw:
+      return JS_Throw(ctx, JS_GetException(ctx))
     jsUndefSentinel(ctx)
 
 when defined(frameosWasm):

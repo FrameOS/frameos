@@ -831,6 +831,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
 else:
   import std/[httpclient, locks, nativesockets, net, os, posix, strformat,
               tables, times, uri]
+  import zippy
 
   const
     RecvChunkBytes = 65536
@@ -1133,6 +1134,7 @@ else:
       status*: string
       headers*: HttpHeaders
       body*: string
+      url*: string ## where the answer came from: the request's URL, or a redirect's last
 
     HttpResponseMetadata* = object
       contentLength*: int
@@ -1324,6 +1326,7 @@ else:
     for _ in 0 .. max(maxRedirects, 0):
       result = singleBoundedRequest(currentUrl, currentMethod, currentBody, currentHeaders,
                                     timeoutMs, maxBytes, deadline, bodySink)
+      result.url = currentUrl
       if result.code notin [301, 302, 303, 307, 308]:
         return result
       let location = headerValue(result.headers, "Location")
@@ -1420,6 +1423,19 @@ else:
       maxBytes = maxBytes,
       maxSeconds = maxSeconds
     )
+
+  proc inflatedBody*(body, headerLines: string): string =
+    ## A body its `Content-Encoding` (among the response's "name: value"
+    ## lines) says is gzip or deflate, inflated; any other as it is. Raises
+    ## when it does not inflate.
+    result = body
+    for line in headerLines.splitLines():
+      let colon = line.find(':')
+      if colon > 0 and body.len > 0 and cmpIgnoreCase(line[0 ..< colon].strip(), "Content-Encoding") == 0:
+        case line[colon + 1 .. ^1].strip().toLowerAscii()
+        of "gzip", "x-gzip": result = uncompress(body, dfGzip)
+        of "deflate": result = uncompress(body, dfZlib)
+        else: discard
 
   proc simpleHeaders(headers: seq[SimpleHttpHeader]): HttpHeaders =
     result = newHttpHeaders()

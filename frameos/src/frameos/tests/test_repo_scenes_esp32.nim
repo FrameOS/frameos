@@ -24,7 +24,7 @@ let networkApps = toHashSet([
   "lichessPuzzlePanel",
   # the Scene store sample's own JS app: the store's listing, with no host
   "sceneStore",
-  # the Browser sample's own JS app: Hacker News, its home page
+  # the Browser sample's own JS app: the web
   "browser",
   # the Hacker News sample's own JS app: the HN and Algolia APIs
   "hackerNews",

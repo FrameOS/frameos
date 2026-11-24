@@ -413,6 +413,22 @@ fos_nim_http_stream *fos_nim_http_stream_open(
 /* > 0 bytes read, 0 at end of body, < 0 on a transport error. */
 int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len);
 void fos_nim_http_stream_close(fos_nim_http_stream *stream);
+/* The same stream for a JS app's fetch(url, { onChunk }) (docs/async-js.md "A
+ * response in pieces"): any method and body, and a gzip (or deflate) answer
+ * inflated as it is read, so fos_nim_http_stream_read hands over the text
+ * itself (the caller's headers ask for gzip; the inflater's 43 KB are in
+ * PSRAM while the stream is open). `out_url` (zeroed) gets the URL the answer
+ * came from when a redirect was followed, as esp_http_client renders it
+ * (with its port) and with the Location's query, and stays "" when none was;
+ * `out_headers` (FOS_NIM_HTTP_HEADERS_BYTES, zeroed) the answer's headers as
+ * "name: value\n" lines, none longer than FOS_NIM_STREAM_HEADER_MAX (a
+ * content security policy of 4 KB would push the content type out). */
+#define FOS_NIM_STREAM_HEADER_MAX 256
+fos_nim_http_stream *fos_nim_http_stream_open_text(
+    const char *method, const char *url, const void *body, size_t body_len,
+    const char *headers, size_t headers_len, int timeout_ms, int *out_status,
+    char *out_url, size_t out_url_len, char *out_headers,
+    char *err_buf, size_t err_buf_len);
 /* Scene requests whose first connect was refused at once and retried
  * (the metrics line's httpConnectRetries, with the firmware's own). */
 uint32_t fos_nim_http_connect_retries(void);

@@ -19,6 +19,13 @@
 ##   it; the task wakes the render task's wait (fos_client_wake_for_events).
 ## - The wasm runtime has none: async calls run there as the blocking calls
 ##   they replace (js_async.nim, `asyncPumped`).
+##
+## A request with `pieceBytes` set is answered in pieces (`fetch`'s `onChunk`,
+## docs/async-js.md "A response in pieces"): `jkPiece` results in order, each
+## the next bytes of the body, then one `jkEnd`. The first of them has the
+## response's `head`: the URL it came from on its first line and its headers
+## on the rest. An ESP32 reads the pieces off the socket as the app takes
+## them and never holds the body; a Pi downloads it whole first.
 
 import ../utils/http_client
 
@@ -29,12 +36,24 @@ type
     headers*: seq[SimpleHttpHeader]
     timeoutMs*, maxBytes*: int
     maxSeconds*: float
+    pieceBytes*: int ## > 0: the answer in pieces of this size
+
+  JsIoKind* = enum
+    jkWhole ## a request's one answer
+    jkPiece ## a piece of a streamed body: more answers follow
+    jkEnd   ## a streamed body's end (`error`: why it was cut short)
 
   JsIoResult* = object
     id*: int
     code*: int
     error*: string ## empty when the request was answered
-    headers*: seq[SimpleHttpHeader] ## a Pi's; the ESP32's glue keeps none
+    headers*: seq[SimpleHttpHeader] ## a Pi's, and a stream's; the ESP32's glue keeps no other
+    kind*: JsIoKind
+    url*: string    ## a Pi's: where the answer came from, after redirects
+    head*: string   ## a stream's first answer: that URL ("" when no redirect was followed
+                    ## or the runtime cannot tell), a line break, and the response's
+                    ## headers, "name: value" a line
+    piece*: string  ## jkPiece: its bytes
     when defined(frameosEmbedded):
       response*: BoundedHttpBufferResponse ## the glue's chunks, until freed
     else:
@@ -45,10 +64,13 @@ when defined(frameosEmbedded):
     ## One TLS session at a time (the header above).
 
   proc fos_js_io_submit(id: cint, httpMethod, url: cstring, headers: pointer, headersLen: csize_t,
-      body: pointer, bodyLen: csize_t, timeoutMs: cint, maxBytes: csize_t): bool {.importc, cdecl.}
+      body: pointer, bodyLen: csize_t, timeoutMs: cint, maxBytes: csize_t,
+      pieceBytes: csize_t): bool {.importc, cdecl.}
   proc fos_js_io_take(id: ptr cint, status: ptr cint, chunks: ptr pointer,
-      count: ptr csize_t): bool {.importc, cdecl.}
+      count: ptr csize_t, kind: ptr cint, head: ptr pointer, waitMs: cint): bool {.importc, cdecl.}
+  proc fos_js_io_cancel(id: cint) {.importc, cdecl.}
   proc fos_js_io_in_flight(): cint {.importc, cdecl.}
+  proc c_free(p: pointer) {.importc: "free", header: "<stdlib.h>".}
 
   proc submitJsIo*(request: sink JsIoRequest): bool =
     ## On the render task: one request for the I/O task. False when its
@@ -58,19 +80,45 @@ when defined(frameosEmbedded):
     fos_js_io_submit(request.id.cint, request.httpMethod.cstring, request.url.cstring,
       (if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil), headerBlock.len.csize_t,
       (if request.body.len > 0: unsafeAddr request.body[0] else: nil), request.body.len.csize_t,
-      request.timeoutMs.cint, request.maxBytes.csize_t)
+      request.timeoutMs.cint, request.maxBytes.csize_t, request.pieceBytes.csize_t)
 
-  proc takeJsIoResult*(): tuple[ok: bool, result: JsIoResult] =
-    ## On the render task: an answer, if one came back. Its chunks are the
-    ## caller's to free (`releaseJsIoResult`, `jsIoText`, or the decode).
+  proc cancelJsIo*(id: int) =
+    ## On the render task: nobody waits for request `id` any more. One not
+    ## started is dropped and a stream being read is closed; no answer for
+    ## it comes after this.
+    fos_js_io_cancel(id.cint)
+
+  proc takeJsIoResult*(waitMs = 0): tuple[ok: bool, result: JsIoResult] =
+    ## On the render task: an answer, if one came back (or comes within
+    ## `waitMs`). Its chunks are the caller's to free (`releaseJsIoResult`,
+    ## `jsIoText`, or the decode).
     var
-      id, status: cint
-      chunks: pointer
+      id, status, kind: cint
+      chunks, head: pointer
       count: csize_t
-    if not fos_js_io_take(addr id, addr status, addr chunks, addr count):
+    if not fos_js_io_take(addr id, addr status, addr chunks, addr count, addr kind, addr head, waitMs.cint):
       return
     result.ok = true
     result.result.id = id.int
+    if kind != 0:
+      # A piece of a streamed body or its end: copied, and the task's
+      # buffers freed.
+      result.result.kind = if kind == 1: jkPiece else: jkEnd
+      result.result.code = status.int
+      if head != nil:
+        result.result.head = $cast[cstring](head)
+        c_free(head)
+      if chunks != nil:
+        if kind == 1:
+          result.result.piece = newString(count.int)
+          if count > 0:
+            copyMem(addr result.result.piece[0], chunks, count.int)
+        else:
+          result.result.error = $cast[cstring](chunks)
+        c_free(chunks)
+      if status == 0 and result.result.error.len == 0:
+        result.result.error = "request failed"
+      return
     let adopted = adoptHttpChunks(status.int, chunks, count)
     result.result.error = adopted.error
     if adopted.error.len == 0:
@@ -112,6 +160,32 @@ else:
 
   initLock(ioLock)
 
+  proc sendPieces(whole: var JsIoResult, pieceBytes: int) =
+    ## A body in pieces: a Pi has it whole by now (inflated here when it came
+    ## gzipped), so the pieces only keep it from being one JS string.
+    var last = JsIoResult(id: whole.id, kind: jkEnd, code: whole.code, error: whole.error)
+    if whole.error.len == 0:
+      last.head = whole.url & "\n"
+      for (name, value) in whole.headers:
+        last.head.add name & ": " & value & "\n"
+      var body = move(whole.body)
+      try:
+        body = inflatedBody(body, last.head)
+      except CatchableError:
+        body = ""
+        last.error = "the answer does not inflate"
+      var at = 0
+      while at < body.len:
+        let n = min(pieceBytes, body.len - at)
+        var piece = JsIoResult(id: whole.id, kind: jkPiece, code: whole.code, piece: body[at ..< at + n])
+        piece.head = move(last.head)
+        last.head = ""
+        results.send(piece)
+        at += n
+    else:
+      last.code = 0
+    results.send(last)
+
   proc work() {.thread.} =
     while true:
       let request = requests.recv()
@@ -132,6 +206,7 @@ else:
             maxBytes = request.maxBytes, maxSeconds = request.maxSeconds)
           answer.code = response.code
           answer.body = response.body
+          answer.url = response.url
           if not response.headers.isNil:
             for name, value in response.headers.pairs:
               answer.headers.add((name, value))
@@ -139,7 +214,10 @@ else:
         answer.error = error.msg
         if answer.error.len == 0:
           answer.error = "request failed"
-      results.send(answer)
+      if request.pieceBytes > 0:
+        sendPieces(answer, request.pieceBytes)
+      else:
+        results.send(answer)
       discard inFlight.fetchSub(1)
       wakeRunner()
 
@@ -159,6 +237,11 @@ else:
     discard inFlight.fetchAdd(1)
     requests.send(request)
     true
+
+  proc cancelJsIo*(id: int) =
+    ## Nobody waits for request `id` any more. A Pi's request runs on (its
+    ## answer, or the pieces of it, are dropped as they come).
+    discard
 
   proc takeJsIoResult*(): tuple[ok: bool, result: JsIoResult] =
     ## On the runner thread: an answer, if one came back.

@@ -1312,6 +1312,56 @@ assets API), GIF and BMP (decision 2026-11-21). Not done, needs work: std/xml
 the SVG reader's fast parser learns entities, text and CDATA and the Nim
 `xmlToJson` app is retired to JavaScript; kept for now (2026-11-21).
 
+## The web, slimmed by the runtime: +15,520 (2026-11-24)
+
+What it took for the Browser sample to open Wikipedia in a few seconds on
+an 8 MB board, where it took ten to read it and the page before left it no
+memory (`docs/esp32-memory.md`, `docs/html-slim.md`). Against main built at
+the same paths (3,111,664 → 3,127,184):
+
+| | bytes |
+|---|---:|
+| `utils/html_slim.nim`: a page's markup made small as it comes | +4,141 |
+| a response in pieces (`fetch`'s `onChunk`, its `slim` lists): `js_async.nim`, the prelude's bytecode (+1,226 for 2 KB of JavaScript), `js_io.nim`, `piece_text.nim` (a character two pieces share, Windows-1252) | +5,802 |
+| the glue and mbedTLS: the streamed open with its head and final URL, gzip through the ROM's tinfl, a TLS session resumed (`fos_tls_sessions.h`, +1,440 of it) | +3,289 |
+| `fos_js_io.c`: the stream's read loop, its pieces and their back-pressure | +889 |
+| pixie: a scrolled viewport as one box of damage | +705 |
+| what moved around them | +694 |
+
+A last pass took 1,136 off: the slimmer set up in place and a list at a
+time (no move hook for its kilobyte, no four lists written out; −439),
+whether a body is HTML read with one lowercase and one search instead of
+splitting the head into lines and trying ten marks (−524 with its strings),
+and 45 calls fewer left long.
+A link order searched eight times longer (2,000,000 steps, three seeds)
+measured worse in the build than the one made from the build before it (70
+more long calls, +176 bytes) although its model counted 124 fewer: the
+model's count is not the image's, so build and measure an order before
+keeping it. What is left is features, each with its number: the slimmer
+(without it reading a page in JavaScript is five times slower), TLS
+resumption (a site's second page 1 to 2 s slower without), pixie's scrolled
+box (a scrolled frame up to 390 ms without), the Windows-1252 reading
+(`piece_text`, an old Latin-1 page in U+FFFD without).
+
+**Built first, and taken out: the page read whole in the runtime, 26,044
+bytes** (28.5 KB with the colours a page's markup states). `html_digest.nim`
+turned HTML into a record a block (a paragraph, a link, a form's field, what
+is navigation), so the app's JavaScript only pushed lines into arrays: 0.03
+to 0.4 s a page. The rules were the size (`open`, a start tag, 4.2 KB; the
+entities and element names 1.5 KB) and nothing was left to squeeze but
+features. The slimmer is a sixth of it and knows no rule about pages: it
+drops what the app did not list and writes the rest one way, and the same
+rules, now the app's JavaScript, read that in 0.2 to 1.1 s on an e-paper
+board and twice that beside an RGB LCD's refresh. One second of a page for
+22 KB of every image was the owner's call. What makes the slimmer worth its
+4 KB: the same reader on markup as sent took 5.5 s for GitHub's front page
+and ten for a Wikipedia article.
+
+Measured and left out: `CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM` takes 10 to
+25 % off a full ECDSA handshake (Hacker News 3.0 → 2.7 s, Wikipedia 2.1 →
+1.6 s to the first byte) for +10,800 bytes; a resumed session is 0.2 to 1.1 s
+for 1,440, and that is what a second page of a site gets.
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim

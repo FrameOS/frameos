@@ -1092,6 +1092,59 @@
   `setNextSleep` loop around a synchronous `fetchImage` (what froze the Scene
   store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
   making it public is those two plus the AI evals.
+- **A body bigger than memory is read in pieces**: `fetch(url, { onChunk })`
+  (the doc's "A response in pieces"; `fetch.chunks` says a runtime has it).
+  An ESP32's I/O task reads the body off the socket a piece at a time
+  (`fos_js_io.c` `run_stream`, the glue's `fos_nim_http_stream_open_text`,
+  gzip inflated by the ROM's tinfl), two pieces queued at most, and the pump
+  hands each to the prelude's `__frameosChunk`; a `false` from the app, an
+  abort or an interpreter gone stops the read (`cancelJsIo`). Where nothing
+  pumps the pieces come inside the `fetch()` call (`jsFetchStream`). A Pi
+  has the body whole first and cuts it up. The text rules (a character two
+  pieces share, Windows-1252 for what is not UTF-8) are `utils/piece_text.nim`,
+  one module for every runtime. A new way to get a big text into a JS app
+  goes through it, never a bigger string.
+
+## Reading the web on a frame: `docs/html-slim.md`
+
+- **The runtime slims a page; the app reads it.** A page as its server
+  sends it is mostly what an app has no use for (CNN's front page: 7 MB
+  around 26 KB of words), and QuickJS on an ESP32 walks a string slowly (a
+  loop iteration 4 to 6 µs, a regular expression over one tag ~175 µs).
+  `fetch(url, { onChunk, slim: { keep, drop, bare, classes } })` hands the
+  app HTML with its scripts, style sheets, comments and unlisted attributes
+  gone and the rest written one way (`<name a="v">`, every `<` a tag, white
+  space one space), by `frameos/src/frameos/utils/html_slim.nim` as the
+  bytes come: one implementation for a Pi, an ESP32 and the wasm runtime,
+  hooked in where a streamed piece becomes a JS string (`js_async.nim`
+  `chunkArgs`). A change to what slimmed markup is, is the module, the doc,
+  `utils/tests/test_html_slim.nim` and the Browser's reader together, and
+  any cut of the input must give the same output.
+- **The slimmer has the mechanism, the app has the lists and the meaning.**
+  Which attributes stay, which elements go, which class words matter: the
+  app passes them. What a page means (a block, a link, what is navigation,
+  what is hidden, its colors) is the app's JavaScript, the Browser's
+  `read.ts`. Do not move a rule about pages into the module: a reader in the
+  runtime was built (30 KB of flash, 0.03 s a page) and taken out for its
+  size the same day (2026-11-24); a second of reading in JavaScript was the
+  owner's call. What keeps that second a second: the reader finds its way
+  with `indexOf` on what the slimmer made regular, and runs no regular
+  expression and no loop over letters per tag.
+- **The Browser sample** (`repo/scenes/samples/Browser`) is its user, a
+  browser the way Lynx and Opera Mini were: no style sheets fetched, no
+  scripts run, a page in one column in the frame's type. `read.ts` reads
+  slimmed HTML into the page, `page.ts` is the page (and feeds, plain text,
+  Markdown, JSON), `lay.ts` breaks it into
+  lines as far down as is looked at, with the built-in face's letter widths
+  from a table (a line is drawn as one row that does not wrap, so the page's
+  height is known before anything is drawn), `app.tsx` draws the rows that
+  show, in the colors the page's own markup states (a `bgcolor`, a
+  `<font color>`, an element's own `style`, the site's `theme-color`; what
+  reads on what is `inkOn`'s). **Every letter drawn is a node the frame keeps** (a screenful of
+  text is a thousand, three times that was one 380 KB block on an 8 MB
+  board): draw what shows and a little around it, in pieces with a fixed
+  place in the tree (`CHUNK`, `GROUP`), so the keys' ring stays on its link
+  while the page scrolls. The page before stays up while the next one comes.
 
 ## Video: `docs/video.md`
 
@@ -1141,6 +1194,17 @@
   an app's `*.test.*` files (`scenes_for_frame` / `scenesForFrame`).
 - Measure on the board (`-d:memProbe`, `heapinfo`'s `min_ever_free`) and add
   what you find to the doc: a host model has been wrong both ways.
+- **A scene's HTTPS request resumes its host's TLS session** (ESP32:
+  `fos_tls_sessions.h`, `frameos_nim_glue.c` "TLS sessions resumed", the
+  numbers in `embedded/esp32/README.md`): a full ECDSA handshake is 2 to 3 s
+  there, a resumed one a few hundred ms. Every `mbedtls_ssl_handshake` of the
+  firmware goes through a linker wrap that is the real call unless
+  `http_open_request` marked the task (`tls_resume_begin` / `_end` around
+  each connect, a session only ever offered to the host and port it came
+  from). ESP-IDF's dynamic buffers leave a too-small receive buffer behind at
+  the states a resumed handshake skips, so a connection that offers a session
+  is stepped by `tls_handshake_resuming`: a new way to offer one goes through
+  it, never `mbedtls_ssl_set_session` alone. No connection is kept open.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
