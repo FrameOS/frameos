@@ -11,6 +11,7 @@ import std/[json, locks, options, sequtils, strformat, tables]
 import pixie
 
 import frameos/render_probe
+import frameos/utils/json_depth
 from frameos/js_runtime/burrito import scriptBreathe
 import frameos/types
 import frameos/utils/asset_colors
@@ -181,7 +182,7 @@ proc loadPersistedSceneState(sceneId: string): JsonNode =
   let text = $raw
   cFree(raw)
   try:
-    result = parseJson(text)
+    result = parseJsonBounded(text)
     if result.kind != JObject:
       result = nil
   except CatchableError:
@@ -327,7 +328,7 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
       if payloadJson == nil or ($payloadJson).len == 0:
         %*{}
       else:
-        parseJson($payloadJson)
+        parseJsonBounded($payloadJson)
     # State aimed at a scene that is not the resident one is persisted first:
     # the dispatcher can only hand it to a built scene, and on a wake-check
     # pass (no render) or a switch there is none — the next build takes it
@@ -398,7 +399,7 @@ proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =
   if text == lastColorsJson:
     return
   try:
-    let node = if text.len == 0: newJObject() else: parseJson(text)
+    let node = if text.len == 0: newJObject() else: parseJsonBounded(text)
     if not frameConfig.isNil:
       frameConfig.colors = node
     setFrameColorSettings(parseFrameColorSettings(node))
@@ -424,7 +425,7 @@ proc fos_nim_set_event_map_impl(json: cstring) {.exportc, cdecl.} =
   try:
     var rules: JsonNode = nil
     if text.len > 0:
-      rules = parseJson(text)
+      rules = parseJsonBounded(text)
       if rules.kind != JArray:
         log("eventMap: ignored, not a list")
         return
@@ -453,7 +454,7 @@ proc fos_nim_set_palette_impl(json: cstring) {.exportc, cdecl.} =
   var colors: seq[(int, int, int)] = @[]
   try:
     if text.len > 0:
-      let node = parseJson(text)
+      let node = parseJsonBounded(text)
       if node.kind == JArray:
         for entry in node.items:
           let color = parseHtmlColor(entry.getStr())
@@ -775,7 +776,7 @@ proc setSceneCatalog*(indexJson: string): int =
   inc catalogGeneration
   var parsed: JsonNode
   try:
-    parsed = parseJson(indexJson)
+    parsed = parseJsonBounded(indexJson)
   except CatchableError as e:
     log("setSceneCatalog: unparseable index: " & e.msg)
     return 0
@@ -982,7 +983,7 @@ proc frameSettingsJson(): JsonNode {.nimcall, gcsafe, raises: [].} =
   if raw.isNil:
     return nil
   try:
-    result = parseJson($raw)
+    result = parseJsonBounded($raw)
   except Exception:
     result = nil
   cFree(raw)

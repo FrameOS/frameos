@@ -19,7 +19,7 @@ pre-commit
 pytest
 pytest-asyncio
 pytest-xdist
-python-jose
+PyJWT
 redis
 requests
 ruff
@@ -28,6 +28,5 @@ sqlmodel
 types-Pillow
 types-redis
 types-requests
-types-python-jose
 werkzeug
 openai

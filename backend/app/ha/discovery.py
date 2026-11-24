@@ -273,8 +273,16 @@ def coerce_field_value(field_spec: dict, value: Any) -> Any:
 
 
 def scene_attribute_fields(scene: dict) -> list[dict]:
-    """The public fields the scene sensor's attributes carry."""
-    return [field for field in scene_public_fields(scene) if str(field.get("type") or "") in ATTRIBUTE_FIELD_TYPES]
+    """The public fields the scene sensor's attributes carry. Not a `secret`
+    one (a token, a share link's key): the fields topic is retained, every
+    client of the broker reads it and Home Assistant's recorder keeps it.
+    Home Assistant can still set such a field (commands.py), it is never
+    told its value."""
+    return [
+        field
+        for field in scene_public_fields(scene)
+        if str(field.get("type") or "") in ATTRIBUTE_FIELD_TYPES and field.get("secret") is not True
+    ]
 
 
 def scene_fields_payload(frame: dict, scene_id: Optional[str], reported: Optional[dict]) -> dict:

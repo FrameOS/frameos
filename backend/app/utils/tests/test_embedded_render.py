@@ -186,6 +186,107 @@ async def test_the_harness_gets_the_frames_render_scale_only_when_set(monkeypatc
     assert ["renderScale" in request for request in sent[1:]] == [False, False, False]
 
 
+@pytest.mark.asyncio
+async def test_a_render_with_no_device_gets_a_ceiling_and_none_of_the_backends_environment(monkeypatch, tmp_path):
+    """The process that runs scene code is started with what Node needs and
+    nothing the backend holds, and a render with no device to stand in for is
+    still told how much its scene may allocate."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+    from app.utils.device_limits import esp32_device_limits
+
+    sent: list[dict] = []
+    started: list[dict] = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, request):
+            sent.append(json.loads(request))
+            return b"\x00" * 16, b""
+
+    async def fake_exec(*_args, **kwargs):
+        started.append(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+    for name in ("SECRET_KEY", "DATABASE_URL", "REDIS_URL", "CLOUD_SECRET_KEY", "FRAMEOS_PHOTOS_S3_SECRET_ACCESS_KEY"):
+        monkeypatch.setenv(name, "held-by-the-backend")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/ssl/own-ca.pem")
+
+    frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=[{"id": "s", "nodes": [], "edges": []}])
+    await embedded_render.render_scene(frame, 2, 2)
+    limits = esp32_device_limits(1200, 1600, 8 * 1024 * 1024)
+    await embedded_render.render_scene(frame, 2, 2, device_limits=limits)
+
+    environment = started[0]["env"]
+    assert environment["PATH"] == "/usr/bin" and environment["SSL_CERT_FILE"] == "/etc/ssl/own-ca.pem"
+    assert "held-by-the-backend" not in environment.values()
+    assert set(environment) <= set(embedded_render.RENDER_ENVIRONMENT_KEYS)
+
+    assert sent[0]["memoryCeilingBytes"] == 256 * 1024 * 1024 and "deviceLimits" not in sent[0]
+    # A device's own ceiling is the only one its render gets.
+    assert sent[1]["deviceLimits"] == limits and "memoryCeilingBytes" not in sent[1]
+    # Twice what any sample scene needs on a 4K canvas; a bigger canvas gets
+    # eight times its own size, up to a gigabyte.
+    assert embedded_render.render_memory_ceiling_bytes(800, 480) == 256 * 1024 * 1024
+    assert embedded_render.render_memory_ceiling_bytes(3840, 2160) == 256 * 1024 * 1024
+    assert embedded_render.render_memory_ceiling_bytes(5120, 2880) == 5120 * 2880 * 4 * 8
+    assert embedded_render.render_memory_ceiling_bytes(20000, 20000) == 1024 * 1024 * 1024
+
+
+def _renderer_has_a_memory_ceiling() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        thin_client_renderer_available()
+        and assets is not None
+        and "frameos_wasm_set_memory_limit" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_has_a_memory_ceiling(), reason="no wasm bundle with frameos_wasm_set_memory_limit")
+async def test_the_real_runtime_stops_a_scene_at_the_ceiling(monkeypatch):
+    """Through the harness and the wasm runtime: with no device, a render
+    that needs more than its ceiling ends as a render that ran out of memory
+    (here a ceiling under the canvas itself), and renders under an ordinary one."""
+    from types import SimpleNamespace
+    from typing import Any
+
+    from app.utils import embedded_render
+
+    scene = {
+        "id": "white",
+        "name": "White",
+        "default": True,
+        "settings": {"execution": "interpreted"},
+        "fields": [],
+        "nodes": [
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": "#ffffff"}}},
+        ],
+        "edges": [{"id": "e1", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"}],
+    }
+    frame: Any = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[scene])
+    assert (await embedded_render.render_scene(frame, 1024, 1024)).rgba is not None
+
+    monkeypatch.setattr(embedded_render, "render_memory_ceiling_bytes", lambda width, height: 1024 * 1024)
+    refused = await embedded_render.render_scene(frame, 1024, 1024)
+    assert refused.rgba is None
+    assert refused.error == "render ran out of memory"
+    assert refused.out_of_memory is not None
+
+
 # The renderer's HTTP child checks the address its socket connects to (its
 # own lookup), not a lookup made before the request: a name checked once and
 # resolved again by fetch could answer the second query with a private

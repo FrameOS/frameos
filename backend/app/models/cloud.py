@@ -62,6 +62,10 @@ class CloudBackendLink(Base):
     cloud_organization_id = mapped_column(String(128), nullable=True)
     cloud_project_id = mapped_column(String(128), nullable=True)
     scope = mapped_column(String(1024), nullable=True)
+    # The scopes this install asked for in the approval that is pending (a
+    # first link, or a feature change): what the provider answers is cut down
+    # to these, never added to. Cleared with the pending approval.
+    requested_scope = mapped_column(String(1024), nullable=True)
     local_organization_id = mapped_column(Integer, ForeignKey("organization.id", ondelete="SET NULL"), nullable=True)
     local_project_id = mapped_column(Integer, ForeignKey("project.id", ondelete="SET NULL"), nullable=True)
     local_fallback_enabled = mapped_column(Boolean, nullable=False, default=True)

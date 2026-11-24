@@ -207,12 +207,15 @@ default). Then the list is sent as "Install & activate" sends it, showing the
 scene unless `show: false`. Refused:
 
 - a scene that is not an object with a string `id` (`invalid_scene`), an id of
-  a built-in scene (`system/…`), a compiled scene (`scene_requires_compilation`)
-  or a layout the layout rule refuses (`invalid_layout`, `scene_layout_problem`);
+  a built-in scene (`system/…`), a compiled scene (`scene_requires_compilation`),
+  a layout the layout rule refuses (`invalid_layout`, `scene_layout_problem`)
+  or a scene with an app whose config.json is not strict JSON
+  (`invalid_app_config`: the file is what the app asks for, read one way by
+  the frame and both planes, `docs/app-config-fixtures.json`);
 - **a save that widens what the scene may do** (`needs_owner`, with `needs`):
   the `permissions` and `settings` its apps' config.json ask for must be ones
   the saved scene of that id already asked for (a new scene: none of the red
-  permissions — `shell`, `files`, `assets-write`, `frame`, `code` — and no
+  permissions — `shell`, `files`, `assets-write`, `frame`, `code`, `store` — and no
   settings keys). What a device asks must never widen a grant
   (docs/cloud-frames.md "Scenes the frame already had"); the owner installs
   such a scene from the workspace, where grants are made;

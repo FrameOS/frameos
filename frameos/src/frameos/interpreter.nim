@@ -44,6 +44,7 @@ import frameos/events_gen
 import std/hashes
 from frameos/utils/app_images import paintPendingBackground
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
+import frameos/utils/json_depth
 import apps/apps
 
 # What a scene's dispatch node may not reach is the contract's: every event
@@ -1001,7 +1002,7 @@ proc dropEmbedImage(r: SceneRhythm) =
 proc parseEmbedProps(props: string): JsonNode =
   ## What the walker stringified, less the tag's own names. An exception here
   ## is the node's, like any failure of the UI that holds the tag.
-  result = parseJson(if props.len > 0: props else: "{}")
+  result = parseJsonBounded(if props.len > 0: props else: "{}")
   if result.kind != JObject:
     return newJObject()
   for key in ["id", "key", "ref", "children"]:
@@ -1584,6 +1585,12 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
   ## The natives. Most take a node id first; the log lines are written by the
   ## program itself (`L`), which costs the program's memory and not flash.
   let context = scene.programCtx
+  # Outside a run there is no context to work in. Only what the kit hands a
+  # snippet is answered then (its console, `state` and `context`, which a
+  # scene's code can keep and call from a timer): any other native has
+  # nothing to do, and reading the context it was not given was a crash.
+  if context.isNil and op notin {opLog, opStateRead, opContextRead}:
+    return JS_ThrowInternalError(ctx, "no run in progress")
   template a(i: int): JSValueConst = (if i < argc: argv[i] else: jsUndefined(ctx))
   proc num(ctx: ptr JSContext, v: JSValueConst): int {.inline.} =
     var n: int32
@@ -1696,7 +1703,7 @@ proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, 
       let message = entry{"message"}
       if not message.isNil and message.kind == JString:
         entry["message"] = %describeJsError(message.getStr())
-      if argc > 1:
+      if argc > 1 and not context.isNil:
         entry = withEventPayload(entry, context.event, context.payload)
       scene.logger.log(entry)
   of opLogOutput:
@@ -1764,6 +1771,73 @@ proc programFor(scene: InterpretedFrameScene): CompiledScene =
     source.compiled = compileScene(source.nodes, source.edges, profile)
   source.compiled
 
+proc programFailure(scene: InterpretedFrameScene, message: string): ref Exception =
+  scene.logger.log(%*{"event": "interpreter:programError", "sceneId": scene.id.string, "error": message})
+  newException(JSException, "Evaluation failed: " & message)
+
+proc snippetFailure(scene: InterpretedFrameScene, k: int, message: string, line: int): ref Exception =
+  ## Snippet `k` of the program does not compile, at `line` of its own.
+  let snippet = scene.program.snippets[k]
+  let error = message & " (line " & $line & ")"
+  if snippet.kind == psCache:
+    if scene.source.isNil:
+      return scene.programFailure(message)
+    let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
+      scene.program.brokenCache & @[(snippet.nodeId, error)])
+    scene.program = program
+    scene.source.compiled = program
+    return nil
+  scene.logNodeErrorPayload(snippet.nodeId, %*{"event": "interpreter:jsCompileError",
+    "sceneId": scene.id.string, "nodeId": snippet.nodeId.int,
+    "sourceKind": (if snippet.kind == psCode: "code" else: "inline"),
+    "sourceName": snippet.name, "error": error, "snippet": snippet.snippet})
+  newException(JSException, "Evaluation failed: " & error)
+
+const SnippetCheckFile = "<frameos:snippet>"
+
+proc snippetStaysInside(ctx: ptr JSContext, snippet: string, message: var string, line: var int): bool =
+  ## Whether `snippet` is text the program can put between its parentheses
+  ## (scene_compiler.snippetFunction) without the text closing them.
+  ##
+  ## The program holds every snippet as it was written, and a scene's code
+  ## is anyone's: `1);…;(2` ends the wrapper early and runs what is between
+  ## when the program loads, before any budget is counting, and with a `}`
+  ## or two more it is out of the function that hides the kit and the
+  ## natives from it. So each snippet is compiled alone first, in square
+  ## brackets. What compiles there leaves every string, template and
+  ## comment it opened closed, so the next snippet starts as it would alone;
+  ## and the one bracket it can close without one of its own is a `]`, which
+  ## the `(` in the program refuses. Whatever passes here is therefore an
+  ## expression in the program, or a syntax error there (compileFailure).
+  ## Every expression a pair of parentheses takes, a pair of brackets takes
+  ## too, so nothing that ran before is refused.
+  var plain = true
+  for c in snippet:
+    if c notin {'a'..'z', 'A'..'Z', '0'..'9', '_', '$', '.', ' '}:
+      plain = false
+      break
+  if plain:
+    return true # `state.title`: no bracket, quote or comment to ask about
+  let text = "\"use strict\";[\n" & snippet & "\n]"
+  let compiled = JS_Eval(ctx, text.cstring, text.len.csize_t, SnippetCheckFile,
+    (JS_EVAL_TYPE_GLOBAL or JS_EVAL_FLAG_COMPILE_ONLY or snippetEvalFlags).cint)
+  if JS_IsException(compiled) == 0:
+    JS_FreeValue(ctx, compiled)
+    return true
+  let details = jsExceptionDetails(ctx)
+  message = details.message
+  line = 1
+  const at = SnippetCheckFile & ":"
+  let found = details.stack.find(at)
+  if found >= 0:
+    var k = found + at.len
+    var n = 0
+    while k < details.stack.len and details.stack[k] in {'0'..'9'}:
+      n = n * 10 + ord(details.stack[k]) - ord('0')
+      inc k
+    line = clamp(n - 1, 1, snippet.count('\n') + 1)
+  false
+
 proc compileFailure(scene: InterpretedFrameScene, message, stack: string): ref Exception =
   ## The program did not compile: the snippet the error is in (or that left
   ## something open the line after it) is named. A code node or an inline
@@ -1784,23 +1858,9 @@ proc compileFailure(scene: InterpretedFrameScene, message, stack: string): ref E
       culprit = k
   if culprit >= 0:
     let snippet = scene.program.snippets[culprit]
-    let error = message & " (line " & $(min(line, snippet.lastLine) - snippet.firstLine + 1) & ")"
-    if snippet.kind == psCache:
-      if not scene.source.isNil:
-        let program = compileScene(scene.source.nodes, scene.source.edges, scene.program.profile,
-          scene.program.brokenCache & @[(snippet.nodeId, error)])
-        scene.program = program
-        scene.source.compiled = program
-        return nil
-    else:
-      scene.logNodeErrorPayload(snippet.nodeId, %*{"event": "interpreter:jsCompileError",
-        "sceneId": scene.id.string, "nodeId": snippet.nodeId.int,
-        "sourceKind": (if snippet.kind == psCode: "code" else: "inline"),
-        "sourceName": snippet.name, "error": error, "snippet": snippet.snippet})
-      return newException(JSException, "Evaluation failed: " & error)
+    return scene.snippetFailure(culprit, message, min(line, snippet.lastLine) - snippet.firstLine + 1)
   # Nothing of the scene's own: the program around it.
-  scene.logger.log(%*{"event": "interpreter:programError", "sceneId": scene.id.string, "error": message})
-  newException(JSException, "Evaluation failed: " & message)
+  scene.programFailure(message)
 
 proc ensureProgram(scene: InterpretedFrameScene) =
   ## The scene's program evaluated into the programs' context, and its ways
@@ -1815,6 +1875,21 @@ proc ensureProgram(scene: InterpretedFrameScene) =
   var attempts = 0
   while true:
     inc attempts
+    if not scene.program.confined:
+      var refused = false
+      for k, snippet in scene.program.snippets:
+        var message = ""
+        var line = 1
+        # firstLine 0: a cache expression already left out of the program.
+        if snippet.firstLine > 0 and not snippetStaysInside(ctx, snippet.snippet, message, line):
+          let failure = scene.snippetFailure(k, message, line)
+          if not failure.isNil or attempts > 4:
+            raise (if failure.isNil: newException(JSException, "Evaluation failed: " & message) else: failure)
+          refused = true
+          break
+      if refused:
+        continue # the program was made again without that cache expression
+      scene.program.confined = true
     let source = scene.program.source
     let fn = JS_Eval(ctx, source.cstring, source.len.csize_t, ProgramFile,
       (JS_EVAL_TYPE_GLOBAL or snippetEvalFlags).cint)
@@ -2117,7 +2192,7 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
       # nodes hand consumers real objects, like seeded defaults do
       if field.fieldType == "json" and value.kind == JString:
         try:
-          value = parseJson(value.getStr())
+          value = parseJsonBounded(value.getStr())
         except CatchableError:
           discard
       value = scene.anInterval(key, value)
@@ -2881,6 +2956,13 @@ proc dumpHook*(s: var string, v: Color) =
 # for a name, null for a list) the loops take the default instead: a scene
 # that fails to parse takes the whole frame down. tests/test_scene_reader.nim
 # reads every repo and e2e scene both ways and compares.
+#
+# Two things are not jsony's any more, because a scene's JSON is anyone's and
+# jsony calls itself once for every `[` or `{` it meets: a value passed over is
+# counted through (skipJson), and a value kept as JSON is read to MaxJsonDepth
+# levels and no deeper (readJson). A few thousand brackets in a node's data
+# were the end of an ESP32's 40 KB render stack, and of any thread's on a Pi
+# with a few hundred thousand.
 
 proc mapSourceNodeId*(source: string): NodeId =
   ## The runtime's id for a node id as the scene JSON wrote it: one table for
@@ -2891,6 +2973,42 @@ proc mapSourceNodeId*(source: string): NodeId =
   result = NodeId(globalNodeCounter)
   nodeMappingTable[source] = result
 
+proc skipJson(s: string, i: var int) =
+  ## The value at `i` passed over without being built, its brackets counted
+  ## and never recursed into, strings jumped as they are (jsony's skipValue
+  ## built each one to drop it, an app's whole source among them). As lenient
+  ## as that was about what is between the brackets; where there is no value
+  ## (a `,` or the caller's own closing bracket) nothing is consumed. Text
+  ## that ends early leaves `i` at its end, where the caller's loop raises.
+  var depth = 0
+  while true:
+    eatSpace(s, i)
+    if i >= s.len:
+      return
+    case s[i]
+    of '{', '[':
+      inc depth
+      inc i
+    of '}', ']':
+      if depth == 0:
+        return
+      dec depth
+      inc i
+    of '"':
+      inc i
+      while i < s.len and s[i] != '"':
+        if s[i] == '\\': inc i
+        inc i
+      i = min(i + 1, s.len)
+    of ',', ':':
+      if depth == 0:
+        return
+      inc i
+    else:
+      discard parseSymbol(s, i)
+    if depth == 0:
+      return
+
 proc openValue(s: string, i: var int, open: char): bool =
   ## At `open` ('{' or '['): consumes it. At anything else (null, a number, the
   ## other bracket): skips that value, and the field keeps its default.
@@ -2898,7 +3016,7 @@ proc openValue(s: string, i: var int, open: char): bool =
   if i < s.len and s[i] == open:
     inc i
     return true
-  skipValue(s, i)
+  skipJson(s, i)
 
 proc expectChar(s: string, i: var int, c: char) =
   ## jsony's eatChar, which is a template: its message is built once here.
@@ -2933,24 +3051,43 @@ proc readText(s: string, i: var int): string =
   elif i < s.len and s[i] in {'-', '+', '0'..'9', 't', 'f'}:
     result = parseSymbol(s, i) # a number or a boolean, as written
   else:
-    skipValue(s, i)
+    skipJson(s, i)
 
 proc readNumber(s: string, i: var int): float =
   eatSpace(s, i)
   if i < s.len and s[i] in {'-', '+', '0'..'9'}:
     parseHook(s, i, result)
   else:
-    skipValue(s, i)
+    skipJson(s, i)
 
 proc readFlag(s: string, i: var int): bool =
   eatSpace(s, i)
   if i < s.len and s[i] in {'t', 'f'}:
     parseHook(s, i, result)
   else:
-    skipValue(s, i)
+    skipJson(s, i)
 
-proc readJson(s: string, i: var int): JsonNode =
-  parseHook(s, i, result)
+proc readJson(s: string, i: var int, depth = 0): JsonNode =
+  ## A value kept as JSON (a node's data, a field's value, an app's files),
+  ## as jsony's parseHook reads one (which still reads the strings, the
+  ## numbers and the rest), to MaxJsonDepth levels (utils/json_depth.nim):
+  ## what nests deeper is null, and the scene around it loads.
+  eatSpace(s, i)
+  if i >= s.len or s[i] notin {'{', '['}:
+    parseHook(s, i, result)
+    return
+  if depth >= MaxJsonDepth:
+    skipJson(s, i)
+    return newJNull()
+  let isObject = s[i] == '{'
+  inc i
+  result = if isObject: newJObject() else: newJArray()
+  while moreItems(s, i, if isObject: '}' else: ']'):
+    if isObject:
+      let key = readKey(s, i)
+      result[key] = readJson(s, i, depth + 1)
+    else:
+      result.add readJson(s, i, depth + 1)
 
 proc readNode(s: string, i: var int): DiagramNode =
   result = DiagramNode()
@@ -2962,7 +3099,7 @@ proc readNode(s: string, i: var int): DiagramNode =
       result.id = mapSourceNodeId(source)
     of "data": result.data = readJson(s, i)
     of "type", "nodeType", "node_type": result.nodeType = readText(s, i)
-    else: skipValue(s, i)
+    else: skipJson(s, i)
   # The id as the scene wrote it goes on the node's data, as
   # `__frameosSourceNodeId`: the name an error line gives the editor.
   if source.len > 0:
@@ -2982,7 +3119,7 @@ proc readEdge(s: string, i: var int): DiagramEdge =
     of "targetHandle", "target_handle": result.targetHandle = readText(s, i)
     of "data": result.data = readJson(s, i)
     of "type", "edgeType", "edge_type": result.edgeType = readText(s, i)
-    else: skipValue(s, i)
+    else: skipJson(s, i)
 
 proc readOption(s: string, i: var int): StateFieldOption =
   ## A select option is stored either as "value" (the value doubles as the
@@ -2996,7 +3133,7 @@ proc readOption(s: string, i: var int): StateFieldOption =
       case readKey(s, i)
       of "value": result.value = readText(s, i)
       of "label": result.label = readText(s, i)
-      else: skipValue(s, i)
+      else: skipJson(s, i)
   else:
     result.value = readText(s, i) # a list is nothing usable, and skipped
   if result.label == "":
@@ -3022,7 +3159,7 @@ proc readField(s: string, i: var int): StateField =
     of "access": result.access = readText(s, i)
     of "showIf", "show_if": result.showIf = readJson(s, i)
     of "role": result.role = readText(s, i)
-    else: skipValue(s, i)
+    else: skipJson(s, i)
 
 proc readSettings(s: string, i: var int): FrameSceneSettings =
   result = FrameSceneSettings()
@@ -3038,7 +3175,7 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "splitScreenLayout", "split_screen_layout":
       eatSpace(s, i)
       result.splitScreenLayout.present = i < s.len and s[i] == '{'
-      skipValue(s, i)
+      skipJson(s, i)
     of "isLayout", "is_layout": result.isLayout = readFlag(s, i)
     of "desktop": result.desktop = readFlag(s, i)
     # "WxH", handed to a desktop as is: the layout reads it (app.frame.scenes).
@@ -3049,7 +3186,7 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "category": result.category = readText(s, i)
     # The file types it opens ("pdf"), listed as they are, like its category.
     of "opens": result.opens = readText(s, i)
-    else: skipValue(s, i)
+    else: skipJson(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
   ## A list of objects; an item that is not one (null) is skipped.
@@ -3073,14 +3210,14 @@ proc readApps(s: string, i: var int, keyword: string): JsonNode =
   while moreItems(s, i, '}'):
     let key = readKey(s, i)
     if keyword.len == 0:
-      skipValue(s, i)
+      skipJson(s, i)
       result[key] = newJObject()
     elif key == keyword and openValue(s, i, '{'):
       while moreItems(s, i, '}'):
         if readKey(s, i) == "sources": result = readJson(s, i)
-        else: skipValue(s, i)
+        else: skipJson(s, i)
     else:
-      skipValue(s, i)
+      skipJson(s, i)
 
 proc readScene(s: string, i: var int, withFiles: bool): FrameSceneInput =
   ## `withFiles`: the apps' files stay in `apps` (sfResident).
@@ -3098,7 +3235,7 @@ proc readScene(s: string, i: var int, withFiles: bool): FrameSceneInput =
     of "customEvents", "custom_events": result.customEvents = readJson(s, i)
     of "eventMap", "event_map": result.eventMap = readJson(s, i)
     of "layout": result.layout = readJson(s, i)
-    else: skipValue(s, i)
+    else: skipJson(s, i)
 
 proc appSourcesInObject(s: string, i: var int, sceneId, keyword: string, found: var JsonNode): bool =
   ## Inside an object of a scene JSON (one scene, or an upload's
@@ -3118,7 +3255,7 @@ proc appSourcesInObject(s: string, i: var int, sceneId, keyword: string, found: 
     elif key == "apps":
       sources = readApps(s, i, keyword)
     else:
-      skipValue(s, i)
+      skipJson(s, i)
   if id == sceneId and not sources.isNil:
     found = sources
     return true

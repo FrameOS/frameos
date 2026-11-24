@@ -145,6 +145,31 @@
       "name": "app.frame is the panel, not the frame's settings",
       "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get(app) { return app.frame.width + (frame(1) || 0) }"}}}},
       "flags": []
+    },
+    {
+      "name": "an app that calls frameos.storeAction installs and removes scenes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "export function get() { frameos.storeAction('install', { store: id }); return <div /> }", "config.json": "{\n  \"name\": \"Scene store\",\n  \"permissions\": [\n    \"store\"\n  ]\n}\n"}}}},
+      "flags": ["store"]
+    },
+    {
+      "name": "frameos.store() alone (the facts) asks for nothing",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "export function get() { const facts = frameos.store(); return <div>{facts?.url}</div> }"}}}},
+      "flags": []
+    },
+    {
+      "name": "a config.json with a comment is not one: it shows as asking for everything a JavaScript app can be given",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return globalThis['jsFrame']('read', '') }", "config.json": "{\n  // only a lenient parser reads this\n  \"permissions\": [\"frame\"]\n}\n"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
+    },
+    {
+      "name": "a config.json with a trailing comma is not one either, whatever its code calls",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return 1 }", "config.json": "{\n  \"permissions\": [],\n}\n"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
+    },
+    {
+      "name": "a config.json that is an array is not one",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return frameos.readAsset('x') }", "config.json": "[\"frame\"]"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
     }
   ],
   "sets": [
@@ -225,6 +250,13 @@
       "after": ["assets", "frame"],
       "gained": ["frame"],
       "lost": []
+    },
+    {
+      "name": "an update that starts installing scenes gains store",
+      "before": ["assets"],
+      "after": ["assets", "store"],
+      "gained": ["store"],
+      "lost": []
     }
   ],
   "stamps": [
@@ -302,6 +334,20 @@
       "code": "frameos.writeAsset('log.txt', b64); frameos . frame ('action', 'render')",
       "config": null,
       "expect": "{\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\",\n    \"frame\"\n  ]\n}\n"
+    },
+    {
+      "name": "frameos.storeAction is asked for last",
+      "afterMigration": true,
+      "code": "frameos . storeAction ('install', { store }); frameos.frame('read')",
+      "config": null,
+      "expect": "{\n  \"permissions\": [\n    \"frame\",\n    \"store\"\n  ]\n}\n"
+    },
+    {
+      "name": "frameos.store() is not frameos.storeAction",
+      "afterMigration": true,
+      "code": "const facts = frameos.store()",
+      "config": null,
+      "expect": "{\n  \"permissions\": []\n}\n"
     }
   ]
 }

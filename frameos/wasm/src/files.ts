@@ -2,13 +2,19 @@
 // Download in the Files scene (frameos/src/frameos/file_transfer_preview.nim,
 // the worker's `fileRequest`).
 //
-// A file picker opens, and a download starts, only from a person's gesture.
-// The tap on Upload happened on the canvas a moment ago, so the page still
-// has it when the request arrives: `navigator.userActivation.isActive` says
-// so, and the picker opens at once. A request that comes after the gesture
-// ran out (a slow render in between), or in a browser that cannot say,
-// waits for the page to ask the person with a button of its own
-// (`onFileRequest`), whose click is the gesture.
+// A file picker opens, and a download starts, only from a person's gesture
+// on the preview itself. The tap on Upload happened on the canvas a moment
+// ago (`previewHasGesture` in ./pointer), and the page still has it when the
+// request arrives (`navigator.userActivation.isActive`), so the picker opens
+// at once. A request with no such tap behind it (scene code is anyone's, and
+// may ask whenever it likes: a click elsewhere on the page is not its
+// permission), one that comes after the gesture ran out (a slow render in
+// between), or one in a browser that cannot say, waits for the page to ask
+// the person with a button of its own (`onFileRequest`), whose click is the
+// gesture; a page with no such button turns it down.
+//
+// The name a file is saved under is cleaned here (`safeFileName`), whatever
+// the worker sent: a name in one folder, nothing a file manager hides.
 
 /** What the Files scene asks of the page. */
 export interface PreviewFileRequest {
@@ -76,12 +82,52 @@ export function pickFiles(doc: Document = document): Promise<PickedFile[] | null
   })
 }
 
-/** Save `data` to the computer as `name` (a Blob and a link's download). */
+/** The longest name a file is saved under. */
+const SAFE_FILE_NAME_MAX = 120
+
+// What no file name holds: the C0 and C1 controls, and the marks that turn
+// the reading order around (a name that reads `...gpj.exe` backwards).
+function isUnprintable(code: number): boolean {
+  return (
+    code < 0x20 ||
+    (code >= 0x7f && code <= 0x9f) ||
+    code === 0x200e ||
+    code === 0x200f ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069)
+  )
+}
+
+/**
+ * The name the computer saves a file under: the last part of what was asked
+ * (no folders), without control or direction-changing characters or the
+ * characters a Windows name cannot have, not starting with a dot or a space
+ * (a hidden file) nor ending in one, at most 120 characters with its
+ * extension kept. "file" when nothing is left.
+ */
+export function safeFileName(name: unknown): string {
+  let clean = typeof name === 'string' ? name : ''
+  clean = clean.slice(Math.max(clean.lastIndexOf('/'), clean.lastIndexOf('\\')) + 1)
+  clean = Array.from(clean)
+    .filter((character) => !isUnprintable(character.codePointAt(0) ?? 0))
+    .join('')
+    .replace(/[<>:"|?*]/g, '_')
+    .replace(/^[.\s]+/, '')
+    .replace(/[.\s]+$/, '')
+  if (clean.length > SAFE_FILE_NAME_MAX) {
+    const dot = clean.lastIndexOf('.')
+    const extension = dot > 0 && clean.length - dot <= 16 ? clean.slice(dot) : ''
+    clean = clean.slice(0, SAFE_FILE_NAME_MAX - extension.length).replace(/[.\s]+$/, '') + extension
+  }
+  return clean || 'file'
+}
+
+/** Save `data` to the computer as `name`, cleaned (a Blob and a link's download). */
 export function saveFile(name: string, data: ArrayBuffer, doc: Document = document): void {
   const url = URL.createObjectURL(new Blob([data]))
   const link = doc.createElement('a')
   link.href = url
-  link.download = name || 'file'
+  link.download = safeFileName(name)
   link.style.display = 'none'
   doc.body.appendChild(link)
   link.click()

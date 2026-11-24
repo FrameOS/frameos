@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { declaredSceneGrants, grantsWidenedBy } from "./panel-code-grants";
+import { declaredSceneGrants, grantsWidenedBy, redPermissionsAsked } from "./panel-code-grants";
 
 function appScene(apps: Record<string, Record<string, string>>, nodes: unknown[] = []) {
   return {
@@ -42,7 +42,7 @@ describe("declaredSceneGrants", () => {
     expect(declaredSceneGrants(scene).permissions).toEqual(["files"]);
   });
 
-  it("is lenient: a config.json that does not parse, or junk in a list, asks for nothing", () => {
+  it("skips junk in a list, and an app no node runs asks for nothing whatever its file says", () => {
     const scene = appScene({
       broken: { "app.ts": "", "config.json": "{ not json" },
       junk: { "app.ts": "", "config.json": config({ permissions: [1, null, "", "assets"], settings: "openAI" }) },
@@ -50,6 +50,32 @@ describe("declaredSceneGrants", () => {
     expect(declaredSceneGrants(scene)).toEqual({ permissions: ["assets"], settings: [] });
     expect(declaredSceneGrants(null)).toEqual({ permissions: [], settings: [] });
     expect(declaredSceneGrants("scene")).toEqual({ permissions: [], settings: [] });
+  });
+
+  it("an app whose config.json is not strict JSON asks for everything, never for nothing", () => {
+    // A comment and a trailing comma: the frame's runtime once read this,
+    // JSON.parse never did, and the list was shown to nobody.
+    const lenient = '{\n  // hidden\n  "permissions": ["frame"],\n}';
+    const scene = appScene({ sneaky: { "app.ts": "export function get() { return 1 }", "config.json": lenient } }, [
+      { data: { keyword: "sneaky" }, id: "n", type: "app" },
+    ]);
+    const grants = declaredSceneGrants(scene);
+    expect(grants.permissions).toEqual(["assets", "assets-write", "code", "frame", "store"]);
+    expect(grantsWidenedBy(null, grants)).toEqual(["assets-write", "code", "frame", "store"]);
+    expect(grantsWidenedBy({ permissions: ["assets"], settings: [] }, grants)).toEqual([
+      "assets-write",
+      "code",
+      "frame",
+      "store",
+    ]);
+  });
+
+  it("counts the store's own permission, declared or called", () => {
+    const declared = appScene({ shop: { "app.tsx": "export function get() {}", "config.json": config({ permissions: ["store"] }) } });
+    expect(declaredSceneGrants(declared).permissions).toEqual(["store"]);
+    const called = appScene({ shop: { "app.tsx": "frameos.storeAction('install', { store })", "config.json": config({ name: "x" }) } });
+    expect(declaredSceneGrants(called).permissions).toEqual(["store"]);
+    expect(grantsWidenedBy(null, declaredSceneGrants(called))).toEqual(["store"]);
   });
 
   it("gives an app with no list the one its code calls for, as every push does", () => {
@@ -89,5 +115,15 @@ describe("grantsWidenedBy", () => {
     });
     expect(grantsWidenedBy(declaredSceneGrants(before), declaredSceneGrants(after))).toEqual(["key:unsplash"]);
     expect(grantsWidenedBy(declaredSceneGrants(after), declaredSceneGrants(before))).toEqual([]);
+  });
+});
+
+describe("redPermissionsAsked", () => {
+  it("is what a store scene new to a frame may ask for none of", () => {
+    expect(redPermissionsAsked(null)).toEqual([]);
+    expect(redPermissionsAsked({ permissions: ["assets"], settings: ["openAI"] })).toEqual([]);
+    expect(
+      redPermissionsAsked({ permissions: ["assets", "assets-write", "code", "files", "frame", "shell", "store"], settings: [] }),
+    ).toEqual(["assets-write", "code", "files", "frame", "shell", "store"]);
   });
 });

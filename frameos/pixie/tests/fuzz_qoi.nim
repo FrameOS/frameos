@@ -7,7 +7,7 @@ let original = readFile("tests/fileformats/qoi/testcard_rgba.qoi")
 for i in 0 ..< 10_000:
   var data = original
   let
-    pos = rand(data.len)
+    pos = rand(data.len - 1)
     value = rand(255).uint8
   data[pos] = value.char
   echo &"{i} {pos} {value}"

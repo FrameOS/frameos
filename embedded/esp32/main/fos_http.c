@@ -1,6 +1,8 @@
 #include "fos_http.h"
 #include "fos_restart.h"
 #include "fos_json_guard.h"
+#include "fos_url_guard.h"
+#include "fos_login_throttle.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -272,12 +274,29 @@ static bool request_bearer_matches(httpd_req_t *req, const fos_config_t *config)
     return strncmp(auth, prefix, prefix_len) == 0 && fos_consttime_eq(auth + prefix_len, config->api_key);
 }
 
+/* Wrong device logins, counted for the whole device (fos_login_throttle.h).
+ * The plain and the TLS server each run a task: a count one short for a
+ * moment costs a guess, nothing else. */
+static fos_login_throttle_t s_login_throttle;
+
+static int64_t login_clock_s(void)
+{
+    return esp_timer_get_time() / 1000000;
+}
+
 static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
 {
     if (!admin_auth_configured(config)) return false;
 
     char auth[384];
     if (!request_auth_header(req, auth, sizeof(auth))) return false;
+    const char *prefix = "Basic ";
+    size_t prefix_len = strlen(prefix);
+    /* Not a device login at all (a plane's Bearer key that did not match):
+     * nothing to count. Too many wrong ones: none is looked at. */
+    if (strncmp(auth, prefix, prefix_len) != 0 || fos_login_throttled(&s_login_throttle, login_clock_s())) {
+        return false;
+    }
 
     char raw[FOS_STR_LEN * 2 + 2];
     snprintf(raw, sizeof(raw), "%s:%s", config->admin_user, config->admin_pass);
@@ -293,9 +312,9 @@ static bool request_basic_matches(httpd_req_t *req, const fos_config_t *config)
     if (rc != 0 || encoded_len >= sizeof(encoded)) return false;
     encoded[encoded_len] = '\0';
 
-    const char *prefix = "Basic ";
-    size_t prefix_len = strlen(prefix);
-    return strncmp(auth, prefix, prefix_len) == 0 && fos_consttime_eq(auth + prefix_len, (const char *)encoded);
+    bool right = fos_consttime_eq(auth + prefix_len, (const char *)encoded);
+    if (!right) fos_login_wrong(&s_login_throttle, login_clock_s());
+    return right;
 }
 
 static const char *http_method_name(int method)
@@ -416,6 +435,15 @@ static esp_err_t refuse_protected_access(httpd_req_t *req)
             "Scenes and files are managed in FrameOS Cloud or your backend. To open this page, join the frame's "
             "hotspot, set \"Frame setup access\" in the backend, or on the USB console: "
             "set admin_user NAME, set admin_pass PASSWORD, set admin_auth 1");
+    }
+
+    if (fos_login_throttled(&s_login_throttle, login_clock_s())) {
+        /* Not a 401: a browser would ask for the password again, and the
+         * right one is not looked at either until the window is over. */
+        log_http_denied(req, 429);
+        httpd_resp_set_status(req, "429 Too Many Requests");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "Too many wrong logins. Try again in five minutes.");
     }
 
     log_http_denied(req, 401);
@@ -2905,12 +2933,41 @@ static bool should_log_request(int method, const char *path)
     return true;
 }
 
+/* A request that changes something, from a page that is not this device's
+ * own. A browser that holds the device's login (it sends a remembered Basic
+ * credential with every request to this address, another site's form
+ * included), or one on the hotspot where there is no login to ask, would
+ * otherwise carry out whatever any page it has open posts here: a new
+ * backend address, a reboot, a scene. Such a request names its page in
+ * Origin, and the device's own pages are the ones served under the Host it
+ * was sent to (fos_url_origin_is_host). What sends no Origin is no browser's
+ * cross-site request: the control planes, curl, the app. */
+static __attribute__((noinline)) bool cross_site_write(httpd_req_t *req)
+{
+    if (req->method == HTTP_GET || req->method == HTTP_HEAD) return false;
+    /* Not inlined: these are off the stack again before the handler runs. A
+     * name too long for them is no address of this frame's. */
+    char origin[160];
+    char host[160];
+    size_t origin_len = httpd_req_get_hdr_value_len(req, "Origin");
+    if (origin_len == 0) return false;
+    return origin_len >= sizeof(origin) ||
+           httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK ||
+           httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK ||
+           !fos_url_origin_is_host(origin, host);
+}
+
 static esp_err_t logged_dispatch(httpd_req_t *req)
 {
     logged_route_t *route = (logged_route_t *)req->user_ctx;
     /* Restore the original user_ctx before dispatching: handlers such as
      * action_handler read their callback out of req->user_ctx. */
     req->user_ctx = route->user_ctx;
+    /* Every route comes through here: asked once, before any handler. */
+    if (cross_site_write(req)) {
+        log_http_denied(req, 403);
+        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Cross-site request refused");
+    }
 
     char path[272];
     bool have_path = copy_request_path(req, path, sizeof(path));
@@ -3130,6 +3187,15 @@ esp_err_t fos_http_start(bool portal_mode)
                     } else {
                         ESP_LOGI(TAG, "https server up on port %u", (unsigned)tls_config.port_secure);
                         s_https_state = "running";
+                        /* With TLS up, only the TLS port: what the frame has
+                         * always reported (`expose_only_port`), and what a
+                         * Pi does by default. A client that still tries the
+                         * plain port is refused the connection before it has
+                         * sent its key or its login in the clear. The plain
+                         * server stays whenever TLS did not come up, and in
+                         * the setup hotspot, which never starts TLS. */
+                        httpd_stop(s_http_server);
+                        s_http_server = NULL;
                     }
                 } else {
                     ESP_LOGE(TAG, "httpd_ssl_start failed: %s", esp_err_to_name(err));

@@ -410,7 +410,6 @@ app/utils/scene_execution.py: Item "None" of "Any | dict[Any, Any] | None" has n
 app/utils/scene_execution.py: Item "None" of "Any | dict[Any, Any] | None" has no attribute "values"  [union-attr]
 app/utils/settings_secrets.py: Item "None" of "Any | dict[Any, Any] | None" has no attribute "get"  [union-attr]
 app/utils/ssh_authorized_keys.py: Incompatible return value type (got "tuple[list[str], list[Any | None], list[Any | None]]", expected "tuple[list[str], list[str], list[str]]")  [return-value]
-app/utils/ssh_utils.py: Argument 1 to "import_private_key" has incompatible type "Any | None"; expected "bytes | str"  [arg-type]
 app/utils/tests/test_legacy_app_migration.py: Incompatible types in assignment (expression has type "dict[Any, Any]", target has type "Sequence[Collection[Any]]")  [assignment]
 app/ws/tests/test_websockets.py: Argument 1 to "handle_remote_stream_chunk" has incompatible type "SimpleNamespace"; expected "WebSocket[State]"  [arg-type]
 app/ws/tests/test_websockets.py: Argument 1 to "handle_remote_stream_chunk" has incompatible type "SimpleNamespace"; expected "WebSocket[State]"  [arg-type]

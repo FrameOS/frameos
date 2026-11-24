@@ -561,12 +561,48 @@ describe("POST /api/frames/{id}/panel/scenes", () => {
     expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([own.id]);
     expect(await newestPush(frame.frame_id)).toBeUndefined();
 
-    // A scene the frame does not hold installs with what it asks for, as before.
-    const terminal = await storeScene(publisherId, "Terminal", { runtimeIds: ["term-rt"] });
-    await addVersion(terminal.id, 2, ["term-rt"], "Terminal", [], false, asksForFrame);
-    const fresh = await panel(frame.frame_id, frame.access_token, { action: "install", scene_id: terminal.id });
+    // A scene the frame does not hold installs when it asks for nothing red.
+    const reader = await storeScene(publisherId, "Reader", { runtimeIds: ["read-rt"] });
+    await addVersion(reader.id, 2, ["read-rt"], "Reader", [], false, {
+      apps: { t: { sources: { "app.ts": "export function get() {}", "config.json": '{"permissions":["assets"]}' } } },
+    });
+    const fresh = await panel(frame.frame_id, frame.access_token, { action: "install", scene_id: reader.id });
     expect(fresh.status).toBe(200);
-    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([own.id, terminal.id]);
+    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([own.id, reader.id]);
+  });
+
+  it("leaves a scene new to the frame that asks for a red permission to the owner", async () => {
+    // The store on the frame shows no tags, and `storeAction` can be called
+    // with nobody at the frame: a scene that reaches past its own data is
+    // installed and previewed from the workspace, where its red tag is seen.
+    const frame = await activeFrame();
+    const clock = await storeScene(frame.accountId, "Clock", { visibility: "private" });
+    await assignScenes(frame.frame_id, [clock.id]);
+    const { accountId: publisherId } = await account("Publisher");
+    const asking = (config: string, code = "export function get() {}") => ({
+      apps: { t: { sources: { "app.ts": code, "config.json": config } } },
+      nodes: [{ data: { keyword: "t" }, id: "n1", type: "app" }],
+    });
+    const cases: [string, Record<string, unknown>, string[]][] = [
+      ["Terminal", asking('{"permissions":["frame"]}'), ["frame"]],
+      ["Sketchbook", asking('{"permissions":["assets","assets-write"]}'), ["assets-write"]],
+      ["Editor", asking('{"permissions":["code","store","files"]}'), ["code", "files", "store"]],
+      // Code that calls a power counts when the app has no list of its own.
+      ["Shop", asking('{"name":"Shop"}', "export function get() { frameos.storeAction('install', {}) }"), ["store"]],
+      // A config.json only a lenient parser reads: everything, never nothing.
+      ["Hidden", asking('{\n  // hidden\n  "permissions": ["frame"],\n}'), ["assets-write", "code", "frame", "store"]],
+    ];
+    for (const [name, extra, needs] of cases) {
+      const scene = await storeScene(publisherId, name, { runtimeIds: [`${name}-rt`] });
+      await addVersion(scene.id, 2, [`${name}-rt`], name, [], false, extra);
+      for (const action of ["install", "preview"]) {
+        const refused = await panel(frame.frame_id, frame.access_token, { action, scene_id: scene.id });
+        expect(refused.status, `${action} ${name}`).toBe(403);
+        expect(await refused.json()).toEqual({ error: "needs_owner", needs, ok: false });
+      }
+    }
+    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([clock.id]);
+    expect(await newestPush(frame.frame_id)).toBeUndefined();
   });
 
   it("removes one installed scene and pushes the rest", async () => {

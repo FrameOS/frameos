@@ -211,7 +211,9 @@ export default async function ScenePage({
       .where(eq(accounts.id, session.accountId))
       .limit(1);
     aiDisabled = Boolean(row?.aiDisabledAt);
-    isAdmin = isOwner ? false : (row?.isSuperadmin ?? false);
+    // A moderator's look at somebody else's private or pulled scene is the
+    // person's (cookie) alone, never their API token's (store-auth.ts).
+    isAdmin = isOwner || session.apiToken ? false : (row?.isSuperadmin ?? false);
   }
 
   // Private and pulled scenes exist only for their owner and moderators;

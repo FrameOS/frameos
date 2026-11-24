@@ -16,9 +16,10 @@ The frame's bearer is its `server_api_key`, as on `/panel/scenes`; a Pi posts
 to `/api/panel/code`. What a frame may do is narrower than what its owner may:
 a save never widens what the scene may do (the permissions and settings its
 apps ask for must be ones the saved scene of that id asked for; a new scene
-asks for no red permission and no settings key), nothing while the settings on
-the frame's screen are off, and asks are rate limited (each is a paid model
-turn).
+asks for no red permission and no settings key), no scene with an app whose
+config.json is not strict JSON (`invalid_app_config`, utils/app_config.py),
+nothing while the settings on the frame's screen are off, and asks are rate
+limited (each is a paid model turn).
 
 The cloud's twin is cloud/apps/auth-web/src/lib/panel-code.ts."""
 from __future__ import annotations
@@ -33,6 +34,7 @@ from fastapi import Depends, Header, Path, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from app.utils.app_config import parse_app_config, scene_app_config_problem
 from app.utils.retired_apps import keep_app_test_files
 from app.api.panel_scenes import PANEL_ACTIONS_PER_15_MIN, _active_scene, _frame_from_bearer, _refused, _save, _show
 from app.database import get_db
@@ -51,8 +53,13 @@ MAX_SCENE_ID_CHARS = 128
 ASKS_PER_HOUR = 20
 # The permissions that reach past the frame's own data (frontend
 # utils/sceneAccess.ts sceneAccessFlagIsRisky): a new scene saved from the
-# frame may ask for none of them.
-RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code")
+# frame may ask for none of them, and a frame installs or previews no store
+# scene that asks for one (panel_scenes.py).
+RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code", "store")
+# What an app whose config.json is no config counts as asking for: all a
+# JavaScript app can be given (the SPA's UNREADABLE_CONFIG_PERMISSIONS). A
+# frame from before the strict reader read such a file its own way.
+UNREADABLE_CONFIG_PERMISSIONS = ("assets", "assets-write", "frame", "code", "store")
 # The calls a JavaScript app's code makes that the SPA's save stamps into its
 # config.json `permissions` (frontend utils/sceneAccess.ts detectPermissions):
 # counted whatever the list says, since the owner's next save of the scene
@@ -61,6 +68,7 @@ RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code")
 _CODE_CALLS = (
     (re.compile(r"\bframeos\s*\.\s*frame\s*\("), "frame"),
     (re.compile(r"\bframeos\s*\.\s*code\s*\("), "code"),
+    (re.compile(r"\bframeos\s*\.\s*storeAction\s*\("), "store"),
     (re.compile(r"\b(writeAsset|appendAsset|deleteAsset|makeAssetFolder)\b"), "assets-write"),
     (re.compile(r"\b(listAssets|assetExists|assetSize|readAsset|loadAssetImage)\b"), "assets"),
 )
@@ -92,12 +100,13 @@ def _code_permissions(sources: Any) -> set[str]:
 
 
 def _config_of(sources: Any) -> dict[str, Any]:
+    """config.json as every reader reads it (utils/app_config.py). One that is
+    no config asks for nothing a list could name, and for everything instead:
+    `UNREADABLE_CONFIG_PERMISSIONS`."""
     config = _object(sources).get("config.json")
     if isinstance(config, str):
-        try:
-            return _object(json.loads(config))
-        except ValueError:
-            return {}
+        parsed = parse_app_config(config)
+        return parsed if parsed is not None else {"permissions": list(UNREADABLE_CONFIG_PERMISSIONS)}
     return _object(config)
 
 
@@ -214,6 +223,8 @@ def scene_refusal(scene: Any) -> str | None:
         return "scene_requires_compilation"
     if _object(scene.get("settings")).get("isLayout") and scene_layout_problem(scene):
         return "invalid_layout"
+    if scene_app_config_problem(scene):
+        return "invalid_app_config"
     return None
 
 

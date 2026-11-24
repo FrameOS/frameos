@@ -1,0 +1,19 @@
+# Every action in .github/workflows and .github/actions is pinned to a commit,
+# with its tag in a trailing comment: a tag can be moved, a commit cannot.
+# This keeps the pins moving: one grouped pull request a week that rewrites
+# the SHAs and their comments. GitHub Actions only; the package lockfiles
+# (pnpm, pip, nimble) are bumped by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    # "/" covers .github/workflows; the composite actions are listed by
+    # directory because Dependabot does not walk .github/actions itself.
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"

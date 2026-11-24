@@ -1,8 +1,5 @@
 import { actions, afterMount, kea, listeners, path, reducers } from 'kea'
-import {
-  getFrameAdminLoginParams,
-  stripFrameAdminLoginParams,
-} from '../../utils/frameAdminLoginParams'
+import { forgetFrameAdminLoginParams } from '../../utils/frameAdminLoginParams'
 
 type FrameosTheme = 'light' | 'dark'
 
@@ -30,7 +27,7 @@ export const loginLogic = kea([
   actions({
     setUsername: (username: string) => ({ username }),
     setPassword: (password: string) => ({ password }),
-    submitLogin: (credentials?: { username?: string; password?: string }) => ({ credentials }),
+    submitLogin: true,
     setLoading: (loading: boolean) => ({ loading }),
     setError: (error: string | null) => ({ error }),
     setCloudLoginAvailable: (available: boolean) => ({ available }),
@@ -56,17 +53,9 @@ export const loginLogic = kea([
         return
       }
 
-      const { username, password, hasParams } = getFrameAdminLoginParams()
-
-      if (hasParams) {
-        actions.setUsername(username || '')
-        actions.setPassword(password || '')
-        window.history.replaceState(
-          window.history.state,
-          '',
-          stripFrameAdminLoginParams()
-        )
-      }
+      // A login link's `__login_user` / `__login_pass` are not read any
+      // more (utils/frameAdminLoginParams.ts); an old one is tidied away.
+      forgetFrameAdminLoginParams()
 
       try {
         const response = await fetch('/api/admin/session')
@@ -77,10 +66,6 @@ export const loginLogic = kea([
         }
       } catch {
         // Ignore session check failures here and allow manual login.
-      }
-
-      if (username !== null && password !== null) {
-        actions.submitLogin({ username, password })
       }
 
       // Offer "Continue with FrameOS Cloud" when this frame's cloud link has
@@ -117,7 +102,7 @@ export const loginLogic = kea([
         actions.setError('Could not start the FrameOS Cloud login')
       }
     },
-    submitLogin: async ({ credentials }) => {
+    submitLogin: async () => {
       if (values.loading) {
         return
       }
@@ -125,12 +110,10 @@ export const loginLogic = kea([
       actions.setLoading(true)
       actions.setError(null)
       try {
-        const username = credentials?.username ?? values.username
-        const password = credentials?.password ?? values.password
         const response = await fetch('/api/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username: values.username, password: values.password }),
         })
         if (!response.ok) {
           actions.setError('Invalid credentials')

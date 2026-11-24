@@ -2,11 +2,14 @@
 // These tests pin the routes where it must NOT: the second-factor enrolment
 // routes, self-serve account deletion, the superadmin API, and — for the
 // enrolment routes — that even a cookie session needs a recent proof.
+import { generateKeyPairSync } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { strToU8, zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
   accountApiTokens,
   accountIdentities,
+  accountTotp,
   accounts,
   createDb,
   frameCommands,
@@ -14,6 +17,8 @@ import {
   linkedClients,
   passwordProviderIssuer,
   sessions,
+  storeScenes,
+  storeSceneVersions,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as createApiToken } from "../../../app/api/account/api-tokens/route";
@@ -30,9 +35,13 @@ import {
 } from "../../../app/api/account/two-factor/totp/route";
 import { POST as confirmTotp } from "../../../app/api/account/two-factor/totp/confirm/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
+import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/route";
+import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
+import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { GET as frameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { GET as frameAssets } from "../../../app/api/frames/[frameId]/assets/route";
 import { GET as frameImage } from "../../../app/api/frames/[frameId]/image/route";
+import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { totpCodeAtStep, totpStepFor } from "../../lib/two-factor";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -52,6 +61,22 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(Object.fromEntries(requestHeaders)),
 }));
 
+// The security mails that "went out" (the real sender only logs without a
+// Postmark token): which change, to whom, and the details line.
+const securityMails = vi.hoisted(
+  () => [] as { detail?: string | undefined; to: string; what: string }[],
+);
+
+vi.mock("../../lib/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/email")>()),
+  sendSecurityNotificationEmail: async (
+    to: string,
+    notification: { detail?: string | undefined; what: string },
+  ) => {
+    securityMails.push({ detail: notification.detail, to, what: notification.what });
+  },
+}));
+
 const baseUrl = "http://localhost:3000";
 const password = "a long enough password";
 const db = createDb();
@@ -65,6 +90,7 @@ beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
   requestHeaders.clear();
+  securityMails.length = 0;
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -254,6 +280,155 @@ describe("what a personal API token may not do", () => {
   });
 });
 
+describe("a claim token minted with an API token", () => {
+  // A single-use code a person mints in the browser enrolls its frame active,
+  // and an active frame pulls the account's service keys. A script's token
+  // minting one must not get that: its frame waits for the owner's click.
+  const hardware = { height: 480, platform: "pi-zero2w", width: 800 };
+  const publicKey = () => generateKeyPairSync("ed25519")
+    .publicKey.export({ format: "der", type: "spki" })
+    .subarray(-32)
+    .toString("base64");
+
+  it("enrolls its frame as pending, and cannot confirm it", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const token = await switchToApiToken(accountId, email);
+    const bearer = { authorization: `Bearer ${token}` };
+
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "Script frame" }, "POST", bearer),
+    );
+    expect(minted.status).toBe(200);
+    const mintedBody = (await minted.json()) as {
+      claim_token: string;
+      max_uses: number;
+      needs_confirmation?: boolean;
+    };
+    expect(mintedBody.max_uses).toBe(1);
+    expect(mintedBody.needs_confirmation).toBe(true);
+
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: mintedBody.claim_token,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    expect(enrolled.status).toBe(200);
+    const frame = (await enrolled.json()) as { frame_id: string; status: string };
+    expect(frame.status).toBe("pending");
+
+    const confirmed = await confirmFrame(
+      request(`/api/frames/${frame.frame_id}/confirm`, {}, "POST", bearer),
+      { params: Promise.resolve({ frameId: frame.frame_id }) },
+    );
+    expect(confirmed.status).toBe(403);
+    expect((await confirmed.json()).error).toBe("api_token_not_allowed");
+    const [row] = await db
+      .select({ status: frames.status })
+      .from(frames)
+      .where(eq(frames.id, frame.frame_id));
+    expect(row?.status).toBe("pending");
+  });
+
+  it("still enrolls active when a person minted it in the browser", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "My frame" }),
+    );
+    expect(minted.status).toBe(200);
+    const mintedBody = (await minted.json()) as {
+      claim_token: string;
+      needs_confirmation?: boolean;
+    };
+    expect(mintedBody.needs_confirmation).toBeUndefined();
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: mintedBody.claim_token,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    expect(enrolled.status).toBe(200);
+    expect(((await enrolled.json()) as { status: string }).status).toBe("active");
+  });
+
+  it("cannot mint a code that re-keys an existing frame", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "My frame" }),
+    );
+    const { claim_token: claimToken } = (await minted.json()) as { claim_token: string };
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: claimToken,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    const { frame_id: frameId } = (await enrolled.json()) as { frame_id: string };
+
+    const token = await switchToApiToken(accountId, email);
+    const refused = await mintClaimToken(
+      request("/api/frames/claim-tokens", { frame_id: frameId }, "POST", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("api_token_not_allowed");
+  });
+});
+
+describe("a superadmin's API token is no moderator", () => {
+  // A moderator opens somebody else's pulled scene from the browser; a
+  // script holding the moderator's token does not (store-auth.ts).
+  it("reads a pulled scene of another account only with the cookie", async () => {
+    const owner = await signUpVerifiedUser();
+    const zip = zipSync({
+      "scene/scenes.json": strToU8(JSON.stringify([{ id: "s", nodes: [] }])),
+      "scene/template.json": strToU8(JSON.stringify({ name: "Gone", scenes: "./scenes.json" })),
+    });
+    const [scene] = await db
+      .insert(storeScenes)
+      .values({
+        accountId: owner.accountId,
+        latestVersion: 1,
+        name: "Gone",
+        slug: `gone-${owner.accountId.slice(0, 8)}`,
+        status: "pulled",
+        visibility: "public",
+      })
+      .returning();
+    await db.insert(storeSceneVersions).values({
+      content: Buffer.from(zip),
+      contentType: "application/zip",
+      riskFlags: [],
+      sceneId: scene!.id,
+      sha256: `sha-${scene!.id}`,
+      sizeBytes: zip.length,
+      version: 1,
+    });
+
+    const admin = await signUpVerifiedUser();
+    await db.update(accounts).set({ isSuperadmin: true }).where(eq(accounts.id, admin.accountId));
+    const read = () =>
+      getScenesJson(request(`/api/store/scenes/${scene!.id}/scenes.json`, undefined, "GET"), {
+        params: Promise.resolve({ sceneId: scene!.id }),
+      });
+
+    await establishSession(admin.accountId, admin.email);
+    expect((await read()).status).toBe(200);
+
+    await switchToApiToken(admin.accountId, admin.email);
+    expect((await read()).status).toBe(410);
+  });
+});
+
 describe("a read-only token may look but not ask the device", () => {
   // Several GETs queue a device command on a cache miss (asset bytes, the
   // asset listing, the current image). A read-only token gets what the hub
@@ -399,6 +574,138 @@ describe("enrolling a second factor revokes every API token", () => {
       }),
     );
     expect(asToken.status).toBe(401);
+  });
+});
+
+describe("turning two-factor on signs the other browsers out", () => {
+  // A session that signed in before the account had a second factor never
+  // answered one; it must not keep walking past the factor just enrolled.
+  it("revokes every other session when the first factor is confirmed", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const elsewhere = await createSession(db, {
+      accountId,
+      email,
+      providerIssuer: passwordProviderIssuer,
+      providerSubject: email,
+    });
+    const current = await establishSession(accountId, email);
+
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+    expect(await confirm.json()).toMatchObject({ ok: true, sessions_revoked: 1 });
+
+    const rows = await db
+      .select({ revokedAt: sessions.revokedAt, tokenHash: sessions.tokenHash })
+      .from(sessions)
+      .where(eq(sessions.accountId, accountId));
+    const byHash = new Map(rows.map((row) => [row.tokenHash, row.revokedAt]));
+    expect(byHash.get(hashSecret(elsewhere))).not.toBeNull();
+    expect(byHash.get(hashSecret(current))).toBeNull();
+  });
+});
+
+describe("minting an API token tells the owner", () => {
+  it("sends the security mail with the token's name and access", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { access: "read_only", name: "dash" }),
+    );
+    expect(minted.status).toBe(201);
+    expect(securityMails).toHaveLength(1);
+    expect(securityMails[0]).toMatchObject({ to: email, what: "api_token_created" });
+    expect(securityMails[0]?.detail).toContain('"dash"');
+    expect(securityMails[0]?.detail).toContain("read-only");
+    // The secret itself never rides the mail.
+    const { token } = (await minted.json()) as { token: string };
+    expect(securityMails[0]?.detail).not.toContain(token);
+  });
+});
+
+describe("on an account with two-factor, the password alone weakens nothing", () => {
+  // The password is the one credential a phishing page or a reused secret
+  // hands over. With a second factor on, a session that has not passed sudo
+  // mode (the second factor) recently cannot use it to remove that factor or
+  // delete the account.
+  async function userWithTotp() {
+    const { accountId, email } = await signUpVerifiedUser();
+    const sessionToken = await establishSession(accountId, email);
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+    return { accountId, email, sessionToken };
+  }
+
+  async function ageSession(sessionToken: string) {
+    await db
+      .update(sessions)
+      .set({ authenticatedAt: new Date(Date.now() - 60 * 60 * 1000) })
+      .where(eq(sessions.tokenHash, hashSecret(sessionToken)));
+  }
+
+  it("does not remove the authenticator from a stale session", async () => {
+    const { accountId, sessionToken } = await userWithTotp();
+    await ageSession(sessionToken);
+
+    const refused = await removeTotp(
+      request("/api/account/two-factor/totp", { password }, "DELETE"),
+    );
+    expect(refused.status).toBe(403);
+    const payload = (await refused.json()) as {
+      error: string;
+      reauth?: { methods?: { code?: boolean; password?: boolean } };
+    };
+    expect(payload.error).toBe("reauth_required");
+    // Sudo mode on a two-factor account is the second factor, not the password.
+    expect(payload.reauth?.methods).toMatchObject({ code: true, password: false });
+    const [row] = await db
+      .select({ confirmedAt: accountTotp.confirmedAt })
+      .from(accountTotp)
+      .where(eq(accountTotp.accountId, accountId));
+    expect(row?.confirmedAt).not.toBeNull();
+    expect(row).toBeDefined();
+  });
+
+  it("does not delete the account from a stale session", async () => {
+    const { accountId, sessionToken } = await userWithTotp();
+    await ageSession(sessionToken);
+
+    const refused = await deleteAccount(
+      request("/api/account/delete", { password }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("reauth_required");
+    const [row] = await db
+      .select({ id: accounts.id })
+      .from(accounts)
+      .where(eq(accounts.id, accountId));
+    expect(row?.id).toBe(accountId);
+  });
+
+  it("still deletes an account without two-factor on the password alone", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const sessionToken = await establishSession(accountId, email);
+    await ageSession(sessionToken);
+
+    const deleted = await deleteAccount(
+      request("/api/account/delete", { password }),
+    );
+    expect(deleted.status).toBe(200);
   });
 });
 

@@ -907,8 +907,15 @@ proc jsIsBigInt*(ctx: ptr JSContext, val: JSValueConst): bool =
 
 proc jsBytes*(ctx: ptr JSContext, val: JSValueConst): tuple[data: ptr UncheckedArray[uint8], len: int] =
   ## The bytes a typed array (a Uint8Array, a Uint8ClampedArray, any other
-  ## view) holds, in place: valid while `val` is, and never past the view.
-  ## `(nil, 0)` for any other value, with no exception left pending.
+  ## view) holds, in place, and never past the view. `(nil, 0)` for any other
+  ## value, with no exception left pending.
+  ##
+  ## Good only until JavaScript runs again: any code of the scene's can
+  ## detach the buffer (`transfer`) or resize it, and the pointer is then
+  ## into freed memory. Take it last, after every read of an argument that
+  ## can call back (a property of an object the caller made, a conversion of
+  ## anything that is not already a number or a string), and call nothing of
+  ## QuickJS's that can run a getter, a proxy or a setter while it is held.
   var offset, length, perElement: csize_t
   let buffer = JS_GetTypedArrayBuffer(ctx, val, addr offset, addr length, addr perElement)
   if JS_IsException(buffer) != 0:

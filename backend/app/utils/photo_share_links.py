@@ -64,6 +64,25 @@ def _map_strings(value: Any, transform: Callable[[str], str]) -> Any:
     return value
 
 
+# The chat tools whose arguments are a scene or an app on its way into the
+# owner's own scenes (delivered to the editor, saved, put on a frame,
+# rendered): the one place a placeholder turns back into the real link. Any
+# other tool gets the placeholder as the model wrote it, so text that talked
+# the model into copying a link into, say, a frame event, a setting or a
+# chat lookup sends nothing usable. The cloud's list is
+# SCENE_DELIVERY_TOOLS in share-links-in-scenes.ts.
+SCENE_DELIVERY_TOOLS = frozenset({
+    "create_scenes",
+    "update_scene",
+    "patch_scene",
+    "edit_app_source",
+    "render_scene",
+    "frame_scene_install",
+    "frame_scene_update",
+    "scene_create",
+})
+
+
 class PhotoLinkRedactor:
     """One chat request's swap of share tokens for placeholders. Each distinct
     token gets the next number the first time it is seen and keeps it, so the

@@ -11,7 +11,7 @@ import {
   type ResponseInputItem,
   type ResponseUsage,
 } from "./openai";
-import { PhotoLinkRedactor } from "../photos/share-links-in-scenes";
+import { PhotoLinkRedactor, SCENE_DELIVERY_TOOLS } from "../photos/share-links-in-scenes";
 import { buildSystemPrompt } from "./prompts";
 import {
   runTool,
@@ -221,9 +221,10 @@ export async function runAgentLoop({
 }): Promise<AgentLoopResult> {
   // A Photos share link is a credential for a whole album, and album scenes
   // carry one (share-links-in-scenes.ts). The model sees a placeholder in its
-  // place, in the context, the history and every tool result; the tool calls
-  // it makes get the real link back before they run, so the scenes it
-  // delivers and saves still play the album.
+  // place, in the context, the history and every tool result; the calls that
+  // deliver a scene (SCENE_DELIVERY_TOOLS) get the real link back before they
+  // run, so the scenes it delivers and saves still play the album, and every
+  // other call gets the placeholder.
   const photoLinks = new PhotoLinkRedactor();
   const redactedInput = photoLinks.redact(input);
   if (redactedInput !== input) {
@@ -348,7 +349,8 @@ export async function runAgentLoop({
         });
       } else {
         try {
-          const result = await runTool(call.name, photoLinks.restore(parsed.args), toolContext);
+          const args = SCENE_DELIVERY_TOOLS.has(call.name) ? photoLinks.restore(parsed.args) : parsed.args;
+          const result = await runTool(call.name, args, toolContext);
           output = result.text;
           images = result.images;
           emit({ label, name: call.name, status: "done", type: "tool" });

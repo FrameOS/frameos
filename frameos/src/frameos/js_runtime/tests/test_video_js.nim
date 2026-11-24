@@ -1,0 +1,204 @@
+import std/[json, monotimes, os, osproc, strutils, times, unittest]
+import pixie
+
+import frameos/js_runtime/app_runtime
+import frameos/types
+import frameos/values
+import frameos/utils/font # the typeface resolver the layout's text uses
+import frameos/utils/svg_frames
+
+# Video for JS apps (docs/video.md, js_runtime/js_video.nim): `frameos.video`
+# drawn with an <img>, decoded by ffmpeg at the size the layout gave it, the
+# scene's next render when the next frame is due, a frame repainting only the
+# video's box; `videoInfo`, `videoFrame`, `seekVideo`, `releaseVideo`.
+# Skipped where there is no ffmpeg.
+
+let haveFfmpeg = findExe("ffmpeg").len > 0 and findExe("ffprobe").len > 0
+let assets = getTempDir() / "frameos-video-js-" & $getCurrentProcessId()
+createDir(assets / "videos")
+
+if haveFfmpeg:
+  # A second of red and a second of blue, 10 frames a second, 160x90.
+  let made = execCmdEx("ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=red:size=160x90:rate=10:duration=1 " &
+    "-f lavfi -i color=c=blue:size=160x90:rate=10:duration=1 -filter_complex \"[0:v][1:v]concat=n=2:v=1[v]\" " &
+    "-map \"[v]\" -pix_fmt yuv420p -c:v mpeg4 " & quoteShell(assets / "videos" / "clip.mp4"))
+  doAssert made.exitCode == 0, made.output
+
+proc testLogger(config: FrameConfig): Logger =
+  var logger = Logger(frameConfig: config, enabled: true)
+  logger.log = proc(payload: JsonNode) = discard
+  logger.enable = proc() = logger.enabled = true
+  logger.disable = proc() = logger.enabled = false
+  logger
+
+type Ui = object
+  runtime: JsAppRuntime
+  owner: AppRoot
+  scene: FrameScene
+
+const
+  W = 120
+  H = 80
+
+proc newUi(source: string, id: string): Ui =
+  let config = FrameConfig(width: W, height: H, rotate: 0, scalingMode: "cover", debug: false,
+    saveAssets: %*false, assetsPath: assets)
+  result.scene = FrameScene(id: id.SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
+  result.owner = AppRoot(nodeId: 1.NodeId, nodeName: "ui", scene: result.scene, frameConfig: config)
+  result.runtime = newJsAppRuntime(category = "data", outputType = "image", source = source,
+    sourceName = "app.tsx")
+  result.runtime.assetGrant = agRead
+
+proc render(ui: Ui, target: Image = nil): tuple[image: Image, nextSleep: float] =
+  let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+    hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1,
+    decodeTargetImage: target, decodeTargetNodeId: 1.NodeId, decodeTargetScalingMode: "stretch",
+    wholeFrame: not target.isNil)
+  let image = ui.runtime.get(ui.owner, %*{}, context).asImage()
+  (image, context.nextSleep)
+
+proc playFor(ui: Ui, seconds: float, until: proc(): bool = nil, target: Image = nil): Image =
+  ## Renders as the runner would: again after the scene's nextSleep.
+  let deadline = epochTime() + seconds
+  while epochTime() < deadline:
+    let (image, wait) = ui.render(target)
+    result = image
+    if not until.isNil and until():
+      return
+    sleep(int(clamp(if wait < 0: 0.05 else: wait, 0.001, 0.2) * 1000))
+
+proc color(image: Image, x, y: int): ColorRGBA =
+  image[x, y].rgba
+
+# The player: the video on grey, 100x56 at (10, 12); its state in the scene's.
+const player = """
+export function get(app) {
+  const video = frameos.video('main', { src: app.state.src || 'videos/clip.mp4', paused: !!app.state.paused,
+    loop: !!app.state.loop })
+  frameos.setState('video', { state: video.state, time: video.time, duration: video.duration,
+    width: video.videoWidth, height: video.videoHeight, error: video.error || null, id: video.id })
+  if (app.state.seek !== undefined && app.state.seek !== null) {
+    frameos.seekVideo(video, app.state.seek)
+    frameos.setState('seek', null)
+  }
+  if (app.state.release) {
+    frameos.setState('released', frameos.releaseVideo(video))
+    frameos.setState('release', false)
+  }
+  return (
+    <div className="w-full h-full pt-[12px] pl-[10px] bg-slate-300">
+      <img className="w-[100px] h-[56px] object-contain" src={video} />
+    </div>
+  )
+}
+"""
+
+proc videoState(ui: Ui): JsonNode = ui.scene.state{"video"}
+
+suite "video in a JS app":
+  test "plays in its <img>, paced by the scene's next render":
+    if not haveFfmpeg:
+      skip()
+    else:
+      let ui = newUi(player, "tests/video-play")
+      let (first, wait) = ui.render()
+      check wait > 0 and wait < 0.2 # it asks for a render soon
+      check first.color(60, 40).r < 230 # black or grey until the first frame
+      let red = ui.playFor(20, proc(): bool = ui.videoState{"state"}.getStr() == "playing")
+      check ui.videoState{"state"}.getStr() == "playing"
+      check ui.videoState{"width"}.getInt() == 160
+      check ui.videoState{"duration"}.getFloat() > 1.9
+      discard red
+      let blue = ui.playFor(30, proc(): bool = ui.videoState{"state"}.getStr() == "ended")
+      check ui.videoState{"state"}.getStr() == "ended"
+      check blue.color(60, 40).b > 200 # the last frame stays
+      check blue.color(5, 5).r > 150 and blue.color(5, 5).b > 150 # grey around it
+      let (_, after) = ui.render()
+      check after < 0 # ended: no more renders for it
+
+  test "a frame repaints the video's box, not the UI":
+    if not haveFfmpeg:
+      skip()
+    else:
+      forgetPanelFrames()
+      let ui = newUi(player, "tests/video-damage")
+      ui.scene.state["loop"] = %*true
+      let target = newImage(W, H)
+      var frames = 0
+      var most = 0
+      # Until twelve frames played (a deadline only for a machine that never gets there).
+      let deadline = epochTime() + 30
+      while epochTime() < deadline and frames < 12:
+        beginPanelFrame(target.bufferPointer, 0)
+        svgFramePixelsForTest = -1
+        let (_, wait) = ui.render(target)
+        endPanelFrame()
+        if ui.videoState{"state"}.getStr() == "playing":
+          inc frames
+          if frames > 3:
+            most = max(most, svgFramePixelsForTest)
+        sleep(int(clamp(wait, 0.001, 0.2) * 1000))
+      check frames >= 6
+      checkpoint $most
+      check most > 0 and most <= 104 * 60 # the box and a pixel around it
+
+  test "seek, pause and release":
+    if not haveFfmpeg:
+      skip()
+    else:
+      let ui = newUi(player, "tests/video-seek")
+      ui.scene.state["seek"] = %*1.4
+      let blue = ui.playFor(20, proc(): bool = ui.videoState{"state"}.getStr() == "playing" and
+        ui.videoState{"time"}.getFloat() >= 1.3)
+      check blue.color(60, 40).b > 200
+      ui.scene.state["paused"] = %*true
+      discard ui.render()
+      check ui.videoState{"state"}.getStr() == "paused"
+      let (_, wait) = ui.render()
+      check wait < 0
+      ui.scene.state["release"] = %*true
+      discard ui.render()
+      check ui.scene.state{"released"}.getBool() == true
+
+  test "a missing file is an error the app can show":
+    let ui = newUi(player, "tests/video-missing")
+    ui.scene.state["src"] = %*"videos/nothing.mp4"
+    let (_, wait) = ui.render()
+    check ui.videoState{"state"}.getStr() == "error"
+    check "no such file" in ui.videoState{"error"}.getStr()
+    check ui.videoState{"id"}.getInt() == 0
+    check wait < 0
+
+  test "a path out of the assets is refused":
+    let ui = newUi(player, "tests/video-escape")
+    ui.scene.state["src"] = %*"../etc/passwd"
+    discard ui.render()
+    check ui.videoState{"state"}.getStr() == "error"
+    check "may read" in ui.videoState{"error"}.getStr()
+
+  test "videoInfo and videoFrame":
+    if not haveFfmpeg:
+      skip()
+    else:
+      let ui = newUi("""
+export function get(app) {
+  const info = frameos.videoInfo('videos/clip.mp4')
+  const still = frameos.videoFrame('videos/clip.mp4', { at: 1.5, width: 40, height: 30, keep: true })
+  const none = frameos.videoFrame('videos/nothing.mp4')
+  frameos.setState('info', info)
+  frameos.setState('still', { width: still.width, height: still.height, error: still.error || null })
+  frameos.setState('none', none.error || null)
+  return <div className="w-full h-full bg-white"><img className="w-[40px] h-[30px]" src={still.image} /></div>
+}
+""", "tests/video-info")
+      let (image, _) = ui.render()
+      let info = ui.scene.state{"info"}
+      check info{"width"}.getInt() == 160 and info{"height"}.getInt() == 90
+      check info{"duration"}.getFloat() > 1.9
+      check info{"fps"}.getFloat() > 9.9
+      check ui.scene.state{"still"}{"width"}.getInt() == 40
+      check ui.scene.state{"still"}{"error"}.kind == JNull
+      check image.color(20, 15).b > 200
+      check "no such file" in ui.scene.state{"none"}.getStr()
+
+removeDir(assets)

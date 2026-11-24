@@ -175,6 +175,30 @@ link_target() {
   readlink -f "$link" 2>/dev/null || true
 }
 
+# True when the release tree has an owner of its own for root to step down
+# to. False on a rehearsal container or a dev box where the "service user" is
+# whoever runs this script: there is no boundary to keep there.
+separate_service_user() {
+  id -u "$service_user" >/dev/null 2>&1 && [ "$(id -u "$service_user")" != "$(id -u)" ]
+}
+
+# A small text file out of a release tree (RELEASE, RELEASE_REF), read without
+# root's eyes. The tree is the service user's: it unpacked the archive, links
+# and all, and the app that runs from it can write there. A RELEASE_REF that
+# is a symlink to /etc/frameos-cloud/auth-web.env would be opened by root and
+# printed into the deploy's output, which is the CI log. So the service user
+# does the reading, and can show nothing it could not read anyway. Capped and
+# timed: a FIFO or an endless file in its place must not hang a deploy that
+# holds the lock. Empty when the file is missing or cannot be read.
+read_release_file() {
+  local file="$1"
+  if separate_service_user; then
+    runuser -u "$service_user" -- timeout 5 head -c 4096 -- "$file" 2>/dev/null || true
+  elif [ -f "$file" ] && [ ! -L "$file" ]; then
+    timeout 5 head -c 4096 -- "$file" 2>/dev/null || true
+  fi
+}
+
 # --- the activation history (the rollback stack) ---------------------------
 #
 # One resolved release directory per line, oldest first; the last line is
@@ -523,6 +547,13 @@ report_ops_drift() {
 # database URL. The URL travels in a 0600 file owned by the service user
 # rather than on a command line, where /proc would show it to every local
 # account.
+#
+# The file lives in /run, where only root can make or replace a name, as the
+# hub check's keys do. It used to be made inside the staging directory, which
+# the service user owns: root then wrote, chmod'ed and chown'ed it BY PATH,
+# and whoever runs as the service user (the live app) could swap the name for
+# a symlink in between and be handed any file on the box, this script
+# included. `chown -h` for the same reason: never through a link.
 run_migrations_as_service_user() {
   local staging="$1" database_url
   database_url="$(
@@ -537,12 +568,12 @@ run_migrations_as_service_user() {
     return 1
   }
   local url_file
-  url_file="$(mktemp "$staging/.database-url.XXXXXX")"
-  printf '%s' "$database_url" >"$url_file"
+  url_file="$(mktemp /run/frameos-cloud-migrate.XXXXXX)"
   chmod 600 "$url_file"
+  printf '%s' "$database_url" >"$url_file"
   local status=0
-  if id -u "$service_user" >/dev/null 2>&1 && [ "$(id -u "$service_user")" != "$(id -u)" ]; then
-    chown "$service_user" "$url_file"
+  if separate_service_user; then
+    chown -h "$service_user" "$url_file"
     runuser -u "$service_user" -- /bin/bash --noprofile --norc -c \
       'DATABASE_URL="$(cat "$1")"; export DATABASE_URL; cd "$2" && exec scripts/db-migrate.sh' \
       migrate "$url_file" "$staging/cloud" || status=$?
@@ -559,13 +590,17 @@ run_migrations_as_service_user() {
   return "$status"
 }
 
+# One line saying what a release is, for the log and --status. Its text comes
+# out of the release tree (see read_release_file), so it is also cut down to
+# printable ASCII on one line: it lands in /root/CODEX_LOG.md and a terminal.
 release_ref_line() {
-  local release="$1"
-  if [ -r "$release/RELEASE_REF" ]; then
-    tr '\n' ' ' <"$release/RELEASE_REF"
-    echo
-  elif [ -r "$release/RELEASE" ]; then
-    cat "$release/RELEASE"
+  local release="$1" line
+  line="$(read_release_file "$release/RELEASE_REF" | tr '\n' ' ' | LC_ALL=C tr -cd '\040-\176')"
+  if [ -z "${line// /}" ]; then
+    line="$(read_release_file "$release/RELEASE" | tr '\n' ' ' | LC_ALL=C tr -cd '\040-\176')"
+  fi
+  if [ -n "${line// /}" ]; then
+    echo "$line"
   else
     echo "unknown"
   fi
@@ -680,9 +715,12 @@ cmd_archive() {
     tar -C "$staging" -xf -
   fi
 
+  # -f only says the name is there; what it says is read as the service user
+  # (read_release_file), so a RELEASE that links to a file of root's names no
+  # release after it.
   [ -f "$staging/RELEASE" ] || die "the archive has no RELEASE file"
   local sha
-  sha="$(tr -dc '0-9a-f' <"$staging/RELEASE" | cut -c1-12)"
+  sha="$(read_release_file "$staging/RELEASE" | tr -dc '0-9a-f' | cut -c1-12)"
   [ -n "$sha" ] || die "the archive's RELEASE file is not a commit sha"
 
   local release
@@ -762,9 +800,8 @@ cmd_release_ref() {
     echo "none"
     return 0
   fi
-  if [ -r "$release/RELEASE_REF" ]; then
-    ref="$(sed -n 's/^ref //p' "$release/RELEASE_REF" | head -n 1)"
-  fi
+  ref="$(read_release_file "$release/RELEASE_REF" | sed -n '/^ref /{s/^ref //p;q;}' |
+    LC_ALL=C tr -cd '\040-\176')"
   echo "${ref:-unknown}"
 }
 

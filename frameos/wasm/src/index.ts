@@ -40,12 +40,13 @@ export {
   type CursorRect,
   type CursorSprite,
 } from './cursor'
-export { pageHasGesture, pickFiles, saveFile, type PickedFile, type PreviewFileRequest } from './files'
+export { pageHasGesture, pickFiles, safeFileName, saveFile, type PickedFile, type PreviewFileRequest } from './files'
 export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } from './dither'
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'
 export {
   POINTER_AXIS_MAX,
+  PREVIEW_GESTURE_MS,
   attachKeyboardInput,
   attachPointerInput,
   isPasteChord,
@@ -58,6 +59,7 @@ export {
   pointerMovePayload,
   pointerPictureRect,
   pointerTypeOf,
+  previewHasGesture,
   wheelNotches,
   writeHostClipboard,
   type AttachPointerOptions,

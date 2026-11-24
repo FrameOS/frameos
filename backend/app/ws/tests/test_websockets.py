@@ -55,6 +55,39 @@ class DummyRedis:
     async def ttl(self, *args, **kwargs):
         return -2
 
+    async def decr(self, *args, **kwargs):
+        pass
+
+    async def eval(self, *args, **kwargs):
+        # The login's attempt counter (app/api/auth.py): the first attempt, no lock.
+        return 1
+
+    def pipeline(self, *args, **kwargs):
+        return _DummyPipeline()
+
+    async def scan_iter(self, *args, **kwargs):
+        for key in ():
+            yield key
+
+
+class _DummyPipeline:
+    """hit_rate_limit's INCR + TTL (app/utils/rate_limit.py): one hit, no window yet."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def incr(self, *args, **kwargs):
+        pass
+
+    def ttl(self, *args, **kwargs):
+        pass
+
+    async def execute(self):
+        return [1, -1]
+
     async def scan_iter(self, *args, **kwargs):
         if False:
             yield None
@@ -516,6 +549,65 @@ def test_remote_ws_bounds_unauthenticated_sockets(client: TestClient, monkeypatc
             pass
     assert exc.value.code == 1013
     assert remote_ws.pending_handshakes == set()
+
+
+def test_remote_ws_bounds_unauthenticated_sockets_per_address(client: TestClient, monkeypatch) -> None:
+    """One address cannot fill every handshake slot: past its own share it is
+    turned away while another address still gets in, and a slot is given
+    back when its socket goes."""
+    from app.ws import remote_ws
+
+    monkeypatch.setattr(remote_ws, "MAX_PENDING_HANDSHAKES_PER_ADDRESS", 1)
+    monkeypatch.setattr(remote_ws, "pending_by_address", {"testclient": 1})
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with client.websocket_connect("/ws/remote"):
+            pass
+    assert (exc.value.code, exc.value.reason) == (1013, "server busy")
+    remote_ws.pending_by_address.clear()
+    with client.websocket_connect("/ws/remote") as ws:
+        ws.send_text("not json")
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()
+    assert remote_ws.pending_by_address == {}
+
+
+def test_remote_ws_handshake_has_one_deadline(client: TestClient, monkeypatch) -> None:
+    from app.ws import remote_ws
+
+    monkeypatch.setattr(remote_ws, "HANDSHAKE_DEADLINE_SECONDS", 0.2)
+    with client.websocket_connect("/ws/remote") as ws:
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1008, "handshake timeout")
+    assert remote_ws.pending_handshakes == set() and remote_ws.pending_by_address == {}
+
+
+def test_remote_ws_a_reply_past_the_cap_ends_the_connection(client: TestClient, monkeypatch) -> None:
+    from app.ws import remote_ws
+
+    monkeypatch.setattr(remote_ws, "REMOTE_MAX_REPLY_BYTES", 1024)
+    _, server_api_key = _remote_frame()
+    with client.websocket_connect("/ws/remote") as ws:
+        _handshake(ws, server_api_key)
+        # A command this connection is waiting on, its binary reply in flight.
+        server_ws = next(iter(remote_ws.active_sockets))
+        server_ws.scope["cmd_buffers"]["cmd-1"] = bytearray()
+        server_ws.scope["current_bin_cmd"] = "cmd-1"
+        ws.send_bytes(b"x" * 800)
+        ws.send_bytes(b"x" * 800)
+        with pytest.raises(WebSocketDisconnect) as exc:
+            ws.receive_text()
+    assert (exc.value.code, exc.value.reason) == (1009, "reply too large")
+
+
+def test_remote_reply_inflate_is_bounded():
+    import gzip as gzip_module
+
+    from app.middleware import _bounded_gunzip
+
+    bomb = gzip_module.compress(bytes(4 * 1024 * 1024))
+    assert _bounded_gunzip(bomb, 1024 * 1024) is None
+    assert _bounded_gunzip(gzip_module.compress(b"hello"), 1024) == b"hello"
 
 
 def test_remote_ws_marks_matching_buildroot_sd_image_deployed_on_first_boot(client: TestClient) -> None:

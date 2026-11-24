@@ -10,6 +10,13 @@
  * installing a scene that shows them is the approval. "Files" are the
  * frame's assets folder; "all files" anything on the frame.
  *
+ * config.json is read one way by everyone who decides on it
+ * (`parseAppConfig`, docs/app-config-fixtures.json): strict JSON, an object.
+ * The frame gives an app whose file is anything else nothing, a save or a
+ * publish of one is refused (`sceneAppConfigProblem`), and one already
+ * stored shows as asking for everything a JavaScript app can be given, never
+ * as asking for nothing.
+ *
  * A JavaScript app's list is set from its code whenever the scene is saved
  * (`withAppPermissions`), so it follows the code. The frame gives each JS app
  * exactly what its list asks for (frameos/src/frameos/
@@ -33,9 +40,10 @@
  * but never writing it. "frame" is `frameos.frame`: the frame page's facts and powers (Wi-Fi, rotation, scale, render,
  * restart, reboot) and an ESP32's serial console, while the frame page is allowed on the screen (docs/terminal.md).
  * "code" is `frameos.code`: every scene's source on the frame, saving scenes to it and asking its control plane's AI
- * for one, under the same condition (docs/code-editor.md).
+ * for one, under the same condition (docs/code-editor.md). "store" is `frameos.storeAction`: installing, previewing,
+ * updating and removing scenes on the frame and choosing its layout, as the Scene store does (docs/scene-store.md).
  */
-export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code'
+export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code' | 'store'
 export const SCENE_PERMISSIONS: readonly ScenePermission[] = [
   'shell',
   'files',
@@ -43,6 +51,7 @@ export const SCENE_PERMISSIONS: readonly ScenePermission[] = [
   'assets-write',
   'frame',
   'code',
+  'store',
 ]
 
 /** "Uses your <service> key": a settings namespace an app reads with getSetting. */
@@ -56,6 +65,7 @@ const permissionLabels: Record<ScenePermission, string> = {
   'assets-write': 'writes files',
   frame: 'changes frame settings',
   code: "reads and changes this frame's scenes",
+  store: 'installs and removes scenes',
 }
 
 const permissionDescriptions: Record<ScenePermission, string> = {
@@ -67,6 +77,8 @@ const permissionDescriptions: Record<ScenePermission, string> = {
   frame:
     "This scene can change the frame's Wi-Fi, rotation and scale, restart or reboot it, and run its console commands on an ESP32, as the frame's settings on its screen can.",
   code: "This scene can read the code and the settings of every scene on the frame (API keys set in their apps included), change them and add scenes, and ask the frame's control plane's AI to write scenes.",
+  store:
+    "This scene can install, preview, update and remove scenes from the scene store on the frame, and choose the frame's layout, as the Scene store does.",
 }
 
 /** The services behind the settings namespaces apps declare (secretSettings.ts takes its titles from here). */
@@ -160,7 +172,14 @@ export function sceneAccessTags(flags: readonly SceneAccessFlag[]): SceneAccessT
 
 /** The permissions that reach past the frame's own data: red tags, and a red button when an update gains one. */
 export function sceneAccessFlagIsRisky(flag: SceneAccessFlag): boolean {
-  return flag === 'shell' || flag === 'files' || flag === 'assets-write' || flag === 'frame' || flag === 'code'
+  return (
+    flag === 'shell' ||
+    flag === 'files' ||
+    flag === 'assets-write' ||
+    flag === 'frame' ||
+    flag === 'code' ||
+    flag === 'store'
+  )
 }
 
 /**
@@ -206,6 +225,8 @@ const assetStreamPattern = /\bopenAssetStream\b/g
 const frameCallPattern = /\bframeos\s*\.\s*frame\s*\(/
 // `frameos.code(...)`: the frame's scenes and its plane's scene AI.
 const codeCallPattern = /\bframeos\s*\.\s*code\s*\(/
+// `frameos.storeAction(...)`: the scenes on the frame and its layout.
+const storeCallPattern = /\bframeos\s*\.\s*storeAction\s*\(/
 const literalStreamModePattern = /^\\?(["'`])([rwa])\\?\1$/
 
 /**
@@ -279,16 +300,54 @@ function hasNimSource(sources: Record<string, string> | null): sources is Record
   return !!sources && Object.keys(sources).some((name) => name.endsWith('.nim'))
 }
 
-function parseConfig(text: string | undefined): Record<string, unknown> | null {
-  if (text === undefined) {
+/** How deep an app's config.json may nest: every reader's limit (docs/app-config-fixtures.json). */
+export const APP_CONFIG_MAX_DEPTH = 32
+
+function withinDepth(value: unknown, depth: number): boolean {
+  if (value === null || typeof value !== 'object') {
+    return true
+  }
+  if (depth <= 0) {
+    return false
+  }
+  for (const item of Array.isArray(value) ? value : Object.values(value)) {
+    if (!withinDepth(item, depth - 1)) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * An app's config.json as every reader takes it, or null when it is not one: strict JSON (`JSON.parse`), an
+ * object, at most APP_CONFIG_MAX_DEPTH containers deep. The frame's runtime reads exactly this
+ * (frameos/src/frameos/utils/strict_json.nim) and the backend too (app/utils/app_config.py);
+ * docs/app-config-fixtures.json is the corpus all three replay. A file that is not one asks for nothing on the
+ * frame, so no surface may read permissions or settings out of it some other way.
+ */
+export function parseAppConfig(text: unknown): Record<string, unknown> | null {
+  if (typeof text !== 'string') {
     return null
   }
+  let parsed: unknown
   try {
-    return record(JSON.parse(text))
+    parsed = JSON.parse(text)
   } catch {
     return null
   }
+  const config = record(parsed)
+  return config && withinDepth(config, APP_CONFIG_MAX_DEPTH) ? config : null
 }
+
+function parseConfig(text: string | undefined): Record<string, unknown> | null {
+  return parseAppConfig(text)
+}
+
+/**
+ * What an app whose config.json cannot be read is shown as asking for: everything a JavaScript app can be given.
+ * A frame from before the strict reader read such a file leniently, so it may hold any of them.
+ */
+const UNREADABLE_CONFIG_PERMISSIONS: readonly ScenePermission[] = ['assets', 'assets-write', 'frame', 'code', 'store']
 
 /** Known names only, in SCENE_PERMISSIONS order. */
 function orderedPermissions(values: Iterable<unknown>): ScenePermission[] {
@@ -321,6 +380,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
   let shell = false
   let frame = false
   let codeCall = false
+  let storeCall = false
   for (const [name, text] of Object.entries(sources)) {
     if (name.endsWith('.nim')) {
       shell = shell || nimShellPattern.test(text)
@@ -331,6 +391,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
     }
     frame = frame || frameCallPattern.test(text)
     codeCall = codeCall || codeCallPattern.test(text)
+    storeCall = storeCall || storeCallPattern.test(text)
     readCall = readCall ?? assetReadCallPattern.exec(text)?.[1] ?? null
     writeCall = writeCall ?? assetWriteCallPattern.exec(text)?.[1] ?? null
     for (const stream of text.matchAll(assetStreamPattern)) {
@@ -365,6 +426,10 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
     found.push('code')
     reasons.push('calls frameos.code')
   }
+  if (storeCall) {
+    found.push('store')
+    reasons.push('calls frameos.storeAction')
+  }
   const detection = { detected: orderedPermissions(found), reasons }
   if (cacheKey) {
     detectionCache.set(cacheKey, detection)
@@ -389,6 +454,11 @@ export interface AppAccess {
   settings: string[]
   /** Why `detected` is what it is, one short phrase per finding. */
   reasons: string[]
+  /**
+   * It carries a config.json that is not one (parseAppConfig): what it asks for cannot be read, so it shows as
+   * asking for everything a JavaScript app can be given, and no control plane saves or publishes it.
+   */
+  unreadable?: true
 }
 
 export interface SceneAccess {
@@ -411,15 +481,21 @@ function sceneAppAccess(
   const declared = Array.isArray(listed) ? orderedPermissions(listed) : null
   const { detected, reasons } = detectSources(sources, cacheKey)
   const name = config?.['name'] ?? fallback?.['name']
+  // A config.json that is there and is not one: nothing can be read from it, and "asks for nothing" is the one
+  // thing it must not be taken to say (only a JavaScript app is given anything by its list).
+  const unreadable = sources['config.json'] !== undefined && config === null && hasJavaScriptSource(sources)
   return {
     keyword,
     name: typeof name === 'string' && name.trim() ? name.trim() : keyword,
     kind: 'scene',
     declared,
     detected,
-    permissions: declared ?? detected,
+    permissions: unreadable
+      ? orderedPermissions([...UNREADABLE_CONFIG_PERMISSIONS, ...detected])
+      : (declared ?? detected),
     settings: stringList(config ? config['settings'] : fallback?.['settings']),
-    reasons,
+    reasons: unreadable ? ['its config.json is not valid JSON', ...reasons] : reasons,
+    ...(unreadable ? { unreadable: true as const } : {}),
   }
 }
 
@@ -523,6 +599,54 @@ export function sceneAccess(scene: unknown): SceneAccess {
 /** The tags one scene shows. */
 export function sceneAccessFlagsForScene(scene: unknown): SceneAccessFlag[] {
   return sceneAccess(scene).flags
+}
+
+/**
+ * What is wrong with a scene's apps' config.json files, in words, or null: the first JavaScript app (one of the
+ * scene's, or a node's own files, run by a node or not) whose config.json is not strict JSON and an object. Every
+ * door a scene is saved, published or imported through refuses such a scene on both control planes (the backend's
+ * app/utils/app_config.py says the same): the frame gives that app nothing, and no surface can show what it asks.
+ */
+export function sceneAppConfigProblem(scene: unknown): string | null {
+  const sceneRecord = record(scene)
+  if (!sceneRecord) {
+    return null
+  }
+  const named = (keyword: string): string => {
+    const sceneName = sceneRecord['name'] ?? sceneRecord['id']
+    return `App "${keyword}"${
+      typeof sceneName === 'string' && sceneName ? ` in scene "${sceneName}"` : ''
+    }: config.json is not valid JSON. Fix the file (no comments, no trailing commas) and save again.`
+  }
+  const broken = (sources: unknown): boolean => {
+    const files = record(sources)
+    return !!files && files['config.json'] !== undefined && parseAppConfig(files['config.json']) === null
+  }
+  for (const [keyword, app] of Object.entries(record(sceneRecord['apps']) ?? {})) {
+    if (broken(record(app)?.['sources'])) {
+      return named(keyword)
+    }
+  }
+  for (const node of Array.isArray(sceneRecord['nodes']) ? (sceneRecord['nodes'] as unknown[]) : []) {
+    const nodeRecord = record(node)
+    const data = record(nodeRecord?.['data'])
+    if (nodeRecord?.['type'] === 'app' && broken(data?.['sources'])) {
+      const keyword = data?.['keyword']
+      return named(typeof keyword === 'string' && keyword ? keyword : String(nodeRecord?.['id'] ?? 'app'))
+    }
+  }
+  return null
+}
+
+/** `sceneAppConfigProblem` over a scenes.json array: the first problem, or null. */
+export function scenesAppConfigProblem(scenes: unknown): string | null {
+  for (const scene of Array.isArray(scenes) ? scenes : []) {
+    const problem = sceneAppConfigProblem(scene)
+    if (problem) {
+      return problem
+    }
+  }
+  return null
 }
 
 /** The tags a set of scenes shows (a template, a store version, a frame's scenes.json). */
@@ -680,13 +804,21 @@ function configWithPermissions(
   return `${JSON.stringify(Object.fromEntries(entries), null, indent)}${text.endsWith('\n') ? '\n' : ''}`
 }
 
-function withSourcesPermissions(sources: unknown, onlyMissing: boolean): Record<string, unknown> | null {
+function withSourcesPermissions(
+  sources: unknown,
+  onlyMissing: boolean,
+  without: readonly ScenePermission[]
+): Record<string, unknown> | null {
   const strings = stringSources(sources)
   if (!hasJavaScriptSource(strings)) {
     return null
   }
   const { detected } = detectSources(strings, record(sources))
-  const next = configWithPermissions(strings['config.json'], detected, onlyMissing)
+  const next = configWithPermissions(
+    strings['config.json'],
+    without.length > 0 ? detected.filter((permission) => !without.includes(permission)) : detected,
+    onlyMissing
+  )
   return next === null ? null : { ...(record(sources) ?? {}), 'config.json': next }
 }
 
@@ -695,20 +827,26 @@ function withSourcesPermissions(sources: unknown, onlyMissing: boolean): Record<
  * its code, the way a save leaves it: a config.json that does not parse is
  * left alone.
  * With `onlyMissing`, only apps with no list at all get one (the cloud's
- * read-time stamp of scenes that predate the lists). Returns the same object
- * when nothing changes.
+ * read-time stamp of scenes that predate the lists). `without` leaves names
+ * out of a list written here (the cloud's push to a firmware from before a
+ * permission existed, so the payload changes when the firmware starts
+ * reading it). Returns the same object when nothing changes.
  */
-export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean } = {}): T {
+export function withAppPermissions<T>(
+  scene: T,
+  options: { onlyMissing?: boolean; without?: readonly ScenePermission[] } = {}
+): T {
   const sceneRecord = record(scene)
   if (!sceneRecord) {
     return scene
   }
   const onlyMissing = options.onlyMissing === true
+  const without = options.without ?? []
   const apps = record(sceneRecord['apps'])
   let nextApps: Record<string, unknown> | null = null
   for (const [keyword, app] of Object.entries(apps ?? {})) {
     const appRecord = record(app)
-    const sources = withSourcesPermissions(appRecord?.['sources'], onlyMissing)
+    const sources = withSourcesPermissions(appRecord?.['sources'], onlyMissing, without)
     if (appRecord && sources) {
       nextApps = nextApps ?? { ...apps }
       nextApps[keyword] = { ...appRecord, sources }
@@ -719,7 +857,8 @@ export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean
   for (let index = 0; index < nodes.length; index += 1) {
     const nodeRecord = record(nodes[index])
     const data = record(nodeRecord?.['data'])
-    const sources = nodeRecord?.['type'] === 'app' && data ? withSourcesPermissions(data['sources'], onlyMissing) : null
+    const sources =
+      nodeRecord?.['type'] === 'app' && data ? withSourcesPermissions(data['sources'], onlyMissing, without) : null
     if (nodeRecord && data && sources) {
       nextNodes = nextNodes ?? [...nodes]
       nextNodes[index] = { ...nodeRecord, data: { ...data, sources } }

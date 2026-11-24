@@ -8,6 +8,7 @@ import frameos/values
 import frameos/js_runtime/source_map
 import frameos/js_runtime/burrito
 import frameos/js_runtime/jsx_native
+import frameos/utils/json_depth
 from frameos/utils/memory import deviceMemoryBytes
 from frameos/scene_compiler import ProgramKit
 import lib/tz
@@ -427,7 +428,7 @@ proc jsValueToJson*(ctx: ptr JSContext, val: JSValueConst,
 
   let jsonText = stringifyJsValue(ctx, val, stringify)
   try:
-    return parseJson(jsonText)
+    return parseJsonBounded(jsonText)
   except CatchableError:
     return %*jsonText
 

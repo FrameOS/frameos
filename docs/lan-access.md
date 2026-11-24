@@ -93,12 +93,19 @@ Turning local network access on needs someone in front of the frame:
 
 The code is six uniform digits from the device's RNG, compared in constant
 time, single use, good for 300 seconds and five tries. Across codes the frame
-takes at most ten wrong ones an hour; after that both a new code and a typed
-one answer `rate_limited` until the hour is up, so asking for code after code
-cannot become a brute force. The count outlives a runtime restart or a reboot
-(the state file on the Pi, RTC memory on the ESP32), since the cloud could send
-those. It is never in an API response, a log line or a command listing. It is
-drawn onto the panel only and never leaves the frame as an image:
+takes at most ten wrong ones a window; after that both a new code and a typed
+one answer `rate_limited` until the window is over, so asking for code after
+code cannot become a brute force. The first window is an hour, counted from
+its first wrong code. Each window that saw a wrong code makes the next one
+twice as long, up to 128 hours, and thirty days without a wrong code make it
+an hour again: ten guesses an hour for ever were one frame in twelve a year
+for whoever only kept asking, and are one in 1,350 this way, while somebody
+who mistypes now and then never meets the limit (a window still takes ten).
+The count outlives a runtime restart or a reboot (the state file on the Pi,
+RTC memory on the ESP32), since the cloud could send those, and the ESP32
+counts the time on its RTC, not on the clock SNTP sets. It is never in an API
+response, a log line or a command listing. It is drawn onto the panel only and
+never leaves the frame as an image:
 
 - Pi: a white band across the middle with the label and the digits in black,
   drawn after the render is stored, so `image_get`, scene snapshots and

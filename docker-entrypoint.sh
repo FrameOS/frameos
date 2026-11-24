@@ -20,7 +20,15 @@ if [ -z "$REDIS_URL" ]; then
   echo "🥕 Starting local Redis (no REDIS_URL detected), data in $REDIS_DATA_DIR."
   redis-server --daemonize yes --dir "$REDIS_DATA_DIR" --appendonly yes --appendfsync everysec
 else
-  echo "REDIS_URL is set ($REDIS_URL). Skipping local Redis."
+  # The URL can carry a password (redis://:secret@host:6379/0), and this line
+  # goes to `docker logs` and the add-on's log page: say where, not with what.
+  # Everything up to the last @ goes; a form this does not understand is not
+  # shown at all.
+  redis_target="$(printf '%s' "$REDIS_URL" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://).*@#\1#')"
+  case "$redis_target" in
+    *@*) redis_target="address not shown" ;;
+  esac
+  echo "REDIS_URL is set ($redis_target). Skipping local Redis."
 fi
 
 cd backend
@@ -60,10 +68,17 @@ if [ -n "$HASSIO_TOKEN" ]; then
 
   # Ingress server on port 8990 in foreground. Always plain HTTP: only the
   # Supervisor's ingress proxy reaches it, and it brings its own TLS.
+  # --no-proxy-headers: this server mounts every router without user auth
+  # and lets in only the Supervisor's address (IngressPeerGuard). uvicorn's
+  # default trusts X-Forwarded-For from 127.0.0.1, so anything running in
+  # this container (a scene rendered on the server, a worker) could name
+  # the Supervisor's address in that header and walk in. The Supervisor is
+  # not on loopback, so it never needed the header honoured.
   echo "🔒 Launching HASSIO_RUN_MODE=ingress uvicorn on port 8990"
   HASSIO_RUN_MODE="ingress" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
-      --port 8990
+      --port 8990 \
+      --no-proxy-headers
 
 else
   # No Ingress: single server on port 8989 (HTTPS when a certificate is set)

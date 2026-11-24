@@ -80,6 +80,14 @@ test-pixie:
 	@python3 tools/nimble_paths.py
 	bash tools/run_pixie_tests.sh
 
+# pixie's fuzzers with the checks a release turns off left on, under
+# AddressSanitizer: broken PNGs, JPEGs, fonts and deflate streams through the
+# decoders and the readers that read where the bytes lie. A minute each;
+# tools/run_pixie_fuzzers.sh has the knobs and the findings still open.
+fuzz-pixie:
+	@python3 tools/nimble_paths.py
+	bash tools/run_pixie_fuzzers.sh
+
 test-shard:
 	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1..4" >&2; exit 1)
 	@python3 tools/nimble_paths.py

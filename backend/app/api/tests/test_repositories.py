@@ -626,3 +626,25 @@ async def test_update_templates_caps_and_guards_the_fetch(monkeypatch):
     repo.url = "http://example.com/huge.json"
     await repo.update_templates()
     assert repo.templates == [{"name": "kept"}]  # over the cap: cache untouched
+
+
+
+@pytest.mark.asyncio
+async def test_system_template_image_stays_inside_the_bundled_repositories(async_client, tmp_path, monkeypatch):
+    """The image route takes the same one-folder slugs as its scenes.json
+    sibling: ".." must not find a template.json above the repositories."""
+    import json as json_module
+
+    from app.api import repositories as repositories_module
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "template.json").write_text(json_module.dumps({"image": "./secret.png"}))
+    (outside / "secret.png").write_bytes(b"\x89PNG not for you")
+    bundled = tmp_path / "bundled"
+    (bundled / "samples" / "Clock").mkdir(parents=True)
+    monkeypatch.setattr(repositories_module, "SYSTEM_REPOSITORIES_PATH", bundled)
+
+    for path in ("..", "%2e%2e"):
+        response = await async_client.get(f"/api/repositories/system/{path}/templates/outside/image")
+        assert response.status_code == 404, (path, response.content)

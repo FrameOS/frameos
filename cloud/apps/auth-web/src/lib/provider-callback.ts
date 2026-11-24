@@ -26,6 +26,10 @@ import { notifyNewCloudUser } from "./signup-notifications";
 import { pendingSignInCookieName, pendingSignInCookieOptions } from "./two-factor";
 
 export type ProviderWebSignIn = {
+  // When the provider says the credentials were last proven, if not now
+  // (google-auth-time.ts). Only the session minted right here takes it: one
+  // that waits for a second factor proved that factor when it is minted.
+  authenticatedAt?: Date | undefined;
   claims: ProviderClaims;
   issuer: string;
   providerKey: SocialProviderKey;
@@ -127,6 +131,7 @@ export async function finishProviderWebSignIn(
       email: claims.email,
       emailVerified: claims.email_verified,
     },
+    authenticatedAt: input.authenticatedAt,
     method: providerKey,
     profile: {
       accountId,

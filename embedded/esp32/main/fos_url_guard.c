@@ -211,3 +211,12 @@ bool fos_url_download_is_first_party(const char *download_url, const char *base_
     }
     return false;
 }
+
+bool fos_url_origin_is_host(const char *origin, const char *host)
+{
+    if (origin == NULL || host == NULL || host[0] == '\0') return false;
+    const char *rest = NULL;
+    if (strncasecmp(origin, "http://", 7) == 0) rest = origin + 7;
+    else if (strncasecmp(origin, "https://", 8) == 0) rest = origin + 8;
+    return rest != NULL && strcasecmp(rest, host) == 0;
+}

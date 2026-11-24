@@ -98,3 +98,26 @@ export function voicePermissionContextLines(permissions: VoicePermissions): stri
     `- Voice chat may not: ${denied.length > 0 ? denied.join("; ") : "nothing is switched off"}`,
   ];
 }
+
+// Why a frame gets no voice turn at all, before a byte of audio is read. The
+// frame's token alone is not the owner talking: a turn is only what a held
+// voice key on a real microphone can start. Every firmware that has voice
+// chat says in its hello whether the board has a microphone and whether the
+// owner's switch lets it listen (`hardware.microphone`, `hardware.voiceChat`;
+// fos_cloud.c), so a frame that reports no microphone, or the switch off, is
+// refused. The backend's twin is `voice_refusal` (app/api/embedded_voice.py),
+// read off its own device_config and presets, which is where a backend keeps
+// both.
+export type VoiceRefusal = "no_microphone" | "voice_chat_off";
+
+export function voiceRefusal(hardware: unknown): VoiceRefusal | null {
+  const reported =
+    hardware && typeof hardware === "object" && !Array.isArray(hardware) ? (hardware as Record<string, unknown>) : {};
+  if (reported.voiceChat === false) {
+    return "voice_chat_off";
+  }
+  if (reported.microphone !== true) {
+    return "no_microphone";
+  }
+  return null;
+}

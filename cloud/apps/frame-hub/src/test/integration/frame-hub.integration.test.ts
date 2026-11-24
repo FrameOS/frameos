@@ -1800,6 +1800,50 @@ describe("command redelivery", () => {
     device.ws.close();
   });
 
+  // From 2026.11.15 `frameos.storeAction` is for an app whose list asks for
+  // "store". A Scene store published without a list gets one from the push,
+  // and that list names "store" for a firmware that asks for it only: so the
+  // update across it re-pushes, and the store on the frame keeps installing.
+  it("re-pushes an app that calls the store with its permission when the firmware starts asking for it", async () => {
+    const storeScenes = [
+      {
+        apps: {
+          shop: {
+            sources: {
+              "app.tsx": "export function get() { frameos.storeAction('install', { store: 'x' }); return <div /> }",
+              "config.json": '{\n  "name": "Shop"\n}\n',
+            },
+          },
+        },
+        edges: [],
+        id: "shop",
+        name: "Shop",
+        nodes: [{ data: { keyword: "shop" }, id: "n1", type: "app" }],
+      },
+    ];
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id, storeScenes);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.11.14" })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      frameos_version: "2026.11.15",
+      states: { active_scene: "shop" },
+    });
+    expect(ready.pending_commands).toBe(1);
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes push");
+    const [pushed] = push.scenes as Array<{ apps: Record<string, { sources: Record<string, string> }> }>;
+    expect(JSON.parse(pushed?.apps.shop?.sources["config.json"] ?? "{}")).toEqual({
+      name: "Shop",
+      permissions: ["store"],
+    });
+    expect(push.scene_id).toBe("shop");
+    device.ws.close();
+  });
+
   it("leaves a firmware update that crosses no retired app to the owner", async () => {
     const { account, frame, privateKey, token } = await createFrameFixture();
     await createAssignedStoreScene(account.id, frame.id, immichScenes);
@@ -2995,6 +3039,77 @@ describe("inbound size limits", () => {
       .from(frameLogs)
       .where(eq(frameLogs.frameId, frame.id));
     expect(rows[0]?.count).toBe(120);
+    device.ws.close();
+  });
+
+  // Every arrival is chained behind the one before, and several kinds cost a
+  // database round trip: without a bound, a socket that sends faster than it
+  // is handled queued without end, each waiting message held in memory.
+  it("closes a device that sends faster than the hub will listen", async () => {
+    const limited = await startExtraHub({
+      inboundLimits: {
+        backlogBytes: 32 * 1024 * 1024,
+        backlogMessages: 1024,
+        burst: 20,
+        perSecond: 1,
+      },
+    });
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, limited.port);
+    await handshake(device, privateKey);
+
+    // Cheap messages (a chunk of a stream nobody asked for), far past the
+    // burst: the bucket runs dry and the socket is closed.
+    for (let i = 0; i < 60; i += 1) {
+      device.send({ data: "", id: randomUUID(), seq: 1, type: "asset_chunk" });
+    }
+    expect(await device.closed).toBe(1008);
+  });
+
+  it("closes a device whose messages pile up unhandled", async () => {
+    const limited = await startExtraHub({
+      inboundLimits: {
+        backlogBytes: 32 * 1024 * 1024,
+        backlogMessages: 8,
+        burst: 100_000,
+        perSecond: 100_000,
+      },
+    });
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, limited.port);
+    await handshake(device, privateKey);
+
+    // Each batch is a database write; 400 of them arrive long before the
+    // first few are stored.
+    for (let i = 0; i < 400; i += 1) {
+      device.send({
+        id: randomUUID(),
+        logs: [{ payload: { line: `line ${i}` }, timestamp: Date.now() / 1000 }],
+        type: "log_batch",
+      });
+    }
+    expect(await device.closed).toBe(1008);
+  });
+
+  it("keeps a device that streams a file back as fast as it can", async () => {
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // 342 chunks of 24 KiB: an 8 MiB file the way an ESP32 sends it, all at
+    // once. Nobody asked for it, so nothing is stored; the socket must live.
+    const id = randomUUID();
+    const data = Buffer.alloc(24 * 1024, 7).toString("base64");
+    for (let seq = 0; seq < 342; seq += 1) {
+      device.send({ data, id, seq, type: "asset_chunk", ...(seq === 341 ? { done: true } : {}) });
+    }
+    const pingId = randomUUID();
+    device.send({ id: pingId, metrics: { sample: 1 }, type: "metrics" });
+    await waitFor(async () => {
+      const rows = await db.select().from(frameMetrics);
+      return rows.length > 0 ? rows : undefined;
+    }, "the metrics sent after the stream were stored");
+    expect(device.ws.readyState).toBe(WebSocket.OPEN);
     device.ws.close();
   });
 

@@ -479,3 +479,54 @@ async def test_out_of_rounds_ends_with_the_models_own_summary():
     assert "You have used all 2 steps" in json.dumps(openai.requests[2]["input"][-1])
     assert result.reply == "Rendered it twice; the list still overflows. Say continue."
     assert result.rounds == 3
+
+
+@pytest.mark.asyncio
+async def test_a_share_link_goes_back_only_into_a_scene_on_its_way_in():
+    """The model sees `pk_photo_link_1` for an album's link. A scene it
+    delivers gets the real link back; any other tool (a frame event, a
+    setting, a lookup) gets the placeholder as written, so injected text that
+    talked the model into copying the link elsewhere sends nothing usable.
+    The cloud's loop.ts does the same (loop.test.ts)."""
+    token = "pk_" + "q7W3e9R1" * 4
+    link = f"/api/photos/shared/{token}"
+    placeholder = "/api/photos/shared/pk_photo_link_1"
+    seen: dict[str, object] = {}
+
+    class Tools(ai_chat_agent.ToolBox):
+        def definitions(self):
+            return []
+
+        async def call(self, name, args):
+            seen[name] = args
+            return ai_chat_agent.ToolOutput(text="{}")
+
+    scene = {"id": "album", "nodes": [{"id": "n1", "data": {"config": {"album": placeholder}}}]}
+    openai = ScriptedOpenAi([
+        ("", [
+            call("update_scene", {"scene": scene}, "c1"),
+            call("frame_scene_install", {"confirm": True, "frame_id": 1, "scenes": [scene]}, "c2"),
+            call("frame_event", {"confirm": True, "frame_id": 1, "event": "x", "payload": {"url": placeholder}}, "c3"),
+            call("settings_update", {"homeAssistant": {"url": f"https://elsewhere.example{placeholder}"}}, "c4"),
+        ]),
+        ("Done.", []),
+    ])
+
+    async def emit(event):
+        pass
+
+    original = ai_chat_agent.stream_response
+    ai_chat_agent.stream_response = openai
+    try:
+        await ai_chat_agent.run_agent_loop(
+            api_key="sk-test", model="gpt-test", reasoning_effort="low", instructions="",
+            input_items=[{"role": "user", "content": f"The album scene: {link}"}], tools=Tools(), emit=emit,
+        )
+    finally:
+        ai_chat_agent.stream_response = original
+
+    assert token not in json.dumps(openai.requests)
+    assert seen["update_scene"]["scene"]["nodes"][0]["data"]["config"]["album"] == link
+    assert seen["frame_scene_install"]["scenes"][0]["nodes"][0]["data"]["config"]["album"] == link
+    assert token not in json.dumps(seen["frame_event"]) and "pk_photo_link_1" in json.dumps(seen["frame_event"])
+    assert token not in json.dumps(seen["settings_update"])

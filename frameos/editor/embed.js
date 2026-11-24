@@ -28,9 +28,10 @@ export function createFrameOSEditor({
   onReady,
 }) {
   const iframe = document.createElement('iframe')
-  // Tell the editor who is allowed to drive it: it accepts postMessage only
-  // from the parent origin named on its URL (or, failing that, the framing
-  // document's referrer origin) and replies only to it — never to '*'.
+  // Tell the editor which host this is: it accepts postMessage only from an
+  // origin its own page trusts (its own, and those its index.html lists in
+  // <meta name="frameos-editor-parent-origins">), picks this one among them
+  // and replies only to it — never to '*'.
   const editorUrl = new URL(url, location.href)
   editorUrl.searchParams.append('parentOrigin', location.origin)
   iframe.src = editorUrl.toString()

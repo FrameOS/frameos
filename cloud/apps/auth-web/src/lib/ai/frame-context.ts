@@ -35,9 +35,12 @@ function renderSizeFrom(width: unknown, height: unknown): { width: number; heigh
 export async function assignedScenes(
   db: ReturnType<typeof createDb>,
   frameId: string,
-): Promise<{ isLayout: boolean; sceneId: string; name: string }[]> {
+): Promise<{ accountId: string; isLayout: boolean; sceneId: string; name: string }[]> {
   return db
     .select({
+      // Whose store scene it is: an installed scene is not always the
+      // frame owner's own.
+      accountId: storeScenes.accountId,
       isLayout: frameSceneAssignments.isLayout,
       name: storeScenes.name,
       sceneId: frameSceneAssignments.sceneId,
@@ -55,6 +58,8 @@ export async function frameContextBlock(
 ): Promise<{
   block: string;
   frameId: string | null;
+  /** The frame holds a scene somebody else published (an install from the store). */
+  holdsOthersScenes?: boolean;
   renderDevice?: RenderDevice | null;
   /** The frame's own render scale; null = automatic. */
   renderScale?: number | null;
@@ -108,6 +113,7 @@ export async function frameContextBlock(
   return {
     block: lines.join("\n"),
     frameId: frame.id,
+    holdsOthersScenes: assignments.some((row) => row.accountId !== accountId),
     renderDevice,
     renderScale: frameRenderScale(frame),
     resolution: renderSizeFrom(width, height),

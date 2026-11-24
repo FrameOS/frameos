@@ -379,9 +379,13 @@ One-time setup, in order:
    keys that open the storage box. Rotate it like any other production
    secret.
 
-   Two rules keep the key's reach at "deploy" rather than "root": the
+   Three rules keep the key's reach at "deploy" rather than "root": the
    migrations run as the service user with `DATABASE_URL` alone (not the
-   env file), and the two root-run scripts — `frameos-cloud-update` and this
+   env file); root never opens, writes or chowns a name inside a release
+   tree, which the service user unpacked and its app can write to (what a
+   release says of itself, `RELEASE` and `RELEASE_REF`, is read as the
+   service user, and the file that hands the migrations their URL lives in
+   `/run`); and the two root-run scripts — `frameos-cloud-update` and this
    wrapper — are never taken from the archive. A deploy that carries a newer
    copy only *says so* in its log; ship them yourself, from a checkout, with
    `cloud/ops/deploy/install.sh --scripts-only` on the box (the wrapper is
@@ -835,7 +839,12 @@ http://localhost:3000/api/auth/google/callback
 
 Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the environment. When
 they are unset, the login page hides the Google button and password sign-in
-keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
+keeps working. Turn the `auth_time` claim on for the client in Google's
+console, then set `GOOGLE_REQUIRE_AUTH_TIME=1`: a Google sign-in then counts
+as a recent proof of credentials (sudo mode) only as far as Google's own last
+sign-in is recent (`docs/auth.md` "Re-authentication"). Set the variable
+without the console switch and no Google sign-in is ever recent: Google-only
+accounts cannot pass sudo mode. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 

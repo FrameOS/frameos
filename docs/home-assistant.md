@@ -80,7 +80,10 @@ fields:
 So a template reads `state_attr('sensor.kitchen_frame_scene', 'fields').city`,
 and a trigger on the attribute fires when the frame itself changes it. Fields
 of type `json`, `image`, `font`, `node`, `scene` and `path` are left out
-(assets and wiring, not settings), private ones too. The values come from where
+(assets and wiring, not settings), private ones too, and so is any field
+marked `secret` (the topic is retained: every client of the broker reads it
+and the recorder keeps it; such a field can still be set from Home Assistant,
+its value is never published). The values come from where
 the backend keeps a frame's scene state (a virtual frame's and a thin client's
 store, a device's `/states` cache, else the device itself), re-read a second
 after the frame logs a scene change or a `setSceneState` / `setCurrentScene` /

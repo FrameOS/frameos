@@ -1,0 +1,193 @@
+[
+  {
+    "id": "archive-films",
+    "name": "Archive films",
+    "settings": {
+      "category": "Art & galleries",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "windowSize": "800x450",
+      "icon": "M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z",
+      "needs": [
+        "fast",
+        "touch",
+        "video"
+      ]
+    },
+    "fields": [
+      {
+        "name": "collection",
+        "label": "Collection",
+        "type": "select",
+        "value": "feature_films",
+        "options": [
+          {
+            "value": "feature_films",
+            "label": "Feature films"
+          },
+          {
+            "value": "animationandcartoons",
+            "label": "Cartoons"
+          },
+          {
+            "value": "silent_films",
+            "label": "Silent films"
+          },
+          {
+            "value": "Film_Noir",
+            "label": "Film noir"
+          },
+          {
+            "value": "SciFi_Horror",
+            "label": "Sci-fi & horror"
+          },
+          {
+            "value": "classic_tv",
+            "label": "Classic TV"
+          },
+          {
+            "value": "prelinger",
+            "label": "Prelinger Archives (ads, educational and industrial films)"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "titles",
+        "label": "Show the title at the start",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "value": "contain",
+        "options": [
+          {
+            "value": "contain",
+            "label": "The whole picture, black bars around it"
+          },
+          {
+            "value": "cover",
+            "label": "Fill the screen, the edges cropped"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fps",
+        "label": "Frames a second, at most",
+        "type": "select",
+        "value": "30",
+        "hint": "Fewer is less work for the Pi; a video slower than this keeps its own.",
+        "options": [
+          {
+            "value": "10",
+            "label": "10"
+          },
+          {
+            "value": "15",
+            "label": "15"
+          },
+          {
+            "value": "24",
+            "label": "24"
+          },
+          {
+            "value": "30",
+            "label": "30"
+          },
+          {
+            "value": "60",
+            "label": "60"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "63141b64-dcf5-5f13-83bf-f9cfdbe1027e",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "9b12ca69-57b2-5e81-ad4e-183fbbaae004",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "archiveFilms",
+          "config": {}
+        }
+      },
+      {
+        "id": "aa15c886-2559-5fa7-8ddb-ef3e03fee0ac",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "68418e9c-13f6-58e8-86b4-6984f7452258",
+        "type": "appNodeEdge",
+        "source": "63141b64-dcf5-5f13-83bf-f9cfdbe1027e",
+        "target": "aa15c886-2559-5fa7-8ddb-ef3e03fee0ac",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "d82b5b30-0322-54d4-989c-dceae79ff42d",
+        "type": "codeNodeEdge",
+        "source": "9b12ca69-57b2-5e81-ad4e-183fbbaae004",
+        "target": "aa15c886-2559-5fa7-8ddb-ef3e03fee0ac",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "archiveFilms": {
+        "name": "Archive films",
+        "category": "data",
+        "description": "Plays films from an Internet Archive collection (archive.org) one after another, from its most watched, with the title and year at the start; a tap moves on.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Archive films\",\n  \"category\": \"data\",\n  \"description\": \"Plays films from an Internet Archive collection (archive.org) one after another, from its most watched, with the title and year at the start; a tap moves on.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Archive films\n// Old films from the Internet Archive (archive.org), free to watch: feature\n// films, the Prelinger Archives' ephemeral films, cartoons, silent films,\n// film noir, classic TV. One at a time from the collection's most watched,\n// its title and year at the start, the next one when it ends; a tap moves on.\n// Plays on a Raspberry Pi (docs/video.md); no account or key needed.\nconst SEARCH = 'https://archive.org/advancedsearch.php'\nconst POPULAR_PAGES = 20 // of 50: a film from the collection's 1,000 most downloaded\nconst FORMATS = ['h.264', 'MPEG4', 'h.264 IA', '512Kb MPEG4']\nconst TITLE_MS = 7000\nconst RETRY_MS = 60000\n\nlet current = null // { id, title, year, url }\nlet startedAt = 0\nlet problem = ''\nlet problemAt = 0\nlet collection = ''\nlet tries = 0\n\nfunction fetchJson(url) {\n  const r = frameos.httpRequest(url, { timeoutMs: 30000, headers: { Accept: 'application/json' } })\n  if (r.status !== 200) throw new Error(r.status ? `archive.org answered HTTP ${r.status}` : `archive.org did not answer: ${r.error ?? ''}`)\n  return JSON.parse(r.body ?? 'null')\n}\n\nfunction pickFilm(name) {\n  const q = encodeURIComponent(`collection:(${name}) AND mediatype:(movies)`)\n  const page = 1 + Math.floor(Math.random() * POPULAR_PAGES)\n  const found = fetchJson(`${SEARCH}?q=${q}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=year&sort%5B%5D=downloads+desc&rows=50&page=${page}&output=json`)\n  const docs = found?.response?.docs ?? []\n  if (!docs.length) throw new Error(`Nothing found in the collection “${name}”.`)\n  const doc = docs[Math.floor(Math.random() * docs.length)]\n  const id = String(doc.identifier)\n  // Its files: the first video in a format a Pi plays well.\n  const meta = fetchJson(`https://archive.org/metadata/${encodeURIComponent(id)}`)\n  const files = Array.isArray(meta?.files) ? meta.files : []\n  let file = null\n  for (const format of FORMATS) {\n    file = files.find((f) => f?.format === format && typeof f.name === 'string')\n    if (file) break\n  }\n  if (!file) return null\n  return {\n    id,\n    title: String(meta?.metadata?.title ?? doc.title ?? id),\n    year: String(meta?.metadata?.year ?? doc.year ?? '').slice(0, 4),\n    url: `https://archive.org/download/${encodeURIComponent(id)}/${file.name.split('/').map(encodeURIComponent).join('/')}`,\n  }\n}\n\nfunction next(name) {\n  // A film with no video file a Pi plays is skipped (a few tries).\n  for (let i = 0; i < 4; i++) {\n    const film = pickFilm(name)\n    if (film) {\n      current = film\n      startedAt = Date.now()\n      return\n    }\n  }\n  throw new Error('No playable film found this time.')\n}\n\nfunction Message({ title, text, k }) {\n  return (\n    <div className=\"w-full h-full flex flex-col items-center justify-center bg-black text-white gap-[8px] px-[24px]\">\n      <span className={`text-[${Math.round(22 * k)}px] font-bold`}>{title}</span>\n      <span className={`text-[${Math.round(15 * k)}px] text-white/70 text-center`}>{text}</span>\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const width = context?.imageWidth ?? app.frame.width\n  const height = context?.imageHeight ?? app.frame.height\n  const k = Math.max(0.6, Math.min(1.6, Math.min(width / 800, height / 480) * 1.15))\n  const name = String(app.state.collection || 'feature_films')\n  if (name !== collection) {\n    collection = name\n    current = null\n  }\n  if (problem && Date.now() - problemAt < RETRY_MS) {\n    frameos.setNextSleep(Math.max(1, (RETRY_MS - (Date.now() - problemAt)) / 1000))\n    return <Message k={k} title=\"Archive films\" text={problem} />\n  }\n  const fit = app.state.fit === 'cover' ? 'cover' : 'contain'\n  const play = () => frameos.video('film', { src: current.url, fit, fps: Number(app.state.fps) || 30 })\n  let video = null\n  try {\n    if (!current) next(name)\n    video = play()\n    if (video.state === 'ended' || (video.state === 'error' && video.id !== 0)) {\n      if (video.state === 'error') frameos.log(`Skipping ${current.id}: ${video.error}`)\n      tries = video.state === 'error' ? tries + 1 : 0\n      if (tries > 3) throw new Error(`Films do not play: ${video.error}`)\n      const before = current.url\n      next(name)\n      if (current.url === before) frameos.releaseVideo(video)\n      video = play()\n    }\n    problem = ''\n  } catch (error) {\n    problem = String(error?.message ?? error)\n    problemAt = Date.now()\n    frameos.setNextSleep(RETRY_MS / 1000)\n    return <Message k={k} title=\"Archive films\" text={problem} />\n  }\n  if (video.state === 'error') {\n    const here = video.id === 0 && /cannot play it|, not here/.test(video.error || '')\n    if (!here) {\n      problem = video.error || 'The film did not play.'\n      problemAt = Date.now()\n      current = null\n    }\n    return <Message k={k} title={here ? 'Video does not play here' : 'Archive films'} text={video.error} />\n  }\n  const titled = app.state.titles !== false && Date.now() - startedAt < TITLE_MS\n  if (titled) frameos.setNextSleep(Math.max(0.5, (TITLE_MS - (Date.now() - startedAt)) / 1000))\n  return (\n    <div className=\"relative w-full h-full bg-black\" onClick={() => { current = null }}>\n      <img className={`w-full h-full object-${fit}`} src={video} />\n      {titled ? (\n        <div className={`absolute left-[${Math.round(16 * k)}px] bottom-[${Math.round(14 * k)}px] flex flex-col px-[12px] py-[8px] rounded-[8px] bg-black/60 max-w-[80%]`}>\n          <span className={`text-[${Math.round(18 * k)}px] font-bold text-white truncate`}>{current.title}</span>\n          <span className={`text-[${Math.round(13 * k)}px] text-white/70`}>\n            {[current.year, 'Internet Archive'].filter(Boolean).join(' · ')}\n          </span>\n        </div>\n      ) : null}\n    </div>\n  )\n}\n"
+        }
+      }
+    }
+  }
+]

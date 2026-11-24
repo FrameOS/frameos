@@ -416,12 +416,80 @@ async def test_an_install_that_replaces_a_scene_asks_for_nothing_more(async_clie
     assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt"]
     assert frame.scenes[1]["name"] == "My radar" and frame.scenes[1]["origin"]["version"] == "2"
 
-    # A scene the frame does not hold installs with what it asks for, as before.
-    store[OTHER] = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), ["frame"])
+    # A scene the frame does not hold installs when it asks for nothing red.
+    store[OTHER] = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), ["assets"])
     fresh = await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})
     assert fresh.status_code == 200, fresh.text
     db.refresh(frame)
     assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt", "term-rt"]
+
+
+@pytest.mark.asyncio
+async def test_a_new_scene_that_asks_for_a_red_permission_is_the_owners(async_client, no_auth_client, db, store, redis):
+    # (`redis`: a flushed database, so this file's many asks do not run into
+    # the frame's 60 in 15 minutes.)
+    # The store on the frame shows no tags, and `storeAction` can be called
+    # with nobody at the frame: a scene new to the frame that reaches past
+    # its own data is installed and previewed from the workspace, where its
+    # red tag is seen.
+    frame = await panel_frame(async_client, db)
+    for permissions, needs in [
+        (["frame"], ["frame"]),
+        (["assets", "assets-write"], ["assets-write"]),
+        (["code", "store", "files"], ["code", "files", "store"]),
+    ]:
+        store[OTHER] = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), permissions)
+        for action in ("install", "preview"):
+            refused = await ask(no_auth_client, frame, {"action": action, "scene_id": OTHER})
+            assert refused.status_code == 403, refused.text
+            assert refused.json() == {"ok": False, "error": "needs_owner", "needs": needs}
+    # Code that calls a power counts whatever its list says, and so does a
+    # config.json that is no config (a frame from before the strict reader
+    # read such a file its own way).
+    sneaky = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), [])
+    sneaky[0]["apps"]["t"]["sources"]["app.ts"] = "export function get() { frameos.storeAction('install', {}) }"
+    store[OTHER] = sneaky
+    assert (await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})).json()["needs"] == ["store"]
+    lenient = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), [])
+    lenient[0]["apps"]["t"]["sources"]["config.json"] = '{\n  // hidden\n  "permissions": ["frame"],\n}'
+    store[OTHER] = lenient
+    hidden = await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})
+    assert hidden.status_code == 403 and hidden.json()["needs"] == ["assets-write", "code", "frame", "store"]
+    # In a pack, the scene that replaces a held copy is compared with it and
+    # the one that is new may ask for nothing red.
+    frame.scenes = [*frame.scenes, asking_for([{"id": "term-rt", "name": "Mine", "nodes": [], "edges": []}], ["frame"])[0]]
+    db.add(frame)
+    db.commit()
+    store[OTHER] = asking_for(store_scene(OTHER, 2, ids=("term-rt", "extra-rt")), ["frame"])
+    pack = await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})
+    assert pack.status_code == 403 and pack.json()["needs"] == ["frame"]
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "term-rt"]
+    assert commands(db, frame, "set_scenes") == []
+    assert commands(db, frame, "set_current_scene") == []
+
+
+@pytest.mark.asyncio
+async def test_a_scene_that_runs_shell_commands_is_never_the_frames_to_take(async_client, no_auth_client, db, store, redis):
+    # As on the cloud (`scene_not_allowed`), and what the store's listing for
+    # frames leaves out: no install, no preview, no update, no entry among
+    # the updates.
+    frame = await panel_frame(async_client, db)
+    shell = store_scene(OTHER, 2, ids=("shot-rt",))
+    shell[0]["nodes"] = [{"id": "n1", "type": "app", "data": {"keyword": "data/chromiumScreenshot"}}]
+    store[OTHER] = shell
+    for action in ("install", "preview"):
+        refused = await ask(no_auth_client, frame, {"action": action, "scene_id": OTHER})
+        assert refused.status_code == 409, refused.text
+        assert refused.json() == {"ok": False, "error": "scene_not_allowed"}
+    frame.scenes = [*frame.scenes, *store_scene(OTHER, 1, ids=("shot-rt",))]
+    db.add(frame)
+    db.commit()
+    update = await ask(no_auth_client, frame, {"action": "update", "scene_id": OTHER})
+    assert update.status_code == 409 and update.json()["error"] == "scene_not_allowed"
+    assert (await ask(no_auth_client, frame, {"action": "updates"})).json() == {"ok": True, "updates": []}
+    db.refresh(frame)
+    assert frame.scenes[1]["origin"]["version"] == "1"
 
 
 @pytest.mark.asyncio

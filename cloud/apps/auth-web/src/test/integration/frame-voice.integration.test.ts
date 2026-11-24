@@ -15,6 +15,7 @@ import {
   aiChats,
   createDb,
   frameCommands,
+  frames,
   photoShares,
   storeScenes,
   storeSceneVersions,
@@ -224,7 +225,9 @@ async function activeFrame() {
     postJson("/api/frames/enroll", {
       claim_token,
       frameos_version: "2026.10.20",
-      hardware: { height: 480, platform: "esp32-s3", width: 800 },
+      // A board with a microphone and the owner's switch on, as every
+      // firmware with voice chat reports them (fos_cloud.c).
+      hardware: { height: 480, microphone: true, platform: "esp32-s3", voiceChat: true, width: 800 },
       public_key: devicePublicKey(),
     }),
   );
@@ -679,6 +682,26 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(newest.map((row) => row.type)).toEqual(["set_scenes", "set_scenes"]);
     const scene = ((newest[1]!.payload as { preview: { scene: { nodes: { data: { config: Record<string, string> } }[] } } }).preview.scene);
     expect(scene.nodes[1]!.data.config.fontColor).toBe("#ff0000");
+  });
+
+  it("gives no turn to a frame that reports no microphone, or whose switch is off", async () => {
+    // The frame's token is not the owner talking: a turn is what a held voice
+    // key on a real microphone starts.
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const report = async (hardware: Record<string, unknown>) => {
+      await db.update(frames).set({ hardware }).where(eq(frames.id, frame.frame_id));
+      const response = await chunk(frame.frame_id, frame.access_token, "sess-gate", 0, true, SECOND);
+      return [response.status, ((await response.json()) as { error?: string }).error];
+    };
+    expect(await report({ platform: "esp32-s3" })).toEqual([403, "no_microphone"]);
+    expect(await report({ microphone: false, platform: "esp32-s3", voiceChat: true })).toEqual([403, "no_microphone"]);
+    expect(await report({ microphone: true, platform: "esp32-s3", voiceChat: false })).toEqual([403, "voice_chat_off"]);
+    expect(heard.calls).toEqual([]);
+    expect(script.requests).toEqual([]);
+    script.rounds.push({ calls: [], text: "Hello." });
+    expect((await report({ microphone: true, platform: "esp32-s3", voiceChat: true }))[0]).toBe(200);
+    expect(heard.calls.length).toBe(1);
   });
 
   it("refuses another frame's token, a gap in the chunks and an oversized chunk", async () => {

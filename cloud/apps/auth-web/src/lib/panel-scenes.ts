@@ -23,7 +23,12 @@ import {
   readFrameSettings,
   supersedePendingCommands,
 } from "./frames";
-import { declaredSceneGrants, grantsWidenedBy, type DeclaredSceneGrants } from "./panel-code-grants";
+import {
+  declaredSceneGrants,
+  grantsWidenedBy,
+  redPermissionsAsked,
+  type DeclaredSceneGrants,
+} from "./panel-code-grants";
 import { versionIsLayout, type SceneLayouts } from "./scene-layouts";
 import { frameosVersionSatisfies } from "./store-versions";
 import type { RequestedScene } from "./frame-scenes";
@@ -76,6 +81,12 @@ function wearingLayout(
 //   settings key: panel-code-grants.ts) is the owner's (`needs_owner`), as
 //   is an install whose scenes replace scenes the frame holds under the same
 //   ids and ask for more than they did.
+// - nothing new that asks for a red permission (writing the frame's files,
+//   reading all of them, the frame's settings, its scenes' code, the store
+//   itself: `redScenePermissions`): an install or a preview of such a scene
+//   is the owner's too (`needs_owner`). The store on the frame shows no
+//   tags, and `storeAction` can be called with nobody at the frame; the
+//   workspace is where a red tag is seen and accepted.
 // - nothing when the owner turned the settings on the frame's screen off
 //   (`frame_settings_on_screen`): the store page is one of them.
 //
@@ -316,20 +327,24 @@ export async function runPanelSceneAction(
     // frame, so, as for an update, the scenes that take its place may ask for
     // nothing more than the copies they replace (backend panel_scenes.py). A
     // set that cannot be built is refused by the push below.
+    // A scene that takes no held scene's place is new to the frame: it may
+    // ask for no red permission.
     const built = await buildScenesPayloadForFrame(db, frame.id);
-    if (!("error" in built)) {
-      const newIds = new Set(scene.scenes.map((entry) => entry.id));
-      const replaced = built.scenes.filter((entry) => newIds.has((entry as { id?: unknown } | null)?.id));
-      if (replaced.length > 0) {
-        const heldIds = new Set(replaced.map((entry) => (entry as { id?: unknown }).id));
-        const needs = grantsWidenedBy(
-          scenesGrants(replaced),
-          scenesGrants(scene.scenes.filter((entry) => heldIds.has(entry.id))) ?? { permissions: [], settings: [] },
-        );
-        if (needs.length > 0) {
-          return refused("needs_owner", 403, { needs });
-        }
-      }
+    const newIds = new Set(scene.scenes.map((entry) => entry.id));
+    const replaced =
+      "error" in built ? [] : built.scenes.filter((entry) => newIds.has((entry as { id?: unknown } | null)?.id));
+    const heldIds = new Set<unknown>(replaced.map((entry) => (entry as { id?: unknown }).id));
+    const needs = [
+      ...(replaced.length > 0
+        ? grantsWidenedBy(
+            scenesGrants(replaced),
+            scenesGrants(scene.scenes.filter((entry) => heldIds.has(entry.id))) ?? { permissions: [], settings: [] },
+          )
+        : []),
+      ...redPermissionsAsked(scenesGrants(scene.scenes.filter((entry) => !heldIds.has(entry.id)))),
+    ];
+    if (needs.length > 0) {
+      return refused("needs_owner", 403, { needs: [...new Set(needs)] });
     }
     // A layout is never shown on its own: shown, it goes around every scene,
     // and the frame stays on the scene it shows.
@@ -437,6 +452,12 @@ export async function runPanelSceneAction(
   }
   const held = new Set<unknown>(built.scenes.map((entry) => (entry as { id?: unknown } | null)?.id));
   const previewed = scene.scenes.filter((entry) => !held.has(entry.id));
+  // A preview runs the scene on the frame with what its apps ask for: one
+  // that asks for a red permission is the owner's to put there.
+  const previewNeeds = redPermissionsAsked(scenesGrants(previewed));
+  if (previewNeeds.length > 0) {
+    return refused("needs_owner", 403, { needs: previewNeeds });
+  }
   const shown = previewed[0] ?? scene.scenes[0];
   const shownId = shown?.id as string;
   const scenes = [...built.scenes, ...previewed];

@@ -150,6 +150,12 @@ confirmation click depends on the token's budget:
   active with `settings:services` and the provisioning scenes, and pulled
   the account's Home Assistant / OpenAI keys. Now each board brings its own
   proof, and the scope grant only becomes usable at the owner's Confirm.
+- **A token minted with a personal API token is pending too**, whatever its
+  budget (the mint answers `needs_confirmation: true`). A script's
+  credential minting a code is not the owner's act, and an active frame
+  pulls the account's service keys; `POST /api/frames/{id}/confirm` refuses
+  an API token, so the click is a person's. Such a token cannot mint a
+  re-enrollment code (A2) at all: `403 api_token_not_allowed`.
 
 Re-enrolling a revoked frame needs a fresh claim token.
 
@@ -738,6 +744,16 @@ A provider acks `log_batch` and `metrics` with `ok: false` and `rate_limited`
 when the frame exceeds its ingestion budget, or `payload_too_large` when a
 message is over the size the provider retains. Neither is fatal: the device
 should drop the batch and keep going rather than reconnect.
+
+A provider may also stop listening to a socket that sends faster than it
+handles: the reference provider closes with WebSocket code **1008**
+(`message_rate` past a sustained 500 messages a second after a burst of
+2000, `message_backlog` once 1024 messages or 32 MiB are waiting to be
+handled; `cloud/apps/frame-hub/src/inbound-guard.ts`), and drops without an
+answer the `ack`, `render` and `sleep` messages past a per-frame ceiling no
+working frame comes near (1200, 600 and 60 a minute). Streaming a file back
+in chunks as fast as the link takes them stays far under all of it. A device
+reconnects as after any other close.
 
 ### Message size and delivery guarantees
 
@@ -1567,7 +1583,11 @@ holds (`frames.assigned_scene_state`) unless that push moves it explicitly —
 the update below, a re-install (`POST …/scenes/add`), or an entry of
 `POST …/scenes` with `"latest": true` (the workspace's Save sets it on the
 scene it just edited). A held version that was yanked falls through to the
-newest one. `GET /api/frames/{id}/scenes` says where each scene is:
+newest one. A yanked version is still read by number
+(`/api/store/scenes/{id}/scenes.json?version=N`, `…/download?version=N`) by
+its owner, a moderator's browser session and an account one of whose frames
+holds it (the pin or `assigned_scene_state`), never cached, and by nobody
+else. `GET /api/frames/{id}/scenes` says where each scene is:
 `scene_version` (the pin, or null), `assigned_version` (the version the frame
 was last sent, from the per-scene deploy ledger; null only on an unpinned
 scene of a frame that predates the ledger), `latest_version`, and

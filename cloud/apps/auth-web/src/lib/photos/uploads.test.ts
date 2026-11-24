@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   discardPhotoUpload,
   isValidPhotoUploadId,
+  maxPendingPhotoUploadBytesPerAccount,
   maxPendingPhotoUploadsPerAccount,
   pendingPhotoUploadBytes,
   pendingPhotoUploadCount,
   photoUploadDirectory,
   readPhotoUpload,
+  setPhotoUploadAccountShareForTests,
   sweepStalePhotoUploads,
   writePhotoUploadChunk,
 } from "./uploads";
@@ -104,6 +106,42 @@ describe("photo upload chunks", () => {
     expect((await writePhotoUploadChunk(account, "parallel-0", 0, Buffer.from("b"))).ok).toBe(
       true,
     );
+  });
+
+  // The global cap was asked only when an upload started: one account's
+  // uploads grew past it and every other account was refused.
+  it("holds one account to its share of the parked bytes, on every chunk", async () => {
+    const other = "1c7e5d2f-9e2a-4b68-8d1f-4a7b3c2d5e6f";
+    // The real share holds two of the largest photos.
+    expect(maxPendingPhotoUploadBytesPerAccount).toBeGreaterThanOrEqual(2 * 250 * 1024 * 1024);
+    setPhotoUploadAccountShareForTests(64 * 1024);
+    const chunk = Buffer.alloc(8 * 1024);
+    const share = (64 * 1024) / chunk.length;
+    // Two uploads, appended to until the account holds its whole share.
+    for (let index = 0; index < share; index += 1) {
+      const id = `share-${index % 2}-upload`;
+      const offset = Math.floor(index / 2) * chunk.length;
+      expect((await writePhotoUploadChunk(account, id, offset, chunk)).ok, String(index)).toBe(true);
+    }
+    // One more byte, appended or started, is refused.
+    const appended = await writePhotoUploadChunk(
+      account,
+      "share-0-upload",
+      (share / 2) * chunk.length,
+      Buffer.alloc(1),
+    );
+    expect(appended).toEqual({ error: "too_many_uploads", ok: false });
+    expect(await writePhotoUploadChunk(account, "share-new-upload", 0, Buffer.alloc(1))).toEqual({
+      error: "too_many_uploads",
+      ok: false,
+    });
+    // Restarting one it holds replaces its bytes, so it fits.
+    expect((await writePhotoUploadChunk(account, "share-0-upload", 0, Buffer.alloc(1))).ok).toBe(
+      true,
+    );
+    // Another account is not held to this one's share.
+    expect((await writePhotoUploadChunk(other, "theirs-0002", 0, chunk)).ok).toBe(true);
+    setPhotoUploadAccountShareForTests(undefined);
   });
 
   it("counts the bytes parked across accounts, within the hour", async () => {

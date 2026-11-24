@@ -64,7 +64,10 @@ reported `hardware.rotate` on the cloud) and firmware that does that
 (`esp32CanvasRotation`: the version the frame last said it runs, from
 `ESP32_SHARED_CANVAS_FIRMWARE`). A Pi, a thin
 client (the control plane renders it) and a chat about no frame render
-unlimited. Which device: `frameRenderDevice` in the SPA and the cloud
+without a device's ceiling: on the cloud's server that is still not
+unlimited, every render there is held to `maxRenderMemoryBytes` (512 MiB,
+`scene-render.ts`; past it the render fails, as `render_failed`). Which
+device: `frameRenderDevice` in the SPA and the cloud
 (`frontend/src/utils/frameRenderDevice.ts`, `src/lib/ai/render-device.ts`),
 `frame_render_device` on the backend.
 
@@ -139,7 +142,13 @@ tools too (catalog and doc search, store, `save_scene`, `add_scene_to_frame`).
 other and the fixtures.
 
 Every tool result that carries text somebody else wrote is wrapped in
-`<untrusted_data source="…">` with the same notice on both planes.
+`<untrusted_data source="…">` with the same notice on both planes. So is the
+scene open in the editor when it may be somebody else's: a backend wraps it
+on every turn; the cloud wraps it (whole, with the other open scenes' names
+and the selection) when the user is on a store scene they do not own, or on
+a frame that holds a scene somebody else published, and leaves the user's
+own scene as it is. A scene's id rides the sentence in front of the frame
+only when it reads as an id.
 
 ## The prompt
 

@@ -34,8 +34,18 @@ const
   # account. At most this many wrong codes per window; while they are spent,
   # neither a new challenge nor a code is taken (`rate_limited`). A right code
   # does not give any back.
+  #
+  # The window grows: ten guesses an hour for ever were 87,600 a year at a
+  # six-digit code. Every window that saw a wrong code makes the next one
+  # twice as long (an hour, two, four ... LocalAccessWrongCodeMaxDoublings
+  # times: 128 hours), and it is an hour again after
+  # LocalAccessWrongCodeQuietSeconds without a wrong code. A window still
+  # takes ten, so somebody who mistypes now and then never meets it. The
+  # ESP32's rule is the same (embedded/esp32/main/fos_lan_access.c).
   LocalAccessWrongCodeLimit* = 10
   LocalAccessWrongCodeWindowSeconds* = 3600.0
+  LocalAccessWrongCodeMaxDoublings* = 7
+  LocalAccessWrongCodeQuietSeconds* = 30.0 * 24.0 * 3600.0
 
   ## The facts the ceremony can unlock. `localNetwork` is local network access, the only
   ## one a control plane's verbs ever ask for; `shellApps` lets
@@ -87,12 +97,15 @@ var
   # clearLocalAccessCodeOnPanel), read by `GET /image` on the HTTP workers.
   localAccessPanel: LocalAccessPanelMark
   # The wrong-code budget (LocalAccessWrongCodeLimit): when the current window
-  # began (wall clock), and how many wrong codes it has seen. Unlike the
+  # began (wall clock), how many wrong codes it has seen, how many times the
+  # window has doubled and when the last wrong code came. Unlike the
   # challenge it is kept in the state file: the same control plane that asks
   # for codes can send `restart_runtime` or `reboot`, and a budget that a
   # restart refills is no budget. (The ESP32 keeps it in RTC memory.)
   wrongCodeWindowStart = 0.0
   wrongCodeCount = 0
+  wrongCodeDoublings = 0
+  wrongCodeLast = 0.0
   wrongCodeBudgetLoaded = false
   # The hub thread re-reads the elevation every couple of seconds; boot_guard
   # learned the same lesson, so this is cached rather than parsed each time.
@@ -255,24 +268,46 @@ proc loadWrongCodeBudgetLocked() =
   if budget != nil and budget.kind == JObject:
     wrongCodeWindowStart = budget{"windowStart"}.getFloat(0.0)
     wrongCodeCount = max(0, budget{"count"}.getInt(0))
+    # A file from before the window grew has neither: an hour, and the last
+    # wrong code no later than its window's start.
+    wrongCodeDoublings = clamp(budget{"doublings"}.getInt(0), 0, LocalAccessWrongCodeMaxDoublings)
+    wrongCodeLast = budget{"last"}.getFloat(wrongCodeWindowStart)
+
+proc rollWrongCodeBudgetLocked(now: float) =
+  ## Caller holds localAccessLock. A window that saw wrong codes and has run
+  ## out gives its ten back and makes the next one twice as long; a quiet
+  ## month makes it an hour again. A clock behind a stored time (an NTP
+  ## correction backwards) starts from now: a longer lock-out, never a
+  ## shorter one.
+  loadWrongCodeBudgetLocked()
+  if now < wrongCodeWindowStart:
+    wrongCodeWindowStart = now
+  if now < wrongCodeLast:
+    wrongCodeLast = now
+  let window = LocalAccessWrongCodeWindowSeconds * float(1 shl wrongCodeDoublings)
+  if wrongCodeCount > 0 and now - wrongCodeWindowStart >= window:
+    wrongCodeCount = 0
+    if wrongCodeDoublings < LocalAccessWrongCodeMaxDoublings:
+      inc wrongCodeDoublings
+  if wrongCodeCount == 0 and now - wrongCodeLast >= LocalAccessWrongCodeQuietSeconds:
+    wrongCodeDoublings = 0
 
 proc wrongCodeBudgetSpentLocked(now: float): bool =
   ## Caller holds localAccessLock.
-  loadWrongCodeBudgetLocked()
-  if wrongCodeCount > 0 and now - wrongCodeWindowStart >= LocalAccessWrongCodeWindowSeconds:
-    wrongCodeCount = 0
+  rollWrongCodeBudgetLocked(now)
   wrongCodeCount >= LocalAccessWrongCodeLimit
 
 proc noteWrongCodeLocked(now: float) =
   ## Caller holds localAccessLock. Persisted on every wrong code (they are
   ## rare); a write that fails still counts for this run.
-  loadWrongCodeBudgetLocked()
-  if wrongCodeCount == 0 or now - wrongCodeWindowStart >= LocalAccessWrongCodeWindowSeconds:
+  rollWrongCodeBudgetLocked(now)
+  if wrongCodeCount == 0:
     wrongCodeWindowStart = now
-    wrongCodeCount = 0
   inc wrongCodeCount
+  wrongCodeLast = now
   try:
-    writeStateFile(%*{"wrongCodes": {"windowStart": wrongCodeWindowStart, "count": wrongCodeCount}})
+    writeStateFile(%*{"wrongCodes": {"windowStart": wrongCodeWindowStart, "count": wrongCodeCount,
+                                     "doublings": wrongCodeDoublings, "last": wrongCodeLast}})
   except CatchableError:
     discard
 
@@ -287,6 +322,8 @@ proc resetLocalAccessWrongCodes*() =
   withLock localAccessLock:
     wrongCodeWindowStart = 0.0
     wrongCodeCount = 0
+    wrongCodeDoublings = 0
+    wrongCodeLast = 0.0
     wrongCodeBudgetLoaded = true
 
 proc forgetLocalAccessWrongCodes*() =
@@ -295,13 +332,17 @@ proc forgetLocalAccessWrongCodes*() =
   withLock localAccessLock:
     wrongCodeWindowStart = 0.0
     wrongCodeCount = 0
+    wrongCodeDoublings = 0
+    wrongCodeLast = 0.0
     wrongCodeBudgetLoaded = false
 
 when defined(testing):
   proc ageLocalAccessWrongCodesForTest*(seconds: float) =
-    ## Moves the wrong-code window `seconds` into the past.
+    ## Moves the wrong-code window, and its last wrong code, `seconds` into
+    ## the past.
     withLock localAccessLock:
       wrongCodeWindowStart -= seconds
+      wrongCodeLast -= seconds
 
 proc startLocalAccessChallenge*(scope = LocalAccessScopeLocalNetwork): LocalAccessChallenge =
   ## Mint a code and show it on the panel. Replaces any pending challenge, so

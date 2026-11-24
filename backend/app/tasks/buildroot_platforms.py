@@ -54,6 +54,13 @@ class BuildrootPlatform:
     uses_network_manager: bool = True
     # Extra lines appended to the shared kernel config fragment.
     kernel_fragment_lines: tuple[str, ...] = ()
+    # The VideoCore's V4L2 codec (bcm2835-codec, /dev/video10): video decodes
+    # H.264 in hardware through ffmpeg's h264_v4l2m2m (docs/video.md
+    # "Hardware"). It lives in staging and needs V4L2, which the shared
+    # fragment trims; a platform with this keeps both and the codec modules.
+    # Pi 0 to 4 only: a Pi 5 has no H.264 block, and its HEVC decoder is a
+    # stateless one upstream ffmpeg 6.1 cannot drive.
+    videocore_codec: bool = False
     # Lines merged into the Raspberry Pi boot config.txt.
     default_boot_config_lines: tuple[str, ...] = ()
     # Device-tree model suffixes that need brcmfmac firmware symlinks so the
@@ -165,8 +172,11 @@ RASPBERRY_PI_32 = BuildrootPlatform(
     # address, a route and "Temporary failure in name resolution".
     uses_network_manager=False,
     # Same firmware/Linux split as the Zero 2 W; the reserve matters even
-    # more on the 256MB Pi 1 A/A+ boards.
-    default_boot_config_lines=("gpu_mem=32",),
+    # more on the 256MB Pi 1 A/A+ boards. A 512MB board gives the VideoCore
+    # 64 (gpu_mem_512 wins over gpu_mem there): its H.264 decoder's working
+    # memory, which 32 does not hold (docs/video.md "Hardware").
+    default_boot_config_lines=("gpu_mem=32", "gpu_mem_512=64"),
+    videocore_codec=True,
     wifi_firmware_models=("raspberrypi,model-zero-w",),
     needs_zero_2_w_wifi_firmware=False,
     # x86_64 so the Bootlin ARMv6 rootfs toolchain applies.
@@ -250,8 +260,11 @@ RASPBERRY_PI_64 = BuildrootPlatform(
     # make a Pi 4 load Pi-3-generation firmware and fail to boot. With the
     # pins removed the bootloader auto-selects start.elf vs start4.elf.
     remove_boot_config_keys=("start_file", "fixup_file"),
-    # Same 512MB-class default as the Zero 2 W; ignored where irrelevant.
-    default_boot_config_lines=("gpu_mem=32",),
+    # Same 512MB-class default as the Zero 2 W; ignored where irrelevant. The
+    # VideoCore's H.264 decoder gets 64 on a 512MB board (the Zero 2 W) and
+    # on bigger ones (Pi 3, Pi 4): gpu_mem_512/1024 win over gpu_mem there.
+    default_boot_config_lines=("gpu_mem=32", "gpu_mem_512=64", "gpu_mem_1024=64"),
+    videocore_codec=True,
     # Zero 2 W BCM43436 quirk applies to the unified image too; Pi 3/3B+/4
     # blobs (43430/43455 incl. board-specific NVRAMs) already come from
     # BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI.

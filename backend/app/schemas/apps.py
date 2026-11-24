@@ -185,12 +185,13 @@ class AppConfigSchema(BaseModel):
         None,
         description="List of global settings keys that this app depends on (pulled from system settings)."
     )
-    permissions: Optional[List[Literal["shell", "files", "assets", "assets-write", "frame", "code"]]] = Field(
+    permissions: Optional[List[Literal["shell", "files", "assets", "assets-write", "frame", "code", "store"]]] = Field(
         None,
         description=(
             "What the app may do on the frame: shell (run shell commands), files (read any file), "
             "assets (read the assets folder), assets-write (write it), frame (frameos.frame: the frame "
-            "page's settings and powers), code (frameos.code: the frame's scenes and its plane's scene AI). A JavaScript app's list is filled "
+            "page's settings and powers), code (frameos.code: the frame's scenes and its plane's scene AI), "
+            "store (frameos.storeAction: the scenes on the frame and its layout). A JavaScript app's list is filled "
             "from its code when the scene is saved, and the frame gives the app exactly this list."
         )
     )

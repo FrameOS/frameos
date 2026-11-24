@@ -416,6 +416,29 @@ whose box is half the width around the line (a miter join's is wider). It
 lasts as long as the interpreter: when `canvas.fresh` is true, draw the
 record you keep in `frameos.remember` into it again.
 
+**Video** (FrameOS 2026.11.15+, a Raspberry Pi with ffmpeg: every Buildroot
+image has it; docs/video.md). `frameos.video(key, { src, loop, paused,
+start, fps, fit, headers })` is the app's video called `key`, an image ref
+shown with `<img src={video}>` sized by its classes (`w-full h-full`,
+`flex-1`): the frame due now is drawn, decoded at the `<img>`'s size,
+`object-contain` (black bars) unless the `<img>` says `object-cover` or
+`object-fill` or the call says `fit`. Call it every render with the options
+as they are now: a new `src` starts again (at `start` seconds), `paused`
+holds the picture, `loop` plays a file from its start again and opens a
+stream that ended or failed again (a camera every 10 s until it answers). `src` is a file in the assets folder (`videos/a.mp4`, as
+`readAsset` takes it) or an `http(s)` or `rtsp(s)` URL (`headers` for an API
+key). The scene renders again when the next frame is due and only the
+video's box is drawn again, so keep a player's `get()` light: no fetch in it
+(`useFetch`, `remember`). What it returns says `state` (`loading`,
+`playing`, `paused`, `ended`, `error`), `time`, `duration` (null for a live
+stream), `videoWidth`/`videoHeight` and `error`; on `ended` move to the next
+file. `frameos.seekVideo(video, seconds)` jumps, `frameos.releaseVideo(video)`
+stops it (it stops by itself with the interpreter). `frameos.videoInfo(src)`
+probes a file (its duration, size, codec) and `frameos.videoFrame(src, { at,
+width, height, keep })` is one frame as a picture: a thumbnail, or a very slow
+movie on e-paper. On an ESP32 and in the editor's preview nothing plays: the
+state is `error`, the `<img>` draws nothing, so show the `error` text there.
+
 **8-bit palette mode.** A picture the app works out cell by cell (a fire, a
 plasma, pixel art) is returned from `get()` as `frameos.pixels(cells, palette,
 { width, height, pixelSize })` (FrameOS 2026.11.8+): `cells` a `Uint8Array` (or
@@ -460,13 +483,18 @@ config.json's `"permissions"` list:
   while the owner allows the
   settings on the frame's screen. The Terminal sample is the worked example
   (docs/terminal.md).
+- `"store"`: `frameos.storeAction`, installing, previewing, updating and
+  removing scenes on the frame and choosing its layout, under the same
+  condition. The Scene store sample is the app that has it.
 
 Saving the scene fills a JavaScript app's list from its code, so you rarely
 write it. The frame gives the app exactly that list: with neither `"assets"`
 nor `"assets-write"`, its asset calls live in a folder of its own,
 `scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
 with no list asks for nothing, and a list written by hand is replaced on the
-next save. A scene asks for what its apps ask for, nothing more, and every
+next save. config.json must be strict JSON (no comments, no trailing
+commas): a file that is not is no config, the frame gives its app nothing,
+and a scene that carries one is not saved or published. A scene asks for what its apps ask for, nothing more, and every
 surface shows it as tags ("reads files", "writes files", "reads & writes files",
 "reads all files", "runs shell commands", "changes frame settings", and
 "uses OpenAI key" for each
@@ -1056,6 +1084,30 @@ interface FrameOSCanvasRef extends FrameOSImageRef {
   version: number;
   fresh: boolean;
 }
+/**
+ * What frameos.video returns: an image ref an img's src takes, its picture the frame due now (docs/video.md). Its
+ * id is 0 when it cannot play (an ESP32, the preview, a missing file): error says why, and an img of it draws nothing.
+ */
+interface FrameOSVideoRef extends FrameOSImageRef {
+  video: string;
+  src?: string;
+  /** loading until its first frame; ended once the last frame showed (not with loop); error: see error. */
+  state: "loading" | "playing" | "paused" | "ended" | "error";
+  /** Where it is, in seconds. */
+  time?: number;
+  /** Its length in seconds; null for a live stream (a camera) or one that does not say. */
+  duration?: number | null;
+  live?: boolean;
+  /** The source's own size and frames a second, once known. */
+  videoWidth?: number;
+  videoHeight?: number;
+  fps?: number;
+  /** What decodes it: "software", or the frame's hardware ("h264_v4l2m2m" on a Pi 0 to 4, "vaapi"). */
+  decoder?: string;
+  /** True when the decoder could not keep up and plays with shortcuts (a softer picture). */
+  fast?: boolean;
+  error?: string;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -1529,7 +1581,9 @@ declare const frameos: {
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
    * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
    * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
-   * where there is no host (FrameOS 2026.11.8+). */
+   * where there is no host (FrameOS 2026.11.8+). For an app whose config.json permissions include "store" (saving
+   * the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the owner
+   * allows the settings on the frame's screen: without either it does nothing and answers false (FrameOS 2026.11.15+). */
   storeAction(action: "preview" | "install" | "update" | "updateAll" | "remove" | "discard", args?: Record<string, any>): boolean;
   /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
    * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
@@ -1650,6 +1704,57 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * The app's video called key (FrameOS 2026.11.15+, docs/video.md): show it with <img src={video}> sized by its
+   * classes, and the frame due now is drawn, decoded by ffmpeg at the img's size (object-contain by default,
+   * object-cover, object-fill; or fit). The scene renders again when the next frame is due, and a frame repaints the
+   * video alone. src is a file in the assets (as readAsset takes it, storage too) or an http(s), rtsp(s) URL. Call it
+   * every render: options apply at once, a new src starts again from start, loop plays a file from its start again
+   * (and opens a stream that ended or failed again, every 10 s while it fails). A Raspberry Pi with ffmpeg plays it (Buildroot images have it); an ESP32
+   * and the preview (any wasm runtime) answer state "error". 4 at most; it stops with the interpreter or releaseVideo.
+   */
+  video(
+    key: string,
+    options: {
+      src: string;
+      storage?: string;
+      loop?: boolean;
+      paused?: boolean;
+      /** Where a new src starts, in seconds. */
+      start?: number;
+      /** Frames a second at most (30 by default, 60 at most): less is less work for the Pi. */
+      fps?: number;
+      fit?: "contain" | "cover" | "fill";
+      /** http(s) request headers (an API key). */
+      headers?: Record<string, string>;
+    }
+  ): FrameOSVideoRef;
+  /** Goes to a time in the video, in seconds. False when it is not playing. */
+  seekVideo(video: FrameOSVideoRef, seconds: number): boolean;
+  /** Stops the video now and lets its decoder go. */
+  releaseVideo(video: FrameOSVideoRef): boolean;
+  /** What a video file or URL holds (ffprobe), without playing it; error when it is no video or cannot be read. */
+  videoInfo(
+    src: string,
+    options?: { storage?: string; headers?: Record<string, string> }
+  ): { width?: number; height?: number; duration?: number | null; fps?: number; codec?: string; error?: string };
+  /**
+   * One frame of a video as a picture, at seconds in (0 by default), decoded at width x height (the canvas's size
+   * by default, cover by default): a thumbnail, or a very slow movie on e-paper. keep holds it for later renders as
+   * fetchImage's keep does.
+   */
+  videoFrame(
+    src: string,
+    options?: {
+      at?: number;
+      width?: number;
+      height?: number;
+      fit?: "contain" | "cover" | "fill";
+      keep?: boolean;
+      storage?: string;
+      headers?: Record<string, string>;
+    }
+  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string };
   /**
    * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
    * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.

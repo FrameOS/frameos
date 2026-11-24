@@ -38,7 +38,13 @@ coverage.xml
 npm-debug.log
 .env
 **/.env
-.env.docker.local
+# .env.local, .env.production, backend/.env.dev …: `COPY backend backend` and
+# the other directory copies would take one into a published image. The
+# examples carry no secret and stay.
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example
 .aws
 .vscode
 .idea
@@ -79,7 +85,6 @@ frameos/state/*.json
 embedded/esp32/build/
 embedded/esp32/build-*/
 embedded/esp32/managed_components/
-embedded/esp32/dependencies.lock
 embedded/esp32/sdkconfig
 embedded/esp32/sdkconfig.old
 embedded/esp32/main/generated_config.h

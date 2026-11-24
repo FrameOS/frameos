@@ -7,7 +7,7 @@ let original = readFile("tests/fileformats/gif/sunflower.gif")
 for i in 0 ..< 10_000:
   var data = original
   let
-    pos = rand(data.len)
+    pos = rand(data.len - 1)
     value = rand(255).char
     # pos = 27355
     # value = '&'

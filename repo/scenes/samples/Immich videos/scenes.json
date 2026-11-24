@@ -1,0 +1,205 @@
+[
+  {
+    "id": "immich-videos",
+    "name": "Immich videos",
+    "settings": {
+      "category": "Photos",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "windowSize": "800x450",
+      "icon": "M18,9H16V7H18M18,13H16V11H18M18,17H16V15H18M8,9H6V7H8M8,13H6V11H8M8,17H6V15H8M18,3V5H16V3H8V5H6V3H4V21H6V19H8V21H16V19H18V21H20V3H18Z",
+      "needs": [
+        "fast",
+        "touch",
+        "video"
+      ]
+    },
+    "fields": [
+      {
+        "name": "mode",
+        "label": "Show",
+        "type": "select",
+        "value": "random",
+        "options": [
+          {
+            "value": "random",
+            "label": "Random videos"
+          },
+          {
+            "value": "album",
+            "label": "An album"
+          },
+          {
+            "value": "favorites",
+            "label": "Favorites"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "albumId",
+        "label": "Album ID",
+        "type": "string",
+        "value": "",
+        "hint": "The UUID in the album's URL.",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "album"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "caption",
+        "label": "Show when and where",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "longest",
+        "label": "Longest play, in minutes",
+        "type": "float",
+        "value": "0",
+        "hint": "0 plays every video to its end.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "value": "contain",
+        "options": [
+          {
+            "value": "contain",
+            "label": "The whole picture, black bars around it"
+          },
+          {
+            "value": "cover",
+            "label": "Fill the screen, the edges cropped"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fps",
+        "label": "Frames a second, at most",
+        "type": "select",
+        "value": "30",
+        "hint": "Fewer is less work for the Pi; a video slower than this keeps its own.",
+        "options": [
+          {
+            "value": "10",
+            "label": "10"
+          },
+          {
+            "value": "15",
+            "label": "15"
+          },
+          {
+            "value": "24",
+            "label": "24"
+          },
+          {
+            "value": "30",
+            "label": "30"
+          },
+          {
+            "value": "60",
+            "label": "60"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "ddeb87bc-e09e-5b47-814d-ec42b72763e9",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "4768e0c1-9688-5e4b-8543-2dc22df6b7e4",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "immichVideos",
+          "config": {}
+        }
+      },
+      {
+        "id": "0b2f313d-18d5-502e-b335-a65c79c0d97f",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "44ad4959-55e0-5c4f-8954-251fa8ea0ae6",
+        "type": "appNodeEdge",
+        "source": "ddeb87bc-e09e-5b47-814d-ec42b72763e9",
+        "target": "0b2f313d-18d5-502e-b335-a65c79c0d97f",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "1a385d1b-5dc0-52aa-b494-e4036910d762",
+        "type": "codeNodeEdge",
+        "source": "4768e0c1-9688-5e4b-8543-2dc22df6b7e4",
+        "target": "0b2f313d-18d5-502e-b335-a65c79c0d97f",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "immichVideos": {
+        "name": "Immich videos",
+        "category": "data",
+        "description": "Plays random videos from a self-hosted Immich server (the whole library, an album or the favorites) with the key from the frame's Immich settings; a tap skips to the next.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "settings": [
+          "immich"
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Immich videos\",\n  \"category\": \"data\",\n  \"description\": \"Plays random videos from a self-hosted Immich server (the whole library, an album or the favorites) with the key from the frame's Immich settings; a tap skips to the next.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [],\n  \"settings\": [\n    \"immich\"\n  ]\n}\n",
+          "app.tsx": "// @name Immich videos\n// Videos from a self-hosted Immich server, one after another: random ones\n// from the whole library, an album or the favorites. The frame plays Immich's\n// own stream of each (its transcoded copy when it made one), with the key from\n// the frame's Immich settings; when or where it was taken shows for a moment\n// at the start. A tap skips to the next. Plays on a Raspberry Pi\n// (docs/video.md).\nconst BATCH = 12\nconst RETRY_MS = 30000\nconst CAPTION_MS = 6000\n\nlet queue = [] // assets to play next\nlet current = null // { id, name, date, place }\nlet startedAt = 0\nlet problem = ''\nlet problemAt = 0\nlet lastFilter = ''\nconst failed = new Set() // assets that did not play, skipped from then on\n\nfunction request(server, key, url, method = 'GET', body = '') {\n  const headers = { 'x-api-key': key, Accept: 'application/json', 'Content-Type': 'application/json' }\n  return frameos.httpRequest(`${server}${url}`, { method, headers, body, timeoutMs: 30000 })\n}\n\nfunction httpError(r) {\n  if (r.status === 0) return r.error ? `request failed: ${r.error}` : 'request failed'\n  try {\n    const json = JSON.parse(r.body ?? '')\n    if (typeof json?.message === 'string') return `HTTP ${r.status}: ${json.message}`\n  } catch {}\n  return `HTTP ${r.status}`\n}\n\nfunction place(exif) {\n  return [exif?.city, exif?.country].filter((part) => typeof part === 'string' && part).join(', ')\n}\n\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']\n\nfunction day(text) {\n  // The day it was taken as Immich wrote it (its own time zone), \"12 March 2024\".\n  const m = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(String(text ?? ''))\n  return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? ''} ${m[1]}` : ''\n}\n\nfunction fetchBatch(app, server, key) {\n  const search = { size: BATCH, type: 'VIDEO', withExif: true }\n  const albumId = String(app.state.albumId ?? '').trim()\n  if (app.state.mode === 'album' && albumId) search.albumIds = [albumId]\n  if (app.state.mode === 'favorites') search.isFavorite = true\n  const r = request(server, key, '/api/search/random', 'POST', JSON.stringify(search))\n  if (r.status !== 200) throw new Error(`Immich did not give videos: ${httpError(r)}`)\n  let list = []\n  try {\n    list = JSON.parse(r.body ?? '[]')\n  } catch {}\n  const videos = (Array.isArray(list) ? list : [])\n    .filter((a) => a && a.type === 'VIDEO' && a.id)\n    .map((a) => ({\n      id: String(a.id),\n      name: String(a.originalFileName ?? ''),\n      date: day(a.exifInfo?.dateTimeOriginal ?? a.fileCreatedAt),\n      place: place(a.exifInfo),\n    }))\n  if (!videos.length) {\n    throw new Error(\n      app.state.mode === 'album'\n        ? 'This album holds no videos. The album ID is the UUID in its URL.'\n        : app.state.mode === 'favorites'\n          ? 'No favorite videos in Immich.'\n          : 'Immich has no videos.'\n    )\n  }\n  return videos\n}\n\nfunction next(app, server, key) {\n  for (let i = 0; i < BATCH * 2; i++) {\n    if (!queue.length) queue = fetchBatch(app, server, key)\n    current = queue.shift()\n    if (!failed.has(current.id)) break\n  }\n  startedAt = Date.now()\n}\n\nfunction Message({ title, text, k }) {\n  return (\n    <div className=\"w-full h-full flex flex-col items-center justify-center bg-black text-white gap-[8px] px-[24px]\">\n      <span className={`text-[${Math.round(22 * k)}px] font-bold`}>{title}</span>\n      <span className={`text-[${Math.round(15 * k)}px] text-white/70 text-center`}>{text}</span>\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const width = context?.imageWidth ?? app.frame.width\n  const height = context?.imageHeight ?? app.frame.height\n  const k = Math.max(0.6, Math.min(1.6, Math.min(width / 800, height / 480) * 1.15))\n  const server = String(frameos.getSetting('immich', 'url') ?? '').replace(/\\/+$/, '')\n  const key = String(frameos.getSetting('immich', 'apiKey') ?? '')\n  if (!server || !key) {\n    return <Message k={k} title=\"Immich videos\" text=\"Add your Immich server's address and an API key in the frame's settings (Immich).\" />\n  }\n  const filter = `${app.state.mode}|${app.state.albumId}`\n  if (filter !== lastFilter) {\n    lastFilter = filter\n    queue = []\n    current = null\n  }\n  if (problem && Date.now() - problemAt < RETRY_MS) {\n    frameos.setNextSleep(Math.max(1, (RETRY_MS - (Date.now() - problemAt)) / 1000))\n    return <Message k={k} title=\"Immich videos\" text={problem} />\n  }\n  try {\n    if (!current) next(app, server, key)\n    problem = ''\n  } catch (error) {\n    problem = String(error?.message ?? error)\n    problemAt = Date.now()\n    frameos.setNextSleep(RETRY_MS / 1000)\n    return <Message k={k} title=\"Immich videos\" text={problem} />\n  }\n  const fit = app.state.fit === 'cover' ? 'cover' : 'contain'\n  const longest = Number(app.state.longest) || 0\n  const playCurrent = () =>\n    frameos.video('immich', {\n      src: `${server}/api/assets/${encodeURIComponent(current.id)}/video/playback`,\n      headers: { 'x-api-key': key },\n      fit,\n      fps: Number(app.state.fps) || 30,\n    })\n  let video = playCurrent()\n  const tooLong = longest > 0 && video.state === 'playing' && Date.now() - startedAt > longest * 60000\n  if (video.state === 'ended' || tooLong || (video.state === 'error' && video.id !== 0)) {\n    if (video.state === 'error') {\n      frameos.log(`Skipping ${current.name || current.id}: ${video.error}`)\n      failed.add(current.id)\n    }\n    const before = current.id\n    try {\n      next(app, server, key)\n    } catch (error) {\n      problem = String(error?.message ?? error)\n      problemAt = Date.now()\n      return <Message k={k} title=\"Immich videos\" text={problem} />\n    }\n    // The same one again (a library of one): from its start.\n    if (current.id === before) frameos.releaseVideo(video)\n    video = playCurrent()\n  }\n  if (video.state === 'error') {\n    // No video here at all (an ESP32, the preview), or one the frame may not\n    // open (a cloud frame's Local network access): said, and tried again later.\n    const here = video.id === 0 && /cannot play it|, not here/.test(video.error || '')\n    if (!here) {\n      problem = video.error || 'The video did not play.'\n      problemAt = Date.now()\n      current = null\n    }\n    return <Message k={k} title={here ? 'Video does not play here' : 'Immich videos'} text={video.error} />\n  }\n  const caption = app.state.caption !== false && Date.now() - startedAt < CAPTION_MS\n  if (caption) frameos.setNextSleep(Math.max(0.5, (CAPTION_MS - (Date.now() - startedAt)) / 1000))\n  const words = [current.date, current.place].filter(Boolean).join(' · ')\n  return (\n    <div className=\"relative w-full h-full bg-black\" onClick={() => { current = null }}>\n      <img className={`w-full h-full object-${fit}`} src={video} />\n      {caption && words ? (\n        <div className={`absolute left-[${Math.round(16 * k)}px] bottom-[${Math.round(14 * k)}px] px-[12px] py-[6px] rounded-[8px] bg-black/55`}>\n          <span className={`text-[${Math.round(16 * k)}px] text-white`}>{words}</span>\n        </div>\n      ) : null}\n    </div>\n  )\n}\n"
+        }
+      }
+    }
+  }
+]

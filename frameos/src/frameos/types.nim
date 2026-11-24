@@ -723,6 +723,9 @@ type
     ## Cached nodes whose expression did not compile, and why: they say so
     ## on every run instead of taking the scene down.
     brokenCache*: seq[(NodeId, string)]
+    ## Every snippet has been checked to stay inside the parentheses the
+    ## program puts around it (interpreter.snippetStaysInside), once.
+    confined*: bool
 
   AppInput* = object
     ## An edge into a node's field: from another node's value, or inline code.

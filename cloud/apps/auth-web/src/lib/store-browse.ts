@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import { accounts, createDb, storeScenes } from "@frameos-cloud/db";
 import { storePageSize, type StoreBrowseFilters } from "./store-filters";
 import { frameosVersionSatisfiesSql } from "./store-versions-sql";
@@ -12,11 +12,15 @@ import { sceneHasImageSql } from "./store-listing";
 
 type Database = ReturnType<typeof createDb>;
 
+// Every query that uses these joins `accounts` (for the publisher's name):
+// the ban condition reads it.
 export function storeBrowseConditions(filters: StoreBrowseFilters): SQL[] {
   const conditions: SQL[] = [
     eq(storeScenes.visibility, "public"),
     eq(storeScenes.status, "active"),
     gt(storeScenes.latestVersion, 0),
+    // A banned publisher's scenes are in no listing (store-ban.ts).
+    isNull(accounts.storeBannedAt),
   ];
   if (filters.query) {
     const pattern = `%${filters.query.replace(/[%_\\]/g, "\\$&")}%`;

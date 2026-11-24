@@ -371,9 +371,24 @@ function AssistantMarkdown({ content, framesUrl }: { content: string; framesUrl?
             }
             const external = href.startsWith("https://") || href.startsWith("http://");
             return (
-              <a {...props} href={href} {...(external ? { rel: "noreferrer", target: "_blank" } : {})}>
+              <a {...props} href={href} {...(external ? { rel: "noopener noreferrer", target: "_blank" } : {})}>
                 {children}
               </a>
+            );
+          },
+          // The reply is the model's text, and what the model read may be
+          // someone else's (a store scene, a fetched page): an <img> would be
+          // fetched the moment it is drawn, with whatever the address
+          // carries. An image is a link to open by choice, as in the
+          // workspace's Markdown (components/Markdown.tsx).
+          img: ({ alt, src }) => {
+            const label = alt ? `Image: ${alt}` : "Image";
+            return typeof src === "string" && src ? (
+              <a href={src} rel="noopener noreferrer" target="_blank">
+                {label}
+              </a>
+            ) : (
+              <span>{label}</span>
             );
           },
         }}

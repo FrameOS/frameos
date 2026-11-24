@@ -236,13 +236,33 @@ AND re-asks for the password when the account has one, otherwise for a
 current authenticator/recovery code (`requireWeakeningProof`,
 `src/lib/account-security.ts`). Because sudo mode on a two-factor account is
 the second factor, turning 2FA off costs the very factor being removed plus
-the password — the password alone never does it.
+the password — the password alone never does it. Every route in that list
+asks for sudo mode, the authenticator's `DELETE
+/api/account/two-factor/totp` included.
+
+**The two routes that take the password in their body** — changing it
+(`POST /api/account/password`) and deleting the account (`POST
+/api/account/delete`) — add sudo mode on an account with two-factor
+(`requireRecentAuthWithSecondFactor`, `src/lib/recent-auth.ts`): there the
+password proves less than sign-in did, so a lifted cookie plus a phished
+password must not rotate the password or end the account. Without
+two-factor the body's password is exactly what `/login/reauth` would ask
+for, and they stay on it alone.
 
 **Enrolling a factor revokes every personal API token** (`api_tokens_revoked`
 in the confirm/attestation response): a token minted before the factor
 existed would keep bypassing it. The settings page says how many were
 revoked and the enrolment mail carries the same line; the owner re-mints
-under Account → Developer, which is behind 2FA from then on.
+under Account → Developer, which is behind 2FA from then on. **The factor
+that turns two-factor ON also signs every other browser session out**
+(`sessions_revoked`): none of them answered a second factor. A later factor
+on an account that already has one leaves the sessions alone.
+
+**A password change revokes every personal API token too**
+(`api_tokens_revoked` in its response, and a line in its mail), as a
+password reset and a second-factor change do. **Minting a token mails the
+owner** (`api_token_created`: the token's name, its access and its expiry,
+never the secret), like every other credential added to the account.
 
 **Google accounts and unverified addresses.** A Google identity we have not
 seen whose `email_verified` claim is not `true` gets no account and no
@@ -322,7 +342,15 @@ nothing local to check (Google or Apple sign-in, no password, no second
 factor) is sent back through its provider (`methods.providers` says which):
 Google with `prompt=login` (`/api/auth/google/start?reauth=1`), Apple as is
 (its web sign-in asks for the Apple ID's password or Face ID / Touch ID every
-time). The callback mints a fresh session, which counts as recent. Checks are rate-limited per IP (30 / 15 min) and per
+time). The callback mints a fresh session, which counts as recent. Google's
+round trip is silent while the browser is signed in to Google, and
+`prompt=login` rides a URL the browser holds, so on its own it proves only
+that the browser is signed in to Google. With `GOOGLE_REQUIRE_AUTH_TIME=1`
+(after turning the `auth_time` claim on for the OAuth client in Google's
+console; it is off by default) every Google start asks for the claim, and
+the session a Google sign-in mints proved its credentials when `auth_time`
+says, not now (`src/lib/google-auth-time.ts`): a silent round trip is no
+recent proof, and a token without the claim is none either. Checks are rate-limited per IP (30 / 15 min) and per
 account (10 / 15 min); every attempt is audited
 (`account.reauthenticated` with `method: password|totp|recovery_code|passkey`,
 `account.reauthentication_failed`).

@@ -28,11 +28,36 @@ static bool name_matches(const char *line, size_t line_len, const char *name)
     return true;
 }
 
+static char lower(char c)
+{
+    return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
+}
+
+// Is `origin` ("scheme://host[:port]") the page `host` (a Host header's
+// value) names? Compared as text, case aside: a browser writes both from the
+// same URL, default port left out of both.
+static bool origin_is_host(const char *origin, size_t origin_len, const char *host, size_t host_len)
+{
+    static const char *const schemes[] = {"http://", "https://"};
+    for (size_t s = 0; s < 2; s++) {
+        size_t scheme_len = strlen(schemes[s]);
+        if (origin_len != scheme_len + host_len || host_len == 0) continue;
+        size_t i = 0;
+        while (i < scheme_len && lower(origin[i]) == schemes[s][i]) i++;
+        if (i < scheme_len) continue;
+        for (i = 0; i < host_len && lower(origin[scheme_len + i]) == lower(host[i]); i++) {}
+        if (i == host_len) return true;
+    }
+    return false;
+}
+
 pk_httpd_parse_t pk_httpd_parse(const char *buf, size_t len, pk_httpd_request_t *out)
 {
     const char *header_end = find_header_end(buf, len);
     if (header_end == NULL) return PK_HTTPD_INCOMPLETE;
     memset(out, 0, sizeof(*out));
+    const char *origin = NULL, *host = NULL;
+    size_t origin_len = 0, host_len = 0;
     out->body_offset = (size_t)(header_end - buf) + 4;
 
     // Request line: METHOD SP target SP HTTP/1.x
@@ -74,12 +99,30 @@ pk_httpd_parse_t pk_httpd_parse(const char *buf, size_t len, pk_httpd_request_t 
                 memcpy(out->authorization, value, value_len);
                 out->authorization[value_len] = '\0';
             }
+        } else if (name_matches(line, line_len, "origin") || name_matches(line, line_len, "host")) {
+            const char *value = memchr(line, ':', line_len) + 1;
+            while (value < next && (*value == ' ' || *value == '\t')) value++;
+            size_t value_len = (size_t)(next - value);
+            while (value_len > 0 && (value[value_len - 1] == ' ' || value[value_len - 1] == '\t')) value_len--;
+            if (line[0] == 'o' || line[0] == 'O') {
+                origin = value;
+                origin_len = value_len;
+            } else {
+                host = value;
+                host_len = value_len;
+            }
         }
         line = next + 2;
     }
+    out->foreign_origin = origin != NULL && (host == NULL || !origin_is_host(origin, origin_len, host, host_len));
 
     if (len - out->body_offset < out->content_length) return PK_HTTPD_INCOMPLETE;
     return PK_HTTPD_READY;
+}
+
+bool pk_httpd_cross_site_write(const pk_httpd_request_t *request)
+{
+    return request->foreign_origin && strcmp(request->method, "GET") != 0 && strcmp(request->method, "HEAD") != 0;
 }
 
 // Length leaks (it has to: strings differ in size), contents do not.

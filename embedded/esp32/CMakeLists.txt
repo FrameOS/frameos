@@ -80,6 +80,14 @@ if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     target_link_options(${CMAKE_PROJECT_NAME}.elf PRIVATE "-Wl,--size-opt")
 endif()
 
+# cJSON recurses once per nested array or object and stops at
+# CJSON_NESTING_LIMIT, 1000 as it ships: a few hundred `[` from a control
+# plane, a scene or the device's own HTTP API overflowed the 8 to 10 KB stacks
+# that parse them. The limit is the firmware's own (FOS_JSON_MAX_DEPTH,
+# main/fos_json_guard.h, which asserts the two agree) for every parse in the
+# image, IDF's included, so no call site can forget the scan in front of it.
+idf_build_set_property(COMPILE_DEFINITIONS "CJSON_NESTING_LIMIT=32" APPEND)
+
 # A failed assert calls __assert_func with no arguments, in everything
 # compiled from source (main/fos_assert.h, which says why that is the same
 # call): newlib defines the function and QuickJS has its own, so they keep

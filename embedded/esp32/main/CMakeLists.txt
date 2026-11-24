@@ -59,6 +59,8 @@ idf_component_register(
         "fos_slot_cache.c"
         "fos_commands.c"
         "fos_backend_http.c"
+        "fos_tls.c"
+        "fos_tls_dates.c"
         "fos_events.c"
         "fos_schedule.c"
         "fos_settings.c"
@@ -146,6 +148,13 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wr
 # strtod there and tzset's five TZ formats are read by its integer scanner,
 # so neither of newlib's scanf engines (9.6 + 8.3 KB) is linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-Wl,--wrap=siscanf" "-u __wrap_sscanf")
+
+# Every TLS client attaches the certificate bundle; the name goes to
+# fos_tls.c, which attaches it and then puts the firmware's rule for
+# certificate dates in front of its verify callback (fos_tls_dates.h). By the
+# linker, so a client added later cannot be written without it.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_crt_bundle_attach"
+    "-u __wrap_esp_crt_bundle_attach")
 
 # The printf family goes through fos_printf.c's formatter (doubles by QuickJS's
 # js_dtoa): newlib's two copies of its own (_vfprintf_r for FILEs,

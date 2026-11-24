@@ -16,6 +16,7 @@ import {
   safeLocalOrigin,
 } from "../../../../src/lib/device-flow";
 import {
+  claimTokenEnrollsActive,
   enqueueFrameSettingsPush,
   frameSupportsTimeZoneSetting,
   countFramesForAccount,
@@ -129,10 +130,13 @@ function parseHardware(value: unknown): Record<string, unknown> | null {
 //   the owner's deliberate, authenticated act, and its budget means only one
 //   device can ever redeem it. EVERY enrollment of a multi-use token — the
 //   first one included — is born `pending` and needs the owner's confirmation
-//   click (`token.maxUses === 1 ? "active" : "pending"` below): a multi-use
+//   click (`claimTokenEnrollsActive` below): a multi-use
 //   token is baked into an SD image that can be copied or leaked, so whoever
 //   boots a card first is not thereby the owner: any card holding a fleet
 //   image can enroll, so each board brings its own proof (the owner's click).
+//   A token minted with a personal API token is pending too, whatever its
+//   budget: a script's credential minting it was not the owner's act, and an
+//   active frame pulls the account's service keys.
 // Flow B — Bearer token from the RFC 8628 device flow (client_kind "frame").
 //   The consent screen was the ownership proof, so the frame is born
 //   `active`; this call registers the device public key.
@@ -365,7 +369,9 @@ async function enrollWithClaimToken(
           // the owner. Every card off such an image lands pending, and the
           // owner's Confirm click is what grants the provisioning scenes and
           // opens the service-settings pull (both gate on status = active).
-          status: token.maxUses === 1 ? "active" : "pending",
+          // Nor is a code minted with a personal API token: the person at
+          // the keyboard never saw it, so their Confirm click is the proof.
+          status: claimTokenEnrollsActive(token) ? "active" : "pending",
         })
         .returning();
       if (!insertedFrame) {

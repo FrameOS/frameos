@@ -97,7 +97,12 @@ from app.schemas.frames import (
     FrameSyncApplyRequest,
     FrameAdoptRequest,
 )
-from app.api.auth import get_current_user_from_request
+from app.api.auth import (
+    get_current_user_from_request,
+    refuse_read_only_token,
+    request_token_is_read_only,
+    require_session_credential,
+)
 from app.config import config
 from app.utils.server_address import split_address as split_typed_address
 from app.utils.network import (
@@ -108,7 +113,8 @@ from app.utils.network import (
     is_safe_host,
 )
 from app.utils.embedded_render import NETWORK_POLICY_PUBLIC, RenderQueueFull, preview_network_policy
-from app.utils.asset_headers import inert_asset_headers
+from app.utils.asset_headers import INERT_ASSET_CSP, inert_asset_headers
+from app.utils.frame_secrets import TOP_LEVEL_SECRET_KEYS, redact_frame_secrets
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
     MAX_ASSET_UPLOAD_BYTES,
@@ -132,6 +138,7 @@ from app.utils.embedded_commands import (
     queue_embedded_command,
 )
 from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.app_config import bad_app_configs_message
 from app.utils.scene_layouts import bad_layouts_message
 from app.utils.frame_commands import (
     cancel_frame_command,
@@ -916,6 +923,9 @@ def _validate_upload_scenes_payload(
     bad_layouts = bad_layouts_message(scenes)
     if bad_layouts:
         _bad_request(bad_layouts)
+    bad_app_configs = bad_app_configs_message(scenes)
+    if bad_app_configs:
+        _bad_request(bad_app_configs)
 
     for scene in scenes:
         nodes = scene.get("nodes") or []
@@ -1363,17 +1373,26 @@ async def _frame_to_api_response_dict(
     frame: Frame,
     redis: Redis,
     latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET,
+    *,
+    request: Request | None = None,
 ) -> dict[str, Any]:
     data = _frame_to_response_dict(frame, latest_log_at)
     sync_hint = await _frame_sync_hint_for_response(redis, frame.id)
     if sync_hint:
         data["frame_sync_hint"] = sync_hint
+    if request is not None and request_token_is_read_only(request):
+        # "May look" is not "may log in to the frame": a read-only token gets
+        # the frame without its SSH password, keys, admin login and Wi-Fi
+        # passphrases (the leaves app/utils/frame_secrets names).
+        data = redact_frame_secrets(data)
+        for key in TOP_LEVEL_SECRET_KEYS:
+            data.setdefault(key, None)  # the response schema wants the keys
     return data
 
 
 @api_project.get("/frames", response_model=FramesListResponse)
 async def api_frames_list(
-    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     project_id = current_project_id()
     frames = db.query(Frame).filter_by(project_id=project_id).all()
@@ -1391,7 +1410,7 @@ async def api_frames_list(
     pending_types = pending_command_types_by_frame(db, project_id)
     frame_items = []
     for f in frames:
-        data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id))
+        data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id), request=request)
         data["pending_command_types"] = pending_types.get(int(f.id), [])
         data["scene_preview"] = scene_preview_info(db, f)
         data["active_scene_id"] = await _active_scene_id_from_cache(redis, f.id)
@@ -2162,6 +2181,27 @@ def _device_assets(frame: Frame):
     return admin_api_assets
 
 
+# What a thumbnail may be served as. The bytes come from a device (its own
+# thumbnail cache, or the original when it would not decode) and the request
+# names a `filename` of the caller's choosing, so neither picks the type: an
+# "image" that is really HTML, served as text/html from this origin, would
+# run with the owner's session.
+_THUMBNAIL_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"})
+
+
+def _thumbnail_response(data: bytes, media_type: str | None = None) -> StreamingResponse:
+    """One thumbnail body: a raster image type or the thumbnail default,
+    never sniffed, and inert if a browser is pointed straight at it."""
+    kind = (media_type or "").split(";", 1)[0].strip().lower()
+    if kind not in _THUMBNAIL_MEDIA_TYPES:
+        kind = THUMBNAIL_CONTENT_TYPE
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=kind,
+        headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": INERT_ASSET_CSP},
+    )
+
+
 async def _embedded_asset_file_response(
     redis: Redis,
     frame: Frame,
@@ -2191,14 +2231,15 @@ async def _embedded_asset_file_response(
         full_md5 = hashlib.md5(data).hexdigest()
         cache_key = f"asset:thumb:{full_md5}"
         if cached := await redis.get(cache_key):
-            return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
+            return _thumbnail_response(cached, "image/jpeg")
         thumb_data = await asyncio.to_thread(embedded_assets.thumbnail_jpeg, data)
         if thumb_data is None:
-            # Undecodable image (or Pillow missing): serve the original bytes.
-            media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
-            return StreamingResponse(io.BytesIO(data), media_type=media_type)
+            # Undecodable image (or Pillow missing): serve the original bytes,
+            # typed by the asset's own (image) extension, which the route
+            # checked: never by the caller's `filename`.
+            return _thumbnail_response(data, mimetypes.guess_type(rel_path)[0])
         await redis.set(cache_key, thumb_data, ex=86400 * 30)
-        return StreamingResponse(io.BytesIO(thumb_data), media_type="image/jpeg")
+        return _thumbnail_response(thumb_data, "image/jpeg")
 
     md5 = hashlib.md5(data).hexdigest()
     await redis.set(f"asset:{md5}", data, ex=86400 * 30)
@@ -2238,8 +2279,7 @@ async def _admin_api_asset_file_response(
         raise
 
     if thumb:
-        media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
-        return StreamingResponse(io.BytesIO(data), media_type=media_type)
+        return _thumbnail_response(data, device_content_type)
 
     md5 = hashlib.md5(data).hexdigest()
     await redis.set(f"asset:{md5}", data, ex=86400 * 30)
@@ -2279,7 +2319,9 @@ async def _ssh_thumbnail_response(
     """A thumbnail for a frame reached over SSH or the Remote: the original's
     md5 names a redis cache entry; a miss renders the preview here from the
     original (no image FrameOS ships has ImageMagick to run)."""
-    md5_key = f"asset-md5:{full_path}"
+    # Per frame: two frames (two projects) may hold different files under one
+    # path, and the md5 names the thumbnail that is served.
+    md5_key = f"asset-md5:{frame.id}:{full_path}"
     cached_md5 = await redis.get(md5_key)
     if cached_md5:
         full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
@@ -2319,7 +2361,7 @@ async def _ssh_thumbnail_response(
                 ) from exc
             await redis.set(cache_key, data, ex=86400 * 30)
 
-    return StreamingResponse(io.BytesIO(data), media_type=THUMBNAIL_CONTENT_TYPE)
+    return _thumbnail_response(data, THUMBNAIL_CONTENT_TYPE)
 
 
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
@@ -2402,8 +2444,7 @@ async def api_frame_get_asset(
                 data, device_content_type = await admin_api_assets.download_asset(
                     frame, redis, full_path, thumb=True
                 )
-                media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
-                return StreamingResponse(io.BytesIO(data), media_type=media_type)
+                return _thumbnail_response(data, device_content_type)
             except HTTPException as exc:
                 if exc.status_code == HTTPStatus.NOT_FOUND:
                     raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
@@ -2455,6 +2496,7 @@ async def api_frame_get_asset(
 @api_project.get("/frames/{id:int}", response_model=FrameResponse)
 async def api_frame_get(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2470,7 +2512,7 @@ async def api_frame_get(
     )
     from app.utils.frame_commands import pending_command_types, scene_preview_info
 
-    data = await _frame_to_api_response_dict(frame, redis, latest_log_at)
+    data = await _frame_to_api_response_dict(frame, redis, latest_log_at, request=request)
     data["pending_command_types"] = pending_command_types(db, frame)
     # The scene the frame shows for now without holding it in its saved list
     # (the editor's "Preview on frame", the voice chat's picture): the
@@ -2518,7 +2560,7 @@ async def api_frame_discard_scene_preview(id: int, db: Session = Depends(get_db)
     return {"ok": True}
 
 
-@api_project.get("/frames/{id:int}/scene_preview_settings")
+@api_project.get("/frames/{id:int}/scene_preview_settings", dependencies=[Depends(require_session_credential)])
 async def api_frame_scene_preview_settings(
     id: int,
     db: Session = Depends(get_db),
@@ -4228,7 +4270,7 @@ async def api_frame_buildroot_sd_image(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.get("/frames/{id:int}/buildroot/sd_image/download")
+@api_project.get("/frames/{id:int}/buildroot/sd_image/download", dependencies=[Depends(refuse_read_only_token)])
 async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
     if not frame:
@@ -4262,7 +4304,7 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
-@api_project.get("/frames/{id:int}/embedded/provisioning")
+@api_project.get("/frames/{id:int}/embedded/provisioning", dependencies=[Depends(refuse_read_only_token)])
 async def api_frame_embedded_provisioning(
     id: int,
     db: Session = Depends(get_db),
@@ -4805,6 +4847,87 @@ async def api_frame_set_next_scene(
     return {"message": "Next scene queued for boot"}
 
 
+def check_frame_settings(update_data: dict[str, Any], frame: Frame) -> None:
+    """The checks and rewrites every write of a frame's settings goes
+    through, before any of it is set: the settings form's save and an
+    imported frame file alike (a file is somebody's JSON). Raises the 400."""
+    # The schedule becomes "<schedule> root <command>" in /etc/cron.d on the
+    # next deploy; refuse what cron cannot parse or what would add a line.
+    reboot_update = update_data.get("reboot")
+    if isinstance(reboot_update, dict) and str(reboot_update.get("enabled")).lower() == "true":
+        crontab = reboot_update.get("crontab")
+        crontab_error = reboot_crontab_error(crontab) if isinstance(crontab, str) else "The reboot schedule is not text"
+        if crontab_error:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=crontab_error)
+    # A new assets folder for a Linux frame must be inside the asset roots
+    # (app/utils/assets_path.py); the folder the frame already has is left
+    # alone, since the form sends every field. An ESP32 mounts its SD card
+    # there instead.
+    from app.utils.assets_path import ASSETS_PATH_RULE, assets_path_change_allowed
+
+    assets_path_update = update_data.get("assets_path")
+    if (
+        isinstance(assets_path_update, str)
+        and (update_data.get("mode") or frame.mode or "rpios") != "embedded"
+        and not assets_path_change_allowed(assets_path_update, frame.assets_path)
+    ):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=ASSETS_PATH_RULE)
+    if isinstance(update_data.get("scenes"), str):
+        try:
+            update_data["scenes"] = json.loads(update_data["scenes"])
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
+    # Templates, imports and chat-built scenes arrive without an execution
+    # mode; stamp it here so nothing downstream has to guess.
+    bad_layouts = bad_layouts_message(update_data.get("scenes"))
+    if bad_layouts:
+        _bad_request(bad_layouts)
+    # An app's config.json is what it asks for (permissions, settings), read
+    # one way by every surface and by the frame (utils/app_config.py): one
+    # that is not strict JSON is not saved.
+    bad_app_configs = bad_app_configs_message(update_data.get("scenes"))
+    if bad_app_configs:
+        _bad_request(bad_app_configs)
+    normalize_scenes_execution(update_data.get("scenes"))
+    # An editor tab or a saved draft from before the upgrade still holds the
+    # retired Nim keyword (data/immich); store it as the JS app it became.
+    from app.utils.retired_apps import retire_apps_in_scenes
+
+    retire_apps_in_scenes(update_data.get("scenes"))
+
+    if "server_host" in update_data:
+        # Handed to the device as frame.json serverHost on the next deploy or
+        # sync, so only the bare host is stored: a scheme or port typed into
+        # the field ("https://host:8443") moves to its own column and wins
+        # over the form's sibling fields. An empty value is the documented
+        # "no backend" state.
+        _require_valid_device_server_host(update_data["server_host"])
+        typed = split_typed_address(update_data["server_host"])
+        update_data["server_host"] = typed.host
+        if typed.port is not None:
+            update_data["server_port"] = typed.port
+        if typed.said_scheme:
+            update_data["server_scheme"] = typed.scheme
+
+
+def normalize_frame_settings(frame: Frame, update_data: dict[str, Any], previous_agent: Any) -> None:
+    """What every write of a frame's settings stores in its normal form,
+    after the values are set (the form's save and an import alike)."""
+    if "agent" in update_data:
+        frame.agent = ensure_agent_shared_secret(frame.agent, previous_agent)
+    if "timezone" in update_data:
+        frame.timezone = stored_timezone(frame.timezone) or None
+    if "timezone_updater" in update_data:
+        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
+    if "https_proxy" in update_data:
+        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
+        refresh_tls_certificate_validity_dates(frame)
+    if "error_behavior" in update_data:
+        frame.error_behavior = normalize_error_behavior(frame.error_behavior)
+    if "input_settings" in update_data:
+        frame.input_settings = normalize_input_settings(frame.input_settings)
+
+
 @api_project.post("/frames/{id:int}")
 async def api_frame_update_endpoint(
     id: int,
@@ -4829,62 +4952,12 @@ async def api_frame_update_endpoint(
                 detail="The admin login is the only way this backend reaches the frame (no SSH key, "
                 "password or FrameOS Remote on it) — it cannot be disabled or left blank",
             )
-    # The schedule becomes "<schedule> root <command>" in /etc/cron.d on the
-    # next deploy; refuse what cron cannot parse or what would add a line.
-    reboot_update = update_data.get("reboot")
-    if isinstance(reboot_update, dict) and str(reboot_update.get("enabled")).lower() == "true":
-        crontab = reboot_update.get("crontab")
-        crontab_error = reboot_crontab_error(crontab) if isinstance(crontab, str) else "The reboot schedule is not text"
-        if crontab_error:
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=crontab_error)
-    # A new assets folder for a Linux frame must be inside the asset roots
-    # (app/utils/assets_path.py); the folder the frame already has is left
-    # alone, since the form sends every field. An ESP32 mounts its SD card
-    # there instead.
-    from app.utils.assets_path import ASSETS_PATH_RULE, assets_path_change_allowed
-
-    assets_path_update = update_data.get("assets_path")
-    if (
-        isinstance(assets_path_update, str)
-        and (update_data.get("mode") or frame.mode or "rpios") != "embedded"
-        and not assets_path_change_allowed(assets_path_update, frame.assets_path)
-    ):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=ASSETS_PATH_RULE)
     previous_buildroot_sd_image_fingerprint = (
         buildroot_sd_image_config_fingerprint(frame)
         if (frame.mode or "rpios") == "buildroot"
         else ""
     )
-    if isinstance(update_data.get("scenes"), str):
-        try:
-            update_data["scenes"] = json.loads(update_data["scenes"])
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid input for scenes (must be JSON)")
-    # Templates, imports and chat-built scenes arrive without an execution
-    # mode; stamp it here so nothing downstream has to guess.
-    bad_layouts = bad_layouts_message(update_data.get("scenes"))
-    if bad_layouts:
-        _bad_request(bad_layouts)
-    normalize_scenes_execution(update_data.get("scenes"))
-    # An editor tab or a saved draft from before the upgrade still holds the
-    # retired Nim keyword (data/immich); store it as the JS app it became.
-    from app.utils.retired_apps import retire_apps_in_scenes
-
-    retire_apps_in_scenes(update_data.get("scenes"))
-
-    if "server_host" in update_data:
-        # Handed to the device as frame.json serverHost on the next deploy or
-        # sync, so only the bare host is stored: a scheme or port typed into
-        # the field ("https://host:8443") moves to its own column and wins
-        # over the form's sibling fields. An empty value is the documented
-        # "no backend" state.
-        _require_valid_device_server_host(update_data["server_host"])
-        typed = split_typed_address(update_data["server_host"])
-        update_data["server_host"] = typed.host
-        if typed.port is not None:
-            update_data["server_port"] = typed.port
-        if typed.said_scheme:
-            update_data["server_scheme"] = typed.scheme
+    check_frame_settings(update_data, frame)
 
     old_mode = frame.mode
     old_device = frame.device
@@ -4894,8 +4967,7 @@ async def api_frame_update_endpoint(
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
-    if "agent" in update_data:
-        frame.agent = ensure_agent_shared_secret(frame.agent, previous_agent)
+    normalize_frame_settings(frame, update_data, previous_agent)
 
     if "buildroot" in update_data:
         # buildroot.sdImage is build output owned by the backend (written by the
@@ -4928,19 +5000,6 @@ async def api_frame_update_endpoint(
         else:
             embedded.pop("storage", None)
         frame.embedded = embedded
-
-    if "timezone" in update_data:
-        frame.timezone = stored_timezone(frame.timezone) or None
-    if "timezone_updater" in update_data:
-        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
-
-    if "https_proxy" in update_data:
-        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
-        refresh_tls_certificate_validity_dates(frame)
-    if "error_behavior" in update_data:
-        frame.error_behavior = normalize_error_behavior(frame.error_behavior)
-    if "input_settings" in update_data:
-        frame.input_settings = normalize_input_settings(frame.input_settings)
 
     if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         try:
@@ -5224,6 +5283,16 @@ async def api_frame_import(
         FrameUpdateRequest.model_validate(importable)
     except ValidationError as exc:
         raise RequestValidationError(exc.errors())
+    # What a device reported about itself (an ESP32's last boot address, the
+    # SD image this backend built) is this backend's to learn, never a
+    # file's: a last boot address is where requests carrying the frame's
+    # key are sent.
+    for owned_key, kept in (("embedded", ("lastBoot", "storage", "layout")), ("buildroot", ("sdImage",))):
+        if isinstance(importable.get(owned_key), dict):
+            importable[owned_key] = {k: v for k, v in importable[owned_key].items() if k not in kept}
+    # The form's own checks: a cron line run as root, an assets folder
+    # outside the asset roots, scenes and layouts, the server address.
+    check_frame_settings(importable, Frame(project_id=current_project_id(), assets_path=None, mode=None))
 
     _require_valid_device_server_host(data.get("server_host"))
     try:
@@ -5232,13 +5301,14 @@ async def api_frame_import(
             redis,
             data.get("name"),
             data.get("frame_host"),
-            data.get("server_host"),
+            importable.get("server_host", data.get("server_host")),
             data.get("device"),
             project_id=current_project_id(),
-            server_port=data.get("server_port"),
-            server_scheme=data.get("server_scheme"),
+            server_port=importable.get("server_port", data.get("server_port")),
+            server_scheme=importable.get("server_scheme", data.get("server_scheme")),
         )
 
+        previous_agent = frame.agent
         for key, value in importable.items():
             if key in FRAME_IMPORT_CREATE_KEYS:
                 continue
@@ -5246,6 +5316,7 @@ async def api_frame_import(
                 if not value or db.query(Frame).filter(Frame.server_api_key == value, Frame.id != frame.id).first():
                     continue
             setattr(frame, key, value)
+        normalize_frame_settings(frame, importable, previous_agent)
 
         await update_frame(db, redis, frame)
         db.refresh(frame)

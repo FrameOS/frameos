@@ -52,6 +52,16 @@ visitor's own browser.
   through the store's anonymous preview proxy (`/api/store/preview-proxy`),
   which accepts the playground's origin by name. The playground is no app
   origin otherwise (`getAppOrigins`): no sign-in, no return-to, no passkeys.
+- **Its host is no door to the API.** The scenes it runs are anyone's, and
+  the session cookie is scoped to the registrable domain, so the browser
+  sends it to this host too. On the playground's own host `proxy.ts`
+  answers `404` for every `/api/*` path but the three things the playground
+  asks for (`playgroundServesApi` in `surfaces.ts`: the store's listing for
+  frames, a public scene's files, the preview proxy) and takes the cookie
+  and any `Authorization` off every request before a page or a route reads
+  it, so those are answered as to a stranger. Something new the playground
+  needs from the API goes on that list, and must be fine to serve to
+  anyone.
 - **Files from the computer**: the Files scene's Upload and Download open the
   browser's file picker or save the file (docs/scene-store.md "The Files
   app"); when the tap's gesture ran out before the request came, the page asks

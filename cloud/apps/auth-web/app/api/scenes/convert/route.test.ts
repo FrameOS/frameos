@@ -5,6 +5,7 @@ import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readSession } from "../../../../src/lib/session";
 import { checkRateLimit } from "../../../../src/lib/rate-limit";
+import { renderScenes, SceneRenderError } from "../../../../src/lib/scene-render";
 import { openAiModelPort } from "@frameos-cloud/scene-convert";
 import { captureSceneConversion } from "../../../../src/lib/ai/telemetry";
 import { GET, POST, sharedConverterKey } from "./route";
@@ -24,9 +25,19 @@ vi.mock("../../../../src/lib/rate-limit", async () => {
 vi.mock("../../../../src/lib/session", () => ({
   readSession: vi.fn(() => Promise.resolve(undefined)),
 }));
+// "Not installed" unless a test says otherwise.
+const renderer = vi.hoisted(() => ({ available: false }));
 vi.mock("../../../../src/lib/scene-render", () => ({
-  SceneRenderError: class extends Error {},
-  rendererAvailable: () => false,
+  SceneRenderError: class extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+      public readonly logs: string[] = [],
+    ) {
+      super(message);
+    }
+  },
+  rendererAvailable: () => renderer.available,
   renderScenes: vi.fn(),
 }));
 vi.mock("../../../../src/lib/ai/telemetry", () => ({
@@ -41,6 +52,7 @@ const sessionMock = vi.mocked(readSession);
 const rateLimitMock = vi.mocked(checkRateLimit);
 const portMock = vi.mocked(openAiModelPort);
 const telemetryMock = vi.mocked(captureSceneConversion);
+const renderMock = vi.mocked(renderScenes);
 
 const vannituba = JSON.parse(
   readFileSync(path.join(import.meta.dirname, "../../../../../../packages/scene-convert/fixtures/vannituba.json"), "utf8"),
@@ -76,6 +88,8 @@ beforeEach(() => {
   portMock.mockReset();
   rateLimitMock.mockClear();
   telemetryMock.mockClear();
+  renderer.available = false;
+  renderMock.mockReset();
 });
 
 afterEach(() => {
@@ -270,5 +284,65 @@ describe("sharedConverterKey", () => {
     expect(sharedConverterKey({ OPENAI_API_KEY: "sk-x", FRAMEOS_SCENE_CONVERT_SHARED_KEY_ACCESS: "none" })).toBeUndefined();
     expect(sharedConverterKey({ OPENAI_API_KEY: "sk-x", FRAMEOS_SCENE_CONVERT_SHARED_KEY_ACCESS: "all" })).toBe("sk-x");
     expect(sharedConverterKey({})).toBeUndefined();
+  });
+});
+
+// The render pool is shared with signed-in renders and the route needs no
+// login: everyone without an account is one owner in the pool, so a handful
+// of addresses cannot hold it.
+describe("the render check and callers without an account", () => {
+  const interpreted = (id: string) => ({
+    edges: [],
+    id,
+    name: id,
+    nodes: [{ data: { keyword: "render" }, id: `${id}-ev`, type: "event" }],
+    settings: { execution: "interpreted" },
+  });
+  const rendered = { errors: [], logs: ["the scene printed this"], pngBase64: "", renderMs: 12 };
+  type Reply = { render: { errors: string[]; logs: string[]; ok: boolean; sceneId: string }[] | null };
+
+  it("renders every anonymous caller in one lane and hands back no scene log", async () => {
+    renderer.available = true;
+    renderMock.mockResolvedValue(rendered as never);
+
+    const first = await POST(request({ scene: interpreted("a") }, { "x-forwarded-for": "203.0.113.1" }));
+    const second = await POST(request({ scene: interpreted("b") }, { "x-forwarded-for": "2001:db8::2" }));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+
+    const owners = renderMock.mock.calls.map(([options]) => options.owner);
+    expect(owners).toHaveLength(2);
+    expect(new Set(owners).size).toBe(1);
+    expect(owners[0]).toBe("scenes:convert:anonymous");
+    const payload = (await first.json()) as Reply;
+    expect(payload.render).toEqual([expect.objectContaining({ logs: [], ok: true, sceneId: "a" })]);
+  });
+
+  it("answers without a render check when the anonymous lane is full", async () => {
+    renderer.available = true;
+    renderMock.mockRejectedValue(
+      new SceneRenderError("render_concurrency_limit", "You already have renders in flight; wait for them to finish."),
+    );
+
+    const response = await POST(request({ scene: interpreted("a") }));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Reply & { ok: boolean };
+    // Not a failed render: the scene converted and was simply not checked.
+    expect(payload.ok).toBe(true);
+    expect(payload.render).toBeNull();
+  });
+
+  it("gives an account its own lane and its scene's log", async () => {
+    renderer.available = true;
+    renderMock.mockResolvedValue(rendered as never);
+    sessionMock.mockResolvedValue({ accountId: "acc-1", providerIssuer: "x", providerSubject: "me" });
+
+    const response = await POST(
+      request({ scene: interpreted("a") }, { origin: "http://localhost:3000" }),
+    );
+    expect(response.status).toBe(200);
+    expect(renderMock.mock.calls[0]?.[0].owner).toBe("acc-1");
+    const payload = (await response.json()) as Reply;
+    expect(payload.render?.[0]?.logs).toEqual(["the scene printed this"]);
   });
 });

@@ -137,11 +137,18 @@ opacity (a PDF's soft mask), put over `background`. Asset
 paths are relative to the frame's assets folder; nothing outside it
 resolves, and a symlink inside it is not a way out. What the app may do
 there is its `config.json` `"permissions"` list: `"assets"` to read,
-`"assets-write"` to also write and delete, and `"frame"` for `frameos.frame`
-(the frame page's facts and powers, `docs/terminal.md`). Saving the scene
+`"assets-write"` to also write and delete, `"frame"` for `frameos.frame`
+(the frame page's facts and powers, `docs/terminal.md`), `"code"` for
+`frameos.code` (`docs/code-editor.md`) and `"store"` for
+`frameos.storeAction` (the scenes on the frame and its layout,
+`docs/scene-store.md`). Saving the scene
 fills the list from the code (the read calls, and `writeAsset`,
 `appendAsset`, `deleteAsset`, `makeAssetFolder` or a stream opened with `"w"` or `"a"`, and
-`frameos.frame(`), replacing whatever it said before. The frame gives the app exactly its list
+`frameos.frame(`, `frameos.code(`, `frameos.storeAction(`), replacing whatever it said before.
+`config.json` is read one way by the frame and by both control planes: strict
+JSON, an object (`docs/app-config-fixtures.json`). A file with a comment or a
+trailing comma is no config: the frame gives its app nothing, and no plane
+saves or publishes a scene that carries one. The frame gives the app exactly its list
 (`frameos/src/frameos/js_runtime/app_runtime.nim`): with neither, the
 asset calls live in the scene's own `scenes/<sceneId>/` folder; with
 `"assets"` alone, writes are refused. An app with no list asks for nothing

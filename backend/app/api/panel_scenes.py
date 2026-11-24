@@ -19,14 +19,18 @@ ESP32's (`queue_embedded_scene_preview`, beside the saved list); a Pi
 previews on its own, as the editor's previews do there.
 
 What a frame may do is narrower than what its owner may: public store scenes
-only, fetched from this backend's store (never sent by the device); no
+only, fetched from this backend's store (never sent by the device), and none
+that runs shell commands (`scene_not_allowed`, as on the cloud); no
 service key is granted (a store scene gets the groups the owner allowed in
 the frame's settings, as for any store scene, docs/cloud-frames.md), and an
 update that asks for more than the copy it replaces (a permission, a
 settings key: panel_code's `grants_widened_by`) is the owner's
 (`needs_owner`), as is an install that replaces a saved scene of the same id
-and asks for more than it; nothing while the owner has the settings on the
-frame's screen turned off.
+and asks for more than it, and an install or a preview of a scene new to the
+frame that asks for a red permission (panel_code's `RED_PERMISSIONS`: the
+store on the frame shows no tags, and `storeAction` can be called with nobody
+at the frame); nothing while the owner has the settings on the frame's screen
+turned off.
 
 The cloud's twin is cloud/apps/auth-web/src/lib/panel-scenes.ts."""
 from __future__ import annotations
@@ -128,6 +132,11 @@ async def fetch_store_scenes(provider_url: str, store_scene_id: str) -> list[dic
             raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="invalid_scene_payload")
         # Installed, not the frame's default: that stays the owner's.
         scene.pop("default", None)
+    # No frame installs, previews or updates to a scene that runs shell
+    # commands by itself (the cloud's `scene_not_allowed`, and what its
+    # listing for frames leaves out).
+    if "shell" in _grants_of(scenes)[0]:
+        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="scene_not_allowed")
     return scenes
 
 
@@ -186,6 +195,16 @@ def _grants_of(scenes: list[Any]) -> tuple[set[str], set[str]]:
         permissions |= asked
         settings |= keys
     return permissions, settings
+
+
+def red_permissions_asked(scenes: list[Any]) -> list[str]:
+    """The red permissions the scenes ask for (panel_code's
+    `RED_PERMISSIONS`): what a store scene put on a frame from its own
+    screen, in no saved scene's place, may ask for none of. Settings keys are
+    not counted: a panel install grants none."""
+    from app.api.panel_code import RED_PERMISSIONS
+
+    return sorted(permission for permission in _grants_of(scenes)[0] if permission in RED_PERMISSIONS)
 
 
 def update_widens(installed: list[Any], new_scenes: list[Any]) -> list[str]:
@@ -483,13 +502,17 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             # replaced as an update replaces it: its values, map and layout
             # stay, and, as for an update, the scenes that take its place may
             # ask for nothing more than the copies they replace.
+            # A scene that takes no saved scene's place is new to the frame:
+            # it may ask for no red permission.
             new_ids = {scene["id"] for scene in scenes}
             replaced = [scene for scene in saved if scene.get("id") in new_ids]
-            if replaced:
-                held_ids = {scene.get("id") for scene in replaced}
-                widens = update_widens(replaced, [scene for scene in scenes if scene["id"] in held_ids])
-                if widens:
-                    return _refused("needs_owner", HTTPStatus.FORBIDDEN, needs=widens)
+            held_ids = {scene.get("id") for scene in replaced}
+            widens = update_widens(replaced, [scene for scene in scenes if scene["id"] in held_ids]) if replaced else []
+            for permission in red_permissions_asked([scene for scene in scenes if scene["id"] not in held_ids]):
+                if permission not in widens:
+                    widens.append(permission)
+            if widens:
+                return _refused("needs_owner", HTTPStatus.FORBIDDEN, needs=widens)
             by_id = {scene.get("id"): scene for scene in saved}
             scenes = [_carried(by_id[scene["id"]], scene) if scene["id"] in by_id else scene for scene in scenes]
             kept =[scene for scene in saved if scene.get("id") not in new_ids]
@@ -539,6 +562,11 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
             # Its scenes go by the ids of scenes the frame holds: a preview
             # would push two of one id. Installing it is what replaces them.
             return _refused("already_assigned", HTTPStatus.CONFLICT)
+        # A preview runs the scene on the frame with what its apps ask for:
+        # one that asks for a red permission is the owner's to put there.
+        needs = red_permissions_asked(previewed)
+        if needs:
+            return _refused("needs_owner", HTTPStatus.FORBIDDEN, needs=needs)
         shown = str(previewed[0]["id"])
         outcome = await queue_embedded_scene_preview(
             # `show: false` (a layout tried) keeps the scene showing: it wears it.

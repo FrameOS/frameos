@@ -4,9 +4,9 @@
 // a canvas, and exposes events/state as callbacks.
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
-import { attachKeyboardInput, attachPointerInput, writeHostClipboard } from './pointer'
+import { attachKeyboardInput, attachPointerInput, previewHasGesture, writeHostClipboard } from './pointer'
 import { PreviewCursor, type CursorSprite } from './cursor'
-import { pageHasGesture, pickFiles, saveFile, type PreviewFileRequest } from './files'
+import { pageHasGesture, pickFiles, safeFileName, saveFile, type PreviewFileRequest } from './files'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -146,12 +146,14 @@ export interface FrameOSPreviewOptions {
    * a frame. A bundle from before (`runtimeInfo.fileTransfer`) has neither. */
   fileTransfer?: boolean
   /**
-   * The Files scene asked for files (Upload) or to save one (Download) when
-   * the page had no gesture left to open a picker or a download with: ask
-   * the person with a button of the page's own whose click calls
-   * `answerFileRequest()` (and one for `cancelFileRequest()`). Called with
-   * null when the request is over. Without it the page tries anyway, and a
-   * picker the browser refuses stays shut.
+   * A scene asked for files (Upload) or to save one (Download) with no press
+   * on the preview a moment before it, or when the page had no gesture left
+   * to open a picker with: ask the person with a button of the page's own
+   * whose click calls `answerFileRequest()` (and one for
+   * `cancelFileRequest()`). Called with null when the request is over.
+   * Without it a request that follows a press is tried anyway (a picker the
+   * browser refuses stays shut) and any other is turned down: nothing is
+   * saved to the computer, and no picker opens, that nobody pressed for.
    */
   onFileRequest?: (request: PreviewFileRequest | null) => void
   onReady?: (sceneInfo: SceneInfo, assets: PreviewAssetsInfo | null, runtime: PreviewRuntimeInfo) => void
@@ -507,22 +509,29 @@ export class FrameOSPreview {
     }
   }
 
-  /** The worker's `fileRequest`: answered now while the page still has the
-   * tap's gesture, else asked of the person (`onFileRequest`). A new one
-   * replaces one still waiting, as it does in the runtime. */
+  /** The worker's `fileRequest`: answered now when the person pressed on the
+   * preview a moment ago and the page still has that gesture (or has no
+   * button to ask with), else asked of the person (`onFileRequest`), else
+   * turned down: scene code may ask at any time, and a file is saved to the
+   * computer, or a picker opened, only for a press. A new one replaces one
+   * still waiting, as it does in the runtime. The name is cleaned here: it
+   * is what the page's button shows and what the file is saved under. */
   private takeFileRequest(msg: Record<string, any>): void {
     const op = msg.op === 'upload' || msg.op === 'download' ? msg.op : null
     const id = Number(msg.id) || 0
     if (!op || !id) {
       return
     }
-    this.fileRequest = { id, op, name: String(msg.name ?? '') }
+    const name = String(msg.name ?? '')
+    this.fileRequest = { id, op, name: op === 'download' || name ? safeFileName(name) : '' }
     this.fileRequestData = op === 'download' && msg.data instanceof ArrayBuffer ? msg.data : null
-    if (pageHasGesture() || !this.options.onFileRequest) {
+    if (previewHasGesture() && (pageHasGesture() || !this.options.onFileRequest)) {
       this.answerFileRequest()
-    } else {
+    } else if (this.options.onFileRequest) {
       this.fileRequestShown = true
       this.options.onFileRequest(this.fileRequest)
+    } else {
+      this.cancelFileRequest()
     }
   }
 

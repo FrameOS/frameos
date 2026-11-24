@@ -499,8 +499,11 @@ suite "async JavaScript":
     check picture[0, 0] == rgbx(255, 0, 0, 255) # beside the list, kept throughout
     check not logged.anyIt("beside.png" in it)
     # Back to the top: its pictures went while out of sight, and come again.
+    # Asked as "a load is waiting to be settled", which only the pump below
+    # ends: the I/O worker answers a 1 ms fake fetch whenever it likes, so
+    # "a request is still in flight" raced the check on a loaded runner.
     picture = u.draw(%*{"top": 0})
-    check jsIoInFlight() >= 1
+    check jsAsyncPending() >= 1
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
     discard drainRenders()
     picture = u.draw(%*{"top": 0})

@@ -17,7 +17,7 @@ openai
 packaging
 pillow
 posthog>=7.5.1
-python-jose
+PyJWT
 redis
 requests
 sqlalchemy

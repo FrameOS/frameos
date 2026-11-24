@@ -9,8 +9,8 @@
 // one case that falls back to the session: there is nothing else to ask for,
 // and a passkey assertion already required user verification to get here.
 
-import { eq } from "drizzle-orm";
-import { accounts, type createDb } from "@frameos-cloud/db";
+import { and, eq, isNull, ne } from "drizzle-orm";
+import { accounts, type createDb, sessions } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "./csrf";
 import { verifyPasswordWithDummyFallback } from "./passwords";
@@ -18,7 +18,8 @@ import { identityRateLimitResponse, rateLimitResponse } from "./rate-limit";
 import { requireRecentAuth } from "./recent-auth";
 import { sendSecurityNotificationEmail, type SecurityNotification } from "./email";
 import { reportError } from "./log";
-import { readSession } from "./session";
+import { hashSecret } from "./secrets";
+import { readSession, readSessionToken } from "./session";
 import { secondFactorStatus, verifySecondFactorCode } from "./two-factor";
 
 export type AccountSessionContext = {
@@ -193,6 +194,31 @@ export async function requireStrengtheningProof(
   return undefined;
 }
 
+// Signs out every browser session of the account except the one making this
+// request. For the moment two-factor turns ON: a session that signed in
+// before the account had a second factor never answered one, so a cookie
+// lifted earlier would keep walking past the factor just enrolled (the
+// personal API tokens are revoked for the same reason). Also what a password
+// change does. Returns how many were live.
+export async function revokeOtherSessions(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+) {
+  const token = await readSessionToken();
+  const revoked = await db
+    .update(sessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.accountId, accountId),
+        isNull(sessions.revokedAt),
+        ...(token ? [ne(sessions.tokenHash, hashSecret(token))] : []),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return revoked.length;
+}
+
 export async function readJsonBody(request: NextRequest) {
   const body = (await request.json().catch(() => undefined)) as unknown;
   return body && typeof body === "object" && !Array.isArray(body)
@@ -232,7 +258,7 @@ export async function twoFactorStatusPayload(
 // revokeApiTokensForAccount.
 export function revokedTokensDetail(
   revoked: number,
-  change: "enrolled" | "removed" = "enrolled",
+  change: "enrolled" | "removed" | "password" = "enrolled",
 ): string | undefined {
   if (revoked <= 0) {
     return undefined;
@@ -240,7 +266,9 @@ export function revokedTokensDetail(
   const reason =
     change === "enrolled"
       ? "tokens minted before a second factor existed would keep bypassing it"
-      : "a token must not outlive the second-factor setup it was minted under";
+      : change === "removed"
+        ? "a token must not outlive the second-factor setup it was minted under"
+        : "a token minted under the old password must not outlive it";
   return `${revoked} personal API ${revoked === 1 ? "token was" : "tokens were"} revoked, because ${reason}. Create new ones under Account → Developer.`;
 }
 

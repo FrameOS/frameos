@@ -242,7 +242,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_claim_token_create",
     {
       description:
-        "Mint a claim token for enrolling a new frame (shown once). The token goes into the FrameOS web flasher / SD image builder at /frames → Add frame, or into an existing frame's console with `cloud enroll`. `multi_use` tokens enroll many frames (each lands as `pending` until frame_confirm). `frame_id` re-enrolls an existing frame (single use, 1 h).",
+        "Mint a claim token for enrolling a new frame (shown once). The token goes into the FrameOS web flasher / SD image builder at /frames → Add frame, or into an existing frame's console with `cloud enroll`. `multi_use` tokens enroll many frames (each lands as `pending` until the owner confirms it). NOTE: a claim token minted with an API token always enrolls its frame as `pending` (the answer says `needs_confirmation`): the frame gets no scenes and no service keys until the owner confirms it at /frames, which an API token cannot do. `frame_id` re-enrolls an existing frame (single use, a week at most); that hands a device the identity of a frame that is already active, so it is refused for API tokens (api_token_not_allowed).",
       inputSchema: {
         frame_id: uuid().optional().describe("Re-enroll this existing frame."),
         max_uses: z.number().int().min(1).optional(),
@@ -268,7 +268,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         );
         return text({
           ...result,
-          how_to_use: `Open ${ctx.publicOrigin}/frames, choose "Add frame", and paste the claim token when the flasher or SD-image builder asks for it. Frames enrolled with a multi-use token appear as pending; confirm them with frame_confirm.`,
+          how_to_use: `Open ${ctx.publicOrigin}/frames, choose "Add frame", and paste the claim token when the flasher or SD-image builder asks for it. Frames enrolled with a multi-use token, or with a token an API token minted (needs_confirmation), appear as pending until the owner confirms them at ${ctx.publicOrigin}/frames.`,
         });
       }),
   );

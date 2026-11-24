@@ -44,11 +44,26 @@ How it plugs in (`backend/app/api/auth.py`):
   endpoint is exempt from the method check because the POST is the
   transport; its tool calls reach the routes as separate requests carrying
   the same token, and those are refused.
-- What tokens cannot do: mint tokens, change the email or the password
-  (`require_session_credential`, `403 api_token_not_allowed`), or log in to
-  the web UI. Frame credentials (SSH password, admin login, agent secret,
-  Wi-Fi) are not settable through the MCP either, by tool design rather than
-  by route.
+- What tokens cannot do: mint tokens, change the email or the password, or
+  log in to the web UI. That last one is a rule on routes, not only a
+  missing form: every route that changes the cloud link, a linked cloud
+  identity or whether the password still signs in (`/api/cloud/provider`,
+  `connect`, `poll`, `disconnect`, `identity/*`, `local-fallback`,
+  `features*`, `backup-features`, `backup-key*`) takes a browser session
+  only (`require_session_credential`, `403 api_token_not_allowed`), because
+  those are the steps a session is made from. Frame credentials (SSH
+  password, admin login, agent secret, Wi-Fi) are not settable through the
+  MCP either, by tool design rather than by route.
+- No token reads stored keys back: `GET settings?reveal=1` answers a token
+  masked, and a frame's `scene_preview_settings` refuses one.
+- A read-only token reads no credentials at all. Its frames come without
+  the SSH password, the frame's keys, the admin password, the agent secret,
+  the TLS key and the Wi-Fi passphrases (the leaves
+  `app/utils/frame_secrets.py` names), and the reads whose whole answer is
+  credentials are refused with `403 read_only_token`: `GET
+  /api/backup/export`, a frame's `embedded/provisioning` and its SD image
+  download. A full-access token still reads them: it can deploy to the
+  frame anyway.
 - A password change does not revoke tokens: they are the owner's own scripts.
   Revoke them on the settings page when a token leaks.
 
@@ -72,7 +87,8 @@ minted filled in.
 
 `backend/app/api/mcp.py` answers one JSON-RPC request per POST and keeps
 nothing: JSON responses, no SSE stream, no session id (`GET` and `DELETE`
-are 405). The protocol itself — `initialize`, `ping`, `tools/list`,
+are 405). The body is `application/json` (415 otherwise: any other type is
+what a page on another origin could post without a preflight). The protocol itself — `initialize`, `ping`, `tools/list`,
 `tools/call`, `resources/list`, `resources/templates/list`,
 `resources/read`, `prompts/list`, `prompts/get`, batches for older clients —
 is `backend/app/mcp/protocol.py`, small enough to own rather than add the
@@ -85,6 +101,15 @@ limits key on it, and project-scoped paths (`/api/frames`, `/api/templates`,
 `/api/settings`, …) get the `/api/projects/{id}` prefix. A tool names its
 project with `project_id`; omitted, the account's only project is used, and
 an account with several is told to pass one.
+
+An argument is the model's, and the model reads untrusted text, so no
+argument is pasted into a route path as it came: a string that becomes part
+of a path goes through `segment()` (quoted whole, so a `/` or `?` in it is
+data, and `.` / `..` refused) and carries a `pattern` in its schema
+(`ID_PATTERN` for a row's id, `SEGMENT_PATTERN` for looser names). The client
+also refuses any path that holds a dot segment, a query or a fragment before
+httpx can fold it into a route the tool never named, and `test_mcp.py` reads
+the tools' sources for an interpolation that skipped the quoting.
 
 ### Tools
 

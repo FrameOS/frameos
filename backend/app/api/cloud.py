@@ -23,7 +23,12 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app import config as app_config
-from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, _should_use_secure_cookie, get_current_user
+from app.api.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    _should_use_secure_cookie,
+    get_current_user,
+    require_session_credential,
+)
 from app.database import get_db
 from app.models.cloud import CloudBackendLink, CloudIdentity, current_cloud_backend_link, link_is_expired
 from app.models.user import User
@@ -166,8 +171,19 @@ def _effective_provider_url(link: CloudBackendLink | None) -> str | None:
     return cloud.default_cloud_provider_url()
 
 
+def _granted_scope(answered: object, requested: str | None) -> str:
+    """The scopes an approval gave this link: what the provider answered,
+    cut down to what this install asked for. A provider decides which of the
+    requested scopes it grants; it does not get to add one (cloud login
+    would hand its account a local session, a telemetry scope would start
+    this install sending logs)."""
+    asked = set((requested or "").split())
+    return " ".join(scope for scope in str(answered or "").split() if scope in asked and scope in KNOWN_SCOPES)
+
+
 def _clear_upgrade(link: CloudBackendLink, poll_error: str | None = None) -> None:
     """Forget a pending feature-change approval; the link itself stays up."""
+    link.requested_scope = None
     link.device_code = None
     link.user_code = None
     link.verification_uri = None
@@ -326,6 +342,7 @@ def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     link.cloud_account_id = None
     link.cloud_account_email = None
     link.scope = None
+    link.requested_scope = None
     link.poll_error = poll_error
     link.revoked_at = None
     # A cleared link is an unclaimed setup flow again.
@@ -334,6 +351,14 @@ def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     # always re-enables local password login.
     link.local_fallback_enabled = True
     link.updated_at = _now()
+
+
+# Every route below that changes the link, an identity or how the owner signs
+# in takes a browser session, never an API token: with a token alone a caller
+# could point the install at a provider of their own, bind that provider's
+# identity to the owner and switch the password off, and keep the access after
+# the token is revoked (the same rule as the cloud's `session.apiToken` checks).
+_SESSION_ONLY = [Depends(require_session_credential)]
 
 
 @api_user.get("/cloud/status", response_model=CloudStatusResponse)
@@ -373,7 +398,7 @@ async def _update_provider(data: CloudProviderUpdateRequest, db: Session) -> dic
     return _status_payload(db, link)
 
 
-@api_user.post("/cloud/provider", response_model=CloudStatusResponse)
+@api_user.post("/cloud/provider", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_cloud_provider(data: CloudProviderUpdateRequest, db: Session = Depends(get_db)):
     return await _update_provider(data, db)
 
@@ -431,6 +456,7 @@ async def _start_connect(request: Request, data: CloudConnectRequest, db: Sessio
     link.verification_uri_complete = response.get("verification_uri_complete")
     link.interval_seconds = int(response.get("interval") or 5)
     link.scope = " ".join(scopes)
+    link.requested_scope = " ".join(scopes)
     expires_in = response.get("expires_in")
     if expires_in:
         link.expires_at = _now() + datetime.timedelta(seconds=int(expires_in))
@@ -438,7 +464,7 @@ async def _start_connect(request: Request, data: CloudConnectRequest, db: Sessio
     return _status_payload(db, link)
 
 
-@api_user.post("/cloud/connect", response_model=CloudStatusResponse)
+@api_user.post("/cloud/connect", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def connect_cloud(request: Request, data: CloudConnectRequest, db: Session = Depends(get_db)):
     return await _start_connect(request, data, db)
 
@@ -458,7 +484,11 @@ async def _poll_upgrade(db: Session, link: CloudBackendLink) -> dict:
         db.commit()
         return _status_payload(db, link)
     if status_code == 200 and response.get("scope") and not response.get("access_token"):
-        link.scope = response["scope"]
+        # A change asked for before the request's scopes were kept can only
+        # confirm what the link already has.
+        link.scope = _granted_scope(
+            response["scope"], link.requested_scope if link.requested_scope is not None else link.scope
+        )
         _clear_upgrade(link)
         db.commit()
         await _nudge_cloud_sync()
@@ -495,7 +525,11 @@ async def _poll_link(db: Session, user: User | None = None) -> dict:
         link.token_reference = response.get("token_reference")
         link.linked_client_id = response.get("linked_client_id")
         if response.get("scope"):
-            link.scope = response["scope"]
+            # While connecting, `scope` holds what was asked for.
+            link.scope = _granted_scope(
+                response["scope"], link.requested_scope if link.requested_scope is not None else link.scope
+            )
+        link.requested_scope = None
         link.device_code = None
         link.user_code = None
         link.verification_uri = None
@@ -537,7 +571,7 @@ def _auto_link_identity(db: Session, user: User | None, link: CloudBackendLink, 
     db.commit()
 
 
-@api_user.post("/cloud/poll", response_model=CloudStatusResponse)
+@api_user.post("/cloud/poll", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def poll_cloud(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
@@ -574,7 +608,7 @@ async def _sync_after_connect(db: Session, link: CloudBackendLink, access_token:
     db.commit()
 
 
-@api_user.post("/cloud/disconnect", response_model=CloudStatusResponse)
+@api_user.post("/cloud/disconnect", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def disconnect_cloud(db: Session = Depends(get_db)):
     link = current_cloud_backend_link(db)
     if link is None:
@@ -646,7 +680,22 @@ def setup_host_allowed(host_header: str | None) -> bool:
     if any(host.endswith(suffix) for suffix in LOCAL_HOST_SUFFIXES):
         return True
     allowed = {entry.strip().lower() for entry in app_config.config.FRAMEOS_SETUP_ALLOWED_HOSTS.split(",") if entry.strip()}
+    # The address the owner said this install is reached at is theirs too.
+    public_url = (app_config.config.FRAMEOS_PUBLIC_URL or "").strip()
+    if public_url:
+        try:
+            public_host = (urlparse(public_url).hostname or "").lower()
+        except ValueError:
+            public_host = ""
+        if public_host:
+            allowed.add(public_host)
     return host in allowed
+
+
+SETUP_HOST_REFUSAL = (
+    "First-run setup is served on the local network only: open this backend by its IP address or a "
+    ".local name, or list this hostname in FRAMEOS_SETUP_ALLOWED_HOSTS."
+)
 
 
 def _require_setup_mode(request: Request, db: Session) -> None:
@@ -656,13 +705,7 @@ def _require_setup_mode(request: Request, db: Session) -> None:
     # (IngressPeerGuard) and the Host is Home Assistant's own, so the name
     # check does not apply there.
     if app_config.config.HASSIO_RUN_MODE != "ingress" and not setup_host_allowed(request.headers.get("host")):
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail=(
-                "First-run setup is served on the local network only: open this backend by its IP address or a "
-                ".local name, or list this hostname in FRAMEOS_SETUP_ALLOWED_HOSTS."
-            ),
-        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=SETUP_HOST_REFUSAL)
 
 
 def _setup_claim_matches(request: Request, link: CloudBackendLink | None) -> bool:
@@ -872,7 +915,10 @@ async def cloud_login_options(db: Session = Depends(get_db)):
     available = enabled and _link_has_scope(link, "auth:login")
     return {
         "available": available,
-        "provider_url": link.provider_url if link else None,
+        # Only when cloud login is offered, which sends the browser there
+        # anyway: otherwise an anonymous caller learns where this install is
+        # linked (the device's options route has the same rule).
+        "provider_url": link.provider_url if link and available else None,
         "local_login_enabled": link.local_fallback_enabled if link else True,
         "setup_mode": db.query(User).first() is None,
     }
@@ -919,7 +965,7 @@ async def cloud_login_start(
     return {"authorization_url": authorization_url}
 
 
-@api_user.post("/cloud/identity/link", response_model=CloudLoginStartResponse)
+@api_user.post("/cloud/identity/link", response_model=CloudLoginStartResponse, dependencies=_SESSION_ONLY)
 async def cloud_identity_link_start(
     request: Request,
     response: Response,
@@ -1119,7 +1165,7 @@ async def cloud_login_callback(
     return redirect
 
 
-@api_user.post("/cloud/identity/unlink", response_model=CloudStatusResponse)
+@api_user.post("/cloud/identity/unlink", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def cloud_identity_unlink(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
@@ -1143,7 +1189,7 @@ async def cloud_identity_unlink(
     return _status_payload(db, link, current_user)
 
 
-@api_user.post("/cloud/local-fallback", response_model=CloudStatusResponse)
+@api_user.post("/cloud/local-fallback", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_local_fallback(
     data: CloudLocalFallbackRequest,
     db: Session = Depends(get_db),
@@ -1204,7 +1250,7 @@ async def set_local_fallback(
     return _status_payload(db, link, current_user)
 
 
-@api_user.post("/cloud/backup-features", response_model=CloudStatusResponse)
+@api_user.post("/cloud/backup-features", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_backup_features(
     data: CloudBackupFeaturesRequest,
     db: Session = Depends(get_db),
@@ -1238,7 +1284,7 @@ BASE_LINK_SCOPES = ("backend:link", "backend:read")
 INCLUDED_FEATURE_SCOPES = ("backup:scenes", "backup:frames", "store:publish")
 
 
-@api_user.post("/cloud/features", response_model=CloudStatusResponse)
+@api_user.post("/cloud/features", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_cloud_features(
     data: CloudFeaturesRequest,
     db: Session = Depends(get_db),
@@ -1270,7 +1316,7 @@ async def set_cloud_features(
 
     if status_code == 200 and response.get("status") == "updated":
         if response.get("scope"):
-            link.scope = response["scope"]
+            link.scope = _granted_scope(response["scope"], " ".join(scopes))
         if "auth:login" not in scopes or "auth:login" not in link.scopes:
             # Cloud login is no longer available, so local passwords must be
             # restored before the current authenticated session can expire.
@@ -1282,6 +1328,7 @@ async def set_cloud_features(
         return _status_payload(db, link, current_user)
 
     if status_code == 200 and response.get("status") == "approval_required" and response.get("device_code"):
+        link.requested_scope = " ".join(scopes)
         link.device_code = response["device_code"]
         link.user_code = response.get("user_code")
         link.verification_uri = response.get("verification_uri")
@@ -1300,7 +1347,7 @@ async def set_cloud_features(
     )
 
 
-@api_user.post("/cloud/features/cancel", response_model=CloudStatusResponse)
+@api_user.post("/cloud/features/cancel", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def cancel_cloud_features(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):

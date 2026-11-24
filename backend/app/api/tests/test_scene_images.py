@@ -347,3 +347,42 @@ async def test_get_scene_image_serves_the_status_screens_slashed_id(async_client
     assert served.status_code == 200, served.text
     assert served.content == png
     assert served.headers['cache-control'] == 'private, max-age=86400'
+
+
+
+def test_a_snapshot_is_refused_on_its_header_when_it_has_too_many_pixels(monkeypatch):
+    """A few kilobytes of PNG can claim billions of pixels; the size is
+    checked before the decode, under Pillow's own (warning-only) ceiling."""
+    import io
+
+    import pytest
+    from PIL import Image
+
+    from app.api import scene_images
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 48), "white").save(buffer, format="PNG")
+    png = buffer.getvalue()
+    assert scene_images._normalize_scene_image(png)[1:3] == (64, 48)
+    monkeypatch.setattr(scene_images, "MAX_SCENE_IMAGE_PIXELS", 64 * 48 - 1)
+    with pytest.raises(ValueError):
+        scene_images._normalize_scene_image(png)
+
+
+def test_pillows_ceiling_comes_back_whatever_the_threads_do():
+    """Two openers on worker threads used to put back each other's raised
+    ceiling, which then held for every later open in the process."""
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+
+    from PIL import Image
+
+    from app.utils import photos
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buffer, format="JPEG")
+    data = buffer.getvalue()
+    before = Image.MAX_IMAGE_PIXELS
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: photos.thumbnail_of(data, "a.jpg"), range(400)))
+    assert Image.MAX_IMAGE_PIXELS == before

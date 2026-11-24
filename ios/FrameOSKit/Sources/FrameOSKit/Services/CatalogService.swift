@@ -158,7 +158,10 @@ extension FrameOSService {
                 let scenes: JSONValue
                 if resolved.hasPrefix("http://") || resolved.hasPrefix("https://") {
                     // A public catalog (the cloud store's scenes.json): fetched as it is.
-                    let (data, response) = try await URLSession.shared.data(from: URL(string: resolved)!)
+                    guard let url = URL(string: resolved) else {
+                        throw APIError(status: 0, message: "The catalog did not hand out the scene.")
+                    }
+                    let (data, response) = try await URLSession.shared.data(from: url)
                     guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else {
                         throw APIError(status: (response as? HTTPURLResponse)?.statusCode ?? 0, message: "The catalog did not hand out the scene.")
                     }

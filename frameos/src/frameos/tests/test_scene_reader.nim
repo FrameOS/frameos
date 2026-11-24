@@ -8,6 +8,7 @@ import chroma
 import jsony
 
 import ../interpreter
+import ../utils/json_depth
 import ../types
 
 # ---- the reference: jsony and its hooks, as interpreter.nim had them ----
@@ -257,3 +258,37 @@ suite "scene reader":
       discard parseInterpretedSceneInput("""{"id": "x"} {"id": "y"}""")
     expect CatchableError:
       discard parseInterpretedSceneInput("""{"id": "x"""")
+
+  test "nesting is counted, never recursed into, however deep":
+    # A scene's JSON is anyone's, and the reader called itself once a bracket:
+    # a million of them, kept or passed over, were the end of any stack.
+    let deep = "[".repeat(1_000_000) & "]".repeat(1_000_000)
+    let text = """[{"id": "deep", "unknown": """ & deep & """, "name": "after",
+      "nodes": [{"id": "n", "data": {"keep": {"a": [1, {"b": "]"}]}, "deep": """ & deep & """}}],
+      "apps": {"x": {"sources": """ & deep & """}},
+      "settings": {"splitScreenLayout": """ & deep & """, "isLayout": true},
+      "fields": [{"name": "f", "value": """ & deep & """, "options": [""" & deep & """]}]}]"""
+    let scenes = parseInterpretedSceneInputs(text)
+    check scenes.len == 1
+    check scenes[0].name == "after" # what came after a value passed over
+    check scenes[0].settings.isLayout
+    let data = scenes[0].nodes[0].data
+    check data["keep"] == %*{"a": [1, {"b": "]"}]}
+    # Kept to MaxJsonDepth levels: the data is the first, and what is deeper is null.
+    var level = data["deep"]
+    var levels = 1
+    while level.kind == JArray and level.len == 1:
+      level = level[0]
+      inc levels
+    check level.kind == JNull
+    check levels == MaxJsonDepth
+    check scenes[0].fields[0].value.kind == JArray
+    check appSourcesInJson(text, "deep", "x").kind == JArray
+
+  test "a value passed over keeps its strings whole":
+    # Brackets, quotes and backslashes inside strings are text, not nesting.
+    let scenes = parseInterpretedSceneInputs("""[{"skip": ["a\\", "b\"]", {"c": "}", "d": [true, null, -1.5e3]}],
+      "id": "s", "other": {"x": "\\\""}, "name": "kept"}]""")
+    check scenes[0].id.string == "s"
+    check scenes[0].name == "kept"
+

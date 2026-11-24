@@ -174,11 +174,21 @@ a frame that stays dark until somebody presses a button.
 `https://` backends work: TLS 1.2 via pico-sdk's mbedTLS behind lwIP altcp,
 with hostname verification against an embedded bundle of the major public
 CA roots (`src/certs/pk_ca_roots.h` — ISRG, DigiCert, Amazon, GlobalSign,
-USERTrust, GoDaddy; swap in your own root for a private CA). Certificate
+USERTrust, GoDaddy; swap in your own root for a private CA). The certificate
+has to verify (`ALTCP_MBEDTLS_AUTHMODE` in `src/lwipopts.h`; lwIP's default
+would complete the handshake with any certificate): a self-signed one, or one
+for another name, fails the request, so a backend with a private certificate
+needs its root in the bundle or plain `http://` on a LAN you trust. Certificate
 validity periods check against the RTC / SNTP time, falling back to a
 build-time floor when neither has it. The device's *own* server is plain HTTP
 (no TLS listener): on the LAN it is guarded by the frame's API key or device
-login, in hotspot mode by the WPA2 passphrase.
+login, in hotspot mode by the WPA2 passphrase. Either way a request that
+changes something and comes from a page that is not the device's own (an
+`Origin` other than `http(s)://<its Host>`) is refused with a 403 before
+anything else is asked (`pk_httpd_cross_site_write`): a browser that holds
+the device login, or sits on its hotspot, would otherwise post another site's
+form here. A backend, `curl` or the console sends no `Origin` and is not
+affected.
 
 ## Layout
 

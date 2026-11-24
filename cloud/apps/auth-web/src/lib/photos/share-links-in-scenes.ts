@@ -94,6 +94,28 @@ function mapStrings(value: unknown, map: (text: string) => string): unknown {
  * result is the same placeholder both times. Only the token is swapped: the
  * host and the path stay, so the model still sees an album link.
  */
+// The chat tools whose arguments are a scene or an app on its way into the
+// owner's own scenes (delivered to the editor, saved, put on a frame,
+// rendered): the one place a placeholder turns back into the real link. Any
+// other tool gets the placeholder as the model wrote it, so text that talked
+// the model into copying a link into, say, a frame event, a setting or a
+// listing sends nothing usable. The backend's list is SCENE_DELIVERY_TOOLS in
+// app/utils/photo_share_links.py.
+export const SCENE_DELIVERY_TOOLS: ReadonlySet<string> = new Set([
+  "create_scenes",
+  "save_scene",
+  "update_scene",
+  "patch_scene",
+  "edit_app_source",
+  "render_scene",
+  "frame_scene_install",
+  "frame_scene_update",
+  "frame_scene_preview",
+  "scene_create",
+  "scene_update_content",
+  "scene_render",
+]);
+
 export class PhotoLinkRedactor {
   private readonly numbers = new Map<string, number>();
   private readonly tokens: string[] = [];

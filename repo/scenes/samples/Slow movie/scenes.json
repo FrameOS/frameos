@@ -1,0 +1,154 @@
+[
+  {
+    "id": "slow-movie",
+    "name": "Slow movie",
+    "settings": {
+      "category": "Art & galleries",
+      "execution": "interpreted",
+      "refreshInterval": 180,
+      "backgroundColor": "#000000",
+      "windowSize": "800x480",
+      "icon": "M18,9H16V7H18M18,13H16V11H18M18,17H16V15H18M8,9H6V7H8M8,13H6V11H8M8,17H6V15H8M18,3V5H16V3H8V5H6V3H4V21H6V19H8V21H16V19H18V21H20V3H18Z"
+    },
+    "fields": [
+      {
+        "name": "file",
+        "label": "Film",
+        "type": "string",
+        "value": "",
+        "hint": "A video in the frame's assets (videos/film.mp4). Empty: the first one in videos/.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "seconds",
+        "role": "refreshInterval",
+        "label": "Seconds between stills",
+        "type": "float",
+        "value": "180",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "step",
+        "label": "Seconds of film a still",
+        "type": "float",
+        "value": "4",
+        "hint": "At 4 seconds every 3 minutes, a two-hour film takes about four days.",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "caption",
+        "label": "Show the name and time",
+        "type": "boolean",
+        "value": "true",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "value": "cover",
+        "options": [
+          {
+            "value": "contain",
+            "label": "The whole picture, black bars around it"
+          },
+          {
+            "value": "cover",
+            "label": "Fill the screen, the edges cropped"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "spot",
+        "label": "Where it is",
+        "type": "json",
+        "value": "{}",
+        "access": "private",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "fa0b6ba2-42cb-5a82-9e4d-959c1fbed6fb",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "7b99c6f6-2ec3-54ae-875c-7aae0f8d0af8",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "slowMovie",
+          "config": {}
+        }
+      },
+      {
+        "id": "bb287aa3-6776-5259-b3f2-8aa49fa22db1",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "80fa354f-e3eb-5bb5-aedf-84c1862f013c",
+        "type": "appNodeEdge",
+        "source": "fa0b6ba2-42cb-5a82-9e4d-959c1fbed6fb",
+        "target": "bb287aa3-6776-5259-b3f2-8aa49fa22db1",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "2564736e-691e-59e2-a1b8-2e26639c089b",
+        "type": "codeNodeEdge",
+        "source": "7b99c6f6-2ec3-54ae-875c-7aae0f8d0af8",
+        "target": "bb287aa3-6776-5259-b3f2-8aa49fa22db1",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "slowMovie": {
+        "name": "Slow movie",
+        "category": "data",
+        "description": "Shows a film from the frame's assets as a still every few minutes, each a few seconds of film after the last, and where it is kept on disk.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Slow movie\",\n  \"category\": \"data\",\n  \"description\": \"Shows a film from the frame's assets as a still every few minutes, each a few seconds of film after the last, and where it is kept on disk.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n",
+          "app.tsx": "// @name Slow movie\n// A film played very slowly: one still every few minutes, each a few seconds\n// of film after the last, so a whole movie takes days or weeks to go by. Made\n// for e-paper, where a still is all the panel shows anyway. The film is a\n// video file in the frame's assets (the first one in videos/ unless the\n// settings name one); where it is is kept on disk, and at the end it starts\n// again. Needs a Raspberry Pi to read the film (docs/video.md).\nconst VIDEO = /\\.(mp4|m4v|mov|mkv|webm|avi|ts|mpg|mpeg|wmv|ogv)$/i\n\nlet durations = {} // file -> seconds, read once\n\nconst clock = (s) => {\n  const h = Math.floor(s / 3600)\n  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')\n  return `${h}:${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`\n}\n\nfunction filmOf(app) {\n  const named = String(app.state.file ?? '').trim()\n  if (named) return named\n  // Named from the assets' top: \"videos/film.mp4\".\n  const found = (frameos.listAssets('videos') || []).filter((name) => VIDEO.test(name)).sort()\n  return found.length ? found[0] : ''\n}\n\nfunction Message({ title, text, k }) {\n  return (\n    <div className=\"w-full h-full flex flex-col items-center justify-center bg-white text-black gap-[8px] px-[24px]\">\n      <span className={`text-[${Math.round(24 * k)}px] font-bold`}>{title}</span>\n      <span className={`text-[${Math.round(16 * k)}px] text-center`}>{text}</span>\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const width = context?.imageWidth ?? app.frame.width\n  const height = context?.imageHeight ?? app.frame.height\n  const k = Math.max(0.6, Math.min(2, Math.min(width / 800, height / 480)))\n  const film = filmOf(app)\n  if (!film) {\n    return <Message k={k} title=\"Slow movie\" text=\"Copy a film into the frame's assets folder, in videos/, or name one in the scene's settings.\" />\n  }\n  if (!(film in durations)) {\n    const info = frameos.videoInfo(film)\n    if (info.error) return <Message k={k} title=\"Slow movie\" text={`${film}: ${info.error}`} />\n    durations[film] = info.duration ?? 0\n  }\n  const duration = durations[film]\n  let spot = app.state.spot\n  if (typeof spot === 'string') {\n    try {\n      spot = JSON.parse(spot)\n    } catch {}\n  }\n  if (!spot || typeof spot !== 'object') spot = {}\n  let at = spot.film === film ? Number(spot.at) || 0 : Number(app.state.start) || 0\n  if (duration > 0 && at >= duration - 0.5) at = 0\n  // The still is decoded at the panel's own pixels, whatever the UI's scale.\n  const scale = Math.max(1, Number(app.frame.scale) || 1)\n  const still = frameos.videoFrame(film, {\n    at,\n    width: Math.round(width * scale),\n    height: Math.round(height * scale),\n    fit: app.state.fit === 'contain' ? 'contain' : 'cover',\n  })\n  if (!still.image) {\n    // Past what the file holds (a duration it did not say): from the start.\n    frameos.setState('spot', { film, at: 0 })\n    return <Message k={k} title=\"Slow movie\" text={`${film}: ${still.error ?? 'no picture there'}`} />\n  }\n  // The next still, a step further on.\n  const step = Math.max(0.04, Number(app.state.step) || 4)\n  frameos.setState('spot', { film, at: duration > 0 && at + step >= duration ? 0 : at + step })\n  const name = film.split('/').pop().replace(VIDEO, '')\n  return (\n    <div className=\"relative w-full h-full bg-black\">\n      <img className=\"w-full h-full\" src={still.image} />\n      {app.state.caption !== false ? (\n        <div className={`absolute right-[${Math.round(10 * k)}px] bottom-[${Math.round(8 * k)}px] px-[8px] py-[2px] bg-white`}>\n          <span className={`text-[${Math.round(13 * k)}px] text-black`}>\n            {`${name} · ${clock(at)}${duration > 0 ? ` of ${clock(duration)}` : ''}`}\n          </span>\n        </div>\n      ) : null}\n    </div>\n  )\n}\n"
+        }
+      }
+    }
+  }
+]

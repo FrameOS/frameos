@@ -38,7 +38,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.api.ai_chat import frame_context_block
-from app.api.embedded_device import _active_scene_id, _embedded_frame_from_bearer
+from app.api.embedded_device import _active_scene_id, _embedded_frame_from_bearer, _hardware_preset
 from app.database import get_db
 from app.models.chat import Chat, ChatMessage, find_project_chat, project_chat_id
 from app.models.frame import Frame
@@ -46,6 +46,7 @@ from app.models.log import new_log
 from app.models.photo_share import PhotoShare
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
+from app.tasks.embedded_firmware import _embedded_device_config_value, is_virtual_frame
 from app.models.frame import update_frame
 from app.utils.ai_scene import CHAT_MODEL, openai_model
 from app.utils.embedded_commands import nudge_embedded_frame, queue_embedded_command, queue_embedded_scene_preview
@@ -130,6 +131,40 @@ def _history(db: Session, chat: Chat, now: datetime) -> list[dict[str, str]]:
     return voice_history_for_model(rows, now=now)
 
 
+def frame_has_microphone(frame: Frame) -> bool:
+    """Whether the backend holds this board to have a microphone: the rule
+    the Settings panel draws the voice controls by
+    (`backendFrameHasMicrophone`, frontend/src/utils/voiceChat.ts). The
+    configured pins (`device_config`, either spelling) over the preset's own
+    name a clock and a data line, or the preset's microphone is its codec's."""
+    preset = _hardware_preset(frame)
+    if preset.get("codecPins"):
+        return True
+
+    def pin(camel: str, snake: str) -> int:
+        value = _embedded_device_config_value(frame, camel, snake)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            value = preset.get(camel, -1)
+        return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else -1
+
+    return pin("micClkPin", "mic_clk_pin") >= 0 and pin("micDataPin", "mic_data_pin") >= 0
+
+
+def voice_refusal(frame: Frame) -> str | None:
+    """Why this frame gets no voice turn at all, before a byte is read. The
+    frame's key alone is not the owner talking: a turn is only what a held
+    voice key on a real microphone can start, so a frame whose owner turned
+    the switch off (`device_config.voiceChat`), or that has no microphone to
+    hold a key for (and so no switches in Settings either), is refused."""
+    if is_virtual_frame(frame):
+        return "no_microphone"
+    if _embedded_device_config_value(frame, "voiceChat", "voice_chat") is False:
+        return "voice_chat_off"
+    if not frame_has_microphone(frame):
+        return "no_microphone"
+    return None
+
+
 def _failure(error: str, detail: str) -> JSONResponse:
     # 200 on purpose: the frame reads the body and sounds the error; a 5xx
     # would read as "the backend is down" when the backend is fine.
@@ -148,6 +183,9 @@ async def api_embedded_device_voice(
     authorization: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    refusal = voice_refusal(frame)
+    if refusal:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=refusal)
     if seq == 0 and await hit_rate_limit(
         redis, "embedded_voice", str(frame.id), limit=VOICE_SESSIONS_PER_FRAME_PER_15_MIN, window_seconds=900
     ):

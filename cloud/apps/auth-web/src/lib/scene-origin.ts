@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from "fflate";
 import { withAppPermissions } from "../../../../../frontend/src/utils/sceneAccess";
 import { getScenesBaseUrl } from "./env";
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZip } from "./scene-zip";
 
 // Where an installed scene came from — the `origin` field on every scene
 // object that leaves the store. The frameos workspace reads it to say
@@ -60,14 +60,19 @@ export function storeSceneOrigin(
  * `appPermissions: false` leaves the apps alone: the device push for a
  * firmware that predates the lists, so the payload changes exactly when the
  * firmware starts reading them and the hub's firmware-change resync
- * (frame-hub, `fromVersion`) delivers them.
+ * (frame-hub, `fromVersion`) delivers them. `storePermission: false` leaves
+ * "store" out of a list written here, for the same reason: the push for a
+ * firmware from before `frameos.storeAction` asked for it
+ * (STORE_PERMISSION_FROM), so a Scene store copy published without a list
+ * gets it the moment its frame starts to ask.
  */
 export function withStoreSceneOrigin<T>(
   scenes: readonly T[],
   source: StoreSceneOriginSource,
-  options: { appPermissions?: boolean } = {},
+  options: { appPermissions?: boolean; storePermission?: boolean } = {},
 ): T[] {
   const appPermissions = options.appPermissions !== false;
+  const without = options.storePermission === false ? (["store"] as const) : [];
   const origin = storeSceneOrigin(source);
   return scenes.map((scene) => {
     if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
@@ -78,7 +83,7 @@ export function withStoreSceneOrigin<T>(
       ...scene,
       origin: { ...origin, ...(typeof id === "string" ? { sceneId: id } : {}) },
     } as T;
-    return appPermissions ? withAppPermissions(stamped, { onlyMissing: true }) : stamped;
+    return appPermissions ? withAppPermissions(stamped, { onlyMissing: true, without }) : stamped;
   });
 }
 
@@ -90,27 +95,13 @@ export function rebuildZipWithSceneOrigins(
   source: StoreSceneOriginSource,
 ): Buffer | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort(
-        (a, b) =>
-          a.split("/").length - b.split("/").length || a.localeCompare(b),
-      )[0];
-    if (!manifestPath) {
+    const files = readSceneZip(zipBytes);
+    if (!files?.scenes) {
       return undefined;
     }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenesBytes = files[`${folder}scenes.json`];
-    const manifestBytes = files[manifestPath];
-    if (!scenesBytes || !manifestBytes) {
-      return undefined;
-    }
+    const { folder, manifestPath } = files;
+    const scenesBytes = files.scenes;
+    const manifestBytes = files.manifest;
     const scenes: unknown = JSON.parse(Buffer.from(scenesBytes).toString("utf8"));
     if (!Array.isArray(scenes)) {
       return undefined;
@@ -121,9 +112,8 @@ export function rebuildZipWithSceneOrigins(
         JSON.stringify(withStoreSceneOrigin(scenes, source), null, 2),
       ),
     };
-    const image = files[`${folder}image.jpg`];
-    if (image) {
-      next[`${folder}image.jpg`] = image;
+    if (files.image) {
+      next[`${folder}image.jpg`] = files.image;
     }
     return Buffer.from(zipSync(next));
   } catch {

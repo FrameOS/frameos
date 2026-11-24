@@ -351,9 +351,25 @@
   shelf is its kind, never a stated category (`categories.ts`, doc section "Categories"). A change is asked of the frame's plane (`POST
   /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
   `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public store
-  scenes only, no service key ever granted, refused while the settings on the
-  screen are off; `show: false` installs without leaving the store. Only a
-  frame with no plane installs by itself. Keep the two routes alike.
+  scenes only, no service key ever granted, nothing new that asks for a red
+  permission (`needs_owner`: the store on a frame shows no tags), refused
+  while the settings on the screen are off; `show: false` installs without
+  leaving the store. Only a frame with no plane installs by itself. Keep the
+  two routes alike. `frameos.storeAction` is for an app whose config.json
+  `permissions` has `"store"` (a red tag, detected on save like `"frame"`
+  and `"code"`; `storeGrant` in `app_runtime.nim`, one gate for every host).
+- **An app's config.json is read one way: `docs/app-config-fixtures.json`.**
+  Strict JSON, an object, at most 32 containers deep, or it is no config:
+  the runtime gives such an app nothing (`utils/strict_json.nim`; std/json
+  alone reads comments and trailing commas, which no plane's parser does),
+  and both planes refuse to save, import or publish a scene that carries one
+  (`sceneAppConfigProblem` in `utils/sceneAccess.ts`, the backend's
+  `utils/app_config.py`). Never read `permissions` or `settings` out of a
+  config.json with another parser; the three runners replay the corpus.
+- **A store zip's scenes.json is found by one function**, the cloud's
+  `src/lib/scene-zip.ts` (the file beside the shallowest template.json): the
+  checks at publish and every reader of a stored zip. A new reader goes
+  through it, never its own walk of the entries.
 
 ## The terminal: `docs/terminal.md`
 
@@ -1130,6 +1146,29 @@
   place in the tree (`CHUNK`, `GROUP`), so the keys' ring stays on its link
   while the page scrolls. The page before stays up while the next one comes.
 
+## Video: `docs/video.md`
+
+- A Linux frame plays video through an ffmpeg CHILD PROCESS, never a linked
+  libav: `frameos/video/player.nim` (a reader thread per video, a ring of
+  frames in shared memory, no ref across threads) and `video/args.nim` (the
+  command lines, pure). ffmpeg scales each frame to the `<img>`'s box in the
+  canvas's pixel format, so the render thread's share is one copy; the
+  player's image is a registered canvas, so a frame repaints the video's box
+  alone, and the scene's `nextSleep` is the next frame's time
+  (`js_runtime/js_video.nim` `fillVideos`, after the layout).
+- JS: `frameos.video(key, {src, loop, paused, start, fps, fit, headers})`
+  drawn with `<img src={video}>`, `seekVideo`, `releaseVideo`, `videoInfo`,
+  `videoFrame`; one native, `jsVideo(op, json)`. An ESP32 and the preview
+  answer "cannot play it" (`id` 0, `state` `error`) and draw nothing: keep the
+  stub that small. A URL goes through `spawn_guard.nim` (pinned, protocol and
+  playlist whitelists): a video is no shell command, and a cloud-managed Pi
+  plays it. A new source of frames goes through the same guard.
+- Scenes that call these need `video` (`utils/sceneNeeds.ts` `VIDEO_CALL`,
+  the backend's `_scenes_use_ffmpeg` installs `ffmpeg` on Raspberry Pi OS, an
+  ESP32's store asks `without=video`): keep the three alike. The samples are
+  Video player, Files (its viewer), Immich videos, Camera wall, Video from
+  URL, Archive films and Slow movie, all out of the playground.
+
 ## ESP32 memory: `docs/esp32-memory.md`
 
 - Nim's allocator cannot refuse: on the device a failed allocation spends the
@@ -1401,7 +1440,7 @@
   - Custom exception handlers degrade gracefully to JSON for API calls and reuse the SPA shell for 404/validation errors in non-test scenarios. 【F:backend/app/fastapi.py†L1-L112】
 - Persistence uses SQLAlchemy ORM models (e.g., `User` with hashed passwords) and Alembic migrations (see `migrations/`). Session factory exposed from `app/database.py`. 【F:backend/app/models/user.py†L1-L16】
 - Background jobs run through `arq` with Redis: worker defined in `app/tasks/worker.py` loads tasks for deploying/resetting frames, building SD images, and controlling agents. Startup hooks share HTTP, Redis, and DB clients. Run via `arq app.tasks.worker.WorkerSettings`. 【F:backend/app/tasks/worker.py†L1-L64】
-- API tokens (`app/models/api_token.py`, `fb_api_…` / read-only `fb_apiro_…`) are accepted by `get_current_user` wherever a login JWT is; the MCP server at `POST /api/mcp` (`app/api/mcp.py`, `app/mcp/`) wraps the backend's own routes in-process over ASGI — a new tool is one HTTP call to an existing route, never new behaviour (the photos tools' URL download and scene install are the two noted exceptions in `docs/mcp.md`), and one that changes a physical frame takes `confirm` (the gated list is pinned by `test_mcp.py`). A string argument that lands in a route path needs a `pattern` (the registry enforces it): httpx normalizes `..`, so a free string could name another route. `docs/mcp.md` is the contract; the cloud's `cloud/packages/mcp` is the sibling to keep tool names in step with.
+- API tokens (`app/models/api_token.py`, `fb_api_…` / read-only `fb_apiro_…`) are accepted by `get_current_user` wherever a login JWT is; the MCP server at `POST /api/mcp` (`app/api/mcp.py`, `app/mcp/`) wraps the backend's own routes in-process over ASGI — a new tool is one HTTP call to an existing route, never new behaviour (the photos tools' URL download and scene install are the two noted exceptions in `docs/mcp.md`), and one that changes a physical frame takes `confirm` (the gated list is pinned by `test_mcp.py`). A string argument that lands in a route path goes through `segment()` (`app/mcp/client.py`) and carries a `pattern`: httpx normalizes `..`, so a free string could name another route. The client refuses a path with a dot segment or a query whatever a tool did, and `test_mcp.py` reads the tools for an unquoted one. `docs/mcp.md` is the contract; the cloud's `cloud/packages/mcp` is the sibling to keep tool names in step with.
 - **A frame's backend address is three fields and one reading: `docs/server-address-fixtures.json`.** `server_host` is a bare host, `server_port` the port, `server_scheme` `http` | `https` (frame.json `serverHost` / `serverPort` / `serverScheme`; the ESP32 keeps the one URL they make). The scheme is stated by every writer and never guessed from the port once stated; the ONE seed for a row or frame.json from before 2026.9.13 is "a port ending in 443 is https" (`scheme_from_port`, `serverSchemeFromPort`). Wherever an address is TYPED (the add-frame and adopt forms, the frame settings' host field, the Wi-Fi portal, the device's own frame API, frame.json on load) it is split by the same parser — `app/utils/server_address.py`, `types.nim` `splitServerAddress`, `utils/backendAddress.ts` `splitServerAddress` — and what it says (`https://host:8443`) lands in the scheme and port fields and wins over them; the three fixture runners pin the parsers. A URL for the device comes from `server_base_url(frame)`; do not rebuild `scheme://host:port` by hand, and never add a fourth port rule.
 - **Fetching a URL a user or a page supplied, on either plane: the check goes in the connect.** Checking a name and letting the HTTP client resolve it again is a DNS-rebinding hole (the second answer can be private). Backend: an `httpx.AsyncClient(transport=guarded_transport(...))` (`app/utils/network.py`), with the same policy as the route's up-front `assert_url_target_allowed`. Cloud: `guardedFetch` / `pinnedFetch` (`cloud/apps/auth-web/src/lib/ssrf.ts`, undici with a guarded `lookup`). The child-process fetchers (`scene-render.ts`, `backend/tools/embedded_wasm_render.mjs`) put the check in the socket's `lookup` via `node:http`.
 - Tests rely on pytest + pytest-asyncio fixtures defined in `app/conftest.py`; there is broad coverage across API, websocket, and model layers under `app/api/tests` and `app/models/tests`. 【F:backend/app/conftest.py†L1-L65】【F:backend/app/api/tests/test_frames.py†L1-L183】
@@ -1465,7 +1504,7 @@
   the runtime's own on the runtime's thread and a `portalRequestConfig` /
   `requestFrameConfig()` anywhere else, and a thread it spawns gets values.
 - `frameos/src` houses the on-device runtime written in Nim with asyncdispatch (`frameos/frameos` and `frameos/build` are untracked build outputs, not sources).
-- **pixie is in the tree** (`frameos/pixie`, a squashed subtree of the FrameOS fork since 2026-11-07; `config.nims` puts its `src/` on the path, `FRAMEOS_PIXIE_PATH` points at another checkout). A change to the rasterizer, the SVG reader or the codecs is an ordinary change here: run `make test-pixie` (its own image tests) next to the FrameOS tests. Interactive render performance is `docs/perf-todo.md`; the device's `set debug 1` puts a per-phase split on every render line (`frameos/render_probe.nim`).
+- **pixie is in the tree** (`frameos/pixie`, a squashed subtree of the FrameOS fork since 2026-11-07; `config.nims` puts its `src/` on the path, `FRAMEOS_PIXIE_PATH` points at another checkout). A change to the rasterizer, the SVG reader or the codecs is an ordinary change here: run `make test-pixie` (its own image tests) next to the FrameOS tests. A change to a decoder, a font reader or the inflater also gets `make fuzz-pixie` (every fuzzer in `pixie/tests` with the checks a release turns off left on, under AddressSanitizer; the **pixie fuzzers** workflow runs it on such a change and nightly): a fuzzer's open finding is fenced off in the open (`tools/run_pixie_fuzzers.sh`), and the fix takes the fence away. Interactive render performance is `docs/perf-todo.md`; the device's `set debug 1` puts a per-phase split on every render line (`frameos/render_probe.nim`).
 - Entry point `src/frameos.nim` is the runtime's CLI, not a bare `waitFor startFrameOS()`: `start` (the default, also for any unrecognised `--flag`) runs `startFrameOS()` in a retry loop with the boot guard; `version` / `--version` / `-v` prints the compiled version and exits — it used to fall through to `start` and boot a second runtime next to the service, which is how release 9.2 shipped a 9.1 runtime, so keep that branch first; `check` verifies the binary starts; `setup` (`--with-setup=/boot/frameos-setup.json[.gz]`, `--reboot-if-required`) runs first-boot device setup; `driver-setup` and `set-display` (`--device`, `--width`, `--height`, `--rotate`, `--vcom`, `--upload-url`) patch and apply the display; `upgrade` (`--dry-run`, `--no-reboot`) pulls the latest GitHub release; `privileged-worker` is the root side of the privileged door on Buildroot frames; `help` lists them. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`, `src/frameos`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`.
 - JavaScript repo apps under `repo/apps/<image|text|json|logic>/<app>` are catalog templates for custom code apps; a scene copies one into its own `apps` map, with `origin` naming the template (until 2026.10.13 they all sat under `repo/apps/code`, and readers match an old origin by the app's name). Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
 - `frameos/Makefile` is the build entry: `make build` (app loaders → driver sources → shared driver libraries → assets → `nim c src/frameos.nim` into `build/frameos`), `make run`, `make test` (`nimble test`), `make test-shard SHARD=n` (what CI's "FrameOS Nim Tests" shards run, via `tools/run_test_shard.sh`), `make cross-<target>` / `make release-<target>` / `make release-all` (`backend/bin/cross`, the Docker cross-toolchain builds). `frameos.nimble` holds the dependencies and the `build_quickjs` task; `nimble build` itself can crash the compiler on macOS, so prefer `make build` / `nim c` directly. `nimble.lock` is the truth for package versions (bump a pin in `frameos.nimble` with it); the gitignored `nimble.paths` is `nimble setup`'s copy of it, `config.nims` refuses one older than the lock, and `python3 tools/nimble_paths.py` refreshes it (the Makefile, `build_wasm.sh` and the ESP32's `build_nim.sh` run it first).

@@ -109,6 +109,8 @@ typedef struct {
   int32_t render, turn, cursor;
   FosMemoSlot *last, *used;
   int32_t lastN, usedN, lastCap, usedCap;
+  int32_t active; /* its calls on the C stack: `last` and `used` are not swapped under them
+                     (an out-of-memory abort leaves it counted, in a runtime that goes) */
 } FosMemo;
 
 /* The memo()'d calls running now, innermost last: a signal read finds its
@@ -185,6 +187,20 @@ static void frameos_memo_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark
 static JSClassDef frameos_memo_class = { "FrameOSMemo", frameos_memo_finalizer, frameos_memo_mark, NULL, NULL };
 static JSClassDef frameos_memo_rec_class = { "FrameOSMemoRecord", frameos_rec_finalizer, frameos_rec_mark, NULL, NULL };
 
+/* Scene code is untrusted, and nearly every call below can run it: a props
+   object is the app's own (a getter, a proxy), so is a subscriber "set" and
+   an element, and an indexed setter on Array.prototype makes a store into a
+   fresh array one too. From inside it can call a memo()'d function again,
+   start a new render (__frameosNextRender, __frameosSignal(4)) and drop its
+   references. So:
+   - a value held only by a slot or a record is passed to such a call as a
+     reference of the call's own (JS_DupValue), never borrowed from where
+     the code it runs can replace it;
+   - nothing read from a slot or a record before such a call is used after
+     it: it is read again;
+   - a memo's two slot arrays are not swapped while one of its calls is on
+     the C stack (FosMemo.active): the frames and the calls hold indexes
+     into them. */
 static int frameos_same_props(JSContext *ctx, JSValueConst a, JSValueConst b) {
   if (!JS_IsObject(a) || !JS_IsObject(b)) return 0;
   JSPropertyEnum *ta = NULL, *tb = NULL;
@@ -254,31 +270,34 @@ static int frameos_memo_push(JSContext *ctx, FosMemo *m, JSValue key, JSValue pr
 static JSValue frameos_memo_run(JSContext *ctx, JSValueConst component, JSValueConst props,
                                 FosMemo *m, int32_t slot, JSValueConst rec) {
   FosMemoFrame frame = { m, slot, rec, frameos_top };
+  /* A record's component and props, which a call inside may replace. */
+  JSValue fn = JS_DupValue(ctx, component), arg = JS_DupValue(ctx, props);
   frameos_top = &frame;
-  JSValue result = JS_Call(ctx, component, JS_UNDEFINED, 1, &props);
+  JSValue result = JS_Call(ctx, fn, JS_UNDEFINED, 1, (JSValueConst *)&arg);
   frameos_top = frame.up;
+  JS_FreeValue(ctx, fn);
+  JS_FreeValue(ctx, arg);
   if (!JS_IsException(result) && JS_IsObject(result) && !JS_IsArray(ctx, result))
     JS_SetPropertyStr(ctx, result, "__frameosNode", JS_NewInt32(ctx, 0));
   return result;
 }
 
-static JSValue frameos_memo_call(JSContext *ctx, JSValueConst this_val, int argc,
-                                 JSValueConst *argv, int magic, JSValue *func_data) {
-  (void)this_val; (void)magic;
-  FosMemo *m = JS_GetOpaque(func_data[0], frameos_memo_class_id);
-  JSValueConst props = argc > 0 ? argv[0] : JS_UNDEFINED;
-  if (!m) return JS_ThrowInternalError(ctx, "memo: no state");
-  if (m->render != frameos_memo_epoch) {
+static JSValue frameos_memo_call_in(JSContext *ctx, FosMemo *m, JSValueConst props) {
+  if (m->render != frameos_memo_epoch && m->active == 1) {
     /* A new render: what the last one used is what this one may take back.
-       A record the last render did not carry over leaves its signals. */
-    for (int32_t i = 0; i < m->lastN; i++)
-      if (!JS_IsUndefined(m->last[i].rec)) frameos_rec_unsubscribe(ctx, m->last[i].rec);
-    frameos_memo_free_slots(JS_GetRuntime(ctx), m->last, m->lastN);
-    FosMemoSlot *t = m->last; int32_t tc = m->lastCap;
+       A record the last render did not carry over leaves its signals, which
+       runs the app's code: the arrays are swapped first and the old one is
+       nobody's but this call's while it does. */
+    FosMemoSlot *old = m->last; int32_t oldN = m->lastN, oldCap = m->lastCap;
     m->last = m->used; m->lastN = m->usedN; m->lastCap = m->usedCap;
-    m->used = t; m->usedN = 0; m->usedCap = tc;
+    m->used = NULL; m->usedN = 0; m->usedCap = 0;
     m->turn = 0; m->cursor = 0;
     m->render = frameos_memo_epoch;
+    for (int32_t i = 0; i < oldN; i++)
+      if (!JS_IsUndefined(old[i].rec)) frameos_rec_unsubscribe(ctx, old[i].rec);
+    frameos_memo_free_slots(JS_GetRuntime(ctx), old, oldN);
+    if (m->used) js_free(ctx, old); /* a call from inside those made a new one */
+    else { m->used = old; m->usedCap = oldCap; }
   }
   JSValue key;
   JSValue keyProp = JS_IsObject(props) ? JS_GetPropertyStr(ctx, props, "key") : JS_UNDEFINED;
@@ -295,7 +314,17 @@ static JSValue frameos_memo_call(JSContext *ctx, JSValueConst this_val, int argc
     if (!frameos_same_key(ctx, s->key, key)) continue;
     m->cursor = i + 1;
     FosMemoRec *r = JS_IsUndefined(s->rec) ? NULL : frameos_rec(s->rec);
-    if ((!r || (!r->dirty && !r->stale)) && frameos_same_props(ctx, s->props, props)) {
+    int same = 0;
+    if (!r || (!r->dirty && !r->stale)) {
+      /* The comparison reads both objects' properties: the slot's is held
+         for it, and the slot's record is read again after. */
+      JSValue was = JS_DupValue(ctx, s->props);
+      same = frameos_same_props(ctx, was, props);
+      JS_FreeValue(ctx, was);
+      r = JS_IsUndefined(s->rec) ? NULL : frameos_rec(s->rec);
+      if (r && (r->dirty || r->stale)) same = 0;
+    }
+    if (same) {
       /* A record's element is the newest: a partial render may have made it. */
       JSValue element = JS_DupValue(ctx, r ? r->element : s->element);
       if (frameos_memo_push(ctx, m, key, JS_DupValue(ctx, s->props), JS_DupValue(ctx, element),
@@ -315,8 +344,9 @@ static JSValue frameos_memo_call(JSContext *ctx, JSValueConst this_val, int argc
   if (!JS_IsUndefined(rec)) {
     FosMemoRec *r = frameos_rec(rec);
     frameos_rec_unsubscribe(ctx, rec);
-    JS_FreeValue(ctx, r->props);
+    JSValue before = r->props;
     r->props = JS_DupValue(ctx, props);
+    JS_FreeValue(ctx, before);
   }
   int32_t slot = m->usedN;
   if (frameos_memo_push(ctx, m, key, JS_DupValue(ctx, props), JS_UNDEFINED, rec) < 0) return JS_EXCEPTION;
@@ -326,11 +356,23 @@ static JSValue frameos_memo_call(JSContext *ctx, JSValueConst this_val, int argc
   s->element = JS_DupValue(ctx, result);
   FosMemoRec *r = JS_IsUndefined(s->rec) ? NULL : frameos_rec(s->rec);
   if (r) {
-    JS_FreeValue(ctx, r->element);
+    JSValue before = r->element;
     r->element = JS_DupValue(ctx, result);
     r->dirty = 0;
     r->stale = 0;
+    JS_FreeValue(ctx, before);
   }
+  return result;
+}
+
+static JSValue frameos_memo_call(JSContext *ctx, JSValueConst this_val, int argc,
+                                 JSValueConst *argv, int magic, JSValue *func_data) {
+  (void)this_val; (void)magic;
+  FosMemo *m = JS_GetOpaque(func_data[0], frameos_memo_class_id);
+  if (!m) return JS_ThrowInternalError(ctx, "memo: no state");
+  m->active++;
+  JSValue result = frameos_memo_call_in(ctx, m, argc > 0 ? argv[0] : JS_UNDEFINED);
+  m->active--;
   return result;
 }
 
@@ -393,7 +435,8 @@ static JSValue frameos_signal_op(JSContext *ctx, JSValueConst this_val, int argc
     JSValue len = JS_GetPropertyStr(ctx, r->deps, "length");
     JS_ToInt32(ctx, &n, len);
     JS_FreeValue(ctx, len);
-    JS_SetPropertyUint32(ctx, r->deps, n, JS_DupValue(ctx, argv[2]));
+    /* Defined, not set: a set asks Array.prototype for a setter first. */
+    JS_DefinePropertyValueUint32(ctx, r->deps, n, JS_DupValue(ctx, argv[2]), JS_PROP_C_W_E);
     return JS_UNDEFINED;
   }
   case 2:
@@ -405,9 +448,11 @@ static JSValue frameos_signal_op(JSContext *ctx, JSValueConst this_val, int argc
     if (!r || !r->dirty) return JS_UNDEFINED;
     int32_t old = 0;
     if (JS_IsObject(r->element)) {
-      JSValue mark = JS_GetPropertyStr(ctx, r->element, "__frameosNode");
+      JSValue element = JS_DupValue(ctx, r->element);
+      JSValue mark = JS_GetPropertyStr(ctx, element, "__frameosNode");
       JS_ToInt32(ctx, &old, mark);
       JS_FreeValue(ctx, mark);
+      JS_FreeValue(ctx, element);
     }
     if (old <= 0) return JS_NULL;
     for (JSValue p = r->parent; !JS_IsUndefined(p);) {
@@ -419,13 +464,14 @@ static JSValue frameos_signal_op(JSContext *ctx, JSValueConst this_val, int argc
     frameos_rec_unsubscribe(ctx, argv[1]);
     JSValue element = frameos_memo_run(ctx, r->component, r->props, NULL, -1, argv[1]);
     if (JS_IsException(element)) return element;
-    JS_FreeValue(ctx, r->element);
+    JSValue before = r->element;
     r->element = JS_DupValue(ctx, element);
     r->dirty = 0;
     r->stale = 0;
+    JS_FreeValue(ctx, before);
     JSValue pair = JS_NewArray(ctx);
-    JS_SetPropertyUint32(ctx, pair, 0, JS_NewInt32(ctx, old));
-    JS_SetPropertyUint32(ctx, pair, 1, element);
+    JS_DefinePropertyValueUint32(ctx, pair, 0, JS_NewInt32(ctx, old), JS_PROP_C_W_E);
+    JS_DefinePropertyValueUint32(ctx, pair, 1, element, JS_PROP_C_W_E);
     return pair;
   }
   case 4:
@@ -433,6 +479,12 @@ static JSValue frameos_signal_op(JSContext *ctx, JSValueConst this_val, int argc
     return JS_UNDEFINED;
   }
   return JS_UNDEFINED;
+}
+
+/* After an out-of-memory abort (a longjmp out of the calls running): the
+   frames it jumped over are gone with their stack. */
+static void frameos_memo_abandon(void) {
+  frameos_top = NULL;
 }
 
 static JSValue frameos_next_render(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -493,6 +545,14 @@ proc installNativeJsx*(js: QuickJS): bool =
   ## The C factory as `__frameosJsx` and the C `memo` in `js`, whose prelude
   ## defined `__frameosFragment`; false (the JavaScript ones stay) otherwise.
   frameosInstallNativeJsx(js.context) != 0
+
+proc frameosMemoAbandon() {.importc: "frameos_memo_abandon", nodecl.}
+
+proc memoAbandon*() =
+  ## The memo()'d calls an out-of-memory abort jumped out of are running no
+  ## more (app_runtime.abandonMidCallJsAppRuntimes): a signal read after it
+  ## must not find one of them.
+  frameosMemoAbandon()
 
 var frameosDirtyMarks {.importc: "frameos_dirty_marks", nodecl.}: uint32
 

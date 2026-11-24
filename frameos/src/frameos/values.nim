@@ -1,5 +1,6 @@
 # values.nim
 import std/[json]
+import frameos/utils/json_depth
 import strutils
 import pixie
 import options
@@ -349,7 +350,7 @@ proc stateFieldSeed*(field: StateField): JsonNode =
   if field.fieldType == "json" and seedValue.kind == JString:
     # Compiled scenes parse JSON string defaults; stay consistent
     try:
-      seedValue = parseJson(seedValue.getStr())
+      seedValue = parseJsonBounded(seedValue.getStr())
     except CatchableError:
       discard
   valueToJson(valueFromJsonByType(seedValue, field.fieldType))

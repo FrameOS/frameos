@@ -35,7 +35,11 @@ import type {
   ScenesEvent,
   ToolContext,
 } from "../../../../src/lib/ai/tools";
-import { renderSizeContext, untrustedResult } from "../../../../src/lib/ai/tools";
+import {
+  renderSizeContext,
+  untrustedData,
+  untrustedResult,
+} from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
   activeTurnCountForAccount,
@@ -159,7 +163,7 @@ async function storeSceneContextBlock(
   accountId: string,
   storeSceneId: string | null,
   draft: ListingEvent["listing"] | null,
-): Promise<{ block: string; storeSceneId: string | null }> {
+): Promise<{ block: string; owned?: boolean; storeSceneId: string | null }> {
   if (!storeSceneId || !/^[0-9a-f-]{36}$/i.test(storeSceneId)) {
     return { block: "", storeSceneId: null };
   }
@@ -226,7 +230,7 @@ async function storeSceneContextBlock(
           "- The listing can be edited in the draft (update_scene_listing) like the scene, but only a fork of their own can carry it.",
         ]),
   ];
-  return { block: lines.join("\n"), storeSceneId: scene.id };
+  return { block: lines.join("\n"), owned, storeSceneId: scene.id };
 }
 
 // The credential the chat's MCP tools call the routes with: the request's
@@ -369,6 +373,7 @@ export async function POST(request: NextRequest) {
   const {
     block: frameBlock,
     frameId,
+    holdsOthersScenes,
     renderDevice,
     renderScale,
     resolution: frameResolution,
@@ -378,7 +383,11 @@ export async function POST(request: NextRequest) {
     stringOrNull(body.frameId),
   );
   const draftListing = parseDraftListing(body.listing);
-  const { block: storeBlock, storeSceneId } = await storeSceneContextBlock(
+  const {
+    block: storeBlock,
+    owned: storeSceneOwned,
+    storeSceneId,
+  } = await storeSceneContextBlock(
     db,
     accountId,
     stringOrNull(body.storeSceneId),
@@ -451,11 +460,27 @@ export async function POST(request: NextRequest) {
   if (renderSize && body.editor !== false) {
     contextParts.push(renderSizeContext(renderSize));
   }
+  // The scene in the editor is somebody else's text when the user is on a
+  // store scene they do not own, or on a frame that holds a scene somebody
+  // else published (an install from the store; which of the frame's scenes
+  // is open is not known here, so any such frame counts). Its names, node
+  // text, comments and app sources then reach the model the way that scene's
+  // listing and get_store_scene do: inside the untrusted frame, never bare.
+  // Nor does its id ride the sentence in front unless it reads as an id.
+  const sceneIsThirdParty =
+    storeSceneOwned === false || holdsOthersScenes === true;
+  const thirdParty = (source: string, text: string) =>
+    sceneIsThirdParty ? untrustedData(source, text) : text;
   if (scenePayload) {
+    const openSceneId = `${sceneId ?? scenePayload.id}`;
+    const idNote =
+      !sceneIsThirdParty || /^[A-Za-z0-9_.:-]{1,128}$/.test(openSceneId)
+        ? ` (its id is "${openSceneId}")`
+        : "";
     contextParts.push(
-      `The user has this scene open in the editor (its id is "${sceneId ?? scenePayload.id}"). ` +
+      `The user has this scene open in the editor${idNote}. ` +
         "update_scene will modify it:\n" +
-        sceneContextJson,
+        thirdParty("open_scene", sceneContextJson),
     );
   }
   if (editorScenes && editorScenes.length > 1) {
@@ -465,7 +490,8 @@ export async function POST(request: NextRequest) {
       .map((scene) => `${String(scene.name ?? "")} (${String(scene.id ?? "")})`);
     if (others.length > 0) {
       contextParts.push(
-        "Other scenes open in the same editor (scene nodes may embed them by id): " + others.join(", "),
+        "Other scenes open in the same editor (scene nodes may embed them by id): " +
+          thirdParty("open_scene_names", others.join(", ")),
       );
     }
   }
@@ -475,7 +501,8 @@ export async function POST(request: NextRequest) {
     const selection = JSON.stringify({ edges: selectedEdges, nodes: selectedNodes });
     contextParts.push(
       selection.length <= maxSelectionContextChars
-        ? "The user has selected these elements in the editor:\n" + selection
+        ? "The user has selected these elements in the editor:\n" +
+            thirdParty("selection", selection)
         : `The user has selected ${selectedNodes.length} node(s) and ${selectedEdges.length} edge(s) in the editor; the selection is too large to include here, so work from the scene JSON above.`,
     );
   }

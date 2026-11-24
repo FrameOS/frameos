@@ -10,7 +10,7 @@ for i in 0 ..< 10000:
   var
     file = fontPaths[rand(fontPaths.len - 1)]
     data = readFile(file)
-    pos = rand(data.len)
+    pos = rand(data.len - 1)
     value = rand(255).char
   data[pos] = value
   echo &"{i} {file} {pos} {value.uint8}"

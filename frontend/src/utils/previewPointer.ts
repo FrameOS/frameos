@@ -126,6 +126,30 @@ export function wheelNotches(delta: number, deltaMode: number, carry: number): {
 // The most positions a move carries in `points` (input_state.nim MovePointsMax).
 const MOVE_POINTS_MAX = 64
 
+/** How long a press on the preview stands for the person who made it: what a
+ * browser gives a gesture of its own (its transient activation). */
+export const PREVIEW_GESTURE_MS = 5000
+
+// When the person last pressed a pointer or a key on a preview's picture. One
+// record for the page: what it gates (the computer's clipboard, a download)
+// is the page's too.
+let lastPreviewGestureAt = Number.NEGATIVE_INFINITY
+
+function notePreviewGesture(): void {
+  lastPreviewGestureAt = Date.now()
+}
+
+/**
+ * Whether the person pressed a pointer or a key on the preview a moment ago.
+ * What a scene asks of the computer (write its clipboard, save a file to it)
+ * is done only then: scene code is anyone's, and a click elsewhere on the
+ * page (which is all `navigator.userActivation` knows) says nothing about
+ * what the scene may do.
+ */
+export function previewHasGesture(now: number = Date.now()): boolean {
+  return now >= lastPreviewGestureAt && now - lastPreviewGestureAt <= PREVIEW_GESTURE_MS
+}
+
 /** Where input events go: the worker's `{type: 'event'}` message, or anything shaped like it. */
 export type PointerEventSink = (name: string, payload: Record<string, unknown>) => void
 
@@ -293,6 +317,7 @@ export function attachPointerInput(
     if (typeof canvas.focus === 'function' && canvas.tabIndex >= 0) {
       canvas.focus({ preventScroll: true })
     }
+    notePreviewGesture()
     send(v2() ? 'pointerDown' : 'mouseDown', v2() ? { ...pointerPayload(event), button } : { button })
   }
 
@@ -311,6 +336,7 @@ export function attachPointerInput(
     }
     queueMove(event)
     flushMoves()
+    notePreviewGesture()
     send(v2() ? 'pointerUp' : 'mouseUp', v2() ? { ...pointerPayload(event), button } : { button })
   }
 
@@ -459,9 +485,15 @@ export function isPasteChord(event: KeyboardEvent): boolean {
 }
 
 /** The frame's Copy or Cut, on the browser's clipboard as well: what the
- * worker hands on (`{type: 'clipboard', text}`). Quietly nothing where the
- * page may not write it. */
+ * worker hands on (`{type: 'clipboard', text}`). Only for a Copy the person
+ * made, a press on the preview a moment ago (`previewHasGesture`): a scene's
+ * own code can move the frame's clipboard too, and a browser that asks no
+ * gesture of a focused page would let it write the computer's whenever it
+ * likes. Quietly nothing where the page may not write it. */
 export function writeHostClipboard(text: string): void {
+  if (!previewHasGesture()) {
+    return
+  }
   try {
     void navigator.clipboard?.writeText(text)?.catch(() => undefined)
   } catch {
@@ -511,6 +543,7 @@ export function attachKeyboardInput(
     if (SCROLLING_KEYS.has(event.code)) {
       event.preventDefault()
     }
+    notePreviewGesture()
     if (options.onPaste && isPasteChord(event)) {
       releasePaste()
       heldPaste = keyPayload(event, true)

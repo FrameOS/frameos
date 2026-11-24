@@ -18,7 +18,10 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
-import { requireRecentAuth } from "../../../../src/lib/recent-auth";
+import {
+  requireRecentAuth,
+  requireRecentAuthWithSecondFactor,
+} from "../../../../src/lib/recent-auth";
 import {
   readSession,
   sessionCookieName,
@@ -40,9 +43,13 @@ import {
 // The delete itself is a single row: every table that holds this account's
 // data cascades from accounts.id (see packages/db/src/schema.ts). Two
 // exceptions. audit_events is ON DELETE SET NULL, so the security trail
-// survives with the account identifier stripped out — a security log that
-// the subject can erase is not a security log; a de-identified one is not
-// their personal data either. The privacy policy says so out loud. And the
+// survives with its link to the account cut (account_id), and no more than
+// that: the rows keep the email address, IP address and actor that each
+// event recorded, this delete's own included, because a security log the
+// subject can erase is not a security log. That is personal data kept on
+// legitimate interest; the privacy policy says so out loud ("Security audit
+// trail", app/legal/privacy) and scripts/db-cleanup.sh removes such rows
+// after two years. Changing what they keep is a change to that policy. And the
 // accounting tables reference nothing (cloud/docs/accounting-todo.md §2.1):
 // the books keep a bare uuid, and a subscription in progress is closed out
 // BELOW before the row goes, so its unearned remainder returns to the
@@ -118,6 +125,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (account.passwordHash) {
+    // With two-factor on, the password alone proves less than sign-in did:
+    // the session must have passed sudo mode (the second factor) recently.
+    const reauth = await requireRecentAuthWithSecondFactor(db, accountId);
+    if (reauth) {
+      return reauth;
+    }
     // Dummy fallback keeps the timing flat whether or not a hash exists.
     const valid = await verifyPasswordWithDummyFallback(
       password,

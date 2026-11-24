@@ -5,6 +5,7 @@ import std/[json, strutils, tables, unittest]
 import pixie
 import ../interpreter
 import ../js_runtime/runtime
+from ../js_runtime/burrito import JSException
 import ../utils/memory
 import ../scene_compiler
 import ../types
@@ -120,6 +121,49 @@ suite "scene compiler":
       code("[typeof d, typeof g, typeof N, typeof __K, typeof T, typeof Z, typeof console.log].join(',')"))], @[], store)
     check scene.getDataNode(1.NodeId, ctx(scene)).asString() ==
       "undefined,undefined,undefined,undefined,undefined,undefined,function"
+
+  test "a snippet that closes what the program puts around it is refused, and nothing of it runs":
+    # The program holds each snippet as written between parentheses: text
+    # that closed them ran in the scope around it when the program loaded,
+    # before any budget counted, and a little more reached the kit.
+    for escape in ["1); console.log('escaped'); (2", "1)); console.log('escaped'); ((2",
+        "1)}; console.log('escaped'); {(2"]:
+      checkpoint escape
+      let store = LogStore()
+      expect JSException: # the scene's start loads its program
+        let scene = started(@[
+          node(1, "app", %*{"keyword": "render/text", "config": {}}),
+          node(2, "code", code("greeting", @["greeting"])),
+        ], @[edge(0, "code/" & escape, 2, "codeField/greeting")], store)
+        discard scene.getDataNode(2.NodeId, ctx(scene))
+      let refused = store.logged("interpreter:jsCompileError")
+      check not refused.isNil
+      check refused{"sourceKind"}.getStr() == "inline"
+      check refused{"snippet"}.getStr() == escape
+      check store.logged("interpreter:jsConsole").isNil
+    let store = LogStore()
+    expect JSException:
+      let scene = started(@[node(1, "code",
+        code("'x'))(__S,A,__C)}; console.log('escaped'); function z(){return((()=>(1"))], @[], store)
+      discard scene.getDataNode(1.NodeId, ctx(scene))
+    check store.logged("interpreter:jsCompileError"){"sourceKind"}.getStr() == "code"
+    check store.logged("interpreter:jsConsole").isNil
+
+  test "any expression a snippet held before still runs":
+    # Brackets, strings, templates, regular expressions and comments that
+    # hold the program's own brackets, an object, a comma, a TS cast, JSX.
+    let store = LogStore()
+    let scene = started(@[
+      node(1, "code", code("""/* ) ] } */ `${[1, 2].map((x) => ({ v: x })).length}` + ')' + "]" // )""")),
+      node(2, "code", code("/[)\\]]/.test(')') ? (1, 'yes') : 'no'")),
+      node(3, "code", code("(state.name as string).length\n+ 0")),
+      node(4, "code", code("typeof <div className='a' />")),
+    ], @[], store)
+    check scene.getDataNode(1.NodeId, ctx(scene)).asString() == "2)]"
+    check scene.getDataNode(2.NodeId, ctx(scene)).asString() == "yes"
+    check scene.getDataNode(3.NodeId, ctx(scene)).asString() == "3"
+    check scene.getDataNode(4.NodeId, ctx(scene)).asString() == "object"
+    check store.logged("interpreter:jsCompileError").isNil
 
   test "a cycle of next edges runs each node once, and says so":
     let store = LogStore()

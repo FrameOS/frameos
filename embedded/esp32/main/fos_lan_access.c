@@ -29,33 +29,40 @@ static uint8_t s_attempts_left = 0;
 static uint32_t s_generation = 0;
 
 /* The wrong-code budget. Not initialised at boot (RTC_NOINIT on the device):
- * the magic tells a kept budget from power-on garbage. */
-#define LAN_BUDGET_MAGIC 0x4C414E42u /* "LANB" */
+ * the magic tells a kept budget from power-on garbage, and from the budget a
+ * firmware before the growing window kept ("LANB", without the last two). */
+#define LAN_BUDGET_MAGIC 0x4C414E32u /* "LAN2" */
 typedef struct {
     uint32_t magic;
-    uint32_t wrong;      /* wrong codes since window_start */
-    int64_t window_start;
+    uint32_t wrong;       /* wrong codes since window_start */
+    int64_t window_start; /* when the window's first wrong code came */
+    uint32_t doublings;   /* the window is an hour, this many times doubled */
+    int64_t last_wrong;   /* when the last wrong code came */
 } lan_budget_t;
 LAN_BUDGET_ATTR static lan_budget_t s_budget;
 
-/* The window as of `now_s`, reset when it has run out. A clock BEHIND the
- * stored start (an SNTP correction backwards; garbage at power-on is caught
- * by the magic) keeps the count and restarts the window from now: every way
- * this misjudges the time errs towards a longer lock-out, never a shorter
- * one. */
+/* The budget as of `now_s`. A window that saw wrong codes and has run out
+ * gives its ten back and makes the next one twice as long; a quiet month
+ * makes it an hour again. A clock BEHIND a stored time (it cannot be on the
+ * device, whose clock only counts up; garbage at power-on is caught by the
+ * magic) keeps the count and starts from now: every way this misjudges the
+ * time errs towards a longer lock-out, never a shorter one. */
 static void budget_roll_locked(int64_t now_s)
 {
-    if (s_budget.magic != LAN_BUDGET_MAGIC || s_budget.wrong > FOS_LAN_ACCESS_BUDGET_WRONG) {
-        s_budget.magic = LAN_BUDGET_MAGIC;
-        s_budget.wrong = 0;
-        s_budget.window_start = now_s;
+    if (s_budget.magic != LAN_BUDGET_MAGIC || s_budget.wrong > FOS_LAN_ACCESS_BUDGET_WRONG ||
+        s_budget.doublings > FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS) {
+        s_budget = (lan_budget_t){.magic = LAN_BUDGET_MAGIC, .window_start = now_s, .last_wrong = now_s};
         return;
     }
-    if (now_s < s_budget.window_start) {
-        s_budget.window_start = now_s;
-    } else if (now_s - s_budget.window_start >= FOS_LAN_ACCESS_BUDGET_WINDOW_SEC) {
+    if (now_s < s_budget.window_start) s_budget.window_start = now_s;
+    if (now_s < s_budget.last_wrong) s_budget.last_wrong = now_s;
+    if (s_budget.wrong > 0 &&
+        now_s - s_budget.window_start >= ((int64_t)FOS_LAN_ACCESS_BUDGET_WINDOW_SEC << s_budget.doublings)) {
         s_budget.wrong = 0;
-        s_budget.window_start = now_s;
+        if (s_budget.doublings < FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS) s_budget.doublings++;
+    }
+    if (s_budget.wrong == 0 && now_s - s_budget.last_wrong >= FOS_LAN_ACCESS_BUDGET_QUIET_SEC) {
+        s_budget.doublings = 0;
     }
 }
 
@@ -71,6 +78,7 @@ static void budget_note_wrong_locked(int64_t now_s)
     /* The window opens at the first wrong code, not at the last reset. */
     if (s_budget.wrong == 0) s_budget.window_start = now_s;
     s_budget.wrong++;
+    s_budget.last_wrong = now_s;
 }
 
 /* volatile: the compiler may not drop a store to a buffer it can prove is

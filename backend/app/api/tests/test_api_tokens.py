@@ -164,3 +164,97 @@ async def test_expiry_bounds_and_the_per_user_cap(async_client, monkeypatch):
 async def test_tokens_need_a_login(no_auth_client):
     assert (await no_auth_client.get("/api/user/api_tokens")).status_code == 401
     assert (await no_auth_client.post("/api/user/api_tokens", json={"name": "x"})).status_code == 401
+
+
+CLOUD_LINK_MUTATIONS = [
+    "/api/cloud/provider",
+    "/api/cloud/connect",
+    "/api/cloud/poll",
+    "/api/cloud/disconnect",
+    "/api/cloud/identity/link",
+    "/api/cloud/identity/unlink",
+    "/api/cloud/local-fallback",
+    "/api/cloud/backup-features",
+    "/api/cloud/features",
+    "/api/cloud/features/cancel",
+    "/api/cloud/backup-key/import",
+]
+
+
+@pytest.mark.asyncio
+async def test_token_cannot_change_the_cloud_link_or_how_the_owner_signs_in(async_client):
+    """Linking the install to a provider, binding a cloud identity to the
+    owner and switching the password off are how a session is made: with a
+    token alone they would outlive the token."""
+    token = (await mint(async_client)).json()["token"]
+
+    for path in CLOUD_LINK_MUTATIONS:
+        refused = await async_client.post(path, json={}, headers=bearer(token))
+        assert refused.status_code == 403, path
+        assert refused.json()["detail"]["error"] == "api_token_not_allowed", path
+
+    recovery = await async_client.get("/api/cloud/backup-key", headers=bearer(token))
+    assert recovery.status_code == 403
+    assert recovery.json()["detail"]["error"] == "api_token_not_allowed"
+
+    # The browser session still reaches them (no link here, so not a 403).
+    assert (await async_client.post("/api/cloud/disconnect")).status_code != 403
+    assert (await async_client.get("/api/cloud/backup-key")).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_read_only_token_reads_no_credentials(async_client, db: Session, redis):
+    read_only = (await mint(async_client, access="read_only")).json()["token"]
+    full = (await mint(async_client, name="script")).json()["token"]
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "localhost")
+    frame.ssh_pass = "hunter2"
+    frame.network = {"wifiSSID": "home", "wifiPassword": "wifi-secret"}
+    frame.frame_admin_auth = {"enabled": True, "user": "admin", "pass": "admin-secret"}
+    db.commit()
+
+    # The session and a full token see the frame as before.
+    for headers in ({}, bearer(full)):
+        whole = (await async_client.get(f"/api/frames/{frame.id}", headers=headers)).json()["frame"]
+        assert whole["ssh_pass"] == "hunter2"
+        assert whole["server_api_key"] and whole["frame_access_key"]
+        assert whole["network"]["wifiPassword"] == "wifi-secret"
+
+    one = (await async_client.get(f"/api/frames/{frame.id}", headers=bearer(read_only))).json()["frame"]
+    listed = (await async_client.get("/api/frames", headers=bearer(read_only))).json()["frames"][0]
+    for seen in (one, listed):
+        assert seen["name"] == "Kitchen"
+        for key in ("ssh_pass", "server_api_key", "frame_access_key"):
+            assert not seen.get(key), key
+        assert seen["network"] == {"wifiSSID": "home"}
+        assert seen["frame_admin_auth"]["user"] == "admin"
+        assert "pass" not in seen["frame_admin_auth"]
+        assert "hunter2" not in str(seen) and "admin-secret" not in str(seen)
+
+    # Stored service keys: revealed to the browser's preview, to no token.
+    saved = await async_client.post("/api/settings", json={"openAI": {"apiKey": "sk-test-1234567890"}})
+    assert saved.status_code == 200
+    assert (await async_client.get("/api/settings?reveal=1")).json()["openAI"]["apiKey"] == "sk-test-1234567890"
+    for token in (read_only, full):
+        masked = await async_client.get("/api/settings?reveal=1", headers=bearer(token))
+        assert masked.status_code == 200
+        assert "sk-test-1234567890" not in masked.text
+
+    preview_keys = f"/api/frames/{frame.id}/scene_preview_settings"
+    assert (await async_client.get(preview_keys)).status_code == 200
+    for token in (read_only, full):
+        refused = await async_client.get(preview_keys, headers=bearer(token))
+        assert refused.status_code == 403
+        assert refused.json()["detail"]["error"] == "api_token_not_allowed"
+
+    # A backup of every frame with its credentials: a full token's script
+    # may take one, a read-only token may not.
+    export = await async_client.get("/api/backup/export", headers=bearer(read_only))
+    assert export.status_code == 403
+    assert export.json()["detail"]["error"] == "read_only_token"
+    assert (await async_client.get("/api/backup/export", headers=bearer(full))).status_code == 200
+
+    provisioning = await async_client.get(
+        f"/api/frames/{frame.id}/embedded/provisioning", headers=bearer(read_only)
+    )
+    assert provisioning.status_code == 403
+    assert provisioning.json()["detail"]["error"] == "read_only_token"

@@ -38,7 +38,7 @@ jobs:
       frontend_e2e: ${{ steps.areas.outputs.frontend_e2e }}
       deploy: ${{ steps.areas.outputs.deploy }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           sparse-checkout: .github/ci
       - name: Classify the changed files
@@ -81,7 +81,7 @@ jobs:
       # branch can be moved between the event and the checkout. The sha is
       # the commit the run was started for.
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -100,7 +100,7 @@ jobs:
         run: echo "key=${{ runner.os }}-frameos-assets-$(bash .github/ci/frameos_assets_key.sh)" >> "$GITHUB_OUTPUT"
       - name: Cache compiled assets
         id: cache_assets
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             frameos/assets/compiled
@@ -117,10 +117,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
+
+      # The video tests play clips through a real ffmpeg (docs/video.md) and
+      # skip without one. The pool's image has it once gha-image-build.sh's
+      # list is built again; until then, and on GitHub's runners, it is
+      # installed here.
+      - name: ffmpeg for the video tests
+        run: command -v ffmpeg >/dev/null || (sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg)
 
       - name: FrameOS nim setup
         run: |
@@ -179,7 +186,7 @@ jobs:
       # and the frameos-editor embed helper (its origin filter).
       - name: Set up Node for FrameOS JS unit tests
         if: ${{ matrix.shard == 1 }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -220,7 +227,7 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -247,21 +254,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
-      - uses: jiro4989/setup-nim-action@v1
+      - uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
           version: 6.0.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -321,7 +328,7 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -338,7 +345,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
@@ -349,7 +356,7 @@ jobs:
         id: assets_key
         run: echo "key=${{ runner.os }}-frameos-assets-$(bash .github/ci/frameos_assets_key.sh)" >> "$GITHUB_OUTPUT"
       - name: Cache compiled assets
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             frameos/assets/compiled
@@ -415,7 +422,7 @@ jobs:
 
       - name: Upload visual snapshot changes
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: visual-regression-snapshot-changes-${{ matrix.shard }}
           path: .tmp/visual-regression-snapshot-artifact
@@ -430,7 +437,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -452,7 +459,7 @@ jobs:
           git branch --set-upstream-to "origin/$HEAD_REF"
 
       - name: Download visual snapshot changes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: visual-regression-snapshot-changes-*
           path: .tmp/visual-regression-snapshot-artifacts
@@ -525,7 +532,7 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -617,7 +624,7 @@ jobs:
 
       - name: Upload frontend visual snapshot changes
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frontend-visual-snapshot-changes-${{ matrix.shard }}
           path: .tmp/frontend-visual-snapshot-artifact
@@ -625,7 +632,7 @@ jobs:
 
       - name: Upload frontend visual report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frontend-visual-report-${{ matrix.shard }}-of-4
           path: |
@@ -642,7 +649,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
@@ -664,7 +671,7 @@ jobs:
           git branch --set-upstream-to "origin/$HEAD_REF"
 
       - name: Download frontend visual snapshot changes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: frontend-visual-snapshot-changes-*
           path: .tmp/frontend-visual-snapshot-artifacts
@@ -697,10 +704,10 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
@@ -718,7 +725,7 @@ jobs:
       # backend on first use) links the bundled QuickJS, so the prebuilt
       # library has to be here. Same cache key as the Nim jobs.
       - name: Cache QuickJS
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
@@ -760,7 +767,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The full requirement set, not just ruff+mypy: mypy's verdicts depend
       # on which third-party packages it can see, and backend/mypy-baseline.txt
@@ -796,7 +803,7 @@ jobs:
       ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install actionlint
         run: |
@@ -822,7 +829,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Verify Docker
         run: docker version
@@ -860,7 +867,7 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up the backend's Python
         uses: ./.github/actions/setup-backend-python
@@ -874,7 +881,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
@@ -885,7 +892,7 @@ jobs:
         id: assets_key
         run: echo "key=${{ runner.os }}-frameos-assets-$(bash .github/ci/frameos_assets_key.sh)" >> "$GITHUB_OUTPUT"
       - name: Cache compiled assets
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             frameos/assets/compiled
@@ -932,7 +939,7 @@ jobs:
       - name: Cache SSH target image
         id: cache_ssh_target
         if: steps.ssh_target_tag.outputs.present != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .tmp/ssh-target-image.tar
           key: ${{ runner.os }}-ssh-target-image-${{ steps.ssh_target_tag.outputs.tag }}
@@ -996,7 +1003,7 @@ jobs:
       - name: Use HTTP/1.1 toward github.com
         run: git config --global http.https://github.com/.version HTTP/1.1
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up the backend's Python
         uses: ./.github/actions/setup-backend-python
@@ -1010,7 +1017,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache QuickJS
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
@@ -1021,7 +1028,7 @@ jobs:
         id: assets_key
         run: echo "key=${{ runner.os }}-frameos-assets-$(bash .github/ci/frameos_assets_key.sh)" >> "$GITHUB_OUTPUT"
       - name: Cache compiled assets
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             frameos/assets/compiled
@@ -1030,7 +1037,7 @@ jobs:
 
       # The pool's VM image registers qemu-user-static's binfmt handlers at
       # boot (tools/gha-runners/bin/gha-image-build.sh); GitHub's do not.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
         if: runner.environment == 'github-hosted'
 
       - name: Verify Docker
@@ -1073,7 +1080,7 @@ jobs:
           TEST=1 FRAMEOS_E2E_RUNTIME=1 FRAMEOS_RUNTIME_BIN="${{ github.workspace }}/frameos/build/frameos" pytest app/tasks/tests/test_real_frameos_runtime_e2e.py -q -s
 
       - name: Cache Buildroot E2E inputs
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             .tmp/buildroot-base-cache
@@ -1104,7 +1111,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node and pnpm
         uses: ./.github/actions/setup-node-pnpm
@@ -1140,7 +1147,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The portable half of the firmware (parsers, the log ring, the hotspot's
       # DHCP/DNS, the flash state log, the status screen…) runs on the host
@@ -1153,7 +1160,7 @@ jobs:
 
       - name: Cache pico-sdk
         id: pico-sdk-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/pico-sdk
           key: pico-sdk-2.1.1

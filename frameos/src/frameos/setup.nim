@@ -10,6 +10,7 @@ import frameos/samba_mounts
 import frameos/types
 import frameos/cloud/contract
 import frameos/utils/system
+import frameos/utils/strict_json
 import drivers/drivers as drivers
 import lib/tz
 
@@ -31,15 +32,14 @@ proc addAptPackagesFromConfig(packages: var seq[string], seen: var HashSet[strin
       packages.addUnique(seen, item.getStr())
 
 proc configFromSources(sources: JsonNode): JsonNode =
+  ## Read as the runtime reads it: a config.json that is not strict JSON is
+  ## no config (utils/strict_json.nim).
   if sources == nil or sources.kind != JObject:
     return nil
   let configSource = sources{"config.json"}
   if configSource == nil or configSource.kind != JString:
     return nil
-  try:
-    result = parseJson(configSource.getStr("{}"))
-  except CatchableError:
-    result = nil
+  strictJsonObject(configSource.getStr())
 
 proc addAptPackagesFromSources(packages: var seq[string], seen: var HashSet[string], sources: JsonNode) =
   packages.addAptPackagesFromConfig(seen, configFromSources(sources))

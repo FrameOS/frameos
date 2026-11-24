@@ -645,19 +645,23 @@ async def api_frame_bootstrap_command(
     selected_remote = select_remote if select_remote is not None else (select_agent if select_agent is not None else True)
     await _ensure_frame_bootstrap_enabled(db, redis, frame, select_remote=selected_remote, regenerate=regenerate)
     script_url = _frame_bootstrap_script_url(request, frame)
-    # The script embeds this frame's API key and the remote's shared secret;
-    # over plain http they cross the LAN in clear, once, when the command is
-    # run. The release archive itself is signature-checked on the device
-    # regardless of transport, so the exposure is the secrets, not the code.
+    # The script embeds this frame's API key and the remote's shared secret,
+    # and it is what `sudo sh` runs. Over plain http both cross the LAN in
+    # clear when the command is run: someone on the path can read the
+    # secrets, and can hand the device a different script, which runs as
+    # root. The release archive the script downloads is signature-checked,
+    # but by the script itself, so that check holds only for a script that
+    # arrived unchanged.
     plain_http = script_url.startswith("http://")
     return {
         "script_url": script_url,
         "command": f"curl -fsSL {shlex.quote(script_url)} | sudo sh",
         "plain_http": plain_http,
         "warning": (
-            "This backend is reached over plain HTTP, so the install script — which carries this frame's API key "
-            "and its FrameOS Remote secret — travels unencrypted across your network when the command runs. Fine "
-            "on a trusted home LAN; put the backend behind HTTPS before using it elsewhere."
+            "This backend is reached over plain HTTP, so the install script travels unencrypted across your "
+            "network when the command runs: anyone on the way can read the frame's API key and FrameOS Remote "
+            "secret in it, and can swap the script for another one, which then runs as root on the device. Fine "
+            "on a trusted home LAN; put the backend behind HTTPS before using it anywhere else."
             if plain_http
             else None
         ),

@@ -1247,6 +1247,18 @@ static bool load_into_nim(const char *const *scenes, const size_t *lens, int cou
                         len, 0, 0, ESP_ERR_INVALID_STATE);
         return false;
     }
+    /* The store checks every scene it writes; a set the runtime takes whole
+     * has not been through it (a backend's answer), or was refused by it (a
+     * stored payload whose split failed on exactly this). The runtime's
+     * reader recurses per level like any other: never a scene it gets here
+     * that the store would have turned away. */
+    for (int i = 0; i < count; i++) {
+        if (lens[i] > FOS_SCENE_STORE_MAX_BYTES || !fos_json_depth_ok(scenes[i], lens[i], FOS_JSON_MAX_DEPTH)) {
+            log_scene_event("scenes:load", "error", origin, "", "scene-refused", len, count, 0,
+                            ESP_ERR_INVALID_ARG);
+            return false;
+        }
+    }
     /* Measure what the payload actually costs in INTERNAL RAM. The Nim heap
      * is served by plain malloc, and CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL
      * (16 KB) sends every allocation below that size to internal RAM — so the
@@ -1902,9 +1914,14 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
         return ESP_ERR_INVALID_ARG;
     }
     /* Refused before it is stored: a payload cut short would be applied in
-     * place of the scenes the frame has, and fail there. */
-    if (!fos_json_whole(json, len)) {
-        set_scene_simple_error("scenes payload is not one whole JSON array or object", len);
+     * place of the scenes the frame has, and fail there. One nested deeper
+     * than a scene may be (inside the array, or the object and array, that
+     * hold them) is no set either: stored, it would wait on flash for the
+     * apply to refuse it. */
+    bool whole = fos_json_whole(json, len);
+    if (!whole || !fos_json_depth_ok(json, len, FOS_JSON_MAX_DEPTH + 2)) {
+        set_scene_simple_error(whole ? "scenes payload nests too deep"
+                                     : "scenes payload is not one whole JSON array or object", len);
         log_scene_event("event:uploadScenes", "error", origin, "", s_last_error, len, 0, 0, ESP_ERR_INVALID_ARG);
         return ESP_ERR_INVALID_ARG;
     }

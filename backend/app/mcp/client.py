@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote, unquote
 
 import httpx
 from httpx import ASGITransport
@@ -33,6 +34,35 @@ PROJECT_SCOPED_PREFIXES = (
 )
 # The bundled catalog, and the share routes frames call (public, by token).
 PROJECT_SCOPED_EXCLUSIONS = ("/api/repositories/system", "/api/photos/shared/")
+
+
+def segment(value: Any) -> str:
+    """A tool argument as exactly one path segment. Every string a tool puts
+    into a route path goes through here: the argument is the model's, and a
+    model reads untrusted text. Quoted whole, a "/" or "?" in it is data, and
+    "." / ".." (which httpx folds, so "../../frames/7" would name another
+    route) are refused."""
+    text = str(value)
+    if text in ("", ".", ".."):
+        raise McpInputError(f"{text!r} is not an id")
+    return quote(text, safe="")
+
+
+def segments(value: Any) -> str:
+    """As `segment`, for the one route whose id may hold slashes (a scene
+    id like "system/index"): each part is quoted, none may be a dot segment."""
+    return "/".join(segment(part) for part in str(value).split("/"))
+
+
+def assert_route_path(path: str) -> None:
+    """What `request` is handed is a path and nothing else. A query, a
+    fragment or a dot segment (written out or percent-encoded) in it means an
+    argument was pasted in unquoted; refuse rather than let httpx resolve it
+    to a route the tool never named."""
+    if not path.startswith("/api/") or any(mark in path for mark in ("?", "#", "\\")):
+        raise McpInputError("That id cannot be used in a request path")
+    if any(part in (".", "..") for part in unquote(path).split("/")):
+        raise McpInputError("That id cannot be used in a request path")
 
 
 class BackendApi:
@@ -107,6 +137,7 @@ class BackendApi:
         content: bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
+        assert_route_path(path)
         if scoped:
             path = self._scoped_path(path, await self.project_id(project_id))
         # Drop `None` query values so a tool can pass its optional inputs

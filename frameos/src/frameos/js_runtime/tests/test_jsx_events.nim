@@ -311,6 +311,102 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-signal-nested", "tap", at(30, 30))
     check ui.render()[30, 30] == red
 
+  test "memo(): props that run code cannot move the slots under the call that reads them":
+    # memo() compares a call's props with the last render's, and props are
+    # the app's own objects: a getter there can start a new render and call
+    # the same memo()'d function again. That swapped and freed the slots the
+    # call outside was still reading (js_runtime/jsx_native.nim).
+    let ui = newUi("""
+      let round = 0, runs = 0
+      const Row = memo(({ n }) => { runs++; return <div className="w-5 h-5 bg-red-500">{`${n}`}</div> })
+      export function get(app) {
+        round++
+        const rows = []
+        for (let i = 0; i < 12; i++) rows.push(<Row key={'k' + i} n={i} />)
+        if (round > 1) {
+          const props = { key: 'k3' }
+          Object.defineProperty(props, 'n', { enumerable: true, get() {
+            __frameosNextRender()
+            for (let i = 0; i < 40; i++) Row({ key: 'x' + i, n: i })
+            return 3
+          } })
+          rows.push(Row(props))
+        }
+        frameos.setState('seen', `${round} ${runs}`)
+        return <div className="flex flex-wrap bg-white">{rows}</div>
+      }
+    """, "tests/jsx-memo-reentry")
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "1 12"
+    for round in 2 .. 4:
+      discard ui.render()
+      # The twelve rows are taken back; the forty calls from inside the getter
+      # are new the first time and taken back after.
+      check ui.scene.state{"seen"}.getStr() == $round & " 52"
+
+  test "memo(): a subscriber that runs code cannot free the record it is leaving":
+    # A call that read a signal leaves it when a later render no longer makes
+    # the call, by calling delete() on each thing it read, and those are the
+    # app's: one whose delete() starts a render and calls the memo()'d
+    # function again freed the slots being walked, and the record with them,
+    # which the next delete() was then handed (js_runtime/jsx_native.nim).
+    let ui = newUi("""
+      let round = 0, log = []
+      const trap = { delete(record) {
+        log.push('left')
+        __frameosNextRender()
+        for (let i = 0; i < 20; i++) Cell({ key: 't' + i })
+        return true
+      } }
+      // A record that is still one is marked dirty once (true), then not.
+      const second = { delete(record) { log.push(__frameosSignal(2, record)); return true } }
+      const Cell = memo(() => {
+        const record = __frameosSignal(0)
+        if (round === 1) {
+          __frameosSignal(1, record, trap)
+          __frameosSignal(1, record, second)
+        }
+        return <div className="w-5 h-5 bg-red-500" />
+      })
+      export function get(app) {
+        round++
+        const cells = []
+        for (let i = 0; i < 6; i++) cells.push(<Cell key={(round === 2 ? 'b' : 'a') + i} />)
+        frameos.setState('seen', `${round} ${log.join(' ')}`)
+        return <div className="flex bg-white">{cells}</div>
+      }
+    """, "tests/jsx-memo-leave")
+    discard ui.render()
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "2 "
+    # The second render did not carry the first's six calls over: the third
+    # leaves their records, each once and whole.
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "3 " & "left true ".repeat(6).strip()
+    discard ui.render()
+    check ui.scene.state{"seen"}.getStr() == "4 " & "left true ".repeat(6).strip()
+
+  test "signal(): the list a record keeps of what it read is never handed to the app":
+    # The list was grown with a plain store, which asks Array.prototype for a
+    # setter first: one put there got the list itself as `this`.
+    let ui = newUi("""
+      const lit = signal(false)
+      let got = 'nothing'
+      const Dot = memo(() => {
+        Object.defineProperty(Array.prototype, 0, { configurable: true, set(v) { got = 'the list' } })
+        const on = lit.value
+        delete Array.prototype[0]
+        return <div className={`w-10 h-10 ${on ? 'bg-green-500' : 'bg-red-500'}`} />
+      })
+      export function get(app) {
+        const tree = <div className="flex bg-white"><Dot /></div>
+        frameos.setState('got', got)
+        return tree
+      }
+    """, "tests/jsx-signal-list")
+    discard ui.render()
+    check ui.scene.state{"got"}.getStr() == "nothing"
+
   test "a render only the pointer asked for lays the last tree out again":
     # hover: changed and no handler ran: the new picture without get(), as
     # CSS restyles :hover. A handler, any other event, or the scene's own

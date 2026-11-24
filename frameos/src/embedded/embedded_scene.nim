@@ -9,6 +9,7 @@ import std/[json, math, strformat, strutils]
 import pixie
 import pixie/fileformats/svg
 import frameos/panel_shape
+import frameos/utils/json_depth
 import frameos/ui/layout
 import frameos/ui/tree
 import frameos/utils/image
@@ -46,7 +47,7 @@ proc setStatusInfo*(infoJson: string) =
   ## Replaces the status facts (a JSON object; see buildStatusScreen for the
   ## keys). An unparseable payload keeps the previous one.
   try:
-    let parsed = parseJson(infoJson)
+    let parsed = parseJsonBounded(infoJson)
     if parsed.kind == JObject:
       statusInfo = parsed
   except CatchableError:

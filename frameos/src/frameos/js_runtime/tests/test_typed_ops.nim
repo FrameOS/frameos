@@ -112,3 +112,37 @@ export function get() {
     check r["noWidth"].getBool() == false
     check r["strange"].getBool()
     check r["odd"][4].getInt() == 0 # 8 * 65536, the largest weight, wraps to 0 in an Int16
+
+  test "a kernel that runs code cannot leave an array's bytes behind":
+    # A kernel's elements are read off an object the scene made: a getter or
+    # a proxy there can detach an array's buffer or shrink it. The arrays are
+    # taken after, so the call sees what is left and refuses it; taken before,
+    # the loop wrote where the buffer had been.
+    let r = run("""
+export function get() {
+  const w = 8, n = w * 8
+  const dst = new Int16Array(n), src = new Int16Array(n).fill(3)
+  const detach = [1, 1, 1, 1, 1, 1, 1, 1, 1]
+  Object.defineProperty(detach, 4, { get() { dst.buffer.transfer(); return 1 } })
+  const detached = frameos.ops.convolve(dst, src, w, detach, 0)
+
+  const buffer = new ArrayBuffer(n * 2, { maxByteLength: n * 2 })
+  const tracking = new Int16Array(buffer)
+  const out = new Int16Array(n)
+  const shrink = new Proxy([1, 1, 1, 1, 1, 1, 1, 1, 1], {
+    get(target, key) { if (key === "8") buffer.resize(2); return target[key] },
+  })
+  const shrunk = frameos.ops.convolve(out, tracking, w, shrink, 0)
+
+  const ok = new Int16Array(n)
+  const fine = frameos.ops.convolve(ok, src, w, new Proxy([0, 0, 0, 0, 1, 0, 0, 0, 0], {}), 0)
+  return JSON.stringify({ detached, left: dst.length, shrunk, kept: tracking.length, fine, middle: ok[w + 1] })
+}
+""")
+    check r["detached"] == %false
+    check r["left"] == %0
+    check r["shrunk"] == %false
+    check r["kept"] == %1
+    check r["fine"] == %true # a proxy that does nothing is a kernel like any other
+    check r["middle"] == %3
+

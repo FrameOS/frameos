@@ -15,7 +15,7 @@ from app.api.auth import get_current_user
 from app.api import api_open, api_project, api_user, api_public
 from app.api.project_auth import get_current_project
 from fastapi.middleware.gzip import GZipMiddleware
-from app.middleware import GzipRequestMiddleware
+from app.middleware import BodyCeilingMiddleware, GzipRequestMiddleware
 from app.ws.remote_ws import router as remote_ws_router
 from app.ws.terminal_ws import router as terminal_ws_router
 from app.websockets import register_ws_routes, redis_listener
@@ -38,9 +38,22 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+# The two forms anyone can post before signing in: a few hundred bytes each.
+UNAUTHENTICATED_BODY_LIMITS = {"/api/login": 64 * 1024, "/api/signup": 64 * 1024}
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(GZipMiddleware)
+# Added before the gzip request middleware, so inside it: the ceiling is on
+# the body as the route would read it, decompressed.
+app.add_middleware(BodyCeilingMiddleware, limits=UNAUTHENTICATED_BODY_LIMITS)
 app.add_middleware(GzipRequestMiddleware)
+if config.HASSIO_RUN_MODE != "ingress":
+    # A mutation that rides the session cookie must come from one of our own
+    # pages (app/utils/same_origin.py). Under ingress the credential is Home
+    # Assistant's, not our cookie, and its proxy is the only peer.
+    from app.utils.same_origin import SameOriginGuard
+
+    app.add_middleware(SameOriginGuard)
 if config.HASSIO_RUN_MODE == "ingress":
     # Added last = outermost: the ingress routers carry no user auth (Home
     # Assistant does that), so nothing but the Supervisor's proxy may reach
@@ -48,6 +61,11 @@ if config.HASSIO_RUN_MODE == "ingress":
     from app.utils.ingress_guard import IngressPeerGuard
 
     app.add_middleware(IngressPeerGuard)
+
+# nosniff everywhere, and who may frame the HTML (app/utils/response_headers.py).
+from app.utils.response_headers import ResponseHeadersMiddleware  # noqa: E402
+
+app.add_middleware(ResponseHeadersMiddleware)
 
 register_ws_routes(app)
 app.include_router(remote_ws_router)
@@ -81,6 +99,21 @@ STATIC_ASSET_PREFIXES = ("/static/", "/assets/", "/img/", "/frameos-wasm/", "/fr
 
 def is_static_asset_path(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in STATIC_ASSET_PREFIXES)
+
+
+def script_json(value) -> str:
+    """JSON for the inside of a `<script>` element. json.dumps alone leaves
+    `</script>` and `<!--` as they are, and one of the values comes from a
+    request header (`X-Ingress-Path`): escaped, the browser's HTML parser
+    never sees a tag, and the JavaScript value is the same."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
 
 
 # The SPA shell names the hashed entrypoint it loads, so a cached copy pins the
@@ -156,7 +189,7 @@ if serve_html:
         def index_html(request: Request | None = None) -> str:
             return index_html_template.replace(
                 '<head>',
-                f'<head><script>window.FRAMEOS_APP_CONFIG={json.dumps(frameos_app_config(request))}</script>',
+                f'<head><script>window.FRAMEOS_APP_CONFIG={script_json(frameos_app_config(request))}</script>',
             )
     else:
         dev_url = "http://localhost:8616"

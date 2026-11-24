@@ -57,7 +57,10 @@ of `render:loadingMark` (its first picture on the panel, after 200 ms),
 `render:sleep` or a `render:scene` seconds later (a later tick), the switch
 went unlogged: a `bench:unlogged` line says so, the switch is said done (the
 mark) or a `render` of the scene follows, and the suites take that switch as
-untimed, not as one that never rendered.
+untimed, not as one that never rendered. A switch to the scene showing is no
+scene change and ends no pause: drawn again while the log is paused, it is
+said untimed at once (`_redrawn_while_paused`), not timed by the render logged
+when the pause runs out.
 
 A boot the bench counts as a crash is the service ending badly (a core dump,
 a kill, a non-zero exit, a watchdog): a restart that was asked for (a push,
@@ -90,6 +93,7 @@ INSTALL = '/srv/frameos'
 SSH_OPTS = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15',
             '-o', 'ControlMaster=auto', '-o', 'ControlPath=' + os.path.expanduser('~/.ssh/fb-%C'),
             '-o', 'ControlPersist=15m']
+RENDER_LOG_PAUSE_S = 10.0  # runner.nim's render-log pause after two fast renders
 JOURNAL_LINE = re.compile(r'^\((\d+(?:\.\d+)?), (.*)\)$')
 # systemd on the service: what ends it badly. `Deactivated successfully` is an
 # exit asked for (a push restarts the runtime, so does `restart`).
@@ -218,6 +222,7 @@ class LinuxConsole:
         self._upload_backup = None
         self._cfg_stale = False
         self.log_paused = False   # the runtime's render-log pause (runner.nim `render:pause`), as last heard
+        self._paused_at = 0.0     # when it began, on this machine's clock
         self._switch_watch = None  # a switch sent: did its render get logged?
         self._scene_changed = False
         self._fence = 0.0  # lines the frame wrote before the last drain stay out of the queue
@@ -338,6 +343,7 @@ class LinuxConsole:
         name = ev.get('event') if isinstance(ev, dict) else None
         if name == 'render:pause':
             self.log_paused = True
+            self._paused_at = now
         elif name in ('render:scene', 'render:done', 'render:driver', 'render:sleep'):
             # Logged by the runner's own logger: it is not paused.
             self.log_paused = False
@@ -412,6 +418,27 @@ class LinuxConsole:
         elif name == 'render:sleep':
             self._emit(body, now)
             threading.Thread(target=self._event, args=('render', {}), daemon=True).start()
+
+    def _redrawn_while_paused(self, cmd, sid):
+        """The scene showing, drawn again (`send`) while the runtime's render
+        log is paused: no scene change ends the pause, so that render is
+        never logged, and the next one logged comes when the pause runs out,
+        up to ten seconds on (desktop windows read as 8-10 s waits for a 40 ms
+        render, 2026-11-24). Said untimed and ended here, as `_unlogged` ends
+        a switch's."""
+        now = time.time()
+        if not self.log_paused or now - self._paused_at >= RENDER_LOG_PAUSE_S:
+            return
+        self._emit(json.dumps({'event': 'bench:unlogged', 'command': cmd.strip(), 'sceneId': sid,
+                               'reason': "the scene showing, drawn again while the runtime's render log was paused "
+                                         "(runner.nim render:pause; only a scene change ends it): untimed"},
+                              separators=(',', ':')), now)
+        self._n += 1
+        label = self.names.get(sid, sid)
+        self._emit(f'render #{self._n} started: scene "{label}" ({sid})', now)
+        self._emit(f'render #{self._n} done in 0 ms', now)
+        self._emit(json.dumps({'event': 'render:done', 'sceneId': sid, 'sceneName': label, 'status': 'ok',
+                               'ms': 0, 'via': 'paused'}, separators=(',', ':')), now)
 
     def _remeasure(self):
         off, rtt = clock_offset(self.target, 5)
@@ -509,6 +536,7 @@ class LinuxConsole:
                     # `scene` draws it again, and so does this one.
                     self._switch_watch = None
                     self._event('render', {})
+                    self._redrawn_while_paused(cmd, sid)
             elif words[0] == 'render':
                 self._event('render', {})
             elif words[0] == 'event' and len(words) > 1:
@@ -520,6 +548,7 @@ class LinuxConsole:
                     # As `scene <id>` below: the scene showing is drawn again.
                     self._switch_watch = None
                     self._event('render', {})
+                    self._redrawn_while_paused(cmd, payload['sceneId'])
             elif words[0] == 'restart':
                 ssh(self.target, 'systemctl --no-block restart frameos', 30)
             else:

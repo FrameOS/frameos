@@ -33,6 +33,11 @@ export type SceneRenderOptions = {
    */
   deviceLimits?: DeviceLimits | null | undefined;
   /**
+   * The ceiling of a render with no device (maxRenderMemoryBytes). Tests
+   * lower it; nothing raises it.
+   */
+  maxMemoryBytes?: number | undefined;
+  /**
    * What a frame rendered on the server relayed with its pull
    * (docs/server-rendering.md "Keys, touch and the schedule"): its key
    * edges and the events its own producers would have handed its scene,
@@ -224,6 +229,16 @@ export type SceneRenderResult = {
 };
 
 export const defaultRenderTimeoutMs = 30_000;
+// What one render may allocate when no device is being simulated. The
+// worker's resourceLimits bound its JavaScript heap, not the wasm runtime's
+// memory, which grows on demand up to the build's 2 GiB: one scene, in a
+// worker beside the web app or the hub. The runtime's own allocator takes a
+// ceiling (frameos_wasm_set_memory_limit, what simulates an ESP32's PSRAM),
+// so every render gets one: the device's when there is a device, this
+// otherwise. An allocation past it fails that render ("out of memory") and
+// nothing else. A 4096 x 4096 canvas is 64 MiB; a 24-megapixel photo decoded
+// whole is 96 MiB.
+export const maxRenderMemoryBytes = 512 * 1024 * 1024;
 export const maxRenderPixels = 8 * 1024 * 1024;
 export const maxRenderDimension = 4096;
 export const minRenderDimension = 16;
@@ -470,6 +485,10 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         eventsJson: JSON.stringify(options.events ?? []),
         frameJson: JSON.stringify(options.frame ?? {}),
         height: options.height,
+        hostMemoryBytes: Math.min(
+          maxRenderMemoryBytes,
+          Math.max(1, Math.floor(options.maxMemoryBytes ?? maxRenderMemoryBytes)),
+        ),
         maxLogs: maxCollectedLogs,
         nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
         pack: options.pack ?? null,
@@ -515,7 +534,15 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
                   describeOutOfMemory(result.outOfMemory, options.deviceLimits),
                   result.logs,
                 )
-              : new SceneRenderError("render_failed", result.message, result.logs),
+              : new SceneRenderError(
+                  "render_failed",
+                  // No device: the server's own ceiling. Not
+                  // render_out_of_memory, which says "this frame cannot".
+                  result.outOfMemory
+                    ? `The scene needs more memory than a render on the server may use (${Math.round(maxRenderMemoryBytes / (1024 * 1024))} MB).`
+                    : result.message,
+                  result.logs,
+                ),
           );
           return;
         }
@@ -888,11 +915,21 @@ async function main() {
   }
   // A device's memory ceiling, set after init like the preview worker does:
   // module startup lives in a frame's flash, not in its render budget.
+  // Every render has a ceiling: the device's, never above the server's own,
+  // which is also what a render with no device gets (maxRenderMemoryBytes).
   const limits = workerData.deviceLimits;
+  const hostMemoryBytes = workerData.hostMemoryBytes;
+  if (!limits) {
+    try {
+      call("frameos_wasm_set_memory_limit", null, ["number", "number"], [hostMemoryBytes, 0]);
+    } catch {
+      // A runtime bundle from before the allocator took a ceiling.
+    }
+  }
   if (limits) {
     try {
       call("frameos_wasm_set_memory_limit", null, ["number", "number"], [
-        Math.max(0, Math.floor(limits.memoryBytes || 0)),
+        Math.min(hostMemoryBytes, Math.max(0, Math.floor(limits.memoryBytes || 0)) || hostMemoryBytes),
         Math.max(0, Math.floor(limits.memoryReserveBytes || 0)),
       ]);
       if (limits.embedded) {
@@ -1202,6 +1239,18 @@ function refused(url) {
   return isIP(host) !== 0 && addressIsPrivate(host);
 }
 const skippedHeaders = new Set(["host", "connection", "content-length", "transfer-encoding"]);
+// Headers that name the caller to ONE origin. A redirect that leaves it must
+// not carry them along, or a scene's API key for host A is handed to whatever
+// host A bounces to. The list and the rule are the runtime's own HTTP client's
+// (frameos/src/frameos/utils/http_client.nim CrossOriginHeaders).
+const crossOriginHeaders = new Set(["authorization", "proxy-authorization", "cookie", "x-api-key"]);
+function withoutCrossOriginHeaders(headers) {
+  const kept = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (!crossOriginHeaders.has(name.toLowerCase())) kept[name] = value;
+  }
+  return kept;
+}
 function requestOnce(target, req, signal) {
   const headers = {};
   for (const [name, value] of Object.entries(req.headers || {})) {
@@ -1243,18 +1292,30 @@ process.stdin.on("end", async () => {
     // Redirects are followed by hand so every hop passes the host check: a
     // public URL must not bounce scene code to loopback or link-local.
     let response;
+    // What the next hop is sent: as the runtime's client does it, a hop to
+    // another origin loses the credential headers, and a 301 / 302 / 303
+    // turns anything but a GET or HEAD into a GET with no body.
+    let hopRequest = { method: req.method, headers: req.headers || {}, bodyBase64: req.bodyBase64 };
     for (let hop = 0; ; hop += 1) {
       if (refused(target)) {
         throw new Error("host not allowed");
       }
-      response = await requestOnce(target, req, controller.signal);
+      response = await requestOnce(target, hopRequest, controller.signal);
       const location = response.headers.location;
       if (response.statusCode >= 300 && response.statusCode < 400 && location) {
         response.resume();
         if (hop >= 5) {
           throw new Error("too many redirects");
         }
-        target = new URL(location, target);
+        const next = new URL(location, target);
+        if (next.origin !== target.origin) {
+          hopRequest = { ...hopRequest, headers: withoutCrossOriginHeaders(hopRequest.headers) };
+        }
+        const method = String(hopRequest.method || "GET").toUpperCase();
+        if ([301, 302, 303].includes(response.statusCode) && method !== "GET" && method !== "HEAD") {
+          hopRequest = { ...hopRequest, method: "GET", bodyBase64: "" };
+        }
+        target = next;
         continue;
       }
       break;

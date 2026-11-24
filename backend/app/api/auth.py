@@ -1,16 +1,21 @@
 import datetime
 from typing import Optional
-from urllib.parse import urlparse
 
 from fastapi import Depends, HTTPException, status, Request, Response, WebSocket
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 from app import config as app_config
 from app.models.user import User
-from app.models.api_token import ApiTokenIdentity, authenticate_api_token, is_api_token
+from app.models.api_token import (
+    ApiTokenIdentity,
+    api_token_access_from_prefix,
+    authenticate_api_token,
+    is_api_token,
+)
 from app.database import get_db
 from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -25,8 +30,9 @@ from app.utils.session_cookie import (
     create_session_cookie_value,
     decode_session_cookie_claims,
 )
-from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, over_rate_limit, rate_limit_key
-from app.utils.request_ip import client_ip_for_request, peer_is_trusted_proxy
+from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, rate_limit_key
+from app.utils.request_ip import client_ip_for_request
+from app.utils.same_origin import hosts_match as _hosts_match, origin_is_ours  # noqa: F401
 
 from . import api_open, api_user
 
@@ -92,19 +98,50 @@ def login_lockout_seconds(failures: int) -> int:
     return min(LOGIN_LOCKOUT_BASE_SECONDS * (2 ** (failures - LOGIN_LOCKOUT_THRESHOLD)), LOGIN_LOCKOUT_MAX_SECONDS)
 
 
-async def _login_locked_seconds(redis: Redis, email: str) -> int:
-    ttl = await redis.ttl(rate_limit_key("login_lock", email))
-    return max(int(ttl or 0), 0)
+# One attempt, counted before the password is looked at and in one step with
+# the lock check: reading the lock, verifying and counting the failure
+# afterwards let every request of a concurrent burst pass the read before any
+# of them had counted (five hundred guesses, five hundred checks). KEYS: the
+# lock, the failure counter. ARGV: the counter's window, the threshold, the
+# base lock and the longest. Answers minus the seconds left on a lock, or the
+# attempt's number; the attempt that reaches the threshold sets the lock
+# itself, so the ones behind it find it.
+_LOGIN_ATTEMPT_SCRIPT = """
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+  return -ttl
+end
+local failures = redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[1]))
+local threshold = tonumber(ARGV[2])
+if failures >= threshold then
+  local lock = tonumber(ARGV[3]) * 2 ^ math.min(failures - threshold, 30)
+  if lock > tonumber(ARGV[4]) then
+    lock = tonumber(ARGV[4])
+  end
+  redis.call('SET', KEYS[1], tostring(failures), 'EX', math.floor(lock))
+end
+return failures
+"""
 
 
-async def _record_login_failure(redis: Redis, email: str, ip: str) -> None:
-    await hit_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT, window_seconds=LOGIN_IP_WINDOW_SECONDS)
-    failures_key = rate_limit_key("login_failures", email)
-    failures = int(await redis.incr(failures_key))
-    await redis.expire(failures_key, LOGIN_FAILURE_WINDOW_SECONDS)
-    lock_seconds = login_lockout_seconds(failures)
-    if lock_seconds:
-        await redis.set(rate_limit_key("login_lock", email), str(failures), ex=lock_seconds)
+async def _count_login_attempt(redis: Redis, email: str) -> int:
+    """Count this attempt against the account as a failure (a success takes
+    it back, `_clear_login_failures`). Returns 0 to go on and verify, or the
+    seconds the account is locked for."""
+    outcome = int(
+        await redis.eval(
+            _LOGIN_ATTEMPT_SCRIPT,
+            2,
+            rate_limit_key("login_lock", email),
+            rate_limit_key("login_failures", email),
+            LOGIN_FAILURE_WINDOW_SECONDS,
+            LOGIN_LOCKOUT_THRESHOLD,
+            LOGIN_LOCKOUT_BASE_SECONDS,
+            LOGIN_LOCKOUT_MAX_SECONDS,
+        )
+    )
+    return -outcome if outcome < 0 else 0
 
 
 async def _clear_login_failures(redis: Redis, email: str) -> None:
@@ -198,11 +235,21 @@ def request_api_token(request: Request) -> ApiTokenIdentity | None:
     return getattr(request.state, "api_token", None)
 
 
+def _bearer_is_api_token(request: Request) -> bool:
+    """Whether the bearer slot holds an API token, read off the header so the
+    answer does not depend on the user dependency having run first (it sets
+    `request.state.api_token`; a route-level dependency may run before it)."""
+    authorization = request.headers.get("authorization") or ""
+    return authorization.startswith("Bearer ") and is_api_token(authorization.split(" ", 1)[1])
+
+
 def require_session_credential(request: Request) -> None:
     """Refuse API tokens on the routes that turn a session into something
-    more durable (minting a token) or change the login itself (email,
-    password): a leaked token must not be able to make itself permanent."""
-    if request_api_token(request) is not None:
+    more durable (minting a token, linking the install or an identity to a
+    cloud account, the backup recovery code) or change the login itself
+    (email, password, whether the password still works): a leaked token must
+    not be able to make itself permanent. Usable as a route dependency."""
+    if request_api_token(request) is not None or _bearer_is_api_token(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -210,6 +257,43 @@ def require_session_credential(request: Request) -> None:
                 "message": "This action needs a browser sign-in and is not available to API tokens",
             },
         )
+
+
+def request_token_is_read_only(request: Request) -> bool:
+    """Whether this request carries a read-only API token."""
+    token = request_api_token(request)
+    if token is not None:
+        return token.read_only
+    authorization = request.headers.get("authorization") or ""
+    bearer = authorization.split(" ", 1)[1] if authorization.startswith("Bearer ") else ""
+    return is_api_token(bearer) and api_token_access_from_prefix(bearer) == "read_only"
+
+
+def refuse_read_only_token(request: Request) -> None:
+    """Refuse a read-only token on a GET whose answer is credentials (a
+    backup with every frame's keys, a provisioning command list, an SD
+    image). The read-only rule is the HTTP method, and these reads would let
+    "may look" become "may log in to every frame". Usable as a route
+    dependency."""
+    if request_token_is_read_only(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "read_only_token",
+                "message": "This read hands out credentials and is not available to read-only API tokens",
+            },
+        )
+
+
+def _session_user(db: Session, email: str, session_id: str) -> User | None:
+    """The account a credential names, when its session is alive and that
+    account's own. The email alone is not enough: a session opened for one
+    account must not answer for whichever account carries that address
+    later (an address changed, then taken by another user)."""
+    user = db.query(User).filter(User.email == email).first()
+    if user is None or not session_is_active(db, session_id, user.id):
+        return None
+    return user
 
 
 async def get_current_user_from_jwt(token: str, db: Session) -> User:
@@ -222,10 +306,7 @@ async def get_current_user_from_jwt(token: str, db: Session) -> User:
         email, session_id = _decode_jwt_claims(token)
     except JWTError:
         raise credentials_exception
-    if not session_is_active(db, session_id):
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         raise credentials_exception
     return user
@@ -272,23 +353,7 @@ async def get_current_user_from_request(
     if claims is None:
         return None
     email, session_id = claims
-    if not session_is_active(db, session_id):
-        return None
-    return db.query(User).filter(User.email == email).first()
-
-
-def _hosts_match(origin_host: str, candidate: str) -> bool:
-    """host[:port] equality, case-insensitive, with the default ports the
-    browser leaves off its Origin (`https://x` vs `Host: x:443`) treated as
-    absent on both sides."""
-    def normalize(value: str) -> str:
-        value = value.strip().lower()
-        for default in (":443", ":80"):
-            if value.endswith(default):
-                value = value[: -len(default)]
-        return value
-
-    return bool(candidate) and normalize(origin_host) == normalize(candidate)
+    return _session_user(db, email, session_id)
 
 
 def websocket_origin_allowed(websocket: WebSocket) -> bool:
@@ -298,38 +363,14 @@ def websocket_origin_allowed(websocket: WebSocket) -> bool:
     set by page script, so a mismatch against the host the browser dialled
     is a cross-site page opening a socket with the user's cookie (SameSite=Lax
     does not cover WebSockets). Non-browser clients send no Origin and pass;
-    the cookie check that follows still applies to them.
-
-    The host the browser dialled is `Host`, or — behind a proxy that rewrites
-    `Host` to the upstream (nginx without `proxy_set_header Host $host`, the
-    vite dev proxy with `changeOrigin`) — `X-Forwarded-Host`, honoured from
-    trusted proxy peers only (app/utils/request_ip.py). A configured
-    `FRAMEOS_PUBLIC_URL` is always an accepted origin. Compared as host:port,
-    scheme ignored: a TLS-terminating proxy changes the scheme the browser
-    sees, never the host it dialled.
-    """
+    the cookie check that follows still applies to them. What counts as the
+    host the browser dialled is `origin_is_ours` (app/utils/same_origin.py),
+    shared with the guard on cookie-authenticated mutations."""
     origin = websocket.headers.get("origin")
     if not origin:
         return True
-    try:
-        origin_host = urlparse(origin).netloc
-    except ValueError:
-        return False
-    if not origin_host:
-        return False
-
-    candidates = [websocket.headers.get("host", "")]
     peer = websocket.client.host if websocket.client else None
-    if peer_is_trusted_proxy(peer):
-        forwarded_host = websocket.headers.get("x-forwarded-host", "").split(",", 1)[0]
-        candidates.append(forwarded_host)
-    public_url = (app_config.config.FRAMEOS_PUBLIC_URL or "").strip()
-    if public_url:
-        try:
-            candidates.append(urlparse(public_url).netloc)
-        except ValueError:
-            pass
-    return any(_hosts_match(origin_host, candidate) for candidate in candidates)
+    return origin_is_ours(origin, websocket.headers, peer)
 
 
 def get_current_user_from_websocket(
@@ -350,7 +391,7 @@ def get_current_user_from_websocket(
     if not session_is_active(db, session_id):
         return None, "Session revoked"
 
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         return None, "User not found"
     return user, None
@@ -383,10 +424,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    if not session_is_active(db, session_id):
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         raise credentials_exception
     return user
@@ -424,18 +462,20 @@ async def login(
     # Strict: the limiter keys on this address, so a header any LAN peer can
     # set must not pick the bucket (docs/cloud-link.md, FRAMEOS_TRUSTED_PROXIES).
     ip = client_ip_for_request(request, strict=True) or "unknown"
-    locked_for = await _login_locked_seconds(redis, account)
+    # Both counters move before the password is looked at (a success takes
+    # its count back): checked first and counted after, a burst of requests
+    # all passed the check.
+    if await hit_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT, window_seconds=LOGIN_IP_WINDOW_SECONDS):
+        raise HTTPException(status_code=429, detail="Too many login attempts")
+    locked_for = await _count_login_attempt(redis, account)
     if locked_for:
         raise HTTPException(
             status_code=429, detail="Too many login attempts", headers={"Retry-After": str(locked_for)}
         )
-    if await over_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT):
-        raise HTTPException(status_code=429, detail="Too many login attempts")
 
     user = find_user_by_login_email(db, email)
     # Cloud-created users (first-run cloud signup) have no local password.
     if user is None or not user.password or not check_password_hash(user.password, password):
-        await _record_login_failure(redis, account, ip)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     from app.tenancy import ensure_default_project_for_user
@@ -443,6 +483,8 @@ async def login(
     ensure_default_project_for_user(db, user)
 
     await _clear_login_failures(redis, account)
+    # Only failures count against the address.
+    await redis.decr(rate_limit_key("login_ip", ip))
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token, session_value, max_age = issue_credentials(db, user, access_token_expires)
     response.set_cookie(
@@ -467,6 +509,16 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     lock_user_table_for_first_signup(db)
     if db.query(User).first() is not None:
         raise HTTPException(status_code=400, detail="Only one user is allowed. Please login!")
+
+    # The first account is made from the network the install lives on, like
+    # the rest of first-run setup: a public name in Host here is a browser
+    # pointed at somebody's domain that resolves to this backend's LAN
+    # address (DNS rebinding), which could otherwise claim a fresh install
+    # and read the token below.
+    from app.api.cloud import SETUP_HOST_REFUSAL, setup_host_allowed
+
+    if not setup_host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail=SETUP_HOST_REFUSAL)
 
     if not data.email:
         raise HTTPException(status_code=400, detail="Email is required.")

@@ -166,8 +166,12 @@ describe("env", () => {
       clientId: "client-id",
       clientSecret: "client-secret",
       issuerUrl: "https://accounts.google.com",
+      requireAuthTime: false,
     });
     expect(hasGoogleOAuth()).toBe(true);
+    process.env.GOOGLE_REQUIRE_AUTH_TIME = "1";
+    expect(getGoogleOAuthConfig()?.requireAuthTime).toBe(true);
+    delete process.env.GOOGLE_REQUIRE_AUTH_TIME;
   });
 
   it("requires DATABASE_URL for runtime startup checks", () => {

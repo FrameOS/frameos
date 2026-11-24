@@ -153,7 +153,9 @@ uses QuickJS only to execute the resulting JavaScript.
     `streamRewind(ref)`, `streamClose(ref)`: simple string/asset-file streams
     for chunked processing. Stream refs are plain JSON (`{__frameosType:
     "streamRef", id}`) held in a global capped registry, so a data app can
-    return one and a downstream app can consume it.
+    return one and a downstream app of the same scene can consume it; a ref
+    names nothing in another scene. A scene's string streams hold 512 KB
+    together on an ESP32, 16 MB elsewhere.
   - `getSetting(...path)`: read `frameConfig.settings` values (API keys etc.);
     only namespaces listed in the app config's `"settings"` array are
     accessible, so access travels visibly with the scene JSON.

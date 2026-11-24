@@ -401,6 +401,14 @@ static fos_scene_store_err_t write_index(const cJSON *index)
     path_of(FOS_SCENE_STORE_INDEX_NAME, path);
     path_of(FOS_SCENE_STORE_INDEX_TMP_NAME, tmp);
     size_t len = strlen(text);
+    /* An index no reader would take back (fos_scene_store_read_file) is
+     * never written: the change is refused and the set stays as it was.
+     * make_entry bounds what one scene adds; this is for what 128 of them
+     * can still come to once every character is written as an escape. */
+    if (len > FOS_SCENE_STORE_MAX_BYTES) {
+        cJSON_free(text);
+        return FOS_SCENE_STORE_ERR_INVALID;
+    }
     fos_scene_store_err_t err = write_plain(tmp, text, len);
     if (err == FOS_SCENE_STORE_OK) (void)write_plain(path, text, len); /* removed if it failed */
     cJSON_free(text);
@@ -451,6 +459,11 @@ static bool entry_hash_is(const cJSON *entry, uint32_t hash)
 /* The file types a scene opens ("pdf", "txt md json", docs/scene-guide.md),
  * listed as they are for the Files app: as long as a category at most. */
 #define OPENS_MAX_LEN 128
+/* A scene's name is a title, and "WxH" a few digits. A longer one is not
+ * kept, like the settings above: two scenes with 300 KB names made an index
+ * past the size every reader takes, and the whole set was gone with it. */
+#define NAME_MAX_LEN 256
+#define WINDOW_SIZE_MAX_LEN 32
 
 /* A setting kept in the index: text no longer than `max` bytes once its ends
  * are trimmed, and not empty. */
@@ -473,7 +486,9 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
     if (entry == NULL) return NULL;
     cJSON_AddStringToObject(entry, "id", entry_id(scene));
     const cJSON *name = cJSON_GetObjectItem(scene, "name");
-    if (cJSON_IsString(name)) cJSON_AddStringToObject(entry, "name", name->valuestring);
+    if (cJSON_IsString(name) && strlen(name->valuestring) <= NAME_MAX_LEN) {
+        cJSON_AddStringToObject(entry, "name", name->valuestring);
+    }
     const cJSON *refresh = cJSON_GetObjectItem(scene, "refreshInterval");
     if (cJSON_IsNumber(refresh)) cJSON_AddNumberToObject(entry, "refreshInterval", refresh->valuedouble);
     cJSON_AddNumberToObject(entry, "slot", slot);
@@ -490,7 +505,7 @@ static cJSON *make_entry(const cJSON *scene, int slot, size_t bytes, uint32_t ha
         if (entry_flag(scene, "default")) cJSON_AddBoolToObject(entry, "default", true);
         /* "WxH": the size it opens at in a desktop's window (app.frame.scenes). */
         const cJSON *window = cJSON_GetObjectItem(settings, "windowSize");
-        if (cJSON_IsString(window) && window->valuestring[0]) {
+        if (cJSON_IsString(window) && window->valuestring[0] && strlen(window->valuestring) <= WINDOW_SIZE_MAX_LEN) {
             cJSON_AddStringToObject(entry, "windowSize", window->valuestring);
         }
         /* Its icon: the switcher's tile and app.frame.scenes, read off the index. */

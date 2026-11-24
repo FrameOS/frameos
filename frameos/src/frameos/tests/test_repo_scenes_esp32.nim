@@ -30,7 +30,9 @@ let networkApps = toHashSet([
   "hackerNews",
   # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
   # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
-  "weatherOpenMeteoJS", "birdJournal", "flightRadar"
+  "weatherOpenMeteoJS", "birdJournal", "flightRadar",
+  # the Archive films sample's own JS app: archive.org's search
+  "archiveFilms"
 ])
 # Apps that need host-only child processes; excluded from embedded builds
 let hostOnlyApps = toHashSet([

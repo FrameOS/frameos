@@ -4,7 +4,7 @@
 ## request workers' hook (jsIoHook); the covers are data URLs unless a test
 ## asks for network ones. FRAMEOS_STORE_SHOTS=<dir> writes each picture there.
 
-import std/[algorithm, base64, json, locks, monotimes, os, strutils, tables, times, unittest, uri]
+import std/[algorithm, base64, json, locks, monotimes, os, sequtils, strutils, tables, times, unittest, uri]
 import pixie
 import ../channels
 import ../interpreter
@@ -382,6 +382,36 @@ suite "the Scene store scene":
     check problems.len == 0
     if problems.len > 0: echo problems
 
+  test "a copy that does not ask for the store permission installs nothing":
+    # `frameos.storeAction` is for an app whose config.json permissions ask
+    # for "store": the scenes on a frame are not any scene's to change. The
+    # same taps as above, on the sample with its list emptied (what a copy
+    # from before the permission holds): the host is never asked.
+    asked = @[]
+    problems = @[]
+    let config = frame(800, 480)
+    let copy = sample("Scene store")
+    let files = copy["apps"]["sceneStore"]["sources"]
+    let appConfig = parseJson(files["config.json"].getStr())
+    check appConfig["permissions"] == %*["store"]
+    appConfig["permissions"] = %*[]
+    files["config.json"] = %($appConfig)
+    setUploadedInterpretedScenes(parseInterpretedScenes($(%*[copy])))
+    resetInterpretedScenes()
+    logger.frameConfig = config
+    let scene = init("scene-store".SceneId, config, logger, %*{})
+    discard draw(scene, config, "ungranted-loading")
+    discard settle()
+    discard draw(scene, config, "ungranted")
+    scene.tap(FirstTileX, FirstTileY)
+    discard draw(scene, config, "ungranted-detail")
+    check scene.state{"spot"}{"detail"}{"name"}.getStr() == "Bouncing logo"
+    for x in countup(420, 780, 20):
+      for y in countup(BelowHeader, 470, 10):
+        scene.tap(x, y)
+    check asked.len == 0
+    check problems.anyIt("permissions do not include store" in it)
+
   test "a preview offers Install and Discard":
     asked = @[]
     let config = frame(800, 480)
@@ -676,6 +706,9 @@ suite "the Scene store scene":
     scene.tap(SideX, SideRow1)
     discard draw(scene, config, "side-featured")
     check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    # Its covers in (the store here is every repo sample with a picture, so
+    # a page asks for many): a fetch past the 32 in flight is refused.
+    discard settle()
     # The Layouts side: its own shelves, the first open.
     scene.tap(275, 27)
     discard draw(scene, config, "layouts-loading")

@@ -325,12 +325,17 @@ struct CatalogImage: View {
             let client = app.service?.client
             RemoteImage(key: "catalog:\(image)", load: {
                 if image.hasPrefix("http://") || image.hasPrefix("https://") {
-                    if let client, let url = URL(string: image), url.host == client.account.baseURL.host {
+                    guard let url = URL(string: image) else { throw CancellationError() }
+                    // The account's credentials go to its own origin alone
+                    // (scheme, host and port): a catalog names any address,
+                    // and the same host on another port, or over plain
+                    // http, is not the plane the app signed in to.
+                    if let client, client.account.isSameOrigin(url) {
                         var request = URLRequest(url: url)
                         client.authorize(&request, isWrite: false)
                         return try await client.send(request).0
                     }
-                    return try await URLSession.shared.data(from: URL(string: image)!).0
+                    return try await URLSession.shared.data(from: url).0
                 }
                 guard let client else { throw CancellationError() }
                 return try await client.bytes(image).0

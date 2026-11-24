@@ -91,6 +91,65 @@ async def test_login_too_many_attempts(no_auth_client, redis, db):
     assert resp.status_code == HTTP_401_UNAUTHORIZED
 
 
+@pytest.mark.asyncio
+async def test_a_burst_of_guesses_gets_no_more_checks_than_the_threshold(no_auth_client, redis, db):
+    """The attempt is counted before the password is looked at, in one step
+    with the lock check. Counted afterwards, every request of a concurrent
+    burst passed the lock check before any of them had failed."""
+    import asyncio
+
+    from app.api import auth
+    from app.api.auth import LOGIN_LOCKOUT_THRESHOLD
+
+    user = User(email="burst@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    checked = 0
+    real_check = auth.check_password_hash
+
+    def counting_check(hashed, password):
+        nonlocal checked
+        checked += 1
+        return real_check(hashed, password)
+
+    auth.check_password_hash = counting_check
+    try:
+        responses = await asyncio.gather(*(
+            no_auth_client.post("/api/login", data={"username": "burst@example.com", "password": f"guess-{n}"})
+            for n in range(40)
+        ))
+    finally:
+        auth.check_password_hash = real_check
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses.count(HTTP_401_UNAUTHORIZED) == LOGIN_LOCKOUT_THRESHOLD
+    assert statuses.count(HTTP_429_TOO_MANY_REQUESTS) == 40 - LOGIN_LOCKOUT_THRESHOLD
+    assert checked == LOGIN_LOCKOUT_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_only_failures_count_against_an_address(no_auth_client, redis, db):
+    from app.api.auth import LOGIN_IP_LIMIT
+    from app.utils.rate_limit import rate_limit_key
+
+    user = User(email="steady@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    good = {"username": "steady@example.com", "password": "testpassword"}
+    for _ in range(3):
+        assert (await no_auth_client.post("/api/login", data=good)).status_code == HTTP_200_OK
+    await no_auth_client.post("/api/login", data={"username": "nobody@example.com", "password": "x"})
+    keys = [key async for key in redis.scan_iter(match=rate_limit_key("login_ip", "*").rsplit(":", 1)[0] + "*")]
+    assert len(keys) == 1 and int(await redis.get(keys[0])) == 1
+
+    # An address at its limit is refused before any account is touched.
+    await redis.set(keys[0], LOGIN_IP_LIMIT)
+    assert (await no_auth_client.post("/api/login", data=good)).status_code == HTTP_429_TOO_MANY_REQUESTS
+
+
 def test_login_lockout_backoff_doubles_up_to_the_cap():
     from app.api.auth import (
         LOGIN_LOCKOUT_BASE_SECONDS,
@@ -375,3 +434,146 @@ async def test_login_cookie_secure_flag_depends_on_request_scheme(no_auth_client
     )
     assert https_response.status_code == HTTP_200_OK
     assert "Secure" in https_response.headers.get("set-cookie", "")
+
+
+# -- first-run signup is the local network's ----------------------------------
+
+SIGNUP = {"email": "first@example.com", "password": "newpassword", "password2": "newpassword", "newsletter": False}
+
+
+@pytest.mark.asyncio
+async def test_signup_answers_on_local_names_only(no_auth_client, db, monkeypatch):
+    """A public name in Host on a first-run request is a browser pointed at a
+    domain that resolves to this backend (DNS rebinding): it must not be
+    able to make the first account, or read the token the answer carries."""
+    for host in ("evil.example.com", "192.168.1.20.evil.example.com:8989"):
+        response = await no_auth_client.post("/api/signup", json=SIGNUP, headers={"Host": host})
+        assert response.status_code == 403, host
+        assert "FRAMEOS_SETUP_ALLOWED_HOSTS" in response.json()["detail"]
+        assert "access_token" not in response.text
+    assert db.query(User).count() == 0
+
+    # The address the owner said the install is reached at is theirs.
+    monkeypatch.setattr(app_config.config, "FRAMEOS_PUBLIC_URL", "https://frames.example.com")
+    assert (await no_auth_client.post("/api/signup", json=SIGNUP, headers={"Host": "other.example.com"})).status_code == 403
+    response = await no_auth_client.post("/api/signup", json=SIGNUP, headers={"Host": "frames.example.com"})
+    assert response.status_code == HTTP_200_OK and response.json()["access_token"]
+
+
+@pytest.mark.asyncio
+async def test_signup_by_address_or_local_name(no_auth_client, db):
+    response = await no_auth_client.post("/api/signup", json=SIGNUP, headers={"Host": "192.168.1.20:8989"})
+    assert response.status_code == HTTP_200_OK
+    # With an account made, the answer is the old one whatever the name.
+    again = await no_auth_client.post("/api/signup", json=SIGNUP, headers={"Host": "evil.example.com"})
+    assert again.status_code == HTTP_400_BAD_REQUEST
+
+
+# -- a session answers for its own account only --------------------------------
+
+@pytest.mark.asyncio
+async def test_a_session_does_not_answer_for_another_account(no_auth_client, db):
+    """A credential names its account by email and its session by id. A
+    session opened for one account must not be good for whichever account
+    carries that address (an address changed, then taken by someone else)."""
+    import datetime
+
+    from app.api.auth import create_access_token
+    from app.models.user_session import create_user_session
+    from app.utils.session_cookie import SESSION_COOKIE_NAME, create_session_cookie_value
+
+    users = []
+    for email in ("first@example.com", "second@example.com"):
+        user = User(email=email)
+        user.set_password("testpassword")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        users.append(user)
+    first, second = users
+    session_id = create_user_session(
+        db, user_id=first.id, expires_at=datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+    )
+    week = datetime.timedelta(days=7)
+
+    own = create_access_token({"sub": first.email, "jti": session_id})
+    assert (await no_auth_client.get("/api/user", headers={"Authorization": f"Bearer {own}"})).status_code == HTTP_200_OK
+
+    # The same live session under the other account's address: bearer and cookie.
+    crossed = create_access_token({"sub": second.email, "jti": session_id})
+    response = await no_auth_client.get("/api/user", headers={"Authorization": f"Bearer {crossed}"})
+    assert response.status_code == HTTP_401_UNAUTHORIZED
+    cookie, _ = create_session_cookie_value(email=second.email, session_id=session_id, expires_delta=week)
+    response = await no_auth_client.get("/api/user", headers={"Cookie": f"{SESSION_COOKIE_NAME}={cookie}"})
+    assert response.status_code == HTTP_401_UNAUTHORIZED
+
+
+# -- the forms anyone can post have a ceiling ----------------------------------
+
+@pytest.mark.asyncio
+async def test_login_and_signup_bodies_have_a_ceiling(no_auth_client, db):
+    big = "x" * (200 * 1024)
+    response = await no_auth_client.post("/api/login", data={"username": "a@example.com", "password": big})
+    assert response.status_code == 413
+    response = await no_auth_client.post("/api/signup", json={**SIGNUP, "password": big, "password2": big})
+    assert response.status_code == 413
+
+    async def streamed():
+        for _ in range(8):
+            yield b"y" * (32 * 1024)
+
+    # No Content-Length to refuse on: cut off as it passes the cap.
+    response = await no_auth_client.post(
+        "/api/login", content=streamed(), headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    assert response.status_code == 413
+    assert db.query(User).count() == 0
+    # An ordinary form is untouched.
+    response = await no_auth_client.post("/api/login", data={"username": "a@example.com", "password": "nope"})
+    assert response.status_code == HTTP_401_UNAUTHORIZED
+
+
+def test_the_app_config_cannot_close_its_script_element():
+    import json
+
+    from app.fastapi import script_json
+
+    config = {"ingress_path": "/x</script><script>alert(1)</script><!--", "note": "a & b"}
+    rendered = script_json(config)
+    assert "<" not in rendered and ">" not in rendered and "&" not in rendered
+    assert json.loads(rendered) == config
+
+
+def test_a_bearer_minted_before_the_switch_to_pyjwt_still_reads():
+    """python-jose made the tokens of every session open at the upgrade; the
+    same HS256 JWT must still decode, and anything else must not."""
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    from app.api.auth import ALGORITHM, SECRET_KEY, JWTError, _decode_jwt_claims
+
+    def b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    def token(claims: dict, key: str = SECRET_KEY, alg: str = ALGORITHM) -> str:
+        head = b64(json.dumps({"alg": alg, "typ": "JWT"}, separators=(",", ":")).encode())
+        body = b64(json.dumps(claims, separators=(",", ":")).encode())
+        digest = hashlib.sha256 if alg == "HS256" else hashlib.sha512
+        signature = b64(hmac.new(key.encode(), f"{head}.{body}".encode(), digest).digest())
+        return f"{head}.{body}.{signature}"
+
+    import time
+
+    later = int(time.time()) + 3600
+    assert _decode_jwt_claims(token({"sub": "a@example.com", "jti": "s1", "exp": later})) == ("a@example.com", "s1")
+    for bad in (
+        token({"sub": "a@example.com", "jti": "s1", "exp": int(time.time()) - 10}),
+        token({"sub": "a@example.com", "jti": "s1", "exp": later}, key="another-key-of-enough-length-000000"),
+        token({"sub": "a@example.com", "jti": "s1", "exp": later}, alg="HS512"),
+        token({"sub": "a@example.com", "exp": later}),
+        "not.a.token",
+    ):
+        with pytest.raises(JWTError):
+            _decode_jwt_claims(bad)

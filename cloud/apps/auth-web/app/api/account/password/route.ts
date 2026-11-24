@@ -1,12 +1,15 @@
-import { and, eq, isNull, ne } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accounts,
   createDb,
-  sessions,
+  revokeApiTokensForAccount,
   setAccountPassword,
 } from "@frameos-cloud/db";
+import {
+  revokeOtherSessions,
+  revokedTokensDetail,
+} from "../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { sendSecurityNotificationEmail } from "../../../../src/lib/email";
@@ -21,13 +24,15 @@ import {
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
-import { hashSecret } from "../../../../src/lib/secrets";
-import { readSession, sessionCookieName } from "../../../../src/lib/session";
+import { requireRecentAuthWithSecondFactor } from "../../../../src/lib/recent-auth";
+import { readSession } from "../../../../src/lib/session";
 
 // Change the signed-in account's password. Requires the current password, so
 // a hijacked session alone cannot lock the owner out; accounts without a
 // password (Google-only) go through the email reset flow instead, which
-// proves control of the address.
+// proves control of the address. On an account with two-factor the session
+// must also have passed sudo mode (the second factor) recently: there the
+// password alone proves less than sign-in did.
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
   if (csrf) {
@@ -96,6 +101,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const reauth = await requireRecentAuthWithSecondFactor(db, session.accountId);
+  if (reauth) {
+    return reauth;
+  }
+
   const currentPasswordValid = await verifyPasswordWithDummyFallback(
     currentPassword,
     account.passwordHash,
@@ -115,23 +125,20 @@ export async function POST(request: NextRequest) {
 
   // Changing the password evicts every other session (a stolen session is a
   // likely reason to change it), but keeps this one signed in.
-  const cookieStore = await cookies();
-  const token = cookieStore.get(sessionCookieName)?.value;
-  await db
-    .update(sessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(sessions.accountId, session.accountId),
-        isNull(sessions.revokedAt),
-        ...(token ? [ne(sessions.tokenHash, hashSecret(token))] : []),
-      ),
-    );
+  await revokeOtherSessions(db, session.accountId);
+  // The personal API tokens go too, as on a password reset and a second-
+  // factor change: whoever had the account long enough to mint one would
+  // otherwise keep a script-shaped way in that outlives the new password.
+  const apiTokensRevoked = await revokeApiTokensForAccount(
+    db,
+    session.accountId,
+  );
 
   await recordAuditEvent(db, {
     accountId: session.accountId,
     actor: { accountId: session.accountId },
     eventType: "account.password_changed",
+    metadata: { apiTokensRevoked },
   });
 
   // The one credential change that had no mail: whoever holds the address
@@ -140,6 +147,7 @@ export async function POST(request: NextRequest) {
   if (account.primaryEmail) {
     try {
       await sendSecurityNotificationEmail(account.primaryEmail, {
+        detail: revokedTokensDetail(apiTokensRevoked, "password"),
         what: "password_changed",
         when: new Date(),
       });
@@ -148,5 +156,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ api_tokens_revoked: apiTokensRevoked, ok: true });
 }

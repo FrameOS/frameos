@@ -2598,18 +2598,26 @@ typedef struct {
     uint8_t *saved; /* the render under the box; NULL = paint it white */
 } lan_overlay_t;
 
+/* The code this render draws, if one is pending: asked once a render, here.
+ * Whether the preview needs a copy from before the overlay and whether the
+ * overlay goes on are one answer: asked twice, a challenge that began between
+ * the two was drawn into a panel buffer with no copy taken, and that buffer
+ * was then lent to the preview with the code in it. */
+static bool lan_overlay_due(char code[FOS_LAN_ACCESS_CODE_LEN + 1])
+{
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), code);
+    s_lan_seen_gen = generation;
+    return generation != 0;
+}
+
 /* Draw the pending code over a finished render, for the panel only
  * (docs/lan-access.md). Between this and lan_overlay_end() the buffer holds
  * the code, and nothing that reads it as an image may run: the snapshot
  * behind /image, image_get and the backend push is stored after the end. */
-static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int height,
+static void lan_overlay_begin(lan_overlay_t *ov, const char *code, uint8_t *buf, int width, int height,
                               fos_pixel_format_t format)
 {
     memset(ov, 0, sizeof(*ov));
-    char code[FOS_LAN_ACCESS_CODE_LEN + 1];
-    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), code);
-    s_lan_seen_gen = generation;
-    if (generation == 0) return;
     if (s_last_frame == buf) {
         /* The lend hook could not drop the preview snapshot (a stream stalled
          * past 30 s) so this buffer is still served as the frame's image. */
@@ -2629,8 +2637,6 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
             frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
         }
     }
-    volatile char *wipe = code;
-    for (size_t i = 0; i < sizeof(code); i++) wipe[i] = 0;
 }
 
 static void lan_overlay_end(lan_overlay_t *ov)
@@ -3442,13 +3448,19 @@ static esp_err_t render_once(bool quiet)
     lan_overlay_t lan_overlay = {0};
     notice_overlay_t notice = {0};
     if (err == ESP_OK && !pulled_unchanged && fos_display_present()) {
-        if (in_panel && panel_overlay_pending()) {
+        char lan_code[FOS_LAN_ACCESS_CODE_LEN + 1];
+        bool lan_due = lan_overlay_due(lan_code);
+        bool notice_due = s_notice_pending;
+        if (in_panel && (lan_due || notice_due)) {
             store_snapshot(buf, buf_len, width, height, format, s_render_count + 1,
                            (esp_timer_get_time() - start) / 1000, false);
             snapshot_stored = true;
         }
-        lan_overlay_begin(&lan_overlay, buf, width, height, format);
-        notice_overlay_begin(&notice, buf, width, height, format);
+        if (lan_due) lan_overlay_begin(&lan_overlay, lan_code, buf, width, height, format);
+        volatile char *wipe = lan_code;
+        for (size_t i = 0; i < sizeof(lan_code); i++) wipe[i] = 0;
+        /* A notice that came after the look above waits for the next render. */
+        if (notice_due) notice_overlay_begin(&notice, buf, width, height, format);
         /* Drawn into the buffer the panel shows: the next render in place
          * there must not take it for its own frame. */
         if (in_panel && (lan_overlay.drawn || notice.drawn)) fos_display_mark_written(buf);
@@ -3595,7 +3607,10 @@ static esp_err_t render_once(bool quiet)
                                    false);
                 }
             }
-        } else if (!snapshot_stored) {
+        } else if (!snapshot_stored && !(in_panel && overlay_drawn)) {
+            /* Never a panel buffer an overlay went into: its copy was taken
+             * before (above), and with none taken the preview keeps the
+             * picture it has. */
             store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms,
                            in_panel);
         }

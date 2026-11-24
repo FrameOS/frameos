@@ -174,6 +174,28 @@ describe("SceneAiPanel", () => {
     ]);
   });
 
+  it("fetches no image the reply names: it is a link to open by choice", async () => {
+    // The model's text may repeat what it read in someone else's scene: an
+    // image drawn from it would be a request nobody clicked.
+    fetchMock.mockResolvedValueOnce(
+      ndjson([
+        { chatId: "chat-1", type: "chat" },
+        { text: "Done. ![status](https://tracker.example/p.png?d=what-the-turn-read)", type: "delta" },
+        { reply: "Done.", type: "done" },
+      ]),
+    );
+    const { container } = renderPanel();
+
+    sendPrompt("what does this scene do");
+
+    const link = await screen.findByRole("link", { name: "Image: status" });
+    expect(link.getAttribute("href")).toBe("https://tracker.example/p.png?d=what-the-turn-read");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(container.querySelector(".ai-panel__markdown img")).toBeNull();
+    expect(container.querySelector('img[src^="https://tracker.example"]')).toBeNull();
+  });
+
   it("feeds render-check errors back to the AI once, in a muted automatic turn", async () => {
     renderCheckMock
       .mockResolvedValueOnce(
