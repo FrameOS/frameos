@@ -782,10 +782,9 @@ proc parseNameTable(buf: string, offset: int): NameTable =
     record.nameID = buf.readUint16(i + 6).swap()
     record.length = buf.readUint16(i + 8).swap()
     record.offset = buf.readUint16(i + 10).swap()
-    record.text = buf[
-      (offset + result.stringOffset.int + record.offset.int) ..<
-      (offset + result.stringOffset.int + record.offset.int + record.length.int)
-    ]
+    let textAt = offset + result.stringOffset.int + record.offset.int
+    buf.eofCheck(textAt + record.length.int)
+    record.text = buf[textAt ..< textAt + record.length.int]
     if record.platformID == 3 and
       record.encodingID == 1 and
       record.languageID == 1033:
@@ -950,6 +949,9 @@ proc parseKernTable(buf: string, offset: int): KernTable =
 proc parseCFFIndexOffsets(
   buf: string, start: var int, stripZero = false
 ): seq[(int, int)] =
+  ## A CFF INDEX at `start`: where each of its objects is in `buf`, every one
+  ## inside it (the reader runs with the checks off in a release, and every
+  ## place it reads comes from the font). `start` moves past the INDEX.
 
   proc getOffset(buf: string, offset, offSize: int): int =
     var v = 0
@@ -960,18 +962,28 @@ proc parseCFFIndexOffsets(
 
   # Compute all of the offsets first.
   var offsets: seq[int]
+  buf.eofCheck(start + 2)
   let count = buf.readUint16(start).swap().int
   var endOffset = 0
   var objectOffset = 0
   if count != 0:
+    buf.eofCheck(start + 3)
     var offsetSize = buf.readUint8(start + 2).int
+    if offsetSize < 1 or offsetSize > 4:
+      raise newException(PixieError, "Invalid CFF INDEX offset size")
+    buf.eofCheck(start + 3 + (count + 1) * offsetSize)
     objectOffset = start + ((count.int + 1) * offsetSize.int) + 2
     var pos = start + 3
     for i in 0 .. count.int:
-      offsets.add(buf.getOffset(pos, offsetSize.int))
+      let offset = buf.getOffset(pos, offsetSize.int)
+      # Offsets count from 1 and never go back.
+      if offset < 1 or (i > 0 and offset < offsets[^1]):
+        raise newException(PixieError, "Invalid CFF INDEX offsets")
+      offsets.add(offset)
 
       pos += offsetSize
     endOffset = objectOffset + offsets[count]
+    buf.eofCheck(endOffset)
   else:
     endOffset = start + 2
 
@@ -982,7 +994,7 @@ proc parseCFFIndexOffsets(
     var
       a = objectOffset + offsets[i]
       b = objectOffset + offsets[i + 1]
-    if stripZero:
+    if stripZero and b > a:
       dec b # ignore 0 at the end
     result.add((a, b))
   start = endOffset
