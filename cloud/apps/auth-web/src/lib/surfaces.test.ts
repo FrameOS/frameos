@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveSurfaceRoute } from "./surfaces";
+import { isPlaygroundHost, resolveSurfaceRoute } from "./surfaces";
 
 const originalAccountUrl = process.env.FRAMEOS_ACCOUNT_APP_URL;
 const originalCloudUrl = process.env.FRAMEOS_CLOUD_APP_URL;
@@ -63,6 +63,76 @@ describe("surface routing", () => {
         resolveSurfaceRoute(new URL(`https://playground.frameos.net${path}`)),
       ).toBeUndefined();
     }
+  });
+
+  // The playground runs anyone's scene on an origin the session cookie is
+  // sent to, so its host answers only what the playground itself asks for.
+  it("answers no API on the playground host beyond the store's public reads", () => {
+    configureMergedOrigins();
+    process.env.FRAMEOS_PLAYGROUND_APP_URL = "https://playground.frameos.net";
+
+    for (const path of [
+      "/api/settings?reveal=1",
+      "/api/account/export",
+      "/api/frames",
+      "/api/photos/albums",
+      "/api/store/account/scenes",
+      "/api/store/browse",
+      "/api/mcp",
+      "/api",
+    ]) {
+      expect(
+        resolveSurfaceRoute(new URL(`https://playground.frameos.net${path}`)),
+      ).toEqual({ kind: "notFound" });
+      // The same request as nginx hands it over.
+      expect(
+        resolveSurfaceRoute(
+          new URL(`https://localhost:3000${path}`),
+          "playground.frameos.net",
+        ),
+      ).toEqual({ kind: "notFound" });
+    }
+    for (const path of [
+      "/api/store/device/scenes?limit=24",
+      "/api/store/scenes/abc/scenes.json",
+      "/api/store/scenes/abc/image",
+      "/api/store/preview-proxy",
+    ]) {
+      expect(
+        resolveSurfaceRoute(new URL(`https://playground.frameos.net${path}`)),
+      ).toBeUndefined();
+    }
+    // The reads are reads: only the preview proxy takes a POST there.
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://playground.frameos.net/api/store/scenes/abc/report"),
+        undefined,
+        "POST",
+      ),
+    ).toEqual({ kind: "notFound" });
+    expect(
+      resolveSurfaceRoute(
+        new URL("https://playground.frameos.net/api/store/preview-proxy"),
+        undefined,
+        "POST",
+      ),
+    ).toBeUndefined();
+    // Every other host keeps its API.
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/api/settings")),
+    ).toBeUndefined();
+    expect(isPlaygroundHost(new URL("https://cloud.frameos.net/"))).toBe(false);
+    expect(isPlaygroundHost(new URL("https://playground.frameos.net/"))).toBe(true);
+  });
+
+  it("keeps the API on a playground that is a path of the cloud origin", () => {
+    configureMergedOrigins();
+    delete process.env.FRAMEOS_PLAYGROUND_APP_URL;
+
+    expect(
+      resolveSurfaceRoute(new URL("https://cloud.frameos.net/api/settings")),
+    ).toBeUndefined();
+    expect(isPlaygroundHost(new URL("https://cloud.frameos.net/"))).toBe(false);
   });
 
   it("serves the playground on the cloud origin when it has no host", () => {
