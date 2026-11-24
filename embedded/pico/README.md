@@ -182,7 +182,13 @@ needs its root in the bundle or plain `http://` on a LAN you trust. Certificate
 validity periods check against the RTC / SNTP time, falling back to a
 build-time floor when neither has it. The device's *own* server is plain HTTP
 (no TLS listener): on the LAN it is guarded by the frame's API key or device
-login, in hotspot mode by the WPA2 passphrase.
+login, in hotspot mode by the WPA2 passphrase. Either way a request that
+changes something and comes from a page that is not the device's own (an
+`Origin` other than `http(s)://<its Host>`) is refused with a 403 before
+anything else is asked (`pk_httpd_cross_site_write`): a browser that holds
+the device login, or sits on its hotspot, would otherwise post another site's
+form here. A backend, `curl` or the console sends no `Origin` and is not
+affected.
 
 ## Layout
 

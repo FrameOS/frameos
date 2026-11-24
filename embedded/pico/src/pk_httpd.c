@@ -309,6 +309,14 @@ static void route(conn_t *conn, const pk_httpd_request_t *request, const char *b
         return;
     }
 
+    // Another site's page, in a browser that holds this device's login or is
+    // on its hotspot, may not change anything here. Before the access rule:
+    // in hotspot mode there is none to ask.
+    if (pk_httpd_cross_site_write(request)) {
+        respond_text(conn, "403 Forbidden", "Cross-site request refused");
+        return;
+    }
+
     if (!portal && !pk_httpd_authorized(request, config)) {
         if (!config->api_key[0] && !(config->admin_auth && config->admin_user[0])) {
             respond_text(conn, "403 Forbidden",

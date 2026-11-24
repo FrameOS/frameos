@@ -420,6 +420,31 @@ static void test_download_is_first_party(void)
                                            NULL), "LAN base without port accepted");
 }
 
+/* The device's own HTTP server: which page may change something on it. */
+static void test_origin_is_host(void)
+{
+    /* The setup page posting to itself: by address, by name, with a port. */
+    CHECK(fos_url_origin_is_host("http://192.168.1.50", "192.168.1.50"), "own page by address refused");
+    CHECK(fos_url_origin_is_host("HTTP://Frame.local", "frame.LOCAL"), "case made a different page");
+    CHECK(fos_url_origin_is_host("https://192.168.1.50:8443", "192.168.1.50:8443"), "own https page refused");
+    /* Under a captive-portal probe's name (the hotspot answers every name). */
+    CHECK(fos_url_origin_is_host("http://captive.apple.com", "captive.apple.com"), "portal page refused");
+    /* Another site's page, and the lookalikes. */
+    CHECK(!fos_url_origin_is_host("http://example.com", "192.168.1.50"), "another site accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.50.example.com", "192.168.1.50"), "suffix lookalike accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.5", "192.168.1.50"), "prefix lookalike accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.50:8080", "192.168.1.50"), "another port accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.50", "192.168.1.50:8443"), "another port accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.50/", "192.168.1.50"), "a path is no origin");
+    CHECK(!fos_url_origin_is_host("null", "192.168.1.50"), "opaque origin accepted");
+    CHECK(!fos_url_origin_is_host("file://", "192.168.1.50"), "file origin accepted");
+    CHECK(!fos_url_origin_is_host("192.168.1.50", "192.168.1.50"), "origin without a scheme accepted");
+    CHECK(!fos_url_origin_is_host("", "192.168.1.50"), "empty origin accepted");
+    CHECK(!fos_url_origin_is_host("http://", ""), "empty host accepted");
+    CHECK(!fos_url_origin_is_host(NULL, "192.168.1.50"), "NULL origin accepted");
+    CHECK(!fos_url_origin_is_host("http://192.168.1.50", NULL), "NULL host accepted");
+}
+
 int main(void)
 {
     test_local_names();
@@ -435,6 +460,7 @@ int main(void)
     test_ws_url_matches_provider();
     test_url_origin();
     test_download_is_first_party();
+    test_origin_is_host();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
