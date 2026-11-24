@@ -91,6 +91,65 @@ async def test_login_too_many_attempts(no_auth_client, redis, db):
     assert resp.status_code == HTTP_401_UNAUTHORIZED
 
 
+@pytest.mark.asyncio
+async def test_a_burst_of_guesses_gets_no_more_checks_than_the_threshold(no_auth_client, redis, db):
+    """The attempt is counted before the password is looked at, in one step
+    with the lock check. Counted afterwards, every request of a concurrent
+    burst passed the lock check before any of them had failed."""
+    import asyncio
+
+    from app.api import auth
+    from app.api.auth import LOGIN_LOCKOUT_THRESHOLD
+
+    user = User(email="burst@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    checked = 0
+    real_check = auth.check_password_hash
+
+    def counting_check(hashed, password):
+        nonlocal checked
+        checked += 1
+        return real_check(hashed, password)
+
+    auth.check_password_hash = counting_check
+    try:
+        responses = await asyncio.gather(*(
+            no_auth_client.post("/api/login", data={"username": "burst@example.com", "password": f"guess-{n}"})
+            for n in range(40)
+        ))
+    finally:
+        auth.check_password_hash = real_check
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses.count(HTTP_401_UNAUTHORIZED) == LOGIN_LOCKOUT_THRESHOLD
+    assert statuses.count(HTTP_429_TOO_MANY_REQUESTS) == 40 - LOGIN_LOCKOUT_THRESHOLD
+    assert checked == LOGIN_LOCKOUT_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_only_failures_count_against_an_address(no_auth_client, redis, db):
+    from app.api.auth import LOGIN_IP_LIMIT
+    from app.utils.rate_limit import rate_limit_key
+
+    user = User(email="steady@example.com")
+    user.set_password("testpassword")
+    db.add(user)
+    db.commit()
+
+    good = {"username": "steady@example.com", "password": "testpassword"}
+    for _ in range(3):
+        assert (await no_auth_client.post("/api/login", data=good)).status_code == HTTP_200_OK
+    await no_auth_client.post("/api/login", data={"username": "nobody@example.com", "password": "x"})
+    keys = [key async for key in redis.scan_iter(match=rate_limit_key("login_ip", "*").rsplit(":", 1)[0] + "*")]
+    assert len(keys) == 1 and int(await redis.get(keys[0])) == 1
+
+    # An address at its limit is refused before any account is touched.
+    await redis.set(keys[0], LOGIN_IP_LIMIT)
+    assert (await no_auth_client.post("/api/login", data=good)).status_code == HTTP_429_TOO_MANY_REQUESTS
+
+
 def test_login_lockout_backoff_doubles_up_to_the_cap():
     from app.api.auth import (
         LOGIN_LOCKOUT_BASE_SECONDS,

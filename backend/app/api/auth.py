@@ -29,7 +29,7 @@ from app.utils.session_cookie import (
     create_session_cookie_value,
     decode_session_cookie_claims,
 )
-from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, over_rate_limit, rate_limit_key
+from app.utils.rate_limit import clear_rate_limit, hit_rate_limit, rate_limit_key
 from app.utils.request_ip import client_ip_for_request
 from app.utils.same_origin import hosts_match as _hosts_match, origin_is_ours  # noqa: F401
 
@@ -97,19 +97,50 @@ def login_lockout_seconds(failures: int) -> int:
     return min(LOGIN_LOCKOUT_BASE_SECONDS * (2 ** (failures - LOGIN_LOCKOUT_THRESHOLD)), LOGIN_LOCKOUT_MAX_SECONDS)
 
 
-async def _login_locked_seconds(redis: Redis, email: str) -> int:
-    ttl = await redis.ttl(rate_limit_key("login_lock", email))
-    return max(int(ttl or 0), 0)
+# One attempt, counted before the password is looked at and in one step with
+# the lock check: reading the lock, verifying and counting the failure
+# afterwards let every request of a concurrent burst pass the read before any
+# of them had counted (five hundred guesses, five hundred checks). KEYS: the
+# lock, the failure counter. ARGV: the counter's window, the threshold, the
+# base lock and the longest. Answers minus the seconds left on a lock, or the
+# attempt's number; the attempt that reaches the threshold sets the lock
+# itself, so the ones behind it find it.
+_LOGIN_ATTEMPT_SCRIPT = """
+local ttl = redis.call('TTL', KEYS[1])
+if ttl > 0 then
+  return -ttl
+end
+local failures = redis.call('INCR', KEYS[2])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[1]))
+local threshold = tonumber(ARGV[2])
+if failures >= threshold then
+  local lock = tonumber(ARGV[3]) * 2 ^ math.min(failures - threshold, 30)
+  if lock > tonumber(ARGV[4]) then
+    lock = tonumber(ARGV[4])
+  end
+  redis.call('SET', KEYS[1], tostring(failures), 'EX', math.floor(lock))
+end
+return failures
+"""
 
 
-async def _record_login_failure(redis: Redis, email: str, ip: str) -> None:
-    await hit_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT, window_seconds=LOGIN_IP_WINDOW_SECONDS)
-    failures_key = rate_limit_key("login_failures", email)
-    failures = int(await redis.incr(failures_key))
-    await redis.expire(failures_key, LOGIN_FAILURE_WINDOW_SECONDS)
-    lock_seconds = login_lockout_seconds(failures)
-    if lock_seconds:
-        await redis.set(rate_limit_key("login_lock", email), str(failures), ex=lock_seconds)
+async def _count_login_attempt(redis: Redis, email: str) -> int:
+    """Count this attempt against the account as a failure (a success takes
+    it back, `_clear_login_failures`). Returns 0 to go on and verify, or the
+    seconds the account is locked for."""
+    outcome = int(
+        await redis.eval(
+            _LOGIN_ATTEMPT_SCRIPT,
+            2,
+            rate_limit_key("login_lock", email),
+            rate_limit_key("login_failures", email),
+            LOGIN_FAILURE_WINDOW_SECONDS,
+            LOGIN_LOCKOUT_THRESHOLD,
+            LOGIN_LOCKOUT_BASE_SECONDS,
+            LOGIN_LOCKOUT_MAX_SECONDS,
+        )
+    )
+    return -outcome if outcome < 0 else 0
 
 
 async def _clear_login_failures(redis: Redis, email: str) -> None:
@@ -427,18 +458,20 @@ async def login(
     # Strict: the limiter keys on this address, so a header any LAN peer can
     # set must not pick the bucket (docs/cloud-link.md, FRAMEOS_TRUSTED_PROXIES).
     ip = client_ip_for_request(request, strict=True) or "unknown"
-    locked_for = await _login_locked_seconds(redis, account)
+    # Both counters move before the password is looked at (a success takes
+    # its count back): checked first and counted after, a burst of requests
+    # all passed the check.
+    if await hit_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT, window_seconds=LOGIN_IP_WINDOW_SECONDS):
+        raise HTTPException(status_code=429, detail="Too many login attempts")
+    locked_for = await _count_login_attempt(redis, account)
     if locked_for:
         raise HTTPException(
             status_code=429, detail="Too many login attempts", headers={"Retry-After": str(locked_for)}
         )
-    if await over_rate_limit(redis, "login_ip", ip, limit=LOGIN_IP_LIMIT):
-        raise HTTPException(status_code=429, detail="Too many login attempts")
 
     user = find_user_by_login_email(db, email)
     # Cloud-created users (first-run cloud signup) have no local password.
     if user is None or not user.password or not check_password_hash(user.password, password):
-        await _record_login_failure(redis, account, ip)
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     from app.tenancy import ensure_default_project_for_user
@@ -446,6 +479,8 @@ async def login(
     ensure_default_project_for_user(db, user)
 
     await _clear_login_failures(redis, account)
+    # Only failures count against the address.
+    await redis.decr(rate_limit_key("login_ip", ip))
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token, session_value, max_age = issue_credentials(db, user, access_token_expires)
     response.set_cookie(
