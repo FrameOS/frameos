@@ -101,6 +101,7 @@ idf_component_register(
         sdmmc
         frameos_display
         frameos_nim
+        frameos_quickjs
         monocypher
 )
 
@@ -132,11 +133,13 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wr
 # so neither of newlib's scanf engines (9.6 + 8.3 KB) is linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-Wl,--wrap=siscanf" "-u __wrap_sscanf")
 
-# printf, fprintf, vprintf and vfprintf go through fos_printf.c, which formats
-# with vsnprintf: newlib's FILE formatter (_vfprintf_r, 11.4 KB, a second copy
-# of the one snprintf uses) is never linked.
+# The printf family goes through fos_printf.c's formatter (doubles by QuickJS's
+# js_dtoa): newlib's two copies of its own (_vfprintf_r for FILEs,
+# _svfprintf_r for strings, 11-13 KB each) and the dtoa behind them are never
+# linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=printf" "-Wl,--wrap=fprintf"
-    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-u __wrap_vprintf")
+    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-Wl,--wrap=snprintf" "-Wl,--wrap=vsnprintf"
+    "-Wl,--wrap=sprintf" "-Wl,--wrap=asprintf" "-Wl,--wrap=vasprintf" "-u __wrap_vprintf")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before

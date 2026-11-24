@@ -39,6 +39,8 @@ main/                     boot orchestration + platform modules
                           the console then offers no USB-Serial/JTAG channel
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
+  fos_printf.c            the printf family for the linker's --wrap: newlib's output from a small
+                          formatter, doubles by QuickJS's js_dtoa, so newlib's is never linked (host-tested)
   fos_sscanf.c            sscanf and siscanf for the linker's --wrap: cJSON's "%lg" read-back as
                           strtod, tzset's TZ formats by an integer scanner that reads as newlib's,
                           so no newlib scanf engine is linked (host-tested)
