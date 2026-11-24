@@ -50,6 +50,28 @@ public struct Account: Codable, Identifiable, Hashable, Sendable {
         return text
     }
 
+    /// The origin of any URL, written as `origin` writes this account's; nil
+    /// for what is no http(s) URL with a host.
+    public static func origin(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let named = url.host?.lowercased(), !named.isEmpty
+        else { return nil }
+        var host = named
+        if host.contains(":") && !host.hasPrefix("[") { host = "[\(host)]" }
+        var text = "\(scheme)://\(host)"
+        if let port = url.port, port != (scheme == "https" ? 443 : 80) { text += ":\(port)" }
+        return text
+    }
+
+    /// Whether `url` is this plane's own origin: the same scheme, host and
+    /// port. Only such a URL is sent the account's credentials (a backend's
+    /// bearer, the cloud's cookies): the same host on another port is another
+    /// program, and the same host over plain http can be read on the way.
+    public func isSameOrigin(_ url: URL) -> Bool {
+        guard let other = Account.origin(of: url) else { return false }
+        return other == origin
+    }
+
     public static let defaultCloudURL = URL(string: "https://cloud.frameos.net")!
 }
 
