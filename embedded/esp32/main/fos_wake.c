@@ -103,3 +103,13 @@ uint32_t fos_wake_rest_ms(int64_t left_ms, int64_t pass_ms)
     if (rest < 1) return 1;
     return rest > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)rest;
 }
+
+fos_wake_wifi_t fos_wake_wifi_plan(bool touch, bool lcd, bool timer_wake, bool wifi_saved)
+{
+    fos_wake_wifi_t plan = {.on_screen = touch};
+    if (!touch) return plan;
+    plan.join_behind = wifi_saved;
+    plan.wait_first = wifi_saved && timer_wake && !lcd;
+    plan.frame_page = !wifi_saved && !timer_wake;
+    return plan;
+}

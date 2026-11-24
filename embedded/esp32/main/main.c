@@ -8,7 +8,7 @@
  * the reTerminal Sticky) does not wait for Wi-Fi and has no portal: it draws
  * first, joins in the background and is set up on its own screen (the
  * settings panel's Frame tab, fos_frame_settings.c). A sleeping e-paper
- * board's timer wake still waits for the network.
+ * board's timer wake renders once the join lands, or a touch, or 45 s.
  *
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
@@ -71,6 +71,7 @@
 #include "fos_status_screen.h"
 #include "fos_tz.h"
 #include "fos_mem.h"
+#include "fos_wake.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "lcd_splash.h"
@@ -391,7 +392,6 @@ static void online_steps(uint32_t sntp_timeout_ms)
     frameos_nim_set_log_upload_enabled(true);
     log_bootup_event(true);
     fos_ota_start_periodic_task(24);
-    fos_client_render_now();
 }
 
 static void on_portal_exit(void)
@@ -401,6 +401,7 @@ static void on_portal_exit(void)
     fos_http_stop();
     fos_http_start(false);
     online_steps(SNTP_TIMEOUT_MS);
+    fos_client_render_now();
 }
 
 /* A touch board's boot went on without Wi-Fi (app_main, touch_setup): the
@@ -416,6 +417,10 @@ static void on_wifi_online(void)
      * the time a deep sleep kept) and renders again when it comes. */
     fos_wifi_set_late_time_hook(action_render_now);
     online_steps(0);
+    /* A picture drawn before the join had none of its data. One that has not
+     * begun yet will: drawn again, a boot whose join beat its first render
+     * refreshed e-paper twice. */
+    fos_client_render_after_join();
 }
 
 static void log_bootup_event(bool online)
@@ -664,17 +669,23 @@ void app_main(void)
      * or e-paper with a partial waveform: the reTerminal Sticky and E1003),
      * and a tap that woke a sleeping Sticky waited ~11 s for Wi-Fi before the
      * scene even started (2026-11-23). A sleeping e-paper board's timer wake
-     * is nobody's tap: it waits for the network as a classic panel does, so
-     * the one picture it draws before sleeping again has its data. */
+     * is nobody's tap: its first render waits for the join (fos_client.c),
+     * so the one picture it draws before sleeping again has its data, but
+     * the runtime and the scenes come up meanwhile, a touch or a key ends the
+     * wait, and a join that does not come opens no hotspot: the frame draws
+     * and sleeps again. With no network saved it opens the frame page when it
+     * has no scene to show (fos_wake_wifi_plan). */
     bool woke_by_timer = esp_reset_reason() == ESP_RST_DEEPSLEEP &&
                          esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
-    bool touch_setup = fos_touch_present() && (fos_display_is_lcd() || !woke_by_timer);
+    fos_wake_wifi_t wifi_plan = fos_wake_wifi_plan(fos_touch_present(), fos_display_is_lcd(), woke_by_timer,
+                                                   fos_config_wifi_ready());
+    bool touch_setup = wifi_plan.on_screen;
     fos_frame_settings_init();
     fos_store_init();
     fos_code_init();
     bool online = false;
     if (touch_setup) {
-        if (fos_config_wifi_ready()) {
+        if (wifi_plan.join_behind) {
             esp_err_t err = fos_wifi_start_background();
             if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi failed to start: %s", esp_err_to_name(err));
             /* An update was asked for (console `ota`, the backend's action):
@@ -747,7 +758,7 @@ void app_main(void)
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
     boot_splash_wait();
-    fos_client_set_render_first(touch_setup);
+    fos_client_set_boot_wifi(touch_setup && !wifi_plan.wait_first, wifi_plan.wait_first, wifi_plan.frame_page);
     fos_client_start();
 
     BOOTMEM("after-client-start");

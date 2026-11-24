@@ -279,8 +279,29 @@ static void apply_service_settings(const cJSON *root, const char *origin, const 
     log_service_settings_event(origin, "applied", names);
 }
 
+/* What the cache on flash holds, as an FNV-1a hash of the blob, its ETag and
+ * its source; 0 = not known. Every boot's first pull used to write the same
+ * blob again: an NVS write stalls an RGB LCD's render task, and it fell right
+ * after the join, a second's freeze on the SenseCAP's animation. */
+static uint32_t s_cache_hash = 0;
+
+static uint32_t cache_hash(const char *printed, const char *etag, const char *origin)
+{
+    uint32_t hash = 2166136261u;
+    const char *parts[3] = {printed, etag ? etag : "", origin ? origin : ""};
+    for (int i = 0; i < 3; i++) {
+        for (const unsigned char *c = (const unsigned char *)parts[i];; c++) {
+            hash = (hash ^ *c) * 16777619u;
+            if (*c == '\0') break;
+        }
+    }
+    return hash ? hash : 1;
+}
+
 static void cache_store(const char *printed, const char *etag, const char *origin)
 {
+    uint32_t hash = cache_hash(printed, etag, origin);
+    if (hash == s_cache_hash) return;
     /* Room check first. A blob takes one entry per 32 bytes plus its index,
      * and the new one is written before the old one is freed. */
     const size_t blob_entries = (strlen(printed) + 1 + 31) / 32 + 2;
@@ -306,14 +327,17 @@ static void cache_store(const char *printed, const char *etag, const char *origi
     nvs_close(nvs);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "service settings cache write failed: %s", esp_err_to_name(err));
+        s_cache_hash = 0;
         return;
     }
+    s_cache_hash = hash;
     s_cache_applied = true;
     s_cache_stored_at = at;
 }
 
 void fos_settings_forget_cache(void)
 {
+    s_cache_hash = 0;
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
     nvs_erase_key(nvs, SETTINGS_CACHE_KEY);
@@ -371,6 +395,7 @@ bool fos_settings_boot_apply_cache(void)
         return false;
     }
     blob[len - 1] = '\0';
+    s_cache_hash = cache_hash(blob, etag, source);
     cJSON *root = cJSON_ParseWithLength(blob, strlen(blob));
     if (root == NULL || !cJSON_IsObject(root)) {
         cJSON_Delete(root);

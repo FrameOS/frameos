@@ -280,10 +280,16 @@
   `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's
   `frameos/frame_settings_linux.nim` (portal Wi-Fi code on its own thread).
   Words go in the scene, never in a host. Its buttons send the contract's
-  device commands from the origin `panel`. A touch ESP32 (`touch_setup` in
-  `main.c`: the LCDs and the fast e-paper of the Sticky and E1003) boots
-  without waiting for Wi-Fi and never opens the hotspot: the page is where it
-  joins (a sleeping e-paper board's timer wake still waits). **No plane is ever told the Wi-Fi network** (a
+  device commands from the origin `panel`. A touch frame boots without
+  waiting for its network and never opens a hotspot in its scene's place: the
+  page is where it joins (doc section "A boot that does not wait for the
+  network"). An ESP32's rule is `fos_wake_wifi_plan` (`fos_wake.c`,
+  host-tested): the LCDs and the fast e-paper of the Sticky and E1003 join
+  behind the scene, a sleeping e-paper board's timer wake holds its one render
+  for the join until a touch or 45 s, and one with no network saved and no
+  scene opens on the page. A Pi's is `boot_network.nim`: a HyperPixel checks
+  the network behind its scene, unless its frame says `networkCheckOnTouch`.
+  **No plane is ever told the Wi-Fi network** (a
   backend learns the address alone); rotation and scale set there are ADOPTED
   by the plane: the cloud mirror follows `hardware.rotate` / `renderScale`,
   a backend the `settings:frame` log line (`frame_settings_adopt.py`). The

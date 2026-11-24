@@ -15,9 +15,17 @@
 #include "frameos_display.h"
 
 void fos_client_start(void);
-/* This boot draws before the network (main.c, touch_setup): the first pass
- * renders and then makes its backend pulls. Before fos_client_start. */
-void fos_client_set_render_first(bool render_first);
+/* How this boot treats Wi-Fi (main.c, fos_wake_wifi_plan), before
+ * fos_client_start. `render_first`: it draws before the network, so the first
+ * pass renders and then makes its backend pulls. `join_first`: the first
+ * render waits for the background join (a timer wake nobody tapped), until a
+ * touch or a key or 45 s after boot. `frame_page`: nothing to join, so the
+ * first pass opens the frame page when there is no scene to show. */
+void fos_client_set_boot_wifi(bool render_first, bool join_first, bool frame_page);
+/* The station got its first address after the boot went on without it: the
+ * scene renders again if a render began before (it had no network), and not
+ * if none has, which will have it. Any task. */
+void fos_client_render_after_join(void);
 /* A tap or a key woke a frame asleep under its moon: a loading ring in its
  * place, drawn once, and the loading chirp until the first picture. Early in boot, once the
  * panel is up; nothing on any other wake. */

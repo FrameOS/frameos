@@ -255,6 +255,47 @@ static void test_a_pass_longer_than_its_interval_rests_as_long(void)
     CHECK(fos_wake_rest_ms((int64_t)UINT32_MAX + 5, 0) == UINT32_MAX, "clamped to the counter");
 }
 
+static void test_a_touch_board_never_waits_for_wifi_unless_nobody_tapped(void)
+{
+    /* A board with no touch panel: the classic boot (main.c waits for the
+     * join, opens the hotspot when it fails or there is nothing to join). */
+    fos_wake_wifi_t plan = fos_wake_wifi_plan(false, false, false, true);
+    CHECK(!plan.on_screen && !plan.join_behind && !plan.wait_first && !plan.frame_page,
+          "an e-paper board without touch waits as before");
+    plan = fos_wake_wifi_plan(false, true, true, true);
+    CHECK(!plan.on_screen && !plan.join_behind, "an LCD without touch too: it has no frame page to join on");
+    plan = fos_wake_wifi_plan(false, false, false, false);
+    CHECK(!plan.on_screen && !plan.frame_page, "no touch, nothing saved: the hotspot, not the frame page");
+
+    /* The SenseCAP Indicator, the Sunton, the round AMOLED: an LCD draws at
+     * once, whatever woke it. */
+    plan = fos_wake_wifi_plan(true, true, false, true);
+    CHECK(plan.on_screen && plan.join_behind && !plan.wait_first && !plan.frame_page,
+          "a touch LCD joins behind its first picture");
+    plan = fos_wake_wifi_plan(true, true, true, true);
+    CHECK(plan.on_screen && plan.join_behind && !plan.wait_first, "a touch LCD on a timer wake too");
+
+    /* The reTerminal Sticky and E1003: a tap, a key or a cold boot draws at
+     * once; the timer wake nobody tapped waits for the join (a touch or a
+     * key ends that wait in fos_client.c), and never for a hotspot. */
+    plan = fos_wake_wifi_plan(true, false, false, true);
+    CHECK(plan.on_screen && plan.join_behind && !plan.wait_first, "a tapped Sticky draws first");
+    plan = fos_wake_wifi_plan(true, false, true, true);
+    CHECK(plan.on_screen && plan.join_behind && plan.wait_first,
+          "a Sticky's timer wake waits for the join, in the background");
+    CHECK(plan.on_screen, "and opens no hotspot when the join does not come");
+
+    /* Nothing saved: no join, the frame page when there is no scene. */
+    plan = fos_wake_wifi_plan(true, true, false, false);
+    CHECK(plan.on_screen && !plan.join_behind && !plan.wait_first && plan.frame_page,
+          "a touch LCD with no network saved opens the frame page");
+    plan = fos_wake_wifi_plan(true, false, false, false);
+    CHECK(plan.frame_page, "a tapped Sticky with no network saved too");
+    plan = fos_wake_wifi_plan(true, false, true, false);
+    CHECK(plan.on_screen && !plan.frame_page && !plan.wait_first,
+          "a timer wake has nobody to open the page for, and nothing to wait for");
+}
+
 int main(void)
 {
     test_arms_every_rtc_capable_button();
@@ -267,6 +308,7 @@ int main(void)
     test_an_awake_wait_counts_the_milliseconds();
     test_a_slice_never_waits_zero_ticks();
     test_a_pass_longer_than_its_interval_rests_as_long();
+    test_a_touch_board_never_waits_for_wifi_unless_nobody_tapped();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

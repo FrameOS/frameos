@@ -555,24 +555,35 @@ runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull
 
 A **touch board** (a touch panel found at boot: the SenseCAP Indicator's and
 the Sunton's LCDs, and the fast e-paper of the reTerminal Sticky and E1003,
-`touch_setup` in `main.c`) has no portal and does not wait for Wi-Fi: it
-starts its scenes at once and joins the stored network in the
-background (`fos_wifi_start_background`), retrying quickly and then every
-30 s for as long as it takes. What a boot that waited does once online (SNTP,
-log upload, the `bootup` line, the OTA check) runs the first time the station
-gets an address, and the scene renders again. A deep sleep waits up to 45 s
-after boot for that join (`sleep:held` `wifi`), so a battery frame woken by a
-tap does not go back to sleep before its picture had the network; a sleeping
-e-paper board's timer wake, which nobody tapped, waits for Wi-Fi first like
-every other board. The network is set on the screen: a swipe down from the top
-opens the settings panel, whose gear opens the frame page with the Wi-Fi
-status, the networks in range by name and a password field, the rotation, the
-scale, and Render again and Reboot (`fos_frame_settings.c`,
-docs/scene-settings.md "The frame page"). The frame's control plane can turn
-the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
-console turns it back on whatever the plane says. The status screen of a frame
-with no scene says to swipe. Every other board keeps the 45 s wait and the
-portal.
+`fos_wake_wifi_plan` in `fos_wake.c`, `touch_setup` in `main.c`) never opens
+the portal and never holds its first picture for Wi-Fi: it starts its scenes
+at once and joins the stored network in the background
+(`fos_wifi_start_background`), retrying quickly and then every 30 s for as
+long as it takes. What a boot that waited does once online (SNTP, log upload,
+the `bootup` line, the OTA check) runs the first time the station gets an
+address, and the scene renders again if it drew before the join (a join that
+beats the first render costs no second refresh). The first render does not
+wait for a cloud session's queued commands either: they render after. A deep
+sleep waits up to 45 s after boot for that join (`sleep:held` `wifi`), so a
+battery frame woken by a tap does not go back to sleep before its picture had
+the network. A sleeping e-paper board's timer wake, which nobody tapped, holds
+its one render for the join, up to that same 45 s after boot, while the
+runtime and the scenes come up; a touch, a key or a console event ends the
+wait (`wifi:wait`, with how it ended), and a join that does not come opens no
+portal: the board draws without it and sleeps again (on 2026.11.14 a Sticky or
+E1003 that could not reach its network waited 21 s and then sat on the portal
+for good, no scene drawn, a battery board awake until its network came back).
+The network is set on the screen: a swipe down from the top opens the
+settings panel, whose gear opens the frame page with the Wi-Fi status, the
+networks in range by name and a password field, the rotation, the scale, and
+Render again and Reboot (`fos_frame_settings.c`, docs/scene-settings.md "The
+frame page" and "A boot that does not wait for the network"). A board with no
+network saved and no scene opens on that page; one off its network with no
+scene shows the status screen, which says to swipe. The frame's control plane can
+turn the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
+console turns it back on whatever the plane says. Every other board keeps the
+45 s wait and the portal, and so does a touch board's boot that was asked to
+update (it joins first, then runs the updater).
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own

@@ -130,12 +130,26 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
  * the classic boot's own connect timeout (WIFI_CONNECT_TIMEOUT_MS). */
 #define FOS_WIFI_JOIN_SLEEP_HOLD_SEC 45
 static bool s_wifi_join_waited = false;
-/* main.c's touch_setup: the boot's first picture goes before its pulls. */
+/* How this boot treats Wi-Fi (main.c, fos_wake_wifi_plan): the first picture
+ * before its pulls; the first render after the join (a timer wake), until
+ * a touch or a key; the frame page on the first pass when there is nothing
+ * to join and no scene. */
 static bool s_render_first = false;
+static bool s_join_first = false;
+static bool s_frame_page_first = false;
+/* A render began this boot: a join after it draws again (fos_client_render_after_join). */
+static bool s_render_begun = false;
 
-void fos_client_set_render_first(bool render_first)
+void fos_client_set_boot_wifi(bool render_first, bool join_first, bool frame_page)
 {
     s_render_first = render_first;
+    s_join_first = join_first;
+    s_frame_page_first = frame_page;
+}
+
+void fos_client_render_after_join(void)
+{
+    if (__atomic_load_n(&s_render_begun, __ATOMIC_SEQ_CST)) fos_client_render_now();
 }
 
 /* How long the first pass of a boot waits for the provider's session to
@@ -2311,7 +2325,7 @@ static void push_status_info(void)
              cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
              backend_url, app ? app->version : "",
              /* main.c's touch_setup: no portal, the settings panel instead
-              * (a timer wake's classic boot that opened one says `portal`). */
+              * (fos_wake_wifi_plan), on every wake. */
              fos_touch_present() ? "true" : "false");
     frameos_nim_set_status_info(info);
 }
@@ -3767,6 +3781,41 @@ static void remote_input_pass(void)
     }
 }
 
+/* A timer wake of a sleeping touch e-paper board (fos_wake_wifi_plan): its
+ * one picture before the next sleep wants the network, which joins in the
+ * background meanwhile. Waited for here, on the first pass, so the runtime
+ * and the scenes came up beside the join, and only until somebody touches
+ * the glass or a key, or the sleep's own hold runs out: a timer wake used
+ * to wait in main.c and then open the setup hotspot, which held a battery
+ * frame awake until its network came back. */
+static void wait_for_boot_join(void)
+{
+    int64_t start = esp_timer_get_time();
+    const char *result = "timeout";
+    while (true) {
+        fos_wifi_state_t state = fos_wifi_state();
+        if (state == FOS_WIFI_CONNECTED) {
+            result = "joined";
+            break;
+        }
+        if (state != FOS_WIFI_CONNECTING) {
+            result = "off";
+            break;
+        }
+        if (fos_touch_pending() || fos_touch_finger_down() || fos_buttons_pending() ||
+            fos_events_deferred_pending()) {
+            result = "input";
+            break;
+        }
+        if (esp_timer_get_time() >= (int64_t)FOS_WIFI_JOIN_SLEEP_HOLD_SEC * 1000000LL) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    char line[112];
+    snprintf(line, sizeof(line), "{\"event\":\"wifi:wait\",\"source\":\"esp32\",\"result\":\"%s\",\"ms\":%lld}",
+             result, (long long)((esp_timer_get_time() - start) / 1000));
+    frameos_nim_log_hook(line);
+}
+
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -3834,6 +3883,10 @@ static void client_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
+        if (s_join_first) {
+            s_join_first = false;
+            wait_for_boot_join();
+        }
         int64_t cycle_start = esp_timer_get_time();
         s_tl_pass_us = cycle_start;
         int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;
@@ -3864,9 +3917,11 @@ static void client_task(void *arg)
          * delivered right after the session's ready frame, and the backend
          * equivalent below (fos_commands_sync) already runs before the
          * render for the same reason. Without this the pass rendered the
-         * old scene while the socket came up, then rendered again. */
+         * old scene while the socket came up, then rendered again. Not on a
+         * boot that draws first (a touch board): its picture does not wait
+         * up to 20 s for the socket, and what the socket brings renders. */
         bool cloud_socket_waited_out = false;
-        if (s_render_attempts == 0 && !s_render_paused_for_memory &&
+        if (s_render_attempts == 0 && !s_render_paused_for_memory && !s_render_first &&
             renders_locally(config) &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED &&
             fos_wifi_state() == FOS_WIFI_CONNECTED) {
@@ -3906,6 +3961,15 @@ static void client_task(void *arg)
         if (renders_locally(config)) {
             if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
+            /* A touch board with no network saved and no scene: its first
+             * picture is the frame page, where it joins one, not a status
+             * screen that says to swipe for it. */
+            if (s_frame_page_first) {
+                s_frame_page_first = false;
+                if (fos_scenes_loaded() == 0 && fos_config_frame_page_offered()) {
+                    fos_events_dispatch(FOS_ORIGIN_SYSTEM, "sceneSettings", "{\"page\":\"frame\"}");
+                }
+            }
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
              * renders, and the render shows them — as the scene's own render
@@ -4197,6 +4261,7 @@ static void client_task(void *arg)
                     fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
+                __atomic_store_n(&s_render_begun, true, __ATOMIC_SEQ_CST);
                 render_once(quiet);
                 s_render_in_flight = false;
                 /* A picture shown put a switch's loading mark away; a render
