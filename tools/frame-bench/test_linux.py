@@ -198,6 +198,21 @@ def test_a_line_from_before_the_drain_stays_out_of_the_queue():
     assert any('pointerDown' in x for _, x in con.history)
 
 
+def test_a_runtime_settling_is_no_leak():
+    from framebench.suites import rss_trend_issues
+    mb = 1 << 20
+    # cloud-w's soak on 2026.11.14 and an x86 runtime's first rounds: rising,
+    # slower each round.
+    settling = rss_trend_issues([int(v * mb) for v in (68, 73, 78, 80, 80.5)])
+    assert [i['kind'] for i in settling] == ['rss_settling'] and settling[0]['severity'] == 'note'
+    # The same pace every round: a leak.
+    leak = rss_trend_issues([int(v * mb) for v in (61.8, 62.6, 63.3, 64.1, 64.9)])
+    assert [(i['severity'], i['kind']) for i in leak] == [('fail', 'leak')]
+    # Flat, or a round that fell: nothing.
+    assert rss_trend_issues([int(v * mb) for v in (80, 81, 81, 81)]) == []
+    assert rss_trend_issues([int(v * mb) for v in (60, 64)]) == []
+
+
 def test_module_names():
     assert module_of('Raspberry Pi Zero W Rev 1.1') == 'raspberry_pi_zero_w'
     assert module_of('Raspberry Pi 5 Model B Rev 1.0\x00') == 'raspberry_pi_5'

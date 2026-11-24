@@ -555,11 +555,29 @@ def suite_soak(ctx, frame, rounds=None):
         vals = [s[key] for s in samples[1:] if s.get(key) is not None]
         if len(vals) >= min(5, rounds) and len(vals) >= 3 and all(b < a for a, b in zip(vals, vals[1:])) and vals[0] - vals[-1] > tol:
             issues.append(issue('fail', 'leak', 'soak', f'{key} fell every round: {vals}'))
-    # A Linux frame: the runtime's resident memory climbing every round.
-    vals = [s['processRss'] for s in samples[1:] if s.get('processRss') is not None]
-    if len(vals) >= 3 and all(b > a for a, b in zip(vals, vals[1:])) and vals[-1] - vals[0] > (2 << 20):
-        issues.append(issue('fail', 'leak', 'soak', f'processRss rose every round: {vals}'))
+    # A Linux frame: the runtime's resident memory climbing every round. It
+    # climbs for the first rounds anyway (its caches, malloc's arenas) and
+    # settles: on x86 +5, +5, +2 MB, then flat for twelve rounds of the
+    # cloud-w scenes (2026-11-24). A leak keeps its pace; warming up slows.
+    issues += rss_trend_issues([s['processRss'] for s in samples[1:] if s.get('processRss') is not None])
     return {'soak': samples, 'issues': issues, 'left_out': left_out}
+
+
+def rss_trend_issues(vals):
+    """`processRss` after each soak round: a leak when it rose every round,
+    by over 2 MB, and the later rounds' rises are not smaller than the
+    earlier ones' (a leak keeps its pace); still rising but slowing is the
+    runtime settling, a note."""
+    steps = [b - a for a, b in zip(vals, vals[1:])]
+    if len(vals) < 3 or not all(step > 0 for step in steps) or vals[-1] - vals[0] <= (2 << 20):
+        return []
+    half = len(steps) // 2
+    early = sum(steps[:half]) / half
+    late = sum(steps[half:]) / (len(steps) - half)
+    mb = [round(v / (1 << 20), 1) for v in vals]
+    if late >= early * 0.5:
+        return [issue('fail', 'leak', 'soak', f'processRss rose every round, at the same pace: {mb} MB')]
+    return [issue('note', 'rss_settling', 'soak', f'processRss still rising, slower each round: {mb} MB')]
 
 
 class Tarpit:
