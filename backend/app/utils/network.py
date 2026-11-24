@@ -107,7 +107,12 @@ def address_block_reason(
         return "multicast address"
     if address.is_reserved:
         return "reserved address"
-    if address.is_private and not allow_private:
+    # "Public only" means globally routable, not "not is_private": the shared
+    # address space 100.64.0.0/10 (carrier NAT, and every Tailscale peer) is
+    # neither private nor global, and a relay that may not reach the LAN must
+    # not reach the tailnet either. The render harness classes it the same
+    # way (tools/embedded_wasm_render.mjs addressClass).
+    if not allow_private and not address.is_global:
         return "private-network address"
     return None
 
