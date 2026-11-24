@@ -188,6 +188,37 @@ def test_scene_to_the_scene_showing_renders_it_again():
     assert sent[-1] == ('setCurrentScene', {'sceneId': 'other', 'state': {'a': 1}})
 
 
+def test_the_scene_showing_drawn_again_while_paused_is_untimed():
+    # cloud-w's desktop suite, 2026-11-24: the first window was the scene the
+    # push opened, rendered fast twice (the pause); bringing it forward drew it
+    # again unlogged, and the next logged render, 9.4 s on, read as its wait.
+    con = LinuxConsole.offline()
+    sent = []
+    con._event = lambda name, payload, failed=None: sent.append((name, payload))
+    con.names['photo'] = 'Cuteness Overload'
+    con.current_scene = 'photo'
+    t = time.time()
+    journal(con, t - 0.5, {'event': 'render:pause', 'message': 'Rendering fast. Pausing all scene render logs for 10 seconds.'})
+    con.drain()
+    con.send('event setCurrentScene {"sceneId":"photo"}')
+    assert sent == [('setCurrentScene', {'sceneId': 'photo'}), ('render', {})]
+    out = lines_of(con)
+    i = next(i for i, x in enumerate(out) if '"bench:unlogged"' in x)
+    assert '"sceneId":"photo"' in out[i]
+    assert out[i + 1] == 'render #1 started: scene "Cuteness Overload" (photo)' and out[i + 2] == 'render #1 done in 0 ms'
+    assert json.loads(out[i + 3])['via'] == 'paused'
+    # Logged again (a render line heard), or the pause run out: timed as before.
+    journal(con, time.time(), {'event': 'render:sleep', 'ms': 0.1})
+    con.drain()
+    con.send('scene photo')
+    assert not any('bench:unlogged' in x for x in lines_of(con))
+    journal(con, time.time(), {'event': 'render:pause', 'message': 'Rendering fast. Pausing all scene render logs for 10 seconds.'})
+    con._paused_at -= 10.5
+    con.drain()
+    con.send('scene photo')
+    assert not any('bench:unlogged' in x for x in lines_of(con))
+
+
 def test_a_line_from_before_the_drain_stays_out_of_the_queue():
     con = LinuxConsole.offline()
     t = time.time()
