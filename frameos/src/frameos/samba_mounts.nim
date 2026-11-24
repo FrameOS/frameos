@@ -103,6 +103,44 @@ proc validateMountpoint(mountpoint: MountpointConfig, index: int) =
   if containsLineBreak(mountpoint.username) or containsLineBreak(mountpoint.password) or containsLineBreak(mountpoint.domain):
     raise newException(ValueError, "Samba " & label & " credentials cannot contain line breaks")
 
+const
+  # The mount.cifs options a mountpoint's `options` may add (the settings'
+  # "Additional comma-separated mount.cifs options"): how the share is read,
+  # who its files belong to on the frame, how the connection behaves.
+  # Nothing else reaches /etc/fstab, which root mounts from: not `suid` or
+  # `dev` (a share's binaries and device nodes would count on the frame),
+  # not `credentials=` (a file of the frame's own read as the login sent to
+  # the server; the username and password fields write the one it gets), not
+  # `user` / `users`, not systemd's `x-systemd.*` unit options.
+  sambaFlagOptions = ["ro", "rw", "noexec", "nosuid", "nodev", "nosetuids", "noperm", "perm", "nounix",
+    "unix", "noserverino", "serverino", "mapposix", "mapchars", "nomapchars", "sfu", "mfsymlinks",
+    "nobrl", "brl", "nolease", "soft", "hard", "seal", "noacl", "nocase", "noatime", "relatime",
+    "forceuid", "forcegid", "noforceuid", "noforcegid", "multichannel", "nohandlecache", "resilienthandles",
+    "persistenthandles", "nostrictsync", "strictcache", "nodfs", "sign", "domainauto", "fsc"]
+  sambaValueOptions = ["vers", "uid", "gid", "file_mode", "dir_mode", "iocharset", "sec", "cache", "port",
+    "rsize", "wsize", "bsize", "actimeo", "acregmax", "acdirmax", "echo_interval", "handletimeout",
+    "max_channels", "closetimeo", "backupuid", "backupgid", "cruid", "netbiosname", "servern"]
+  # Always on, whatever the options say: a share's files may be run, never
+  # with the privileges a setuid bit or a device node would give them.
+  sambaForcedOptions = ["nosuid", "nodev"]
+
+proc sambaOptionAllowed*(option: string): bool =
+  ## One mount option as the user typed it: a flag from the list above, or
+  ## `name=value` with a listed name and a plain value (letters, digits and
+  ## `.`, `_`, `-`, `:`; a mode's leading 0 included).
+  let normalized = option.strip()
+  let equals = normalized.find('=')
+  if equals < 0:
+    return normalized.toLowerAscii() in sambaFlagOptions
+  let name = normalized[0 ..< equals].toLowerAscii()
+  let value = normalized[equals + 1 .. ^1]
+  if name notin sambaValueOptions or value.len == 0 or value.len > 64:
+    return false
+  for ch in value:
+    if ch notin {'a'..'z', 'A'..'Z', '0'..'9', '.', '_', '-', ':'}:
+      return false
+  true
+
 proc addMountOption(options: var seq[string], seen: var HashSet[string], option: string) =
   let normalized = option.strip()
   if normalized.len == 0 or seen.contains(normalized):
@@ -122,8 +160,12 @@ proc mountOptions(mountpoint: MountpointConfig, index: int, credentialsDir: stri
     result.addMountOption(seen, "guest")
   for option in ["iocharset=utf8", "_netdev", "nofail", "x-systemd.automount", "x-systemd.device-timeout=10s", "vers=3.0"]:
     result.addMountOption(seen, option)
-  for option in mountpoint.options.split(","):
+  for option in sambaForcedOptions:
     result.addMountOption(seen, option)
+  for option in mountpoint.options.split(","):
+    # What is not on the list is left out, as a malformed option always was.
+    if sambaOptionAllowed(option):
+      result.addMountOption(seen, option)
 
 proc sambaFstabEntry*(mountpoint: MountpointConfig, index: int, credentialsDir = sambaCredentialsDir): string =
   validateMountpoint(mountpoint, index)

@@ -265,7 +265,11 @@ export function MountpointsSection(): JSX.Element | null {
                     <Field name="domain" label="Domain">
                       <TextInput name="domain" placeholder="optional" />
                     </Field>
-                    <Field name="options" label="Options" tooltip="Additional comma-separated mount.cifs options.">
+                    <Field
+                      name="options"
+                      label="Options"
+                      tooltip="Additional comma-separated mount.cifs options: vers, uid, gid, file_mode, dir_mode, ro, sec and the like. The share is always mounted nosuid,nodev; anything the frame does not take is left out."
+                    >
                       <TextInput name="options" placeholder="vers=3.0,uid=pi,gid=pi" />
                     </Field>
                   </div>
