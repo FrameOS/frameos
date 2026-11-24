@@ -835,7 +835,12 @@ http://localhost:3000/api/auth/google/callback
 
 Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the environment. When
 they are unset, the login page hides the Google button and password sign-in
-keeps working. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
+keeps working. Turn the `auth_time` claim on for the client in Google's
+console, then set `GOOGLE_REQUIRE_AUTH_TIME=1`: a Google sign-in then counts
+as a recent proof of credentials (sudo mode) only as far as Google's own last
+sign-in is recent (`docs/auth.md` "Re-authentication"). Set the variable
+without the console switch and no Google sign-in is ever recent: Google-only
+accounts cannot pass sudo mode. Set `POSTMARK_SERVER_TOKEN` and `POSTMARK_FROM_EMAIL` so
 password reset emails are delivered; without them reset links are only written
 to the server log.
 

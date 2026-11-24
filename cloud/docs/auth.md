@@ -342,7 +342,15 @@ nothing local to check (Google or Apple sign-in, no password, no second
 factor) is sent back through its provider (`methods.providers` says which):
 Google with `prompt=login` (`/api/auth/google/start?reauth=1`), Apple as is
 (its web sign-in asks for the Apple ID's password or Face ID / Touch ID every
-time). The callback mints a fresh session, which counts as recent. Checks are rate-limited per IP (30 / 15 min) and per
+time). The callback mints a fresh session, which counts as recent. Google's
+round trip is silent while the browser is signed in to Google, and
+`prompt=login` rides a URL the browser holds, so on its own it proves only
+that the browser is signed in to Google. With `GOOGLE_REQUIRE_AUTH_TIME=1`
+(after turning the `auth_time` claim on for the OAuth client in Google's
+console; it is off by default) every Google start asks for the claim, and
+the session a Google sign-in mints proved its credentials when `auth_time`
+says, not now (`src/lib/google-auth-time.ts`): a silent round trip is no
+recent proof, and a token without the claim is none either. Checks are rate-limited per IP (30 / 15 min) and per
 account (10 / 15 min); every attempt is audited
 (`account.reauthenticated` with `method: password|totp|recovery_code|passkey`,
 `account.reauthentication_failed`).

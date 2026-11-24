@@ -14,6 +14,7 @@ import {
   getGoogleCallbackUrl,
   getGoogleOAuthConfig,
 } from "../../../../../src/lib/env";
+import { googleAuthenticatedAt } from "../../../../../src/lib/google-auth-time";
 import { finishProviderWebSignIn } from "../../../../../src/lib/provider-callback";
 import { logWarn, reportError } from "../../../../../src/lib/log";
 
@@ -88,6 +89,13 @@ export async function GET(request: NextRequest) {
     request,
     createDb(),
     {
+      // When Google says the person last signed in there, if the operator
+      // asked for it: a silent round trip then mints a session that is not a
+      // recent proof (google-auth-time.ts).
+      authenticatedAt: googleAuthenticatedAt(
+        claims.auth_time,
+        config.requireAuthTime,
+      ),
       claims: {
         email: claims.email,
         email_verified: claims.email_verified,

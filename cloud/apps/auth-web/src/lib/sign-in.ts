@@ -38,6 +38,10 @@ export async function completeFirstFactor(
   db: ReturnType<typeof createDb>,
   input: {
     auditMetadata?: Record<string, unknown> | undefined;
+    // When this first factor was really proven, if not now (a provider's
+    // auth_time). Only for the session minted here: with a second factor
+    // the session is minted when that factor is shown, which is the proof.
+    authenticatedAt?: Date | undefined;
     method: PendingSignIn["method"];
     profile: SessionProfile & { accountId: string };
     returnTo?: string | undefined;
@@ -57,7 +61,9 @@ export async function completeFirstFactor(
     ...input.auditMetadata,
     method: input.method,
   });
-  const token = await createSession(db, input.profile);
+  const token = await createSession(db, input.profile, {
+    authenticatedAt: input.authenticatedAt,
+  });
   return { kind: "session", token };
 }
 
