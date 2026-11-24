@@ -31,7 +31,11 @@ main/                     boot orchestration + platform modules
   fos_ota.c               signed release OTA (manifest + streaming verify) when an OTA partition exists
   fos_cloud.c             cloud-managed frames: claim-token enrollment + management WS
   fos_url_guard.c         provider URL rules: local-host exception for plain http/ws, ws_url
-                          override guard, origin comparison for the OTA bearer (host-tested)
+                          override guard, origin comparison for the OTA bearer, and "is this
+                          request's Origin its own Host" for the HTTP server (host-tested)
+  fos_tls.c               certificate validity dates for every TLS client (the bundle's attach,
+                          taken at the link); fos_tls_dates.c is the rule, what a frame
+                          without the time does included (host-tested)
   fos_minisig.c           minisign .minisig parser + "signed as which release?" check gating every OTA image (host-tested)
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_usb_pads.c          the owner of the S3's native USB pads (GPIO19/20): every driver that
@@ -54,6 +58,7 @@ main/                     boot orchestration + platform modules
                           fetched on the backend link task and run on the render task (fos_client.c)
   fos_backend_http.c      the one HTTP client for the small pulls and posts (settings, scenes, commands, tz, OTA manifest)
   fos_http_body.c         its body read: a declared length read to the byte, a chunked one grown to the cap (host-tested)
+  fos_login_throttle.h    how many wrong device logins the HTTP server looks at: ten in five minutes (host-tested)
   fos_schedule.c          schedule evaluation; fos_schedule_catchup.h its catch-up window (host-tested)
   fos_events.c            the ONE routing function for scene events (fos_events_dispatch): every
                           producer — /event/<name>, the schedule, the cloud verbs, the console's
@@ -71,7 +76,8 @@ main/                     boot orchestration + platform modules
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
                           aware: the status screen and the local network access code box (host-tested)
-  fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
+  fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check, the
+                          wrong-code window that grows (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
@@ -115,7 +121,8 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark,
-                          slot cache, refresh queue
+                          slot cache, refresh queue, login throttle (test_esp32_http_gate.py), certificate dates
+                          (test_esp32_tls_dates.py)
                           (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -703,7 +710,12 @@ Scene state used to last one render on such a frame. The runtime keeps each
 scene's public state (and its `persist: "disk"` fields) in a file per scene
 under /state (`fos_scene_state.c`, `/state/st-<hash>.json`), writes it when
 it changes and seeds the scene from it when the scene is next built — the
-Linux runtime's `./state/scene-<id>.json`, for the chip. Only values off
+Linux runtime's `./state/scene-<id>.json`, for the chip. The name is 32 bits
+of hash, and two ids can be made to share one, so the file's first member names
+the id it belongs to (`{"__owner":"<id>", ...}`) and a scene is handed no file
+that names another (a file from before 2026.11.15 has none: the scene that
+reads it first takes it, and it is written again with one; firmware from
+before reads a file with one as it always did). Only values off
 their declared default are written (a default in the file would outlive the
 redeploy that changes it), and the file carries a `"__persist": 2` marker: a
 file without one was written by firmware that still pinned defaults and is
@@ -927,10 +939,14 @@ is physical presence), and the cloud changes it with two verbs on its socket
 - `lan_access_challenge {}`: mints six digits (`fos_lan_access.c`, rejection
   sampled from `esp_random()`, 300 s, five tries, constant-time compare) and
   acks; `no_panel` on a headless board, `rate_limited` once ten wrong codes
-  have been given within an hour of the first of them, across challenges (a
-  right code does not reset that; the count lives in RTC memory and the
-  clock is system time, so neither a `reboot` nor a deep-sleep wake refills
-  it, only a power cycle does). The render task picks it up within a
+  have been given within a window of the first of them, across challenges.
+  The first window is an hour; each one that saw a wrong code makes the next
+  twice as long, up to 128 hours, and thirty days without one make it an hour
+  again (docs/lan-access.md says why). A right code does not reset it; the
+  count lives in RTC memory and the clock is the RTC's own count since
+  power-on (`esp_rtc_get_time_us`), not the time SNTP sets, so neither a
+  `reboot`, a deep-sleep wake nor a time server that lies refills it, only a
+  power cycle does. The render task picks it up within a
   second and renders: after the packed buffer is hashed, `render_once` saves
   the bytes under a centred box, draws "Local network access code" and the
   digits (`fos_panel_draw.c`, upright for the frame's `rotate`), blits, and
@@ -1862,7 +1878,15 @@ room, a file error), with the reason as the body.
 A changed scene is written to a new slot file and the index is switched to it;
 the old file goes at the next sweep. A whole payload is split by the same code,
 so the index keeps `isLayout` and a scene's `default` mark however a scene
-arrived. A power cut, a full partition, or a scene
+arrived. What the index keeps of a scene is bounded (`make_entry`: a name of
+256 bytes or fewer, a `windowSize` of 32, an icon of 1024, a category and
+`opens` of 128 each; a longer one is left out, the scene is kept), and a
+change whose index would still pass the 512 KB every reader takes is refused
+(400) with the set as it was: an index nobody can read is every scene gone. A
+scene nested deeper than 32 levels is refused by every door, the store's and
+the runtime's (a set a backend sends whole, a stored payload that could not be
+split), and cJSON itself is built to stop there (`CJSON_NESTING_LIMIT`, the
+project's `CMakeLists.txt`) for every parse in the image. A power cut, a full partition, or a scene
 the runtime refuses (when it is the one on the panel) leaves the scene that
 worked. Only the scene on the panel, or one it embeds as a split panel, is
 reloaded; adding any other scene costs one file and no render. Deleting the
@@ -2091,8 +2115,67 @@ a failed allocation.
 When connected, the device serves `GET /status` (heap/PSRAM/Wi-Fi/render stats JSON)
 and `POST /api/action/render` / `POST /api/action/ota` on port 80. With
 `tls_enable` on and certificate material present (`set tls_enable 1`, the
-material from the settings pull), the same API is also served over native
-ESP-IDF HTTPS on `tls_port` (8443 by default).
+material from the settings pull), the same API is served over native
+ESP-IDF HTTPS on `tls_port` (8443 by default) **instead**: once the TLS server
+is up the plain one is stopped (firmware 2026.11.15+), which is what the frame
+has always reported as `expose_only_port`, and what a Pi does by default. A
+client that still tries port 80 is refused the connection, before it has sent
+its key or its login in the clear. The plain server stays when TLS could not
+start (no certificate, no memory: `https` in `/status` says which) and in the
+setup hotspot, which never starts TLS.
+
+Three rules guard that server, whichever port it is on:
+
+- **A page that is not the frame's own may not change anything.** A browser
+  that has logged in to the frame sends its remembered Basic login with every
+  request to that address, another site's form included, and on the setup
+  hotspot there is no login to ask. So a request that is not a `GET` or a
+  `HEAD` and names an `Origin` other than `http(s)://<its own Host>` is
+  answered 403 before any handler runs (`logged_dispatch` in `fos_http.c`,
+  `fos_url_origin_is_host`). The frame's own page passes, by address, by name,
+  and under a captive-portal probe's name. A request with no `Origin` is no
+  browser's cross-site request and passes to the login as before: a backend,
+  `curl`, the app.
+- **Ten wrong device logins in five minutes, and none is looked at until the
+  five minutes are over** (429; `fos_login_throttle.h`, the Pi's rule for its
+  admin login). Counted for the whole device: there is no memory for a table
+  of clients. A backend's `Authorization: Bearer` key is not counted and never
+  locked out, so the frame's plane keeps working while somebody guesses. A
+  browser tab left polling with an old password spends the ten too: close it.
+- **JSON nested deeper than 32 levels is refused** (see "One scene at a time").
+
+### Certificate dates
+
+A certificate's validity dates are checked (`CONFIG_MBEDTLS_HAVE_TIME_DATE`,
+firmware 2026.11.15+): one that has run out is refused, on the plane link, the
+cloud socket, OTA, voice and a scene's own requests alike. Before, an expired
+certificate was as good as a current one, so a key that leaked once never aged
+out. All of those clients trust the certificate bundle, and `fos_tls.c` takes
+the bundle's attach call at the link (`--wrap=esp_crt_bundle_attach`), so a
+client added later cannot be written without the rule.
+
+A frame may not know the time: switched on for the first time, or after its
+battery was out, it counts from 1970 until SNTP answers, and SNTP may be
+blocked on its network. It must still reach its plane and its update, so the
+rule (`fos_tls_dates.c`, host-tested) goes by what the clock says:
+
+- **At or past the month this firmware was released in** (a FrameOS version is
+  a date: 2026.11.14 is November 2026), the clock is taken for the time and
+  the dates stand as mbedTLS read them.
+- **Before it**, the clock is known to be wrong. "Not valid yet" is dropped,
+  and "expired" is asked of the release month instead: what had run out before
+  this firmware was released has run out now, whatever the time is.
+
+So a board with no clock behaves as every board did before, except for
+certificates older than its firmware. Two things follow that are worth knowing
+when a TLS error shows up in the logs (`esp-tls` prints the mbedTLS code, the
+strings are not in the image): a clock set wrong but plausibly (by hand on the
+frame page, or a clock chip years ahead) fails every handshake until SNTP or
+the owner corrects it, and a server that still sends an expired cross-signed
+certificate at the top of its chain is refused, as mbedTLS has no way to build
+another path. SNTP is not authenticated: whoever answers for the time server
+can still turn the clock back to make an old certificate current. That is the
+Pico's position too.
 
 ## OTA
 
