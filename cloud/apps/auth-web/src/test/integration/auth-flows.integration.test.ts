@@ -22,6 +22,7 @@ import { GET as adminListUsers } from "../../../app/api/admin/users/route";
 import { POST as login } from "../../../app/api/auth/login/route";
 import { POST as logout } from "../../../app/api/auth/logout/route";
 import { POST as resetConfirm } from "../../../app/api/auth/reset/confirm/route";
+import { waitForPendingPasswordResetMail } from "../../lib/password-reset-request";
 import { POST as resetRequest } from "../../../app/api/auth/reset/request/route";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { POST as verifyEmail } from "../../../app/api/auth/verify-email/route";
@@ -67,8 +68,14 @@ vi.mock("next/headers", () => ({
 const sentVerificationUrls = vi.hoisted(() => [] as string[]);
 const verificationSendFails = vi.hoisted(() => ({ next: false }));
 
+// A test can hold the reset mail back, as a slow mail provider would.
+const sendResetMailGate = vi.hoisted(() => ({ wait: undefined as Promise<void> | undefined }));
+
 vi.mock("../../lib/email", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/email")>()),
+  sendPasswordResetEmail: async () => {
+    await sendResetMailGate.wait;
+  },
   sendEmailVerificationEmail: async (_to: string, verifyUrl: string) => {
     if (verificationSendFails.next) {
       verificationSendFails.next = false;
@@ -655,7 +662,32 @@ describe("password reset", () => {
     );
     expect(known.status).toBe(200);
     expect(unknown.status).toBe(200);
+    expect(await known.text()).toBe(await unknown.text());
 
+    await waitForPendingPasswordResetMail();
+    const tokens = await db.select().from(passwordResetTokens);
+    expect(tokens).toHaveLength(1);
+  });
+
+  // The answer was the same either way, but a known address waited for the
+  // mail provider. The mail now goes out after the answer.
+  it("answers a known address without waiting for the mail", async () => {
+    const { email } = await signUpUser();
+    let releaseMail: () => void = () => {};
+    sendResetMailGate.wait = new Promise<void>((resolve) => {
+      releaseMail = resolve;
+    });
+    try {
+      const answer = await Promise.race([
+        resetRequest(postJson("/api/auth/reset/request", { email })).then(() => "answered"),
+        new Promise((resolve) => setTimeout(() => resolve("waited for the mail"), 5_000)),
+      ]);
+      expect(answer).toBe("answered");
+    } finally {
+      releaseMail();
+      sendResetMailGate.wait = undefined;
+      await waitForPendingPasswordResetMail();
+    }
     const tokens = await db.select().from(passwordResetTokens);
     expect(tokens).toHaveLength(1);
   });
@@ -1129,6 +1161,7 @@ describe("google sign-in merging", () => {
       postJson("/api/auth/reset/request", { email }),
     );
     expect(request.status).toBe(200);
+    await waitForPendingPasswordResetMail();
     const [tokenRow] = await db
       .select({ id: passwordResetTokens.id })
       .from(passwordResetTokens)

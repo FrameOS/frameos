@@ -3,26 +3,17 @@ import {
   findAccountByPasswordEmail,
   findVerifiedSocialAccountByEmail,
   normalizeEmail,
-  passwordResetTokens,
 } from "@frameos-cloud/db";
-import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
-import { sendPasswordResetEmail } from "../../../../../src/lib/email";
-import {
-  assertDatabaseUrlConfigured,
-  getBaseUrl,
-} from "../../../../../src/lib/env";
-import { reportError } from "../../../../../src/lib/log";
-import { createSecretToken, hashSecret } from "../../../../../src/lib/secrets";
+import { assertDatabaseUrlConfigured } from "../../../../../src/lib/env";
+import { startPasswordResetMail } from "../../../../../src/lib/password-reset-request";
 import {
   clientKey,
   identityRateLimitResponse,
   rateLimitResponse,
 } from "../../../../../src/lib/rate-limit";
 import { verifyTurnstileToken } from "../../../../../src/lib/turnstile";
-
-const resetTokenMaxAgeMs = 60 * 60 * 1000;
 
 // Same loose shape the signup route uses: only obvious garbage is refused,
 // the address proves itself by receiving the mail.
@@ -85,35 +76,12 @@ export async function POST(request: NextRequest) {
     passwordAccount?.id ??
     (await findVerifiedSocialAccountByEmail(db, email))?.accountId;
 
-  // Whether or not the email resolves to an account, respond identically so
-  // the endpoint cannot be used to enumerate registered addresses.
+  // Whether or not the email resolves to an account, respond identically and
+  // in the same time, so the endpoint cannot be used to enumerate registered
+  // addresses: the token, the mail and the audit row happen after the answer
+  // (password-reset-request.ts).
   if (accountId) {
-    const token = createSecretToken("frpr", 32);
-    await db.insert(passwordResetTokens).values({
-      accountId,
-      expiresAt: new Date(Date.now() + resetTokenMaxAgeMs),
-      tokenHash: hashSecret(token),
-    });
-
-    const resetUrl = new URL(
-      `/recovery?token=${encodeURIComponent(token)}`,
-      getBaseUrl(),
-    ).toString();
-
-    try {
-      await sendPasswordResetEmail(email, resetUrl);
-    } catch (error) {
-      // Swallowed on purpose — telling the caller the send failed would leak
-      // whether the address is registered. So the failure has to reach us by
-      // another route: the error tracker. Never log the email address.
-      reportError("email.password_reset_send_failed", error, { accountId });
-    }
-
-    await recordAuditEvent(db, {
-      accountId,
-      actor: { providerSubject: email },
-      eventType: "account.password_reset_requested",
-    });
+    startPasswordResetMail(db, { accountId, email });
   }
 
   return NextResponse.json({ ok: true });
