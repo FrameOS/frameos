@@ -25,6 +25,25 @@
 uint64_t fos_wake_button_mask(const int *pins, size_t count, uint64_t valid_mask,
                               uint64_t held_mask, uint64_t *skipped_mask);
 
+/* The ESP32-S3 pads that may run on VDD_SPI, the flash's supply, which every
+ * deep sleep switches off (esp_deep_sleep_start powers the domain down,
+ * whatever esp_sleep_pd_config asked): the flash and PSRAM lines GPIO26-37,
+ * and GPIO47/48 (SPICLK_P/N; the datasheet's "VDD_SPI/VDD3P3_CPU"). A pad
+ * with no supply holds no level, gpio_hold_en or not. */
+#define FOS_WAKE_S3_UNHELD_PADS ((0xFFFULL << 26) | (3ULL << 47))
+
+/* A touch controller wakes the chip only while it stays powered and out of
+ * reset through the sleep, so its reset and supply lines (`rst`, `en`; -1 =
+ * not wired) must be held on pads that keep their supply, none of them in
+ * `unheld_mask`. The reTerminal E1003's GT911 resets on GPIO48: held high,
+ * the reset fell all the same as the chip slept, the controller let go of its
+ * interrupt line, the pad's pull-down took the line low and the frame woke at
+ * once with nobody at it. With the line pulled up instead, it slept and came
+ * back with its GT911 at 0x14, the address the chip takes when its reset
+ * rises over a high interrupt line: reset in the sleep (2026-11-24). Its keys
+ * wake it. */
+bool fos_wake_touch_holds(int rst, int en, uint64_t unheld_mask);
+
 /* Map a wakeup-status mask (the pins the RTC controller latched as the wake
  * cause) back to the configured button it belongs to. Returns the index into
  * `pins` of the lowest-numbered matching button, or -1 when none of the

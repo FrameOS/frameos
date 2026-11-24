@@ -21,6 +21,15 @@ uint64_t fos_wake_button_mask(const int *pins, size_t count, uint64_t valid_mask
     return armed;
 }
 
+bool fos_wake_touch_holds(int rst, int en, uint64_t unheld_mask)
+{
+    const int lines[] = {rst, en};
+    for (size_t i = 0; i < 2; i++) {
+        if (lines[i] > 63 || (lines[i] >= 0 && (unheld_mask & (1ULL << lines[i])))) return false;
+    }
+    return true;
+}
+
 int fos_wake_button_index(const int *pins, size_t count, uint64_t status_mask)
 {
     int best = -1;

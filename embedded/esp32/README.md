@@ -296,7 +296,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); BQ25616 charger enabled through GPIO39 (low); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
-| `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
+| `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery, and its keys wake it, not the glass ("Wake on touch") |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 | `seeed_xiao_ee02` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | XIAO ePaper Display Board EE02, a XIAO ESP32-S3 Plus (16MB flash, 8MB PSRAM); SCK7/MOSI9, CS44, second CS41, DC10, RST38, BUSY4, panel power GPIO43; keys GPIO2/3/5; battery GPIO1 ÷2, switch GPIO6. Unverified on hardware |
@@ -322,7 +322,8 @@ for the two Spectra boards most of the bench work runs on:
   (`fos_board_touch_mirror`: the SenseCAP Indicator's, both axes;
   `touch:ready` says `mirrored`). A
   touch wakes a deep-sleeping frame through ext0 on TP_INT (GPIO21, an RTC
-  IO); the controller is held powered through the sleep for it (a few mA).
+  IO); the controller is held powered through the sleep for it (a few mA;
+  "Wake on touch" below).
   The PDM microphone sits on GPIO19/20, the S3's native USB pads: the board's
   USB is a CH343 on UART0, so the pads are claimed from the USB-Serial/JTAG
   PHY at boot (`main.c` claims the configured microphone's pins,
@@ -1041,6 +1042,30 @@ sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
 what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
 tested by `main/tests/test_fos_wake.c`; a button's debounce and press kinds
 are `fos_button_timing.c`, host tested by `main/tests/test_button_timing.c`.
+
+**Wake on touch.** A touch panel's interrupt line is armed beside the keys
+(`ext0` on its RTC IO, `fos_touch_arm_wake`), on the level that leaves the
+line's idle one, so a finger wakes the frame like a key. That needs the
+controller powered and out of reset all through the sleep: its reset and
+supply-switch lines are held (`gpio_hold_en`), and a held line keeps its
+level only on a pad that keeps its supply. On the S3 GPIO26-37 and 47/48 may
+run on VDD_SPI, the flash's supply, which every deep sleep switches off
+(`FOS_WAKE_S3_UNHELD_PADS`); a controller reset from one of those is no wake
+source (`fos_wake_touch_holds`, host tested): `touch:ready` says
+`"wake": false` and the `sleep` line's `wakeButtons` leave its line out. The
+reTerminal E1003's GT911 resets on GPIO48. Armed, its reset fell as the chip
+slept, the controller let go of its line, the pad's pull-down took it low
+and the frame woke at once with nobody at it, every time; with the line
+pulled up instead it slept, and its GT911 came back at 0x14, the address the
+chip takes when its reset rises over a high line (2026-11-24). So the
+E1003's three keys wake it, and its glass sits in reset through the sleep,
+which also draws the least. The Sticky's GT911 (reset GPIO41, supply switch
+GPIO42) and the AMOLED 1.75's CST9217 (reset GPIO40) keep theirs. Asleep the
+line belongs to the RTC mux, whose pull-down is on out of reset on GPIO2 and
+GPIO21 and which has no pull at all on GPIO11: the line is pulled toward its
+idle level instead, so a line the controller lets go of never reads as a
+touch, one it drives high sinks nothing through a pull-down, and the
+CST9217's open-drain line has the pull-up it needs.
 
 **A press while awake.** The press cuts the render task's wait short
 (`fos_client_wake_for_events`) so the scene hears the `gpio` edges and the
