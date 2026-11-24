@@ -104,6 +104,9 @@ bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_
  * partial update after a deep sleep greys the picture around it). Same placement and
  * size as the sleep mark; false when that does not fit. */
 bool fos_panel_draw_wake_mark(const fos_panel_surface_t *s, int frame, fos_panel_code_box_t *box);
+/* Where those marks go, without drawing: the tile's box, `px`..`ph` its
+ * rectangle on the panel (for fos_panel_box_copy and a partial update). */
+bool fos_panel_mark_box(const fos_panel_surface_t *s, fos_panel_code_box_t *box);
 
 #ifdef __cplusplus
 }

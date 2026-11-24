@@ -72,6 +72,13 @@ type
     # has shown it (`flashSeen`).
     flashDue: MonoTime
     flashSeen: bool
+    # A tap quicker than a render on a fast panel (its press and its lift
+    # handled before a render drew the press): its `active:` look stays with
+    # its answer for a moment once a render shows it (`pressSeen`), as a key's
+    # light does.
+    pressLinger: bool
+    pressDue: MonoTime
+    pressSeen: bool
     # A finger that went down on the space bar (-1 for none): where, in the
     # UI's pixels, how far apart its steps are, the steps it has made the
     # caret take, and whether it moved enough to be a drag. A drag's tap
@@ -107,11 +114,18 @@ const
     ## (app_runtime.windowLimit).
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
+  PressLingerMs = 150
+    ## How long a quick tap's press shows after a render first draws it.
   RepeatFirstMs = 100
   RepeatFastMs = 50
   RepeatFastAfter = 12
     ## Backspace held: one erase at the long press, then one every
     ## RepeatFirstMs, every RepeatFastMs after RepeatFastAfter of them.
+
+var quickTapLingers* = defined(frameosEmbedded)
+  ## Whether a quick tap's press lingers (`pressLinger`): on an ESP32, where a
+  ## tap's two ends are often handled in one go behind a render. A test turns
+  ## it on; a Pi and the browser draw every frame they are asked for.
 
 # Flash on an ESP32: no checks the code above them already makes, and
 # nothing raises (see ui/layout.nim).
@@ -281,7 +295,7 @@ proc handlerKind(event: string): int =
   else: -1
 
 proc timerPending(target: UiTarget): bool =
-  target.input.flash > 0 or target.repeatPointer >= 0
+  target.input.flash > 0 or target.repeatPointer >= 0 or target.pressLinger
 
 proc uiTimersPending*(): bool =
   ## Whether a UI is timing something (a key's light, a key held): a host
@@ -298,6 +312,7 @@ proc uiTimerDue*(sceneId: string, now: MonoTime): bool =
   for target in targets:
     if target.sceneId != sceneId:
       target.repeatPointer = -1
+      target.pressLinger = false
       continue
     if target.input.flash > 0 and target.input.flashDrawn:
       if not target.flashSeen:
@@ -307,6 +322,12 @@ proc uiTimerDue*(sceneId: string, now: MonoTime): bool =
         result = true
     if target.repeatPointer >= 0 and now >= target.repeatDue:
       result = true
+    if target.pressLinger:
+      if target.input.pressedDrawn and not target.pressSeen:
+        target.pressSeen = true
+        target.pressDue = now + initDuration(milliseconds = PressLingerMs)
+      elif now >= target.pressDue:
+        result = true
 
 template scrolls(r: UiRegion): bool = r.scrollX > 0 or r.scrollY > 0
 
@@ -918,6 +939,13 @@ proc timePassed(target: UiTarget, now: MonoTime): bool =
     target.flashSeen = false
     target.inputOnly = true
     result = true
+  if target.pressLinger and now >= target.pressDue:
+    target.pressLinger = false
+    target.pressSeen = false
+    if i.pressed.len > 0:
+      i.pressed.setLen(0)
+      target.inputOnly = true
+      result = true
   if target.repeatPointer >= 0 and now >= target.repeatDue:
     if i.focus == 0 or not i.keyboard:
       target.repeatPointer = -1
@@ -1834,7 +1862,16 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
-        target.input.pressed.setLen(0)
+        if showsPress and quickTapLingers and not target.input.pressedDrawn:
+          # Lifted before any render drew the press (its two ends handled in
+          # one go behind a busy render): it shows with its answer, for a
+          # moment (`pressLinger`), or a quick tap would never look pressed.
+          target.pressLinger = true
+          target.pressSeen = false
+          # A render that never draws it lets go of it after a second all the same.
+          target.pressDue = getMonoTime() + initDuration(milliseconds = 1000)
+        else:
+          target.input.pressed.setLen(0)
         moved = true
       # A finger that lifts is not over anything any more.
       if touch and target.input.hovered.len > 0:
@@ -1847,8 +1884,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
         moved = true
       if down:
         let pressed = target.keysOver(lx, ly, true)
+        target.pressLinger = false
         if showsPress and pressed != target.input.pressed:
           target.input.pressed = pressed
+          target.input.pressedDrawn = false
           moved = true
         # The space bar: held, the finger may drag the caret.
         target.swallowTap = -1

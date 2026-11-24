@@ -75,7 +75,11 @@ fos_refresh_kind_t fos_partial_refresh_kind(const fos_partial_refresh_input_t *i
      * a 2.2 s flash (the reTerminal Sticky's switcher and swipes), and its
      * ghosts count like theirs. */
     if (!input->same_scene && !input->input_recent) return FOS_REFRESH_FULL_NEW_SCENE;
-    if (input->changed_bytes * 2 >= input->total_bytes) return FOS_REFRESH_FULL_CHANGED;
+    /* A controller that keeps the picture takes any change as one DU while
+     * someone taps (fos_partial_refresh.h controller_keeps): a page turned by
+     * a tap does not flash the whole panel. */
+    bool any_size = input->controller_keeps && input->input_recent;
+    if (input->changed_bytes * 2 >= input->total_bytes && !any_size) return FOS_REFRESH_FULL_CHANGED;
     if (input->counted) {
         const fos_ghost_wear_t *wear = &input->wear;
         if (!input->input_recent) return fos_ghost_due(wear) ? FOS_REFRESH_FULL_GHOSTS : FOS_REFRESH_PARTIAL;

@@ -213,6 +213,10 @@ proc resolveFit(scene: InterpretedFrameScene, node: DiagramNode,
   fit = value
   true
 
+proc cacheEnabled(data: JsonNode): bool =
+  ## Whether a node caches its value (the config's tuple is let go here).
+  readCacheConfig(data).enabled
+
 proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
     isOpaque: OpaqueCheck, hops: var seq[NodeId],
     producerFits: var seq[string], producerComposites: var bool,
@@ -277,7 +281,7 @@ proc walkProducerChain(scene: InterpretedFrameScene, startId: NodeId,
       # A cached transformer breaks the handoff: on a cache hit it returns a
       # value it does not own, and mutating that in place would poison the
       # cache for every later render.
-      if readCacheConfig(node.data).enabled: continue
+      if cacheEnabled(node.data): continue
       let upstream = connectedInput(scene, currentId, forwards.input)
       if upstream == NoNodeId: continue
       hops.add(currentId)
@@ -325,129 +329,138 @@ proc excludedOwnedFits(scene: InterpretedFrameScene, node: DiagramNode,
 proc planImageEdge(scene: InterpretedFrameScene, node: DiagramNode,
     caps: AppCapabilities, spec: ProvidesTargetSpec,
     isOpaque: OpaqueCheck, diagnosis: var EdgeDiagnosis): ImageFusionPlan =
+  # One way out: a refusal sets `diagnosis.refusal` and leaves `plan`. A
+  # `return` destroyed every list below again, most of this proc's flash
+  # (docs/esp32-image-size.md); the lists live out here so leaving the block
+  # destroys nothing.
   diagnosis = EdgeDiagnosis(nodeId: node.id, keyword: node.appKeyword(),
                             input: spec.input, refusal: frFused,
                             blockedAt: NoNodeId)
-  # The consumer's own cache is a materialization barrier: a cached render
-  # cannot be the thing that owns the canvas it is drawn onto.
-  if readCacheConfig(node.data).enabled:
-    diagnosis.refusal = frConsumerCached
-    return nil
-  if not constraintsHold(scene, node, caps, spec.requireStatic):
-    diagnosis.refusal = frStaticFieldWired
-    return nil
-  if not unsetHolds(scene, node, spec.requireUnset):
-    diagnosis.refusal = frFieldSet
-    return nil
+  var
+    fit = ""
+    fitFromNodeId = NoNodeId
+    hops: seq[NodeId] = @[]
+    producerFits: seq[string] = @[]
+    producerComposites = false
+    producerId = NoNodeId
+    fits: seq[string] = @[]
+    excluded: seq[string]
+    tier: ImageFusionTier
+    ownedForCache = false
+  block plan:
+    # The consumer's own cache is a materialization barrier: a cached render
+    # cannot be the thing that owns the canvas it is drawn onto.
+    if cacheEnabled(node.data):
+      diagnosis.refusal = frConsumerCached
+      break plan
+    if not constraintsHold(scene, node, caps, spec.requireStatic):
+      diagnosis.refusal = frStaticFieldWired
+      break plan
+    if not unsetHolds(scene, node, spec.requireUnset):
+      diagnosis.refusal = frFieldSet
+      break plan
 
-  var fit = ""
-  var fitFromNodeId = NoNodeId
-  if not resolveFit(scene, node, caps, spec, fit, fitFromNodeId):
-    diagnosis.refusal = frFitUnsupported
-    return nil
+    if not resolveFit(scene, node, caps, spec, fit, fitFromNodeId):
+      diagnosis.refusal = frFitUnsupported
+      break plan
 
-  let inputId = connectedInput(scene, node.id, spec.input)
-  if inputId == NoNodeId:
-    diagnosis.refusal = frInputUnwired
-    return nil
+    let inputId = connectedInput(scene, node.id, spec.input)
+    if inputId == NoNodeId:
+      diagnosis.refusal = frInputUnwired
+      break plan
 
-  var hops: seq[NodeId] = @[]
-  var producerFits: seq[string] = @[]
-  var producerComposites = false
-  let producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits,
-      producerComposites, diagnosis)
-  if producerId == NoNodeId:
-    diagnosis.refusal = frChainOpaque
-    return nil
-  if producerComposites and
-      not constraintsHold(scene, node, caps, spec.compositingRequireStatic):
-    # A compositing producer leaves the target's existing pixels visible under
-    # everything it does not paint. That equals the materialized result only
-    # when the consumer's draw is itself a plain composite; an `overwrite`
-    # blend of the materialized (possibly transparent) image would have erased
-    # them.
-    diagnosis.refusal = frCompositeBlend
-    return nil
+    producerId = walkProducerChain(scene, inputId, isOpaque, hops, producerFits,
+        producerComposites, diagnosis)
+    if producerId == NoNodeId:
+      diagnosis.refusal = frChainOpaque
+      break plan
+    if producerComposites and
+        not constraintsHold(scene, node, caps, spec.compositingRequireStatic):
+      # A compositing producer leaves the target's existing pixels visible under
+      # everything it does not paint. That equals the materialized result only
+      # when the consumer's draw is itself a plain composite; an `overwrite`
+      # blend of the materialized (possibly transparent) image would have erased
+      # them.
+      diagnosis.refusal = frCompositeBlend
+      break plan
 
-  var fits: seq[string] = @[]
-  let naturalProducer = NaturalFit in producerFits
-  if naturalProducer:
-    # Its output is target-sized whatever we ask for, so every placement the
-    # consumer might be configured with reduces to the same 1:1 draw. The
-    # offsets and blend still matter and are already covered by requireStatic.
-    fits = spec.fits
-    if fit.len > 0 and fit notin fits:
-      fits.add(fit)
-  else:
-    for candidate in spec.fits:
-      if candidate in producerFits:
-        fits.add(candidate)
-  if fits.len == 0:
-    diagnosis.refusal = frNoCommonFit
-    return nil
-  if fitFromNodeId == NoNodeId and fit notin fits:
-    diagnosis.refusal = frNoCommonFit
-    return nil
+    let naturalProducer = NaturalFit in producerFits
+    if naturalProducer:
+      # Its output is target-sized whatever we ask for, so every placement the
+      # consumer might be configured with reduces to the same 1:1 draw. The
+      # offsets and blend still matter and are already covered by requireStatic.
+      fits = spec.fits
+      if fit.len > 0 and fit notin fits:
+        fits.add(fit)
+    else:
+      for candidate in spec.fits:
+        if candidate in producerFits:
+          fits.add(candidate)
+    if fits.len == 0:
+      diagnosis.refusal = frNoCommonFit
+      break plan
+    if fitFromNodeId == NoNodeId and fit notin fits:
+      diagnosis.refusal = frNoCommonFit
+      break plan
 
-  let producerCached = readCacheConfig(scene.nodes[producerId].data).enabled
-  if producerCached and fitFromNodeId != NoNodeId and not naturalProducer:
-    # A cached producer bakes the fit it was handed into the canvas-sized value
-    # it caches. A placement wired from a state field can change between
-    # renders, and every cache hit would keep serving the old fit — the
-    # materialized floor re-fits per render, so this shape must too. A natural
-    # producer is exempt: its output is target-sized under every placement, so
-    # there is no fit to go stale.
-    diagnosis.refusal = frDynamicFitOverCache
-    return nil
-  var tier: ImageFusionTier
-  var ownedForCache = false
-  if hops.len == 0:
-    # Today's two shapes: an uncached producer decodes straight into the live
-    # canvas; a cached one gets a canvas-sized image of its own, because a
-    # cache holding the live canvas would redraw it onto itself forever.
-    tier = if producerCached: iftOwnedScratch else: iftLiveCanvas
-    ownedForCache = producerCached
-  else:
-    # Forwarding means a transformer mutates the image in place on the way
-    # back down. It must therefore own what it mutates: not the live canvas
-    # (which the consumer is going to composite onto, and whose untouched
-    # regions belong to whatever rendered before), and not a cached producer's
-    # value (which is shared with every later render).
-    if producerCached:
-      diagnosis.refusal = frForwardingOverCache
-      return nil
-    tier = iftOwnedScratch
+    let producerCached = cacheEnabled(scene.nodes[producerId].data)
+    if producerCached and fitFromNodeId != NoNodeId and not naturalProducer:
+      # A cached producer bakes the fit it was handed into the canvas-sized value
+      # it caches. A placement wired from a state field can change between
+      # renders, and every cache hit would keep serving the old fit — the
+      # materialized floor re-fits per render, so this shape must too. A natural
+      # producer is exempt: its output is target-sized under every placement, so
+      # there is no fit to go stale.
+      diagnosis.refusal = frDynamicFitOverCache
+      break plan
+    if hops.len == 0:
+      # Today's two shapes: an uncached producer decodes straight into the live
+      # canvas; a cached one gets a canvas-sized image of its own, because a
+      # cache holding the live canvas would redraw it onto itself forever.
+      tier = if producerCached: iftOwnedScratch else: iftLiveCanvas
+      ownedForCache = producerCached
+    else:
+      # Forwarding means a transformer mutates the image in place on the way
+      # back down. It must therefore own what it mutates: not the live canvas
+      # (which the consumer is going to composite onto, and whose untouched
+      # regions belong to whatever rendered before), and not a cached producer's
+      # value (which is shared with every later render).
+      if producerCached:
+        diagnosis.refusal = frForwardingOverCache
+        break plan
+      tier = iftOwnedScratch
 
-  var blockedOutright = false
-  let excluded = excludedOwnedFits(scene, node, caps, spec, blockedOutright)
-  if tier == iftOwnedScratch:
-    if blockedOutright:
-      diagnosis.refusal = frOwnedTargetExcluded
-      return nil
-    if fitFromNodeId == NoNodeId and fit in excluded:
-      diagnosis.refusal = frOwnedTargetExcluded
-      return nil
-    var anyAllowed = false
-    for candidate in fits:
-      if candidate notin excluded:
-        anyAllowed = true
-        break
-    if not anyAllowed:
-      diagnosis.refusal = frOwnedTargetExcluded
-      return nil
+    var blockedOutright = false
+    excluded = excludedOwnedFits(scene, node, caps, spec, blockedOutright)
+    if tier == iftOwnedScratch:
+      if blockedOutright:
+        diagnosis.refusal = frOwnedTargetExcluded
+        break plan
+      if fitFromNodeId == NoNodeId and fit in excluded:
+        diagnosis.refusal = frOwnedTargetExcluded
+        break plan
+      var anyAllowed = false
+      for candidate in fits:
+        if candidate notin excluded:
+          anyAllowed = true
+          break
+      if not anyAllowed:
+        diagnosis.refusal = frOwnedTargetExcluded
+        break plan
 
-  ImageFusionPlan(
-    inputName: spec.input,
-    tier: tier,
-    fit: fit,
-    fitFromNodeId: fitFromNodeId,
-    defaultFit: caps.fieldDefault(spec.fitFrom),
-    fits: fits,
-    excludedFits: (if tier == iftOwnedScratch: excluded else: @[]),
-    inPlaceNodeIds: hops,
-    producerNodeId: producerId,
-    ownedForCache: ownedForCache
-  )
+  if diagnosis.refusal == frFused:
+    result = ImageFusionPlan(
+      inputName: spec.input,
+      tier: tier,
+      fit: fit,
+      fitFromNodeId: fitFromNodeId,
+      defaultFit: caps.fieldDefault(spec.fitFrom),
+      fits: fits,
+      excludedFits: (if tier == iftOwnedScratch: excluded else: @[]),
+      inPlaceNodeIds: hops,
+      producerNodeId: producerId,
+      ownedForCache: ownedForCache
+    )
 
 proc planImageBoundsEdge(scene: InterpretedFrameScene, node: DiagramNode,
     input: string, requireUnset: seq[string], originScale: float,

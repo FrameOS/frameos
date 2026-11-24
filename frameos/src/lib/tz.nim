@@ -108,33 +108,36 @@ proc canonicalTimeZone*(timeZone: string): string =
 
 proc detectSystemTimeZone*(): string =
   ## Returns e.g. "Europe/Brussels"; never raises.
-  const zoneinfoPrefixes = [
-    "/usr/share/zoneinfo/",
-    "/etc/zoneinfo/",
-    "/var/db/timezone/zoneinfo/"
-  ]
-  const relativeZoneinfoPrefixes = [
-    "usr/share/zoneinfo/",
-    "etc/zoneinfo/",
-    "var/db/timezone/zoneinfo/"
-  ]
-  try:
-    # Works whenever /etc/localtime is a symlink (systemd-managed distros)
-    let tgt = expandSymlink("/etc/localtime")
-    for prefix in zoneinfoPrefixes:
-      if tgt.startsWith(prefix):
-        result = tgt[prefix.len .. ^1] # strip the prefix
-        break
-    if result.len == 0:
-      for prefix in relativeZoneinfoPrefixes:
-        let index = tgt.find(prefix)
-        if index >= 0:
-          result = tgt[index + prefix.len .. ^1]
+  when not defined(frameosEmbedded):
+    # The ESP32's VFS has no symlinks: its readlink is EINVAL for every path
+    # (frameos_nim_glue.c), so expandSymlink raised there every time.
+    const zoneinfoPrefixes = [
+      "/usr/share/zoneinfo/",
+      "/etc/zoneinfo/",
+      "/var/db/timezone/zoneinfo/"
+    ]
+    const relativeZoneinfoPrefixes = [
+      "usr/share/zoneinfo/",
+      "etc/zoneinfo/",
+      "var/db/timezone/zoneinfo/"
+    ]
+    try:
+      # Works whenever /etc/localtime is a symlink (systemd-managed distros)
+      let tgt = expandSymlink("/etc/localtime")
+      for prefix in zoneinfoPrefixes:
+        if tgt.startsWith(prefix):
+          result = tgt[prefix.len .. ^1] # strip the prefix
           break
+      if result.len == 0:
+        for prefix in relativeZoneinfoPrefixes:
+          let index = tgt.find(prefix)
+          if index >= 0:
+            result = tgt[index + prefix.len .. ^1]
+            break
 
-    if result.len == 0:
-      echo "Unknown timezone path: " & tgt
-  except OSError: discard
+      if result.len == 0:
+        echo "Unknown timezone path: " & tgt
+    except OSError: discard
 
   # Debian/Raspberry-Pi fallback: /etc/timezone is a plain text copy
   if result.len == 0 and fileExists("/etc/timezone"):

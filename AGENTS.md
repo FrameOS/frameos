@@ -402,9 +402,10 @@
 
 - Flash is the budget (the 8 MB layout's 3520 KB OTA slot), and every cut is
   in that doc with what it measured: read it before proposing one, and add
-  to it. Two decisions stand: QuickJS keeps its Unicode tables, and a Defect
-  stays catchable (no `--panics:on`): with the desktops a failed node must
-  not take the other windows with it.
+  to it. Three decisions stand: QuickJS keeps its Unicode tables and its
+  built-ins (Atomics, Proxy, the ES2025 additions: measured 2026-11-24 and
+  kept), and a Defect stays catchable (no `--panics:on`): with the desktops
+  a failed node must not take the other windows with it.
 - **Where an object stands is `embedded/esp32/link_order.txt`** (S3): callers
   near what they call, because a `CALL8` is 3 bytes and reaches 512 KB and a
   longer call is 6. A new module needs no line (the file's `*` stands for
@@ -418,10 +419,25 @@
   are the frame rate keep the assembler's (`FRAMEOS_NIM_HOT_MODULES`,
   `quickjs_hot.c`). A module that becomes hot goes on that list, and the PR
   says what it cost.
-- `build_nim.sh` folds what Nim writes once per C file: inline helpers
-  (`fold_nim_inlines.py`) and string literals (`fold_nim_strings.py`). The
-  same shape of waste elsewhere (a hook or a generic that is byte for byte
-  another's) is counted in the doc and not folded yet.
+- `build_nim.sh` drops the error check Nim writes after a call that cannot
+  raise (`drop_nim_dead_checks.py`: a proc that reaches a raise, an indirect
+  call or unknown C is never clean) and folds what Nim writes once per C
+  file: inline helpers (`fold_nim_inlines.py`) and string literals
+  (`fold_nim_strings.py`). The archive's byte-identical functions (hooks of
+  same-shaped types, generics per module) fold after it is made
+  (`fold_identical_code.py`, the hot modules kept), and the vendored e-paper
+  drivers' identical helpers at the copy step (`fold_panel_helpers.py`).
+  A function whose address is compared, or that something outside the
+  archive names, must stay out of the fold: the tool refuses any use that is
+  not a call or a Nim type descriptor's.
+- newlib's formatter and scanner are not in the image: the `printf` family
+  is `fos_printf.c` (doubles through QuickJS's `js_dtoa`) and `sscanf` /
+  `siscanf` are `fos_sscanf.c`, both `--wrap`s, both byte for byte newlib's
+  (`test_fos_printf.c`, `test_fos_sscanf.c`; newlib under QEMU is the
+  oracle, doc "Tools for the next pass"). A new conversion goes in them and
+  their tests. The shell's C calls ROM and IRAM through flash veneers
+  (`main/fos_veneers.h`): a file with `IRAM_ATTR` code stays out of it
+  (`test_esp32_veneers.py`).
 
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
@@ -825,6 +841,11 @@
   pixie's colour glyph cache (`colorGlyphCacheBudget`), never the decode
   or the font. The glyph budget grows with the board's PSRAM
   (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
+  A frame gets more fonts by itself in the Fonts sample's "Get fonts"
+  (docs/esp32-fonts.md): `repo/fonts/catalog.txt`, made by
+  `frameos/tools/generate_font_catalog.py` (every file checked there, never
+  converted on a frame), downloaded straight from where the files are in
+  ranges by the scene's own JS, no firmware for it and no plane in the way.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
@@ -930,7 +951,12 @@
   (`fos_display_park`). The IT8951 (the reTerminal E1003) keeps the picture
   itself: `it8951.c` hashes tiles of the packed buffer and the table's
   `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
-  not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
+  not fit an 8 MB board. Before a tap's upload it hashes only the render's box
+  (`fos_display_hint_damage`, from `frameos_nim_render_damage`) and the whole
+  picture once the waveform runs: a new way onto the glass or into the canvas
+  that is not the render's own update goes through `fos_display_blit` /
+  `fos_display_quick_update` or calls `fos_display_hint_forget`, or its pixels
+  go up a waveform late (logged `changed outside the render's box`). Only GC16 (greys) and DU (pure black and white) draw
   on its waveform file: while someone taps, and for pictures coming quickly
   (`fos_pictures_fast`: an animation, a clock's seconds), it is one DU over
   all that changed, greys as a halftone, and GC16 once they stop
@@ -962,6 +988,17 @@
   panel chip select written behind `DEV_Digital_Write` would let a card clock
   the panel (`test_esp32_bus_share.py` reads for it). A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
+- **A press shows at once** (`docs/realtime-rendering.md` of that name,
+  `fos_press.h`): an LCD's touch task shades the element under a finger (the
+  press map's `taken` 3, `lcd_press.c`) in the buffer on the glass at its
+  first report, before any render, under the loading mark's lock; the next
+  present puts it away. E-paper lights the LED until the answer's waveform
+  has run and, on a scene whose taps are slow, inks the box with one DU
+  (`fos_display_glass_rect`: its tiles `stale` until an update sends the
+  picture's own). A new writer into the scanned LCD buffer takes that lock and
+  moves the buffer's count; one off the render task leaves it moved
+  (`svg_frames.nim` checks the count after a copy). `touch tap` on the console
+  is a finger through the touch task, for the bench.
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,

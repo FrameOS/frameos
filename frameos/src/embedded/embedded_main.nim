@@ -24,10 +24,12 @@ import frameos/utils/asset_colors
 import frameos/utils/dither
 from frameos/utils/http_client import releaseStrandedHttp
 from frameos/js_runtime/app_runtime import pumpJsAsync, nextJsAsyncMs
+from frameos/ui/events import uiTimersPending
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/panel_damage
 import frameos/utils/palette_pack
+from frameos/utils/svg_frames import takePanelPaint
 import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
@@ -433,12 +435,22 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   rhythmForgetCanvases()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
+proc noteRenderDamage(known, x, y, w, h: cint) {.importc: "fos_nim_note_damage", cdecl.}
+
+var keptPaint: tuple[known: bool, x, y, w, h: int]
+  ## Where the last kept-canvas render wrote the canvas, when it knows
+  ## (svg_frames.takePanelPaint): reported with the picture to the firmware,
+  ## whose IT8951 hashes only that before the upload (fos_display_hint_damage).
+
 proc renderKeptFrameImage(): tuple[image: Image, source: string] =
   ## renderFrameImage for a canvas that is packed afterwards: a panel with a
   ## partial waveform keeps the SVG damage records an LCD's buffer has.
+  keptPaint = (false, 0, 0, 0, 0)
   let kept = beginKeptCanvasFrame()
   try:
-    renderFrameImage()
+    result = renderFrameImage()
+    if kept:
+      keptPaint = takePanelPaint()
   finally:
     if kept:
       endKeptCanvasFrame()
@@ -978,6 +990,11 @@ proc fos_nim_render_alloc_impl(
       # sixteen-grey canvas is its picture as it is, and keeps both.
       rhythmForgetCanvases()
       lastPackedFromCanvas = false
+    # Where this picture can differ from the last one the canvas held: only
+    # for a sixteen-grey canvas that is the panel buffer as it is (nothing
+    # packed over it) and a render that knows (renderKeptFrameImage).
+    let paintKnown = drawsInPanel and lastPackedFromCanvas and canvas.format == pfGray4 and keptPaint.known
+    noteRenderDamage(paintKnown.cint, keptPaint.x.cint, keptPaint.y.cint, keptPaint.w.cint, keptPaint.h.cint)
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()
@@ -1085,8 +1102,9 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
 proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr UncheckedArray[uint8];
                             maxEntries: cint): cint {.exportc, cdecl.} =
   ## The press map after a render (embedded_runtime.panelPressMapNow) into the
-  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, in `taken` 1 or 0, and
-  ## 2 on the frame's keyboard (taken, and never an edge swipe).
+  ## glue's arrays: `x0, y0, x1, y1` an entry in `boxes`, in `taken` 1 or 0,
+  ## 2 on the frame's keyboard (taken, and never an edge swipe) and 3 for one
+  ## element of a UI (taken, its own box: what a press lights at once).
   ## How many entries, -1 when it could not be made.
   try:
     var count = 0
@@ -1095,7 +1113,7 @@ proc fos_nim_press_map_impl(boxes: ptr UncheckedArray[uint16]; taken: ptr Unchec
       boxes[4 * count + 1] = uint16(clamp(entry.y0, 0, 0xFFFF))
       boxes[4 * count + 2] = uint16(clamp(entry.x1, 0, 0xFFFF))
       boxes[4 * count + 3] = uint16(clamp(entry.y1, 0, 0xFFFF))
-      taken[count] = if entry.keys: 2'u8 elif entry.taken: 1'u8 else: 0'u8
+      taken[count] = if entry.keys: 2'u8 elif entry.element: 3'u8 elif entry.taken: 1'u8 else: 0'u8
       count += 1
     count.cint
   except Exception:
@@ -1129,9 +1147,15 @@ proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
 proc fos_nim_next_async_ms_impl(): cint {.exportc, cdecl.} =
   ## How long the render task's idle wait may sleep before a JS timer is due
   ## (0: something is ready now), -1 when none is pending. An answer from the
-  ## request task wakes the wait itself.
+  ## request task wakes the wait itself. A UI timing something (a key's light,
+  ## a quick tap's press: ui/events.nim) is looked at every 50 ms, or its
+  ## light would stay up to a whole slice (a second) past its moment.
+  const UiTimerSliceMs = 50
   try:
-    nextJsAsyncMs().cint
+    var ms = nextJsAsyncMs()
+    if uiTimersPending() and (ms < 0 or ms > UiTimerSliceMs):
+      ms = UiTimerSliceMs
+    ms.cint
   except Exception:
     -1.cint
 

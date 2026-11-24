@@ -5,10 +5,11 @@
 ## font's own bytes, which can be the program image's read-only data: nothing
 ## of them is copied. The outlines are TrueType glyf records in blocks of
 ## about 2 KB: deflated, except the blocks of printable ASCII, which are read
-## in place. A glyph's outline in a deflated block inflates it, and the last
-## two blocks inflated are kept per thread (`{.threadvar.}`: values no other
-## thread touches). Advances, kerning and outlines are the TrueType font's,
-## as `opentype.nim` reads them.
+## in place and are the preset dictionary the others were deflated against. A
+## glyph's outline in a deflated block inflates it, and the last two blocks
+## inflated are kept per thread (`{.threadvar.}`: values no other thread
+## touches). Advances, kerning and outlines are the TrueType font's, as
+## `opentype.nim` reads them.
 
 import bumpy, vmath, ../common, ../inflatestream, ../paths, opentype
 
@@ -24,13 +25,13 @@ type
     underlinePosition*, underlineThickness*: int
     strikeoutPosition*, strikeoutSize*: int
     numGlyphs*: int
-    numRuns, numBlocks, numTables, numValues: int
+    numRuns, numBlocks, dictLen, numValues: int
     cmapAt, glyphsAt, blocksAt, blockDataAt, kernAt, valuesAt: int
 
 const
   HeaderBytes = 64
-  KernTableBytes = 24
-  KernPreludeBytes = 24
+  GlyphBytes = 7
+  KernHeadBytes = 28
   BlockCacheSlots = 2
 
 var
@@ -66,7 +67,7 @@ proc readHeader(font: IndexedFont) =
   if font.len < HeaderBytes or font.data[0] != uint8('F') or font.data[1] != uint8('O') or
       font.data[2] != uint8('S') or font.data[3] != uint8('F'):
     fail("no FOSF header")
-  if font.u16(4) != 2:
+  if font.u16(4) != 3:
     fail("version " & $font.u16(4))
   font.unit = font.u16(6)
   font.unitsPerEm = font.u16(8)
@@ -81,7 +82,7 @@ proc readHeader(font: IndexedFont) =
   font.numGlyphs = font.u16(26)
   font.numRuns = font.u16(28)
   font.numBlocks = font.u16(30)
-  font.numTables = font.u16(32)
+  font.dictLen = font.u16(32)
   font.numValues = font.u16(34)
   font.cmapAt = font.u32(36)
   font.glyphsAt = font.u32(40)
@@ -91,9 +92,10 @@ proc readHeader(font: IndexedFont) =
   font.valuesAt = font.u32(56)
   if font.u32(60) != font.len or font.unitsPerEm == 0 or font.numBlocks == 0 or
       font.cmapAt + font.numRuns * 8 > font.len or
-      font.glyphsAt + font.numGlyphs * 8 > font.len or
+      font.glyphsAt + font.numGlyphs * GlyphBytes > font.len or
       font.blocksAt + (font.numBlocks + 1) * 8 > font.len or
-      font.kernAt + KernPreludeBytes + font.numTables * KernTableBytes > font.len or
+      font.blockDataAt + font.dictLen > font.len or
+      font.kernAt + KernHeadBytes > font.len or
       font.valuesAt + font.numValues * 2 > font.len:
     fail("sections out of bounds")
   font.id = uint32(atomicInc(indexedFontIds))
@@ -138,7 +140,13 @@ proc hasGlyph*(font: IndexedFont, rune: int32): bool {.raises: [].} =
 proc advance*(font: IndexedFont, glyph: int): int {.raises: [].} =
   if glyph < 0 or glyph >= font.numGlyphs:
     return 0
-  font.u16(font.glyphsAt + glyph * 8)
+  font.u16(font.glyphsAt + glyph * GlyphBytes) and 0xFFF
+
+proc offsetInBlock(font: IndexedFont, glyph: int): int =
+  ## Where the glyph's record starts in its block: the high 12 bits of the
+  ## glyph's first three bytes (the advance is the low 12).
+  let at = font.glyphsAt + glyph * GlyphBytes
+  (font.u16(at) shr 12) or (font.u8(at + 2) shl 4)
 
 proc glyphBox*(font: IndexedFont, glyph: int, box: var Rect): bool {.raises: [].} =
   ## The glyph's box, rounded outwards, in font units, y down like
@@ -147,15 +155,15 @@ proc glyphBox*(font: IndexedFont, glyph: int, box: var Rect): bool {.raises: [].
   box = rect(0, 0, 0, 0)
   if glyph < 0 or glyph >= font.numGlyphs:
     return true
-  let at = font.glyphsAt + glyph * 8
-  if font.i8(at + 4) == -128:
+  let at = font.glyphsAt + glyph * GlyphBytes
+  if font.i8(at + 3) == -128:
     return false
   let
     u = font.unit.float32
-    xMin = font.i8(at + 4).float32 * u
-    yMin = font.i8(at + 5).float32 * u
-    xMax = font.i8(at + 6).float32 * u
-    yMax = font.i8(at + 7).float32 * u
+    xMin = font.i8(at + 3).float32 * u
+    yMin = font.i8(at + 4).float32 * u
+    xMax = font.i8(at + 5).float32 * u
+    yMax = font.i8(at + 6).float32 * u
   if xMax > xMin and yMax > yMin:
     box = rect(xMin, -yMax, xMax - xMin, yMax - yMin)
   true
@@ -180,9 +188,9 @@ proc inflatedBlock(font: IndexedFont, b: int): int =
   let
     at = font.blocksAt + b * 8
     rawLen = font.u16(at + 2)
-    start = font.blockDataAt + font.u32(at + 4)
-    stop = font.blockDataAt + font.u32(at + 12)
-  if stop < start or stop > font.len:
+    start = font.blockDataAt + font.u16(at + 6)
+    stop = start + font.u16(at + 4)
+  if stop > font.len:
     fail("block out of bounds")
   result = blockNext
   blockNext = (blockNext + 1) mod BlockCacheSlots
@@ -191,8 +199,10 @@ proc inflatedBlock(font: IndexedFont, b: int): int =
   var inflated: string
   try:
     # Its length is known, so the string is made that size and the block is
-    # inflated in a buffer of its own size, not the stream's 64 KB window.
-    inflated = uncompressDeflate(font.data[start].addr, stop - start, rawLen)
+    # inflated in a buffer of its own size, not the stream's 64 KB window;
+    # its preset dictionary is read where it lies.
+    inflated = uncompressDeflate(font.data[start].addr, stop - start, rawLen,
+      font.data[font.blockDataAt].addr, font.dictLen)
   except PixieError as e:
     raise newException(PixieError, "Invalid indexed font block: " & e.msg, e)
   if inflated.len != rawLen:
@@ -210,11 +220,11 @@ proc glyfRecord(font: IndexedFont, glyph: int): string =
     b = font.blockOf(glyph)
     at = font.blocksAt + b * 8
     rawLen = font.u16(at + 2)
-    stored = font.u32(at + 12) - font.u32(at + 4)
+    stored = font.u16(at + 4)
     nextFirst = font.u16(at + 8)
-    start = font.u16(font.glyphsAt + glyph * 8 + 2)
+    start = font.offsetInBlock(glyph)
     stop =
-      if glyph + 1 < nextFirst: font.u16(font.glyphsAt + (glyph + 1) * 8 + 2)
+      if glyph + 1 < nextFirst: font.offsetInBlock(glyph + 1)
       else: rawLen
   if stop <= start:
     return
@@ -222,7 +232,7 @@ proc glyfRecord(font: IndexedFont, glyph: int): string =
     fail("glyph out of its block")
   if stored == rawLen:
     # Stored as it is: read in place.
-    let src = font.blockDataAt + font.u32(at + 4) + start
+    let src = font.blockDataAt + font.u16(at + 6) + start
     if src + (stop - start) > font.len:
       fail("block out of bounds")
     result = newString(stop - start)
@@ -255,113 +265,69 @@ proc getGlyphPath*(font: IndexedFont, rune: int32): Path {.raises: [PixieError],
   result = font.parseGlyfGlyph(max(font.glyphIdOf(rune), 0).uint16, 0)
   result.transform(scale(vec2(1, -1)))
 
-proc rangeValue(font: IndexedFont, at, count, glyph: int): int =
-  ## In `count` (first, last, value) u16 triples at `at`, sorted, the value
-  ## of the range holding `glyph`; -1 for none.
+proc entryValue(font: IndexedFont, at, size, first, stop, key: int): int =
+  ## In the entries `first ..< stop` at `at`, `size` bytes each, sorted by
+  ## their key (a u16 when `size` is 3, a u8 when 2) and ending in a u8
+  ## value index, the value index of `key`; -1 for none.
   var
-    lo = 0
-    hi = count - 1
+    lo = first
+    hi = stop - 1
   while lo <= hi:
     let
       mid = (lo + hi) div 2
-      r = at + mid * 6
-    if glyph < font.u16(r):
-      hi = mid - 1
-    elif glyph > font.u16(r + 2):
-      lo = mid + 1
-    else:
-      return font.u16(r + 4)
+      e = at + mid * size
+      k = if size == 3: font.u16(e) else: font.u8(e)
+    if key < k: hi = mid - 1
+    elif key > k: lo = mid + 1
+    else: return font.u8(e + size - 1)
   -1
 
-proc rightClasses(font: IndexedFont, glyph: int): int =
-  ## Where the right glyph's classes are, one byte a class subtable: the
-  ## tuple of the run of glyphs it is in.
-  let
-    runs = font.u16(font.kernAt)
-    width = font.u16(font.kernAt + 4)
-    startsAt = font.u32(font.kernAt + 8)
+proc runOf(font: IndexedFont, glyph: int): int =
+  ## Where the run of glyphs holding `glyph` is: u16 first glyph, u8 row,
+  ## u8 column.
+  let runsAt = font.u32(font.kernAt + 16)
   var
     lo = 0
-    hi = runs - 1
+    hi = font.u16(font.kernAt + 2) - 1
   while lo < hi:
     let mid = (lo + hi + 1) div 2
-    if font.u16(startsAt + mid * 2) <= glyph:
-      lo = mid
-    else:
-      hi = mid - 1
-  font.u32(font.kernAt + 16) + font.u8(font.u32(font.kernAt + 12) + lo) * width
+    if font.u16(runsAt + mid * 4) <= glyph: lo = mid
+    else: hi = mid - 1
+  runsAt + lo * 4
 
 proc kerning*(font: IndexedFont, left, right: int): int {.raises: [].} =
   ## The x advance between two glyphs, in font units: the first subtable, in
   ## lookup order, that covers `left` and has a nonzero entry for the pair
-  ## (opentype's `getKerningAdjustment`).
-  if left < 0 or right < 0 or font.numTables == 0:
+  ## (opentype's `getKerningAdjustment`). The file holds the glyph pairs, then
+  ## the class subtables merged into one table: the left glyph's row, the
+  ## right glyph's column in it.
+  if left < 0 or right < 0 or left >= font.numGlyphs or right >= font.numGlyphs:
     return 0
-  var classes = -1 # rightClasses, found when a class subtable first asks
-  for t in 0 ..< font.numTables:
+  let
+    k = font.kernAt
+    leftsAt = font.u32(k + 8)
+  var
+    v = -1
+    lo = 0
+    hi = font.u16(k) - 1
+  # Glyph pairs: the left glyph's list, then the right glyph in it.
+  while lo <= hi:
     let
-      h = font.kernAt + KernPreludeBytes + t * KernTableBytes
-      leftCount = font.u16(h + 2)
-      leftAt = font.u32(h + 4)
-      secondCount = font.u16(h + 8)
-      rowCount = font.u16(h + 10)
-      secondAt = font.u32(h + 12)
-    var
-      first = 0
-      count = 0
-      entryAt = 0
-      key = 0
-      entryBytes = 0
-    if font.u8(h) == 1:
-      # Glyph pairs: the left glyph's list, then the right glyph in it.
-      var
-        lo = 0
-        hi = leftCount - 1
-        found = -1
-      while lo <= hi:
-        let mid = (lo + hi) div 2
-        let g = font.u16(leftAt + mid * 8)
-        if left < g: hi = mid - 1
-        elif left > g: lo = mid + 1
-        else:
-          found = mid
-          break
-      if found < 0:
-        continue
-      first = font.u16(leftAt + found * 8 + 2)
-      count = font.u16(leftAt + found * 8 + 4)
-      entryAt = secondAt
-      entryBytes = 4
-      key = right
+      mid = (lo + hi) div 2
+      g = font.u16(leftsAt + mid * 4)
+    if left < g: hi = mid - 1
+    elif left > g: lo = mid + 1
     else:
-      # Class pairs: the left glyph's class row, the right glyph's class in it.
-      let class1 = font.rangeValue(leftAt, leftCount, left)
-      if class1 < 0 or class1 >= rowCount:
-        continue
-      if classes < 0:
-        classes = font.rightClasses(right)
-      let class2 = font.u8(classes + secondCount) # secondCount: its column
-      let row = font.u32(h + 16) + class1 * 4
-      first = font.u16(row)
-      count = font.u16(row + 2)
-      entryAt = font.u32(h + 20)
-      entryBytes = 2
-      key = class2
-    var
-      lo = first
-      hi = first + count - 1
-    while lo <= hi:
-      let
-        mid = (lo + hi) div 2
-        e = entryAt + mid * entryBytes
-        k = if entryBytes == 4: font.u16(e) else: font.u8(e)
-      if key < k: hi = mid - 1
-      elif key > k: lo = mid + 1
-      else:
-        let v = if entryBytes == 4: font.u16(e + 2) else: font.u8(e + 1)
-        if v < font.numValues:
-          return font.i16(font.valuesAt + v * 2)
-        return 0
+      v = font.entryValue(font.u32(k + 12), 3, font.u16(leftsAt + mid * 4 + 2),
+        font.u16(leftsAt + mid * 4 + 6), right)
+      break
+  if v < 0:
+    # Class pairs: the left glyph's row, the right glyph's column in it.
+    let row = font.u32(k + 20) + font.u8(font.runOf(left) + 2) * 2
+    v = font.entryValue(font.u32(k + 24), 2, font.u16(row), font.u16(row + 2),
+      font.u8(font.runOf(right) + 3))
+  if v >= 0 and v < font.numValues:
+    return font.i16(font.valuesAt + v * 2)
   0
 
 proc clearIndexedFontBlocks*() {.raises: [].} =

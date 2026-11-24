@@ -61,6 +61,14 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (len) *len = 0;
     return -1;
 }
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h)
+{
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    return false;
+}
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len) { return frameos_nim_render(buf, len, 1); }
 int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_t generation)
 {
@@ -131,6 +139,13 @@ int frameos_nim_press_map_takes(int x, int y)
 {
     (void)x;
     (void)y;
+    return -1;
+}
+int frameos_nim_press_map_find(int x, int y, uint16_t box[4])
+{
+    (void)x;
+    (void)y;
+    (void)box;
     return -1;
 }
 bool frameos_nim_tick(void) { return false; }

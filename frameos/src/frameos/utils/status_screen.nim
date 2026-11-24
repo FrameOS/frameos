@@ -57,11 +57,58 @@ type
 proc hasAside*(screen: StatusScreen): bool =
   screen.aside.code.len > 0 or screen.aside.qr != nil
 
+proc compactSvgMarkup*(svg: string): string {.compileTime.} =
+  ## The markup as the binary holds it: from `<svg` on (the comment the file
+  ## opens with is for whoever reads it), no line breaks or indentation, and
+  ## in each `d` no space after a command, no trailing zeros in a number and
+  ## no letter repeating the curve or line before it (SVG's implicit repeat,
+  ## which pixie's path readers expand to the same commands). Every number
+  ## reads to the same float: the same paths, ~330 bytes of ESP32 flash less.
+  var s = svg.substr(svg.find("<svg"))
+  var lines: seq[string]
+  for line in s.splitLines():
+    if line.strip().len > 0:
+      lines.add(line.strip())
+  s = lines.join(" ").replace("> <", "><").replace(" />", "/>")
+  var at = 0
+  while true:
+    let open = s.find(" d=\"", at)
+    if open < 0:
+      break
+    let start = open + 4
+    let stop = s.find('"', start)
+    var
+      d = ""
+      last = '\0'
+      i = start
+    while i < stop:
+      let c = s[i]
+      if c in {'A'..'Z', 'a'..'z'}:
+        doAssert c in {'M', 'C', 'L', 'Z'}, "compactSvgMarkup: a command it does not know"
+        if not (c in {'C', 'L'} and c == last):
+          d.add c
+        last = c
+        inc i
+      elif c in {'0'..'9', '-', '.'}:
+        var j = i + 1
+        while j < stop and s[j] in {'0'..'9', '.'}:
+          inc j
+        var number = s[i ..< j]
+        if '.' in number:
+          number = number.strip(leading = false, chars = {'0'}).strip(leading = false, chars = {'.'})
+        if d.len > 0 and d[^1] notin {'A'..'Z', 'a'..'z'}:
+          d.add ' '
+        d.add number
+        i = j
+      else:
+        inc i # a separator: one space goes between two numbers
+    s = s[0 ..< start] & d & s[stop .. ^1]
+    at = start + d.len
+  s
+
 const
-  frameosMarkFile = staticRead("status_screen/frameos_mark.svg")
-  # From `<svg` on: the comment the file opens with is for whoever reads it,
-  # and in the binary it was 330 bytes of ESP32 flash.
-  frameosMarkSvg = frameosMarkFile.substr(frameosMarkFile.find("<svg"))
+  frameosMarkFile* = staticRead("status_screen/frameos_mark.svg")
+  frameosMarkSvg* = compactSvgMarkup(frameosMarkFile)
   markAspect = 464.0 / 544.0 # width / height of the mark's viewBox
   wordmark = "FrameOS"
   # The three squares' fills in frameos_mark.svg (same as logo-white-colors.svg).

@@ -69,7 +69,11 @@ cheap is that the pictures are reconciled, not the code:
   comes back the same is not typeset again, and it is handed to pixie as
   the very same nodes, so pixie compares it by identity. What a layout did
   not use is let go. Each glyph is drawn from pixie's glyph cache ("Text and
-  fonts").
+  fonts"). A text node keeps two arrangements, for the last two widths it
+  was set in (measured in the room its container offers, then set in the
+  width it took), each with its memo entry: a label that did not change is
+  not looked up by key at all, which was ~200 lookups and 10 ms of a
+  Calculator tap on a SenseCAP Indicator.
 - **Damage is a few boxes, matched in order.** On an LCD whose canvas is
   the panel's own buffer, `utils/svg_frames.nim` keeps the parsed SVG each
   buffer holds and compares the next with it (pixie's `damageRects`): the
@@ -84,9 +88,10 @@ cheap is that the pictures are reconciled, not the code:
   objects.** The layout keeps its last tree (on the UI's `UiMemo`), and an
   element whose node at the same place is the same, or equal, and that the
   pointer left as it was takes back its laid-out node: no classes read, its
-  size from the layout cache (two calls kept per node, since a flex item is
-  measured, then placed, and its children are placed again for its final
-  call before it is drawn), and, where its place, size and opacity did not
+  size from the layout cache (four calls kept per node, since a flex item is
+  measured, then placed, and an item of a row in a column is asked three
+  questions a layout; its children are placed again for its final call
+  before it is drawn), and, where its place, size and opacity did not
   change, the very SVG nodes it emitted. pixie keeps the parse of a node it
   is handed again (`parseSvg`'s `reuse`), and damageRects knows those
   elements without comparing them. Gradient ids and handler numbers are part
@@ -619,6 +624,12 @@ export const get = () => (
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
+  On an ESP32 a tap whose press and lift were handled before any render drew
+  its `active:` look (both behind a busy render) keeps the look with its
+  answer, for 150 ms once a render has drawn it (`pressLinger`), and an
+  LCD's touch task shades the element a finger lands on in the picture on
+  the glass before any render at all, `active:` class or not, until the
+  scene's next picture (docs/realtime-rendering.md "A press shows at once").
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
   refresh, so e-paper draws no `hover:` or `active:` at all (a press asked

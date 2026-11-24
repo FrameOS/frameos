@@ -39,8 +39,13 @@ main/                     boot orchestration + platform modules
                           the console then offers no USB-Serial/JTAG channel
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
-  fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
-                          newlib's floating-point scanf is never linked (host-tested)
+  fos_cxx_new.c           NVS's new[] (std::nothrow) / delete[] as malloc-or-abort / free, without
+                          libstdc++'s exception runtime
+  fos_printf.c            the printf family for the linker's --wrap: newlib's output from a small
+                          formatter, doubles by QuickJS's js_dtoa, so newlib's is never linked (host-tested)
+  fos_sscanf.c            sscanf and siscanf for the linker's --wrap: cJSON's "%lg" read-back as
+                          strtod, tzset's TZ formats by an integer scanner that reads as newlib's,
+                          so no newlib scanf engine is linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
   fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
@@ -725,7 +730,11 @@ writes the queued id to NVS (`pending_scene`), the boot restore prefers it
 over `last_scene`, the pass that applies it erases it and writes
 `last_scene` too — resident because of the pending key is not persisted,
 and skipping that write sent the frame back to the old scene on the next
-timer wake (2026-10-12) — and a pass that
+timer wake (2026-10-12). Both marks a switch makes on the render task (a tap
+on the switcher, the apply) are owed, not written there: the state writer
+puts them in one NVS commit when nobody taps, and a deep sleep or a restart
+flushes them first (`fos_scenes_flush_marks`), as the scene state; each was a
+flash write between a tap and the new scene's first picture. And a pass that
 switched the scene — or applied a payload pushed since boot — renders even
 when it woke only to check in (`fos_scenes_take_switched`). Work that lands
 mid-render holds the deep sleep for one more pass (`sleep:held`, reason

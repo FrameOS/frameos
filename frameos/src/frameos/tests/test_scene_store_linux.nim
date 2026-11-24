@@ -1,4 +1,4 @@
-import std/[json, os, strutils, times]
+import std/[json, net, os, strutils, times]
 import ../scene_store_linux
 import ../server/api
 import ../config
@@ -53,6 +53,52 @@ proc waitIdle(): JsonNode =
 writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": true, "width": 800, "height": 480}))
 persistScenesPayload(scenes())
 
+# A backend's /api/panel/scenes: what each request asked, and one update
+# listed until `updateAll`.
+var
+  planeAsked: Channel[string]
+  planePort: Port
+  planeThread: Thread[void]
+planeAsked.open()
+
+proc planeLoop() {.thread.} =
+  var server = newSocket()
+  server.setSockOpt(OptReuseAddr, true)
+  server.bindAddr(Port(0), "0.0.0.0")
+  server.listen()
+  planePort = server.getLocalAddr()[1]
+  var updated = false
+  while true:
+    var client: Socket
+    server.accept(client)
+    var length = 0
+    try:
+      discard client.recvLine(timeout = 5000)
+      while true:
+        let line = client.recvLine(timeout = 5000)
+        if line == "\r\n" or line.len == 0:
+          break
+        if line.toLowerAscii().startsWith("content-length:"):
+          length = parseInt(line.split(":")[1].strip())
+      let action = parseJson(client.recv(length, timeout = 5000)){"action"}.getStr()
+      planeAsked.send(action)
+      if action == "updateAll":
+        updated = true
+      let answer =
+        if action == "updates" and not updated:
+          $(%*{"ok": true, "updates": [{"store": Radar, "name": "Rain radar", "from": 3, "to": 4}]})
+        elif action == "updates": """{"ok":true,"updates":[]}"""
+        else: """{"ok":true,"status":"queued","updated":1,"kept":0}"""
+      client.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " & $answer.len &
+        "\r\nConnection: close\r\n\r\n" & answer)
+    except CatchableError:
+      discard
+    client.close()
+
+createThread(planeThread, planeLoop)
+while planePort.int == 0:
+  sleep(5)
+
 block the_page_is_offered_and_lists_what_came_from_the_store:
   installSceneStoreHooks()
   doAssert not sceneStoreRead.isNil and not sceneStoreAction.isNil
@@ -100,6 +146,36 @@ block a_plane_that_does_not_answer_is_not_the_store:
   doAssert facts{"busy"}.getStr() == "", "the worker never finished"
   doAssert facts{"error"}.getStr() == "plane_unavailable", $facts
   doAssert loadScenePayload().len == 1, "nothing installed on the frame's own"
+
+block the_planes_updates_are_in_the_facts_and_update_all_is_asked_of_it:
+  # A backend that lists one update until it is asked to take them all.
+  writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": true, "width": 800, "height": 480,
+    "serverHost": "0.0.0.0", "serverPort": planePort.int, "serverScheme": "http", "serverApiKey": "key"}))
+  noteFrameConfigChanged()
+  # Opened by another scene: the store asks its plane what has updates.
+  var facts: JsonNode
+  for i in 0 ..< 500:
+    facts = parseJson(linuxSceneStoreRead("store-2"))
+    if facts.hasKey("updates"):
+      break
+    sleep(10)
+  doAssert facts{"updates"} == %*[{"store": Radar, "name": "Rain radar", "from": 3, "to": 4}], $facts
+  linuxSceneStoreAction("store-2", "updateAll", "{}")
+  for i in 0 ..< 500:
+    facts = parseJson(linuxSceneStoreRead("store-2"))
+    if facts{"busy"}.getStr() == "" and facts{"updates"}.len == 0:
+      break
+    sleep(10)
+  doAssert facts{"error"}.getStr() == "" and facts{"done"}.getStr() == "updateAll", $facts
+  doAssert facts{"updates"} == %*[], "asked again after the change: " & $facts
+  var asked: seq[string]
+  while true:
+    let (ok, action) = planeAsked.tryRecv()
+    if not ok:
+      break
+    asked.add action
+  doAssert asked == @["updates", "updateAll", "updates"], $asked
+  doAssert loadScenePayload().len == 1, "the plane's push brings the new versions, nothing here"
 
 block the_lock_hides_the_page:
   writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": false, "width": 800, "height": 480}))

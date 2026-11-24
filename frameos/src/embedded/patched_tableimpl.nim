@@ -5,7 +5,7 @@
 when (NimMajor, NimMinor) != (2, 2):
   {.error: "re-derive src/embedded/patched_tableimpl.nim from this Nim's lib/pure/collections/tableimpl.nim".}
 
-from ./fos_table_probe import fosTableRehash
+from ./fos_table_probe import fosTableRehash, fosTableBackShift
 
 #
 #
@@ -172,7 +172,7 @@ template hasKeyOrPutImpl(enlarge) {.dirty.} =
 # only 1 key cmp is needed for *any* seq.  Timing only predictable activity,
 # small tables, and/or integer keys often perpetuates such bad ideas. }
 
-template delImplIdx(t, i, makeEmpty, cellEmpty, cellHash) =
+template delImplIdxStock(t, i, makeEmpty, cellEmpty, cellHash) =
   let msk = maxHash(t)
   if i >= 0:
     dec(t.counter)
@@ -196,6 +196,24 @@ template delImplIdx(t, i, makeEmpty, cellEmpty, cellHash) =
           t.data[j] = t.data[i]
         else:
           t.data[j] = move(t.data[i]) # data[j] will be marked EMPTY next loop
+
+template delImplIdx(t, i, makeEmpty, cellEmpty, cellHash) =
+  when compiles(t.data[0].hcode):
+    # A Table's slots (hcode first, 0 is empty): the victim is emptied and
+    # reset here, and the slots after it move back in fosTableBackShift, one
+    # loop for every pair, each slot it leaves zeroed as `move` leaves it.
+    if i >= 0:
+      dec(t.counter)
+      makeEmpty(i)
+      {.push warning[UnsafeDefault]:off.}
+      reset(t.data[i].key)
+      reset(t.data[i].val)
+      {.pop.}
+      {.push boundChecks: off.}
+      fosTableBackShift(unsafeAddr t.data[0], maxHash(t), i, sizeof(t.data[0]))
+      {.pop.}
+  else:
+    delImplIdxStock(t, i, makeEmpty, cellEmpty, cellHash)
 
 template delImpl(makeEmpty, cellEmpty, cellHash) {.dirty.} =
   var hc: Hash

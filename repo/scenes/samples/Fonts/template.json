@@ -1,6 +1,6 @@
 {
   "name": "Fonts",
-  "description": "The fonts on this frame, each name in its own face, with a specimen of the one you pick.",
+  "description": "The fonts on this frame, each name in its own face, with a specimen of the one you pick, and more to get from a catalog.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

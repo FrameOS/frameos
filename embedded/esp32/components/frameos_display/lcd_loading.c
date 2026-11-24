@@ -69,6 +69,11 @@ int32_t fos_lcd_loading_step(fos_lcd_loading_t *m, uint16_t *scanned, uint32_t n
     return FOS_LCD_LOADING_FRAME_MS;
 }
 
+bool fos_lcd_loading_due(const fos_lcd_loading_t *m, uint32_t now_ms)
+{
+    return m->active && (int32_t)(now_ms - m->since_ms) >= FOS_LCD_LOADING_DELAY_MS;
+}
+
 void fos_lcd_loading_end(fos_lcd_loading_t *m)
 {
     m->active = false;

@@ -123,7 +123,9 @@ def test_an_animation_goes_to_the_backend_once():
     held frames to 115 ms."""
     client = (MAIN_DIR / "fos_client.c").read_text()
     publishes = [m.start() for m in re.finditer(r"link_publish_picture\(scene_id\);", client)]
-    assert len(publishes) == 2, "a new place publishes a picture: ask picture_push_wanted there too"
+    # A render, an animation's summary, and the hold's release (the last tap's
+    # picture, whose hash waited for it: pay_display_state).
+    assert len(publishes) == 3, "a new place publishes a picture: ask picture_push_wanted there too"
     for at in publishes:
         window = client[max(0, at - 400) : at]
         assert "picture_push_wanted(scene_id)" in window, "a picture is published without picture_push_wanted"

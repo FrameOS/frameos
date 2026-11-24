@@ -146,6 +146,8 @@ type
     op: int      # Write position; buf[0 ..< op] is not yet emitted
     emitted: int # Total bytes handed to onData so far
     onData: InflateOnData
+    dict: ptr UncheckedArray[uint8] # A preset dictionary, read in place:
+    dictLen: int                    # the bytes before the output's first
 
 template failStream() =
   raise newException(PixieError, "Invalid buffer, unable to uncompress")
@@ -479,7 +481,20 @@ proc inflateBlockStream(
       ).int
 
       if distance > s.totalOut:
-        failStream()
+        # Back past the output's first byte: into the preset dictionary,
+        # which comes before it. Nothing was emitted yet (a flush leaves a
+        # whole window behind, and a distance reaches no further), so the
+        # output starts at buf[0].
+        let start = s.op - distance
+        if s.emitted != 0 or -start > s.dictLen or s.op + copyLength > s.buf.len:
+          failStream()
+        for i in 0 ..< copyLength:
+          let at = start + i
+          s.buf[s.op + i] =
+            if at < 0: s.dict[s.dictLen + at].char
+            else: s.buf[at]
+        s.op += copyLength
+        continue
 
       # Min match is 3 so leave room to overwrite by 13
       if s.op + copyLength + 13 > s.buf.len:
@@ -528,10 +543,12 @@ proc inflateNoCompressionStream(
 proc inflateStream(
   onData: InflateOnData,
   b: var BitStreamReader,
-  bufLen = inflateBufferSize
+  bufLen = inflateBufferSize,
+  dict: ptr UncheckedArray[uint8] = nil,
+  dictLen = 0
 ) =
   var
-    s = InflateStreamState(buf: newString(bufLen), onData: onData)
+    s = InflateStreamState(buf: newString(bufLen), onData: onData, dict: dict, dictLen: dictLen)
     finalBlock: bool
   while not finalBlock:
     let
@@ -634,7 +651,8 @@ proc uncompressStreamZlib*(
   uncompressStreamZlib(onData, segment)
 
 proc inflateToString(
-  b: var BitStreamReader, zlib: bool, expected: int
+  b: var BitStreamReader, zlib: bool, expected: int,
+  dict: ptr UncheckedArray[uint8] = nil, dictLen = 0
 ): string {.raises: [PixieError].} =
   ## The whole output in one string. `expected`, when known, sizes it once,
   ## and an output smaller than the window is inflated in a buffer of its own
@@ -651,7 +669,7 @@ proc inflateToString(
   if zlib:
     uncompressZlibFrom(onData, b, bufLen)
   else:
-    inflateStream(onData, b, bufLen)
+    inflateStream(onData, b, bufLen, dict, dictLen)
   move output
 
 proc uncompressZlib*(
@@ -668,13 +686,16 @@ proc uncompressZlib*(
   inflateToString(b, true, expected)
 
 proc uncompressDeflate*(
-  src: pointer, len: int, expected = 0
+  src: pointer, len: int, expected = 0, dict: pointer = nil, dictLen = 0
 ): string {.raises: [PixieError].} =
   ## A raw deflate stream (no zlib header or trailer) uncompressed into one
-  ## string; `expected` is the output's length when known.
+  ## string; `expected` is the output's length when known. `dict` is the
+  ## preset dictionary the stream was deflated against (zlib's
+  ## `deflateSetDictionary`), `dictLen` bytes read where they lie: an indexed
+  ## font's raw blocks, for the blocks deflated against them.
   let segment = [InflateSegment(data: cast[ptr UncheckedArray[uint8]](src), len: len)]
   var b = initBitStreamReader(segment)
-  inflateToString(b, false, expected)
+  inflateToString(b, false, expected, cast[ptr UncheckedArray[uint8]](dict), dictLen)
 
 when defined(release):
   {.pop.}

@@ -1,6 +1,7 @@
 /* ST7701S 480x480 RGB LCD (the Seeed SenseCAP Indicator's) and the Sunton
  * ESP32-8048S070's EK9716 800x480. See lcd_st7701s_rgb.h. */
 #include "lcd_st7701s_rgb.h"
+#include "lcd_press.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -237,6 +238,15 @@ static fos_lcd_loading_t s_mark;
 static int s_mark_index = -1;
 static uint32_t s_mark_generation = 0;
 static volatile uint32_t s_presented_at = 0;
+/* A press lit at once (lcd_press.h), under the mark's lock and drawn by
+ * whoever has the press (the touch task), put away by the next present or by
+ * the mark's task once its lift has had its moment. */
+static fos_lcd_press_t s_press;
+static int s_press_index = -1;
+static uint32_t s_press_generation = 0;
+/* When the lit press goes if no picture comes first (esp_timer us, 0 for
+ * while the finger is down). */
+static int64_t s_press_until_us = 0;
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
 static volatile uint32_t s_glitches = 0;
@@ -698,6 +708,8 @@ static uint8_t *writable_back(void)
     return back;
 }
 
+static void press_end_presenting(void);
+
 /* Hand the drawn buffer to the driver once the one handed over before is on
  * the glass (the driver switches to the newest it was given, so handing two
  * over within one frame would skip the first): the refill starts reading it
@@ -717,8 +729,10 @@ static void present_back(void)
     }
     settle_front();
     /* A picture after a switch began is that switch's: the loading mark
-     * goes, from whichever buffer holds it, before this one is on the way. */
+     * goes, from whichever buffer holds it, before this one is on the way.
+     * So does a lit press: this picture is the scene's answer to it. */
     fos_lcd_st7701s_loading_end();
+    press_end_presenting();
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, s_width, s_height, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
      * clear it, so the wait in settle_front is for one that ends after it. */
@@ -847,15 +861,62 @@ static void count_mark_move(const uint16_t *before)
     if (s_mark_index >= 0) s_mark_generation = ++s_generation[s_mark_index];
 }
 
+/* The same for the lit press (count_mark_move). */
+static void count_press_move(const uint16_t *before)
+{
+    if (s_press.drawn_in == before) return;
+    if (s_press_index >= 0 && s_generation[s_press_index] == s_press_generation) s_generation[s_press_index]--;
+    s_press_index = s_press.drawn_in ? buffer_index((const uint8_t *)s_press.drawn_in) : -1;
+    if (s_press_index >= 0) s_press_generation = ++s_generation[s_press_index];
+}
+
+/* With s_mark_lock held. `presenting`: from present_back, on the render
+ * task, which copies from no buffer meanwhile, so the buffer's count goes
+ * back with its pixels. From any other task a render may have been copying
+ * from that buffer while the press came and went (svg_frames.nim checks the
+ * count after a copy): the count stays moved, and the next render into that
+ * buffer draws it whole. */
+static void press_put_back(bool presenting)
+{
+    uint16_t *before = s_press.drawn_in;
+    fos_lcd_press_put_back(&s_press);
+    if (presenting) {
+        count_press_move(before);
+    } else if (before) {
+        s_press_index = -1;
+    }
+    s_press_until_us = 0;
+}
+
+/* present_back's. */
+static void press_end_presenting(void)
+{
+    if (!s_mark_lock || !s_press.drawn_in) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    press_put_back(true);
+    xSemaphoreGive(s_mark_lock);
+}
+
 static void mark_task(void *arg)
 {
     (void)arg;
     while (true) {
         xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+        /* A lifted press whose moment is over, and no picture came. */
+        int32_t press_wait_ms = -1;
+        if (s_press.drawn_in && s_press_until_us > 0) {
+            int64_t left_us = s_press_until_us - esp_timer_get_time();
+            if (left_us <= 0) press_put_back(false);
+            else press_wait_ms = (int32_t)(left_us / 1000) + 1;
+        }
         uint16_t *before = s_mark.drawn_in;
         uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        /* The mark and a press are never up together: the mark (a switch
+         * that takes a while) is the newer news. */
+        if (s_mark.active && s_press.drawn_in && fos_lcd_loading_due(&s_mark, now_ms)) press_put_back(false);
         int32_t wait_ms = fos_lcd_loading_step(&s_mark, scanned_buffer(), now_ms);
         count_mark_move(before);
+        if (s_press.drawn_in && press_wait_ms >= 0 && (wait_ms < 0 || press_wait_ms < wait_ms)) wait_ms = press_wait_ms;
         xSemaphoreGive(s_mark_lock);
         /* Rounded up: a wait of at least 1 ms is at least a tick, never the
          * 0-tick wait that spins. */
@@ -869,25 +930,33 @@ void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark)
     s_mark.draw = mark;
 }
 
+/* The lock and the task the mark and a lit press share, made at the first
+ * of either. */
+static bool mark_task_ready(void)
+{
+    if (s_mark_task) return true;
+    if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
+    if (!s_mark_lock) return false;
+    s_mark.width = s_width;
+    s_mark.height = s_height;
+    if (xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
+                                LCD_MARK_CORE) != pdPASS) {
+        s_mark_task = NULL;
+        return false;
+    }
+    return true;
+}
+
 void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
 {
     if (!s_ready || s_splash_on || !s_mark.draw) return;
-    if (!s_mark_task) {
-        /* The first switch: room for the pixels, the lock and the task. */
-        if (!s_mark.saved) {
-            s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
-        if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
-        if (!s_mark.saved || !s_mark_lock ||
-            xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
-                                    LCD_MARK_CORE) != pdPASS) {
-            s_mark_task = NULL;
-            return;
-        }
+    if (!s_mark.saved) {
+        /* The first switch: room for the pixels under the mark. */
+        s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_mark.saved) return;
         s_mark.saved_words = LCD_MARK_SAVED_WORDS;
-        s_mark.width = s_width;
-        s_mark.height = s_height;
     }
+    if (!mark_task_ready()) return;
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
     uint16_t *before = s_mark.drawn_in;
     bool begun = fos_lcd_loading_begin(&s_mark, rotation, since_tick * portTICK_PERIOD_MS);
@@ -906,6 +975,51 @@ void fos_lcd_st7701s_loading_end(void)
     uint16_t *before = s_mark.drawn_in;
     fos_lcd_loading_end(&s_mark);
     count_mark_move(before);
+    xSemaphoreGive(s_mark_lock);
+}
+
+/* ------------------------------------------------------- a lit press */
+
+void fos_lcd_st7701s_press_begin(int x0, int y0, int x1, int y1)
+{
+    if (!s_ready || s_splash_on || s_updating) return;
+    if (!s_press.saved) {
+        /* The first press: room for the biggest box lit (a quarter of the
+         * panel), in PSRAM. */
+        size_t words = (size_t)s_width * (size_t)s_height * FOS_LCD_PRESS_MAX_SHARE_PERCENT / 100u;
+        s_press.saved = heap_caps_malloc(words * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_press.saved) return;
+        s_press.saved_words = words;
+        s_press.width = s_width;
+        s_press.height = s_height;
+    }
+    if (!mark_task_ready()) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    /* Not over the loading mark: the switch it says is the newer news. */
+    if (!s_mark.drawn_in) {
+        /* One already up (another box, another buffer) is put back from this
+         * task: its buffer's count stays moved. */
+        press_put_back(false);
+        fos_lcd_press_draw(&s_press, scanned_buffer(), x0, y0, x1, y1);
+        count_press_move(NULL);
+    }
+    xSemaphoreGive(s_mark_lock);
+}
+
+void fos_lcd_st7701s_press_release(int linger_ms)
+{
+    if (!s_mark_lock || !s_press.drawn_in) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    if (s_press.drawn_in) s_press_until_us = esp_timer_get_time() + (int64_t)linger_ms * 1000;
+    xSemaphoreGive(s_mark_lock);
+    xTaskNotifyGive(s_mark_task);
+}
+
+void fos_lcd_st7701s_press_end(void)
+{
+    if (!s_mark_lock || !s_press.drawn_in) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    press_put_back(false);
     xSemaphoreGive(s_mark_lock);
 }
 
@@ -1201,6 +1315,15 @@ void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
     (void)rotation;
 }
 void fos_lcd_st7701s_loading_end(void) {}
+void fos_lcd_st7701s_press_begin(int x0, int y0, int x1, int y1)
+{
+    (void)x0;
+    (void)y0;
+    (void)x1;
+    (void)y1;
+}
+void fos_lcd_st7701s_press_release(int linger_ms) { (void)linger_ms; }
+void fos_lcd_st7701s_press_end(void) {}
 esp_err_t fos_lcd_st7701s_backlight(bool on)
 {
     (void)on;

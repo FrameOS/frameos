@@ -81,6 +81,9 @@
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
 
+/* The one external copy of fos_mem.h's inline fos_big_malloc. */
+extern inline void *fos_big_malloc(size_t size);
+
 static const char *TAG = "frameos";
 
 #define WIFI_CONNECT_TIMEOUT_MS 45000
@@ -213,7 +216,10 @@ static void scene_state_writer_task(void *arg)
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-        if (!fos_client_input_held()) fos_scene_state_flush(fos_scene_state_crowded());
+        if (!fos_client_input_held()) {
+            fos_scene_state_flush(fos_scene_state_crowded());
+            fos_scenes_flush_marks();
+        }
     }
 }
 
@@ -288,6 +294,7 @@ static void boot_splash_wait(void)
 static void scene_state_flush_on_restart(void)
 {
     fos_scene_state_flush(true);
+    fos_scenes_flush_marks();
 }
 
 static void scene_state_write_behind(void)
@@ -598,6 +605,9 @@ void app_main(void)
         fos_assets_cleanup_stale_uploads();
     }
     boot_splash_start();
+    /* The IT8951 comes up while Wi-Fi joins, not after the first render; not
+     * on a timer's wake, whose picture may well be unchanged (no refresh). */
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) fos_display_warm_up();
     fos_client_wake_mark_begin();
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit

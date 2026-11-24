@@ -133,6 +133,10 @@ void fos_scenes_request_sync(void);
 /* Queue a scene switch. Safe from any task; the render task applies it before
  * the next render so Nim/QuickJS scene state stays single-threaded. */
 esp_err_t fos_scenes_select(const char *scene_id);
+/* Writes the scene marks a switch on the render task left owed (last_scene,
+ * pending_scene) in one NVS commit: the state writer's, and before a deep
+ * sleep or a restart. */
+void fos_scenes_flush_marks(void);
 
 /* Apply a queued scene switch. Render task only. True if selection changed. */
 bool fos_scenes_apply_pending_selection(void);

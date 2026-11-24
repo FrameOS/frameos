@@ -69,6 +69,30 @@ if(NIM_GENERATED_SRCS)
             endif()
         endforeach()
     endforeach()
+    # One copy of each function the archive holds more than once: Nim's
+    # hooks of types with the same shape and generics made again per module,
+    # renamed to one name and made weak, so the link keeps one
+    # (tools/fold_identical_code.py, about 20 KB; docs/esp32-image-size.md).
+    # Run on the archive as it is made, so every link reads it folded. The
+    # hot modules keep their own copies.
+    idf_build_get_property(fold_python PYTHON)
+    set(fold_keep "")
+    foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
+        list(APPEND fold_keep "--keep=${hot}")
+    endforeach()
+    add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+        COMMAND "${fold_python}" "${CMAKE_CURRENT_LIST_DIR}/../../tools/fold_identical_code.py"
+                --objcopy "${CMAKE_OBJCOPY}" --ar "${CMAKE_AR}" ${fold_keep}
+                "$<TARGET_FILE:${COMPONENT_LIB}>"
+        VERBATIM)
+    # The hand-written C that stands among the shell's objects (link_order.txt)
+    # calls ROM and IRAM through the shell's veneers (main/fos_veneers.h,
+    # test_esp32_veneers.py). None of it is IRAM code; fos_rows.c, whose
+    # helper runs on the other core beside the raster loops, stays out.
+    if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+        set_property(SOURCE "frameos_nim_glue.c" "fos_netguard.c" "fos_js_io.c" "fos_log_ring.c"
+            APPEND PROPERTY COMPILE_OPTIONS "-include" "${CMAKE_CURRENT_LIST_DIR}/../../main/fos_veneers.h")
+    endif()
 else()
     # fos_netguard.c is in both branches on purpose: fos_cloud.c arms the
     # private-network policy unconditionally, so a thin-client image that

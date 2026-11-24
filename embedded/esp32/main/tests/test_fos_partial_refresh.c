@@ -276,6 +276,34 @@ static void test_a_controller_that_keeps_the_picture_counts_updates(void)
     CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_FULL_GHOSTS);
 }
 
+static void test_a_controller_that_keeps_the_picture_takes_any_change_while_tapping(void)
+{
+    /* The IT8951: a page turned by a tap goes up as one DU, not a GC16 of the
+     * whole panel that flashes; the greys it halftoned settle afterwards. */
+    fos_partial_refresh_input_t input = a_small_change();
+    input.counted = false;
+    input.controller_keeps = true;
+    input.input_recent = true;
+    input.changed_bytes = input.total_bytes;
+    CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_PARTIAL);
+    /* A new scene someone switched to, too. */
+    input.same_scene = false;
+    CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_PARTIAL);
+    /* Nobody tapping: half the panel or more is the slow way, as before. */
+    input.same_scene = true;
+    input.input_recent = false;
+    CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_FULL_CHANGED);
+    /* Its own count still ends a long session with a full refresh. */
+    input.input_recent = true;
+    input.partials_since_full = FOS_PARTIAL_MAX_WHILE_INPUT;
+    CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_FULL_GHOSTS);
+    /* A panel whose glass the display layer copies (the Sticky) keeps the rule. */
+    input = a_small_change();
+    input.input_recent = true;
+    input.changed_bytes = input.total_bytes;
+    CHECK(fos_partial_refresh_kind(&input) == FOS_REFRESH_FULL_CHANGED);
+}
+
 static void test_a_tile_count_saturates(void)
 {
     fos_ghost_t ghost;
@@ -302,6 +330,7 @@ int main(void)
     test_a_worn_quarter_is_due_tapping_or_not();
     test_pages_of_text_flash_every_fifth();
     test_a_controller_that_keeps_the_picture_counts_updates();
+    test_a_controller_that_keeps_the_picture_takes_any_change_while_tapping();
     test_a_tile_count_saturates();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

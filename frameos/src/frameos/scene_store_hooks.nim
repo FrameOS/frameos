@@ -1,6 +1,7 @@
 ## The scene store's hooks (docs/scene-store.md): what a JS app reads with
 ## `frameos.store()` and asks with `frameos.storeAction(action, args)`. The
-## Scene store sample scene is the app that uses them; any app may.
+## Scene store sample scene is the app that uses them; any app may. The
+## frame page (system/sceneSettings) reads `updates` and asks `updateAll`.
 ##
 ## The host has the facts and does the work, off the render task: the Pi's
 ## frameos/scene_store_linux.nim, the ESP32's main/fos_store.c through
@@ -19,14 +20,16 @@ type
     ## done: the last action that worked ("uptodate": an update with nothing
     ## newer), installed: [{id, store, v}] (every scene on
     ## the frame that came from the store: its runtime id, store scene id and
-    ## version), preview: {store, id, name} or null, removeAny: a scene not
+    ## version), preview: {store, id, name} or null, updates: the control
+    ## plane's [{store, name, from, to, owner?}] as it answered `updates`
+    ## (absent with no plane and until it answers), removeAny: a scene not
     ## from the store may be removed too (a frame with no control plane),
     ## previewOnly: the browser preview's host, which installs nothing}.
     ## `asker` is the scene reading: news redraws it while it shows.
   SceneStoreAction* = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].}
     ## `args` is a JSON object's text. preview {store, name, show},
-    ## install {store, name, show}, update {store or id}, remove {store or
-    ## id}, discard. `show: false` keeps the scene showing (a preview of a
+    ## install {store, name, show}, update {store or id}, updateAll (the
+    ## plane's, one push), remove {store or id}, discard. `show: false` keeps the scene showing (a preview of a
     ## layout, which every scene then wears: docs/scene-store.md "Trying a
     ## layout"). One at a time: an action while one runs is dropped. The
     ## host asks for a render of `asker` when what it knows changed.

@@ -404,6 +404,29 @@ proc parsePathCached(d: string): Path {.raises: [PixieError].} =
     pathCacheChars -= pathCache[0][0].len
     pathCache.delete(0)
 
+type SvgAttr = enum
+  ## The attributes parseSvgProperties reads, a slot each.
+  saFillRule, saFill, saStroke, saStrokeWidth, saStrokeLineCap, saStrokeLineJoin,
+  saStrokeMiterLimit, saStrokeDashArray, saTransform, saStyle, saDisplay,
+  saOpacity, saFillOpacity, saStrokeOpacity, saFontFamily, saFontSize,
+  saFontWeight, saFontStyle, saTextAnchor, saBaseline
+
+const
+  svgAttrNames: array[SvgAttr, string] = ["fill-rule", "fill", "stroke",
+    "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-dasharray", "transform", "style", "display", "opacity",
+    "fill-opacity", "stroke-opacity", "font-family", "font-size", "font-weight",
+    "font-style", "text-anchor", "dominant-baseline"]
+  svgStyleNames: array[SvgAttr, string] = ["fill-rule", "fill", "stroke",
+    "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-dasharray", "", "", "display", "opacity",
+    "fillOpacity", "strokeOpacity", "font-family", "font-size", "font-weight",
+    "font-style", "text-anchor", "dominant-baseline"]
+    ## The key a style="" pair sets each by ("": none; the opacities in camel
+    ## case, as pixie has always read them), "alignment-baseline" the
+    ## baseline's too. One table and a loop, not a variable and a branch an
+    ## attribute: 2 KB of an ESP32's flash.
+
 proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties =
   result = inherited
   result.isRect = false
@@ -411,29 +434,11 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
   result.imageClip = false
   result.imagePixelated = false
 
-  var
-    fillRule = node.attr("fill-rule")
-    fill = node.attr("fill")
-    stroke = node.attr("stroke")
-    strokeWidth = node.attr("stroke-width")
-    strokeLineCap = node.attr("stroke-linecap")
-    strokeLineJoin = node.attr("stroke-linejoin")
-    strokeMiterLimit = node.attr("stroke-miterlimit")
-    strokeDashArray = node.attr("stroke-dasharray")
-    transform = node.attr("transform")
-    style = node.attr("style")
-    display = node.attr("display")
-    opacity = node.attr("opacity")
-    fillOpacity = node.attr("fill-opacity")
-    strokeOpacity = node.attr("stroke-opacity")
-    fontFamily = node.attr("font-family")
-    fontSize = node.attr("font-size")
-    fontWeight = node.attr("font-weight")
-    fontStyle = node.attr("font-style")
-    textAnchor = node.attr("text-anchor")
-    baseline = node.attrOrDefault(
-      "dominant-baseline", node.attr("alignment-baseline")
-    )
+  var a: array[SvgAttr, string]
+  for k in SvgAttr:
+    a[k] = node.attr(svgAttrNames[k])
+  if a[saBaseline].len == 0:
+    a[saBaseline] = node.attr("alignment-baseline")
 
   when defined(pixieDebugSvg):
     proc maybeLogPair(k, v: string) =
@@ -454,72 +459,46 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
       maybeLogPair(k, v)
 
   # Most elements have no style: splitting "" still allocates a seq.
-  let pairs = if style.len > 0: style.split(';') else: @[]
+  let pairs = if a[saStyle].len > 0: a[saStyle].split(';') else: @[]
   for pair in pairs:
     let parts = pair.split(':')
     if parts.len == 2:
       # Do not override element properties
-      case parts[0].strip():
-      of "fill-rule":
-        if fillRule.len == 0:
-          fillRule = parts[1].strip()
-      of "fill":
-        if fill.len == 0:
-          fill = parts[1].strip()
-      of "stroke":
-        if stroke.len == 0:
-          stroke = parts[1].strip()
-      of "stroke-linecap":
-        if strokeLineCap.len == 0:
-          strokeLineCap = parts[1].strip()
-      of "stroke-linejoin":
-        if strokeLineJoin.len == 0:
-          strokeLineJoin = parts[1].strip()
-      of "stroke-width":
-        if strokeWidth.len == 0:
-          strokeWidth = parts[1].strip()
-      of "stroke-miterlimit":
-        if strokeMiterLimit.len == 0:
-          strokeMiterLimit = parts[1].strip()
-      of "stroke-dasharray":
-        if strokeDashArray.len == 0:
-          strokeDashArray = parts[1].strip()
-      of "display":
-        if display.len == 0:
-          display = parts[1].strip()
-      of "opacity":
-        if opacity.len == 0:
-          opacity = parts[1].strip()
-      of "fillOpacity":
-        if fillOpacity.len == 0:
-          fillOpacity = parts[1].strip()
-      of "strokeOpacity":
-        if strokeOpacity.len == 0:
-          strokeOpacity = parts[1].strip()
-      of "font-family":
-        if fontFamily.len == 0:
-          fontFamily = parts[1].strip()
-      of "font-size":
-        if fontSize.len == 0:
-          fontSize = parts[1].strip()
-      of "font-weight":
-        if fontWeight.len == 0:
-          fontWeight = parts[1].strip()
-      of "font-style":
-        if fontStyle.len == 0:
-          fontStyle = parts[1].strip()
-      of "text-anchor":
-        if textAnchor.len == 0:
-          textAnchor = parts[1].strip()
-      of "dominant-baseline", "alignment-baseline":
-        if baseline.len == 0:
-          baseline = parts[1].strip()
-      else:
+      let key = parts[0].strip()
+      var known = false
+      for k in SvgAttr:
+        if svgStyleNames[k].len > 0 and (key == svgStyleNames[k] or
+            (k == saBaseline and key == "alignment-baseline")):
+          known = true
+          if a[k].len == 0:
+            a[k] = parts[1].strip()
+          break
+      if not known:
         when defined(pixieDebugSvg):
           maybeLogPair(parts[0], parts[1])
     elif pair.len > 0:
       when defined(pixieDebugSvg):
         echo "Invalid style pair: ", pair
+
+  template fillRule: untyped = a[saFillRule]
+  template fill: untyped = a[saFill]
+  template stroke: untyped = a[saStroke]
+  template strokeWidth: untyped = a[saStrokeWidth]
+  template strokeLineCap: untyped = a[saStrokeLineCap]
+  template strokeLineJoin: untyped = a[saStrokeLineJoin]
+  template strokeMiterLimit: untyped = a[saStrokeMiterLimit]
+  template strokeDashArray: untyped = a[saStrokeDashArray]
+  template transform: untyped = a[saTransform]
+  template display: untyped = a[saDisplay]
+  template opacity: untyped = a[saOpacity]
+  template fillOpacity: untyped = a[saFillOpacity]
+  template strokeOpacity: untyped = a[saStrokeOpacity]
+  template fontFamily: untyped = a[saFontFamily]
+  template fontSize: untyped = a[saFontSize]
+  template fontWeight: untyped = a[saFontWeight]
+  template fontStyle: untyped = a[saFontStyle]
+  template textAnchor: untyped = a[saTextAnchor]
+  template baseline: untyped = a[saBaseline]
 
   if display.len > 0:
     result.display = display.strip() != "none"
@@ -1144,6 +1123,9 @@ proc movedBy(element: SvgElement, d: Vec2): SvgElement =
   props.transform[2, 1] += d.y
   SvgElement(path: element.path, props: props, bounds: rect(0, 0, -1, -1))
 
+when defined(testing):
+  var svgNodesParsedForTest* = 0 ## nodes parseSvgElement read (FrameOS's tests)
+
 proc parseViewportChildren(
   node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
   elements: var seq[SvgElement]
@@ -1202,6 +1184,8 @@ proc parseSvgElement(
 ) =
   if node.isText:
     return
+  when defined(testing):
+    inc svgNodesParsedForTest
 
   case node.tag:
   of "title", "desc":

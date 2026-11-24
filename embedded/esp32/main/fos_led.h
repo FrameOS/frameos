@@ -30,5 +30,10 @@ void fos_led_set(bool on);
 /* Hold the LED lit (the voice chat's recording) or let it go back to the
  * notes. Idempotent; safe from any task. */
 void fos_led_hold(bool held);
+/* Lit while a press on e-paper is being answered (fos_client.c), from the
+ * touch task's moment of contact to the waveform that draws the answer: the
+ * glass takes a while, the LED says the press was heard. Safe from any
+ * task. */
+void fos_led_busy(bool busy);
 /* True when the live config names an LED on a pin this firmware may drive. */
 bool fos_led_present(void);

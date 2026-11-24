@@ -144,6 +144,12 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # CONFIG_MBEDTLS_X509_CSR_PARSE_C is not set
 # CONFIG_MBEDTLS_PKCS7_C is not set
 # CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS is not set
+# Nor the Digital Signature peripheral (2.8K: esp_ds, the RSA-alt signer and
+# the HMAC/DS HAL): a TLS client key only comes from it when a connection is
+# given ds_data, and nothing in the firmware gives one.
+# (ALPN cannot go the same way: esp_http_client calls the ALPN setter
+# whatever CONFIG_MBEDTLS_SSL_ALPN says, and the link fails without it.)
+# CONFIG_ESP_TLS_USE_DS_PERIPHERAL is not set
 
 # Wi-Fi a frame does not use (11.6K of image): WPA3 on its own setup hotspot
 # (that is WPA2-PSK, fos_wifi.c), WPA3 public-key (SAE-PK) networks, and OWE
@@ -153,6 +159,13 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # CONFIG_ESP_WIFI_ENABLE_SAE_PK is not set
 # CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
 # CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
+
+# No termios (4.0K of image): tcgetattr/tcsetattr, the UART and
+# USB-Serial/JTAG drivers' versions of them and the UART getters only they
+# called. Nothing in the firmware sets a
+# terminal mode: fos_console.c reads both drivers itself, and the baud rate is
+# CONFIG_ESP_CONSOLE_UART_BAUDRATE's.
+# CONFIG_VFS_SUPPORT_TERMIOS is not set
 
 # Wi-Fi provisioning portal posts can carry long headers/forms
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

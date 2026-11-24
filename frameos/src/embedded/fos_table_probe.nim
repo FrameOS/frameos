@@ -75,4 +75,25 @@ proc fosTableRehash*(old: pointer, oldLen: int, fresh: pointer, freshLen,
       copyMem(slotAt(fresh, h, slotSize), source, slotSize)
   zeroMem(old, oldLen * slotSize)
 
+proc fosTableBackShift*(data: pointer, mask, victim, slotSize: int) {.noinline, raises: [].} =
+  ## std/tables' back-shift delete (tableimpl's delImplIdx), once the slot
+  ## `victim` was emptied: each slot of the cluster after it whose home is not
+  ## between the hole and itself moves into the hole, as a copy, and the slot
+  ## it leaves is zeroed, which is what `move` leaves (an empty slot's key
+  ## and value are never read, and destroying zeroes frees nothing).
+  var
+    hole = victim
+    i = victim
+  while true:
+    i = (i + 1) and mask
+    let hc = hcodeAt(slotAt(data, i, slotSize))
+    if hc == 0:
+      return
+    let home = hc and mask
+    if (i >= home and home > hole) or (home > hole and hole > i) or (hole > i and i >= home):
+      continue
+    copyMem(slotAt(data, hole, slotSize), slotAt(data, i, slotSize), slotSize)
+    zeroMem(slotAt(data, i, slotSize), slotSize)
+    hole = i
+
 {.pop.}
