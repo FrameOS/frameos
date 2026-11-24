@@ -267,6 +267,19 @@ static bool s_last_refresh_skipped = false;
 /* The scene whose picture is on the glass: a new one gets a full refresh. */
 static char s_refresh_scene_id[128] = "";
 static fos_display_state_t s_display_state;
+/* While somebody taps an e-paper with a partial waveform, the hash of each
+ * picture is not written to flash after its update (an NVS commit, 12 ms with
+ * the cache off on both cores, every tap), and where the controller keeps the
+ * picture (the IT8951) it is not even worked out: a SHA-256 of 1.3 MB was 40
+ * ms between the render and the upload (2026-11-24), and the controller's
+ * tile digests skip an unchanged picture anyway. What is owed is written once
+ * the tapping stops (the input hold's release) and before a deep sleep
+ * (pay_display_state). Flash holds no hash in between (erased at the first
+ * picture that owes one): a reset meanwhile refreshes the first picture after
+ * it instead of skipping it under a hash of one the glass no longer shows. */
+static bool s_display_state_owed = false;
+static uint32_t s_display_state_owed_render = 0;
+static bool s_display_state_in_flash = true; /* not known at boot: as if */
 
 static void load_display_state(void);
 
@@ -693,7 +706,10 @@ static void save_display_state(const fos_display_state_t *state)
     nvs_close(nvs);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "display state save failed: %s", esp_err_to_name(err));
+        return;
     }
+    s_display_state_in_flash = true;
+    s_display_state_owed = false;
 }
 
 static bool should_keep_packed_snapshot(size_t len)
@@ -2597,15 +2613,50 @@ static bool notice_dismissal_due(void)
 /* The panel shows something no stored hash describes (the render plus a
  * code): the next render must refresh even when the scene did not change,
  * here and after a reboot. */
+static void erase_display_state(void)
+{
+    s_display_state_owed = false;
+    if (!display_state_persists() || !s_display_state_in_flash) return;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    esp_err_t err = nvs_erase_key(nvs, "display_state");
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) s_display_state_in_flash = false;
+}
+
 static void forget_display_state(void)
 {
     s_display_state_loaded = true;
     s_display_state_valid = false;
-    if (!display_state_persists()) return;
-    nvs_handle_t nvs;
-    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
-    if (nvs_erase_key(nvs, "display_state") == ESP_OK) nvs_commit(nvs);
-    nvs_close(nvs);
+    erase_display_state();
+}
+
+/* A picture went up while somebody taps (s_display_state_owed): its hash is
+ * written later. The first one of a session takes the old hash off flash. */
+static void owe_display_state(void)
+{
+    if (!s_display_state_owed) {
+        erase_display_state();
+        s_display_state_owed = true;
+    }
+    s_display_state_owed_render = s_render_count + 1; /* this render's, once counted */
+}
+
+/* What the taps owed: the hash of the picture on the glass, worked out now
+ * if it was not (the snapshot is that picture while no render came since),
+ * and written. Nobody is tapping: the 40 ms and the flash write are free. */
+static void pay_display_state(void)
+{
+    if (!s_display_state_owed) return;
+    s_display_state_owed = false;
+    if (!s_display_state_valid) {
+        fos_display_state_t state;
+        if (s_last_frame_render_count != s_display_state_owed_render || !snapshot_display_state(&state)) return;
+        s_display_state = state;
+        s_display_state_valid = true;
+    }
+    save_display_state(&s_display_state);
 }
 
 /* ---------------------------------------------------------- the wake mark */
@@ -3060,6 +3111,14 @@ static esp_err_t render_once(bool quiet)
 
     tl_scene_us = esp_timer_get_time();
     int64_t framebuffer_ms = (tl_scene_us - start) / 1000;
+    if (fos_display_present() && !fos_display_is_lcd()) {
+        /* Where the render changed the canvas, for a controller that hashes
+         * the picture to find what to send (fos_display_hint_damage); a pull
+         * or a render that cannot say could have written anywhere. */
+        int dx = 0, dy = 0, dw = -1, dh = -1;
+        if (!(err == ESP_OK && local_render && frameos_nim_render_damage(&dx, &dy, &dw, &dh))) dw = dh = -1;
+        fos_display_hint_damage(dx, dy, dw, dh);
+    }
     if (!quiet) {
         log_render_event("render:framebuffer", scene_id, scene_name,
                          err == ESP_OK ? "rendered" : "error", "framebuffer",
@@ -3082,9 +3141,13 @@ static esp_err_t render_once(bool quiet)
     /* A 304 brought no picture: `buf` holds whatever it held, and the panel
      * keeps the one it shows. */
     fos_display_state_t rendered_state;
+    /* Somebody tapping an e-paper with a partial waveform: the hash waits
+     * (s_display_state_owed), and is not even worked out where the
+     * controller keeps the picture and skips an unchanged one itself. */
+    bool state_waits = local_render && fos_display_supports_partial() && fos_input_hold_engaged(&s_input_hold);
     /* A version 2 pull checked the buffer against the plane's hash already. */
     bool rendered_state_valid = err == ESP_OK && !pulled_unchanged && fos_display_present() &&
-        !fos_display_is_lcd() &&
+        !fos_display_is_lcd() && !(state_waits && fos_display_keeps_picture()) &&
         display_state_for_buffer_sha(buf, buf_len, width, height, format,
                                      !local_render && pull.sha_checked ? pull.sha256 : NULL, &rendered_state);
     bool skipped_refresh = false;
@@ -3178,6 +3241,15 @@ static esp_err_t render_once(bool quiet)
                 }
                 s_last_refresh_skipped = false;
                 forget_display_state();
+                /* Taken off the canvas, still on the glass: the next update
+                 * hashes the whole picture, not a render's box. */
+                fos_display_hint_forget();
+            } else if (err == ESP_OK && state_waits) {
+                /* Written when the tapping stops (pay_display_state). */
+                if (rendered_state_valid) s_display_state = rendered_state;
+                s_display_state_valid = rendered_state_valid;
+                s_last_refresh_skipped = false;
+                owe_display_state();
             } else if (err == ESP_OK && rendered_state_valid) {
                 s_display_state = rendered_state;
                 s_display_state_valid = true;
@@ -3674,14 +3746,18 @@ static bool input_takes_over(void)
 /* What the input hold put off, once. One round trip at a time, so a tap waits
  * for one at the most. */
 /* The greys a tapping session drew as a halftone, from the canvas as it is:
- * the scene is not run again for this. */
-static void settle_panel(void)
+ * the scene is not run again for this. `fast`: what the check after a tap's
+ * waveform found outside its render's box (fos_display_followup_due), in the
+ * tap's own waveform. */
+static void settle_panel(bool fast)
 {
     uint8_t *buf = NULL;
     size_t len = 0;
     if (frameos_nim_repack_alloc(&buf, &len, (int)fos_display_format()) != 0 || !buf) return;
     bool partial = false;
-    esp_err_t err = fos_display_update(buf, len, true, false, &partial);
+    /* The canvas as the last update left it: nothing new in it. */
+    fos_display_hint_damage(0, 0, 0, 0);
+    esp_err_t err = fos_display_update(buf, len, true, fast, &partial);
     if (err != ESP_OK) ESP_LOGW(TAG, "settling the panel failed: %s", esp_err_to_name(err));
     fos_framebuffer_release(buf);
 }
@@ -4147,6 +4223,9 @@ static void client_task(void *arg)
             s_pass_deep_sleep = deep_sleep_now;
             s_pass_sleep_held_by_input = power.deep_sleep && !deep_sleep_now;
             s_pass_usb_power = power_in.usb_power;
+            /* On USB the IT8951 is never put in standby between taps: its
+             * first waveform after one is 300 ms longer. */
+            fos_display_keep_controller_awake(s_pass_usb_power == 1);
             /* The backend round trips leave this task while the frame stays
              * awake; a frame about to sleep, and a boot's first pass, do
              * them here (the link task, above). */
@@ -4441,6 +4520,7 @@ static void client_task(void *arg)
         if (deep_sleep_now && fos_input_hold_engaged(&s_input_hold)) {
             /* Going dark: there is no quiet to wait for. */
             s_input_hold = (fos_input_hold_t){0};
+            pay_display_state();
             run_held_network(config);
             if (fos_client_render_pending()) {
                 xEventGroupClearBits(s_events, RENDER_NOW_BIT);
@@ -4624,6 +4704,9 @@ static void client_task(void *arg)
             /* USB console drops in deep sleep; that's the point (battery).
              * What the log ring still holds goes out first. */
             fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
+            /* The picture's hash the taps put off: the first render after the
+             * wake skips the refresh when nothing changed. */
+            pay_display_state();
             fos_display_park();
             /* A scene payload the store task is still writing goes to flash
              * first: the next boot loads what is on flash. */
@@ -4684,11 +4767,20 @@ static void client_task(void *arg)
             if (esp_timer_get_time() >= wait_until_us && fos_display_refreshing()) {
                 slice_until_us = esp_timer_get_time() + 250000;
             }
-            if (frameos_nim_available() && fos_display_settle_due(esp_timer_get_time())) settle_panel();
+            /* Not under a finger or with a press queued: the settle's GC16 is
+             * 580 ms a tap landing meanwhile would wait out, and the press's
+             * own picture is on its way. Neither is the clean and the park. */
+            bool touching = fos_touch_finger_down() || input_queued();
+            if (frameos_nim_available() && !touching && fos_display_settle_due(esp_timer_get_time())) {
+                settle_panel(false);
+            }
+            /* What the check after a tap's waveform found outside its render's
+             * box goes up now, not with the next tap. */
+            if (frameos_nim_available() && !input_queued() && fos_display_followup_due()) settle_panel(true);
             /* The chrome a tap's frames left as it was (its clock came due while
              * someone tapped): drawn now that they stopped. */
             if (frameos_nim_available() && !input_hold_on() && frameos_nim_chrome_owed()) fos_client_render_now();
-            fos_display_park_if_idle(esp_timer_get_time());
+            if (!touching) fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
                     LINK_BIT | RESTART_NOTICE_BIT,
@@ -4760,6 +4852,16 @@ static void client_task(void *arg)
             /* Nobody has touched it for a while: what the input hold put
              * off, and whatever that brought is picked up below. */
             if (fos_input_hold_release(&s_input_hold, esp_timer_get_time())) {
+                /* The last tap's picture and its hash: on flash now, and to the
+                 * backend, which a picture without one was not pushed to. */
+                bool owed_state = s_display_state_owed;
+                pay_display_state();
+                if (owed_state && s_link_on && s_display_state_valid && renders_locally(config)) {
+                    char scene_id[128];
+                    char scene_name[128];
+                    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+                    if (picture_push_wanted(scene_id)) link_publish_picture(scene_id);
+                }
                 run_held_network(config);
                 if (fos_client_render_pending()) {
                     xEventGroupClearBits(s_events, RENDER_NOW_BIT);

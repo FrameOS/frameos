@@ -930,7 +930,12 @@
   (`fos_display_park`). The IT8951 (the reTerminal E1003) keeps the picture
   itself: `it8951.c` hashes tiles of the packed buffer and the table's
   `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
-  not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
+  not fit an 8 MB board. Before a tap's upload it hashes only the render's box
+  (`fos_display_hint_damage`, from `frameos_nim_render_damage`) and the whole
+  picture once the waveform runs: a new way onto the glass or into the canvas
+  that is not the render's own update goes through `fos_display_blit` /
+  `fos_display_quick_update` or calls `fos_display_hint_forget`, or its pixels
+  go up a waveform late (logged `changed outside the render's box`). Only GC16 (greys) and DU (pure black and white) draw
   on its waveform file: while someone taps, and for pictures coming quickly
   (`fos_pictures_fast`: an animation, a clock's seconds), it is one DU over
   all that changed, greys as a halftone, and GC16 once they stop
