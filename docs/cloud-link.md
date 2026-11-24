@@ -228,6 +228,13 @@ usual. The approved poll response carries the new `scope` and **no**
 without this owner approval: a linked client must not be able to escalate
 its own privileges silently.
 
+The rule holds in the other direction too: **a provider grants from what was
+asked for and never adds to it.** The `scope` in a token answer, an approved
+poll or an `updated` answer is cut down to the scopes that request named
+before it is stored (the backend keeps them beside the pending device code,
+`cloud_backend_link.requested_scope`), so a provider cannot switch on cloud
+login or a telemetry scope by answering with it.
+
 `grants` response shape:
 
 ```json

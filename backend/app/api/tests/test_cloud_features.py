@@ -225,3 +225,62 @@ async def test_logout_without_cloud_identity_has_no_cloud_url(async_client, db):
     response = await async_client.post("/api/logout")
     assert response.status_code == 200
     assert response.json()["cloud_logout_url"] is None
+
+
+# -- a provider grants from what was asked, it does not add --------------------
+
+@pytest.mark.asyncio
+async def test_an_approval_never_adds_a_scope_this_install_did_not_ask_for(async_client, db, scope_calls):
+    """Asked for backups only; the provider answers with cloud login and a
+    telemetry scope on top (its account would get a local session, the
+    install would start sending logs). Only what was asked for is kept."""
+    calls, responses = scope_calls
+    make_connected_link(db, scope="backend:link backend:read")
+    responses["set_scopes"] = (
+        200,
+        {"status": "approval_required", "device_code": "upgrade-device-9", "user_code": "WXYZ-9999", "expires_in": 600},
+    )
+    response = await async_client.post("/api/cloud/features", json={"scopes": ["backup:assets"]})
+    assert response.status_code == 200, response.text
+    asked = calls["set_scopes"][0][2]
+    assert "backup:assets" in asked and "auth:login" not in asked
+
+    responses["poll"] = (
+        200,
+        {
+            "status": "approved",
+            "scope": "backend:link backend:read backup:assets auth:login telemetry:logs remote:access made:up",
+            "linked_client_id": "lc-1",
+        },
+    )
+    data = (await async_client.post("/api/cloud/poll")).json()
+    assert data.get("upgrade") is None
+    assert data["link"]["scopes"] == ["backend:link", "backend:read", "backup:assets"]
+    link = db.query(CloudBackendLink).first()
+    assert link.requested_scope is None and link.device_code is None
+
+
+@pytest.mark.asyncio
+async def test_a_removal_answered_with_more_keeps_only_what_was_sent(async_client, db, scope_calls):
+    _calls, responses = scope_calls
+    link = make_connected_link(db)
+    responses["set_scopes"] = (
+        200,
+        {"status": "updated", "scope": "backend:link backend:read auth:login telemetry:metrics store:publish"},
+    )
+    data = (await async_client.post("/api/cloud/features", json={"scopes": []})).json()
+    assert data["link"]["scopes"] == ["backend:link", "backend:read", "store:publish"]
+    # Cloud login did not survive, so the password comes back.
+    db.refresh(link)
+    assert link.local_fallback_enabled is True
+
+
+@pytest.mark.asyncio
+async def test_a_change_pending_from_before_the_request_was_kept_adds_nothing(async_client, db, scope_calls):
+    _calls, responses = scope_calls
+    link = make_connected_link(db, scope="backend:link backend:read")
+    link.device_code = "upgrade-device-old"
+    db.commit()
+    responses["poll"] = (200, {"status": "approved", "scope": "backend:link backend:read auth:login"})
+    data = (await async_client.post("/api/cloud/poll")).json()
+    assert data["link"]["scopes"] == ["backend:link", "backend:read"]

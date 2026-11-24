@@ -171,8 +171,19 @@ def _effective_provider_url(link: CloudBackendLink | None) -> str | None:
     return cloud.default_cloud_provider_url()
 
 
+def _granted_scope(answered: object, requested: str | None) -> str:
+    """The scopes an approval gave this link: what the provider answered,
+    cut down to what this install asked for. A provider decides which of the
+    requested scopes it grants; it does not get to add one (cloud login
+    would hand its account a local session, a telemetry scope would start
+    this install sending logs)."""
+    asked = set((requested or "").split())
+    return " ".join(scope for scope in str(answered or "").split() if scope in asked and scope in KNOWN_SCOPES)
+
+
 def _clear_upgrade(link: CloudBackendLink, poll_error: str | None = None) -> None:
     """Forget a pending feature-change approval; the link itself stays up."""
+    link.requested_scope = None
     link.device_code = None
     link.user_code = None
     link.verification_uri = None
@@ -331,6 +342,7 @@ def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     link.cloud_account_id = None
     link.cloud_account_email = None
     link.scope = None
+    link.requested_scope = None
     link.poll_error = poll_error
     link.revoked_at = None
     # A cleared link is an unclaimed setup flow again.
@@ -444,6 +456,7 @@ async def _start_connect(request: Request, data: CloudConnectRequest, db: Sessio
     link.verification_uri_complete = response.get("verification_uri_complete")
     link.interval_seconds = int(response.get("interval") or 5)
     link.scope = " ".join(scopes)
+    link.requested_scope = " ".join(scopes)
     expires_in = response.get("expires_in")
     if expires_in:
         link.expires_at = _now() + datetime.timedelta(seconds=int(expires_in))
@@ -471,7 +484,11 @@ async def _poll_upgrade(db: Session, link: CloudBackendLink) -> dict:
         db.commit()
         return _status_payload(db, link)
     if status_code == 200 and response.get("scope") and not response.get("access_token"):
-        link.scope = response["scope"]
+        # A change asked for before the request's scopes were kept can only
+        # confirm what the link already has.
+        link.scope = _granted_scope(
+            response["scope"], link.requested_scope if link.requested_scope is not None else link.scope
+        )
         _clear_upgrade(link)
         db.commit()
         await _nudge_cloud_sync()
@@ -508,7 +525,11 @@ async def _poll_link(db: Session, user: User | None = None) -> dict:
         link.token_reference = response.get("token_reference")
         link.linked_client_id = response.get("linked_client_id")
         if response.get("scope"):
-            link.scope = response["scope"]
+            # While connecting, `scope` holds what was asked for.
+            link.scope = _granted_scope(
+                response["scope"], link.requested_scope if link.requested_scope is not None else link.scope
+            )
+        link.requested_scope = None
         link.device_code = None
         link.user_code = None
         link.verification_uri = None
@@ -1283,7 +1304,7 @@ async def set_cloud_features(
 
     if status_code == 200 and response.get("status") == "updated":
         if response.get("scope"):
-            link.scope = response["scope"]
+            link.scope = _granted_scope(response["scope"], " ".join(scopes))
         if "auth:login" not in scopes or "auth:login" not in link.scopes:
             # Cloud login is no longer available, so local passwords must be
             # restored before the current authenticated session can expire.
@@ -1295,6 +1316,7 @@ async def set_cloud_features(
         return _status_payload(db, link, current_user)
 
     if status_code == 200 and response.get("status") == "approval_required" and response.get("device_code"):
+        link.requested_scope = " ".join(scopes)
         link.device_code = response["device_code"]
         link.user_code = response.get("user_code")
         link.verification_uri = response.get("verification_uri")
