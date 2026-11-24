@@ -31,9 +31,9 @@
 # found and nobody has fixed yet is fenced off, in the open:
 #   - `open` below: fuzzers left out of the default run, with what they found.
 #     Naming one in PIXIE_FUZZERS runs it.
-#   - three fences inside the fuzzers (`grep -n 'still open' tests/`), each a
-#     const that a -d: flag turns off: one input shape is not given, or one
-#     Defect is not counted, and the rest of the fuzzer runs.
+#   - fences inside the fuzzers (`grep -n 'still open' tests/`, none today),
+#     each a const that a -d: flag turns off: one input shape is not given, or
+#     one Defect is not counted, and the rest of the fuzzer runs.
 # Take a name off the list, or a fence out, in the change that fixes it.
 set -euo pipefail
 
@@ -44,12 +44,9 @@ jobs="${PIXIE_FUZZ_JOBS:-1}"
 [[ "$seconds" =~ ^[1-9][0-9]*$ ]] || { echo "PIXIE_FUZZ_SECONDS must be a number of seconds" >&2; exit 2; }
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || jobs=1
 
-#   opentype  The first round ends in an IndexDefect: the CFF charstring
-#             reader (opentype.nim `parseCFFCharstring`) takes an operand off
-#             an empty stack. Seen on tests/fonts/NotoSansJP-Regular.ttf with
-#             one byte changed (2026-11-24). It is upstream's whole-file
-#             parser, which a Pi uses for the fonts it is given.
-open=" opentype "
+# None today (the CFF charstring reader's empty stack, fixed 2026-11-24, was
+# the last: tests/test_cff_charstrings.nim).
+open=" "
 # Not fuzzers of a reader: drawing loops that need -d:pixieLeakCheck.
 never=" leaks leaks2 leaks3 "
 
