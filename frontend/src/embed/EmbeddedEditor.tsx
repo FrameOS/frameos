@@ -1,8 +1,10 @@
 import {
+  PARENT_ORIGINS_META,
   allowedParentOrigins,
   replyTargetOrigin,
   sameOriginPreviewProxyUrl,
   setLockedParentOrigin,
+  trustedParentOrigins,
 } from './embedOrigins'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -330,10 +332,12 @@ export function EmbeddedSceneEditor(props: EmbeddedSceneEditorProps): JSX.Elemen
 //                                                   error?, fallbackDownload?} or the editor
 //                                                  downloads the PNG locally after a timeout
 // Origins: in an iframe, only the parent window may send these, and only from
-// an origin the host declared (`?parentOrigin=` on the iframe URL, else the
-// framing document's origin from document.referrer); replies go to that origin,
-// never '*'. `previewProxyUrl` is honoured only when it is same-origin with
-// the editor itself.
+// an origin the editor's own page trusts: its own, and the ones listed in its
+// `<meta name="frameos-editor-parent-origins">` (embedOrigins.ts). What the
+// host says of itself (`?parentOrigin=` on the iframe URL, else the framing
+// document's origin from document.referrer) picks among those and adds none;
+// replies go to that origin, never '*'. `previewProxyUrl` is honoured only
+// when it is same-origin with the editor itself.
 // `previewProxyUrl` is an optional same-origin endpoint the wasm live preview
 // routes CORS-blocked HTTP requests through. `description` is the embedding
 // page's description of the scene (scenes.json doesn't carry one), shown in
@@ -355,7 +359,11 @@ export function EmbeddedEditor(): JSX.Element {
   const [parentOrigin, setParentOrigin] = useState<string | null>(null)
 
   useEffect(() => {
-    const allowed = allowedParentOrigins(window.location.search, document.referrer)
+    const trusted = trustedParentOrigins(
+      window.location.origin,
+      document.querySelector(`meta[name="${PARENT_ORIGINS_META}"]`)?.getAttribute('content')
+    )
+    const allowed = allowedParentOrigins(window.location.search, document.referrer, trusted)
     let lockedParentOrigin: string | null = null
     const onMessage = (event: MessageEvent): void => {
       const message = event.data
@@ -371,9 +379,10 @@ export function EmbeddedEditor(): JSX.Element {
         if (!allowed.includes(event.origin)) {
           console.warn(
             `frameos-editor: ignoring a "${String(message.type)}" message from ${event.origin}; ` +
-              (allowed.length > 0
-                ? `allowed parent origins: ${allowed.join(', ')}`
-                : 'no parent origin is known — load the editor with ?parentOrigin=<your origin>')
+              (trusted.includes(event.origin)
+                ? `allowed parent origins: ${allowed.join(', ') || 'none'} (?parentOrigin= names another)`
+                : `the editor is driven from its own origin (${window.location.origin}) and from the ` +
+                  `origins its index.html lists in <meta name="${PARENT_ORIGINS_META}">`)
           )
           return
         }
