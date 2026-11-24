@@ -520,3 +520,27 @@ int __wrap_printf(const char *format_string, ...)
     va_end(args);
     return n;
 }
+
+/* The veneers fos_veneers.h sends the firmware's calls to ROM and IRAM
+ * through: `l32r a9, <target>; jx a9` in flash, one per function, here
+ * because this object stands among the shell's (link_order.txt), within a
+ * CALL8 of all of them. */
+#if defined(__XTENSA__)
+#include "fos_veneers.h"
+
+#define FOS_VENEER_ASM(name)                                                  \
+    __asm__(".pushsection .text.fos_v_" #name ",\"ax\",@progbits\n"           \
+            ".literal_position\n"                                             \
+            ".literal .Lfos_v_" #name ", " #name "\n"                         \
+            ".align 4\n"                                                      \
+            ".global fos_v_" #name "\n"                                       \
+            ".type fos_v_" #name ", @function\n"                              \
+            "fos_v_" #name ":\n"                                              \
+            "l32r a9, .Lfos_v_" #name "\n"                                    \
+            "jx a9\n"                                                         \
+            ".size fos_v_" #name ", . - fos_v_" #name "\n"                    \
+            ".popsection\n");
+#define FOS_VENEER_ASM_LIBC(ret, name, params) FOS_VENEER_ASM(name)
+FOS_VENEER_LIBC(FOS_VENEER_ASM_LIBC)
+FOS_VENEER_IDF(FOS_VENEER_ASM)
+#endif

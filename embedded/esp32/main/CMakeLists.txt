@@ -106,6 +106,18 @@ idf_component_register(
         monocypher
 )
 
+# Calls to ROM and IRAM go through veneers in flash (fos_veneers.h): a
+# CALL8 where a call was an L32R, a CALLX8 and a literal. Not from a file
+# with IRAM code, which must not call flash: test_esp32_veneers.py holds
+# every main/*.c that says IRAM_ATTR to this list.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    get_target_property(fos_veneered_srcs ${COMPONENT_LIB} SOURCES)
+    list(FILTER fos_veneered_srcs INCLUDE REGEX "\\.c$")
+    list(FILTER fos_veneered_srcs EXCLUDE REGEX "/?(fos_led|fos_mic|fos_touch)\\.c$")
+    set_source_files_properties(${fos_veneered_srcs} PROPERTIES
+        COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/fos_veneers.h")
+endif()
+
 # The setup page (fos_http.c's GET /) is setup_page.html gzipped here and
 # served with Content-Encoding: gzip (tools/gzip_setup_page.py).
 set(FOS_SETUP_PAGE_GZ "${CMAKE_CURRENT_BINARY_DIR}/setup_page.html.gz")
