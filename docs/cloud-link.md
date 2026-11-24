@@ -240,7 +240,12 @@ asked for and never adds to it.** The `scope` in a token answer, an approved
 poll or an `updated` answer is cut down to the scopes that request named
 before it is stored (the backend keeps them beside the pending device code,
 `cloud_backend_link.requested_scope`), so a provider cannot switch on cloud
-login or a telemetry scope by answering with it.
+login or a telemetry scope by answering with it. A Linux frame keeps the same
+rule for its own link (`scopesTakenFromProvider`,
+`frameos/src/frameos/cloud/link_state.nim`) on a device-flow poll, an
+enrollment answer and a hub `ready`, with one allowance: the provider that
+manages the frame may add `settings:services`, `telemetry:logs` and
+`telemetry:metrics`, the per-frame switches its owner turns on in the cloud.
 
 `grants` response shape:
 
