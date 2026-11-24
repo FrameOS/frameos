@@ -15,10 +15,12 @@
  * but objects in it, unbalanced brackets, an open string). */
 int fos_store_split_scenes(const char *json, size_t len, const char **starts, size_t *lens, int max);
 
-/* The store scene a stored scene came from: the `origin` the store stamps on
- * every scene it serves ({href, storeSceneId, version, sceneId}), found by its
- * keys (no app's `origin` has a storeSceneId). `store` gets the uuid ("" for
- * none), `*version` the version (0 for none). */
+/* The store scene a stored scene came from: the scene's own `origin` (an
+ * app's is not), the store's stamp ({href, storeSceneId, version, sceneId})
+ * or the workspace's longer one (repositoryId, repositoryUrl, templateId and
+ * templateName too, and a backend serves the keys sorted), read by its keys in
+ * any order and never past its end. `store` gets the uuid ("" for none),
+ * `*version` the version (0 for none). */
 void fos_store_read_origin(const char *json, char *store, size_t store_len, int *version);
 
 /* A scene object's own `"default": true` (the scene a frame boots to) made

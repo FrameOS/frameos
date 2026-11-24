@@ -65,6 +65,44 @@ int main(void)
     /* No version after it. */
     fos_store_read_origin("{\"origin\":{\"storeSceneId\":\"abc\"}}", store, sizeof(store), &version);
     assert(strcmp(store, "abc") == 0 && version == 0);
+    /* The workspace's longer stamp as a backend serves it (keys sorted): the
+     * repository and template between the id and the version. */
+    fos_store_read_origin("{\"id\":\"hn\",\"name\":\"Hacker News\",\"nodes\":[],"
+                          "\"origin\":{\"href\":\"https://scenes.frameos.net/s/hn\",\"repositoryId\":\"store\","
+                          "\"repositoryUrl\":\"https://scenes.frameos.net/api/store/repository.json\","
+                          "\"sceneId\":\"hn\",\"storeSceneId\":\"abc\",\"templateId\":\"hacker-news\","
+                          "\"templateName\":\"Hacker News\",\"version\":\"7\"},\"settings\":{}}",
+                          store, sizeof(store), &version);
+    assert(strcmp(store, "abc") == 0 && version == 7);
+    /* The same in the order the workspace writes it, spaced, with a number. */
+    fos_store_read_origin("{ \"origin\" : { \"href\" : \"h\", \"storeSceneId\" : \"abc\", \"repositoryId\" : \"r\", "
+                          "\"templateName\" : \"T\", \"sceneId\" : \"x\", \"version\" : 4 } }",
+                          store, sizeof(store), &version);
+    assert(strcmp(store, "abc") == 0 && version == 4);
+    /* A version before the id. */
+    fos_store_read_origin("{\"origin\":{\"version\":\"3\",\"storeSceneId\":\"abc\"}}", store, sizeof(store), &version);
+    assert(strcmp(store, "abc") == 0 && version == 3);
+    /* A version of another object is not the stamp's: one nested in the
+     * stamp, the scene's own, a node's, an app's, a string's. */
+    fos_store_read_origin("{\"version\":\"5\",\"nodes\":[{\"data\":{\"version\":\"6\"}}],"
+                          "\"origin\":{\"storeSceneId\":\"abc\",\"meta\":{\"version\":\"9\"},\"note\":\"\\\"version\\\":\\\"8\\\"\"},"
+                          "\"apps\":{\"a\":{\"origin\":{\"version\":\"2\"}}},\"settings\":{\"version\":\"1\"}}",
+                          store, sizeof(store), &version);
+    assert(strcmp(store, "abc") == 0 && version == 0);
+    /* An id that is not the scene's own stamp's is no id. */
+    fos_store_read_origin("{\"apps\":{\"a\":{\"origin\":{\"storeSceneId\":\"abc\",\"version\":\"2\"}}},"
+                          "\"origin\":{\"repositoryUrl\":\"r\",\"version\":\"3\"}}",
+                          store, sizeof(store), &version);
+    assert(store[0] == '\0' && version == 0);
+    fos_store_read_origin("{\"origin\":{\"meta\":{\"storeSceneId\":\"abc\"}}}", store, sizeof(store), &version);
+    assert(store[0] == '\0');
+    fos_store_read_origin("{\"origin\":\"repo/scenes/x\",\"storeSceneId\":\"abc\"}", store, sizeof(store), &version);
+    assert(store[0] == '\0');
+    fos_store_read_origin("{\"origin\":{\"storeSceneId\":12}}", store, sizeof(store), &version);
+    assert(store[0] == '\0');
+    /* An origin cut off: nothing read past the end of the text. */
+    fos_store_read_origin("{\"origin\":{\"storeSceneId\":\"abc\",\"version\":\"7\"", store, sizeof(store), &version);
+    assert(store[0] == '\0' && version == 0);
 
     /* The scene's own default goes; a nested one, a string, stay. */
     char scene[] = "{\"id\":\"a\",\"settings\":{\"default\":true},\"name\":\"\\\"default\\\": true\","

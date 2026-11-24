@@ -250,10 +250,15 @@ A refusal is `{"ok": false, "error": <code>}`, and the app says it in words
 ### What came from the store
 
 Every scene the store serves carries `origin {href, storeSceneId, version,
-sceneId}` (`scene-origin.ts`), and the frame keeps it. The host reads it off
-each scene: the ESP32 from each scene's file, found by its keys without parsing
-the scene, cached by the content hash the index already has; the Pi from its
-scenes on disk. That is what "on frame" and Update are measured against.
+sceneId}` (`scene-origin.ts`), and the frame keeps it. A store scene a
+backend's workspace installed carries the workspace's longer stamp instead
+(`sceneOriginForTemplate`: `repositoryId`, `repositoryUrl`, `templateId` and
+`templateName` too), and a backend serves the keys sorted, so no reader may
+count on their order. The host reads it off each scene: the ESP32 from each
+scene's file without parsing the scene (`fos_store_read_origin`: the scene's
+own `origin` object, then its keys inside it), cached by the content hash the
+index already has; the Pi from its scenes on disk. That is what "on frame" and
+Update are measured against.
 
 ### What has updates
 

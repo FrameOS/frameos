@@ -45,20 +45,18 @@ int fos_store_split_scenes(const char *json, size_t len, const char **starts, si
 
 void fos_store_read_origin(const char *json, char *store, size_t store_len, int *version)
 {
-    static const char key[] = "\"storeSceneId\":\"";
+    const char *origin, *v;
+    size_t origin_len, n;
     store[0] = '\0';
     *version = 0;
-    const char *at = json != NULL ? strstr(json, key) : NULL;
-    if (at == NULL) return;
-    at += sizeof(key) - 1;
-    size_t n = 0;
-    while (at[n] && at[n] != '"' && n + 1 < store_len) n++;
-    if (at[n] != '"') return; /* longer than an id, or cut off */
-    memcpy(store, at, n);
-    store[n] = '\0';
-    /* The stamp's next key: "version":"N". */
-    const char *next = at + n + 1;
-    if (strncmp(next, ",\"version\":\"", 12) == 0) *version = atoi(next + 12);
+    /* The scene's own `origin`, then its own keys, in whatever order. */
+    if (json == NULL || !fos_store_find_key(json, strlen(json), "origin", &origin, &origin_len)) return;
+    if (!fos_store_find_key(origin, origin_len, "storeSceneId", &v, &n) || n < 2 || v[0] != '"' || n - 2 >= store_len)
+        return; /* not a string, or longer than an id */
+    memcpy(store, v + 1, n - 2);
+    store[n - 2] = '\0';
+    /* "version":"N", or a number. */
+    if (fos_store_find_key(origin, origin_len, "version", &v, &n)) *version = atoi(v + (v[0] == '"'));
 }
 
 void fos_store_clear_default(char *scene, size_t len)
