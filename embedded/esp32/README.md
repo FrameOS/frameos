@@ -39,8 +39,9 @@ main/                     boot orchestration + platform modules
                           the console then offers no USB-Serial/JTAG channel
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
-  fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
-                          newlib's floating-point scanf is never linked (host-tested)
+  fos_sscanf.c            sscanf and siscanf for the linker's --wrap: cJSON's "%lg" read-back as
+                          strtod, tzset's TZ formats by an integer scanner that reads as newlib's,
+                          so no newlib scanf engine is linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
   fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)

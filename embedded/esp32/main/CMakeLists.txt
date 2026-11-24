@@ -127,9 +127,10 @@ set_source_files_properties(fos_spiffs_gc.c PROPERTIES
 # -u: the only reference is esp_spiffs.c's, which the archive scan can pass.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wrap_SPIFFS_gc")
 
-# sscanf goes through fos_sscanf.c: cJSON's "%lg" read-back is strtod there,
-# so newlib's floating-point scanf (9.6 KB) is never linked.
-target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-u __wrap_sscanf")
+# sscanf and siscanf go through fos_sscanf.c: cJSON's "%lg" read-back is
+# strtod there and tzset's five TZ formats are read by its integer scanner,
+# so neither of newlib's scanf engines (9.6 + 8.3 KB) is linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-Wl,--wrap=siscanf" "-u __wrap_sscanf")
 
 # printf, fprintf, vprintf and vfprintf go through fos_printf.c, which formats
 # with vsnprintf: newlib's FILE formatter (_vfprintf_r, 11.4 KB, a second copy
