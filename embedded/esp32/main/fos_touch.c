@@ -241,6 +241,7 @@ int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy)
 #include "fos_events.h"
 #include "fos_i2c.h"
 #include "fos_usb_pads.h"
+#include "fos_wake.h"
 #include "fos_events_gen.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1172,10 +1173,13 @@ bool fos_touch_present(void)
 int fos_touch_wake_pin(void)
 {
 #if SOC_PM_SUPPORT_EXT0_WAKEUP
-    const fos_config_t *config = fos_config();
+    const fos_touch_pins_t *pins = &fos_config()->touch_pins;
     if (!s_present) return -1;
-    int pin = config->touch_pins.irq;
-    return pin >= 0 && rtc_gpio_is_valid_gpio((gpio_num_t)pin) ? pin : -1;
+    int pin = pins->irq;
+    return pin >= 0 && rtc_gpio_is_valid_gpio((gpio_num_t)pin) &&
+                   fos_wake_touch_holds(pins->rst, pins->en, FOS_WAKE_S3_UNHELD_PADS)
+               ? pin
+               : -1;
 #else
     return -1;
 #endif
@@ -1195,6 +1199,18 @@ esp_err_t fos_touch_arm_wake(void)
     /* Wake on the line LEAVING its idle level, whichever that is for this
      * controller's trigger setting: read it now, arm the other. */
     int idle = gpio_get_level((gpio_num_t)pin);
+    /* Asleep the pad is the RTC mux's, with that mux's pull: down out of
+     * reset on GPIO2 and GPIO21, none on GPIO11. Pulled toward the idle level
+     * instead, a line the controller lets go of stays where it was (the
+     * CST92xx's open-drain one, between reports), and one it drives high
+     * sinks nothing through a pull-down all night. */
+    if (idle) {
+        rtc_gpio_pulldown_dis((gpio_num_t)pin);
+        rtc_gpio_pullup_en((gpio_num_t)pin);
+    } else {
+        rtc_gpio_pullup_dis((gpio_num_t)pin);
+        rtc_gpio_pulldown_en((gpio_num_t)pin);
+    }
     esp_err_t err = esp_sleep_enable_ext0_wakeup((gpio_num_t)pin, idle ? 0 : 1);
     if (err != ESP_OK) ESP_LOGW(TAG, "arming touch wake on GPIO %d failed: %s", pin, esp_err_to_name(err));
     return err;

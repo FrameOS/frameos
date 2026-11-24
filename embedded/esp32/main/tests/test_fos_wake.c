@@ -104,6 +104,30 @@ static void test_held_button_sits_the_sleep_out(void)
     CHECK(armed == 0, "every key held: nothing armed, the timer alone wakes the frame");
 }
 
+static void test_touch_wakes_only_a_controller_the_sleep_keeps_up(void)
+{
+    /* The touch_pins of the boards in fos_board.c. The reTerminal Sticky's
+     * GT911 is held by its supply switch (GPIO42) and reset (GPIO41), both
+     * pads on VDD3P3_CPU, which deep sleep keeps: a finger wakes it. */
+    CHECK(fos_wake_touch_holds(41, 42, FOS_WAKE_S3_UNHELD_PADS), "the Sticky's GT911 stays up asleep");
+    /* The E1003's resets on GPIO48, a pad on VDD_SPI: the sleep cuts that
+     * supply, the reset falls, the controller lets go of its line. */
+    CHECK(!fos_wake_touch_holds(48, -1, FOS_WAKE_S3_UNHELD_PADS), "the E1003's GT911 resets asleep");
+    CHECK(!fos_wake_touch_holds(47, -1, FOS_WAKE_S3_UNHELD_PADS), "GPIO47 is the same supply as 48");
+    CHECK(!fos_wake_touch_holds(-1, 33, FOS_WAKE_S3_UNHELD_PADS), "a supply switch on a PSRAM pad holds nothing");
+    /* The AMOLED 1.75's CST9217 resets on GPIO40; the Sunton's GT911 on 38. */
+    CHECK(fos_wake_touch_holds(40, -1, FOS_WAKE_S3_UNHELD_PADS), "GPIO40 keeps its supply");
+    CHECK(fos_wake_touch_holds(38, -1, FOS_WAKE_S3_UNHELD_PADS), "GPIO38 keeps its supply");
+    /* Nothing to hold: a controller wired to the rail with no reset line. */
+    CHECK(fos_wake_touch_holds(-1, -1, FOS_WAKE_S3_UNHELD_PADS), "no reset, no switch: nothing to lose");
+    CHECK(!fos_wake_touch_holds(64, -1, FOS_WAKE_S3_UNHELD_PADS), "a pin past GPIO63 is no pad to hold");
+    uint64_t pads = 0;
+    for (int pin = 26; pin <= 37; pin++) pads |= BIT_(pin);
+    pads |= BIT_(47) | BIT_(48);
+    CHECK(FOS_WAKE_S3_UNHELD_PADS == pads, "GPIO26-37 and 47-48, nothing else: got 0x%llx",
+          (unsigned long long)FOS_WAKE_S3_UNHELD_PADS);
+}
+
 static void test_wake_status_maps_back_to_a_button(void)
 {
     const int e10xx[] = {3, 4, 5};
@@ -301,6 +325,7 @@ int main(void)
     test_arms_every_rtc_capable_button();
     test_skips_pins_the_chip_cannot_wake_from();
     test_held_button_sits_the_sleep_out();
+    test_touch_wakes_only_a_controller_the_sleep_keeps_up();
     test_wake_status_maps_back_to_a_button();
     test_an_edge_stamp_widens_against_the_render_tasks_clock();
     test_wake_schedule_aligns_to_the_local_clock();
