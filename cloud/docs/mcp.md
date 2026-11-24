@@ -62,6 +62,11 @@ How it plugs in (`src/lib/api-tokens.ts`):
   `/api/device/revoke`, `/api/device/authorize`) read the session cookie's
   `authenticated_at` and answer `403 reauth_required`; the 2FA routes demand a
   live proof in the body; minting tokens answers `403 api_token_not_allowed`.
+  A claim token minted with an API token (`POST /api/frames/claim-tokens`,
+  `frame_claim_token_create`) enrolls its frame as `pending`, and the Confirm
+  that makes it active is refused for tokens; the re-enrollment form
+  (`frame_id`) answers `403 api_token_not_allowed`. So a token alone never
+  puts a device of its own choosing in reach of the account's service keys.
 - Rate limits are per client IP, unchanged. Audit events:
   `account.api_token_created`, `account.api_token_revoked`.
 

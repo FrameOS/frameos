@@ -2,6 +2,7 @@
 // These tests pin the routes where it must NOT: the second-factor enrolment
 // routes, self-serve account deletion, the superadmin API, and — for the
 // enrolment routes — that even a cookie session needs a recent proof.
+import { generateKeyPairSync } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
@@ -30,6 +31,9 @@ import {
 } from "../../../app/api/account/two-factor/totp/route";
 import { POST as confirmTotp } from "../../../app/api/account/two-factor/totp/confirm/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
+import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/route";
+import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
+import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { GET as frameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { GET as frameAssets } from "../../../app/api/frames/[frameId]/assets/route";
 import { GET as frameImage } from "../../../app/api/frames/[frameId]/image/route";
@@ -251,6 +255,110 @@ describe("what a personal API token may not do", () => {
     );
     expect(withToken.status).toBe(403);
     expect((await withToken.json()).error).toBe("forbidden");
+  });
+});
+
+describe("a claim token minted with an API token", () => {
+  // A single-use code a person mints in the browser enrolls its frame active,
+  // and an active frame pulls the account's service keys. A script's token
+  // minting one must not get that: its frame waits for the owner's click.
+  const hardware = { height: 480, platform: "pi-zero2w", width: 800 };
+  const publicKey = () => generateKeyPairSync("ed25519")
+    .publicKey.export({ format: "der", type: "spki" })
+    .subarray(-32)
+    .toString("base64");
+
+  it("enrolls its frame as pending, and cannot confirm it", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    const token = await switchToApiToken(accountId, email);
+    const bearer = { authorization: `Bearer ${token}` };
+
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "Script frame" }, "POST", bearer),
+    );
+    expect(minted.status).toBe(200);
+    const mintedBody = (await minted.json()) as {
+      claim_token: string;
+      max_uses: number;
+      needs_confirmation?: boolean;
+    };
+    expect(mintedBody.max_uses).toBe(1);
+    expect(mintedBody.needs_confirmation).toBe(true);
+
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: mintedBody.claim_token,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    expect(enrolled.status).toBe(200);
+    const frame = (await enrolled.json()) as { frame_id: string; status: string };
+    expect(frame.status).toBe("pending");
+
+    const confirmed = await confirmFrame(
+      request(`/api/frames/${frame.frame_id}/confirm`, {}, "POST", bearer),
+      { params: Promise.resolve({ frameId: frame.frame_id }) },
+    );
+    expect(confirmed.status).toBe(403);
+    expect((await confirmed.json()).error).toBe("api_token_not_allowed");
+    const [row] = await db
+      .select({ status: frames.status })
+      .from(frames)
+      .where(eq(frames.id, frame.frame_id));
+    expect(row?.status).toBe("pending");
+  });
+
+  it("still enrolls active when a person minted it in the browser", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "My frame" }),
+    );
+    expect(minted.status).toBe(200);
+    const mintedBody = (await minted.json()) as {
+      claim_token: string;
+      needs_confirmation?: boolean;
+    };
+    expect(mintedBody.needs_confirmation).toBeUndefined();
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: mintedBody.claim_token,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    expect(enrolled.status).toBe(200);
+    expect(((await enrolled.json()) as { status: string }).status).toBe("active");
+  });
+
+  it("cannot mint a code that re-keys an existing frame", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const minted = await mintClaimToken(
+      request("/api/frames/claim-tokens", { name: "My frame" }),
+    );
+    const { claim_token: claimToken } = (await minted.json()) as { claim_token: string };
+    const enrolled = await enrollFrame(
+      request("/api/frames/enroll", {
+        claim_token: claimToken,
+        frameos_version: "2026.8.1",
+        hardware,
+        public_key: publicKey(),
+      }),
+    );
+    const { frame_id: frameId } = (await enrolled.json()) as { frame_id: string };
+
+    const token = await switchToApiToken(accountId, email);
+    const refused = await mintClaimToken(
+      request("/api/frames/claim-tokens", { frame_id: frameId }, "POST", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("api_token_not_allowed");
   });
 });
 

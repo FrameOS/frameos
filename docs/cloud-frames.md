@@ -150,6 +150,12 @@ confirmation click depends on the token's budget:
   active with `settings:services` and the provisioning scenes, and pulled
   the account's Home Assistant / OpenAI keys. Now each board brings its own
   proof, and the scope grant only becomes usable at the owner's Confirm.
+- **A token minted with a personal API token is pending too**, whatever its
+  budget (the mint answers `needs_confirmation: true`). A script's
+  credential minting a code is not the owner's act, and an active frame
+  pulls the account's service keys; `POST /api/frames/{id}/confirm` refuses
+  an API token, so the click is a person's. Such a token cannot mint a
+  re-enrollment code (A2) at all: `403 api_token_not_allowed`.
 
 Re-enrolling a revoked frame needs a fresh claim token.
 
