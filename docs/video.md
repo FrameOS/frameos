@@ -152,10 +152,14 @@ frame's log once, as `video:software` with the decoder, ffmpeg's reason and
 **A V4L2 decoder's buffers.** ffmpeg asks for 16 coded and 20 decoded ones;
 at 1080p a VideoCore's are 1.5 and 3 MB of CMA each, 85 MB a video, and on a
 Pi Zero W (256 MB of CMA) the fourth 1080p decoder of four failed and another
-hung. FrameOS asks for 6 and 10 (`V4l2OutputBuffers`, `V4l2CaptureBuffers`):
-43 MB at 1080p, so four 1080p videos fit, and the VideoCore decodes as fast
-(44 frames a second of 1080p, 2026-11-24). Fewer than 8 decoded ones had
-ffmpeg warn that all of them were in use.
+hung. A decoder hung like that and then killed left the VideoCore unable to
+make another until a reboot (every video after it played in software). FrameOS
+asks for 6 and 10 (`V4l2OutputBuffers`, `V4l2CaptureBuffers`): 43 MB at
+1080p, and the VideoCore decodes as fast (44 frames a second of 1080p,
+2026-11-24). Four 1080p feeds at their pace into quarter boxes, a Camera
+wall's, ran together with 65 MB of CMA left, and three rounds of starting
+them and stopping them with SIGTERM left nothing behind. Fewer than 8 decoded
+buffers had ffmpeg warn that all of them were in use.
 
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
