@@ -1,6 +1,7 @@
 import std/[algorithm, base64, json, monotimes, options, os, sequtils, streams, strformat, strutils, tables, times]
 from std/posix import Stat, stat, errno, ENOENT, ENOTDIR
 import frameos/utils/memory
+import frameos/utils/json_depth
 import pixie
 import pixie/fileformats/svg
 
@@ -554,7 +555,7 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
   let lvl = toNimString(ctx, level)
   let payloadStr = toNimString(ctx, payloadJson)
   try:
-    let payload = parseJson(payloadStr)
+    let payload = parseJsonBounded(payloadStr)
     if payload.kind == JObject:
       var logPayload = payload
       logPayload["event"] = %*("jsApp:" & lvl)
@@ -610,7 +611,7 @@ proc jsDispatch(ctx: ptr JSContext, event: JSValue, payloadJson: JSValue): JSVal
   let e = env(ctx)
   if e != nil and not e.owner.scene.isNil:
     try:
-      dispatchFromScene(e.owner.scene, toNimString(ctx, event), parseJson(toNimString(ctx, payloadJson)),
+      dispatchFromScene(e.owner.scene, toNimString(ctx, event), parseJsonBounded(toNimString(ctx, payloadJson)),
         e.owner.nodeId.int, e.context.event)
     except CatchableError as error:
       frameos_apps.logError(e.owner, "frameos.dispatch failed: " & error.msg)
@@ -750,7 +751,7 @@ proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
   try:
     if e.owner.scene.state.isNil:
       e.owner.scene.state = %*{}
-    e.owner.scene.state[stateKey] = parseJson(valueStr)
+    e.owner.scene.state[stateKey] = parseJsonBounded(valueStr)
   except CatchableError:
     e.owner.scene.state[stateKey] = %*valueStr
 
@@ -912,7 +913,7 @@ proc optionsArg(ctx: ptr JSContext, optionsJson: JSValue): JsonNode =
   ## A bridge call's options, handed over from JS as a JSON string: that
   ## object, or an empty one when the string is not one.
   try:
-    result = parseJson(toNimString(ctx, optionsJson))
+    result = parseJsonBounded(toNimString(ctx, optionsJson))
   except CatchableError:
     discard
   if result.isNil or result.kind != JObject:
@@ -1983,7 +1984,7 @@ when not defined(frameosEmbedded):
         let upload = what == "upload"
         var given = newJObject()
         try:
-          given = parseJson(toNimString(ctx, argsJson))
+          given = parseJsonBounded(toNimString(ctx, argsJson))
         except CatchableError:
           discard
         let
@@ -3029,7 +3030,7 @@ proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {
   let name = toNimString(ctx, key)
   var options = newJObject()
   try:
-    options = parseJson(toNimString(ctx, optionsJson))
+    options = parseJsonBounded(toNimString(ctx, optionsJson))
   except CatchableError:
     discard
   let
