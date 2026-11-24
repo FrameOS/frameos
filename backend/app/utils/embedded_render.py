@@ -44,6 +44,38 @@ _render_semaphore = asyncio.Semaphore(RENDER_CONCURRENCY)
 _render_waiters = 0
 
 
+# A render with no device to stand in for (a virtual frame, a preview with no
+# frame) still gets a ceiling on what its scene may allocate; without one the
+# only bound is the wasm module's own 2 GiB, per render. Every sample scene
+# renders a 4K canvas inside 120 MiB (2026-11-24), so 256 MiB is twice what a
+# real scene needs there (and eight times that canvas); a bigger canvas gets
+# eight times its own size.
+RENDER_MEMORY_CEILING_BYTES = 256 * 1024 * 1024
+RENDER_MEMORY_CEILING_MAX_BYTES = 1024 * 1024 * 1024
+
+
+def render_memory_ceiling_bytes(width: int, height: int) -> int:
+    canvas = max(0, width) * max(0, height) * 4
+    return min(max(RENDER_MEMORY_CEILING_BYTES, canvas * 8), RENDER_MEMORY_CEILING_MAX_BYTES)
+
+
+# What the render process is started with. It runs scene code (inside the
+# wasm module) and its fetch children talk to the network; none of that needs
+# what the backend's own environment holds (SECRET_KEY, DATABASE_URL,
+# REDIS_URL, the cloud and storage credentials), and code that got out of the
+# module should not find them there. Node itself needs its PATH and where to
+# find its certificates; a proxy, when the host uses one.
+RENDER_ENVIRONMENT_KEYS = (
+    "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ",
+    "LD_LIBRARY_PATH", "NODE_OPTIONS", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NIX_SSL_CERT_FILE",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy", "NODE_USE_ENV_PROXY",
+)
+
+
+def render_environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in RENDER_ENVIRONMENT_KEYS if key in os.environ}
+
+
 class RenderQueueFull(Exception):
     """Every render slot is busy and the wait queue is at its cap."""
 
@@ -262,6 +294,8 @@ async def render_scene(
         request["assetsWriteBudget"] = max(0, int(assets_write_budget))
     if device_limits:
         request["deviceLimits"] = device_limits
+    else:
+        request["memoryCeilingBytes"] = render_memory_ceiling_bytes(int(width), int(height))
     # The frame's render scale (frame.json `renderScale`): what a UI from a
     # .tsx/.jsx app is laid out for. 0 (automatic, and every preview with no
     # frame) is left to the runtime, which works it out from width and height.
@@ -300,6 +334,7 @@ async def render_scene(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=render_environment(),
         )
         try:
             stdout, stderr = await asyncio.wait_for(
