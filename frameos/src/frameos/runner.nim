@@ -18,6 +18,7 @@ import frameos/display_detect
 import frameos/panel_canvas
 import frameos/driver_render_hint
 import frameos/render_stats
+import frameos/scene_snapshot_writer
 import frameos/local_access
 import frameos/loading_mark_panel
 import frameos/cursor_panel
@@ -536,6 +537,14 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       if lastSceneId != sceneId:
         sceneChangedThisCycle = true
         var sceneInitialized = true
+        # The fast-render pause is the scene's that rendered fast, not the
+        # next one's: a switch away from an animation logs its first render
+        # (its `render:done` is what the backend and a deploy wait for), and
+        # the new scene earns a pause of its own by rendering fast twice.
+        if fastSceneResumeAt.isSome or fastSceneCount > 0:
+          fastSceneCount = 0
+          fastSceneResumeAt = none(MonoTime)
+          self.logger.enable()
         self.logSignal(%*{"event": "render:sceneChange", "sceneId": sceneId.string})
         # A photo's own dither palette (utils/asset_colors) outlives the
         # render that loaded it, not the scene that showed it; same for the
@@ -586,11 +595,15 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       # what "not sceneImageExists" alone did — left the workspace showing a
       # frame's boot render for as long as it stayed on one scene, which is
       # forever for most frames. Written once the panel has the picture
-      # (below): the PNG encode is most of a second on a Pi Zero, and it
-      # held every switch back by that. Never for a built-in scene (the
-      # switcher, the settings): no list shows one.
+      # (below), and on a thread of its own (scene_snapshot_writer.nim): the
+      # PNG encode is most of a second on a Pi Zero, three for a photo, and
+      # on this thread it held every tap and switch back by that. Never for
+      # a built-in scene (the switcher, the settings): no list shows one.
+      # Nor while one of this scene is still being written: an animation
+      # would copy its every frame until the first was on disk.
       let saveSnapshot = not isBuiltInScene(currentScene.id.string) and
-        (sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id))
+        (sceneChangedThisCycle or sceneImageIsStale(self.frameConfig.assetsPath, currentScene.id)) and
+        not snapshotPending(currentScene.id.string)
       clearBootCrashCount()
       successfulSceneRenders += 1
       if interval < 1:
@@ -669,16 +682,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         clearNextRenderSeconds()
       if saveSnapshot:
         try:
-          let savedImage = saveLastSceneImagePng(self.frameConfig.assetsPath, currentScene.id)
-          noteSceneImageSaved()
-          # The switcher's picture of it, from the pixels in hand: no decode.
-          noteSceneSnapshot(self.frameConfig.assetsPath, currentScene.id.string, getLastImageCopy())
-          self.logger.log(%*{
-            "event": "render:sceneImage:saved",
-            "sceneId": currentScene.id.string,
-            "publicSceneId": savedImage.sceneId,
-            "bytes": savedImage.size,
-          })
+          # The picture's pixels, copied; the writer logs
+          # `render:sceneImage:saved` when the file is there.
+          discard queueSceneSnapshot(self.frameConfig.assetsPath, currentScene.id.string)
         except Exception as e:
           self.logSignal(%*{
             "event": "render:sceneImage:error",

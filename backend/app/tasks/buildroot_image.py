@@ -3429,6 +3429,32 @@ PY
 merge_config "config.txt"
 merge_config "firmware/config.txt"
 
+add_kernel_arg() {{
+  relpath="$1"
+  arg="$2"
+  key="${{arg%%=*}}"
+  current="$(mktemp)"
+  if ! mcopy -i "$target" "::${{relpath}}" "$current" 2>/dev/null; then
+    rm -f "$current"
+    return 0
+  fi
+  line="$(tr -d '\\n' < "$current")"
+  if ! printf '%s' "$line" | grep -Eq "(^|[[:space:]])${{key}}="; then
+    step "adding $arg to $relpath"
+    printf '%s %s\\n' "$line" "$arg" > "$current"
+    mcopy -i "$target" -o "$current" "::${{relpath}}"
+  fi
+  rm -f "$current"
+}}
+# The Pi kernel boots on the powersave governor: a Pi Zero W at 700 MHz of
+# its 1 GHz, for good. post-image.sh has said ondemand on the kernel command
+# line since 2026-09-16, but a card is composed from a cached base image, and
+# the bases in tools/buildroot-images/manifest.json are older (a Pi Zero W
+# card, the hardware bench, 2026-11-24). Said here too, so every card gets it
+# whatever its base.
+add_kernel_arg "cmdline.txt" "cpufreq.default_governor=ondemand"
+add_kernel_arg "firmware/cmdline.txt" "cpufreq.default_governor=ondemand"
+
 if find "$boot_root" -mindepth 1 -print -quit | grep -q .; then
   cd "$boot_root"
   step "copying boot overlay files"

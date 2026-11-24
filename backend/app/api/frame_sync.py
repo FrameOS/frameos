@@ -50,7 +50,7 @@ from app.utils.render_scale import normalize_render_scale
 from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_frame
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
-from app.utils.versions import current_frameos_version
+from app.utils.versions import current_frameos_version, version_tuple
 
 FrameFetch = Callable[..., Awaitable[tuple[int, bytes, dict[str, Any]]]]
 
@@ -1408,6 +1408,19 @@ async def _push_frame_sync_payload(
     return answer if isinstance(answer, dict) else {}
 
 
+def _device_deploy_baseline(frame: Frame) -> dict[str, Any]:
+    """The deploy baseline as the device keeps it (frame.json
+    `frameApi.last_successful_deploy`): the backend's, without the scene set.
+    Nothing on the device reads the baseline's scenes (its own admin page
+    never diffs against it, `isFrameAdminMode`), the device holds them in
+    scenes.json already, and frame.json is parsed again on every config read:
+    20 scenes made it ~800 KB on a Pi Zero (2026-11-24 bench). The backend's
+    own baseline (`frame.last_successful_deploy`) keeps them."""
+    snapshot = _frame_sync_snapshot(frame)
+    snapshot.pop("scenes", None)
+    return snapshot
+
+
 async def _push_frame_sync_metadata(
     frame: Frame, redis: Redis, fetch_frame_http_bytes: FrameFetch
 ) -> None:
@@ -1415,7 +1428,7 @@ async def _push_frame_sync_metadata(
         frame,
         redis,
         {
-            "last_successful_deploy": _frame_sync_snapshot(frame),
+            "last_successful_deploy": _device_deploy_baseline(frame),
             "last_successful_deploy_at": _serialize_datetime(frame.last_successful_deploy_at),
             "frame_sync_mark_deployed": True,
         },
@@ -1928,23 +1941,41 @@ async def adopt_standalone_frame(
         await _push_frame_sync_metadata(frame, redis, fetch_frame_http_bytes)
     except Exception:  # noqa: BLE001 - best effort, the adoption is complete
         logger.warning("adopt: metadata echo to %s failed", host, exc_info=True)
-    await _restart_adopted_runtime(frame, db, redis, fetch_frame_http_bytes)
+    await _restart_adopted_runtime(frame, db, redis, fetch_frame_http_bytes, remote_frame.get("version"))
     return frame
 
 
+# From this release on the runtime's log shipper takes a reloaded config's
+# server (logger.nim, applyLoggerSettings): the write-back's reload is enough.
+LOGGER_FOLLOWS_RELOAD_VERSION = (2026, 9, 13)
+
+
 async def _restart_adopted_runtime(
-    frame: Frame, db: Session, redis: Redis, fetch_frame_http_bytes: FrameFetch
+    frame: Frame,
+    db: Session,
+    redis: Redis,
+    fetch_frame_http_bytes: FrameFetch,
+    device_version: Any = None,
 ) -> None:
     """Ask the freshly adopted runtime to restart so its logs reach us.
 
-    The device reloaded its config with the write-back, but the logger
-    thread keeps the serverHost it started with — empty on a standalone
-    card — so nothing arrived here until someone restarted FrameOS by hand
-    (2026-09-08 bench). `restart` is a control verb the runtime takes with
-    the serverApiKey bearer it just received; systemd starts it again a few
-    seconds later. Best effort: the adoption is complete either way, and the
-    frame's log says what to do if this did not work.
+    The device reloaded its config with the write-back, but before
+    2026.9.13 the logger thread kept the serverHost it started with — empty
+    on a standalone card — so nothing arrived here until someone restarted
+    FrameOS by hand (2026-09-08 bench). `restart` is a control verb the
+    runtime takes with the serverApiKey bearer it just received; systemd
+    starts it again a few seconds later. Best effort: the adoption is
+    complete either way, and the frame's log says what to do if this did not
+    work.
+
+    A newer runtime is left alone: its logs come here from the reload, and
+    the restart only raced it. The reload waits for the render pass in
+    progress (most of a second on a Pi Zero), so the restart arrived with a
+    key the runtime did not hold yet and got a 401 (2026-11-24 bench).
     """
+    version = version_tuple(device_version if isinstance(device_version, str) else None)
+    if version is not None and version >= LOGGER_FOLLOWS_RELOAD_VERSION:
+        return
     try:
         status, body, _headers = await fetch_frame_http_bytes(
             frame,

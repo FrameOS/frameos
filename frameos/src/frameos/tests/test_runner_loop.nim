@@ -165,6 +165,19 @@ proc lateAnimationRender(scene: FrameScene, context: ExecutionContext): Image =
     sleep(LoadingMarkDelayMs + 60)
   fastRender(scene, context)
 
+# A render that switches the runner to another scene after a few: what a
+# person (or the backend) does while a fast scene is showing.
+var switchingRunner: RunnerThread
+var switchingTo: SceneId
+var switchAfterRenders = 0
+var switchingRenders = 0
+
+proc switchingRender(scene: FrameScene, context: ExecutionContext): Image =
+  inc switchingRenders
+  if switchingRenders == switchAfterRenders and not switchingRunner.isNil:
+    switchingRunner.currentSceneId = switchingTo
+  fastRender(scene, context)
+
 proc failingRender(scene: FrameScene, context: ExecutionContext): Image =
   raise newException(IOError, "network request failed")
 
@@ -459,6 +472,60 @@ suite "runner loop safety":
       check countEvent(store, "render:done") == 2
       check not logger.enabled
     finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a switch away from a fast scene logs the next scene's first render":
+    # The pause was the fast scene's. The next scene's first render is what a
+    # switch (a person, the backend, a deploy) waits to hear: on a Pi the
+    # switch away from an animation used to go unlogged for ten seconds.
+    let fastId = "tests/runner/fast-before-switch".SceneId
+    let nextId = "tests/runner/after-switch".SceneId
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      for id in [fastId, nextId]:
+        uploaded[id] = ExportedInterpretedScene(
+          name: id.string,
+          publicStateFields: @[],
+          persistedStateKeys: @[],
+          init: fastInit,
+          render: switchingRender,
+          runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+        )
+      updateUploadedScenes(uploaded)
+
+      var config = loadConfig()
+      config.controlCode = ControlCode(enabled: false, position: "center",
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+      let store = LogStore(entries: @[])
+      let logger = testLogger(config, store)
+      var runnerThread = RunnerThread(
+        frameConfig: config,
+        scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: fastId,
+        lastRenderAt: 0.0,
+        sleepFuture: none(Future[void]),
+        isRendering: false,
+        triggerRenderNext: false,
+        logger: logger
+      )
+      switchingRunner = runnerThread
+      switchingTo = nextId
+      switchAfterRenders = 3
+      switchingRenders = 0
+
+      waitFor runnerThread.startRenderLoop(maxCycles = 4)
+
+      check countEvent(store, "render:pause") == 1
+      var doneFor: seq[string]
+      for entry in store.entries:
+        if entry{"event"}.getStr() == "render:done":
+          doneFor.add(entry{"sceneId"}.getStr())
+      # The fast scene's third render falls in its pause; the next scene's
+      # first is logged.
+      check doneFor == @[fastId.string, fastId.string, nextId.string]
+      check logger.enabled
+    finally:
+      switchingRunner = nil
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
   test "activation control events are logged while render logging is paused":
