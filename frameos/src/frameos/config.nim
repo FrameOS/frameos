@@ -25,6 +25,7 @@
 import json, jsony, pixie, os, strutils, parseutils, locks
 import std/atomics
 import zippy
+from frameos/cpu_governor import normalizeCpuMode
 import frameos/device_event_map
 import frameos/hal/files
 import frameos/hotspot_credentials
@@ -369,6 +370,9 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.name == "": config.name = config.frameHost
   if config.deviceConfig == nil: newHook(config.deviceConfig)
   if config.deviceConfig.pins == nil: newHook(config.deviceConfig.pins)
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
+    # A mode the contract names, else `auto` (a frame.json from before it).
+    config.deviceConfig.cpuMode = normalizeCpuMode(config.deviceConfig.cpuMode)
   if config.network == nil: newHook(config.network)
   if config.agent == nil: newHook(config.agent)
   if config.mountpoints == nil: newHook(config.mountpoints)

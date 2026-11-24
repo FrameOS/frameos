@@ -13,6 +13,7 @@ import std/[json, monotimes, os, strutils, times]
 
 import frameos/buildroot_privileges
 import frameos/config
+import frameos/cpu_governor
 import frameos/device_setup
 import frameos/privileged
 import frameos/setup
@@ -154,6 +155,16 @@ proc execSetTimezone(args: JsonNode): PrivilegedResult =
     return privilegedError("system zone is " & now & " after setup, not " & zone)
   privilegedOk(zone)
 
+proc execSetCpuGovernor(args: JsonNode): PrivilegedResult =
+  ## The processor speed (`cpu_mode`, cpu_mode_linux.nim) for a runtime that
+  ## is not root: sysfs's cpufreq files are root's. Only a governor of the
+  ## allow-list, only the policies' scaling_governor under the fixed root.
+  let governor = argStr(args, "governor")
+  let outcome = setCpuGovernorAsRoot(governor)
+  if not outcome.ok:
+    return privilegedError(outcome.message)
+  privilegedOk(outcome.message, data = %*{"governor": governor, "mhz": cpuMhzNow()})
+
 # timesyncd touches this file on every successful sync, so its presence is
 # "the kernel clock has been set from the network at least once this boot".
 var clockSyncSystemdDir = "/run/systemd/system"
@@ -270,6 +281,7 @@ proc executePrivilegedRequest*(request: PrivilegedRequest): PrivilegedResult =
     of pvSetHostname: execSetHostname(request.args)
     of pvSetTimezone: execSetTimezone(request.args)
     of pvSyncClock: execSyncClock()
+    of pvSetCpuGovernor: execSetCpuGovernor(request.args)
     of pvNmDeviceStatus: resultOf(nmcli(@["-t", "-f", "DEVICE,TYPE,STATE", "device", "status"]))
     of pvNmWifiList: resultOf(nmcli(@["--colors", "no", "-t", "-f", "ACTIVE,SSID", "device", "wifi", "list"]))
     of pvNmConnections:

@@ -124,6 +124,17 @@ block test_server_scheme_defaults:
     doAssert parseFrameConfig($(%*{"serverPort": 8443, "serverScheme": "ftp"})).serverScheme == "https"
     doAssert parseFrameConfig($(%*{"serverPort": 8080, "serverScheme": 12})).serverScheme == "http"
 
+block test_cpu_mode_defaults_to_auto:
+    # The processor speed (cpu_governor.nim): a frame.json from before it, or a
+    # word the contract does not name, runs `auto` (ondemand on a Pi).
+    # It lives in deviceConfig, where a backend keeps it for every frame.
+    doAssert parseFrameConfig("{}").deviceConfig.cpuMode == "auto"
+    doAssert parseFrameConfig($(%*{"deviceConfig": {"cpuMode": "performance"}})).deviceConfig.cpuMode == "performance"
+    doAssert parseFrameConfig($(%*{"deviceConfig": {"cpuMode": "battery", "partial": true}})).deviceConfig.cpuMode == "battery"
+    doAssert parseFrameConfig($(%*{"deviceConfig": {"cpuMode": "ondemand"}})).deviceConfig.cpuMode == "auto"
+    doAssert parseFrameConfig($(%*{"deviceConfig": {"cpuMode": ""}})).deviceConfig.cpuMode == "auto"
+    doAssert parseFrameConfig($(%*{"deviceConfig": nil})).deviceConfig.cpuMode == "auto"
+
 block test_server_host_typed_as_an_address:
     # A frame.json whose serverHost carries a scheme or port (an older portal,
     # a hand edit, another writer): what it says moves to the scheme and port

@@ -31,6 +31,7 @@
 import std/[algorithm, json, os, strutils, sysrand, times]
 import frameos/utils/system
 from frameos/cloud/contract import isIanaZone
+from frameos/cpu_governor import isCpuGovernor, CpuGovernors
 
 when not defined(windows):
   from std/posix import geteuid
@@ -54,6 +55,7 @@ type
     pvSetHostname = "set-hostname"
     pvSetTimezone = "set-timezone"
     pvSyncClock = "sync-clock"
+    pvSetCpuGovernor = "set-cpu-governor"
     pvNmDeviceStatus = "nm-device-status"
     pvNmWifiList = "nm-wifi-list"
     pvNmConnections = "nm-connections"
@@ -227,6 +229,7 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
     of pvInstallRelease: @["archive", "signature", "version"]
     of pvSetHostname: @["hostname"]
     of pvSetTimezone: @["zone"]
+    of pvSetCpuGovernor: @["governor"]
     of pvSyncClock, pvNmDeviceStatus, pvNmWifiList, pvNmRadioOn, pvNmHotspotStop: @[]
     of pvNmConnections: @["active"]
     of pvNmHotspotStart: @["device", "ssid", "psk"]
@@ -266,6 +269,12 @@ proc validatePrivilegedArgs*(verb: PrivilegedVerb, args: JsonNode): string =
     # so only an IANA-shaped name may pass (no "../../etc/shadow").
     if not isIanaZone(argStr(args, "zone")):
       return "zone must be an IANA zone name"
+  of pvSetCpuGovernor:
+    # Written into the cpufreq policies' scaling_governor as root, so only
+    # the governors `cpu_mode` maps to may pass (cpu_governor.nim); the
+    # worker picks the files itself.
+    if not isCpuGovernor(argStr(args, "governor")):
+      return "governor must be one of " & CpuGovernors.join(", ")
   of pvNmConnections:
     if hasArg(args, "active") and args["active"].kind != JBool:
       return "active must be a boolean"

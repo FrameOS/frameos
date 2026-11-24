@@ -24,6 +24,7 @@ from app.utils.retired_apps import retired_app_config
 from app.models.settings import get_settings_dict
 from app.utils.events_contract_gen import BUTTON_ROLES, DEFAULT_KEYBOARD_LAYOUT, KEYBOARD_LAYOUTS
 from app.utils.render_scale import normalize_render_scale
+from app.utils.cpu_mode import device_config_cpu_mode
 from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.frame_secrets import (
     deploy_snapshot,
@@ -88,6 +89,9 @@ def serialize_device_config(cfg: Optional[dict]) -> dict:
         **_optional_config_float(cfg, "partialMaxAreaPercent"),
         **_optional_config_int(cfg, "partialMaxRefreshesBeforeFull"),
         **({"pins": serialized_pins} if serialized_pins else {}),
+        # The processor speed (app/utils/cpu_mode.py): a Linux frame sets its
+        # CPU governor from it (cpu_governor.nim). Present-only: unset is auto.
+        **({"cpuMode": cpu_mode} if (cpu_mode := device_config_cpu_mode(cfg)) else {}),
         **({"uploadUrl": str(cfg.get('uploadUrl'))} if cfg.get('uploadUrl') else {}),
         **({"uploadHeaders": [
             {"name": str(h.get('name')).strip(), "value": str(h.get('value', ''))}

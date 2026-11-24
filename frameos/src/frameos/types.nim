@@ -296,6 +296,13 @@ type
     httpUploadUrl*: string
     httpUploadHeaders*: seq[HttpHeaderPair]
     pins*: PinOverrides
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
+      ## The processor speed (the contract's `cpu_mode`: auto, battery,
+      ## performance) as the kernel's CPU frequency governor
+      ## (cpu_governor.nim). In deviceConfig because that is where a backend
+      ## keeps it for every frame (an ESP32 reads its copy off the settings
+      ## pull into NVS); a cloud push's `cpu_mode` lands here too (api.nim).
+      cpuMode*: string
 
   SerializedLog* = object
     timestamp*: float

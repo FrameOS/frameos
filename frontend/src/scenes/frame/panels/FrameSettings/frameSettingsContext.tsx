@@ -15,6 +15,8 @@ import {
   cloudFrameSupportsEsp32ClickSounds,
   esp32ClickSoundsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32CpuMode,
+  cloudFrameSupportsCpuMode,
+  cpuModeCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32RenderMode,
   cloudFrameSupportsEsp32VoiceChat,
   cloudFrameSupportsEsp32Led,
@@ -47,7 +49,11 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameSettingsSectionIsAllowed, workspaceMode, type WorkspaceMode } from '../../../workspace/workspaceSurfaces'
 import { timezoneOptions } from '../../../../decorators/timezones'
 import type { DeepPartial } from 'kea-forms'
-import type { PowerSettingsValues, RenderOnServerChoice } from '../../../../components/PowerSettingsFields'
+import type {
+  CpuModeFieldProps,
+  PowerSettingsValues,
+  RenderOnServerChoice,
+} from '../../../../components/PowerSettingsFields'
 import { backendFrameRenderMode, cloudFrameRenderMode, frameCanRenderItself } from '../../../../utils/renderOnServer'
 import { clickSoundsOf, frameHasSounds } from '../../../../utils/clickSounds'
 import type {
@@ -297,6 +303,14 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   /** Which Power controls this board's firmware implements; null = none. */
   embeddedPowerProfile: EmbeddedPowerProfile | null
   showEmbeddedPowerSection: boolean
+  /**
+   * "Processor speed" on a Pi/Linux frame (its CPU governor,
+   * frameos/src/frameos/cpu_governor.nim); undefined hides it. The cloud
+   * keeps it as the `cpu_mode` setting, a backend in device_config.cpuMode
+   * (for an ESP32 too), and the frame's own admin page in its frame.json's
+   * deviceConfig, read back as device_config.
+   */
+  linuxCpuMode: Omit<CpuModeFieldProps, 'platform'> | undefined
 
   virtualViewToken: string
   virtualImageUrl: string
@@ -660,6 +674,38 @@ export function FrameSettingsProvider({
           reach: 'Scenes then fetch their data from the backend, so they reach what it reaches: your network, a VPN.',
         }
       : undefined
+
+  // The processor speed on a Pi/Linux frame: the kernel's CPU governor,
+  // applied live (frameos/src/frameos/cpu_mode_linux.nim). The cloud pushes
+  // `cpu_mode` (from FrameOS 2026.11.15, the field disabled below it); a
+  // backend keeps device_config.cpuMode as it does for an ESP32 and deploys
+  // it in frame.json; the frame's own admin page reads and writes the same
+  // device_config. Not on a virtual frame (no processor of its own) nor on
+  // an embedded board (its Power section has the chip's clock).
+  const linuxCpuMode: FrameSettingsContextValue['linuxCpuMode'] =
+    surface === 'cloudLinux'
+      ? {
+          value: frameForm.cpu_mode ?? frame.hardware?.cpuMode ?? undefined,
+          onChange: (mode) => setFrameFormValues({ cpu_mode: mode }),
+          disabledReason: cloudFrameSupportsCpuMode(frame.frameos_version)
+            ? undefined
+            : frame.frameos_version
+              ? `The processor speed needs FrameOS ${cpuModeCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+              : `The processor speed needs FrameOS ${cpuModeCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+          appliedNote: 'Applied without a restart.',
+          reportedMhz: frame.hardware?.cpuMhz ?? undefined,
+          reportedGovernor: frame.hardware?.cpuGovernor ?? undefined,
+        }
+      : (surface === 'backend' || surface === 'frameAdmin') && !isEmbeddedMode
+        ? {
+            value: powerDeviceConfig.cpuMode ?? powerDeviceConfig.cpu_mode,
+            onChange: (mode) => setEmbeddedPowerSettings({ cpuMode: mode }),
+            appliedNote:
+              surface === 'backend'
+                ? 'The frame takes it with the next deploy (FrameOS 2026.11.15 or newer), without a restart.'
+                : 'Applied when you save, without a restart.',
+          }
+        : undefined
 
   // The button-press chirp's buzzer, on the same two routes as the power
   // keys above. Real ESP32 boards only: a virtual frame has no buttons to
@@ -1147,6 +1193,7 @@ export function FrameSettingsProvider({
       isEmbeddedMode &&
       embeddedPowerProfile !== null &&
       frameSettingsSectionIsAllowed(workspaceSurfaceMode, 'frame-settings-power', frame),
+    linuxCpuMode,
 
     virtualViewToken,
     virtualImageUrl: `${virtualUrlOrigin}/api/frames/${frame.id}/virtual/image?k=${virtualUrlToken}`,

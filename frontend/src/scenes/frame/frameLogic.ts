@@ -480,6 +480,9 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   // One list, spread from the exported source so a new power key lands here
   // (and in frameDiffKeys below) without a second hand-copy.
   ...esp32PowerSettingKeys,
+  // The processor speed: a cloud setting of both profiles since 2026.11.15
+  // (a Pi's CPU governor), so no longer one of the ESP32-only keys above.
+  'cpu_mode',
   'network',
   'agent',
   'mountpoints',

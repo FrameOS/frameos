@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { Group } from 'kea-forms'
 import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { Button } from '../../../../../components/Button'
+import { CpuModeField } from '../../../../../components/PowerSettingsFields'
 import { ColorInput } from '../../../../../components/ColorInput'
 import { Field } from '../../../../../components/Field'
 import { H6 } from '../../../../../components/H6'
@@ -778,6 +779,19 @@ export function FrameSettingsOnScreenField(): JSX.Element | null {
       </Field>
     </fieldset>
   )
+}
+
+/**
+ * "Processor speed" on a Pi/Linux frame (`cpu_mode`, its CPU governor), on
+ * every plane that offers it (frameSettingsContext's `linuxCpuMode`). An
+ * ESP32's is in its Power section; a virtual frame has none.
+ */
+export function LinuxCpuModeField(): JSX.Element | null {
+  const { linuxCpuMode } = useFrameSettings()
+  if (!linuxCpuMode) {
+    return null
+  }
+  return <CpuModeField platform="linux" {...linuxCpuMode} />
 }
 
 export function MetricsIntervalField(): JSX.Element {

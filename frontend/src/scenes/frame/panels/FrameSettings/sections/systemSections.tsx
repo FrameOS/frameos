@@ -16,6 +16,7 @@ import {
   PaletteField,
   RenderScaleField,
   FrameSettingsOnScreenField,
+  LinuxCpuModeField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -305,6 +306,7 @@ export function DefaultsSection(): JSX.Element {
         </Field>
         <RenderScaleField />
         <FrameSettingsOnScreenField />
+        <LinuxCpuModeField />
       </SectionBody>
     </>
   )

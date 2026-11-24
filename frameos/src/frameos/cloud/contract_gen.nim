@@ -295,6 +295,7 @@ const CloudContractSettings* = @[
   SettingSpec(key: "cpu_mode", rule:
     Rule(kind: rkString, strEnum: @["auto", "battery", "performance"]),
   profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.11.15"),
     ProfileSpec(profile: "esp32", since: "2026.11.7", restart: true)]),
   SettingSpec(key: "render_mode", rule:
     Rule(kind: rkString, strEnum: @["local", "remote"]),

@@ -908,6 +908,9 @@ export const cloudFramesContract = {
         ]
       },
       "profiles": {
+        "linux": {
+          "since": "2026.11.15"
+        },
         "esp32": {
           "since": "2026.11.7",
           "restart": true

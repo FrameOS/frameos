@@ -396,6 +396,12 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
       continue
     putJsonIfPresent(result, payload, apiKey, configKey)
 
+  # The processor speed: a cloud push's `cpu_mode` (the contract's wire key)
+  # lives in deviceConfig, where a backend's deploy and this API's own form
+  # keep it (cpu_governor.nim).
+  if payload.hasKey("cpu_mode"):
+    result["deviceConfig"] = mergeDeviceConfig(result{"deviceConfig"}, %*{"cpuMode": payload["cpu_mode"]})
+
   # A scheme or port typed into the host field ("https://backend:8443") goes
   # to serverScheme / serverPort and wins over the payload's own; the host
   # stays bare, which is what the log shipper dials.
@@ -696,6 +702,14 @@ proc canonicalDeviceConfig(node: JsonNode): JsonNode =
         pins[key] = value
     if pins.len > 0: result["pins"] = pins else: result.delete("pins")
 
+proc withoutCpuMode(node: JsonNode): JsonNode =
+  ## deviceConfig as the drivers see it: the processor speed is the
+  ## runtime's, applied on a reload (cpu_mode_linux.nim), never a restart.
+  if node == nil or node.kind != JObject or not node.hasKey("cpuMode"):
+    return node
+  result = copy(node)
+  result.delete("cpuMode")
+
 proc runtimeVisibleConfig(node: JsonNode): JsonNode =
   ## frameApi is sync BOOKKEEPING, not runtime config: an echo of the last
   ## payload plus a frame_sync revision the merge freshly stamps on every
@@ -713,7 +727,10 @@ proc classifyFrameConfigChange*(existing, next: JsonNode): FrameConfigChange =
   if not result.any:
     return
   proc differs(key: string): bool =
-    before{key} != after{key}
+    if key == "deviceConfig":
+      withoutCpuMode(before{key}) != withoutCpuMode(after{key})
+    else:
+      before{key} != after{key}
   for key in frameConfigListenerKeys:
     if differs(key):
       result.listeners = true

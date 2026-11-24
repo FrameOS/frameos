@@ -101,11 +101,96 @@ const awakeAfterInputChoices = [
   { value: '1800', label: '30 minutes' },
 ]
 
-const cpuModeChoices: { value: CpuMode; label: string }[] = [
-  { value: 'auto', label: 'Automatic (default)' },
-  { value: 'battery', label: 'Battery: 160 MHz' },
-  { value: 'performance', label: 'Performance: 240 MHz' },
-]
+const cpuModeChoices: Record<CpuModePlatform, { value: CpuMode; label: string }[]> = {
+  esp32: [
+    { value: 'auto', label: 'Automatic (default)' },
+    { value: 'battery', label: 'Battery: 160 MHz' },
+    { value: 'performance', label: 'Performance: 240 MHz' },
+  ],
+  // A Pi's clock is the kernel's governor (frameos/src/frameos/cpu_governor.nim):
+  // auto is ondemand, battery powersave, performance performance.
+  linux: [
+    { value: 'auto', label: 'Automatic (default): fast while busy' },
+    { value: 'battery', label: 'Battery: always the lowest speed' },
+    { value: 'performance', label: 'Performance: always the highest speed' },
+  ],
+}
+
+/** Whose processor: an ESP32's clock, or a Linux frame's (a Raspberry Pi's) CPU governor. */
+export type CpuModePlatform = 'esp32' | 'linux'
+
+export interface CpuModeFieldProps {
+  platform: CpuModePlatform
+  value: CpuMode | undefined
+  onChange: (mode: CpuMode) => void
+  /** Why it cannot be set here (cloud: firmware before the key); the field renders disabled with it. */
+  disabledReason?: string
+  /** When the frame takes a change (a Pi: live on the cloud, with the next deploy on a backend). */
+  appliedNote?: string
+  /** The clock the frame reported running at, in MHz (cloud only). */
+  reportedMhz?: number | undefined
+  /** The governor a Linux frame reported running (cloud only). */
+  reportedGovernor?: string | undefined
+}
+
+/**
+ * "Processor speed" (the contract's `cpu_mode`), one field for both kinds of
+ * frame. On an ESP32 it picks the chip's clock at boot, inside the Power
+ * fields below. On a Pi it picks the kernel's CPU frequency governor, live
+ * (frameos/src/frameos/cpu_mode_linux.nim): a Pi frame is on mains power, so
+ * the words are about speed, not battery life.
+ */
+export function CpuModeField({
+  platform,
+  value,
+  onChange,
+  disabledReason,
+  appliedNote,
+  reportedMhz,
+  reportedGovernor,
+}: CpuModeFieldProps): JSX.Element {
+  const help =
+    platform === 'esp32' ? (
+      <>
+        Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about a third faster, but the chip
+        also waits out the screen refresh at the higher speed, about 20 seconds on a reTerminal E1002. On a battery
+        e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery on e-paper and performance on
+        LCD and touch screens. Saving a change reboots the frame.
+      </>
+    ) : (
+      <>
+        How fast the processor runs. Automatic runs it at its highest speed while the frame works (a render, a video, a
+        scene switch) and at its lowest while it waits. Performance keeps it at its highest speed: the quickest renders,
+        for a little more power and heat. Battery keeps it at its lowest speed. A Raspberry Pi frame on mains power is
+        best on Automatic or Performance. {appliedNote ?? 'Applied without a restart.'}
+      </>
+    )
+  const reported =
+    platform === 'esp32'
+      ? reportedMhz
+        ? `Running at ${reportedMhz} MHz now.`
+        : null
+      : reportedMhz || reportedGovernor
+        ? `Last reported: ${[
+            reportedMhz ? `${reportedMhz} MHz` : '',
+            reportedGovernor ? `the ${reportedGovernor} governor` : '',
+          ]
+            .filter(Boolean)
+            .join(', ')}.`
+        : null
+  return (
+    <PowerField label="Processor speed" tooltip={disabledReason ?? help}>
+      <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-1">
+        <Select
+          value={value ?? 'auto'}
+          onChange={(mode) => onChange(mode as CpuMode)}
+          options={cpuModeChoices[platform]}
+        />
+        {reported ? <p className="frameos-muted text-xs">{reported}</p> : null}
+      </fieldset>
+    </PowerField>
+  )
+}
 
 const wakeCheckChoices = [
   { value: '0', label: 'Only wake to render' },
@@ -241,28 +326,13 @@ export function PowerSettingsFields({
         </PowerField>
       ) : null}
       {renderOnServer ? <RenderScenesField choice={renderOnServer} value={value} onChange={onChange} /> : null}
-      <PowerField
-        label="Processor speed"
-        tooltip={
-          cpuModeDisabledReason ?? (
-            <>
-              Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about a third faster, but
-              the chip also waits out the screen refresh at the higher speed, about 20 seconds on a reTerminal E1002. On
-              a battery e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery on e-paper and
-              performance on LCD and touch screens. Saving a change reboots the frame.
-            </>
-          )
-        }
-      >
-        <fieldset disabled={cpuModeDisabledReason !== undefined} className="min-w-0 space-y-1">
-          <Select
-            value={value.cpuMode ?? 'auto'}
-            onChange={(mode) => onChange({ cpuMode: mode as CpuMode })}
-            options={cpuModeChoices}
-          />
-          {reportedCpuMhz ? <p className="frameos-muted text-xs">Running at {reportedCpuMhz} MHz now.</p> : null}
-        </fieldset>
-      </PowerField>
+      <CpuModeField
+        platform="esp32"
+        value={value.cpuMode}
+        onChange={(mode) => onChange({ cpuMode: mode })}
+        disabledReason={cpuModeDisabledReason}
+        reportedMhz={reportedCpuMhz}
+      />
       <PowerField
         label="Battery sense GPIO"
         tooltip={
