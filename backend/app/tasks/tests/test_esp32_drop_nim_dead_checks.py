@@ -248,3 +248,26 @@ def test_the_program_does_what_it_did(tmp_path: Path, optimization: str):
     assert before == "7 0|0 1|0 1|1 0|2 0|9 0|7 0|0 1|\n"
     load_tool().drop(nimcache)
     assert build_and_run("after") == before
+
+
+def test_a_proc_field_is_never_the_c_library(tmp_path: Path):
+    # A proc field is called as `s->log(...)` / `(*s).log(...)`: an indirect
+    # call whatever the field's name, never libm's `log`.
+    tool = load_tool()
+    source = tmp_path / "@mfield.nim.c"
+    source.write_text(
+        '#include "nimbase.h"\n'
+        "typedef struct { void (*log)(double); } tyObject_Logger;\n"
+        "N_LIB_PRIVATE N_NIMCALL(void, viaField__f_u1)(tyObject_Logger* s_p0) {\n"
+        "\ts_p0->log(1.0);\n"
+        "}\n"
+        "N_LIB_PRIVATE N_NIMCALL(void, viaDeref__f_u2)(tyObject_Logger* s_p0) {\n"
+        "\t(*s_p0).log(1.0);\n"
+        "}\n"
+        "N_LIB_PRIVATE N_NIMCALL(double, libm__f_u3)(double x_p0) {\n"
+        "\treturn log(x_p0);\n"
+        "}\n"
+    )
+    clean = tool.clean_functions({source: source.read_text().split("\n")})
+    assert "viaField__f_u1" not in clean and "viaDeref__f_u2" not in clean
+    assert "libm__f_u3" in clean

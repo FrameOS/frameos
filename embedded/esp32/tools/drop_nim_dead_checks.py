@@ -24,8 +24,10 @@ overflow, range or field check goes there), so a function is dirty when
   - it calls a function the nimcache does not define, other than the C
     library's memory, string and math functions (QuickJS, ESP-IDF and our own
     C can call back into Nim), or
-  - it makes an indirect call (a closure, a proc variable, a destructor
-    through a type's RTTI), or
+  - it makes an indirect call (a closure, a proc variable, a proc field such
+    as a stream's `readDataImpl`, a destructor through a type's RTTI; a field
+    call is indirect whatever its name, so a field called `log` is never
+    taken for the C library's), or
   - its body differs from another definition of the same name.
 
 and everything else is clean. Four functions of system's ORC are clean though
@@ -74,7 +76,7 @@ CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 CHECK = re.compile(r"^\s*if \(NIM_UNLIKELY\(\*nimErr_\)\) goto \w+;\s*$")
 LABEL = re.compile(r"^\s*\}?\s*\w+:\s*;?\s*$")
-INDIRECT = re.compile(r"ClP_0|destructor|traceImpl|\(\s*\*\s*[\w\.\[\]>-]+\s*\)\s*\(|\(\s*\(\s*tyProc_\w+\s*\)")
+INDIRECT = re.compile(r"ClP_0|destructor|traceImpl|(?:->|\.)\s*[A-Za-z_]\w*\s*\(|\(\s*\*\s*[\w\.\[\]>-]+\s*\)\s*\(|\(\s*\(\s*tyProc_\w+\s*\)")
 
 # Not calls: keywords and Nim's macros.
 NOT_CALLS = {
