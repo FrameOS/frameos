@@ -84,6 +84,7 @@ import { identityRateLimitResponse, rateLimitResponse } from "../../../../../../
 import { scenesForFrame } from "../../../../../../src/lib/retired-apps";
 import { deviceSceneIdForFrame, resolveStoreSceneForFrameScene } from "../../../../../../src/lib/scene-images";
 import { sceneListWithPreview } from "../../../../../../src/lib/scene-preview-list";
+import { voiceRefusal } from "../../../../../../src/lib/voice-permissions";
 
 export const runtime = "nodejs";
 // The closing chunk waits for the transcription and the chat turn.
@@ -101,6 +102,8 @@ export const maxDuration = 300;
 //   -> 200 {"ok": false, "error": "nothing_heard" | "transcription_failed" |
 //                        "chat_failed" | "ai_unavailable", "detail"}
 //   -> 409 seq_mismatch / unknown_session, 413 over the caps, 429 too many
+//   -> 403 no_microphone / voice_chat_off        the frame reports no
+//      microphone, or its owner's switch off (voiceRefusal)
 //
 // The chunks are held in this process's memory until `done` (voiceSessions);
 // the audio is kept nowhere after the turn. The turn is the AI chat's loop
@@ -159,6 +162,11 @@ export async function POST(
   }
   if (frame.status !== "active") {
     return jsonError("frame_not_active", 409);
+  }
+  // No microphone, or the owner's switch off: no turn, whatever holds the token.
+  const refusal = voiceRefusal(frame.hardware);
+  if (refusal) {
+    return jsonError(refusal, 403);
   }
   if (!VOICE_SESSION_ID_PATTERN.test(sessionId)) {
     return jsonError("invalid_session_id", 400);
