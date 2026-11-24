@@ -497,6 +497,7 @@ proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   ## released. The next render builds the app a new one and runs its init()
   ## again; `frameos.remember` values are Nim data and carry over.
   currentEnv = nil # the abort skipped the `finally` that puts the caller's back
+  memoAbandon()
   for runtime in jsRuntimeStack:
     if runtime.isNil or not runtime.ready:
       continue  # already dropped: a runtime re-entered further up the chain
@@ -3182,16 +3183,22 @@ proc jsTypedOps(ctx: ptr JSContext, args: seq[JSValue]): JSValue {.nimcall.} =
   if args.len < 6:
     refuse()
   let op = jsArgInt(ctx, args[0], -1)
+  # An array's bytes are a pointer into the JS heap, good only until the
+  # scene's code runs again: it can detach the buffer or resize it. So what
+  # can run it is read first (a kernel's elements may be getters, or a
+  # proxy's), the arrays are taken after, and from there to the loops nothing
+  # calls into JavaScript (a number is read as one, never converted).
+  var kernel: array[9, int32]
+  if op == 4:
+    for k in 0 ..< 9:
+      let v = JS_GetPropertyUint32(ctx, args[4], k.uint32)
+      kernel[k] = int32(clamp(jsArgInt(ctx, v, 0), -65536, 65536))
+      JS_FreeValue(ctx, v)
   var dst, a: Elements
   if not jsElements(ctx, args[1], dst) or not jsElements(ctx, args[2], a):
     refuse()
   if op == 4:
     let width = jsArgInt(ctx, args[3], 0)
-    var kernel: array[9, int32]
-    for k in 0 ..< 9:
-      let v = JS_GetPropertyUint32(ctx, args[4], k.uint32)
-      kernel[k] = int32(clamp(jsArgInt(ctx, v, 0), -65536, 65536))
-      JS_FreeValue(ctx, v)
     let shift = clamp(jsArgInt(ctx, args[5], 0), 0, 31)
     if width < 3 or a.length < width * 3 or dst.length < a.length:
       refuse()
@@ -4757,10 +4764,16 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     ps = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
     width = jsOptionInt(ctx, options, "width", frameWidth div ps)
     height = jsOptionInt(ctx, options, "height", frameHeight div ps)
-    (cells, byteLen) = jsBytes(ctx, cellsValue)
   var palette: PixelPalette
+  # The palette and the options before the cells: reading them can run the
+  # app's code (a getter, a proxy), which can detach or resize the cells'
+  # buffer, and the cells are a pointer into it. Nothing below calls into
+  # JavaScript.
+  let
+    colors = readPalette(ctx, paletteValue, palette)
+    (cells, byteLen) = jsBytes(ctx, cellsValue)
   # One constant message: the numbers in one were a kilobyte of firmware.
-  if cells.isNil or readPalette(ctx, paletteValue, palette) == 0 or width <= 0 or height <= 0 or
+  if cells.isNil or colors == 0 or width <= 0 or height <= 0 or
       width.int64 * height.int64 > byteLen.int64 or width * ps > 4096 or height * ps > 4096:
     frameos_apps.logError(owner, "frameos.pixels(cells, palette, options) needs a typed array of width x height cells and a palette")
     return
