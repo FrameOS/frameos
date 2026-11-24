@@ -389,6 +389,33 @@ suite "web route behavior":
     )
     check authedPrivateLogo.status == 200
 
+  test "pages are never sniffed, and only the viewer may be framed by another site":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    configureServerState(config)
+    let adminLogin = httpRequest(server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}))
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+    for (path, headers) in [("/admin", @[("Cookie", adminCookie)]), ("/c?k=test-key", newSeq[(string, string)]())]:
+      let page = httpRequest(server.port, "GET", path, headers = headers)
+      check page.status == 200
+      check page.header("content-type").startsWith("text/html")
+      check page.header("x-content-type-options") == "nosniff"
+      check page.header("x-frame-options") == "SAMEORIGIN"
+      check page.header("content-security-policy") == "frame-ancestors 'self'"
+    config.frameAdminAuth = %*{}
+    configureServerState(config)
+    let viewer = httpRequest(server.port, "GET", "/", headers = [("Cookie", ACCESS_COOKIE & "=test-key")])
+    check viewer.status == 200
+    check viewer.header("x-content-type-options") == "nosniff"
+    check viewer.header("x-frame-options") == ""
+    let asset = httpRequest(server.port, "GET", stableStaticAssetPath, headers = [("Cookie", ACCESS_COOKIE & "=test-key")])
+    check asset.header("x-content-type-options") == "nosniff"
+    let json = httpRequest(server.port, "GET", "/states?k=test-key")
+    check json.header("content-type") == "application/json"
+    check json.header("x-content-type-options") == "nosniff"
+
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()
     configureServerState(config)

@@ -76,7 +76,20 @@ proc parseUrlEncoded*(body: string): Table[string, string] =
 proc jsonResponse*(request: Request, statusCode: httpcore.HttpCode, payload: JsonNode) =
   var headers: mummy.HttpHeaders
   headers["Content-Type"] = "application/json"
+  headers["X-Content-Type-Options"] = "nosniff"
   request.respond(int(statusCode), headers, $payload)
+
+proc pageHeaders*(frameable = false): mummy.HttpHeaders =
+  ## An HTML page of the frame's own. Never sniffed as anything else. Unless
+  ## `frameable`, only the frame's own pages may put it in a frame: the admin
+  ## app, the login, the control page and the setup form have buttons a page
+  ## of somebody else's could lay a frame over. The viewer stays frameable,
+  ## as a dashboard or a kiosk page shows it.
+  result["Content-Type"] = "text/html; charset=utf-8"
+  result["X-Content-Type-Options"] = "nosniff"
+  if not frameable:
+    result["X-Frame-Options"] = "SAMEORIGIN"
+    result["Content-Security-Policy"] = "frame-ancestors 'self'"
 
 proc loadConfigJson(): JsonNode =
   try:
@@ -1455,7 +1468,7 @@ proc renderControlPage*(request: Request) =
       ("[/*$$fieldsMetaJson$$*/]", fieldsMetaJson),
       ("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml),
       ("Frame Control", if frameName != "": h(frameName) else: "Frame Control"))
-    request.respond(int(Http200), body = controlHtml)
+    request.respond(int(Http200), pageHeaders(), controlHtml)
 
 proc appsPayload*(): string =
   appsAsset.getAppsJson()

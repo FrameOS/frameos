@@ -60,7 +60,7 @@ proc respondAdminWebApp(request: Request) {.gcsafe.} =
   elif not hasAdminSession(request):
     redirectTo(request, "/login")
   else:
-    request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
+    request.respond(Http200, pageHeaders(), frameWebHtml(frameAdminMode = true))
 
 proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
   if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
@@ -69,6 +69,7 @@ proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
   try:
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = contentTypeForAsset(assetPath)
+    headers["X-Content-Type-Options"] = "nosniff"
     headers["Vary"] = "Accept-Encoding"
     let asset =
       if clientAcceptsGzip(request):
@@ -183,7 +184,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         if captivePortalRedirect(request):
           return
         log(%*{"event": "portal:http", "get": request.path})
-        request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
+        request.respond(Http200, pageHeaders(), netportal.setupHtml(globalFrameOS))
       else:
         let accessKey = frameAccessKeyValue()
         if accessKey != "" and request.queryParams.contains("k") and
@@ -203,7 +204,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
           else:
             request.respond(Http401, body = "Unauthorized")
         else:
-          request.respond(Http200, body = frameWebHtml())
+          request.respond(Http200, pageHeaders(frameable = true), frameWebHtml())
   )
 
   router.get("/admin", proc(request: Request) {.gcsafe.} =
@@ -225,7 +226,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     elif hasAdminSession(request):
       redirectTo(request, "/admin")
     else:
-      request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
+      request.respond(Http200, pageHeaders(), frameWebHtml(frameAdminMode = true))
   )
 
   router.get("/logout", proc(request: Request) {.gcsafe.} =
@@ -285,10 +286,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http400, body = problem)
         return
       if not netportal.persistPortalSetup(globalFrameOS, options):
-        request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
+        request.respond(Http500, pageHeaders(), netportal.setupHtml(globalFrameOS))
         return
       spawn netportal.connectToWifiDetached(netportal.runtimeHandle(globalFrameOS), options)
-      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
+      request.respond(Http200, pageHeaders(), netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
   )
 
   # Polled by the "Saved!" page from the hotspot origin AND from the frame's
