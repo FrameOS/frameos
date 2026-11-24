@@ -6,7 +6,10 @@ import ../../[channels, types]
 import ../../scenes
 import ./helpers/http_harness
 import ../[auth, state]
-from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest
+from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest,
+  setupPeerOutsideHotspotForTest
+import std/atomics
+from ../hotspot_listener import isHotspotPeer
 
 var server = startRouterServer(19331)
 
@@ -78,6 +81,46 @@ suite "web route behavior":
     check after["hotspot"].getBool() == false
     # Once the hotspot is down the error text (SSID, driver output) stays home.
     check after["error"].getStr() == ""
+
+  test "the open setup routes answer the hotspot, not the rest of a network the frame is on":
+    # The form sets the frame's Wi-Fi, backend and cloud claim with no login.
+    # It is served by the frame's ordinary listeners, on every interface, so
+    # while the hotspot is up a frame with Ethernet (or a listener that fell
+    # back to every interface) would have offered it to its whole LAN.
+    check isHotspotPeer("10.42.0.23")
+    check isHotspotPeer("::ffff:10.42.0.23")
+    check isHotspotPeer("127.0.0.1")
+    check isHotspotPeer("::1")
+    check not isHotspotPeer("192.168.1.40")
+    check not isHotspotPeer("10.42.1.5")
+    check not isHotspotPeer("10.4.0.16")
+    check not isHotspotPeer("")
+
+    var config = defaultFrameConfig()
+    configureServerState(config, hotspotActive = true)
+    setupPeerOutsideHotspotForTest.store(true)
+    try:
+      let post = httpRequest(server.port, "POST", "/setup",
+        headers = [("Content-Type", "application/x-www-form-urlencoded")],
+        body = "ssid=elsewhere&password=x")
+      check post.status == 403
+      check httpRequest(server.port, "GET", "/wifi").status == 403
+      # The frame's own network asks for the frame, not for the setup form.
+      let root = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+      check root.status == 401
+      check not root.body.contains("Set up your Frame")
+      let stray = httpRequest(server.port, "GET", "/some/app/page", headers = [("Host", "example.com")])
+      check stray.status == 404
+      let status = parseJson(httpRequest(server.port, "GET", "/setup/status").body)
+      check status["hotspot"].getBool()
+      check status["error"].getStr() == ""
+    finally:
+      setupPeerOutsideHotspotForTest.store(false)
+    # From the hotspot (here: loopback, the frame itself) it is all there.
+    let root = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+    check root.status == 200
+    check root.body.contains("Set up your Frame")
+    configureServerState(config, hotspotActive = false)
 
   test "captive-portal probes and stray hosts redirect to the setup form while the hotspot is up":
     var config = defaultFrameConfig()
