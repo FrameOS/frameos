@@ -1,5 +1,5 @@
 import {
-  sceneAccessFlagsForScene,
+  sceneAccess,
   withAppPermissions,
 } from "../../../../../frontend/src/utils/sceneAccess";
 
@@ -18,11 +18,15 @@ import {
 // gets the list its code calls for first (withAppPermissions, the stamp
 // every push puts on such an app), so leaving the list out is not a way
 // past the check. The built-in apps a scene's nodes run count too, through
-// the SPA's own reading (sceneAccessFlagsForScene).
+// the SPA's own reading (sceneAccess). And an app whose code calls `frameos.storeAction` counts as
+// asking for "store" whatever its list says: a frame from before the
+// permission (STORE_PERMISSION_FROM) runs that call for any app, and a list
+// the push wrote for such a frame leaves the name out (scene-origin.ts).
 
 /** The permissions that reach past the frame's own data: a new scene saved
- * from the frame may ask for none of them. */
-export const redScenePermissions: readonly string[] = ["shell", "files", "assets-write", "frame", "code"];
+ * from the frame may ask for none of them, and a frame installs or previews
+ * no store scene that asks for one (panel-scenes.ts). */
+export const redScenePermissions: readonly string[] = ["shell", "files", "assets-write", "frame", "code", "store"];
 
 export type DeclaredSceneGrants = {
   /** config.json `permissions`, every app's, sorted. */
@@ -76,12 +80,16 @@ export function declaredSceneGrants(scene: unknown): DeclaredSceneGrants {
       strings(config?.permissions).forEach((permission) => permissions.add(permission));
       strings(config?.settings).forEach((key) => settings.add(key));
     }
-    for (const flag of sceneAccessFlagsForScene(filled)) {
+    const access = sceneAccess(filled);
+    for (const flag of access.flags) {
       if (flag.startsWith("key:")) {
         settings.add(flag.slice("key:".length));
       } else {
         permissions.add(flag);
       }
+    }
+    if (access.apps.some((app) => app.detected.includes("store"))) {
+      permissions.add("store");
     }
   }
   return { permissions: [...permissions].sort(), settings: [...settings].sort() };
@@ -103,4 +111,14 @@ export function grantsWidenedBy(before: DeclaredSceneGrants | null, after: Decla
     : after.permissions.filter((permission) => redScenePermissions.includes(permission));
   const settings = before ? after.settings.filter((key) => !before.settings.includes(key)) : after.settings;
   return [...permissions, ...settings.map((key) => `key:${key}`)];
+}
+
+/**
+ * The red permissions `grants` asks for: what a store scene put on a frame
+ * from the frame's own screen, in no saved scene's place, may ask for none
+ * of (the owner installs such a scene from the workspace, where its tags
+ * show). Settings keys are not counted: a panel install grants none.
+ */
+export function redPermissionsAsked(grants: DeclaredSceneGrants | null): string[] {
+  return (grants?.permissions ?? []).filter((permission) => redScenePermissions.includes(permission));
 }

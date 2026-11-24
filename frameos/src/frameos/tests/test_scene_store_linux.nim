@@ -182,5 +182,43 @@ block the_lock_hides_the_page:
   noteFrameConfigChanged()
   doAssert read().isNil, "the settings on the screen are off: no store"
 
+block the_lock_refuses_the_work_too:
+  # The read saying nothing is not what stops an app that asks anyway: with
+  # the page off the host starts no job, here removing the frame's one scene's
+  # neighbour would have worked.
+  writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": true, "width": 800, "height": 480}))
+  noteFrameConfigChanged()
+  persistScenesPayload(scenes())
+  discard waitIdle()
+  writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": false, "width": 800, "height": 480}))
+  noteFrameConfigChanged()
+  act("remove", %*{"id": "radar", "store": Radar})
+  sleep(200)
+  doAssert loadScenePayload().len == 2, "nothing removed while the page is off"
+  writeFile(dir / "frame.json", $(%*{"name": "Test", "frameSettingsOnScreen": true, "width": 800, "height": 480}))
+  noteFrameConfigChanged()
+  doAssert waitIdle(){"busy"}.getStr() == "", "no job was started"
+  doAssert loadScenePayload().len == 2
+
+block what_asks_for_a_red_permission:
+  # A backend's frame previews by itself (a backend keeps no preview of a
+  # Pi), and its owner is not at the frame: a scene that asks for a red
+  # permission is not put on (`needs_owner`, as its backend answers an
+  # install of one).
+  proc scene(permissions: JsonNode, config = ""): JsonNode =
+    %*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "a"}}],
+       "apps": {"a": {"sources": {"app.tsx": "export function get() {}",
+         "config.json": (if config.len > 0: config else: $(%*{"permissions": permissions}))}}}}
+  doAssert not scenesAskForRed([scene(%*[])])
+  doAssert not scenesAskForRed([scene(%*["assets"])])
+  for permission in ["shell", "files", "assets-write", "frame", "code", "store"]:
+    doAssert scenesAskForRed([scene(%*["assets", permission])]), permission
+  # A node's own files, and a built-in app that has a red permission.
+  doAssert scenesAskForRed([%*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "x",
+    "sources": {"config.json": "{\"permissions\": [\"code\"]}"}}}]}])
+  doAssert scenesAskForRed([%*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "data/localImage"}}]}])
+  doAssert scenesAskForRed([%*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "chromiumScreenshot"}}]}])
+  doAssert not scenesAskForRed([%*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "render/text"}}]}])
+
 removeDir(dir)
 echo "scene store (linux): ok"

@@ -271,6 +271,8 @@ describe("repo sample scenes", () => {
     ["repo/scenes/samples/PDF viewer/scenes.json", ["assets"]],
     // Fonts lists the fonts folder and writes the fonts it gets into it.
     ["repo/scenes/samples/Fonts/scenes.json", ["assets", "assets-write"]],
+    // The Scene store installs, updates and removes the frame's scenes.
+    ["repo/scenes/samples/Scene store/scenes.json", ["store"]],
   ])("%s", (path, flags) => {
     expect(sceneAccessFlags(JSON.parse(repoFile(path)))).toEqual(flags);
   });

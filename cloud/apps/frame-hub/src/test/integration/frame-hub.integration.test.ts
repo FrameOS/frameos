@@ -1800,6 +1800,50 @@ describe("command redelivery", () => {
     device.ws.close();
   });
 
+  // From 2026.11.15 `frameos.storeAction` is for an app whose list asks for
+  // "store". A Scene store published without a list gets one from the push,
+  // and that list names "store" for a firmware that asks for it only: so the
+  // update across it re-pushes, and the store on the frame keeps installing.
+  it("re-pushes an app that calls the store with its permission when the firmware starts asking for it", async () => {
+    const storeScenes = [
+      {
+        apps: {
+          shop: {
+            sources: {
+              "app.tsx": "export function get() { frameos.storeAction('install', { store: 'x' }); return <div /> }",
+              "config.json": '{\n  "name": "Shop"\n}\n',
+            },
+          },
+        },
+        edges: [],
+        id: "shop",
+        name: "Shop",
+        nodes: [{ data: { keyword: "shop" }, id: "n1", type: "app" }],
+      },
+    ];
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id, storeScenes);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.11.14" })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      frameos_version: "2026.11.15",
+      states: { active_scene: "shop" },
+    });
+    expect(ready.pending_commands).toBe(1);
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes push");
+    const [pushed] = push.scenes as Array<{ apps: Record<string, { sources: Record<string, string> }> }>;
+    expect(JSON.parse(pushed?.apps.shop?.sources["config.json"] ?? "{}")).toEqual({
+      name: "Shop",
+      permissions: ["store"],
+    });
+    expect(push.scene_id).toBe("shop");
+    device.ws.close();
+  });
+
   it("leaves a firmware update that crosses no retired app to the owner", async () => {
     const { account, frame, privateKey, token } = await createFrameFixture();
     await createAssignedStoreScene(account.id, frame.id, immichScenes);

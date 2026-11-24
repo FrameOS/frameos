@@ -100,7 +100,7 @@ async def test_save_adds_a_new_scene_but_not_as_the_default(async_client, no_aut
 
 
 @pytest.mark.asyncio
-async def test_save_never_widens_what_a_scene_may_do(async_client, no_auth_client, db):
+async def test_save_never_widens_what_a_scene_may_do(async_client, no_auth_client, db, redis):
     frame = await code_frame(async_client, db)
     for apps, needs in [
         ({"thing": js_app(["assets", "frame"], ["openAI"])}, ["frame"]),
@@ -113,6 +113,13 @@ async def test_save_never_widens_what_a_scene_may_do(async_client, no_auth_clien
     # A new scene: no red permission, no settings key; reading assets is fine.
     response = await post(no_auth_client, frame, {"action": "save", "scene": scene("new", thing=js_app(["shell"], ["openAI"]))})
     assert response.json()["needs"] == ["shell", "key:openAI"]
+    # The store's own permission is red too, declared or called.
+    response = await post(no_auth_client, frame, {"action": "save", "scene": scene("new", thing=js_app(["store"]))})
+    assert response.json()["needs"] == ["store"]
+    installer = js_app([])
+    installer["sources"]["app.ts"] = "export function get() { frameos . storeAction ('install', { store }) }"
+    response = await post(no_auth_client, frame, {"action": "save", "scene": scene("new", thing=installer)})
+    assert response.json()["needs"] == ["store"]
     # A built-in app counts by its own config.json.
     chromium = {**scene("shot"), "nodes": [{"id": "c", "type": "app", "data": {"keyword": "data/chromiumScreenshot"}}]}
     response = await post(no_auth_client, frame, {"action": "save", "scene": chromium})

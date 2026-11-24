@@ -212,7 +212,7 @@ scene unless `show: false`. Refused:
 - **a save that widens what the scene may do** (`needs_owner`, with `needs`):
   the `permissions` and `settings` its apps' config.json ask for must be ones
   the saved scene of that id already asked for (a new scene: none of the red
-  permissions — `shell`, `files`, `assets-write`, `frame`, `code` — and no
+  permissions — `shell`, `files`, `assets-write`, `frame`, `code`, `store` — and no
   settings keys). What a device asks must never widen a grant
   (docs/cloud-frames.md "Scenes the frame already had"); the owner installs
   such a scene from the workspace, where grants are made;

@@ -526,6 +526,12 @@ describe("POST /api/frames/{id}/panel/code: save", () => {
       error: "invalid_layout",
       ok: false,
     });
+    // The store's own permission is red too.
+    const shop = await code(frame.frame_id, frame.access_token, {
+      action: "save",
+      scene: withApp(scene("shop-rt", "Shop"), ["store"]),
+    });
+    expect(await shop.json()).toEqual({ error: "needs_owner", needs: ["store"], ok: false });
     expect((await refusal({ action: "publish" })).error).toBe("invalid_action");
     // Nothing of the refused ones reached the frame's list.
     expect((await assignments(frame.frame_id)).length).toBe(1);

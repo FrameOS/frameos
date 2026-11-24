@@ -56,6 +56,24 @@ that scene still shows (the Pi checks `shownSceneId()`, the ESP32
 every request a scene asks for (`fos_js_io_run`, `docs/async-js.md`), so the
 store and an app's pictures never hold two TLS sessions.
 
+**`storeAction` is for an app that asks for the `store` permission** (FrameOS
+2026.11.15+): `"permissions": ["store"]` in its config.json, a red tag
+("installs and removes scenes") like `frame` and `code`, written by the
+editor's save when the code calls `frameos.storeAction(`
+(`frontend/src/utils/sceneAccess.ts`). The scenes on a frame and the layout
+they wear are not any scene's to change: without the permission the call does
+nothing, answers false and logs why, `layout` included (`jsStoreAction`,
+`storeGrant` in `js_runtime/app_runtime.nim`, one gate for the Pi, the ESP32
+and the preview). And only while the store is offered: with the settings on
+the frame's screen off the call is refused before any host is asked, and the
+Pi's host refuses again (`linuxSceneStoreAction`). `frameos.store()`, the
+facts, needs no permission. A Scene store installed before the permission
+keeps working: the cloud writes the list of an app that has none on every
+push, with `store` in it from the firmware that asks for it
+(`STORE_PERMISSION_FROM`, and the hub pushes again when a frame crosses it);
+a backend's migration `c4e8a1b7d3f6` adds it to what it has stored, which a
+frame gets with its next deploy or pull.
+
 Browsing is the app's: it `fetch`es the listing for frames from `url`
 (`${url}/api/store/device/scenes?version=…&<its query>`), off the render, and
 renders again when the page is in (`docs/async-js.md`). Where a render may
@@ -199,8 +217,8 @@ over goes into a URL path on the ESP32, so it must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
-| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). One that takes the place of a scene the frame holds under the same id is `needs_owner` when it asks for more than that scene (below). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
-| `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it |
+| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). One that takes the place of a scene the frame holds under the same id is `needs_owner` when it asks for more than that scene, and one new to the frame when it asks for a red permission (below). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
+| `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it. `needs_owner` when it asks for a red permission (below) |
 | `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is); `needs_owner` when that version asks for more (below) |
 | `updates` | none | reads, changes nothing: `{"ok": true, "updates": [{store, name, from, to, owner?}]}`, each public store scene the frame holds with a newer version it can run, in the frame's order |
 | `updateAll` | none | moves every one of `updates` without `owner` in ONE push (`{"status", "updated", "kept"}`: `kept` the ones left to the owner) |
@@ -239,9 +257,23 @@ What a frame may ask is narrower than what its owner may:
   `needs`, 403: the same check as an update's). A backend compares with the
   copies in its saved list and replaces them there, keeping their names,
   values, maps and layouts; the cloud compares with the scenes the frame was
-  last sent (`buildScenesPayloadForFrame`). A scene of an id the frame does
-  not hold installs with what it declares, as the store's red tags say.
-- **Nothing while the settings on the frame's screen are off** (`panel_locked`).
+  last sent (`buildScenesPayloadForFrame`).
+- **Nothing new that asks for a red permission.** A scene of an id the frame
+  does not hold is installed or previewed only when its apps ask for none of
+  `shell`, `files`, `assets-write`, `frame`, `code` and `store` (the SPA's red
+  tags, `sceneAccessFlagIsRisky`; `needs_owner`, with `needs`, 403). The store
+  on a frame shows no tags, and what asks is a scene's code, with or without
+  a person at the frame: a scene that reaches past its own data is put on
+  from the workspace, where its red tag is seen and accepted. Code that
+  calls `frameos.storeAction` counts as asking for `store` whatever its list
+  says. A backend's Pi, which previews by itself, refuses the same on its own
+  (`scenesAskForRed`, `scene_store_linux.nim`); a frame with no control plane
+  has its owner at the frame and installs what its store app asks for.
+- **Nothing that runs shell commands**, on either plane (`scene_not_allowed`):
+  the listing for frames leaves such a scene out, and an id asked for anyway
+  is refused, an update to such a version too.
+- **Nothing while the settings on the frame's screen are off** (`panel_locked`):
+  the planes refuse, and so does the device before it asks them.
 - **A frame keeps one scene** (`last_scene`).
 - Sixty changes a quarter of an hour per frame, and 120 `updates` reads in a
   bucket of their own, so reading never costs a tap.

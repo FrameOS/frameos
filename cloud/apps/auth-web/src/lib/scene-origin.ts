@@ -60,14 +60,19 @@ export function storeSceneOrigin(
  * `appPermissions: false` leaves the apps alone: the device push for a
  * firmware that predates the lists, so the payload changes exactly when the
  * firmware starts reading them and the hub's firmware-change resync
- * (frame-hub, `fromVersion`) delivers them.
+ * (frame-hub, `fromVersion`) delivers them. `storePermission: false` leaves
+ * "store" out of a list written here, for the same reason: the push for a
+ * firmware from before `frameos.storeAction` asked for it
+ * (STORE_PERMISSION_FROM), so a Scene store copy published without a list
+ * gets it the moment its frame starts to ask.
  */
 export function withStoreSceneOrigin<T>(
   scenes: readonly T[],
   source: StoreSceneOriginSource,
-  options: { appPermissions?: boolean } = {},
+  options: { appPermissions?: boolean; storePermission?: boolean } = {},
 ): T[] {
   const appPermissions = options.appPermissions !== false;
+  const without = options.storePermission === false ? (["store"] as const) : [];
   const origin = storeSceneOrigin(source);
   return scenes.map((scene) => {
     if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
@@ -78,7 +83,7 @@ export function withStoreSceneOrigin<T>(
       ...scene,
       origin: { ...origin, ...(typeof id === "string" ? { sceneId: id } : {}) },
     } as T;
-    return appPermissions ? withAppPermissions(stamped, { onlyMissing: true }) : stamped;
+    return appPermissions ? withAppPermissions(stamped, { onlyMissing: true, without }) : stamped;
   });
 }
 
@@ -94,14 +99,14 @@ export function rebuildZipWithSceneOrigins(
     if (!files?.scenes) {
       return undefined;
     }
+    const { folder, manifestPath } = files;
+    const scenesBytes = files.scenes;
+    const manifestBytes = files.manifest;
     const scenes: unknown = JSON.parse(Buffer.from(scenesBytes).toString("utf8"));
     if (!Array.isArray(scenes)) {
       return undefined;
     }
     const next: Record<string, Uint8Array> = {
-    const { folder, manifestPath } = files;
-    const scenesBytes = files.scenes;
-    const manifestBytes = files.manifest;
       [manifestPath]: manifestBytes,
       [`${folder}scenes.json`]: strToU8(
         JSON.stringify(withStoreSceneOrigin(scenes, source), null, 2),

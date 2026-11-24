@@ -51,8 +51,9 @@ MAX_SCENE_ID_CHARS = 128
 ASKS_PER_HOUR = 20
 # The permissions that reach past the frame's own data (frontend
 # utils/sceneAccess.ts sceneAccessFlagIsRisky): a new scene saved from the
-# frame may ask for none of them.
-RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code")
+# frame may ask for none of them, and a frame installs or previews no store
+# scene that asks for one (panel_scenes.py).
+RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code", "store")
 # The calls a JavaScript app's code makes that the SPA's save stamps into its
 # config.json `permissions` (frontend utils/sceneAccess.ts detectPermissions):
 # counted whatever the list says, since the owner's next save of the scene
@@ -61,6 +62,7 @@ RED_PERMISSIONS = ("shell", "files", "assets-write", "frame", "code")
 _CODE_CALLS = (
     (re.compile(r"\bframeos\s*\.\s*frame\s*\("), "frame"),
     (re.compile(r"\bframeos\s*\.\s*code\s*\("), "code"),
+    (re.compile(r"\bframeos\s*\.\s*storeAction\s*\("), "store"),
     (re.compile(r"\b(writeAsset|appendAsset|deleteAsset|makeAssetFolder)\b"), "assets-write"),
     (re.compile(r"\b(listAssets|assetExists|assetSize|readAsset|loadAssetImage)\b"), "assets"),
 )

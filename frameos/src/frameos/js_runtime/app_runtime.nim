@@ -116,6 +116,10 @@ type
       ## config.json `permissions` asks for "code": `frameos.code`, the
       ## frame's scenes' sources and the plane's scene AI (docs/code-editor.md).
     js*: QuickJS
+    storeGrant*: bool
+      ## config.json `permissions` asks for "store": `frameos.storeAction`,
+      ## installing, updating and removing the frame's scenes and choosing its
+      ## layout (docs/scene-store.md).
     ready*: bool
     initialized*: bool
     nextImageId*: int
@@ -658,16 +662,22 @@ proc storeChooseLayout(asker, argsJson: string) =
 
 proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSValue {.nimcall.} =
   ## `frameos.storeAction(action, args)`: the host starts it and redraws the
-  ## scene when it is done; false with no host to ask. `layout` is no host's:
-  ## it is the frame's choice, made here while the store is offered at all.
+  ## scene when it is done; false with no host to ask. For an app whose
+  ## permissions ask for "store" (the scenes on the frame and its layout are
+  ## not any scene's to change), and only while the store is offered at all
+  ## (the host's facts are "" when the settings on the frame's screen are
+  ## off). `layout` is no host's: it is the frame's choice, made here.
   let e = env(ctx)
   let act = sceneStoreAction
   if act.isNil or e == nil:
     return nimBoolToJS(ctx, false)
   let what = toNimString(ctx, action)
+  if not e.runtime.storeGrant:
+    frameos_apps.logError(e.owner, "frameos.storeAction: this app's permissions do not include store")
+    return nimBoolToJS(ctx, false)
+  if storeFacts(storeAsker(e)).len == 0:
+    return nimBoolToJS(ctx, false)
   if what == "layout":
-    if storeFacts(storeAsker(e)).len == 0:
-      return nimBoolToJS(ctx, false)
     storeChooseLayout(storeAsker(e), toNimString(ctx, argsJson))
     return nimBoolToJS(ctx, true)
   act(storeAsker(e), what, toNimString(ctx, argsJson))
@@ -3353,11 +3363,11 @@ proc configFromSources(sources: JsonNode): JsonNode =
   except CatchableError:
     return %*{}
 
-proc grantsFromConfig*(config: JsonNode): tuple[assets: JsAssetGrant, frame, code: bool] =
+proc grantsFromConfig*(config: JsonNode): tuple[assets: JsAssetGrant, frame, code, store: bool] =
   ## config.json `permissions`: exactly what the app asks for. No list, or a
   ## value that is not one, asks for nothing. "frame" is `frameos.frame`,
-  ## "code" `frameos.code`.
-  ## One pass for both: a second walk of the list cost 0.5 KB of ESP32 flash.
+  ## "code" `frameos.code`, "store" `frameos.storeAction`.
+  ## One pass for them all: a second walk of the list cost 0.5 KB of ESP32 flash.
   result.assets = agOwnFolder
   let declared = config{"permissions"}
   if not declared.isNil and declared.kind == JArray:
@@ -3376,11 +3386,13 @@ template codeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config)
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode,
     reload: proc (): JsonNode = nil): AppRoot =
   ## `reload`: the app's files read again, so that its interpreter keeps none
+      of "store": result.store = true
   ## of them once compiled (JsAppRuntime.reload).
   let source = jsAppSourceFromSources(sources)
   if source.len == 0:
     raise newException(ValueError, "Missing JavaScript app source for keyword: " & keyword)
   let config = configFromSources(sources)
+template storeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).store
   let category = config{"category"}.getStr().toLowerAscii()
   let outputType = outputTypeFromConfig(config)
   var settingsKeys: seq[string] = @[]
@@ -3397,6 +3409,7 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
   runtime.reload = reload
   var byteIterFields: seq[string] = @[]
   let fields = config{"fields"}
+  runtime.storeGrant = grants.store
   if not fields.isNil and fields.kind == JArray:
     for field in fields.elems:
       let capabilities = if field.kind == JObject: field{"capabilities"} else: nil

@@ -321,6 +321,15 @@ export function frameContractProfile(frame: { hardware: unknown }): ContractProf
 // frameos/src/frameos/js_runtime/app_runtime.nim.
 export const APP_PERMISSIONS_FROM = "2026.10.16";
 
+// The first FrameOS whose `frameos.storeAction` is for an app that asks for
+// the "store" permission (app_runtime.nim `storeGrant`). An older one runs
+// it for any app, so the list a push writes for an app that has none
+// (scene-origin.ts) names "store" from here on only: the payload changes
+// when the firmware crosses it, and the hub pushes the frame's scenes again
+// (frame-hub, the firmware-change resync) instead of leaving the Scene store
+// on the frame without the permission it now needs.
+export const STORE_PERMISSION_FROM = "2026.11.15";
+
 /** The three-way answer above, for any floor. */
 export function frameSupportsSettingsFrom(
   minVersion: string,
@@ -2120,7 +2129,10 @@ export async function buildScenesPayloadForFrame(
               slug: assignment.sceneSlug,
               version: versionRow.version,
             },
-            { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+            {
+              appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion),
+              storePermission: frameSupportsSettingsFrom(STORE_PERMISSION_FROM, targetVersion),
+            },
           ),
           sceneEventMapsOf(assignment.eventMaps),
         ),
@@ -2217,7 +2229,10 @@ export async function publicStoreSceneForFrame(
     withStoreSceneOrigin(
       extracted.scenes,
       { id: storeSceneId, slug: scene.slug, version: versionRow.version },
-      { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, frame.frameosVersion) },
+      {
+        appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, frame.frameosVersion),
+        storePermission: frameSupportsSettingsFrom(STORE_PERMISSION_FROM, frame.frameosVersion),
+      },
     ),
     frame.frameosVersion,
   ).filter(

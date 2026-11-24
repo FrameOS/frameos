@@ -59,6 +59,7 @@ proc runJsAppTests*(sources: JsonNode, testFile: string, frameConfig: FrameConfi
   let started = epochTime()
   var logs = new(seq[JsonNode])
   var logger = Logger(frameConfig: frameConfig, enabled: true)
+  runtime.storeGrant = storeGrantFromConfig(config)
   logger.log = proc(payload: JsonNode) = logs[].add(payload)
   logger.enable = proc() = discard
   logger.disable = proc() = discard

@@ -1132,10 +1132,11 @@ export interface AppConfig {
   /**
    * What the app may do on the frame (utils/sceneAccess.ts): "shell", "files" (read any file),
    * "assets" (read the assets folder), "assets-write" (write it), "frame" (frameos.frame: the
-   * frame page's settings and powers, FrameOS 2026.11.8+). Filled from a JS app's code
-   * on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
+   * frame page's settings and powers, FrameOS 2026.11.8+), "code" (frameos.code), "store"
+   * (frameos.storeAction: the scenes on the frame and its layout, FrameOS 2026.11.15+). Filled
+   * from a JS app's code on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
    */
-  permissions?: ('shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code')[]
+  permissions?: ('shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code' | 'store')[]
   /**
    * The events a JS app's onEvent hears, without an event node: contract names, the scene's
    * custom events, or "*" (docs/events.md "Apps that subscribe"; FrameOS 2026.11+).

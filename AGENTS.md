@@ -351,9 +351,13 @@
   shelf is its kind, never a stated category (`categories.ts`, doc section "Categories"). A change is asked of the frame's plane (`POST
   /api/frames/{id}/panel/scenes`, cloud `panel-scenes.ts`, backend
   `panel_scenes.py`, which a Pi reaches at `/api/panel/scenes`): public store
-  scenes only, no service key ever granted, refused while the settings on the
-  screen are off; `show: false` installs without leaving the store. Only a
-  frame with no plane installs by itself. Keep the two routes alike.
+  scenes only, no service key ever granted, nothing new that asks for a red
+  permission (`needs_owner`: the store on a frame shows no tags), refused
+  while the settings on the screen are off; `show: false` installs without
+  leaving the store. Only a frame with no plane installs by itself. Keep the
+  two routes alike. `frameos.storeAction` is for an app whose config.json
+  `permissions` has `"store"` (a red tag, detected on save like `"frame"`
+  and `"code"`; `storeGrant` in `app_runtime.nim`, one gate for every host).
 - **A store zip's scenes.json is found by one function**, the cloud's
   `src/lib/scene-zip.ts` (the file beside the shallowest template.json): the
   checks at publish and every reader of a stored zip. A new reader goes

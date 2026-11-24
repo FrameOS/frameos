@@ -13,7 +13,9 @@
 ##   keeps. A frame with no plane, and a backend's frame for a preview (a
 ##   backend keeps no preview of a Pi), does it itself: the store's scenes go
 ##   into the frame's own scenes (server/api.nim persistScenesPayload) and
-##   the runtime reloads, as after a save on its admin page.
+##   the runtime reloads, as after a save on its admin page. A backend's
+##   frame previews no scene that asks for a red permission (`needs_owner`,
+##   as its backend answers an install of one): its owner is not at the frame.
 ## - What came from the store is each scene's `origin`, read off the scenes
 ##   on disk (the deployed set and the uploaded one).
 ## - Which of them the store has a newer version of is the plane's to say
@@ -26,7 +28,7 @@
 ## worker reads files and the network and hands back values under
 ## `factsLock`. No ref crosses.
 
-import std/[json, locks, os, strutils, times, uri]
+import std/[json, locks, os, strutils, tables, times, uri]
 import frameos/types
 import frameos/channels
 import frameos/config
@@ -184,6 +186,42 @@ proc storeScenes(store: string): tuple[scenes: seq[JsonNode], error: string] =
   if result.scenes.len == 0:
     result.error = "store_unavailable"
 
+const
+  RedPermissions = ["shell", "files", "assets-write", "frame", "code", "store"]
+    ## The permissions that reach past the frame's own data (the SPA's
+    ## sceneAccessFlagIsRisky, the planes' panel routes).
+  RedBuiltInApps = ["chromiumScreenshot", "localImage", "rstpSnapshot"]
+    ## The built-in apps that ask for one (frameos/src/apps: shell, files).
+
+proc asksForRed(sources: JsonNode): bool =
+  if sources.isNil or sources.kind != JObject:
+    return false
+  try:
+    for permission in parseJson(sources{"config.json"}.getStr("{}")){"permissions"}.getElems():
+      if permission.getStr() in RedPermissions:
+        return true
+  except CatchableError:
+    discard
+
+proc scenesAskForRed*(scenes: openArray[JsonNode]): bool =
+  ## Whether one of the scenes' apps asks for a red permission: a JavaScript
+  ## app's config.json list (all the runtime gives it), or a built-in app
+  ## that has one.
+  for scene in scenes:
+    let apps = scene{"apps"}
+    if not apps.isNil and apps.kind == JObject:
+      for app in apps.fields.values:
+        if asksForRed(app{"sources"}):
+          return true
+    for node in scene{"nodes"}.getElems():
+      if node{"type"}.getStr() != "app":
+        continue
+      if asksForRed(node{"data", "sources"}):
+        return true
+      let keyword = node{"data", "keyword"}.getStr()
+      if keyword.rsplit('/', maxsplit = 1)[^1] in RedBuiltInApps and scene{"apps", keyword}.isNil:
+        return true
+
 proc saveHere*(scenes: JsonNode, show: string) =
   ## The frame's own scenes, as its admin page saves them, and the runtime
   ## reloads them; then `show`. From the runtime itself (`system`), as the
@@ -193,10 +231,14 @@ proc saveHere*(scenes: JsonNode, show: string) =
   if show.len > 0:
     sendEvent(evSetCurrentScene, %*{"sceneId": show}, eoSystem)
 
-proc installHere(store: string, show: bool): tuple[error, first: string] =
+proc installHere(store: string, show: bool, ownerElsewhere = false): tuple[error, first: string] =
+  ## `ownerElsewhere`: the frame has a control plane (a backend's frame
+  ## previewing), so what asks for a red permission is its owner's to put on.
   let (scenes, error) = storeScenes(store)
   if error.len > 0:
     return (error, "")
+  if ownerElsewhere and scenesAskForRed(scenes):
+    return ("needs_owner", "")
   var ids: seq[string]
   for scene in scenes:
     ids.add scene{"id"}.getStr()
@@ -295,7 +337,8 @@ proc work(job: var Job, error, done: var string) =
       of "install", "preview", "update":
         # Shown unless the store asks to stay (`show: false`: an install
         # from the shelf, a layout tried, docs/scene-store.md).
-        (error, previewId) = installHere(job.store, job.show and job.action in ["preview", "install"])
+        (error, previewId) = installHere(job.store, job.show and job.action in ["preview", "install"],
+          ownerElsewhere = job.backendUrl.len > 0)
       of "remove":
         error = removeHere(job.store, job.id, "")
       of "discard":
@@ -445,7 +488,12 @@ proc linuxSceneStoreAction*(scene, action, argsText: string) {.nimcall, gcsafe, 
         args = newJObject()
       var job = Job(action: action, store: args{"store"}.getStr(), id: args{"id"}.getStr(),
         name: args{"name"}.getStr(), origin: scene, show: args{"show"}.getBool(true))
-      (job.backendUrl, job.backendKey) = backendOf(runnerConfig())
+      let config = runnerConfig()
+      # Nothing while the owner has the settings on the frame's screen off:
+      # the read says so with no facts, and the work is refused here too.
+      if config == nil or not framePageOffered(config):
+        return
+      (job.backendUrl, job.backendKey) = backendOf(config)
       withLock factsLock:
         asker = scene
         # One thing at a time: the app says what is running.

@@ -33,9 +33,10 @@
  * but never writing it. "frame" is `frameos.frame`: the frame page's facts and powers (Wi-Fi, rotation, scale, render,
  * restart, reboot) and an ESP32's serial console, while the frame page is allowed on the screen (docs/terminal.md).
  * "code" is `frameos.code`: every scene's source on the frame, saving scenes to it and asking its control plane's AI
- * for one, under the same condition (docs/code-editor.md).
+ * for one, under the same condition (docs/code-editor.md). "store" is `frameos.storeAction`: installing, previewing,
+ * updating and removing scenes on the frame and choosing its layout, as the Scene store does (docs/scene-store.md).
  */
-export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code'
+export type ScenePermission = 'shell' | 'files' | 'assets' | 'assets-write' | 'frame' | 'code' | 'store'
 export const SCENE_PERMISSIONS: readonly ScenePermission[] = [
   'shell',
   'files',
@@ -50,6 +51,7 @@ export type SceneKeyFlag = `key:${string}`
 export type SceneAccessFlag = ScenePermission | SceneKeyFlag
 
 const permissionLabels: Record<ScenePermission, string> = {
+  'store',
   shell: 'runs shell commands',
   files: 'reads all files',
   assets: 'reads files',
@@ -63,6 +65,7 @@ const permissionDescriptions: Record<ScenePermission, string> = {
   files: 'This scene can read any file on the frame, outside the assets folder too.',
   assets: "This scene reads the frame's assets folder: uploaded photos, fonts and what other scenes saved there.",
   'assets-write':
+  store: 'installs and removes scenes',
     "This scene writes and deletes files in the frame's assets folder, where your uploaded photos and other scenes' files are.",
   frame:
     "This scene can change the frame's Wi-Fi, rotation and scale, restart or reboot it, and run its console commands on an ESP32, as the frame's settings on its screen can.",
@@ -74,6 +77,8 @@ export const SETTINGS_KEY_TITLES: Readonly<Record<string, string>> = {
   openAI: 'OpenAI',
   unsplash: 'Unsplash',
   homeAssistant: 'Home Assistant',
+  store:
+    "This scene can install, preview, update and remove scenes from the scene store on the frame, and choose the frame's layout, as the Scene store does.",
   immich: 'Immich',
   github: 'GitHub',
   frameOS: 'FrameOS Gallery',
@@ -160,7 +165,14 @@ export function sceneAccessTags(flags: readonly SceneAccessFlag[]): SceneAccessT
 
 /** The permissions that reach past the frame's own data: red tags, and a red button when an update gains one. */
 export function sceneAccessFlagIsRisky(flag: SceneAccessFlag): boolean {
-  return flag === 'shell' || flag === 'files' || flag === 'assets-write' || flag === 'frame' || flag === 'code'
+  return (
+    flag === 'shell' ||
+    flag === 'files' ||
+    flag === 'assets-write' ||
+    flag === 'frame' ||
+    flag === 'code' ||
+    flag === 'store'
+  )
 }
 
 /**
@@ -213,6 +225,8 @@ const literalStreamModePattern = /^\\?(["'`])([rwa])\\?\1$/
  * name) opens for writing: mode "w" or "a", or a mode that is not a literal
  * this can read. No arguments or no mode is "r", the default. A mention that
  * is not a call (no parenthesis) reads.
+// `frameos.storeAction(...)`: the scenes on the frame and its layout.
+const storeCallPattern = /\bframeos\s*\.\s*storeAction\s*\(/
  */
 function assetStreamWrites(text: string, from: number): boolean {
   let index = from
@@ -366,6 +380,7 @@ function detectSources(sources: Record<string, string>, cacheKey: object | null)
     reasons.push('calls frameos.code')
   }
   const detection = { detected: orderedPermissions(found), reasons }
+  let storeCall = false
   if (cacheKey) {
     detectionCache.set(cacheKey, detection)
   }
@@ -376,6 +391,7 @@ export interface AppAccess {
   /** The node's keyword (the scene.apps key for a scene app). */
   keyword: string
   /** How the settings panel names it. */
+    storeCall = storeCall || storeCallPattern.test(text)
   name: string
   /** A built-in app (declared in frameos/src/apps) or one whose files the scene carries. */
   kind: 'builtin' | 'scene'
@@ -410,6 +426,10 @@ function sceneAppAccess(
   const listed = config?.['permissions']
   const declared = Array.isArray(listed) ? orderedPermissions(listed) : null
   const { detected, reasons } = detectSources(sources, cacheKey)
+  if (storeCall) {
+    found.push('store')
+    reasons.push('calls frameos.storeAction')
+  }
   const name = config?.['name'] ?? fallback?.['name']
   return {
     keyword,
@@ -680,13 +700,21 @@ function configWithPermissions(
   return `${JSON.stringify(Object.fromEntries(entries), null, indent)}${text.endsWith('\n') ? '\n' : ''}`
 }
 
-function withSourcesPermissions(sources: unknown, onlyMissing: boolean): Record<string, unknown> | null {
+function withSourcesPermissions(
+  sources: unknown,
+  onlyMissing: boolean,
+  without: readonly ScenePermission[]
+): Record<string, unknown> | null {
   const strings = stringSources(sources)
   if (!hasJavaScriptSource(strings)) {
     return null
   }
   const { detected } = detectSources(strings, record(sources))
-  const next = configWithPermissions(strings['config.json'], detected, onlyMissing)
+  const next = configWithPermissions(
+    strings['config.json'],
+    without.length > 0 ? detected.filter((permission) => !without.includes(permission)) : detected,
+    onlyMissing
+  )
   return next === null ? null : { ...(record(sources) ?? {}), 'config.json': next }
 }
 
@@ -695,10 +723,15 @@ function withSourcesPermissions(sources: unknown, onlyMissing: boolean): Record<
  * its code, the way a save leaves it: a config.json that does not parse is
  * left alone.
  * With `onlyMissing`, only apps with no list at all get one (the cloud's
- * read-time stamp of scenes that predate the lists). Returns the same object
- * when nothing changes.
+ * read-time stamp of scenes that predate the lists). `without` leaves names
+ * out of a list written here (the cloud's push to a firmware from before a
+ * permission existed, so the payload changes when the firmware starts
+ * reading it). Returns the same object when nothing changes.
  */
-export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean } = {}): T {
+export function withAppPermissions<T>(
+  scene: T,
+  options: { onlyMissing?: boolean; without?: readonly ScenePermission[] } = {}
+): T {
   const sceneRecord = record(scene)
   if (!sceneRecord) {
     return scene
@@ -708,7 +741,7 @@ export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean
   let nextApps: Record<string, unknown> | null = null
   for (const [keyword, app] of Object.entries(apps ?? {})) {
     const appRecord = record(app)
-    const sources = withSourcesPermissions(appRecord?.['sources'], onlyMissing)
+    const sources = withSourcesPermissions(appRecord?.['sources'], onlyMissing, without)
     if (appRecord && sources) {
       nextApps = nextApps ?? { ...apps }
       nextApps[keyword] = { ...appRecord, sources }
@@ -719,7 +752,8 @@ export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean
   for (let index = 0; index < nodes.length; index += 1) {
     const nodeRecord = record(nodes[index])
     const data = record(nodeRecord?.['data'])
-    const sources = nodeRecord?.['type'] === 'app' && data ? withSourcesPermissions(data['sources'], onlyMissing) : null
+    const sources =
+      nodeRecord?.['type'] === 'app' && data ? withSourcesPermissions(data['sources'], onlyMissing, without) : null
     if (nodeRecord && data && sources) {
       nextNodes = nextNodes ?? [...nodes]
       nextNodes[index] = { ...nodeRecord, data: { ...data, sources } }
@@ -739,3 +773,4 @@ export function withAppPermissions<T>(scene: T, options: { onlyMissing?: boolean
 export function withScenesAppPermissions<T>(scenes: readonly T[], options: { onlyMissing?: boolean } = {}): T[] {
   return scenes.map((scene) => withAppPermissions(scene, options))
 }
+  const without = options.without ?? []

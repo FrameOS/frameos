@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { declaredSceneGrants, grantsWidenedBy } from "./panel-code-grants";
+import { declaredSceneGrants, grantsWidenedBy, redPermissionsAsked } from "./panel-code-grants";
 
 function appScene(apps: Record<string, Record<string, string>>, nodes: unknown[] = []) {
   return {
@@ -52,6 +52,14 @@ describe("declaredSceneGrants", () => {
     expect(declaredSceneGrants("scene")).toEqual({ permissions: [], settings: [] });
   });
 
+  it("counts the store's own permission, declared or called", () => {
+    const declared = appScene({ shop: { "app.tsx": "export function get() {}", "config.json": config({ permissions: ["store"] }) } });
+    expect(declaredSceneGrants(declared).permissions).toEqual(["store"]);
+    const called = appScene({ shop: { "app.tsx": "frameos.storeAction('install', { store })", "config.json": config({ name: "x" }) } });
+    expect(declaredSceneGrants(called).permissions).toEqual(["store"]);
+    expect(grantsWidenedBy(null, declaredSceneGrants(called))).toEqual(["store"]);
+  });
+
   it("gives an app with no list the one its code calls for, as every push does", () => {
     const scene = appScene({ sneaky: { "app.ts": "frameos.frame('reboot')", "config.json": config({ name: "x" }) } });
     expect(declaredSceneGrants(scene).permissions).toContain("frame");
@@ -89,5 +97,15 @@ describe("grantsWidenedBy", () => {
     });
     expect(grantsWidenedBy(declaredSceneGrants(before), declaredSceneGrants(after))).toEqual(["key:unsplash"]);
     expect(grantsWidenedBy(declaredSceneGrants(after), declaredSceneGrants(before))).toEqual([]);
+  });
+});
+
+describe("redPermissionsAsked", () => {
+  it("is what a store scene new to a frame may ask for none of", () => {
+    expect(redPermissionsAsked(null)).toEqual([]);
+    expect(redPermissionsAsked({ permissions: ["assets"], settings: ["openAI"] })).toEqual([]);
+    expect(
+      redPermissionsAsked({ permissions: ["assets", "assets-write", "code", "files", "frame", "shell", "store"], settings: [] }),
+    ).toEqual(["assets-write", "code", "files", "frame", "shell", "store"]);
   });
 });
