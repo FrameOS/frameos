@@ -3183,8 +3183,9 @@ static bool picture_push_wanted(const char *scene_id);
 
 /* The setup hotspot's screen (docs/cloud-frames.md "What the panel shows
  * before a scene arrives"), drawn once when the portal comes up. Through the
- * runtime where there is one, in its font (embedded_scene.nim
- * renderPortalInto); else, or when that fails, in C (fos_portal_screen.c).
+ * runtime where there is one: the code a phone joins the hotspot by, in
+ * the runtime's font (embedded_scene.nim renderPortalInto). Else, or when
+ * that fails, the same facts as lines of text (fos_status_screen.c).
  * Not a render: no snapshot (the passphrase stays off /image and the backend
  * push), no render count, and no OTA mark, since a new image that cannot
  * join the stored network must still roll back (main.c). */
@@ -3198,7 +3199,7 @@ static void show_portal_screen(void)
     /* The runtime when it is up, whatever renders the scenes: the portal
      * needs no plane, and a frame set to render on its plane has the runtime
      * all the same (main.c starts it wherever the panel fits). */
-    if (frameos_nim_set_portal_screen(ssid, psk, ip, fos_display_is_lcd(), fos_display_round())) {
+    if (frameos_nim_set_portal_screen(ssid, psk, ip)) {
         fos_pixel_format_t format = fos_display_format();
         size_t len = fos_display_buffer_size();
         size_t target_len = 0;
@@ -3215,7 +3216,7 @@ static void show_portal_screen(void)
             fos_display_wait_for(fos_framebuffer_reserved_buffer());
             rendered = frameos_nim_render_alloc(&buf, &len, format) == 0;
         }
-        frameos_nim_set_portal_screen(NULL, NULL, NULL, false, false);
+        frameos_nim_set_portal_screen(NULL, NULL, NULL);
         if (rendered) {
             esp_err_t err = fos_display_blit(buf, len);
             shown = err == ESP_OK;

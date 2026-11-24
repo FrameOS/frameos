@@ -7,7 +7,11 @@
 
 import std/[json, math, strformat, strutils]
 import pixie
-import frameos/utils/font as fontUtils
+import pixie/fileformats/svg
+import frameos/panel_shape
+import frameos/ui/layout
+import frameos/ui/tree
+import frameos/utils/image
 import frameos/utils/qr
 import frameos/utils/status_screen
 
@@ -127,47 +131,49 @@ proc renderDemoInto*(canvas: Image; frameName: string; renderCount: int): Image 
 
 # ------------------------------------------------------- the portal's screen
 #
-# What a frame with no Wi-Fi shows while its setup hotspot is up: the two QR
-# codes of the Pi's hotspot scene (system/wifiHotspot), one that joins the
-# hotspot and one that opens the setup page, each with what it says under it,
-# under the status screen's header. The render task draws it once when the
-# portal starts (fos_client.c show_portal_screen), between setPortalScreen
-# and clearPortalScreen, so no scene render ever draws it. A board without
-# the runtime draws the same layout in C, in the 5x7 font
-# (embedded/esp32/main/fos_portal_screen.c): keep the two alike.
+# What a frame with no Wi-Fi shows while its setup hotspot is up: the code a
+# phone's camera joins the hotspot by (the first of the two the Pi's hotspot
+# scene draws, system/wifiHotspot), with the network's name and password and
+# the setup page's address as words. One code: a phone that joins is sent to
+# the setup page by the portal itself (fos_wifi.c answers every DNS query),
+# and the address is there for one that is not. The render task draws it once
+# when the portal starts (fos_client.c show_portal_screen), between
+# setPortalScreen and clearPortalScreen, so no scene render ever draws it. A
+# board without the runtime shows the same facts as lines of 5x7 text
+# (embedded/esp32/main/fos_status_screen.c).
 #
-# Plain values in the plan (no seq, no ref): each copy of an object holding
-# one is a copy hook in the ESP32 image. Unchecked there, as utils/qr.nim:
-# every index is a module of a code or one of two cards, every size comes
-# from the panel's; the tests run it with every check on.
+# A UI tree built here and laid out by the UI layer, as the built-in scenes'
+# and a link's QR card (ui/layout.nim linkCard) are: the sizes are decided
+# here, from the panel's, in whole pixels a module, and the layout puts the
+# header, the code and the words in their places.
 
 when defined(frameosEmbedded):
   {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 type
   PortalPlan* = object
-    columns*: bool          ## side by side; else one above the other
-    header*: bool
-    unit*: array[2, int]    ## pixels a module; 0: no codes, the captions alone
-    side*: int              ## the larger code's side, its quiet zone included
-    headerY*: float32       ## the top of what is drawn
-    x*, y*: array[2, int]   ## each code's first module, quiet zone excluded
-    captionX*, captionY*: array[2, float32]
-    cardWidth*, captionSize*: float32
+    w*, h*: int     ## what it is drawn in: the panel less its margins, or a rectangle inside a round one's circle
+    pad*: int       ## the margin, and the gap between its parts
+    text*: int      ## the words' size
+    mark*: int      ## the header's height; 0: none
+    wide*: bool     ## the code beside its words; else over them
+    code*: int      ## the code's side, its quiet zone included; 0: none fits, the words alone
 
 const
   PortalStatus = "Set up Wi-Fi with your phone"
-  PortalQuiet = 2 # modules of white around a code
-  PortalLeading = 1.25'f32
+  PortalQuiet = 2 # modules of white around the code
+  PortalCodeMax = 512
+    ## The code's side at most: its picture is four bytes a pixel, so a
+    ## megabyte here, where a 13.3" panel has the room for one of four and
+    ## its 8 MB board has not the memory.
 
-var portalScreen: tuple[on: bool, ssid, pass, ip: string, dark, round: bool]
+var portalScreen: tuple[on: bool, ssid, pass, ip: string]
 
-proc setPortalScreen*(ssid, pass, ip: string; dark: bool; round = false) =
-  ## `round`: only the circle inside the panel shows (fos_display_round).
-  portalScreen = (true, ssid, pass, ip, dark, round)
+proc setPortalScreen*(ssid, pass, ip: string) =
+  portalScreen = (true, ssid, pass, ip)
 
 proc clearPortalScreen*() =
-  portalScreen = (false, "", "", "", false, false)
+  portalScreen = (false, "", "", "")
 
 proc portalScreenOn*(): bool = portalScreen.on
 
@@ -181,176 +187,106 @@ proc wifiJoinCode*(ssid, pass: string): string =
   if pass.len == 0: "WIFI:T:nopass;S:" & esc(ssid) & ";;"
   else: "WIFI:T:WPA;S:" & esc(ssid) & ";P:" & esc(pass) & ";;"
 
-proc portalUrl*(ip: string): string =
-  "http://" & (if ip.len > 0: ip else: "192.168.4.1") & "/"
+proc portalLines*(ssid, pass, ip: string): seq[string] =
+  ## The words: what the code says, and where the setup page is.
+  result = @["Wi-Fi: " & ssid]
+  if pass.len > 0: result.add("Password: " & pass)
+  result.add("http://" & (if ip.len > 0: ip else: "192.168.4.1") & "/")
 
-proc portalCaptions*(ssid, pass, ip: string): array[2, seq[string]] =
-  result[0] = @["1. Join the Wi-Fi", ssid]
-  if pass.len > 0: result[0].add("Password: " & pass)
-  result[1] = @["2. Then open", portalUrl(ip)]
+proc planPortal*(width, height, modules, lines: int; round: bool): PortalPlan =
+  ## The sizes, for a code `modules` wide and `lines` of words. The code gets
+  ## the room first: beside its words on a wide panel, over them on a tall or
+  ## square one, a header above both where the panel is large enough for one.
+  ## On a round panel everything stays in a rectangle inside its circle, the
+  ## one that is as wide as the code. If no code a phone reads fits (under
+  ## two pixels a module), `code` is 0.
+  var small = min(width, height)
+  # A round panel's circle, its bezel kept clear, and the square inside it.
+  let across = small - 2 * RoundInset
+  if round:
+    small = across * 70 div 99
+  result.pad = max(2, small div 20)
+  result.text = clamp(small * 45 div 1000, 8, 44)
+  result.wide = not round and width * 20 >= height * 23
+  if small >= 240:
+    result.mark = clamp(small div 10, 24, 140)
+  result.w = width - 2 * result.pad
+  result.h = height - 2 * result.pad
+  # What stands over and under the code: the header, and the words when they
+  # are not beside it.
+  var rest = if result.mark > 0: result.mark + result.pad else: 0
+  if not result.wide:
+    rest += lines * (result.text * 5 div 4) + result.pad
+  var side = if result.wide: min(result.h - rest, result.w * 55 div 100) else: min(result.w, result.h - rest)
+  if round:
+    # side² + (side + rest)² = across²: its corners on the circle.
+    side = (int(sqrt(float(max(2 * across * across - rest * rest, 0)))) - rest) div 2
+    result.w = side
+    result.h = side + rest
+  let unit = min(side, PortalCodeMax) div (modules + 2 * PortalQuiet)
+  if unit >= 2:
+    result.code = unit * (modules + 2 * PortalQuiet)
+    if result.wide:
+      # The words have the column beside the code: as large as a line of
+      # twenty letters (the password's) fits there.
+      result.text = clamp((result.w - result.code - result.pad) div 12, 8, 44)
 
-proc portalFont(size: float32; color: Color): Font =
-  result = newFont(fontUtils.getDefaultTypeface())
-  result.size = size
-  result.paint = newPaint(SolidPaint)
-  result.paint.color = color
-
-proc headerHeight(small: float32): float32 = clamp(small * 0.1, 24, 140)
-
-proc headerWidth(small: float32): float32 =
-  ## The mark (464:544), a gap and the wider of its two lines.
-  let mh = headerHeight(small)
-  mh * (464 / 544 + 0.3) + max(portalFont(mh * 0.62, color(0, 0, 0, 1)).layoutBounds("FrameOS").x,
-                               portalFont(mh * 0.3, color(0, 0, 0, 1)).layoutBounds(PortalStatus).x)
-proc portalMargin(small: float32): float32 = max(6'f32, small * 0.05)
-
-proc planIn(small, ax, ay, aw, ah: float32; withHeader: bool; modules: array[2, int];
-            widest, wanted, lines: float32): PortalPlan =
-  ## The codes as large as the rectangle (ax, ay, aw, ah) lets them be, side
-  ## by side on a wide one and stacked on a tall one unless the other way
-  ## gives codes a quarter larger. `unit` 0: under two pixels a module, or a
-  ## header wider than the rectangle.
-  if withHeader and headerWidth(small) > aw: return
-  let top = ay + (if withHeader: headerHeight(small) + portalMargin(small) / 2 else: 0)
-  let areaH = ay + ah - top
-  let gutter = max(aw, areaH) / 20
-  var plans: array[2, PortalPlan] # side by side, stacked
-  for arrangement in 0 .. 1:
-    let columns = arrangement == 0
-    let cardW = if columns: (aw - gutter) / 2 else: aw
-    let cardH = if columns: areaH else: (areaH - gutter) / 2
-    let size = max(8'f32, min(wanted, wanted * cardW * 0.97 / widest))
-    let captionH = lines * size * PortalLeading
-    let tile = int(min(cardW, cardH - captionH - size * 0.5))
-    var plan = PortalPlan(columns: columns, header: withHeader, headerY: ay, cardWidth: cardW, captionSize: size)
-    for i in 0 .. 1:
-      plan.unit[i] = max(0, tile) div (modules[i] + 2 * PortalQuiet)
-      plan.side = max(plan.side, plan.unit[i] * (modules[i] + 2 * PortalQuiet))
-    if min(plan.unit[0], plan.unit[1]) < 2: continue
-    let blockH = plan.side.float32 + size * 0.5 + captionH
-    for i in 0 .. 1:
-      let cardX = ax + (if columns: i.float32 * (aw - cardW) else: 0)
-      let cardY = top + (if columns: 0'f32 else: i.float32 * (areaH - cardH))
-      let blockTop = cardY + (cardH - blockH) / 2
-      let own = plan.unit[i] * (modules[i] + 2 * PortalQuiet)
-      plan.x[i] = int(cardX + (cardW - own.float32) / 2) + plan.unit[i] * PortalQuiet
-      plan.y[i] = int(blockTop) + (plan.side - own) div 2 + plan.unit[i] * PortalQuiet
-      plan.captionX[i] = cardX
-      plan.captionY[i] = blockTop + plan.side.float32 + size * 0.5
-    plans[arrangement] = plan
-  var pick = if aw >= areaH: 0 else: 1
-  if plans[1 - pick].side * 4 > plans[pick].side * 5: pick = 1 - pick
-  plans[pick]
-
-proc planPortal*(width, height: int; modules: array[2, int]; captions: array[2, seq[string]];
-                 round = false): PortalPlan =
-  ## Where everything goes, for codes `modules` wide: the codes first, the
-  ## captions at one size that fits the widest line, and the header when the
-  ## codes stay readable with it. On a round panel everything stays inside a
-  ## rectangle inscribed in its circle, of the shape that gives the largest
-  ## codes. If no code a phone reads fits, `unit` is 0: the captions alone.
-  let
-    w = width.float32
-    h = height.float32
-    small = min(w, h)
-    margin = portalMargin(small)
-    wanted = clamp(small * 0.045, 8, 44)
-    lines = max(captions[0].len, captions[1].len).float32
-    # A round panel's circle, its bezel kept clear (panel_shape.RoundInset).
-    diameter = small - 2 * max(12'f32, margin / 2)
-  let probe = portalFont(wanted, color(0, 0, 0, 1))
-  var widest = 1'f32
-  for caption in captions:
-    for line in caption:
-      widest = max(widest, probe.layoutBounds(line).x)
-
-  var areaX = margin
-  var areaY = margin
-  var areaW = w - 2 * margin
-  var areaH = h - 2 * margin
-  for withHeader in [true, false]:
-    if not round:
-      result = planIn(small, areaX, areaY, areaW, areaH, withHeader, modules, widest, wanted, lines)
-    else:
-      # Width over height of the rectangle; a square last, for the text.
-      for aspect in [2.0'f32, 1.6, 1.3, 1.0]:
-        let d = sqrt(1 + aspect * aspect)
-        areaW = diameter * aspect / d
-        areaH = diameter / d
-        areaX = (w - areaW) / 2
-        areaY = (h - areaH) / 2
-        let plan = planIn(small, areaX, areaY, areaW, areaH, withHeader, modules, widest, wanted, lines)
-        if plan.side > result.side: result = plan
-      if result.side > 0:
-        # In the middle of the circle: the room left under the captions, half
-        # of it above the header instead.
-        let bottom = max(result.captionY[0], result.captionY[1]) + lines * result.captionSize * PortalLeading
-        let shift = int(max(0'f32, (h - bottom - result.headerY) / 2))
-        result.headerY += shift.float32
-        for i in 0 .. 1:
-          result.y[i] += shift
-          result.captionY[i] += shift.float32
-    if result.side > 0: return
-  # Too small for a code a phone reads (the 72x40 OLED): the captions alone.
-  result = PortalPlan(header: areaH >= 160, headerY: areaY, cardWidth: areaW,
-                      captionSize: max(8'f32, min(wanted, wanted * areaW * 0.97 / widest)))
-  result.captionX[0] = areaX
-
-proc renderPortalInto*(canvas: Image): Image =
+proc renderPortalInto*(canvas: Image; dark, round: bool): Image =
   ## The portal's screen over the whole of `canvas` (setPortalScreen's
-  ## facts), returned. White on black on an LCD, black on white on e-paper,
-  ## the codes on white either way: not every phone reads a light-on-dark one.
+  ## facts), returned. White on black on an LCD (`dark`), black on white on
+  ## e-paper, the code on white either way: not every phone reads a
+  ## light-on-dark one. Raises when it cannot be drawn; the firmware then
+  ## shows its lines of text.
   result = canvas
-  let s = portalScreen
-  let fg = if s.dark: color(1, 1, 1, 1) else: color(0, 0, 0, 1)
-  canvas.fill(if s.dark: color(0, 0, 0, 1) else: color(1, 1, 1, 1))
-  let ssid = if s.ssid.len > 0: s.ssid else: "FrameOS"
-  let codes = [qrEncode(wifiJoinCode(ssid, s.pass)), qrEncode(portalUrl(s.ip))]
-  let captions = portalCaptions(ssid, s.pass, s.ip)
-  let plan = planPortal(canvas.width, canvas.height, [codes[0].size, codes[1].size], captions, s.round)
-  let w = canvas.width.float32
-  let small = min(w, canvas.height.float32)
-  let margin = portalMargin(small)
+  let
+    s = portalScreen
+    ssid = if s.ssid.len > 0: s.ssid else: "FrameOS"
+    qr = qrEncode(wifiJoinCode(ssid, s.pass))
+    lines = portalLines(ssid, s.pass, s.ip)
+    plan = planPortal(canvas.width, canvas.height, qr.size, lines.len, round)
+    fg = if dark: color(1, 1, 1, 1) else: color(0, 0, 0, 1)
+  canvas.fill(if dark: color(0, 0, 0, 1) else: color(1, 1, 1, 1))
 
-  var y = plan.headerY
-  if plan.header:
-    # The status screen's header, centred: the mark, the wordmark, one line.
-    let mh = headerHeight(small)
-    let mark = frameosMark(int(mh), fg, coloredSquares = s.dark)
-    let titleFont = portalFont(mh * 0.62, fg)
-    let statusFont = portalFont(mh * 0.3, fg)
-    let titleH = mh * 0.62 * 1.2
-    let statusH = mh * 0.3 * 1.3
-    let textW = max(titleFont.layoutBounds("FrameOS").x, statusFont.layoutBounds(PortalStatus).x)
-    let x = max(plan.captionX[0], (w - mark.width.float32 - mh * 0.3 - textW) / 2)
-    let textX = x + mark.width.float32 + mh * 0.3
-    let textY = y + (mh - titleH - statusH) / 2
-    canvas.draw(mark, translate(vec2(x, y + (mh - mark.height.float32) / 2)))
-    canvas.fillText(titleFont.typeset("FrameOS", bounds = vec2(w, titleH), vAlign = MiddleAlign),
-      translate(vec2(textX, textY)))
-    canvas.fillText(statusFont.typeset(PortalStatus, bounds = vec2(w, statusH), vAlign = MiddleAlign),
-      translate(vec2(textX, textY + titleH)))
-    y += mh + margin / 2
-
-  let font = portalFont(plan.captionSize, fg)
-  let lineH = plan.captionSize * PortalLeading
-  let codesShown = plan.unit[0] > 0
-  for i in 0 .. 1:
-    var ly = y
-    var x = plan.captionX[0]
-    var align = LeftAlign
-    if codesShown:
-      let unit = plan.unit[i]
-      canvas.draw(codes[i].qrImage(unit * (codes[i].size + 2 * PortalQuiet), padding = PortalQuiet),
-        translate(vec2(float32(plan.x[i] - unit * PortalQuiet), float32(plan.y[i] - unit * PortalQuiet))))
-      ly = plan.captionY[i]
-      x = plan.captionX[i]
-      align = CenterAlign
-    for line in captions[i]:
-      canvas.fillText(font.typeset(line, bounds = vec2(plan.cardWidth, lineH), hAlign = align,
-        vAlign = MiddleAlign, wrap = false), translate(vec2(x, ly)))
-      ly += lineH
-    y = ly # no codes: the second caption under the first
+  # Words alone start at the top: what does not fit is the last of them.
+  var c = if plan.code > 0: "flex flex-col items-center justify-center" else: "flex flex-col items-center"
+  c.px("w", plan.w)
+  c.px("h", plan.h)
+  c.px("gap", plan.pad)
+  let box = el("div", move c)
+  if plan.mark > 0:
+    # The status screen's header: the mark, the wordmark, one line.
+    c = "flex items-center"
+    c.px("gap", plan.mark * 3 div 10)
+    let header = el("div", move c)
+    let mark = el("img", "shrink-0")
+    mark.image = frameosMark(plan.mark, fg, coloredSquares = dark)
+    header.children.add mark
+    let words = el("div", "flex flex-col")
+    c = "leading-[1.2]"
+    c.px("text", plan.mark * 62 div 100)
+    words.children.add el("div", move c, SvgNode(text: "FrameOS"))
+    c = "leading-[1.3]"
+    c.px("text", plan.mark * 3 div 10)
+    words.children.add el("div", move c, SvgNode(text: PortalStatus))
+    header.children.add words
+    box.children.add header
+  c = if plan.wide: "flex items-center leading-[1.25]" else: "flex flex-col items-center text-center leading-[1.25]"
+  c.px("gap", plan.pad)
+  c.px("text", plan.text)
+  let body = el("div", move c)
+  if plan.code > 0:
+    let code = el("img", "shrink-0")
+    code.image = qr.qrImage(plan.code, padding = PortalQuiet)
+    body.children.add code
+  let words = el("div", "")
+  for line in lines:
+    words.children.add el("div", "", SvgNode(text: line))
+  body.children.add words
+  box.children.add body
+  let root = el("div", if dark: "flex items-center justify-center w-full h-full text-white"
+                       else: "flex items-center justify-center w-full h-full text-black", box)
+  if not renderSvgIntoTarget(layoutUi(root, canvas.width, canvas.height), canvas):
+    raise newException(ValueError, "the portal's screen was not drawn")
 
 when defined(frameosEmbedded):
   {.pop.}
