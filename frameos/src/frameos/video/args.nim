@@ -36,6 +36,18 @@ type
     fps*: float          ## 0 when unknown
     codec*: string
 
+  DecodeCaps* = object
+    ## What this machine's ffmpeg can decode in hardware (docs/video.md
+    ## "Hardware"): read once (`decodeCaps` in player.nim).
+    v4l2Decoders*: seq[string] ## ffmpeg's V4L2 mem2mem decoders ("h264_v4l2m2m"), with a decoder device there
+    vaapi*: bool               ## a VA-API render node, a VA driver and ffmpeg's vaapi hwaccel
+
+  VideoDecode* = object
+    ## How one ffmpeg decodes.
+    decoder*: string ## a hardware decoder for `-c:v` ("h264_v4l2m2m"); "" for ffmpeg's own
+    hwaccel*: string ## "vaapi"; ""
+    fast*: bool      ## the decoder is behind: no loop filter, the scaler's fast bilinear
+
 const
   DefaultMaxFps* = 30.0
   MaxMaxFps* = 60.0
@@ -147,21 +159,64 @@ proc inputArgs*(source: VideoSource): seq[string] =
   if source.denyActive or source.scheme.len == 0:
     result.add @["-format_whitelist", PlaylistFreeFormats]
 
-proc fitFilter*(width, height: int, fit: VideoFit): string =
+proc fitFilter*(width, height: int, fit: VideoFit, fast = false): string =
   ## Scaled to exactly `width` x `height` whatever the fit, so the draw is a
-  ## copy: contain pads with black, cover crops.
+  ## copy: contain pads with black, cover crops. `fast`: the scaler's fast
+  ## bilinear, a sixth less of a Pi Zero's 720p frame than bilinear.
   let
     w = $clamp(width, 1, MaxFrameEdge)
     h = $clamp(height, 1, MaxFrameEdge)
+    flags = if fast: "fast_bilinear" else: "bilinear"
   case fit
   of vfFill:
-    "scale=" & w & ":" & h & ":flags=bilinear,setsar=1"
+    "scale=" & w & ":" & h & ":flags=" & flags & ",setsar=1"
   of vfContain:
-    "scale=" & w & ":" & h & ":force_original_aspect_ratio=decrease:flags=bilinear," &
+    "scale=" & w & ":" & h & ":force_original_aspect_ratio=decrease:flags=" & flags & "," &
       "pad=" & w & ":" & h & ":(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
   of vfCover:
-    "scale=" & w & ":" & h & ":force_original_aspect_ratio=increase:flags=bilinear," &
+    "scale=" & w & ":" & h & ":force_original_aspect_ratio=increase:flags=" & flags & "," &
       "crop=" & w & ":" & h & ",setsar=1"
+
+proc v4l2Decoder*(codec: string): string =
+  ## ffmpeg's V4L2 mem2mem decoder for a codec as ffprobe names it.
+  case codec
+  of "h264", "hevc", "vp8", "vp9", "vc1", "h263", "mpeg4": codec & "_v4l2m2m"
+  of "mpeg2video": "mpeg2_v4l2m2m"
+  of "mpeg1video": "mpeg1_v4l2m2m"
+  else: ""
+
+proc pickDecode*(codec: string, caps: DecodeCaps, fast: bool, software: bool): VideoDecode =
+  ## The decoder for a source of `codec`: the machine's V4L2 decoder for it
+  ## (a Pi 0 to 4's VideoCore), else VA-API (Intel, AMD), else ffmpeg's own.
+  ## `software`: the hardware failed for it before (player.nim falls back).
+  result.fast = fast
+  if software or codec.len == 0:
+    return
+  let v4l2 = v4l2Decoder(codec)
+  if v4l2.len > 0 and v4l2 in caps.v4l2Decoders:
+    result.decoder = v4l2
+  elif caps.vaapi and codec in ["h264", "hevc", "vp8", "vp9", "av1", "mpeg2video", "vc1"]:
+    result.hwaccel = "vaapi"
+
+proc decodeName*(decode: VideoDecode): string =
+  ## What a status says decodes it.
+  if decode.decoder.len > 0: decode.decoder
+  elif decode.hwaccel.len > 0: decode.hwaccel
+  else: "software"
+
+proc parseDecoderList*(text: string, suffix = "_v4l2m2m"): seq[string] =
+  ## Names from `ffmpeg -decoders` that end in `suffix`.
+  for line in text.splitLines():
+    let parts = line.strip().splitWhitespace()
+    if parts.len >= 2 and parts[0].len == 6 and parts[0][0] == 'V' and parts[1].endsWith(suffix):
+      result.add parts[1]
+
+proc parseHwaccels*(text: string): seq[string] =
+  ## Names from `ffmpeg -hwaccels` (a heading, then one a line).
+  for line in text.splitLines():
+    let name = line.strip()
+    if name.len > 0 and not name.endsWith(":") and ' ' notin name:
+      result.add name
 
 proc fpsText(fps: float): string =
   ## A rate ffmpeg reads exactly: 29.97 as 2997/100.
@@ -169,21 +224,31 @@ proc fpsText(fps: float): string =
   if hundredths mod 100 == 0: $(hundredths div 100) else: $hundredths & "/100"
 
 proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels: VideoPixels,
-    startAt, fps: float, loopFile: bool, threads: int): seq[string] =
+    startAt, fps: float, loopFile: bool, threads: int, decode = VideoDecode()): seq[string] =
   ## ffmpeg playing `source` from `startAt` seconds as raw frames on stdout:
   ## `width` x `height`, `pixels`, `fps` a second. `loopFile`: a file plays
   ## again from its start for ever (`-stream_loop`, no gap); anything else is
-  ## started again by the player.
+  ## started again by the player. `decode`: a hardware decoder, and the
+  ## shortcuts of a decoder that is behind (pickDecode).
   result = @["-hide_banner", "-loglevel", "error", "-nostdin", "-nostats"]
-  if threads > 0:
+  if threads > 0 and decode.decoder.len == 0:
     result.add @["-threads", $threads]
   result.add source.inputArgs()
+  if decode.hwaccel.len > 0:
+    # Frames come back to memory for the scaler: no -hwaccel_output_format.
+    result.add @["-hwaccel", decode.hwaccel]
+  if decode.decoder.len > 0:
+    result.add @["-c:v", decode.decoder]
+  if decode.fast:
+    # No deblocking filter (a tenth of a Pi Zero's 720p frame, 2026-11-24):
+    # what it smooths is hardly seen on a frame's panel.
+    result.add @["-skip_loop_filter", "all", "-flags2", "fast"]
   if startAt > 0.001:
     result.add @["-ss", formatFloat(startAt, ffDecimal, 3)]
   if loopFile and source.scheme.len == 0:
     result.add @["-stream_loop", "-1"]
   result.add @["-i", source.input, "-an", "-sn", "-dn",
-    "-vf", "fps=" & fpsText(fps) & "," & fitFilter(width, height, fit),
+    "-vf", "fps=" & fpsText(fps) & "," & fitFilter(width, height, fit, decode.fast),
     "-f", "rawvideo", "-pix_fmt", pixels.pixFmt, "pipe:1"]
 
 proc stillArgs*(source: VideoSource, at: float, width, height: int, fit: VideoFit,

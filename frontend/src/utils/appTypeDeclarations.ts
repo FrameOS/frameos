@@ -108,6 +108,10 @@ interface FrameOSVideoRef extends FrameOSImageRef {
   videoWidth?: number;
   videoHeight?: number;
   fps?: number;
+  /** What decodes it: "software", or the frame's hardware ("h264_v4l2m2m" on a Pi 0 to 4, "vaapi"). */
+  decoder?: string;
+  /** True when the decoder could not keep up and plays with shortcuts (a softer picture). */
+  fast?: boolean;
   error?: string;
 }
 

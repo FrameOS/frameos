@@ -55,7 +55,7 @@ from app.tasks.buildroot_image import (
     render_post_build_script,
     render_post_image_script,
 )
-from app.tasks.buildroot_platforms import RASPBERRY_PI_32, RASPBERRY_PI_64
+from app.tasks.buildroot_platforms import BUILDROOT_PLATFORMS, RASPBERRY_PI_32, RASPBERRY_PI_64
 from app.tasks.binary_builder import FrameBinaryBuildResult
 from app.tasks.prebuilt_deps import resolve_prebuilt_target
 from app.tasks.setup_json_reset import (
@@ -673,7 +673,29 @@ def test_kernel_config_fragment_disables_case_colliding_xtables_targets(tmp_path
     assert "# CONFIG_IP6_NF_TARGET_HL is not set" in fragment
     assert "# CONFIG_CAN is not set" in fragment
     assert "# CONFIG_DVB_CORE is not set" in fragment
+
+
+def test_kernel_config_fragment_keeps_the_videocore_codec_on_pi_0_to_4(tmp_path):
+    # Video decodes H.264 on the VideoCore through ffmpeg's h264_v4l2m2m
+    # (docs/video.md "Hardware"): bcm2835-codec lives in staging and needs
+    # V4L2, which every other platform's fragment trims.
+    for platform in (RASPBERRY_PI_32, RASPBERRY_PI_64):
+        fragment_path = tmp_path / f"{platform.key}.config"
+        BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, platform)
+        fragment = fragment_path.read_text(encoding="utf-8")
+        assert "# CONFIG_STAGING is not set" not in fragment
+        assert "# CONFIG_VIDEO_DEV is not set" not in fragment
+        assert "CONFIG_STAGING=y" in fragment
+        assert "CONFIG_VIDEO_DEV=m" in fragment
+        assert "CONFIG_VIDEO_CODEC_BCM2835=m" in fragment
+        assert "CONFIG_BCM_VC_SM_CMA=m" in fragment
+    # A Pi 5 has no H.264 block: its kernel stays trimmed.
+    fragment_path = tmp_path / "pi5.config"
+    BuildrootImageBuilder._write_kernel_config_fragment(fragment_path, BUILDROOT_PLATFORMS["raspberry-pi-5"])
+    fragment = fragment_path.read_text(encoding="utf-8")
     assert "# CONFIG_STAGING is not set" in fragment
+    assert "# CONFIG_VIDEO_DEV is not set" in fragment
+    assert "CONFIG_VIDEO_CODEC_BCM2835" not in fragment
 
 
 def test_buildroot_script_builds_output_on_container_filesystem(tmp_path):
@@ -2596,7 +2618,9 @@ def test_post_build_script_wifi_firmware_is_platform_specific():
 def test_post_image_script_keeps_gpu_memory_reserve_for_zero_w():
     post_image = render_post_image_script(RASPBERRY_PI_32)
 
-    assert '\'{"remove": [], "set": ["gpu_mem=32"]}\'' in post_image
+    # 32 MB for the VideoCore, 64 on a 512MB board (gpu_mem_512 wins there):
+    # its H.264 decoder's working memory.
+    assert '\'{"remove": [], "set": ["gpu_mem=32", "gpu_mem_512=64"]}\'' in post_image
     assert "size = 32M" in post_image
     assert "genimage" in post_image
 
@@ -2608,7 +2632,10 @@ def test_post_image_script_unified_image_strips_start_file_pins():
 
     # start_file=start.elf pinned in the sample config would stop a Pi 4 from
     # loading start4.elf; the unified image must strip the pins.
-    assert '\'{"remove": ["fixup_file", "start_file"], "set": ["gpu_mem=32"]}\'' in post_image
+    assert (
+        '\'{"remove": ["fixup_file", "start_file"], "set": ["gpu_mem=32", "gpu_mem_512=64", "gpu_mem_1024=64"]}\''
+        in post_image
+    )
     # All DTBs + both firmware sets don't fit the 32M single-model layout.
     assert "size = 64M" in post_image
 

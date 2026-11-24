@@ -119,6 +119,9 @@ else:
       result["videoHeight"] = %status.height
     if status.fps > 0:
       result["fps"] = %(round(status.fps * 100) / 100)
+    if status.decoder.len > 0:
+      result["decoder"] = %status.decoder
+      result["fast"] = %status.fast
     if status.error.len > 0:
       result["error"] = %status.error
 

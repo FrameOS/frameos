@@ -2459,8 +2459,11 @@ class BuildrootImageBuilder:
                     "# CONFIG_MEDIA_PCI_SUPPORT is not set",
                     "# CONFIG_MEDIA_PLATFORM_DRIVERS is not set",
                     "# CONFIG_MEDIA_USB_SUPPORT is not set",
-                    "# CONFIG_STAGING is not set",
-                    "# CONFIG_VIDEO_DEV is not set",
+                    *(
+                        ()
+                        if platform.videocore_codec
+                        else ("# CONFIG_STAGING is not set", "# CONFIG_VIDEO_DEV is not set")
+                    ),
                     "# CONFIG_VIDEO_HDPVR is not set",
                     "# CONFIG_VIDEO_OV2640 is not set",
                     "# CONFIG_USB_ACM is not set",
@@ -2479,6 +2482,22 @@ class BuildrootImageBuilder:
                     "# CONFIG_USB_SERIAL is not set",
                     "# CONFIG_USB_MON is not set",
                     "# CONFIG_WIMAX is not set",
+                    *(
+                        (
+                            "",
+                            "# The VideoCore's V4L2 codec: video decodes H.264 in hardware",
+                            "# (ffmpeg's h264_v4l2m2m, docs/video.md \"Hardware\").",
+                            "CONFIG_STAGING=y",
+                            "CONFIG_MEDIA_SUPPORT=m",
+                            "CONFIG_MEDIA_CONTROLLER=y",
+                            "CONFIG_VIDEO_DEV=m",
+                            "CONFIG_BCM_VIDEOCORE=y",
+                            "CONFIG_BCM_VC_SM_CMA=m",
+                            "CONFIG_VIDEO_CODEC_BCM2835=m",
+                        )
+                        if platform.videocore_codec
+                        else ()
+                    ),
                     *platform.kernel_fragment_lines,
                     "",
                 ]

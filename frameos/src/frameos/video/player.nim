@@ -48,6 +48,11 @@ const
   MessageKeep = 400
   ProbeTimeoutMs = 15_000
   FileProbeTimeoutMs = 8_000
+  SlowAfterFrames = 12
+    ## Frames a launch makes before its pace says the decoder is behind.
+  SlowPace = 1.2
+    ## Behind: a frame takes this many frame times to make (makeSeconds).
+  DecoderKeep = 32
 
 type
   Shared = object
@@ -80,6 +85,9 @@ type
     exited: bool
     arrivedAt: float       ## monotonic seconds the run's last frame came in (0: none yet)
     makeSeconds: float     ## how long ffmpeg takes to make a frame once there is room (an average)
+    decoder: array[DecoderKeep, char] ## what decodes the running launch (decodeName)
+    decoderLen: int
+    fast: bool             ## ... with a slow decoder's shortcuts (VideoDecode.fast)
     # The ring: `count` frames from `head`, oldest first.
     buf: ptr UncheckedArray[byte]
     frameBytes: int
@@ -130,6 +138,15 @@ var retrySeconds* = 10.0
   ## often, its error shown meanwhile. A plain value the readers read; tests
   ## shorten it.
 
+# What the machine decodes in hardware, read once, and the codecs whose
+# hardware decoder failed here: values every reader reads under `capsLock`
+# (copies handed out), never a ref.
+var capsLock: Lock
+var capsRead: bool
+var caps: DecodeCaps
+var hwFailedCodecs: seq[string]
+initLock(capsLock)
+
 proc nowSeconds*(): float =
   getMonoTime().ticks.float / 1e9
 
@@ -149,6 +166,103 @@ proc videoAvailable*(): bool =
   ## Raspberry Pi OS frame after `apt install ffmpeg`).
   let command = ffmpegCommand()
   if command.contains('/'): fileExists(command) else: findExe(command).len > 0
+
+# ------------------------------------------------------- hardware decoding
+
+proc ffmpegSays(args: openArray[string]): string =
+  try:
+    let run = runProcessPiped(ffmpegCommand(), @args, timeoutMs = 5000, maxOutputBytes = 256 * 1024,
+      maxErrorBytes = 4096)
+    if run.exitCode == 0: run.output else: ""
+  except CatchableError:
+    ""
+
+proc ffmpegRuns(args: openArray[string]): bool =
+  try:
+    runProcessPiped(ffmpegCommand(), @args, timeoutMs = 5000, maxOutputBytes = 4096,
+      maxErrorBytes = 4096).exitCode == 0
+  except CatchableError:
+    false
+
+proc v4l2DecoderDevice(): bool =
+  ## A V4L2 mem2mem decoder (a Pi 0 to 4's VideoCore: "bcm2835-codec-decode",
+  ## /dev/video10). ffmpeg finds which device takes the codec itself.
+  try:
+    for dir in walkDirs("/sys/class/video4linux/video*"):
+      let name = readFile(dir / "name").strip().toLowerAscii()
+      if "decode" in name or "vdec" in name:
+        return true
+  except CatchableError:
+    discard
+
+proc vaDriverThere(): bool =
+  ## A VA-API driver for the render node (Intel's iHD or i965, AMD's radeonsi):
+  ## without one `-hwaccel vaapi` fails, as it would on a Pi's vc4.
+  if getEnv("LIBVA_DRIVERS_PATH").len > 0:
+    return true
+  for dir in ["/usr/lib/x86_64-linux-gnu/dri", "/usr/lib/aarch64-linux-gnu/dri", "/usr/lib/dri",
+      "/usr/lib64/dri", "/usr/local/lib/dri"]:
+    try:
+      for _ in walkFiles(dir / "*_drv_video.so"):
+        return true
+    except CatchableError:
+      discard
+
+proc readDecodeCaps(): DecodeCaps =
+  if getEnv("FRAMEOS_VIDEO_HARDWARE") == "0":
+    return
+  if v4l2DecoderDevice():
+    result.v4l2Decoders = parseDecoderList(ffmpegSays(["-hide_banner", "-decoders"]))
+  var renderNode = false
+  try:
+    for _ in walkFiles("/dev/dri/renderD*"):
+      renderNode = true
+      break
+  except CatchableError:
+    discard
+  if renderNode and vaDriverThere() and "vaapi" in parseHwaccels(ffmpegSays(["-hide_banner", "-hwaccels"])):
+    # A driver on disk is not one for this GPU (Mesa's beside an NVIDIA
+    # card's): ffmpeg opens the device once, as a decode would.
+    result.vaapi = ffmpegRuns(["-hide_banner", "-loglevel", "error", "-nostdin", "-init_hw_device",
+      "vaapi=va", "-f", "lavfi", "-i", "color=size=16x16:duration=0.04", "-frames:v", "1", "-f", "null", "-"])
+
+proc decodeCaps*(): DecodeCaps =
+  ## What this machine decodes in hardware (docs/video.md "Hardware"), read on
+  ## first use by a reader thread. A copy: values only, under the lock.
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      if capsRead:
+        return caps
+    let read = readDecodeCaps()
+    withLock capsLock:
+      if not capsRead:
+        caps = read
+        capsRead = true
+      result = caps
+
+proc setDecodeCapsForTest*(value: DecodeCaps) =
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      caps = value
+      capsRead = true
+      hwFailedCodecs.setLen(0)
+
+proc hardwareFailed*(codec: string): bool =
+  ## Its hardware decoder failed here while ffmpeg's own played it.
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      result = codec in hwFailedCodecs
+
+proc markHardwareFailed(codec: string) =
+  {.cast(gcsafe).}:
+    withLock capsLock:
+      if codec notin hwFailedCodecs:
+        hwFailedCodecs.add codec
+
+proc slowMachine(): bool =
+  ## One core (a Pi Zero, a Pi 1): the shortcuts from the first frame, not
+  ## after a relaunch that costs it seconds.
+  countProcessors() <= 1
 
 # ------------------------------------------------------------- the reader
 
@@ -225,14 +339,25 @@ proc probeSource(arg: ReaderArg): ProbeResult =
   except CatchableError as e:
     result = ProbeResult(duration: -1, error: e.msg)
 
-type LaunchEnd = enum leSuperseded, leEof, leFailed, leIdle
+type LaunchEnd = enum
+  leSuperseded, leEof, leFailed, leIdle
+  leSlow ## a decoder without the shortcuts fell behind: again with them
 
 proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
-    startAt, fps: float, loopFile: bool, firstSeq: int64, made: var int64): LaunchEnd =
+    startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode, made: var int64,
+    exitCode: var int): LaunchEnd =
   ## One ffmpeg, its frames into the ring until it ends, is told to stop or
-  ## nobody takes them. `made`: frames it put in the ring.
+  ## nobody takes them. `made`: frames it put in the ring; `exitCode`
+  ## ffmpeg's, -1 when it was stopped.
   let s = arg.shared
-  let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads)
+  let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads, decode)
+  let shownDecoder = decodeName(decode)
+  withLock s.lock:
+    let n = min(shownDecoder.len, DecoderKeep)
+    for i in 0 ..< n:
+      s.decoder[i] = shownDecoder[i]
+    s.decoderLen = n
+    s.fast = decode.fast
   let fb = frameBytes(width, height, pixels)
   var p: Process
   try:
@@ -316,6 +441,7 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
               break frames
             elif osLastError().int32 notin [EAGAIN, EWOULDBLOCK, EINTR]:
               break frames
+        var behind = false
         withLock s.lock:
           if s.stop or s.gen != gen:
             result = leSuperseded
@@ -338,8 +464,13 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
             s.failed = false
             s.retrying = false
             s.messageLen = 0
+          behind = not decode.fast and made + 1 >= SlowAfterFrames and
+            s.makeSeconds > frameTime * SlowPace
         inc seqNo
         inc made
+        if behind:
+          result = leSlow
+          break frames
   finally:
     if p.peekExitCode() == -1:
       p.stopProcess()
@@ -356,6 +487,7 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
     except CatchableError:
       discard
     let code = p.peekExitCode()
+    exitCode = code
     p.close()
     if result == leEof and made == 0:
       result = leFailed
@@ -380,6 +512,12 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       broadcast(s.cond)
     var lastGen = 0
     var seqNo: int64 = 0
+    # Hardware where there is some, and the shortcuts once the decoder is
+    # behind (from the start on one core): docs/video.md "Hardware".
+    let caps = decodeCaps()
+    var fast = slowMachine()
+    var software = false ## the hardware failed this player: ffmpeg's own
+    var suspect = false  ## ... and it is the hardware's fault once ffmpeg's own plays it
     while true:
       var
         gen, width, height: int
@@ -427,11 +565,39 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       let loopFile = loop and arg.source.scheme.len == 0 and probe.duration > 0
       var launchAt = startAt
       while true:
+        let decode = pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec))
+        let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
         var made: int64 = 0
-        let ended = runLaunch(arg, gen, width, height, fit, pixels, launchAt, fps, loopFile, seqNo, made)
+        var code = 0
+        let ended = runLaunch(arg, gen, width, height, fit, pixels, launchAt, fps, loopFile, seqNo,
+          decode, made, code)
         seqNo += made
+        if suspect and not hardware and made > 0:
+          # ffmpeg's own played what the hardware would not: the hardware's
+          # fault, not the source's, so no player here tries it for this codec.
+          markHardwareFailed(probe.codec)
+          suspect = false
         if ended == leSuperseded:
           break
+        # Where a launch that goes on from here starts.
+        var reached = launchAt + float(made) / fps
+        if loopFile and probe.duration > 0:
+          reached = reached mod probe.duration
+        let atEnd = not loopFile and probe.duration > 0 and reached >= probe.duration - 1.0
+        if ended == leSlow:
+          fast = true
+          launchAt = reached
+          continue
+        if hardware and not atEnd and
+            (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
+          # The hardware would not (a codec or profile it lacks, a stream it
+          # chokes on): ffmpeg's own, from where it got to.
+          software = true
+          suspect = true
+          withLock s.lock:
+            s.messageLen = 0
+          launchAt = reached
+          continue
         if ended == leIdle:
           withLock s.lock:
             s.idle = true
@@ -467,6 +633,10 @@ proc readerMain(arg: ReaderArg) {.thread.} =
             superseded = s.stop or s.gen != gen
           if superseded:
             break
+          # A source that was not there (a camera off): its hardware is
+          # tried again with it.
+          software = false
+          suspect = false
         launchAt = 0
   except CatchableError as e:
     withLock s.lock:
@@ -782,6 +952,8 @@ type VideoStatus* = object
   fps*: float
   error*: string
   probed*: bool
+  decoder*: string    ## what decodes it: "software", "h264_v4l2m2m", "vaapi" (docs/video.md "Hardware")
+  fast*: bool         ## with a slow decoder's shortcuts
 
 proc status*(player: VideoPlayer): VideoStatus =
   result.state = player.state()
@@ -797,6 +969,10 @@ proc status*(player: VideoPlayer): VideoStatus =
     result.height = s.srcHeight
     result.fps = if s.fps > 0: s.fps else: s.srcFps
     result.probed = s.probed
+    result.decoder = newString(s.decoderLen)
+    for i in 0 ..< s.decoderLen:
+      result.decoder[i] = s.decoder[i]
+    result.fast = s.fast
     if result.state == "error":
       let text = s.messageOf()
       result.error = if text.len > 0: text else: "the video could not be played"

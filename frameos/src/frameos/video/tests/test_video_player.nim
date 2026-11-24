@@ -189,6 +189,29 @@ suite "video player":
       check probe.ok
       check probe.width == 320 and probe.height == 180
 
+  test "a hardware decoder that fails gives way to ffmpeg's own, which plays it, and is not tried again":
+    if not haveFfmpeg:
+      skip()
+    else:
+      # This machine says it has the VideoCore's MPEG-4 decoder (the clip's
+      # codec); there is no such device, so ffmpeg fails with it.
+      setDecodeCapsForTest(DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"]))
+      defer: setDecodeCapsForTest(DecodeCaps())
+      check not hardwareFailed("mpeg4")
+      let player = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard player.playUntil(200, 100, vfContain, nil, 30,
+        proc(p: VideoPlayer): bool = p.state == "ended")
+      check player.state == "ended" # not "error": ffmpeg's own played it
+      check player.image.blue
+      check player.status.decoder == "software"
+      check hardwareFailed("mpeg4")
+      player.close()
+      # The next player of this codec starts with ffmpeg's own.
+      let next = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard next.playUntil(200, 100, vfContain, nil, 30, proc(p: VideoPlayer): bool = not p.image.isNil)
+      check next.status.decoder == "software"
+      next.close()
+
   test "closed players are joined once their reader ends":
     if not haveFfmpeg:
       skip()

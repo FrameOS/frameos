@@ -36,7 +36,9 @@ export function get(app) {
   `object-contain` (black bars), `object-cover` (cropped), `object-fill`.
   `headers` go with an http(s) request (an API key).
 - What it returns: `{ __frameosType: "imageRef", id, width, height, video,
-  src, state, time, duration, live, videoWidth, videoHeight, fps, error }`.
+  src, state, time, duration, live, videoWidth, videoHeight, fps, decoder,
+  fast, error }`. `decoder` says what decodes it (`software`, `h264_v4l2m2m`,
+  `vaapi`) and `fast` whether with a slow decoder's shortcuts ("Hardware").
   `state` is `loading` until the first frame, `playing`, `paused`, `ended`
   (the last frame showed; never with `loop`) or `error`. `duration` is null
   for a live stream or a source that does not say. `id` is 0 when it cannot
@@ -115,6 +117,57 @@ the desktop around a playing window does not run (`rhythmVisitChrome`). The
 runner tells the web sockets about a new picture once a second, not every
 frame (`runner.nim`, as for a scene under a second).
 
+## Hardware
+
+What decodes a source is chosen for its codec (ffprobe's), in this order
+(`pickDecode` in `video/args.nim`):
+
+- **A V4L2 mem2mem decoder** (`-c:v h264_v4l2m2m`): a Pi 0 to 4's VideoCore,
+  through its `bcm2835-codec` (`/dev/video10`): H.264, and MPEG-2, MPEG-4 and
+  VC-1 where the firmware has them. Used when the machine has a V4L2 decoder
+  device and ffmpeg the decoder for the codec.
+- **VA-API** (`-hwaccel vaapi`): an Intel or AMD GPU's decoder, the frames
+  back in memory for the scaler. Used when there is a render node, a VA
+  driver and ffmpeg's `vaapi` hwaccel, and ffmpeg can open the device: a
+  driver on disk is not one for the GPU (Mesa's beside an NVIDIA card's).
+- **ffmpeg's own**, on `cores - 1` threads.
+
+What the machine has is read once a runtime (`decodeCaps` in
+`video/player.nim`); `FRAMEOS_VIDEO_HARDWARE=0` leaves the hardware alone. A
+hardware launch that fails (no frame, or a non-zero exit in the middle) is
+started again with ffmpeg's own from where it got to, and once ffmpeg's own
+plays it, no player of that runtime tries the codec's hardware again
+(`hardwareFailed`). A source that was not there at all (a camera off) is no
+hardware's fault: its next try has the hardware again.
+
+**A decoder that is behind.** A launch whose frames take more than 1.2 frame
+times to make over its first 12 is started again where it was with a slow
+decoder's shortcuts: no loop filter (`-skip_loop_filter all -flags2 fast`)
+and the scaler's `fast_bilinear`. A machine of one core (a Pi Zero, a Pi 1)
+starts with them, a relaunch costing it seconds. Measured on a Pi Zero W,
+720p H.264 into its 720x720 RGB565 box (2026-11-24): 2.5 frames a second
+plain at 700 MHz, 3.3 with the shortcuts; 3.2 and 4.0 at 1 GHz. A Pi left in
+the `powersave` governor (an image from before the kernel's
+`cpufreq.default_governor=ondemand`) decodes a fifth slower. `-skip_frame
+nonref` made no frame at all of an x264 clip: not used.
+
+**Where.**
+- **Buildroot images, Pi 0 to 4**: the kernel keeps the VideoCore's codec
+  (`videocore_codec` in `backend/app/tasks/buildroot_platforms.py`: staging,
+  V4L2, `bcm2835-codec`, which the shared fragment trims elsewhere) and the
+  VideoCore gets 64 MB on a board of 512 MB or more (`gpu_mem_512=64`,
+  `gpu_mem_1024=64`; a 256 MB Pi 1 A keeps 32), from the base image built
+  after this. An image flashed before has no codec and decodes in software.
+- **Raspberry Pi OS, Pi 0 to 4**: the codec is there already.
+- **A Pi 5** has no H.264 block; its HEVC decoder is a stateless one
+  (v4l2-request), which upstream ffmpeg 6.1 does not drive: ffmpeg's own,
+  which it does well ("Where it plays").
+- **Intel and AMD** Linux frames: VA-API.
+
+Not yet run on a Pi with the codec (the bench's Pi Zero W has an image from
+before it): the fallback is tested against a real ffmpeg given a decoder with
+no device (`test_video_player.nim`).
+
 ## Network
 
 A URL goes through `spawn_guard.nim` before ffmpeg sees it, as the RTSP
@@ -143,9 +196,9 @@ Pi plays one. Its scenes say `video` among their needs, never `linux`.
   governor) is no video player in software: into its 720x720 RGB565 box,
   ffmpeg alone made 6.9 frames a second of a 270p clip, 3.8 of a busy 360p
   one and 2.7 of 720p (2026-11-24), the scale and the colour conversion
-  costing as much as the decode. It plays, slowly (the clock follows the
-  decoder); its VideoCore's H.264 decoder and ISP are the way to real time
-  there (Next).
+  costing as much as the decode, 4.0 of 720p with the shortcuts at 1 GHz
+  ("Hardware"). It plays, slowly (the clock follows the decoder); its
+  VideoCore's H.264 decoder is the way to real time there.
 - **Raspberry Pi OS**: the backend's deploy installs the `ffmpeg` package when
   one of the frame's scenes plays video or uses the RTSP snapshot app
   (`_scenes_use_ffmpeg` in `frame_deploy_workflow.py`). A cloud-managed Pi OS
@@ -191,9 +244,11 @@ box). All three skip without ffmpeg.
 - **Holes**: a `<video>` drawn straight into the canvas as a `<Scene>` is,
   the UI around it not run per frame (`docs/scene-layouts.md`, `seekHoles`).
   Today the app's `get()` and the layout run every frame.
-- **Hardware decoding**: a Pi 4's H.264 block (`h264_v4l2m2m`, in the image
-  already); a Pi 5 has none for H.264 and decodes in software anyway. Then
-  zero copies: the frames in the panel's buffer, or a DRM plane.
+- **More hardware**: the scale and the colour conversion on the VideoCore's
+  ISP (`bcm2835-isp`, a V4L2 mem2mem device upstream ffmpeg has no filter
+  for), half a Pi Zero's frame; a Pi 5's HEVC once ffmpeg drives
+  v4l2-request; then zero copies: the frames in the panel's buffer, or a DRM
+  plane.
 - **Audio**: frames have no speakers; ALSA is not in the image.
 - **The preview**: the browser could play the video itself.
 - **On the device**: these numbers are FFmpeg's alone. The runtime's playback
