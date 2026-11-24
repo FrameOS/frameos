@@ -386,12 +386,14 @@ jobs:
           sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
 
       # The IDF-free modules' host tests (embedded/esp32/main/tests), once.
+      # `-i`: the script is bash's stdin, and without it docker hands the
+      # container none, so bash ran nothing and passed (2026-11-14 to 11-24).
       - name: Host tests
         if: matrix.leg == 'esp32-s3'
         env:
           TAG: ${{ steps.toolchain.outputs.tag }}
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" "$TAG" bash -s <<'TESTS'
+          docker run --rm -i -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" "$TAG" bash -s <<'TESTS'
           set -euo pipefail
           # The cloud verb contract, as the firmware walks it, against the
           # conformance corpus the Linux runtime and the cloud also run
@@ -536,11 +538,11 @@ jobs:
             embedded/esp32/components/frameos_display/fos_partial_refresh.c embedded/esp32/main/tests/test_fos_partial_refresh.c \
             -o /tmp/test_fos_partial_refresh
           /tmp/test_fos_partial_refresh
-          # The charger register decode, the RTC conversions, the fuel gauge decode
-          # and the climate sensor decode, pure.
+          # The charger register decode, the RTC conversions, the fuel gauge decode,
+          # the climate sensor decode and the IMU decode, pure.
           cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
             embedded/esp32/main/fos_charger.c embedded/esp32/main/fos_rtc.c embedded/esp32/main/fos_gauge.c \
-            embedded/esp32/main/fos_climate.c embedded/esp32/main/tests/test_fos_i2c_devices.c \
+            embedded/esp32/main/fos_climate.c embedded/esp32/main/fos_imu.c embedded/esp32/main/tests/test_fos_i2c_devices.c \
             -o /tmp/test_fos_i2c_devices
           /tmp/test_fos_i2c_devices
           # The IT8951 panel rows (the reTerminal E1003, the Waveshare 10.3 inch HAT), pure.

@@ -353,6 +353,41 @@ async def test_updates_lists_what_is_newer_and_what_asks_for_more(async_client, 
 
 
 @pytest.mark.asyncio
+async def test_updates_read_the_workspace_stamp_too(async_client, no_auth_client, db, store):
+    """A store scene installed from the workspace's templates carries the
+    longer stamp (frontend utils/sceneOrigin.ts sceneOriginForTemplate): the
+    repository and template between the id and the version."""
+    frame = await panel_frame(async_client, db)
+    installed = store_scene(RADAR, 2)
+    installed[0]["origin"] = {
+        "href": "https://scenes.example/s/rain-radar",
+        "storeSceneId": RADAR,
+        "repositoryId": "store",
+        "repositoryUrl": "https://cloud.example/api/store/repository.json",
+        "templateId": "rain-radar",
+        "templateName": "Rain radar",
+        "sceneId": "radar-rt",
+        "version": "2",
+    }
+    frame.scenes = [*frame.scenes, *installed]
+    db.add(frame)
+    db.commit()
+    store[RADAR] = store_scene(RADAR, 2)
+
+    current = await ask(no_auth_client, frame, {"action": "updates"})
+    assert current.json() == {"ok": True, "updates": []}
+    assert (await ask(no_auth_client, frame, {"action": "update", "scene_id": RADAR})).json() == {
+        "ok": True,
+        "status": "up_to_date",
+        "version": "2",
+    }
+
+    store[RADAR] = store_scene(RADAR, 3)
+    newer = await ask(no_auth_client, frame, {"action": "updates"})
+    assert newer.json() == {"ok": True, "updates": [{"store": RADAR, "name": "Rain radar", "from": 2, "to": 3}]}
+
+
+@pytest.mark.asyncio
 async def test_update_all_moves_every_scene_it_may_in_one_push(async_client, no_auth_client, db, store, monkeypatch):
     frame = await panel_frame(async_client, db)
     radar = store_scene(RADAR, 1)

@@ -9,7 +9,7 @@
  *
  *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain \
  *      main/fos_charger.c main/fos_rtc.c main/fos_gauge.c main/fos_climate.c \
- *      main/tests/test_fos_i2c_devices.c \
+ *      main/fos_imu.c main/tests/test_fos_i2c_devices.c \
  *      -o /tmp/test_fos_i2c_devices && /tmp/test_fos_i2c_devices
  *
  * (backend/app/tasks/tests/test_esp32_i2c_devices.py does exactly that in CI.)
