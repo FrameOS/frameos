@@ -64,7 +64,10 @@ reported `hardware.rotate` on the cloud) and firmware that does that
 (`esp32CanvasRotation`: the version the frame last said it runs, from
 `ESP32_SHARED_CANVAS_FIRMWARE`). A Pi, a thin
 client (the control plane renders it) and a chat about no frame render
-unlimited. Which device: `frameRenderDevice` in the SPA and the cloud
+without a device's ceiling: on the cloud's server that is still not
+unlimited, every render there is held to `maxRenderMemoryBytes` (512 MiB,
+`scene-render.ts`; past it the render fails, as `render_failed`). Which
+device: `frameRenderDevice` in the SPA and the cloud
 (`frontend/src/utils/frameRenderDevice.ts`, `src/lib/ai/render-device.ts`),
 `frame_render_device` on the backend.
 

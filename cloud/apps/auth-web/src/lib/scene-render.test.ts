@@ -329,4 +329,45 @@ describe.skipIf(!rendererAvailable())("renderScenes", () => {
       message: expect.stringMatching(/^Out of memory: an allocation of 7\.3 MB was refused/),
     });
   }, 60_000);
+
+  // With no device there was no ceiling at all: the wasm memory grew to
+  // whatever the scene asked for, in a worker beside the web app.
+  it("holds a render with no device to the server's own ceiling", async () => {
+    const svg =
+      '<svg viewBox="0 0 1200 1600" width="1200" height="1600"><rect width="1200" height="1600" fill="#efe7d7"/></svg>';
+    const scenes = [
+      {
+        edges: [
+          { id: "e", source: "e1", sourceHandle: "next", target: "svg", targetHandle: "prev" },
+        ],
+        fields: [],
+        id: "s1",
+        name: "Big",
+        nodes: [
+          { data: { keyword: "render" }, id: "e1", position: { x: 0, y: 0 }, type: "event" },
+          {
+            data: {
+              config: { blendMode: "normal", offsetX: "1", offsetY: "0", placement: "center", svg },
+              keyword: "render/svg",
+            },
+            id: "svg",
+            position: { x: 200, y: 0 },
+            type: "app",
+          },
+        ],
+        settings: { execution: "interpreted" },
+      },
+    ];
+    // The same 7.3 MB image the device test refuses, under a 4 MiB ceiling.
+    await expect(
+      renderScenes({ height: 1600, maxMemoryBytes: 4 * 1024 * 1024, scenes, width: 1200 }),
+    ).rejects.toMatchObject({
+      code: "render_failed",
+      message: expect.stringMatching(/more memory than a render on the server may use/),
+    });
+    // And it renders under the real one, as it always did.
+    const rendered = await renderScenes({ height: 1600, scenes, width: 1200 });
+    expect(rendered.errors).toEqual([]);
+    expect(rendered.width).toBe(1200);
+  }, 60_000);
 });

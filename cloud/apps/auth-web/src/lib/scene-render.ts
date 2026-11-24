@@ -33,6 +33,11 @@ export type SceneRenderOptions = {
    */
   deviceLimits?: DeviceLimits | null | undefined;
   /**
+   * The ceiling of a render with no device (maxRenderMemoryBytes). Tests
+   * lower it; nothing raises it.
+   */
+  maxMemoryBytes?: number | undefined;
+  /**
    * What a frame rendered on the server relayed with its pull
    * (docs/server-rendering.md "Keys, touch and the schedule"): its key
    * edges and the events its own producers would have handed its scene,
@@ -224,6 +229,16 @@ export type SceneRenderResult = {
 };
 
 export const defaultRenderTimeoutMs = 30_000;
+// What one render may allocate when no device is being simulated. The
+// worker's resourceLimits bound its JavaScript heap, not the wasm runtime's
+// memory, which grows on demand up to the build's 2 GiB: one scene, in a
+// worker beside the web app or the hub. The runtime's own allocator takes a
+// ceiling (frameos_wasm_set_memory_limit, what simulates an ESP32's PSRAM),
+// so every render gets one: the device's when there is a device, this
+// otherwise. An allocation past it fails that render ("out of memory") and
+// nothing else. A 4096 x 4096 canvas is 64 MiB; a 24-megapixel photo decoded
+// whole is 96 MiB.
+export const maxRenderMemoryBytes = 512 * 1024 * 1024;
 export const maxRenderPixels = 8 * 1024 * 1024;
 export const maxRenderDimension = 4096;
 export const minRenderDimension = 16;
@@ -470,6 +485,10 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         eventsJson: JSON.stringify(options.events ?? []),
         frameJson: JSON.stringify(options.frame ?? {}),
         height: options.height,
+        hostMemoryBytes: Math.min(
+          maxRenderMemoryBytes,
+          Math.max(1, Math.floor(options.maxMemoryBytes ?? maxRenderMemoryBytes)),
+        ),
         maxLogs: maxCollectedLogs,
         nowMs: typeof options.nowMs === "number" && Number.isFinite(options.nowMs) ? options.nowMs : null,
         pack: options.pack ?? null,
@@ -515,7 +534,15 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
                   describeOutOfMemory(result.outOfMemory, options.deviceLimits),
                   result.logs,
                 )
-              : new SceneRenderError("render_failed", result.message, result.logs),
+              : new SceneRenderError(
+                  "render_failed",
+                  // No device: the server's own ceiling. Not
+                  // render_out_of_memory, which says "this frame cannot".
+                  result.outOfMemory
+                    ? `The scene needs more memory than a render on the server may use (${Math.round(maxRenderMemoryBytes / (1024 * 1024))} MB).`
+                    : result.message,
+                  result.logs,
+                ),
           );
           return;
         }
@@ -888,11 +915,21 @@ async function main() {
   }
   // A device's memory ceiling, set after init like the preview worker does:
   // module startup lives in a frame's flash, not in its render budget.
+  // Every render has a ceiling: the device's, never above the server's own,
+  // which is also what a render with no device gets (maxRenderMemoryBytes).
   const limits = workerData.deviceLimits;
+  const hostMemoryBytes = workerData.hostMemoryBytes;
+  if (!limits) {
+    try {
+      call("frameos_wasm_set_memory_limit", null, ["number", "number"], [hostMemoryBytes, 0]);
+    } catch {
+      // A runtime bundle from before the allocator took a ceiling.
+    }
+  }
   if (limits) {
     try {
       call("frameos_wasm_set_memory_limit", null, ["number", "number"], [
-        Math.max(0, Math.floor(limits.memoryBytes || 0)),
+        Math.min(hostMemoryBytes, Math.max(0, Math.floor(limits.memoryBytes || 0)) || hostMemoryBytes),
         Math.max(0, Math.floor(limits.memoryReserveBytes || 0)),
       ]);
       if (limits.embedded) {
