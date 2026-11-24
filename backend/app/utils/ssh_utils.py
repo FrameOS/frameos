@@ -1,6 +1,7 @@
 from arq import ArqRedis
 import asyncssh
 import asyncio
+import hashlib
 import time
 from typing import Optional, Any
 from sqlalchemy.orm import Session
@@ -22,9 +23,13 @@ from app.utils.ssh_key_utils import select_ssh_keys_for_frame
 # ---------------------------------------
 _pool_lock = asyncio.Lock()
 
-# Keys in this dict: (host, port, username, 'password' or 'key'), e.g. ("192.168.1.1", 22, "ubuntu", "password")
-# Values: List of PooledConnection objects
-_ssh_pool: dict[tuple[Any, Any | int, Any, str], list["PooledConnection"]] = {}
+# Keyed by `_pool_key`: the frame row and the credentials it would connect
+# with. Never by address alone: a connection is an authenticated session, and
+# a second frame row pointed at the same host, port and user (another
+# project's, with credentials of its own or none that work) must open its
+# own or fail to.
+PoolKey = tuple[Any, Any, Any, Any, Any, str]
+_ssh_pool: dict[PoolKey, list["PooledConnection"]] = {}
 
 # If a connection is idle more than this many seconds, it will be closed.
 IDLE_TIMEOUT_SECONDS = 30
@@ -86,23 +91,65 @@ class PooledConnection:
 # PUBLIC SSH UTILS
 # ---------------------------------------
 
+def _frame_private_keys(db, frame) -> tuple[list[str], str]:
+    """The private keys a key-authenticated connect to this frame offers, and
+    their names for the log line."""
+    ssh_keys_row = db.query(Settings).filter_by(project_id=frame.project_id, key="ssh_keys").first()
+    settings = {"ssh_keys": ssh_keys_row.value} if ssh_keys_row and ssh_keys_row.value else {}
+    selected_keys = select_ssh_keys_for_frame(frame, settings)
+    keypair_names = [key.get("name") or key.get("id") for key in selected_keys]
+    keypair_label = ", ".join([name for name in keypair_names if name]) or "unknown"
+    return [key.get("private") for key in selected_keys if key.get("private")], keypair_label
+
+
+def _pool_key(db, frame) -> PoolKey:
+    """Who may share a pooled connection: the same frame row, at the same
+    address, with the same credentials. The fingerprint covers what the
+    connect would present, so changing a frame's password or keys stops it
+    reusing a session opened with the old ones."""
+    password = frame.ssh_pass
+    if password:
+        material = "password\0" + str(password)
+    else:
+        try:
+            private_keys, _ = _frame_private_keys(db, frame)
+        except Exception:
+            private_keys = []
+        material = "key\0" + "\0".join(str(key) for key in private_keys)
+    fingerprint = hashlib.sha256(material.encode("utf-8", "replace")).hexdigest()
+    return (
+        getattr(frame, "project_id", None),
+        getattr(frame, "id", None),
+        frame.frame_host,
+        frame.ssh_port or 22,
+        frame.ssh_user,
+        fingerprint,
+    )
+
+
+def _connection_matches_pin(ssh: asyncssh.SSHClientConnection, stored_host_key: str | None) -> bool:
+    """Whether an open connection is to the host this frame is pinned to. A
+    frame with no key recorded (never connected, or "Forget host key") reuses
+    nothing: its next connect is the one that records the key."""
+    stored = (stored_host_key or "").split()
+    if len(stored) < 2:
+        return False
+    try:
+        key = ssh.get_server_host_key()
+    except Exception:
+        return False
+    if key is None:
+        return False
+    return openssh_host_key_line(key).split()[:2] == stored[:2]
+
+
 async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyncssh.SSHClientConnection:
     """
     Retrieve an SSH connection from the pool if available. Otherwise, open a new one.
     If all existing connections for this frame's credentials are in use, create another one.
     """
-    host = frame.frame_host
-    port = frame.ssh_port or 22
-    username = frame.ssh_user
-    password = frame.ssh_pass
-
-    # Build a pool key
-    if password:
-        auth_label = "password"
-    else:
-        auth_label = "key"
-
-    pool_key = (host, port, username, auth_label)
+    pool_key = _pool_key(db, frame)
+    stored_host_key = getattr(frame, "ssh_host_key", None) or None
 
     async with _pool_lock:
         # 1) Clean up any connections that have been closed or that had errors:
@@ -114,10 +161,10 @@ async def get_ssh_connection(db: Session, redis: ArqRedis, frame: Frame) -> asyn
             for pc in to_remove:
                 _ssh_pool[pool_key].remove(pc)
 
-        # 2) Look for an idle connection
+        # 2) Look for an idle connection to the host this frame is pinned to
         if pool_key in _ssh_pool:
             for pc in _ssh_pool[pool_key]:
-                if not pc.in_use:  # found an idle connection
+                if not pc.in_use and _connection_matches_pin(pc.ssh, stored_host_key):
                     pc.mark_in_use()
                     # await log(db, redis, frame.id, "stdinfo", "Reusing existing SSH connection")
                     return pc.ssh
@@ -144,26 +191,17 @@ async def remove_ssh_connection(db, redis, ssh: asyncssh.SSHClientConnection, fr
     if not ssh:
         return
 
-    # Find which pool entry this belongs to
-    host = frame.frame_host
-    port = frame.ssh_port or 22
-    username = frame.ssh_user
-    password = frame.ssh_pass
-    auth_label = "password" if password else "key"
-    pool_key = (host, port, username, auth_label)
-
     async with _pool_lock:
-        # If we don't have this key at all, there's nothing to do
-        if pool_key not in _ssh_pool:
-            return
-
-        # Look for the matching PooledConnection
-        for pc in _ssh_pool[pool_key]:
-            if pc.ssh is ssh:
-                # await log(db, redis, frame.id, "stdinfo", "SSH connection scheduled for closure")
-                pc.mark_idle()
-                await schedule_close(pc, pool_key, db, redis, frame.id)
-                return
+        # Found by the connection itself, not by a key worked out again from
+        # the frame: the row may have changed (a new password, the host key
+        # recorded by this very connect) since the connection was taken.
+        for pool_key, connections in _ssh_pool.items():
+            for pc in connections:
+                if pc.ssh is ssh:
+                    # await log(db, redis, frame.id, "stdinfo", "SSH connection scheduled for closure")
+                    pc.mark_idle()
+                    await schedule_close(pc, pool_key, db, redis, frame.id)
+                    return
 
 
 async def schedule_close(pc: PooledConnection, pool_key, db, redis, frame_id):
@@ -194,12 +232,7 @@ async def _create_new_connection(db, redis, frame) -> asyncssh.SSHClientConnecti
     keypair_label = None
     if not password:
         # Attempt to load SSH keys from DB
-        ssh_keys_row = db.query(Settings).filter_by(project_id=frame.project_id, key="ssh_keys").first()
-        settings = {"ssh_keys": ssh_keys_row.value} if ssh_keys_row and ssh_keys_row.value else {}
-        selected_keys = select_ssh_keys_for_frame(frame, settings)
-        keypair_names = [key.get("name") or key.get("id") for key in selected_keys]
-        keypair_label = ", ".join([name for name in keypair_names if name]) or "unknown"
-        private_keys = [key.get("private") for key in selected_keys if key.get("private")]
+        private_keys, keypair_label = _frame_private_keys(db, frame)
         if not private_keys:
             raise Exception("No SSH private keys available for this frame.")
         for private_key in private_keys:
