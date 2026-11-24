@@ -72,10 +72,13 @@ measured=True)`), so it knows which colour is "red" even when the measured red
 is dark brown. OpenDisplay's indices are then mapped back to the panel's wire
 indices, Spectra 6's hole at 4 included.
 
-When an image is dithered with OpenDisplay, the render's automatic fit of
-drawn images (`colors.autoFit`) defaults to off: OpenDisplay does its own
-tone mapping to the measured palette, and fitting first squeezes the picture
-twice. An explicit "on" still wins.
+When a frame dithers with OpenDisplay, the render's automatic fit of drawn
+images (`colors.autoFit`) is off, whatever the frame's setting says.
+OpenDisplay does its own tone mapping to the measured palette; fitting first
+squeezes the picture twice. On a 7.3" Spectra 6 panel with auto fit set to
+"on", that pushed the share of black dots in a photo from 24 % to 47 %. The
+Colors section says so when OpenDisplay is chosen; the setting still applies
+to a frame that renders its own scenes.
 
 DBS needs the panel's pixel density. It is read from the panel's name
 (`EPD_7in3e` is 7.3", `inky_impression_4` is 4") with the picture's size;

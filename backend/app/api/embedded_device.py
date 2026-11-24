@@ -999,10 +999,12 @@ def thin_client_frame_json(frame: Frame, pixel_format: int) -> dict:
     map stays empty: the owner cleared it."""
     colors = getattr(frame, "colors", None)
     colors = dict(colors) if isinstance(colors, dict) else {}
-    if normalize_dither(getattr(frame, "dither", None)) is not None and colors.get("autoFit", "default") == "default":
+    if normalize_dither(getattr(frame, "dither", None)) is not None:
         # OpenDisplay fits the picture to the panel's own white itself; the
-        # render's automatic fit on top would tone-map it twice. An owner's
-        # explicit "on" still wins.
+        # render's automatic fit on top would tone-map it twice and come out
+        # far too dark. Off whatever the frame's setting says (an "on" kept
+        # from Floyd-Steinberg days included); a frame that renders its own
+        # scenes still reads it.
         colors["autoFit"] = "off"
     frame_json: dict = {
         "palette": [f"#{r:02x}{g:02x}{b:02x}" for r, g, b in palette_colors(getattr(frame, "palette", None))],

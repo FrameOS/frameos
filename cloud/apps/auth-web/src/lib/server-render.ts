@@ -526,10 +526,11 @@ export function renderFrameConfig(frame: Pick<FrameRow, "hardware" | "settings">
       : undefined;
   const palette = isRecord(settings.palette) && Array.isArray(settings.palette.colors) ? settings.palette.colors : undefined;
   let colors = isRecord(settings.colors) ? settings.colors : undefined;
-  if (normalizeDither(frame.dither) && (colors?.autoFit ?? "default") === "default") {
+  if (normalizeDither(frame.dither)) {
     // OpenDisplay fits the picture to the panel's own white itself; the
-    // render's automatic fit on top would tone-map it twice. An owner's
-    // explicit "on" still wins (panel_dither.py does the same).
+    // render's automatic fit on top would tone-map it twice and come out
+    // far too dark. Off whatever the frame's setting says, as on the
+    // backend (thin_client_frame_json).
     colors = { ...colors, autoFit: "off" };
   }
   // The panel the board reported ("EPD_10in3"): its size is what the

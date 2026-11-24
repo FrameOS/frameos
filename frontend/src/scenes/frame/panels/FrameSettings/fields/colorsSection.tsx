@@ -168,6 +168,10 @@ export function ColorsSection(): JSX.Element {
   }
   const fitsByDefault = panelAutoFitByDefault(panel, deviceLabelFor(paletteDeviceOf(panel)))
   const setColors = (next: FrameColors): void => setFrameFormValues({ colors: next })
+  // OpenDisplay dithering (docs/dithering.md) fits the picture itself, so the
+  // server's render skips the automatic fit whatever is set here.
+  const dither = 'dither' in frameForm ? frameForm.dither : frame.dither
+  const openDisplay = dither?.method === 'opendisplay'
 
   return (
     <>
@@ -203,6 +207,12 @@ export function ColorsSection(): JSX.Element {
             className="min-w-0 flex-1"
           />
         </label>
+        {openDisplay ? (
+          <p className="frameos-muted text-xs">
+            Not used when FrameOS renders this frame&apos;s scenes on the server: OpenDisplay dithering (above) fits the
+            picture to the panel&apos;s colors itself, and fitting it twice makes it far too dark.
+          </p>
+        ) : null}
         <p className="frameos-muted text-xs">
           {fitsByDefault
             ? 'Default is on here: this panel dithers to a fixed set of color inks. Off shows the image as it is.'

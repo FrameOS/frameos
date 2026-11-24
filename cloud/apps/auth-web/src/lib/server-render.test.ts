@@ -305,6 +305,17 @@ describe("what the render is told of its frame", () => {
     expect(renderFrameConfig({ hardware: { device: "EPD_10in3" }, settings: {} })).toEqual({ panel: "EPD_10in3" });
     expect(renderFrameConfig({ hardware: { device: "" }, settings: {} })).toEqual({});
   });
+
+  it("switches the auto fit off for OpenDisplay dithering, whatever the setting (docs/dithering.md)", () => {
+    for (const autoFit of ["on", "default", undefined]) {
+      expect(
+        renderFrameConfig({ dither: { method: "opendisplay" }, hardware: null, settings: { colors: { autoFit } } }).colors,
+      ).toMatchObject({ autoFit: "off" });
+    }
+    expect(renderFrameConfig({ dither: null, hardware: null, settings: { colors: { autoFit: "on" } } }).colors).toEqual({
+      autoFit: "on",
+    });
+  });
 });
 
 describe("the frame's reported scene, for hardware the cloud renders for", () => {
