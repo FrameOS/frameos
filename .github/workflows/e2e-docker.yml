@@ -461,12 +461,22 @@ jobs:
             embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
             -o /tmp/test_fos_json_guard
           /tmp/test_fos_json_guard
-          # sscanf without the floating-point scanf: the cJSON "%lg"
-          # read-back goes to strtod (fos_sscanf.c, the --wrap=sscanf).
+          # sscanf and siscanf without newlib's scanf engines: the cJSON
+          # "%lg" read-back goes to strtod, tzset's TZ formats to an integer
+          # scanner that reads as newlib's (fos_sscanf.c, the --wraps).
           cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
             embedded/esp32/main/fos_sscanf.c embedded/esp32/main/tests/test_fos_sscanf.c \
             -o /tmp/test_fos_sscanf
           /tmp/test_fos_sscanf
+          # The printf family without newlib's formatter (fos_printf.c, the
+          # --wraps): the C library's output, newlib's where the two differ;
+          # doubles through QuickJS's dtoa.c from frameos/quickjs.
+          cc -std=c11 -O2 -w -D_GNU_SOURCE -c frameos/quickjs/dtoa.c -o /tmp/qjs_dtoa.o
+          cc -std=c11 -O2 -w -D_GNU_SOURCE -c frameos/quickjs/cutils.c -o /tmp/qjs_cutils.o
+          cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main -Iframeos \
+            embedded/esp32/main/fos_printf.c embedded/esp32/main/tests/test_fos_printf.c \
+            /tmp/qjs_dtoa.o /tmp/qjs_cutils.o -lm -o /tmp/test_fos_printf
+          /tmp/test_fos_printf
           # Upload bounds + usb_api payload timeout math (fos_upload_limits.h).
           cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
             embedded/esp32/main/tests/test_fos_upload_limits.c \

@@ -1,4 +1,5 @@
 #include "fos_buttons.h"
+#include "fos_board.h"
 #include "fos_button_timing.h"
 
 #include <stdbool.h>
@@ -24,6 +25,7 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_events_gen.h"
+#include "fos_i2c.h"
 #include "fos_mem.h"
 #include "fos_touch.h"
 #include "fos_voice.h"
@@ -45,7 +47,7 @@ static const char *TAG = "fos_buttons";
 #define BUTTON_POLL_MS 20
 
 typedef struct {
-    uint8_t index; /* into config->gpio_buttons, which only a restart rebinds */
+    uint8_t index; /* into s_buttons, which only a restart rebinds */
     uint8_t level; /* 0: pressed (the line is pulled up), 1: released */
     bool wake;     /* the down that woke the chip from deep sleep, stamped at boot */
     /* An `up` of a key a voice hold took (docs/voice-chat.md): the
@@ -61,6 +63,12 @@ typedef struct {
 
 static QueueHandle_t s_queue = NULL;
 static bool s_started = false;
+/* The keys this task reads: the configured GPIO keys, then the board's own on
+ * its IO expander (fos_board_expander_keys: the AMOLED 1.75's PWR), which no
+ * setting names. Fixed at start, as the config's are: a new gpio_buttons
+ * takes a restart. */
+static fos_gpio_button_t s_buttons[FOS_GPIO_BUTTONS_MAX];
+static size_t s_button_count = 0;
 /* This boot's wake, when a button caused it (fos_buttons_wake_boot). */
 static int s_wake_pin = -1;
 static char s_wake_label[FOS_GPIO_BUTTON_LABEL_LEN] = "";
@@ -74,8 +82,8 @@ static fos_button_timing_t s_timing[FOS_GPIO_BUTTONS_MAX];
 static bool s_release_owed[FOS_GPIO_BUTTONS_MAX];
 /* What this key's press clicked, so the hold and the release sound to
  * match: nothing (held at boot, or no buzzer), a press, the second press of
- * a double press, or a refused press. */
-typedef enum { CLICK_NONE = 0, CLICK_PRESS, CLICK_DOUBLE, CLICK_REFUSED } click_t;
+ * a double press, the third of a triple press, or a refused press. */
+typedef enum { CLICK_NONE = 0, CLICK_PRESS, CLICK_DOUBLE, CLICK_TRIPLE, CLICK_REFUSED } click_t;
 static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
 /* The dispatcher still has a `press`, `doublePress` or `longPress` to
  * deliver for this key (fos_button_timing_busy, 100 ms of slack for the tick
@@ -105,16 +113,26 @@ static void refresh_voice_keys(const fos_config_t *config)
     if (s_bound_map) strlcpy(s_bound_map, config->event_map, FOS_EVENT_MAP_LEN);
     char labels[FOS_GPIO_BUTTONS_MAX][FOS_VOICE_BINDING_LABEL_LEN];
     size_t bound = fos_voice_binding_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
-    for (size_t i = 0; i < config->gpio_button_count; i++) {
+    for (size_t i = 0; i < s_button_count; i++) {
         bool voice = false;
         for (size_t j = 0; s_enabled[i] && j < bound && !voice; j++) {
-            voice = strcasecmp(config->gpio_buttons[i].label, labels[j]) == 0;
+            voice = strcasecmp(s_buttons[i].label, labels[j]) == 0;
         }
         if (voice != s_voice_key[i]) {
-            ESP_LOGI(TAG, "GPIO %d (%s) held %s", config->gpio_buttons[i].pin, config->gpio_buttons[i].label,
+            ESP_LOGI(TAG, "GPIO %d (%s) held %s", s_buttons[i].pin, s_buttons[i].label,
                      voice ? "starts the voice chat" : "is the scene's again");
         }
         s_voice_key[i] = voice;
+    }
+    /* The keys whose pair the dispatcher holds back for a third press: the
+     * third down sounds as one (the labels array is the voice keys', reused). */
+    bound = fos_voice_binding_triple_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        bool triple = false;
+        for (size_t j = 0; j < bound && !triple; j++) {
+            triple = strcasecmp(config->gpio_buttons[i].label, labels[j]) == 0;
+        }
+        s_timing[i].triple = triple;
     }
 }
 
@@ -132,7 +150,7 @@ static bool key_claimed(size_t index)
  * mid-hold keeps its claim to the release. */
 static void voice_keys_sample(const fos_config_t *config, int64_t now)
 {
-    for (size_t i = 0; i < config->gpio_button_count; i++) {
+    for (size_t i = 0; i < s_button_count; i++) {
         if (!s_voice_key[i] && !s_hold[i].active) continue;
         switch (fos_voice_hold_sample(&s_hold[i], s_timing[i].down, now)) {
         case FOS_VOICE_HOLD_START:
@@ -189,7 +207,7 @@ static bool enqueue_event(size_t index, int level, bool wake, int64_t at_ms)
         .at_ms = (uint32_t)at_ms,
     };
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
-        log_dropped(fos_config()->gpio_buttons[index].pin);
+        log_dropped(s_buttons[index].pin);
         return false;
     }
     /* A live press wakes the render task so the scene hears it now, not at the
@@ -220,30 +238,33 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
      * task sends (the render task only takes), so the reservation holds. */
     /* Book it either way: the hold is timed from here. A refused press is
      * one the dispatcher never hears, so it pairs with nothing (below). */
-    bool twice = fos_button_timing_press(&s_timing[index], at_ms);
+    int nth = fos_button_timing_press(&s_timing[index], at_ms);
     if (uxQueueSpacesAvailable(s_queue) < releases_owed(count) + 2) {
         /* Not received: say so with the dull click instead of the bright one. */
-        log_dropped(fos_config()->gpio_buttons[index].pin);
+        log_dropped(s_buttons[index].pin);
         s_clicked[index] = CLICK_REFUSED;
-        s_timing[index].twice = false;
+        s_timing[index].twice = s_timing[index].thrice = false;
         fos_buzzer_reject_down();
         return;
     }
     if (!enqueue_event(index, 0, false, at_ms)) {
         s_clicked[index] = CLICK_NONE;
-        s_timing[index].twice = false;
+        s_timing[index].twice = s_timing[index].thrice = false;
         return;
     }
     s_release_owed[index] = true;
     /* Registered: click now, from this task, so the feedback does not wait
      * for the render task (which may be 30 s into a panel refresh). A `down`
      * clicks; the second down of a double press (the dispatcher makes it a
-     * `doublePress`, by the same rule on the same stamps) clicks higher.
+     * `doublePress`, by the same rule on the same stamps) clicks higher, and
+     * the third of a triple press (a key the frame's map binds three times)
+     * higher still.
      * Every `up` is the same lower click. A held key sounds each second
      * (hold_sounds); the `press` a short tap becomes 350 ms after its `up`
      * adds no sound: its clicks were the down and the up. */
-    s_clicked[index] = twice ? CLICK_DOUBLE : CLICK_PRESS;
-    if (twice) fos_buzzer_double_down();
+    s_clicked[index] = nth == 3 ? CLICK_TRIPLE : nth == 2 ? CLICK_DOUBLE : CLICK_PRESS;
+    if (nth == 3) fos_buzzer_triple_down();
+    else if (nth == 2) fos_buzzer_double_down();
     else fos_buzzer_click_down();
 }
 
@@ -273,33 +294,60 @@ static void release_edge(size_t index, int64_t at_ms)
     bool claimed = key_claimed(index);
     click_t clicked = s_clicked[index];
     if (claimed) clicked = CLICK_NONE;
-    /* Only a press the dispatcher heard as one can start a double press:
-     * not a refused one, not a key down since boot, not one a voice hold took. The wake press is one. */
-    if (clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) {
+    /* Only a press the dispatcher heard as one can start a double press (or
+     * go on to a triple): not a refused one, not a key down since boot, not
+     * one a voice hold took. The wake press is one. */
+    bool heard = clicked == CLICK_PRESS || clicked == CLICK_DOUBLE || clicked == CLICK_TRIPLE;
+    if (!heard) {
         s_timing[index].tap_ended = false;
+        s_timing[index].pair_ended = false;
     }
     if (s_release_owed[index]) {
         enqueue_event(index, 1, false, at_ms); /* its slot was reserved */
         s_release_owed[index] = false;
     }
     s_clicked[index] = CLICK_NONE;
-    /* Every up is the same lower click: a tap's, a double press's, a long
-     * press's (its seconds were sounded while it was held). */
-    if (clicked == CLICK_PRESS || clicked == CLICK_DOUBLE) fos_buzzer_click_up();
+    /* Every up is the same lower click: a tap's, a double or triple press's,
+     * a long press's (its seconds were sounded while it was held). */
+    if (heard) fos_buzzer_click_up();
     else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
+}
+
+/* A key's level as a GPIO key reads (0 while pressed): an expander key's
+ * from the expander's input register, read once a poll for all of them
+ * (s_expander_in, -1 when the read failed: every expander key up). */
+static int s_expander_in = -1;
+
+static void read_expander(void)
+{
+    for (size_t i = 0; i < s_button_count; i++) {
+        if (!s_enabled[i] || !FOS_BUTTON_IS_EXPANDER(s_buttons[i].pin)) continue;
+        uint8_t value = 0;
+        s_expander_in = fos_i2c_expander_input(&value) == ESP_OK ? value : -1;
+        return;
+    }
+}
+
+static int button_level(const fos_gpio_button_t *button)
+{
+    if (!FOS_BUTTON_IS_EXPANDER(button->pin)) return gpio_get_level(button->pin);
+    if (s_expander_in < 0) return 1;
+    int bit = button->pin - FOS_BUTTON_EXPANDER_BASE;
+    return (s_expander_in >> bit) & 1 ? 0 : 1;
 }
 
 static void buttons_task(void *arg)
 {
     fos_config_t *config = fos_config();
-    for (size_t i = 0; i < config->gpio_button_count; i++) {
+    read_expander();
+    for (size_t i = 0; i < s_button_count; i++) {
         if (!s_enabled[i]) continue;
-        int level = gpio_get_level(config->gpio_buttons[i].pin);
+        int level = button_level(&s_buttons[i]);
         fos_button_timing_init(&s_timing[i], level, now_ms());
         /* Held at boot: no press was queued, but its release is real. */
         s_release_owed[i] = s_timing[i].down;
         s_clicked[i] = CLICK_NONE;
-        if (config->gpio_buttons[i].pin != s_wake_pin) continue;
+        if (s_buttons[i].pin != s_wake_pin) continue;
         /* The key that woke the chip: its down clicked at boot
          * (fos_buttons_wake_boot), and from here on it is a press like any
          * other, so holding it is a long press and a quick second tap a
@@ -327,7 +375,7 @@ static void buttons_task(void *arg)
         }
     }
 
-    for (size_t i = 0; i < config->gpio_button_count; i++) fos_voice_hold_init(&s_hold[i]);
+    for (size_t i = 0; i < s_button_count; i++) fos_voice_hold_init(&s_hold[i]);
 
     while (true) {
         int64_t now = now_ms();
@@ -335,10 +383,11 @@ static void buttons_task(void *arg)
          * release seen this poll is queued claimed, and the next poll ends
          * the session. */
         refresh_voice_keys(config);
+        read_expander();
         voice_keys_sample(config, now);
-        for (size_t i = 0; i < config->gpio_button_count; i++) {
+        for (size_t i = 0; i < s_button_count; i++) {
             if (!s_enabled[i]) continue;
-            const fos_gpio_button_t *button = &config->gpio_buttons[i];
+            const fos_gpio_button_t *button = &s_buttons[i];
             /* Both edges, as `down` and `up`: the hardware layer a scene can
              * hear as it is, and what the Nim dispatcher makes `press`,
              * `doublePress` and `longPress` out of (frameos/input_state.nim),
@@ -347,9 +396,9 @@ static void buttons_task(void *arg)
              * (fos_button_timing_sample): a 20 ms tap is a tap, and a tap
              * made while the render task is 30 s into a refresh is still a
              * tap when the queue is drained. */
-            switch (fos_button_timing_sample(&s_timing[i], gpio_get_level(button->pin), now)) {
+            switch (fos_button_timing_sample(&s_timing[i], button_level(button), now)) {
             case FOS_BUTTON_EDGE_PRESS:
-                press_edge(i, config->gpio_button_count, now);
+                press_edge(i, s_button_count, now);
                 break;
             case FOS_BUTTON_EDGE_RELEASE:
                 /* A key held at boot is `down` already: its release is real. */
@@ -369,7 +418,18 @@ esp_err_t fos_buttons_start(void)
 {
     if (s_started) return ESP_OK;
     fos_config_t *config = fos_config();
-    if (config->gpio_button_count == 0) {
+    s_button_count = 0;
+    for (size_t i = 0; i < config->gpio_button_count && s_button_count < FOS_GPIO_BUTTONS_MAX; i++) {
+        s_buttons[s_button_count++] = config->gpio_buttons[i];
+    }
+    fos_board_key_t keys[FOS_GPIO_BUTTONS_MAX];
+    size_t key_count = fos_board_expander_keys(config->hardware_preset, keys, FOS_GPIO_BUTTONS_MAX);
+    for (size_t i = 0; i < key_count && s_button_count < FOS_GPIO_BUTTONS_MAX; i++) {
+        fos_gpio_button_t *button = &s_buttons[s_button_count++];
+        button->pin = (int8_t)FOS_BUTTON_EXPANDER_PIN(keys[i].pin);
+        strlcpy(button->label, keys[i].label, sizeof(button->label));
+    }
+    if (s_button_count == 0) {
         ESP_LOGI(TAG, "no GPIO buttons configured");
         return ESP_OK;
     }
@@ -380,9 +440,17 @@ esp_err_t fos_buttons_start(void)
     }
 
     bool any_enabled = false;
-    for (size_t i = 0; i < config->gpio_button_count; i++) {
+    for (size_t i = 0; i < s_button_count; i++) {
         s_enabled[i] = false;
-        const fos_gpio_button_t *button = &config->gpio_buttons[i];
+        const fos_gpio_button_t *button = &s_buttons[i];
+        if (FOS_BUTTON_IS_EXPANDER(button->pin)) {
+            /* The expander's pin: an input already (TCA9554 pins power up as
+             * inputs). The bus comes up after the buttons (fos_i2c_init):
+             * until it answers, every poll reads the key up. */
+            s_enabled[i] = true;
+            any_enabled = true;
+            continue;
+        }
         /* A stored spec from before the parser refused these (or a pin a
          * driver has since claimed): configuring a pull-up on a flash pad
          * here is what turns a bad setting into a boot loop. Skip, say so. */
@@ -420,14 +488,14 @@ esp_err_t fos_buttons_start(void)
         char list[352];
         size_t used = 0;
         list[0] = '\0';
-        for (size_t i = 0; i < config->gpio_button_count && used + 1 < sizeof(list); i++) {
+        for (size_t i = 0; i < s_button_count && used + 1 < sizeof(list); i++) {
             if (!s_enabled[i]) continue;
             char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
-            json_escape(config->gpio_buttons[i].label, label, sizeof(label));
+            json_escape(s_buttons[i].label, label, sizeof(label));
             int written = snprintf(list + used, sizeof(list) - used,
                                    "%s{\"pin\":%d,\"label\":\"%s\",\"wake\":%s}",
-                                   used ? "," : "", config->gpio_buttons[i].pin, label,
-                                   fos_buttons_pin_can_wake(config->gpio_buttons[i].pin) ? "true" : "false");
+                                   used ? "," : "", s_buttons[i].pin, label,
+                                   fos_buttons_pin_can_wake(s_buttons[i].pin) ? "true" : "false");
             if (written < 0 || (size_t)written >= sizeof(list) - used) break;
             used += (size_t)written;
         }
@@ -452,11 +520,10 @@ void fos_buttons_process_events(void)
 {
     if (!s_queue) return;
 
-    const fos_config_t *config = fos_config();
     fos_button_event_t event;
     while (xQueueReceive(s_queue, &event, 0) == pdTRUE) {
-        if (event.index >= config->gpio_button_count) continue;
-        const fos_gpio_button_t *button = &config->gpio_buttons[event.index];
+        if (event.index >= s_button_count) continue;
+        const fos_gpio_button_t *button = &s_buttons[event.index];
         char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
         json_escape(button->label, label, sizeof(label));
         /* A `gpio` edge and when it was seen, nothing more: `action` is
@@ -480,6 +547,9 @@ void fos_buttons_process_events(void)
          * for the render when a listener took it; this is the render task, so
          * the runtime lock is free. */
         bool dispatched = fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_GPIO, payload) == FOS_EVENT_DONE;
+        /* A key takes the voice chat's notice off too, and still does
+         * what it does (docs/voice-chat.md). */
+        if (event.level == 0) fos_client_notice_dismiss();
         /* Into the frame log, not just the serial console: a press used to
          * leave no trace anywhere a user can see. When a scene ignores it the
          * interpreter says so (runEvent:noListenerMatched), but that only

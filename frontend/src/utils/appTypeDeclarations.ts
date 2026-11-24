@@ -161,7 +161,7 @@ interface FrameOSStore {
   url: string;
   /** This frame's FrameOS: the listing offers only what runs on it. */
   version: string;
-  /** The action running ("install", "preview", "update", "remove", "discard"), else "". One at a time. */
+  /** The action running ("install", "preview", "update", "updateAll", "remove", "discard"), else "". One at a time. */
   busy: string;
   /** The last action's refusal ("offline", "too_many_scenes", "panel_locked", ...), else "". */
   error: string;
@@ -171,6 +171,10 @@ interface FrameOSStore {
   installed: { id: string; store: string; v: number }[];
   /** The store scene this frame previews, until it is installed or discarded. */
   preview: { store: string; id: string; name: string } | null;
+  /** The store scenes on the frame its control plane has a newer version of: the version it has (from) and the
+   * newest (to); owner when the new one asks for more access than the frame may give it (its owner updates it).
+   * Absent with no control plane and while not known yet (FrameOS 2026.11.15+). */
+  updates?: { store: string; name: string; from: number; to: number; owner?: boolean }[];
   /** A scene not from the store may be removed too (a frame with no control plane). */
   removeAny: boolean;
   /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
@@ -354,6 +358,11 @@ interface FrameOSApp {
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
      * undefined before, so treat undefined as color). The same in every phase, as fast. */
     color?: boolean;
+    /** Whether only the circle inside the panel's square shows and takes touches, as on the HyperPixel 2.1 Round
+     * and the Waveshare ESP32-S3-Touch-AMOLED-1.75. The corners are drawn but never seen, so an app that draws the
+     * whole panel keeps its text and buttons inside the circle, or inside the square inside it (FrameOS
+     * 2026.11.15+; undefined before, so treat undefined as square). */
+    round?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;
@@ -364,6 +373,11 @@ interface FrameOSApp {
      * frame's then, at the bottom of the panel with the layout laid out above it (on a desktop, a window over the
      * others); returning a bare <yield /> gives the scene all the room it leaves (FrameOS 2026.11.14+; undefined before). */
     typing?: boolean;
+    /** True in a layout's app while the scene it wraps asks for the whole panel, by its field with role "fullScreen"
+     * (a boolean the person at the frame sets in the scene's settings), else by its settings.fullScreen. Return a
+     * bare <yield /> then, as a reader or a photo wants no bar around it (FrameOS 2026.11.15+; undefined before, and
+     * whenever it is false). */
+    fullScreen?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
      * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
@@ -387,8 +401,10 @@ interface FrameOSApp {
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
      * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+     * (FrameOS 2026.11.10+). opens is the file types the scene opens, their extensions as the scene's
+     * settings.opens has them ("pdf", "txt md json"), where it names some. Such a file goes to the scene with
+     * setCurrentScene, its public field file set to "<storage>:<path>" (FrameOS 2026.11.15+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string; opens?: string }[];
     /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
      * window without their going back, so still open beside the scene showing, their page and edits as they were.
      * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes
@@ -405,7 +421,7 @@ interface FrameOSApp {
     theme?: Record<string, string | string[]>;
     /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
      * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
-     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * "triplePress", "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
      * the frame has none (the preview of a scene) (FrameOS 2026.11.14+; undefined before). */
     eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
@@ -452,9 +468,10 @@ declare const frameos: {
    * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
   store(): FrameOSStore | null;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
-   * {store}, remove {store}, discard. It runs off the render and this scene renders again when it is done (see
-   * store().busy). False where there is no host (FrameOS 2026.11.8+). */
-  storeAction(action: "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
+   * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
+   * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
+   * where there is no host (FrameOS 2026.11.8+). */
+  storeAction(action: "preview" | "install" | "update" | "updateAll" | "remove" | "discard", args?: Record<string, any>): boolean;
   /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
    * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
    * frame's settings are allowed on its screen: it throws otherwise. "read" is what the page shows, null where there is
@@ -603,8 +620,13 @@ declare const frameos: {
     convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
   };
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
-   * ending in "/" (FrameOS 2026.11.8+). */
-  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
+   * ending in "/" (FrameOS 2026.11.8+). A storage that cannot be read lists nothing; with strict it is null instead,
+   * which an app can tell from an empty folder: a TF card not mounted, a read that failed (FrameOS 2026.11.15+). */
+  listAssets(
+    dir: string | undefined,
+    options: { shallow?: boolean; storage?: "assets" | "internal"; strict: true }
+  ): string[] | null;
+  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal"; strict?: false }): string[];
   assetExists(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   assetSize(path: string, options?: { storage?: "assets" | "internal" }): number;
   /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its

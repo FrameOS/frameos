@@ -17,13 +17,15 @@
 ## with the layout's fields, the keyboard on the screen and a list that
 ## scrolls: no QuickJS. On a round panel (frameos/panel_shape.nim) the name,
 ## Cancel and Save sit in the top arc and the list is as wide as the circle
-## lets it be, as the switcher's tiles are; no ESP32 board is round. Flash is the budget on an ESP32 (AGENTS.md): one
+## lets it be, as the switcher's tiles are (a HyperPixel Round, the Waveshare
+## 1.75" AMOLED), a gear between them, and the frame page is the square
+## panel's page in the square inside the circle. Flash is the budget on an ESP32 (AGENTS.md): one
 ## handler for everything (numbered), classes appended in place, and no Nim
 ## checks in this module (every index is guarded by its loop): JSON arrays
 ## are read through `elems` once their kind is known, since json's `[]` and
 ## `items` bring their own asserts in with them.
 
-import std/[json, options, parseutils, strutils, tables, times]
+import std/[json, math, options, parseutils, strutils, tables, times]
 import pixie
 import pixie/fileformats/svg
 import frameos/types
@@ -39,6 +41,7 @@ import frameos/ui/events
 import frameos/ui/keyboard
 import frameos/frame_settings_hooks
 export frame_settings_hooks
+import frameos/scene_store_hooks
 import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
@@ -77,6 +80,7 @@ const
   ALayout = 4
   ACheckUpdate = 5
   AInstallUpdate = 6
+  AUpdateScenes = 7
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -167,6 +171,28 @@ proc openedOnFrame(self: SceneSettingsScene): bool =
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
     frameSettingsAction(action)
+
+proc sceneUpdates(asker: string): tuple[listed, movable: int, busy: bool] =
+  ## The store scenes on the frame with a newer version, as the scene store's
+  ## host has them from the control plane (docs/scene-store.md "What has
+  ## updates"): how many, how many the frame may take itself, and whether it
+  ## takes them now. `listed` is -1 where nothing is known (no plane, no host).
+  result.listed = -1
+  let read = sceneStoreRead
+  if read.isNil:
+    return
+  try:
+    let
+      facts = parseJson(read(asker))
+      updates = facts{"updates"}
+    result.busy = facts{"busy"}.getStr() == "updateAll"
+    if not updates.isNil and updates.kind == JArray:
+      result.listed = updates.len
+      for row in updates.elems:
+        if not row{"owner"}.getBool():
+          inc result.movable
+  except CatchableError:
+    discard
 
 template uiId(self: SceneSettingsScene): string =
   ## Its UI's target (ui/events.nim): one a scene where built-in scenes stay
@@ -261,6 +287,12 @@ const ClickSounds = [("silent", "Silent"), ("normal", "Normal")]
   ## Tap and click sounds, by the names every wire uses (an ESP32's
   ## fos_config.h keeps them as FOS_CLICK_SOUNDS_*): a new mode is one more
   ## entry here and its name on the host.
+
+const AwakeAfterInput = [("0", "Sleep as soon as it can"), ("60", "1 minute"), ("300", "5 minutes"),
+                         ("600", "10 minutes"), ("1800", "30 minutes")]
+  ## How long a tap keeps a deep-sleeping frame up, in seconds: the web app's
+  ## Power choices (PowerSettingsFields.tsx), with the frame's own value
+  ## added when it is none of them.
 
 proc scaleLabel(scale: string): string =
   scale & "\xc3\x97"
@@ -388,6 +420,20 @@ proc frameFields(self: SceneSettingsScene, info: JsonNode, autoScale: string, un
       options.elems.add option(value, label)
     sounds.put("options", options)
     result.elems.add sounds
+  if not info{"awakeAfterInputSeconds"}.isNil:
+    # Only a frame that deep-sleeps: the host says so by handing it over.
+    var awake = field("awakeAfterInputSeconds", "Stay awake after a press or tap", "integer")
+    options = newJArray()
+    let seconds = $info{"awakeAfterInputSeconds"}.getInt(300)
+    var listed = false
+    for (value, label) in AwakeAfterInput:
+      options.elems.add option(value, label)
+      if value == seconds:
+        listed = true
+    if not listed:
+      options.elems.add option(seconds, seconds & " seconds")
+    awake.put("options", options)
+    result.elems.add awake
   if not info{"clock"}.isNil:
     # An ESP32's clock, set by hand where no network time reaches it.
     let clock = field("clock", "Date and time", "string")
@@ -519,6 +565,9 @@ proc press(self: SceneSettingsScene, action: int) =
   elif self.state{"confirm"}.getInt(-1) == action:
     if action == AInstallUpdate:
       frameAction("installUpdate")
+    elif action == AUpdateScenes:
+      if not sceneStoreAction.isNil:
+        sceneStoreAction(self.uiId, "updateAll", "{}")
     else:
       sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
   else:
@@ -831,6 +880,14 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
+  # The store scenes with a newer version, where the control plane says.
+  let scenes = sceneUpdates(self.uiId)
+  if scenes.busy:
+    card.line(look, "Scenes", "Updating\xe2\x80\xa6")
+  elif scenes.listed == 0:
+    card.line(look, "Scenes", UpdateWords[2])
+  elif scenes.listed > 0:
+    card.line(look, "Scenes", $scenes.listed & (if scenes.listed == 1: " update" else: " updates"))
   result.children.add card.role("card")
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -860,60 +917,65 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
   elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
     buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
+  if scenes.movable > 0 and not scenes.busy:
+    buttons.children.add look.pressButton("Update scenes", AUpdateScenes, asking)
   if %"restart" in arrayOf(info{"actions"}).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)
   result.children.add buttons
 
-when not defined(frameosEmbedded):
-  proc box(c: var string, x, y, w, h: int) =
-    c.add "absolute"
-    c.px("left", x)
-    c.px("top", y)
-    c.px("w", w)
-    c.px("h", h)
+proc box(c: var string, x, y, w, h: int) =
+  c.add "absolute"
+  c.px("left", x)
+  c.px("top", y)
+  c.px("w", w)
+  c.px("h", h)
 
-  proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, height: int, title: string,
-      keyboardTop: int) =
-    ## A round panel's: the scene's name in the top arc, Cancel and Save
-    ## under it, and the fields in a list as wide as the circle is where the
-    ## list ends, everything `RoundInset` in from the rim. With the keyboard
-    ## up (on the circle's lower half, ui/keyboard.nim) the name makes way
-    ## for the buttons and the list ends above the keys.
-    let
-      cx = width div 2
-      cy = height div 2
-      radius = max(min(width, height) div 2 - RoundInset, 8)
-      rowH = look.line * 4 div 5
-      keys = keyboardTop < height
-    # The first row's top edge, where the circle is 45% of its width wide.
-    var
-      y = cy - chordHalf(radius, radius * 45 div 100)
-      half: int
-      c: string
-    # The name is hidden, not left out: an element's key is its place in the
-    # tree, and the field with the keyboard has to keep its own.
-    half = max(chordHalf(radius, cy - y) - 2, 4)
-    c.box(cx - half, y, 2 * half, rowH)
-    c.add(if keys: " hidden" else: " flex items-center justify-center")
-    root.children.add el("div", move c, el("span", "truncate font-bold", SvgNode(text: title)))
-    if not keys:
-      y += rowH + look.gap div 2
-    half = max(chordHalf(radius, cy - y) - 2, 4)
-    c.box(cx - half, y, 2 * half, rowH)
-    c.add " flex items-center justify-center"
-    c.px("gap", look.gap)
-    let buttons = el("div", move c)
-    buttons.children.add look.button("Cancel", HCancel, false)
-    buttons.children.add look.button("Save", HSave, true)
-    root.children.add buttons
+proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, height: int, title: string,
+    keyboardTop: int, gear: bool, body: SvgNode, cancel = "Cancel", saveLit = true) =
+  ## A round panel's: the scene's name in the top arc, Cancel and Save
+  ## under it, and `body` (the fields, or the frame page's rows) in a list as
+  ## wide as the circle is where the list ends, everything `RoundInset` in
+  ## from the rim. With the keyboard up (on the circle's lower half,
+  ## ui/keyboard.nim) the name makes way for the buttons and the list ends
+  ## above the keys. With `gear` the gear that opens the frame page sits
+  ## between Cancel and Save.
+  let
+    cx = width div 2
+    cy = height div 2
+    radius = max(min(width, height) div 2 - RoundInset, 8)
+    rowH = look.line * 4 div 5
+    keys = keyboardTop < height
+  # The first row's top edge, where the circle is 45% of its width wide.
+  var
+    y = cy - chordHalf(radius, radius * 45 div 100)
+    half: int
+    c: string
+  # The name is hidden, not left out: an element's key is its place in the
+  # tree, and the field with the keyboard has to keep its own.
+  half = max(chordHalf(radius, cy - y) - 2, 4)
+  c.box(cx - half, y, 2 * half, rowH)
+  c.add(if keys: " hidden" else: " flex items-center justify-center")
+  root.children.add el("div", move c, el("span", "truncate font-bold", SvgNode(text: title)))
+  if not keys:
     y += rowH + look.gap div 2
-    # As far below the centre as it starts above it, or to the keyboard.
-    let bottom = if keys: keyboardTop - look.gap div 2 else: 2 * cy - y
-    half = max(chordHalf(radius, max(abs(y - cy), abs(bottom - cy))) - 2, 4)
-    c.box(cx - half, y, 2 * half, max(bottom - y, 1))
-    c.add " overflow-y-auto"
-    root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
+  half = max(chordHalf(radius, cy - y) - 2, 4)
+  c.box(cx - half, y, 2 * half, rowH)
+  c.add " flex items-center justify-center"
+  c.px("gap", look.gap)
+  let buttons = el("div", move c)
+  buttons.children.add look.button(cancel, HCancel, false)
+  if gear:
+    buttons.children.add look.gear(false, named = false)
+  buttons.children.add look.button("Save", HSave, saveLit)
+  root.children.add buttons
+  y += rowH + look.gap div 2
+  # As far below the centre as it starts above it, or to the keyboard.
+  let bottom = if keys: keyboardTop - look.gap div 2 else: 2 * cy - y
+  half = max(chordHalf(radius, max(abs(y - cy), abs(bottom - cy))) - 2, 4)
+  c.box(cx - half, y, 2 * half, max(bottom - y, 1))
+  c.add " overflow-y-auto"
+  root.children.add el("div", move c, body)
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
     keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
@@ -935,10 +997,21 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   # every pixel, so a key repaints only what it changed.
   if not paper: c.add " bg-zinc-950 text-white"
   result = el("div", move c).role("page")
-  when not defined(frameosEmbedded):
-    if round:
-      self.roundTree(look, result, width, height, title, min(keyboardTop, height))
-      return
+  if round:
+    if not info.isNil and self.onFrame():
+      # The frame page (Wi-Fi, rotation, scale, restart), as the form is:
+      # its name in the top arc, Back and Save under it, its rows in the
+      # list as wide as the circle, which ends above the keyboard while it
+      # is up. Save is lit while there is something to save.
+      let edits = self.state{"frameValues"}
+      self.roundTree(look, result, width, height, "Frame settings", min(keyboardTop, height),
+        gear = false, self.frameList(look, info,
+          scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit),
+        cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
+    else:
+      self.roundTree(look, result, width, height, title, min(keyboardTop, height),
+        gear = not info.isNil and not self.panelWindow(), self.fieldList(look, 2, look.gap div 2))
+    return
   c = "shrink-0 flex items-center"
   c.px("h", look.line * 3 div 2)
   c.px("px", look.pad)
@@ -995,7 +1068,7 @@ proc drawForm*(self: SceneSettingsScene, image: Image) =
     let target = uiTarget(self.uiId, SettingsNode, create = false)
     if not target.isNil and target.input.keyboard and target.input.focus > 0:
       keyboardTop = keyboardBox(roomW, roomH, true)[0]
-  let info = if round: nil else: frameInfo()
+  let info = frameInfo()
   if info.isNil and self.onFrame():
     self.showPage(false)
   if self.drawUi(self.uiId, self.tree(roomW, roomH, self.paper, self.title(), round,

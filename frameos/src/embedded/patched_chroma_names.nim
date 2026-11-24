@@ -4,10 +4,12 @@
 ## `Table[string, string]`: 256 slots of hash, name and hex string, 9.1 KB of
 ## the ESP32 image for the one lookup chroma makes, `parseHtmlName` (every
 ## "white" in a scene, an SVG or a JSX class). Here they are one string of
-## `name=RRGGBB;` entries, read in order: the same names with the same
-## colors, which tests/test_patched_chroma_names.nim checks against chroma's
-## table. Only the embedded build patches it; Pi and backend builds keep
+## `name=` entries, each followed by its color's three bytes, read in order:
+## the same names with the same colors (as chroma's hex text again), which
+## tests/test_patched_chroma_names.nim checks against chroma's table. Only the embedded build patches it; Pi and backend builds keep
 ## chroma as its author wrote it.
+
+import std/strutils
 
 type ColorNames* = object
   ## `colorNames` for chroma's `name in colorNames` and `colorNames[name]`.
@@ -74,7 +76,9 @@ const cssColors = [
 const packed = block:
   var entries = ""
   for (name, hex) in cssColors:
-    entries.add name & "=" & hex & ";"
+    entries.add name & "="
+    for i in 0 .. 2:
+      entries.add char(fromHex[int](hex[i * 2 .. i * 2 + 1]))
   entries
 
 const colorNames* = ColorNames()
@@ -82,7 +86,7 @@ const colorNames* = ColorNames()
 {.push boundChecks: off.}
 
 proc hexAt(name: string): int =
-  ## Where `name`'s six hex digits start in `packed`, or -1.
+  ## Where `name`'s three color bytes start in `packed`, or -1.
   var start = 0
   while start < packed.len:
     var equals = start
@@ -96,7 +100,7 @@ proc hexAt(name: string): int =
           break
       if same:
         return equals + 1
-    start = equals + 8
+    start = equals + 4
   -1
 
 {.pop.}
@@ -108,4 +112,9 @@ proc `[]`*(names: ColorNames, name: string): string =
   let at = hexAt(name)
   if at < 0:
     raise newException(KeyError, "key not found: " & name)
-  packed[at ..< at + 6]
+  const digits = "0123456789ABCDEF"
+  result = newString(6)
+  for i in 0 .. 2:
+    let b = packed[at + i].uint8
+    result[i * 2] = digits[b shr 4]
+    result[i * 2 + 1] = digits[b and 15]

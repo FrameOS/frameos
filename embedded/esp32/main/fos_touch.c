@@ -1,6 +1,10 @@
 #include "fos_touch.h"
+#include "fos_press.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+
+#include "fos_events_gen.h"
 #include <string.h>
 
 int fos_touch_decode(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max)
@@ -40,6 +44,36 @@ int fos_touch_decode_ft(const uint8_t *report, size_t len, fos_touch_point_t *po
         points[out].id = (uint8_t)id;
         points[out].x = (uint16_t)(((rec[0] & 0x0F) << 8) | rec[1]);
         points[out].y = (uint16_t)(((rec[2] & 0x0F) << 8) | rec[3]);
+        out++;
+    }
+    return out;
+}
+
+int fos_touch_decode_cst92(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max)
+{
+    if (!report || len < FOS_TOUCH_CST92_REPORT_BYTES) return -1;
+    /* The host's own ack read back: no report since the last read. */
+    if (report[0] == FOS_TOUCH_CST92_ACK) return -1;
+    /* Nothing between reports: every byte 0xFF. */
+    bool blank = true;
+    for (size_t i = 0; i < FOS_TOUCH_CST92_REPORT_BYTES && blank; i++) blank = report[i] == 0xFF;
+    if (blank) return -1;
+    /* A report has its ack byte; a read without one is noise, not a lift
+     * (read as a lift, a drag came apart in pieces on the bench). A lift is
+     * a report with no finger down in it, or a finger gone silent
+     * (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+    if (report[6] != FOS_TOUCH_CST92_ACK) return -1;
+    if (report[0] == 0x00) return 0;
+    int count = report[5] & 0x7F;
+    if (count > FOS_TOUCH_CST92_POINTS_MAX) return -1;
+    int out = 0;
+    for (int i = 0; i < count && (size_t)out < max; i++) {
+        const uint8_t *rec = report + i * 5 + (i ? 2 : 0);
+        int id = rec[0] >> 4;
+        if ((rec[0] & 0x0F) != FOS_TOUCH_CST92_EVENT_DOWN || id >= FOS_TOUCH_POINTS_MAX) continue;
+        points[out].id = (uint8_t)id;
+        points[out].x = (uint16_t)((rec[1] << 4) | (rec[3] >> 4));
+        points[out].y = (uint16_t)((rec[2] << 4) | (rec[3] & 0x0F));
         out++;
     }
     return out;
@@ -132,6 +166,59 @@ fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, ui
     return FOS_TOUCH_BEEP_NONE;
 }
 
+void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy, int *sw, int *sh)
+{
+    switch (((rotate % 360) + 360) % 360) {
+    case 90: *sx = y; *sy = width - x - 1; *sw = height; *sh = width; break;
+    case 180: *sx = width - x - 1; *sy = height - y - 1; *sw = width; *sh = height; break;
+    case 270: *sx = height - y - 1; *sy = x; *sw = height; *sh = width; break;
+    default: *sx = x; *sy = y; *sw = width; *sh = height; break;
+    }
+}
+
+fos_touch_edge_t fos_touch_edge_at_round(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    /* input_state.nim edgeAt on a round panel: the rim, the edge band in
+     * from the circle (panel_shape.insideRound, in half pixels), named for
+     * the quarter it is in. */
+    int diameter = (width < height ? width : height) - 2 * FOS_GESTURE_EDGE_PX;
+    long dx = 2L * x + 1 - width, dy = 2L * y + 1 - height;
+    if (diameter > 0 && dx * dx + dy * dy <= (long)diameter * diameter) return FOS_TOUCH_EDGE_NONE;
+    if ((dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)) return dx < 0 ? FOS_TOUCH_EDGE_LEFT : FOS_TOUCH_EDGE_RIGHT;
+    return dy < 0 ? FOS_TOUCH_EDGE_TOP : FOS_TOUCH_EDGE_BOTTOM;
+}
+
+fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height)
+{
+    if (width < 4 * FOS_GESTURE_EDGE_PX || height < 4 * FOS_GESTURE_EDGE_PX) return FOS_TOUCH_EDGE_NONE;
+    const int distance[] = {x, width - 1 - x, y, height - 1 - y};
+    int best = FOS_GESTURE_EDGE_PX;
+    fos_touch_edge_t edge = FOS_TOUCH_EDGE_NONE;
+    for (int i = 0; i < 4; i++) {
+        if (distance[i] < best) {
+            best = distance[i];
+            edge = (fos_touch_edge_t)(FOS_TOUCH_EDGE_LEFT + i);
+        }
+    }
+    return edge;
+}
+
+int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy)
+{
+    int inward, along;
+    switch (edge) {
+    case FOS_TOUCH_EDGE_LEFT: inward = dx; along = dy; break;
+    case FOS_TOUCH_EDGE_RIGHT: inward = -dx; along = dy; break;
+    case FOS_TOUCH_EDGE_TOP: inward = dy; along = dx; break;
+    case FOS_TOUCH_EDGE_BOTTOM: inward = -dy; along = dx; break;
+    default: return -1;
+    }
+    if (inward >= FOS_GESTURE_SWIPE_MIN_PX && inward > abs(along)) return 1;
+    if (abs(along) <= FOS_GESTURE_TAP_SLOP_PX || abs(along) < inward) return 0;
+    return -1;
+}
+
 #ifdef ESP_PLATFORM
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -164,6 +251,10 @@ static const char *TAG = "fos_touch";
 /* What the GT911 gets on every firmware known to run the reTerminal Sticky's
  * panel: the bus has only the chip's weak pull-ups behind it. */
 #define TOUCH_GT911_I2C_HZ 100000
+/* On a bus with the board's 4.7 kΩ pull-ups (the reTerminal E1003's, which
+ * fos_i2c.c runs for the clock): the chip's rated 400 kHz, once a read at it
+ * answers. */
+#define TOUCH_GT911_FAST_I2C_HZ 400000
 #define TOUCH_I2C_TIMEOUT_MS 50
 /* The panel's supply switch to a controller that answers (Seeed's demos). */
 #define TOUCH_POWER_SETTLE_MS 250
@@ -197,8 +288,8 @@ static const char *TAG = "fos_touch";
  * same finger, so this is mostly downs and ups: 64 is plenty. */
 #define TOUCH_QUEUE_LEN 64
 
-typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1 } controller_t;
-static const char *const k_controller_names[] = {"gt911", "ft6x36"};
+typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1, CTRL_CST92XX = 2 } controller_t;
+static const char *const k_controller_names[] = {"gt911", "ft6x36", "cst92xx"};
 
 static bool s_present = false;
 static i2c_master_bus_handle_t s_bus = NULL;
@@ -210,6 +301,7 @@ static bool s_bus_owned = false;
 static bool s_polled = false; /* no interrupt line: the task polls */
 static controller_t s_controller = CTRL_GT911;
 static i2c_master_dev_handle_t s_dev = NULL;
+static uint32_t s_hz = 0; /* the controller's clock (attach) */
 static uint8_t s_addr = 0;
 static int s_x_max = 0, s_y_max = 0;
 static bool s_swap = false;
@@ -235,12 +327,24 @@ static int s_last_raw_x = -1, s_last_raw_y = -1;
  * carry none) and which fingers' a queued move owns. */
 static fos_touch_passed_t *s_passed = NULL;
 static uint8_t s_passed_owned = 0;
+/* Fingers that landed on the voice chat's notice (fos_client_notice_takes):
+ * the notice's from the press to the lift, so none of their reports is
+ * queued and the scene under it hears nothing. Touch task. */
+static uint8_t s_notice_mask = 0;
 static bool s_woke = false;
+/* The last report a CST92xx sent (not its ack read back): the console's. */
+static uint8_t s_last_report[FOS_TOUCH_CST92_REPORT_BYTES];
+/* When the CST92xx last sent a report (esp_timer ms). */
+static int64_t s_cst92_report_ms = 0;
+/* What the touch task has seen, for the console: interrupts, reads, reads
+ * with nothing new, reports by what they held, moves queued. */
+static volatile uint32_t s_n_irq = 0, s_n_read = 0, s_n_stale = 0, s_n_none = 0, s_n_fingers = 0, s_n_moves = 0;
 
 /* ------------------------------------------------------------- the queue */
 
 static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
 {
+    if (s_notice_mask & (1u << id)) return;
     int64_t at_ms = esp_timer_get_time() / 1000;
     portENTER_CRITICAL(&s_queue_lock);
     if (kind == FOS_TOUCH_MOVE) {
@@ -312,36 +416,71 @@ bool fos_touch_finger_down(void)
 }
 
 /* The click of a press something takes, on e-paper, where the picture takes
- * its moment to answer. Asked before the event runs, of what the last render
- * drew. The render task's, so a press during a panel update is heard when
- * that ends. */
-static void play_beep(fos_touch_beep_t beep)
+ * its moment to answer: from this task, the moment the finger lands or
+ * lifts, on its own core. The render task is in a render, a panel update or
+ * (rendered on the server) a pull for a second or more at a time, and a
+ * click that waited for it to dispatch the press came that late: a key typed
+ * on the reTerminal Sticky while the last one drew clicked when the drawing
+ * was done (2026-11-23). Whether the press is taken is the press map's, of
+ * the picture showing (fos_client_press_taken): the plane's with a picture
+ * it rendered, the runtime's after each render here. No map, no click. */
+static uint8_t s_beep_held = 0, s_beeped = 0;
+
+static bool sounds_on_touch(void)
 {
-    if (!fos_config()->touch_beep || fos_display_is_lcd()) return;
+    return fos_config()->touch_beep && !fos_display_is_lcd();
+}
+
+static void click(uint8_t kind, uint8_t id, int taken)
+{
+    fos_touch_beep_t beep = fos_touch_beep_step(kind, id, taken > 0, &s_beep_held, &s_beeped);
+    if (beep == FOS_TOUCH_BEEP_NONE || !sounds_on_touch()) return;
     if (beep == FOS_TOUCH_BEEP_DOWN) fos_buzzer_click_down();
     else if (beep == FOS_TOUCH_BEEP_SECOND_DOWN) fos_buzzer_double_down();
     else if (beep == FOS_TOUCH_BEEP_UP) fos_buzzer_click_up();
 }
 
-static void touch_feedback(const fos_touch_event_t *event)
+/* An edge swipe's chirp, the same way: each finger that went down at an edge
+ * (fos_touch_edge_at; on the frame's keyboard only its bottom edge, as in the
+ * dispatcher) is watched until it is a swipe (fos_touch_edge_step, the
+ * dispatcher's rule), heard at once, or a drag along the edge. A swipe's lift
+ * does not click: its four clicks said it. In the scene's pixels, which the
+ * dispatcher's edges are named in. */
+static fos_touch_edge_t s_edge[FOS_TOUCH_POINTS_MAX];
+static int16_t s_edge_x[FOS_TOUCH_POINTS_MAX], s_edge_y[FOS_TOUCH_POINTS_MAX];
+
+static void scene_point(uint16_t wx, uint16_t wy, int *x, int *y, int *w, int *h)
 {
-    static uint8_t held = 0, beeped = 0;
-    if (event->kind == FOS_TOUCH_MOVE) return;
-    bool captured = event->kind == FOS_TOUCH_DOWN && frameos_nim_press_taken(event->x, event->y);
-    play_beep(fos_touch_beep_step(event->kind, event->id, captured, &held, &beeped));
+    int pw = fos_display_width(), ph = fos_display_height();
+    int px = (int)((int64_t)pw * wx / FOS_TOUCH_WIRE_MAX);
+    int py = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
+    if (px >= pw) px = pw - 1;
+    if (py >= ph) py = ph - 1;
+    fos_touch_scene_point(px, py, pw, ph, fos_config()->rotate, x, y, w, h);
 }
 
-/* The same click for a frame rendered on the server, from the touch task the
- * moment the finger lands or lifts: the render task is in a pull or a panel
- * refresh for a second or more at a time there, and the picture's own press
- * map (its plane's, fos_client_remote_press_taken) says without asking
- * anyone whether the press is taken. A frame that runs its scene here leaves
- * it to touch_feedback, after the runtime's answer. */
-static void remote_click(uint8_t kind, uint8_t id, uint16_t wx, uint16_t wy)
+static void edge_begin(uint8_t id, uint16_t wx, uint16_t wy, int taken)
 {
-    static uint8_t held = 0, beeped = 0;
-    int taken = kind == FOS_TOUCH_DOWN ? fos_client_remote_press_taken(wx, wy) : 0;
-    play_beep(fos_touch_beep_step(kind, id, taken > 0, &held, &beeped));
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
+    fos_touch_edge_t edge = fos_display_round() ? fos_touch_edge_at_round(x, y, w, h) : fos_touch_edge_at(x, y, w, h);
+    s_edge[id] = taken == 2 && edge != FOS_TOUCH_EDGE_BOTTOM ? FOS_TOUCH_EDGE_NONE : edge;
+    s_edge_x[id] = (int16_t)x;
+    s_edge_y[id] = (int16_t)y;
+}
+
+static void edge_moved(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    if (s_edge[id] == FOS_TOUCH_EDGE_NONE) return;
+    int x, y, w, h;
+    scene_point(wx, wy, &x, &y, &w, &h);
+    int step = fos_touch_edge_step(s_edge[id], x - s_edge_x[id], y - s_edge_y[id]);
+    if (step == 0) return;
+    if (step > 0) {
+        s_beeped &= (uint8_t)~(1u << id);
+        if (sounds_on_touch()) fos_buzzer_swipe(s_edge[id] != FOS_TOUCH_EDGE_TOP);
+    }
+    s_edge[id] = FOS_TOUCH_EDGE_NONE;
 }
 
 bool fos_touch_process_events(void)
@@ -377,8 +516,7 @@ bool fos_touch_process_events(void)
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a
-         * gesture changed state. */
-        touch_feedback(&event);
+         * gesture changed state. Its click was the touch task's (click). */
         fos_events_dispatch(FOS_ORIGIN_DRIVER, names[event.kind], payload);
         any = true;
     }
@@ -405,10 +543,26 @@ static esp_err_t ft_read(uint8_t reg, uint8_t *buf, size_t len)
     return i2c_master_transmit_receive(s_dev, &reg, 1, buf, len, TOUCH_I2C_TIMEOUT_MS);
 }
 
+static esp_err_t ft_write(uint8_t reg, uint8_t value)
+{
+    uint8_t frame[2] = {reg, value};
+    return i2c_master_transmit(s_dev, frame, sizeof(frame), TOUCH_I2C_TIMEOUT_MS);
+}
+
+/* FocalTech's power modes: ID_G_CTRL 0 keeps the controller scanning at its
+ * active rate with no finger down; 1, its default, drops it to the monitor
+ * rate after ID_G_TIMEENTERMONITOR, so the first touch after a pause waits
+ * for a slower scan. A polled controller (the SenseCAP Indicator's FT6336U,
+ * mains-powered) stays active. The four registers from 0x86 are logged as
+ * they were (touch:ready `ft`). */
+#define FT_REG_G_CTRL 0x86
+static uint8_t s_ft_power[4] = {0}; /* ctrl, time to monitor, active period, monitor period */
+
 static void IRAM_ATTR on_irq(void *arg)
 {
     (void)arg;
     BaseType_t woke = pdFALSE;
+    s_n_irq++;
     xSemaphoreGiveFromISR(s_irq, &woke);
     if (woke) portYIELD_FROM_ISR();
 }
@@ -450,6 +604,7 @@ static bool attach(uint8_t addr, uint32_t hz)
         .device_address = addr,
         .scl_speed_hz = hz,
     };
+    s_hz = hz;
     return i2c_master_bus_add_device(s_bus, &dev_config, &s_dev) == ESP_OK;
 }
 
@@ -470,16 +625,70 @@ static bool probe_ft(uint8_t addr)
     return ft_read(FOS_TOUCH_FT_REG_TOUCHES, &count, 1) == ESP_OK;
 }
 
+/* The Hynitron CST92xx: a plain reset (its INT is an output from the start,
+ * no address to strap), then the report register answers. */
+#define TOUCH_CST92_ADDR 0x5a
+
+static void reset_cst92(const fos_touch_pins_t *pins)
+{
+    /* Its INT is open-drain, low on a report (SensorLib's example reads it
+     * with a pull-up, falling edge): an input with the pull-up from here on,
+     * or no edge reaches the task. */
+    if (pins->irq >= 0) {
+        gpio_set_direction((gpio_num_t)pins->irq, GPIO_MODE_INPUT);
+        gpio_set_pull_mode((gpio_num_t)pins->irq, GPIO_PULLUP_ONLY);
+    }
+    if (pins->rst < 0) return;
+    gpio_set_direction((gpio_num_t)pins->rst, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)pins->rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level((gpio_num_t)pins->rst, 1);
+    vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+static bool probe_cst92(void)
+{
+    if (i2c_master_probe(s_bus, TOUCH_CST92_ADDR, TOUCH_I2C_TIMEOUT_MS) != ESP_OK) return false;
+    if (!attach(TOUCH_CST92_ADDR, TOUCH_I2C_HZ)) return false;
+    uint8_t report[FOS_TOUCH_CST92_REPORT_BYTES];
+    return reg_read(FOS_TOUCH_CST92_REG_REPORT, report, sizeof(report)) == ESP_OK;
+}
+
 /* One report from whichever controller is there: the fingers down. */
 static int read_points(fos_touch_point_t *points)
 {
+    if (s_controller == CTRL_CST92XX) {
+        uint8_t report[FOS_TOUCH_CST92_REPORT_BYTES];
+        if (reg_read(FOS_TOUCH_CST92_REG_REPORT, report, sizeof(report)) != ESP_OK) return -1;
+        int count = fos_touch_decode_cst92(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
+        if (count >= 0) {
+            memcpy(s_last_report, report, sizeof(s_last_report));
+            s_cst92_report_ms = esp_timer_get_time() / 1000;
+        } else if ((s_down_mask | s_settling_mask) && esp_timer_get_time() / 1000 - s_cst92_report_ms >= FOS_TOUCH_CST92_SILENT_LIFT_MS) {
+            /* Down, and silent since: lifted (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+            count = 0;
+        }
+        /* Every read is acked: the next read without a new report then
+         * finds the ack where a report would start. */
+        reg_write_byte(FOS_TOUCH_CST92_REG_REPORT, FOS_TOUCH_CST92_ACK);
+        return count;
+    }
     if (s_controller == CTRL_FT6X36) {
         uint8_t report[FOS_TOUCH_FT_REPORT_BYTES];
         if (ft_read(FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report)) != ESP_OK) return -1;
         return fos_touch_decode_ft(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     }
-    uint8_t report[FOS_TOUCH_REPORT_BYTES];
-    if (reg_read(FOS_TOUCH_REG_STATUS, report, sizeof(report)) != ESP_OK) return -1;
+    /* The status and the first finger, and the other fingers only when there
+     * are others: 9 bytes on the wire instead of 41 (at 100 kHz ~1 ms instead
+     * of ~4.5, every 10 ms while a finger is down: a lift is seen sooner). */
+    uint8_t report[FOS_TOUCH_REPORT_BYTES] = {0};
+    if (reg_read(FOS_TOUCH_REG_STATUS, report, 1 + FOS_TOUCH_POINT_BYTES) != ESP_OK) return -1;
+    int fingers = report[0] & 0x0F;
+    if ((report[0] & FOS_TOUCH_STATUS_READY) && fingers > 1 && fingers <= FOS_TOUCH_POINTS_MAX &&
+        reg_read(FOS_TOUCH_REG_STATUS + 1 + FOS_TOUCH_POINT_BYTES, report + 1 + FOS_TOUCH_POINT_BYTES,
+                 (size_t)(fingers - 1) * FOS_TOUCH_POINT_BYTES) != ESP_OK) {
+        return -1;
+    }
     int count = fos_touch_decode(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     /* Every ready report is cleared, one that does not decode too: left set,
      * the controller sends no other. */
@@ -487,15 +696,105 @@ static int read_points(fos_touch_point_t *points)
     return count;
 }
 
+/* A press lit at once on an LCD (docs/realtime-rendering.md "A press shows
+ * at once", lcd_press.h): at the first report of a finger, before it has
+ * settled, the element the press map has under it is shaded in the buffer
+ * on the glass, whatever the render task is doing; a move off it, a second
+ * finger or the next picture puts it away, and its lift lets it go a moment
+ * later (FOS_PRESS_LINGER_MS) when no picture comes. One finger's, the
+ * first. */
+static int8_t s_lit_id = -1;
+static int s_lit_box[4];
+static int s_lit_x = 0, s_lit_y = 0; /* where it landed, panel pixels */
+/* When the press was first seen and when it was lit (esp_timer us): the
+ * console's `touch tap` prints them. */
+static int64_t s_seen_us = 0, s_lit_us = 0;
+
+static void panel_point(uint16_t wx, uint16_t wy, int *x, int *y)
+{
+    int pw = fos_display_width(), ph = fos_display_height();
+    *x = (int)((int64_t)pw * wx / FOS_TOUCH_WIRE_MAX);
+    *y = (int)((int64_t)ph * wy / FOS_TOUCH_WIRE_MAX);
+}
+
+static void press_unlight(void)
+{
+    if (s_lit_id < 0) return;
+    fos_display_press_end();
+    s_lit_id = -1;
+}
+
+/* `taken`, `box`: the press map's answer at the point (fos_client_press_find). */
+static void press_light(uint8_t id, int taken, const int box[4], uint16_t wx, uint16_t wy)
+{
+    if (!fos_display_is_lcd()) return;
+    uint8_t others = (uint8_t)((s_down_mask | s_settling_mask) & (uint8_t)~(1u << id));
+    if (others) {
+        /* Two fingers: a gesture, not a press. */
+        press_unlight();
+        return;
+    }
+    if (taken != 3) {
+        if (s_lit_id == (int8_t)id) press_unlight();
+        return;
+    }
+    if (s_lit_id == (int8_t)id && memcmp(box, s_lit_box, sizeof(s_lit_box)) == 0) return;
+    if (s_lit_id != (int8_t)id) panel_point(wx, wy, &s_lit_x, &s_lit_y);
+    fos_display_press_begin(box[0], box[1], box[2], box[3]);
+    s_lit_id = (int8_t)id;
+    memcpy(s_lit_box, box, sizeof(s_lit_box));
+    s_lit_us = esp_timer_get_time();
+}
+
+static void press_moved(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    if (s_lit_id != (int8_t)id) return;
+    int x, y;
+    panel_point(wx, wy, &x, &y);
+    if (fos_press_moved_off(x - s_lit_x, y - s_lit_y)) press_unlight();
+}
+
+static void press_lifted(uint8_t id)
+{
+    if (s_lit_id != (int8_t)id) return;
+    fos_display_press_release(FOS_PRESS_LINGER_MS);
+    s_lit_id = -1;
+}
+
+/* A finger seen for the first time, before it settles: lit at once. */
+static void press_first_seen(uint8_t id, uint16_t wx, uint16_t wy)
+{
+    s_seen_us = esp_timer_get_time();
+    /* The voice chat's notice takes a press on it: nothing under it lights. */
+    if (!fos_display_is_lcd() || fos_client_notice_takes(wx, wy)) return;
+    int box[4];
+    int taken = fos_client_press_find(wx, wy, box);
+    press_light(id, taken, box, wx, wy);
+}
+
 static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
 {
+    /* On the notice: it comes off when the finger lifts, and the press
+     * clicks as one something took. */
+    if (fos_client_notice_takes(wx, wy)) {
+        s_notice_mask |= (uint8_t)(1u << id);
+        s_edge[id] = FOS_TOUCH_EDGE_NONE;
+        click(FOS_TOUCH_DOWN, id, 1);
+        return;
+    }
     /* Where the finger landed first, then that it did, as the Linux evdev
      * translator does (translate.nim flushSlots): a scene that follows the
      * pointer by its moves (the Touch test's `mouseMove`) sees a tap where it
      * was, not only a finger dragged. */
     enqueue(FOS_TOUCH_MOVE, id, wx, wy);
     enqueue(FOS_TOUCH_DOWN, id, wx, wy);
-    remote_click(FOS_TOUCH_DOWN, id, wx, wy);
+    int box[4];
+    int taken = fos_client_press_find(wx, wy, box);
+    click(FOS_TOUCH_DOWN, id, taken);
+    edge_begin(id, wx, wy, taken);
+    /* Where it settled: the element under it now (a thumb rolls). */
+    press_light(id, taken, box, wx, wy);
+    fos_client_press_seen(taken, taken == 3 ? box : NULL);
 }
 
 /* A press reported once it settled, where it is then; or, when it glided
@@ -506,9 +805,60 @@ static void report_settled(uint8_t id, int x_max)
     if (fos_touch_glided(s_last_rx[id] - s_first_rx[id], s_last_ry[id] - s_first_ry[id], x_max)) {
         report_down(id, s_first_x[id], s_first_y[id]);
         enqueue(FOS_TOUCH_MOVE, id, s_last_x[id], s_last_y[id]);
+        edge_moved(id, s_last_x[id], s_last_y[id]);
     } else {
         report_down(id, s_last_x[id], s_last_y[id]);
     }
+}
+
+/* A touch the console made (`touch tap`): read in place of the controller's
+ * reports, one finger, in the controller's own coordinates, until its lift,
+ * so a bench can time what a finger on the glass sets going without one. */
+static volatile int64_t s_inject_until_us = 0; /* 0: none; the lift once past it */
+static volatile int16_t s_inject_x = 0, s_inject_y = 0;
+
+static bool inject_points(fos_touch_point_t *points, int *count)
+{
+    int64_t until = s_inject_until_us;
+    if (until == 0) return false;
+    if (esp_timer_get_time() >= until) {
+        s_inject_until_us = 0;
+        *count = 0;
+        return true;
+    }
+    memset(&points[0], 0, sizeof(points[0]));
+    points[0].id = 0;
+    points[0].x = (uint16_t)s_inject_x;
+    points[0].y = (uint16_t)s_inject_y;
+    *count = 1;
+    return true;
+}
+
+esp_err_t fos_touch_inject(int px, int py, int hold_ms)
+{
+    if (!s_present || !s_irq) return ESP_ERR_INVALID_STATE;
+    int pw = fos_display_width(), ph = fos_display_height();
+    if (px < 0 || py < 0 || px >= pw || py >= ph || hold_ms <= 0) return ESP_ERR_INVALID_ARG;
+    /* The panel's pixel back into the controller's range, the other way
+     * round from the task (its swap, then its mirror). */
+    int x_max = s_swap ? s_y_max : s_x_max;
+    int y_max = s_swap ? s_x_max : s_y_max;
+    int rx = (int)((int64_t)px * x_max / pw), ry = (int)((int64_t)py * y_max / ph);
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_X) rx = x_max - 1 - rx;
+    if (s_mirror & FOS_BOARD_TOUCH_MIRROR_Y) ry = y_max - 1 - ry;
+    s_inject_x = (int16_t)(s_swap ? ry : rx);
+    s_inject_y = (int16_t)(s_swap ? rx : ry);
+    s_seen_us = 0;
+    s_lit_us = 0;
+    s_inject_until_us = esp_timer_get_time() + (int64_t)hold_ms * 1000;
+    xSemaphoreGive(s_irq);
+    return ESP_OK;
+}
+
+void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us)
+{
+    *seen_us = s_seen_us;
+    *lit_us = s_lit_us;
 }
 
 static void touch_task(void *arg)
@@ -519,9 +869,29 @@ static void touch_task(void *arg)
         uint32_t wait_ms = (s_down_mask | s_settling_mask) ? TOUCH_POLL_HELD_MS
                            : s_polled                      ? TOUCH_POLL_NO_IRQ_MS
                                                            : TOUCH_POLL_IDLE_MS;
-        xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms));
-        int count = read_points(points);
-        if (count < 0) continue; /* nothing new, or a failed read */
+        bool irq = xSemaphoreTake(s_irq, pdMS_TO_TICKS(wait_ms)) == pdTRUE;
+        int count;
+        if (inject_points(points, &count)) {
+            /* the console's touch */
+        } else if (s_controller == CTRL_CST92XX && !s_polled && !irq) {
+            /* The CST92xx is read on its interrupt alone: a read (and its
+             * ack) between two reports costs the next one (the bench, a drag
+             * in pieces, 2026-11-23). Without one it is only asked whether a
+             * finger has gone silent (FOS_TOUCH_CST92_SILENT_LIFT_MS). */
+            count = (s_down_mask | s_settling_mask) &&
+                            esp_timer_get_time() / 1000 - s_cst92_report_ms >= FOS_TOUCH_CST92_SILENT_LIFT_MS
+                        ? 0
+                        : -1;
+        } else {
+            count = read_points(points);
+        }
+        s_n_read++;
+        if (count < 0) {
+            s_n_stale++;
+            continue; /* nothing new, or a failed read */
+        }
+        if (count == 0) s_n_none++;
+        else s_n_fingers++;
         int64_t now_ms = esp_timer_get_time() / 1000;
         uint8_t seen = 0;
         for (int i = 0; i < count; i++) {
@@ -556,6 +926,7 @@ static void touch_task(void *arg)
                     s_first_ry[p->id] = (int16_t)ry;
                     s_first_x[p->id] = wx;
                     s_first_y[p->id] = wy;
+                    press_first_seen(p->id, wx, wy);
                 } else if (near_edge || now_ms - s_first_seen_ms[p->id] >= TOUCH_SETTLE_MS) {
                     /* On the glass before its press is queued: a frame
                      * rendered on the server sends what the queue holds once
@@ -565,11 +936,18 @@ static void touch_task(void *arg)
                      * opened one time in several). */
                     s_settling_mask &= (uint8_t)~bit;
                     s_down_mask |= bit;
-                    if (settling) report_settled(p->id, x_max);
-                    else report_down(p->id, wx, wy);
+                    if (settling) {
+                        report_settled(p->id, x_max);
+                    } else {
+                        s_seen_us = esp_timer_get_time(); /* at an edge: reported as it is seen */
+                        report_down(p->id, wx, wy);
+                    }
                 }
             } else if (moved) {
+                s_n_moves++;
                 enqueue(FOS_TOUCH_MOVE, p->id, wx, wy);
+                edge_moved(p->id, wx, wy);
+                press_moved(p->id, wx, wy);
             }
         }
         /* A tap shorter than TOUCH_SETTLE_MS: its press, where it was last,
@@ -590,9 +968,12 @@ static void touch_task(void *arg)
         for (int id = 0; id < FOS_TOUCH_POINTS_MAX; id++) {
             if (lifted & (1u << id)) {
                 enqueue(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
-                remote_click(FOS_TOUCH_UP, (uint8_t)id, s_last_x[id], s_last_y[id]);
+                click(FOS_TOUCH_UP, (uint8_t)id, 0);
+                press_lifted((uint8_t)id);
+                s_edge[id] = FOS_TOUCH_EDGE_NONE;
             }
         }
+        s_notice_mask &= seen;
         s_down_mask &= seen; /* a finger still settling is not down yet */
         if (lifted) fos_client_wake_for_events();
     }
@@ -684,6 +1065,13 @@ esp_err_t fos_touch_start(void)
     static const uint8_t gt_addresses[] = {0x5d, 0x14};
     static const uint8_t ft_addresses[] = {0x48, 0x38};
     int attempts = pins->rst >= 0 ? 3 : 1;
+    /* A Hynitron CST92xx first, after a reset of its own: the Goodix one
+     * below holds INT low through the reset to pick an address. */
+    reset_cst92(pins);
+    if (probe_cst92()) {
+        s_addr = TOUCH_CST92_ADDR;
+        s_controller = CTRL_CST92XX;
+    }
     for (int attempt = 0; attempt < attempts && s_addr == 0; attempt++) {
         reset_controller(pins);
         for (size_t i = 0; i < sizeof(gt_addresses) && s_addr == 0; i++) {
@@ -700,14 +1088,26 @@ esp_err_t fos_touch_start(void)
         }
     }
     if (s_addr == 0) {
-        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5d, 0x14, 0x48 or 0x38\"}");
+        log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5a, 0x5d, 0x14, 0x48 or 0x38\"}");
         drop_bus();
         return ESP_ERR_NOT_FOUND;
+    }
+    if (s_controller == CTRL_FT6X36 && ft_read(FT_REG_G_CTRL, s_ft_power, sizeof(s_ft_power)) == ESP_OK &&
+        s_polled && s_ft_power[0] != 0) {
+        ft_write(FT_REG_G_CTRL, 0);
     }
     uint8_t range[4] = {0};
     if (s_controller == CTRL_GT911 && reg_read(FOS_TOUCH_REG_X_MAX, range, sizeof(range)) == ESP_OK) {
         s_x_max = range[0] | (range[1] << 8);
         s_y_max = range[2] | (range[3] << 8);
+    }
+    if (s_controller == CTRL_GT911 && lent) {
+        /* The board's pull-ups: 400 kHz if the chip answers its id at it. */
+        uint8_t id[4] = {0};
+        if (!attach(s_addr, TOUCH_GT911_FAST_I2C_HZ) || reg_read(FOS_TOUCH_REG_PRODUCT_ID, id, sizeof(id)) != ESP_OK ||
+            id[0] != '9') {
+            attach(s_addr, TOUCH_GT911_I2C_HZ);
+        }
     }
     /* A report left over from before the reset would hold the next one back. */
     if (s_controller == CTRL_GT911) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
@@ -724,7 +1124,9 @@ esp_err_t fos_touch_start(void)
         /* Any edge: the controller's trigger polarity is its configuration's,
          * and a poll follows either way. */
         gpio_install_isr_service(0); /* ESP_ERR_INVALID_STATE when already installed: fine */
-        gpio_set_intr_type((gpio_num_t)pins->irq, GPIO_INTR_ANYEDGE);
+        /* The CST92xx pulls its line low per report: the falling edge alone
+         * (any edge read every report twice, once between reports). */
+        gpio_set_intr_type((gpio_num_t)pins->irq, s_controller == CTRL_CST92XX ? GPIO_INTR_NEGEDGE : GPIO_INTR_ANYEDGE);
         gpio_isr_handler_add((gpio_num_t)pins->irq, on_irq, NULL);
         gpio_intr_enable((gpio_num_t)pins->irq);
     }
@@ -744,16 +1146,20 @@ esp_err_t fos_touch_start(void)
      * PSRAM: internal RAM is the Wi-Fi stack's. Without them a move carries
      * none. */
     s_passed = heap_caps_calloc(FOS_TOUCH_POINTS_MAX, sizeof(fos_touch_passed_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    /* What click asks a scene that runs here, and what an LCD lights at a
+     * press before any render (press_light): the press map of every render. */
+    frameos_nim_keep_press_map(true);
     s_present = true;
-    char line[256];
+    char line[288];
     snprintf(line, sizeof(line),
              "{\"event\":\"touch:ready\",\"source\":\"esp32\",\"controller\":\"%s\",\"address\":\"0x%02x\","
              "\"xMax\":%d,\"yMax\":%d,\"swapped\":%s,\"mirrored\":\"%s\",\"polled\":%s,"
-             "\"sharedBus\":%s,\"wake\":%s}",
+             "\"sharedBus\":%s,\"wake\":%s,\"ft\":[%u,%u,%u,%u]}",
              k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? "true" : "false",
              mirror_name(),
              s_polled ? "true" : "false", share ? "true" : "false",
-             fos_touch_wake_pin() >= 0 ? "true" : "false");
+             fos_touch_wake_pin() >= 0 ? "true" : "false", s_ft_power[0], s_ft_power[1], s_ft_power[2],
+             s_ft_power[3]);
     log_line(line);
     return ESP_OK;
 }
@@ -817,10 +1223,21 @@ void fos_touch_print_status(void)
                (int)pins->sda, (int)pins->scl, (int)pins->irq);
         return;
     }
-    printf("touch:       %s at 0x%02x, %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
-           k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? " (axes swapped)" : "",
+    printf("touch:       %s at 0x%02x (%lu kHz), %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
+           k_controller_names[s_controller], s_addr, (unsigned long)(s_hz / 1000), s_x_max, s_y_max,
+           s_swap ? " (axes swapped)" : "",
            s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
            s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);
+    if (s_controller == CTRL_CST92XX) {
+        printf("touch_report:");
+        for (size_t i = 0; i < sizeof(s_last_report); i++) printf(" %02x", s_last_report[i]);
+        printf(" (int GPIO %d reads %d)\n", (int)pins->irq, pins->irq >= 0 ? gpio_get_level((gpio_num_t)pins->irq) : -1);
+    }
+    {
+        printf("touch_seen:  irq %lu, reads %lu (stale %lu, none %lu, fingers %lu), moves %lu\n",
+               (unsigned long)s_n_irq, (unsigned long)s_n_read, (unsigned long)s_n_stale, (unsigned long)s_n_none,
+               (unsigned long)s_n_fingers, (unsigned long)s_n_moves);
+    }
 }
 #endif /* ESP_PLATFORM */

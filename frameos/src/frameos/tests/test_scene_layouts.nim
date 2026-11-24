@@ -10,6 +10,8 @@ import ../scene_rhythm
 import ../types
 import ../ui/events as ui_events
 from ../ui/keyboard import keyboardBox
+from ../ui/layout import frameKeyboard
+from ../utils/image import panelToScenePoint
 import ../js_runtime/app_runtime
 from ../ui/events import uiListens
 import system/sceneSwitcher/scene as switcher
@@ -162,6 +164,25 @@ export function get(app) {
   )
 }
 """
+
+# A bar layout that gives a scene asking for the whole panel all of it.
+const fullScreenLayoutUi = """
+export function get(app) {
+  frameos.setState("heardFull", app.frame.fullScreen === true)
+  if (app.frame.fullScreen) return <yield />
+  return (
+    <div className="flex flex-col w-full h-full">
+      <div className="h-[20px] bg-white" />
+      <yield />
+    </div>
+  )
+}
+"""
+
+proc withFullScreenField(sceneJson, value: string): string =
+  ## A public boolean with role fullScreen, as the reader samples carry.
+  sceneJson.replace(""""fields": []""", """"fields": [{"name": "full", "type": "boolean", "label": "Full screen",
+    "value": "$1", "access": "public", "persist": "disk", "role": "fullScreen"}]""" % [value])
 
 const fieldUi = """
 export function get(app) {
@@ -333,6 +354,11 @@ let scenesJson = "[" & [
   jsxScene("tests/escaping", escapingUi, 1.0, ""","isLayout": true"""),
   jsxScene("tests/typingLayout", typingLayoutUi, 1.0, ""","isLayout": true"""),
   jsxScene("tests/typing", fieldUi, 3000.0).withLayout("tests/typingLayout"),
+  jsxScene("tests/fullLayout", fullScreenLayoutUi, 1.0, ""","isLayout": true"""),
+  panel("tests/fullByField", "#0000ff", 600.0).withFullScreenField("true").withLayout("tests/fullLayout"),
+  panel("tests/fullBySetting", "#0000ff", 600.0, ""","fullScreen": true""").withLayout("tests/fullLayout"),
+  panel("tests/fullFieldOff", "#0000ff", 600.0, ""","fullScreen": true""").withFullScreenField("false").withLayout("tests/fullLayout"),
+  panel("tests/notFull", "#0000ff", 600.0).withLayout("tests/fullLayout"),
   panel("tests/fastChild", "#ff00ff", 1.0),
   jsxScene("tests/twoHoles", twoScenesUi, 300.0),
   jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
@@ -517,6 +543,43 @@ suite "layouts":
     # laid out above it (test_frame_keyboard.nim).
     check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == keyboardBox(W, H)[0]
 
+  test "a scene asks its layout for the whole panel, by its field or its setting, and the field wins":
+    for (id, full) in [("tests/fullByField", true), ("tests/fullBySetting", true), ("tests/fullFieldOff", false),
+        ("tests/notFull", false)]:
+      let scene = newScene(id)
+      let canvas = pass(scene)
+      check scene.layoutOf.wrapsFullScreen == full
+      check scene.layoutOf.state{"heardFull"}.getBool() == full
+      if full:
+        check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == H
+        check canvas.color(5, 5) == colored("#0000ff")
+      else:
+        check scene.layoutOf.holeIn.y == 20 and scene.layoutOf.holeIn.h == H - 20
+        check canvas.color(5, 5) == colored("#ffffff")
+      check not ($logged).contains("error")
+
+  test "a change of the full screen field in the scene's settings shows on the next render":
+    let scene = newScene("tests/fullByField")
+    discard pass(scene)
+    check scene.layoutOf.holeIn.y == 0
+    # What the scene settings' Save and a control panel send: the public field.
+    runEvent(scene, ExecutionContext(scene: scene, event: "setSceneState", payload: %*{"state": {"full": false}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1000.01
+    var canvas = pass(scene)
+    check not scene.layoutOf.wrapsFullScreen
+    check scene.layoutOf.holeIn.y == 20
+    check canvas.color(5, 5) == colored("#ffffff")
+    check canvas.color(5, 30) == colored("#0000ff")
+    # As text, the way a form may deliver a boolean.
+    runEvent(scene, ExecutionContext(scene: scene, event: "setSceneState", payload: %*{"state": {"full": "true"}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1000.02
+    canvas = pass(scene)
+    check scene.layoutOf.wrapsFullScreen
+    check scene.layoutOf.holeIn.y == 0
+    check canvas.color(5, 5) == colored("#0000ff")
+
   test "a layout is told the name of the scene it wraps":
     let scene = newScene("tests/inTaskbar")
     discard pass(scene)
@@ -609,6 +672,44 @@ suite "layouts":
               taken = entry.taken
               break
           check taken == pressTakenAt(scene, x, y)
+
+  test "an element's own box is its entry, for a panel to light at the press":
+    # docs/realtime-rendering.md "A press shows at once": an LCD's touch task
+    # shades the element a finger lands on before any render, by its entry.
+    let scene = newScene("tests/counter")
+    let image = pass(scene)
+    let map = panelPressMap(scene, image.width, image.height, 0, "", 64)
+    var elements = 0
+    for entry in map:
+      if entry.element:
+        inc elements
+        check entry.taken and not entry.keys
+        check entry.x1 - entry.x0 < image.width or entry.y1 - entry.y0 < image.height
+    check elements > 0
+
+  test "the press map on the panel answers where a touch lands on the scene":
+    # What an ESP32 keeps after each render for its touch task, and what a
+    # plane sends a board: the canvas turned back onto the panel, so a press
+    # at a panel pixel answers as the scene pixel it is (panelToScenePoint).
+    for name in ["tests/inTaskbar", "tests/counter"]:
+      let scene = newScene(name)
+      let image = pass(scene)
+      for rotate in [0, 90, 180, 270]:
+        for flip in ["", "horizontal", "both"]:
+          let map = panelPressMap(scene, image.width, image.height, rotate, flip, 64)
+          check map.len > 0
+          let turned = rotate in [90, 270]
+          let panelW = if turned: image.height else: image.width
+          let panelH = if turned: image.width else: image.height
+          for py in countup(0, panelH - 1, 3):
+            for px in countup(0, panelW - 1, 3):
+              var taken = false
+              for entry in map:
+                if px >= entry.x0 and py >= entry.y0 and px < entry.x1 and py < entry.y1:
+                  taken = entry.taken
+                  break
+              let at = panelToScenePoint(px, py, panelW, panelH, rotate, flip)
+              check taken == pressTakenAt(scene, at.x, at.y)
 
 suite "a canvas that stays":
   var generation = 0'i64
@@ -1174,6 +1275,40 @@ suite "a layout around the built-in scenes":
     check panel.wornLayout.isNil
     chooseLayout("")
 
+  test "a press on the frame's keyboard reaches the settings' own form inside a layout":
+    # keysTake hands it to the built-in scene's run: the context it builds
+    # once took `owner` with it before `owner.ownRun` was read (a nil load
+    # that rebooted a reTerminal Sticky at every key, 2026-11-23).
+    const PW = 480
+    const PH = 400
+    forgetTypedKeys()
+    let panel = sceneSettings.exportedScene.init(SceneSettingsId.SceneId, config, logger(), %*{})
+    sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: "setCurrentScene",
+      loopIndex: 0, loopKey: ".", nextSleep: -1, payload: %*{"state": {
+        "from": "tests/content", "layout": {"sceneId": "tests/uiLayout"},
+        "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false}],
+        "values": {"city": "Oslo"}}}))
+    discard pass(panel, newImage(PW, PH))
+    check not panel.wornLayout.isNil
+    proc press(x, y: float32) =
+      for (event, buttons) in [("pointerDown", 1), ("pointerUp", 0)]:
+        let at = %*{"x": x, "y": y, "pointerId": 0, "pointerType": "mouse", "button": 0, "buttons": buttons}
+        sceneSettings.exportedScene.runEvent(panel, ExecutionContext(scene: panel, event: event, payload: at,
+          loopIndex: 0, loopKey: ".", nextSleep: -1))
+    var at = (-1'f32, -1'f32)
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.field in 1'u8 .. 3'u8: at = (r.x.float32 + r.w.float32 / 2, r.y.float32 + r.h.float32 / 2)
+    check at[0] >= 0
+    let hole = panel.wornLayout.holeIn
+    press(hole.x.float32 + at[0], hole.y.float32 + at[1])
+    rhythmClockOverride = 1000.01
+    discard pass(panel, newImage(PW, PH))
+    check frameKeyboard.sceneId == SceneSettingsId
+    let box = keyboardBox(PW, PH)
+    press(PW / 2, (box[0] + box[1] div 2).float32)
+    rhythmClockOverride = 1000.02
+    discard pass(panel, newImage(PW, PH))
+
   test "a layout can give a built-in scene the whole panel":
     let scene = opened("tests/escaping")
     let canvas = drawn(scene)
@@ -1215,12 +1350,7 @@ suite "the starter layouts":
       let layout = scene.layoutOf
       let hole = layout.holeIn
       check hole.found and hole.w > 0 and hole.h > 0
-      # The reTerminal Sticky's draws its chrome only around the scene list
-      # (its home screen): on a scene it gives the whole glass by default.
-      if starter["id"].getStr() == "layout-reterminal-sticky":
-        check hole.w * hole.h == W * H
-      else:
-        check hole.w * hole.h < W * H
+      check hole.w * hole.h < W * H
       check canvas.color(hole.x + hole.w div 2, hole.y + hole.h div 2) == colored("#0000ff")
       check not ($logged).contains("error")
   test "there are starters to check":

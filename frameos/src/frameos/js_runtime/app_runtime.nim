@@ -1,4 +1,5 @@
 import std/[algorithm, base64, json, monotimes, options, os, sequtils, streams, strformat, strutils, tables, times]
+from std/posix import Stat, stat, errno, ENOENT, ENOTDIR
 import frameos/utils/memory
 import pixie
 import pixie/fileformats/svg
@@ -963,19 +964,42 @@ proc jsText(ctx: ptr JSContext, op: JSValue, value: JSValue): JSValue {.nimcall.
     return JS_NewArrayBufferCopy(ctx, s.cstring, s.len.csize_t)
 {.pop.}
 
+proc answerToJS(ctx: ptr JSContext, head: string, body: var string, hasBody: bool): JSValue =
+  ## An HTTP answer for the prelude: `head`, its JSON without the body, as an
+  ## object, and the body set on it as a JS string made from the bytes, which
+  ## go once it is made. Escaped into the JSON text and parsed back out, a
+  ## body was four copies at once, the two in JS two bytes a character once
+  ## one is past Latin-1: 3.5 MB for a 512 KB piece of GitHub's front page,
+  ## more than a reTerminal Sticky had (2026-11-24). A body with no room is
+  ## the answer's error (status 0), never an exception that leaves its
+  ## promise waiting.
+  result = JS_ParseJSON(ctx, head.cstring, head.len.csize_t, "<answer>")
+  if not hasBody or JS_IsException(result) != 0:
+    return
+  let text = nimStringToJS(ctx, body)
+  body = ""
+  if JS_IsException(text) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    discard JS_SetPropertyStr(ctx, result, "status", nimIntToJS(ctx, 0))
+    discard JS_SetPropertyStr(ctx, result, "error", nimStringToJS(ctx, describeJsError("out of memory")))
+  else:
+    discard JS_SetPropertyStr(ctx, result, "body", text)
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
   ## base64-encoded, required for binary responses), timeoutMs, find,
   ## findLength, findLimit}.
-  ## Returns JSON: {status, headers, body | bodyBase64} or {status: 0,
-  ## error}; headers as "name: value" lines, which the prelude turns into
-  ## an object (__frameosHeaders). With
+  ## Returns an object (answerToJS): {status, headers, body | bodyBase64} or
+  ## {status: 0, error}; headers as "name: value" lines, which the prelude
+  ## turns into an object (__frameosAnswer). With
   ## `find` the body stays native: the response carries `found` (the text
   ## at each occurrence, findLimit of them, findLength bytes each) and, for a
   ## non-2xx status, the first KB of the body so the error stays readable.
   let e = env(ctx)
   var response = %*{"status": 0}
+  var resBody = ""
+  var hasBody = false
 
   let urlStr = toNimString(ctx, url)
   var options = optionsArg(ctx, optionsJson)
@@ -1007,7 +1031,6 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     let maxSeconds = capToRenderDeadline(int(max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0) * 1000)).float / 1000.0
     let httpMethod = options{"method"}.getStr("GET").toUpperAscii()
     var code = 0
-    var resBody = ""
     var answered = false
     var resHeaders = ""
     when defined(testing):
@@ -1016,7 +1039,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
         resHeaders = jsHttpHookHeaders
         answered = true
     if not answered:
-      let res = boundedRequestWithHeaders(
+      var res = boundedRequestWithHeaders(
         urlStr,
         httpMethod = httpMethod,
         body = body,
@@ -1027,7 +1050,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
         wantHeaders = true
       )
       code = res.code
-      resBody = res.body
+      resBody = move(res.body)
       when defined(frameosEmbedded) or defined(frameosWasm):
         resHeaders = res.headers
       else:
@@ -1059,7 +1082,7 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     elif options{"base64"}.getBool(false):
       response["bodyBase64"] = %*encode(resBody)
     else:
-      response["body"] = %*resBody
+      hasBody = true
   except CatchableError as err:
     # The request's URL is the scene's and may carry a key or a share token;
     # the client's own errors name its origin only (utils/redacted_url.nim),
@@ -1067,9 +1090,10 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     # reaches the log or an app that draws it.
     let message = redactedUrlsIn(err.msg)
     response["error"] = %*message
+    hasBody = false
     if e != nil:
       frameos_apps.logError(e.owner, "JS app httpRequest failed: " & message)
-  return nimStringToJS(ctx, $response)
+  answerToJS(ctx, $response, resBody, hasBody)
 
 const DecoderFits = ["cover", "contain", "stretch"]
   ## The placements a decode can honour while it streams into a target. The
@@ -1549,7 +1573,7 @@ type AssetOptions = object
   ## every exit of one proc, and every exit destroyed them all: 625 cleanup
   ## calls, 14.8 KB of the ESP32 image for this one bridge.
   storage, entry, background: string
-  shallow, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
+  shallow, strict, text, keep, contain, hasLength, inflate, bytes, hasPixels, hasMask, maskInflate: bool
   offset, length, width, height, maskOffset, maskLength: int
   pixels, mask: RawPixels
 
@@ -1569,6 +1593,7 @@ proc assetOptions(ctx: ptr JSContext, data: JSValue): AssetOptions {.noinline.} 
   result.entry = options{"entry"}.getStr()
   result.background = options{"background"}.getStr()
   result.shallow = options{"shallow"}.getBool(false)
+  result.strict = options{"strict"}.getBool(false)
   result.text = options{"text"}.getBool(false)
   result.keep = options{"keep"}.getBool(false)
   result.contain = options{"fit"}.getStr("cover") == "contain"
@@ -1603,18 +1628,41 @@ proc logAssetSliceTooBig(e: JsAppEvalEnv, what: string, size: int64, readMax: in
     " bytes, over the " & $readMax & " byte limit; read it in chunks" &
     " with {offset, length}")
 
+proc storageGone(e: JsAppEvalEnv, storage: string): bool =
+  ## A storage the frame lists (`app.frame.storages`) whose folder is not
+  ## there: a card that is not mounted any more, an internal storage that is not.
+  if storage == "internal":
+    return storageInternalPath.len > 0 and not dirExists(storageInternalPath)
+  if storage.len == 0 or storage == "assets":
+    let config = e.owner.frameConfig
+    return storageCardMounted and not dirExists(
+      if config == nil or config.assetsPath == "": "/srv/assets" else: config.assetsPath)
+
+proc unreadable(path: string): bool =
+  ## A folder whose stat failed for another reason than not being there: a
+  ## card that answered a read with an error.
+  var st: Stat
+  stat(path.cstring, st) != 0 and errno != ENOENT and errno != ENOTDIR
+
 proc assetsList(ctx: ptr JSContext, e: JsAppEvalEnv, pathStr: string, data: JSValue): JSValue =
   let options = assetOptions(ctx, data)
   let root = assetsRoot(e, options.storage)
   let dir = if root.len == 0: "" elif pathStr.len == 0: root else: resolveAssetPath(e, pathStr, storage = options.storage)
   var files: seq[string] = @[]
+  # `strict`: null when the storage cannot be read (a card that is not
+  # mounted, a read that failed), which an app can tell from an empty
+  # folder. A folder that is not there is still [].
+  if options.strict and (storageGone(e, options.storage) or
+      (dir.len > 0 and not dirExists(dir) and unreadable(dir))):
+    return jsNull(ctx)
   if dir.len > 0 and dirExists(dir):
     # Hidden/OS-junk entries (`.thumbs`, `.frameos`, `._IMG.jpg`,
     # `Thumbs.db`, `@eaDir`, …) never show up in an app's asset listing.
     if options.shallow:
       # One folder's entries, as a browser walks a card a folder at a
-      # time (a recursive walk of a large SD card takes seconds).
-      for kind, entry in walkDir(dir, relative = false):
+      # time (a recursive walk of a large SD card takes seconds). A read
+      # that fails raises under `strict` (jsAssets answers null).
+      for kind, entry in walkDir(dir, relative = false, checkDir = options.strict):
         let name = entry.extractFilename
         if kind in {pcDir, pcLinkToDir} and not isJunkDirName(name):
           files.add(entry[(root.len + 1)..^1] & "/")
@@ -2298,131 +2346,166 @@ proc windowLimit*(): int =
   else: 1
 
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  ## One way out: a `return` per key repeated the clean-up of the key's
+  ## text and the inlined sentinel (docs/esp32-image-size.md). `undef`: the
+  ## key has no value here.
   let e = env(ctx)
-  if e == nil:
-    return jsUndefSentinel(ctx)
+  var undef = e == nil
+  if not undef:
+    case toNimString(ctx, key)
+    of "width":
+      # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
+      result = appLength(ctx, e, e.owner.frameConfig.width)
+    of "height":
+      result = appLength(ctx, e, e.owner.frameConfig.height)
+    of "scale":
+      # The render scale in effect for the scene, whatever kind of app asks.
+      result = nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
+    of "rotate":
+      # A board rendered on its plane is turned by the board: the runtime draws
+      # its canvas already turned and keeps 0 itself, and says the board's.
+      let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
+      result = nimIntToJS(ctx, rotate.int32)
+    of "assetsPath":
+      result = nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
+    of "storages":
+      result = jsonToJS(ctx, frameStorages())
+    of "timeZone":
+      result = nimStringToJS(ctx, e.owner.frameConfig.timeZone)
+    of "debug":
+      result = nimBoolToJS(ctx, e.owner.frameConfig.debug)
+    of "embedded":
+      # An ESP32-class runtime, or the preview running as one: no storage for
+      # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
+      # picture there.
+      result = nimBoolToJS(ctx, runsAsEmbedded())
+    of "fast":
+      # Whether a change shows as soon as it is drawn (panel_shape.panelIsFast):
+      # an app that follows a finger waits for it to lift where it does not.
+      # The frame's panel, never the context's canvas, which onEvent, init()
+      # and an async continuation do not have: on an ESP32 they read e-paper
+      # on an LCD.
+      result = nimBoolToJS(ctx, panelIsFast(e.owner.frameConfig.device))
+    of "paper":
+      # Whether the panel draws in inks (panel_shape.panelIsPaper): how a scene
+      # looks there. Until 2026.11.10 it also said what `fast` says now, and
+      # today the two are opposites on every panel. The panel's, as above.
+      result = nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
+    of "round":
+      # Only the circle inside the panel's square shows and takes touches
+      # (panel_shape.panelIsRound: the HyperPixel 2.1 Round, the Waveshare
+      # 1.75" AMOLED). An app that draws the whole panel keeps what matters
+      # inside it; the frame's own scenes do.
+      result = nimBoolToJS(ctx, panelIsRound(e.owner.frameConfig.device))
+    of "color":
+      # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
+      # a scene draws in high contrast where it does not. The panel's, as above.
+      result = nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device))
+    of "sceneName":
+      # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
+      if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
+        result = nimStringToJS(ctx, e.owner.scene.shownName)
+      else:
+        undef = true
+    of "systemScene":
+      # A layout around the scene list or the settings: it may give them the
+      # whole panel by returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.systemScene:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "typing":
+      # A layout around a scene that has the keyboard on the screen up: it may
+      # give the scene the whole panel by returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.typing:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "fullScreen":
+      # A layout around a scene that asks for the whole panel (full_screen.nim:
+      # its role field, else settings.fullScreen): the layout gives it by
+      # returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.wrapsFullScreen:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "batteryPercent":
+      # An ESP32 with a battery. A Pi and the preview have nothing to say.
+      when defined(freertos):
+        let percent = fos_client_battery_percent()
+        if percent >= 0:
+          result = nimIntToJS(ctx, percent.int32)
+        else:
+          undef = true
+      else:
+        undef = true
+    of "wifiRssi":
+      when defined(freertos):
+        let rssi = fos_client_wifi_rssi()
+        if rssi != 0:
+          result = nimIntToJS(ctx, rssi.int32)
+        else:
+          undef = true
+      else:
+        undef = true
+    of "sceneId":
+      # A layout's is the id of the scene it wraps, the one its <yield /> shows.
+      if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
+        result = nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
+      else:
+        undef = true
+    of "wentBack":
+      # True while the scene a layout wraps is showing because a built-in scene
+      # went back to it by itself (its Close, its Cancel, its timeout), not
+      # because anyone picked it: a desktop opens no window again for it.
+      if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil and sceneWentBackTo.len > 0 and
+          layoutWrappedSceneId(e.owner.scene) == sceneWentBackTo:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "scenes":
+      # The scenes a layout can open side by side: not on every host.
+      if not windowSceneListing.isNil:
+        result = jsonToJS(ctx, windowSceneListing())
+      else:
+        undef = true
+    of "keptOpen":
+      # The built-in scenes open beside the scene showing (`builtInsAway`).
+      if not windowSceneListing.isNil:
+        result = jsonToJS(ctx, %builtInsAway)
+      else:
+        undef = true
+    of "windows":
+      # How many of them may run at once, where there is a limit (windowLimit).
+      let limit = windowLimit()
+      if not windowSceneListing.isNil and limit > 0:
+        result = nimIntToJS(ctx, limit.int32)
+      else:
+        undef = true
+    of "eventMap":
+      # The frame's event map (frame.json `eventMap`, docs/events.md "Event
+      # map"): what its keys and swipes do whatever scene shows, for a layout
+      # that labels the keys beside the glass. Undefined with none (the
+      # preview of a scene, a frame never given one).
+      let rules = e.owner.frameConfig.eventMap
+      if not rules.isNil and rules.kind == JArray:
+        result = jsonToJS(ctx, rules)
+      else:
+        undef = true
+    of "theme":
+      # The theme of the desktop around the frame's scene (ui/theme.nim), for
+      # what an element's `look` cannot reach: an SVG's fill, a mask in the
+      # page's color. None, or an empty one, is the app's own look.
+      let theme = if themeSource.isNil: nil else: themeSource()
+      if not theme.isNil and theme.kind == JObject and theme.len > 0:
+        result = jsonToJS(ctx, theme)
+      else:
+        undef = true
+    else:
+      undef = true
 
-  case toNimString(ctx, key)
-  of "width":
-    # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
-    return appLength(ctx, e, e.owner.frameConfig.width)
-  of "height":
-    return appLength(ctx, e, e.owner.frameConfig.height)
-  of "scale":
-    # The render scale in effect for the scene, whatever kind of app asks.
-    return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
-  of "rotate":
-    # A board rendered on its plane is turned by the board: the runtime draws
-    # its canvas already turned and keeps 0 itself, and says the board's.
-    let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
-    return nimIntToJS(ctx, rotate.int32)
-  of "assetsPath":
-    return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
-  of "storages":
-    return jsonToJS(ctx, frameStorages())
-  of "timeZone":
-    return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
-  of "debug":
-    return nimBoolToJS(ctx, e.owner.frameConfig.debug)
-  of "embedded":
-    # An ESP32-class runtime, or the preview running as one: no storage for
-    # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
-    # picture there.
-    return nimBoolToJS(ctx, runsAsEmbedded())
-  of "fast":
-    # Whether a change shows as soon as it is drawn (panel_shape.panelIsFast):
-    # an app that follows a finger waits for it to lift where it does not.
-    # The frame's panel, never the context's canvas, which onEvent, init()
-    # and an async continuation do not have: on an ESP32 they read e-paper
-    # on an LCD.
-    return nimBoolToJS(ctx, panelIsFast(e.owner.frameConfig.device))
-  of "paper":
-    # Whether the panel draws in inks (panel_shape.panelIsPaper): how a scene
-    # looks there. Until 2026.11.10 it also said what `fast` says now, and
-    # today the two are opposites on every panel. The panel's, as above.
-    return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
-  of "color":
-    # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
-    # a scene draws in high contrast where it does not. The panel's, as above.
-    return nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device))
-  of "sceneName":
-    # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
-    if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
-      return nimStringToJS(ctx, e.owner.scene.shownName)
-    return jsUndefSentinel(ctx)
-  of "systemScene":
-    # A layout around the scene list or the settings: it may give them the
-    # whole panel by returning a bare <yield />.
-    if not e.owner.scene.isNil and e.owner.scene.systemScene:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "typing":
-    # A layout around a scene that has the keyboard on the screen up: it may
-    # give the scene the whole panel by returning a bare <yield />.
-    if not e.owner.scene.isNil and e.owner.scene.typing:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "batteryPercent":
-    # An ESP32 with a battery. A Pi and the preview have nothing to say.
-    when defined(freertos):
-      let percent = fos_client_battery_percent()
-      if percent >= 0:
-        return nimIntToJS(ctx, percent.int32)
-    return jsUndefSentinel(ctx)
-  of "wifiRssi":
-    when defined(freertos):
-      let rssi = fos_client_wifi_rssi()
-      if rssi != 0:
-        return nimIntToJS(ctx, rssi.int32)
-    return jsUndefSentinel(ctx)
-  of "sceneId":
-    # A layout's is the id of the scene it wraps, the one its <yield /> shows.
-    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
-      return nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
-    return jsUndefSentinel(ctx)
-  of "wentBack":
-    # True while the scene a layout wraps is showing because a built-in scene
-    # went back to it by itself (its Close, its Cancel, its timeout), not
-    # because anyone picked it: a desktop opens no window again for it.
-    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil and sceneWentBackTo.len > 0 and
-        layoutWrappedSceneId(e.owner.scene) == sceneWentBackTo:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "scenes":
-    # The scenes a layout can open side by side: not on every host.
-    if not windowSceneListing.isNil:
-      return jsonToJS(ctx, windowSceneListing())
-    return jsUndefSentinel(ctx)
-  of "keptOpen":
-    # The built-in scenes open beside the scene showing (`builtInsAway`).
-    if not windowSceneListing.isNil:
-      return jsonToJS(ctx, %builtInsAway)
-    return jsUndefSentinel(ctx)
-  of "windows":
-    # How many of them may run at once, where there is a limit (windowLimit).
-    let limit = windowLimit()
-    if not windowSceneListing.isNil and limit > 0:
-      return nimIntToJS(ctx, limit.int32)
-    return jsUndefSentinel(ctx)
-  of "eventMap":
-    # The frame's event map (frame.json `eventMap`, docs/events.md "Event
-    # map"): what its keys and swipes do whatever scene shows, for a layout
-    # that labels the keys beside the glass. Undefined with none (the
-    # preview of a scene, a frame never given one).
-    let rules = e.owner.frameConfig.eventMap
-    if not rules.isNil and rules.kind == JArray:
-      return jsonToJS(ctx, rules)
-    return jsUndefSentinel(ctx)
-  of "theme":
-    # The theme of the desktop around the frame's scene (ui/theme.nim), for
-    # what an element's `look` cannot reach: an SVG's fill, a mask in the
-    # page's color. None, or an empty one, is the app's own look.
-    let theme = if themeSource.isNil: nil else: themeSource()
-    if not theme.isNil and theme.kind == JObject and theme.len > 0:
-      return jsonToJS(ctx, theme)
-    return jsUndefSentinel(ctx)
-  else:
-    return jsUndefSentinel(ctx)
+  if undef:
+    result = jsUndefSentinel(ctx)
 
 proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -2461,6 +2544,16 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if e.context.hasImage and not e.context.image.isNil:
       return appLength(ctx, e, e.context.image.height)
     return jsUndefSentinel(ctx)
+  of "round":
+    # This app draws a round panel's whole canvas: only the circle inside it
+    # shows, so the app keeps what matters there (docs/scene-guide.md "Round
+    # panels"). False in a window, a split's panel or a layout's hole, which
+    # are rooms of their own, and on every other panel.
+    let config = e.owner.frameConfig
+    return nimBoolToJS(ctx, not config.isNil and panelIsRound(config.device) and
+      e.context.hasImage and not e.context.image.isNil and
+      e.context.image.width == frameos_apps.renderWidth(config) and
+      e.context.image.height == frameos_apps.renderHeight(config))
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
@@ -2493,7 +2586,8 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
+      "paper", "color", "round", "sceneName", "systemScene", "typing", "fullScreen", "wentBack", "batteryPercent", "wifiRssi",
+      "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")
@@ -2501,7 +2595,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       if windowLimit() > 0:
         keys.add("windows")
   of "context":
-    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
+    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep", "round"]
     if e.context.hasImage and not e.context.image.isNil:
       keys.add("image")
       keys.add("imageWidth")
@@ -3388,10 +3482,11 @@ const appJsPrelude* = compactJs("""
   const __frameosAppState = __frameosProxy("state", jsGetAppState);
   const __frameosAppFrame = __frameosProxy("frame", jsGetAppFrame);
   globalThis.__frameosContext = __frameosProxy("context", jsGetAppContext);
-  // httpRequest's answer, its "name: value" header lines as an object: names
-  // in lower case, a repeated one joined with ", " as the web's Headers does.
-  const __frameosAnswer = (text) => {
-    const a = JSON.parse(text || "{}"), h = {};
+  // httpRequest's answer (an object, its body a string of its own), its
+  // "name: value" header lines as an object: names in lower case, a repeated
+  // one joined with ", " as the web's Headers does.
+  const __frameosAnswer = (a) => {
+    const h = {};
     if (typeof a.headers !== "string") return a;
     for (const line of a.headers.split("\n")) {
       const i = line.indexOf(":"), k = line.slice(0, i).trim().toLowerCase(), v = line.slice(i + 1).trim();
@@ -3451,7 +3546,8 @@ const appJsPrelude* = compactJs("""
       mul: (dst, a, b, start, end) => jsTypedOps(3, dst, a, b, start ?? 0, end ?? -1) === true,
       convolve: (dst, src, width, kernel, shift) => jsTypedOps(4, dst, src, width, kernel, shift ?? 0) === true,
     },
-    listAssets: (dir, options) => __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || [],
+    listAssets: (dir, options) =>
+      __frameosAsset("list", dir, options ? JSON.stringify(options) : "") || (options && options.strict ? null : []),
     assetExists: (path, options) => __frameosAsset("exists", path, options ? JSON.stringify(options) : "") === true,
     assetSize: (path, options) => __frameosAsset("size", path, options ? JSON.stringify(options) : "") ?? -1,
     readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,
@@ -3519,12 +3615,14 @@ const appJsPrelude* = compactJs("""
     return id;
   };
   const __later = (kind, arg, options) => new Promise((ok, no) => __wait(kind, arg, options, ok, no));
+  // An answer comes as JSON text or as an object (a fetch's, its body a string
+  // of its own); one that cannot be read rejects rather than waits for ever.
   globalThis.__frameosSettle = (id, text, failed) => {
     const w = __waits.get(id);
     if (!w) return;
     __waits.delete(id);
-    if (failed) w[1](new Error(text));
-    else w[0](text ? JSON.parse(text) : undefined);
+    if (failed) return w[1](new Error(text));
+    try { w[0](typeof text !== "string" ? text : text ? JSON.parse(text) : undefined); } catch (e) { w[1](e); }
   };
   const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
     body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __appReplacer);
@@ -3625,7 +3723,7 @@ const appJsPrelude* = compactJs("""
     const end = () => { s.loading = false; s.at = Date.now(); };
     if (!jsAsyncMode()) {
       try {
-        const a = JSON.parse(jsHttpRequest(url, __fetchInit(init)) || "{}");
+        const a = __frameosAnswer(jsHttpRequest(url, __fetchInit(init)));
         take(__response(url, a), a.body ?? "");
       } catch (e) { fail(e); }
       end();
@@ -4130,16 +4228,21 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     if not owner.scene.isNil:
       let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
       if not target.isNil:
+        let refused = JS_IsException(returned) == 0 and jsIsBool(returned) and
+          not toNimBool(ctx, returned)
         # Signals set: the components that read them may do (partialRender).
-        # Nothing set: what changed is anyone's guess, get() runs.
+        # Nothing set: what changed is anyone's guess, get() runs. A scroll
+        # handler that returns false and set none changed nothing get()
+        # reads: the box scrolls on the tree it has (a list whose rows built
+        # still cover what shows, docs/jsx-ui.md "Scrolling and clipping").
         if JS_IsException(returned) == 0 and signalMarks() != marks:
           target.partial = true
-        else:
+        elif not (refused and name == "scroll"):
           target.full = true
         # A pointer handler that returns false asks for no render: what it
         # changed shows with the next one (docs/jsx-ui.md "Events").
-        target.declined = name.startsWith("pointer") and jsIsBool(returned) and
-          not toNimBool(ctx, returned)
+        target.declined = refused and (name.startsWith("pointer") or
+          name == "scroll" and signalMarks() == marks)
     if JS_IsException(returned) != 0:
       frameos_apps.logError(owner, "JS app handler failed: " &
         runtime.appText(mappedJsExceptionDetails(ctx).message))
@@ -4176,7 +4279,7 @@ var embeddedYieldReady*: proc(owner: FrameScene): bool {.nimcall.}
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
-    index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles) =
+    index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles): bool {.discardable.} =
   ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
   ## (it could not know the size before): the scenes run here, each at the
   ## size it got, a hole straight into the canvas. Walks the UI's tree, nested
@@ -4208,10 +4311,14 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
           [max(x, clip[0]) * scale, max(y, clip[1]) * scale, min(x + w, clip[2]) * scale, min(y + h, clip[3]) * scale],
           round(w * scale).int, round(h * scale).int, false, context)
     inc index
-    node.image = image
     let tag = if image.isNil: "g" else: "image"
-    if node.tag != tag:
-      node.tag = tag
+    # What it draws changed: its parse goes, and its ancestors' (true), which
+    # hold its elements in theirs (pixie's parseSvg keeps a parse per node at
+    # any depth).
+    result = node.image != image or node.tag != tag
+    node.image = image
+    node.tag = tag
+    if result:
       node.forgetParse()
     return
   var nx = ox
@@ -4232,7 +4339,10 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
       nx -= parseFloat(view[0]).float32
       ny -= parseFloat(view[1]).float32
   for child in node.children:
-    fillSceneImages(owner, context, child, scale, index, nx, ny, inner, holes)
+    if fillSceneImages(owner, context, child, scale, index, nx, ny, inner, holes):
+      result = true
+  if result:
+    node.forgetParse()
 
 proc placed(v, scale: float32, limit: int): int =
   clamp(round(v * scale).int, 0, limit)
@@ -4320,11 +4430,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     let device = if owner.frameConfig.isNil: "" else: owner.frameConfig.device
     target.input.slow = not panelIsFast(device)
     target.input.paper = panelIsPaper(device)
-    when not defined(frameosEmbedded):
-      # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
-      target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
-        requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
-        requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
+    # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
+    target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
+      requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
+      requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
     try:
       # Inside a layout a field's keyboard is the frame's (KeyboardDock): its
       # corner here is where the last render put this UI in the scene's canvas.
@@ -4840,6 +4949,9 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
     runtime.init(owner, configJson)
   if not owner.scene.isNil:
     let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+    # A handler ran since the last render and changed what get() reads: no
+    # pointer's render after it may lay the old tree out again.
+    let handled = not target.isNil and target.full
     if not target.isNil and (target.partial or target.full):
       # Handlers ran since the last render: when every one set signals and
       # nothing else asks for a new tree (the same config, a render sooner
@@ -4858,7 +4970,7 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # Only the pointer asked for this render: the last tree with the new
       # pointer, while nothing else can have changed what get() returns (the
       # same config, a render sooner than the scene's own interval).
-      if not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
+      if not handled and not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
           inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
         return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
   try:

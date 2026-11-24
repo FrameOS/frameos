@@ -296,6 +296,20 @@ suite "the Books scene":
     check scene.at == place
     noProblems()
 
+  test "opens the .epub files another scene hands it (settings.opens), where each was left":
+    problems = @[]
+    check parseFile(Samples / "Books" / "scenes.json")[0]["settings"]["opens"].getStr() == "epub"
+    let config = frame(800, 480)
+    let scene = load(config)
+    discard draw(scene, config, "library")
+    scene.state["file"] = %"assets:Books/old-tales.epub"
+    discard draw(scene, config, "handed")
+    check scene.spot{"view"}.getStr() == "book"
+    check scene.spot{"book"}.getStr() == "assets:Books/old-tales.epub"
+    check scene.state{"file"}.getStr() == ""
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
   test "a bigger text keeps the paragraph it was on, and the contents jump":
     problems = @[]
     let config = frame(800, 480)

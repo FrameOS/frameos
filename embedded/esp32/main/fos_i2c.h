@@ -31,6 +31,10 @@ typedef enum {
     FOS_I2C_ES8311 = 5,  /* audio DAC, 0x18 (fos_codec.c; the Waveshare PhotoPainter and 13.3E6) */
     FOS_I2C_ES7210 = 6,  /* audio ADC, 0x40 (fos_codec.c; the same two) */
     FOS_I2C_AXP2101 = 7, /* PMIC with a fuel gauge, 0x34 (fos_gauge.c; the Waveshare PhotoPainter) */
+    FOS_I2C_TCA9554 = 8, /* 8-bit IO expander, 0x20 (the AMOLED 1.75's PWR key on P4: fos_buttons.c) */
+    /* Six-axis IMU, 0x6b (the AMOLED 1.75: fos_imu.c). The SY6974B's address
+     * too: whichever says WHO_AM_I 0x05 at register 0 is the IMU. */
+    FOS_I2C_QMI8658 = 9,
     FOS_I2C_CHIP_COUNT
 } fos_i2c_chip_t;
 
@@ -52,5 +56,8 @@ esp_err_t fos_i2c_command_read(fos_i2c_chip_t chip, uint8_t command, uint32_t wa
 i2c_master_bus_handle_t fos_i2c_lend_bus(int sda, int scl);
 /* The chip's name as the console and the hardware report spell it. */
 const char *fos_i2c_chip_name(fos_i2c_chip_t chip);
+/* The IO expander's input register (FOS_I2C_TCA9554, register 0): a bit per
+ * pin, the level it reads. ESP_ERR_NOT_FOUND without one. */
+esp_err_t fos_i2c_expander_input(uint8_t *value);
 /* One line: `sda19/scl20: pcf8563 sht4x; sda39/scl40: sy6974b`, or "none". */
 void fos_i2c_summary(char *out, size_t out_len);

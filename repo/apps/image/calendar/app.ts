@@ -462,10 +462,10 @@ export function get(app, context) {
   const p = Math.max(Math.trunc(number(c.padding, 18)), 0) * s
   const st0 = style(c)
   const gridStroke = nimRound(Math.max(number(st0.gridWidth ?? c.gridWidth, 1), 1) * s)
-  const contentX = p
-  const contentY = p
-  const contentW = W - 2 * p
-  const contentH = H - 2 * p
+  let contentX = p
+  let contentY = p
+  let contentW = W - 2 * p
+  let contentH = H - 2 * p
 
   const weekdayHeaderHeight = st.weekdayFontSize * s * 1.5
   const position = text(c.monthYearPosition, 'top').toLowerCase()
@@ -473,6 +473,15 @@ export function get(app, context) {
   const titleHeight = titleShown ? st.titleFontSize * s * 1.8 : 0
   const topTitle = titleShown && position === 'top' ? titleHeight : 0
   const bottomTitle = titleShown && position === 'bottom' ? titleHeight : 0
+  if (context.round === true) {
+    // A round panel: the weekdays and the days in the square inside the
+    // circle, 12 px in from its rim, and the month in the arc above (or below).
+    const side = Math.floor((Math.min(W, H) / 2 - 12) * Math.SQRT2)
+    contentX = (W - side) / 2
+    contentY = (H - side) / 2 - topTitle
+    contentW = side
+    contentH = side + topTitle + bottomTitle
+  }
   const gridTop = contentY + topTitle + weekdayHeaderHeight
   const gridHeight = contentH - weekdayHeaderHeight - topTitle - bottomTitle
   const cellWidth = contentW / 7

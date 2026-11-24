@@ -9,11 +9,13 @@ import pixie
 import ../channels
 import ../interpreter
 import ../scene_rhythm
+import ../render_probe
 import ../scene_store_hooks
 import ../layout_choice
 import ../types
 import ../js_runtime/app_runtime
 import ../js_runtime/js_io
+from ../ui/events import keyboardShown, forgetTypedKeys
 import ../utils/http_client
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
@@ -492,6 +494,73 @@ suite "the Scene store scene":
     check scene.state{"spot"}{"cat"}.getStr() == ""
     check problems.len == 0
 
+  test "a square screen's grid scrolls on the tree it built, and builds again only past it":
+    # A drag on an ESP32 is a render a move: get() and the walk were most of
+    # one (the Waveshare 1.75" AMOLED, 2026-11-24). While the rows built
+    # cover what shows, onScroll returns false and the frame lays out the
+    # tree it has; past them, or near the end of the pages there are, get().
+    problems = @[]
+    realStore = true
+    defer: realStore = false
+    withLock requestsLock: requests = @[]
+    let config = frame(480, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{"cat": "featured"}
+    discard draw(scene, config, "grid")
+    discard settle()
+    discard draw(scene, config, "grid-page")
+    check requested("page=1").len == 1
+    proc ranGet(notches: float, name: string): bool =
+      scene.wheel(240, 300, notches)
+      probeOn = true
+      probeReset()
+      discard draw(scene, config, name)
+      result = " get " in " " & probeSummary()
+      probeOn = false
+    # Three rows across, eight to a page of 24: a screen and more each way
+    # of what shows is built.
+    check not ranGet(1.0, "grid-down-1")
+    check not ranGet(1.0, "grid-down-2")
+    check not ranGet(-1.0, "grid-up")
+    check requested("page=2").len == 0
+    # Down to where the next page is wanted: get() asks for it.
+    check ranGet(9.0, "grid-far")
+    discard settle()
+    check requested("page=2").len == 1
+    check problems.len == 0
+    if problems.len > 0: echo problems
+
+  test "a square screen's search: the button opens the field, a tap on the field the keyboard":
+    # The header of a narrow store has a search button and no field: the
+    # field is a row of its own under it once the button is pressed (the
+    # SenseCAP Indicator's 480x480, 2026-11-23).
+    problems = @[]
+    discard settle()
+    forgetTypedKeys()
+    let config = frame(480, 480)
+    let scene = load(config)
+    scene.state["spot"] = %*{}
+    discard draw(scene, config, "search")
+    discard settle()
+    discard draw(scene, config, "search-page")
+    let tapped = proc(x, y: int) =
+      for (event, buttons) in [("pointerDown", 1), ("pointerUp", 0)]:
+        runEvent(scene, ExecutionContext(scene: scene, event: event, loopIndex: 0, loopKey: ".", nextSleep: -1,
+          payload: %*{"x": x, "y": y, "pointerId": 0, "pointerType": "touch", "button": 0, "buttons": buttons}))
+      scene.tap(x, y)
+    tapped(480 - 12 - 19, 27) # the search button, right in the header
+    # It changes no state, only the app's own `searchOpen`: the tap itself
+    # must ask for the frame that shows the field.
+    check settle() > 0
+    discard draw(scene, config, "search-open")
+    # On its magnifier, not on the text: what looks like the field is the
+    # field (look="field", UiRegion.labelFor), as a finger found out.
+    tapped(12 + 12 + 8, 8 + 38 + 8 + 19)
+    discard settle()
+    discard draw(scene, config, "search-field")
+    check keyboardShown("scene-store")
+    check problems.len == 0
+
   test "e-paper is not offered the scenes that move, and fetches its own page":
     problems = @[]
     discard settle() # what the last test left
@@ -658,3 +727,62 @@ suite "the Scene store scene":
     check scene.state{"spot"}{"page"}.getInt() == 2
     check "page=2" in fetched[^1]
     check problems.len == 0
+
+  test "the plane's updates: an entry at the top, Update on each, Update all, one only the owner may take":
+    problems = @[]
+    realStore = true
+    defer:
+      realStore = false
+      facts.delete("updates")
+      facts["error"] = %""
+      facts["done"] = %""
+      facts["busy"] = %""
+    discard settle()
+    facts["installed"] = %*[]
+    facts["previewOnly"] = %false
+    facts["updates"] = %*[
+      {"store": "00000001-0000-4000-8000-000000000001", "name": "Rain radar", "from": 2, "to": 4},
+      {"store": "00000002-0000-4000-8000-000000000002", "name": "Moon phases", "from": 1, "to": 3},
+      {"store": "00000003-0000-4000-8000-000000000003", "name": "Terminal", "from": 1, "to": 2, "owner": true}]
+    for (name, device, size) in [("color", "framebuffer", (800, 480)), ("paper", "waveshare.EPD_7in5_V2", (800, 480)),
+        ("square", "framebuffer", (480, 480))]:
+      let config = frame(size[0], size[1], device)
+      let scene = opened(config, "updates-front-" & name, %*{})[0]
+      # The first row of the categories (side panel) or of the front (narrow).
+      if size[0] >= 600:
+        scene.tap(SideX, SideRow1)
+      else:
+        scene.tap(120, 120)
+      discard draw(scene, config, "updates-" & name)
+      check scene.state{"spot"}{"cat"}.getStr() == "updates"
+      # Update all, and Update on each the frame may take (not the owner's).
+      var actions: seq[string]
+      for y in countup(BelowHeader, size[1] - 10, 8):
+        for x in countup(size[0] div 2, size[0] - 10, 16):
+          asked = @[]
+          scene.tap(x, y)
+          for (_, action, args) in asked:
+            let entry = action & ":" & args{"store"}.getStr()
+            if entry notin actions: actions.add entry
+      checkpoint name & ": " & $actions
+      check "updateAll:" in actions
+      check "update:00000001-0000-4000-8000-000000000001" in actions
+      check "update:00000002-0000-4000-8000-000000000002" in actions
+      check "update:00000003-0000-4000-8000-000000000003" notin actions
+      facts["busy"] = %"updateAll"
+      discard draw(scene, config, "updates-busy-" & name)
+      facts["busy"] = %""
+      facts["done"] = %"updateAll"
+      let left = facts["updates"]
+      facts["updates"] = %*[left[2]]
+      discard draw(scene, config, "updates-done-" & name)
+      facts["updates"] = left
+      facts["done"] = %""
+    # With no plane there is nothing to list, and a spot on Updates goes back.
+    facts["removeAny"] = %true
+    let config = frame(800, 480)
+    let scene = opened(config, "updates-no-plane", %*{"cat": "updates"})[0]
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    facts["removeAny"] = %false
+    check problems.len == 0
+    if problems.len > 0: echo problems

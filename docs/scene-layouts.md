@@ -169,6 +169,37 @@ the keyboard on the screen) in its look: its state's `theme`
 (`docs/jsx-ui.md` "Themes"). The samples set it from their "Look of the settings
 pages" field, High contrast among the choices.
 
+## Full screen
+
+A scene can ask the layout for the whole panel: a book, a page of a PDF, a photo
+want no bar around them. The scene says it, the person at the frame decides,
+and the layout gives it:
+
+- **The scene** sets `settings.fullScreen: true` (the editor's "Full screen" in
+  the scene's settings), or declares a public `boolean` field with
+  `role: "fullScreen"` whose value then decides, over the setting. The field is
+  how people choose on the frame: it is one of the scene's settings there (the
+  swipe down, the gear), in the SPA's and the iOS app's scene settings, and a
+  `setSceneState` like any field. The Books and PDF viewer samples carry one,
+  "Full screen", on by default.
+- **The runtime** reads it on every render pass of the frame's scene
+  (`full_screen.nim` `sceneWantsFullScreen`, from the interpreter where it reads
+  `typing`: the same code on a Pi, an ESP32 and in the browser), and when the
+  answer changes it marks the layout due, so a change in the scene's settings
+  shows on the next render, no restart. Nothing new goes to a device or into an
+  ESP32's scene index: the field and the setting are the scene's own.
+- **The layout** hears `app.frame.fullScreen` (true, else undefined) and gives
+  the panel by returning a bare `<yield />`, as it does for the built-in scenes
+  and while someone types. It is a request, never forced: the reTerminal
+  Sticky layout and the Top bar, Bottom bar, Side rail and E-reader layouts
+  honor it; a desktop of windows and a frame-as-picture layout (Polaroid,
+  Gallery wall) keep their look. On a runtime from before (2026.11.14 and
+  older) the key is undefined and every layout keeps its bar.
+
+The Sticky's header is the other half of the same idea, inside one layout: big
+over the scene list (its home screen), a thin bar over a scene, none over a
+scene that asks for the whole glass.
+
 ## How it works
 
 `layout: {sceneId, state}` sits beside `nodes` on the installed scene. The first
@@ -706,20 +737,39 @@ on e-paper the chrome never wakes the frame sooner than its scene would
 (`scene_rhythm.nim`).
 
 - **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
-  upright, its panel turned 270, with the AI, UP and DOWN keys on its right
-  edge. The scene gets the whole glass. When the scene list is open (a swipe up,
-  or AI pressed twice: the layout's own binding, while the frame's map leaves
-  that free), the layout turns it into a home screen. That screen has the time
-  and the date, the battery and the signal, and under the list how to get
-  around, a line each, read off the frame's event map: what the Talk key (AI on the case) does (a press,
-  twice, held), what UP and DOWN do (in the list they move; held, the map's
-  scene back and on) and the swipes. That is the one place the layout teaches
+  upright, its panel turned 270, with three keys on its right edge: Action on top
+  (Seeed prints AI on it, and `AI` stays its label in event maps, NVS and the
+  fixtures), then UP and DOWN. Its presses, in the help's words: once: go (the
+  scene's press, its `primary` role from the contract's `buttons.roleByLabel`:
+  what is picked opens), twice: back, thrice: home (the scene list), held:
+  talk (the board's preset map). People are told "Action" everywhere a key is named for them: the
+  layout's help, and the SPA's and the iOS app's button rows (`keyTitle`,
+  pinned by `docs/button-map-fixtures.json`).
+  **One header that shrinks.** Over every scene is a thin bar (6.5 units):
+  the time and the short date on the left (a tap: the scene list), the Wi-Fi
+  signal and the battery on the right (a tap: the frame's page), a 2 px rule
+  under it, one ink and no greys, so it stays crisp on the black-and-white
+  panel. When the scene list is open (a swipe up, Action pressed thrice, or
+  twice where the frame's map leaves that free: the layout's own binding), the
+  same header is big: the layout turns the list into a home screen with the
+  time and the date large, the battery and the signal, and under the list how
+  to get around, a line each, read off the frame's event map: what Action does (once,
+  twice, thrice, held: `once: go · twice: back · thrice: home · hold: talk`), what UP and
+  DOWN do (in the list they move; held, the map's scene back and on) and the
+  swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
   nobody used it (removed 2026-11-23; an install that chose it gets the whole
-  glass). AI's `primary` role is the contract's (`buttons.roleByLabel`).
-  "Around the scene" also offers a status bar. A press of AI that the frame's
-  map leaves to the scene also draws the picture again (`render`), so the
-  help calls it refresh.
+  glass, as "Around the scene: Nothing" does).
+  The signal is a fan of four (the dot and three arcs, the strength solid and
+  the rest a hairline) and the battery its level and percentage, each only
+  where the frame says it (`app.frame.wifiRssi`, `app.frame.batteryPercent`:
+  an ESP32; none in the preview or on a Pi). The bar's clock asks for the next
+  run when the minute turns (`frameos.setNextSleep`), and on e-paper that
+  never wakes the panel: the chrome is drawn on the scene's own passes (the
+  rule above), so the time shown is when the picture was last drawn, and a
+  scene that draws more often than once a minute brings it up to date within
+  a pass, in the same refresh. A press of Action that the frame's
+  map leaves to the scene also draws the picture again (`render`).
 - **`reTerminal`** (`layout-reterminal`), for the E1001, E1002, E1003 and
   E1004, the model read off the panel (size and colour) or set. A bar along
   the edge with the keys holds the scene's name, the signal, the battery and
@@ -746,12 +796,15 @@ Both are on the store's Device layouts shelf (`settings.devices` names the
 boards), and both are set up through their fields, on the install or from the
 frame page's gear: whether the signal, the battery and the time show (24 or 12
 hours, or none), whether the small hold words and the help lines do (the
-E-series' hint under the name; the Sticky's date and its help under the list),
-whether the Refresh key or AI draws the picture again when pressed (off: the
+E-series' hint under the name; the Sticky's date, in its bar and on its home
+screen, and its help under the list), the Sticky's bar or nothing around a scene,
+whether the Refresh key or Action draws the picture again when pressed (off: the
 press is the scene's alone, and its cap says "To scene") and opens the scene
 list when pressed twice, white on black or black on white, and the text size
 (0.85, 1 or 1.2 times the unit, a hundredth of the shorter edge). A switch is
-on until it is turned off, so an install from before keeps its look.
+on until it is turned off, so an install from before keeps its look; the
+Sticky's bar is the one new look an install gets without asking (it was
+"Nothing" by default until 2026-11-24), and "Nothing" takes it off.
 
 The pictures in their pull request were made with
 `frameos/tools/wasm_layout_shots.mjs`: the wasm runtime run as each board

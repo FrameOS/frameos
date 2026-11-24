@@ -118,7 +118,11 @@ def test_quick_pictures_go_up_the_fast_way_and_a_white_tile_owes_nothing():
     assert "fos_input_hold_engaged(&s_input_hold) ||" in render
     update = render.index("fos_display_update(buf, buf_len, strcmp(")
     assert render.index("bool fast =") < update < render.index("s_last_picture_us = picture_us")
-    assert "fos_display_update(buf, len, true, false, &partial)" in functions["settle_panel"]
+    # The settle goes up the slow way; the follow-up of tiles a render's box
+    # missed (fos_display_followup_due) in the tap's own.
+    assert "fos_display_update(buf, len, true, fast, &partial)" in functions["settle_panel"]
+    assert "fos_display_settle_due(esp_timer_get_time())) {\n                settle_panel(false);" in client
+    assert "fos_display_followup_due()) settle_panel(true);" in client
     driver = _functions(SOURCE.read_text())
     assert "set_owed(&rects[i], !plain[i])" in driver["fos_it8951_10in3_partial_show"]
     assert "memchr(s_tiles->owed, 1, sizeof(s_tiles->owed))" in driver["set_owed"]

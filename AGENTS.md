@@ -257,6 +257,12 @@
   icon's `keep_text`); the desktops trim it and group by the text itself
   (`grouped`), and a store version whose scene names a store title is filed
   under it. A new repo sample names its category.
+- `settings.opens` is the file types a scene opens, their extensions as text
+  ("pdf", "txt md json"), listed the same way (`opens`; an ESP32's index keeps
+  128 bytes or fewer). The Files app sends such a file to the first scene that
+  names its kind as `setCurrentScene {sceneId, state: {file: "<storage>:<path>"}}`:
+  a scene that says `opens` has the public field `file` and sets it back to
+  "" once open (docs/scene-guide.md, docs/scene-store.md "The Files app").
 
 ## Scene settings on the frame: `docs/scene-settings.md`
 
@@ -280,9 +286,16 @@
   `main/fos_frame_settings.c` (via `embedded_runtime.nim`) and the Pi's
   `frameos/frame_settings_linux.nim` (portal Wi-Fi code on its own thread).
   Words go in the scene, never in a host. Its buttons send the contract's
-  device commands from the origin `panel`. A touch LCD ESP32 (`touch_setup` in
-  `main.c`) boots without waiting for Wi-Fi and never opens the hotspot: the
-  page is where it joins. **No plane is ever told the Wi-Fi network** (a
+  device commands from the origin `panel`. A touch frame boots without
+  waiting for its network and never opens a hotspot in its scene's place: the
+  page is where it joins (doc section "A boot that does not wait for the
+  network"). An ESP32's rule is `fos_wake_wifi_plan` (`fos_wake.c`,
+  host-tested): the LCDs and the fast e-paper of the Sticky and E1003 join
+  behind the scene, a sleeping e-paper board's timer wake holds its one render
+  for the join until a touch or 45 s, and one with no network saved and no
+  scene opens on the page. A Pi's is `boot_network.nim`: a HyperPixel checks
+  the network behind its scene, unless its frame says `networkCheckOnTouch`.
+  **No plane is ever told the Wi-Fi network** (a
   backend learns the address alone); rotation and scale set there are ADOPTED
   by the plane: the cloud mirror follows `hardware.rotate` / `renderScale`,
   a backend the `settings:frame` log line (`frame_settings_adopt.py`). The
@@ -389,9 +402,10 @@
 
 - Flash is the budget (the 8 MB layout's 3520 KB OTA slot), and every cut is
   in that doc with what it measured: read it before proposing one, and add
-  to it. Two decisions stand: QuickJS keeps its Unicode tables, and a Defect
-  stays catchable (no `--panics:on`): with the desktops a failed node must
-  not take the other windows with it.
+  to it. Three decisions stand: QuickJS keeps its Unicode tables and its
+  built-ins (Atomics, Proxy, the ES2025 additions: measured 2026-11-24 and
+  kept), and a Defect stays catchable (no `--panics:on`): with the desktops
+  a failed node must not take the other windows with it.
 - **Where an object stands is `embedded/esp32/link_order.txt`** (S3): callers
   near what they call, because a `CALL8` is 3 bytes and reaches 512 KB and a
   longer call is 6. A new module needs no line (the file's `*` stands for
@@ -405,10 +419,25 @@
   are the frame rate keep the assembler's (`FRAMEOS_NIM_HOT_MODULES`,
   `quickjs_hot.c`). A module that becomes hot goes on that list, and the PR
   says what it cost.
-- `build_nim.sh` folds what Nim writes once per C file: inline helpers
-  (`fold_nim_inlines.py`) and string literals (`fold_nim_strings.py`). The
-  same shape of waste elsewhere (a hook or a generic that is byte for byte
-  another's) is counted in the doc and not folded yet.
+- `build_nim.sh` drops the error check Nim writes after a call that cannot
+  raise (`drop_nim_dead_checks.py`: a proc that reaches a raise, an indirect
+  call or unknown C is never clean) and folds what Nim writes once per C
+  file: inline helpers (`fold_nim_inlines.py`) and string literals
+  (`fold_nim_strings.py`). The archive's byte-identical functions (hooks of
+  same-shaped types, generics per module) fold after it is made
+  (`fold_identical_code.py`, the hot modules kept), and the vendored e-paper
+  drivers' identical helpers at the copy step (`fold_panel_helpers.py`).
+  A function whose address is compared, or that something outside the
+  archive names, must stay out of the fold: the tool refuses any use that is
+  not a call or a Nim type descriptor's.
+- newlib's formatter and scanner are not in the image: the `printf` family
+  is `fos_printf.c` (doubles through QuickJS's `js_dtoa`) and `sscanf` /
+  `siscanf` are `fos_sscanf.c`, both `--wrap`s, both byte for byte newlib's
+  (`test_fos_printf.c`, `test_fos_sscanf.c`; newlib under QEMU is the
+  oracle, doc "Tools for the next pass"). A new conversion goes in them and
+  their tests. The shell's C calls ROM and IRAM through flash veneers
+  (`main/fos_veneers.h`): a file with `IRAM_ATTR` code stays out of it
+  (`test_esp32_veneers.py`).
 
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
@@ -482,7 +511,7 @@
 
 - Holding the voice key — the key whose long press the frame's event map
   binds to `voiceChat`: REFRESH on the reTerminal E1001/E1002/E1003 presets
-  (PDM microphone; the E1004 has none), AI on the reTerminal Sticky (PDM
+  (PDM microphone; the E1004 has none), AI (the Action key) on the reTerminal Sticky (PDM
   microphone on the S3's USB pads), KEY1 / BOOT on the Waveshare PhotoPainter
   / 13.3E6 (an ES7210 codec microphone, `fos_codec.c`, whose ES8311 speaker
   plays the buzzer's notes) — streams speech to the frame's control
@@ -715,6 +744,11 @@
   the field's UI past the layout (`keysTake`), so the focus and the windows stay.
   Its UI lays it out (`layoutUiDocked`), the interpreter draws it last and
   forgets the canvas when it comes, goes or moves.
+  A scene asks its layout for the whole panel (a reader) with a public boolean
+  field of `role: "fullScreen"`, else `settings.fullScreen` (`full_screen.nim`,
+  `utils/fullScreen.ts`, doc section "Full screen"); the interpreter reads it
+  each render pass where it reads `typing`, the layout hears
+  `app.frame.fullScreen` and decides (a bare `<yield />`). Never a host's.
 - `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
   (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
   `hole` set): `renderSvgAround` draws the chrome, each scene goes through
@@ -807,6 +841,11 @@
   pixie's colour glyph cache (`colorGlyphCacheBudget`), never the decode
   or the font. The glyph budget grows with the board's PSRAM
   (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
+  A frame gets more fonts by itself in the Fonts sample's "Get fonts"
+  (docs/esp32-fonts.md): `repo/fonts/catalog.txt`, made by
+  `frameos/tools/generate_font_catalog.py` (every file checked there, never
+  converted on a frame), downloaded straight from where the files are in
+  ranges by the scene's own JS, no firmware for it and no plane in the way.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
@@ -912,7 +951,12 @@
   (`fos_display_park`). The IT8951 (the reTerminal E1003) keeps the picture
   itself: `it8951.c` hashes tiles of the packed buffer and the table's
   `changed` / `clean` / `owed` replace the copy, because 1.25 MiB more does
-  not fit an 8 MB board. Only GC16 (greys) and DU (pure black and white) draw
+  not fit an 8 MB board. Before a tap's upload it hashes only the render's box
+  (`fos_display_hint_damage`, from `frameos_nim_render_damage`) and the whole
+  picture once the waveform runs: a new way onto the glass or into the canvas
+  that is not the render's own update goes through `fos_display_blit` /
+  `fos_display_quick_update` or calls `fos_display_hint_forget`, or its pixels
+  go up a waveform late (logged `changed outside the render's box`). Only GC16 (greys) and DU (pure black and white) draw
   on its waveform file: while someone taps, and for pictures coming quickly
   (`fos_pictures_fast`: an animation, a clock's seconds), it is one DU over
   all that changed, greys as a halftone, and GC16 once they stop
@@ -920,7 +964,10 @@
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh
-  that only clears ghosts waits for the idle frame. Better still, a chore leaves
+  that only clears ghosts waits for the idle frame. Whether the ghosts are due
+  one is the glass's wear, the pixels flipped per 16x16 tile since the last full
+  refresh (`fos_ghost_add`, doc section "The ghosts, counted where they are"),
+  never a count of updates or a timer. Better still, a chore leaves
   the render task: scene state is written by `scene_state_writer_task`
   (`main.c`), a frame that stays awake does its backend round trips (logs,
   picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
@@ -941,6 +988,17 @@
   panel chip select written behind `DEV_Digital_Write` would let a card clock
   the panel (`test_esp32_bus_share.py` reads for it). A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
+- **A press shows at once** (`docs/realtime-rendering.md` of that name,
+  `fos_press.h`): an LCD's touch task shades the element under a finger (the
+  press map's `taken` 3, `lcd_press.c`) in the buffer on the glass at its
+  first report, before any render, under the loading mark's lock; the next
+  present puts it away. E-paper lights the LED until the answer's waveform
+  has run and, on a scene whose taps are slow, inks the box with one DU
+  (`fos_display_glass_rect`: its tiles `stale` until an update sends the
+  picture's own). A new writer into the scanned LCD buffer takes that lock and
+  moves the buffer's count; one off the render task leaves it moved
+  (`svg_frames.nim` checks the count after a copy). `touch tap` on the console
+  is a finger through the touch task, for the bench.
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,

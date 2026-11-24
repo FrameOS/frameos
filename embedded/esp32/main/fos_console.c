@@ -34,6 +34,7 @@
 #include "fos_charger.h"
 #include "fos_codec.h"
 #include "fos_gauge.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "lcd_st7701s_rgb.h"
 #include "esp_private/esp_clk.h"
@@ -254,6 +255,15 @@ static int cmd_status(int argc, char **argv)
         printf("\n");
     } else {
         printf("buttons:     (none configured)\n");
+    }
+    {
+        /* The board's own keys on its IO expander (fos_board_expander_keys). */
+        fos_board_key_t keys[4];
+        size_t key_count = fos_board_expander_keys(config->hardware_preset, keys, 4);
+        for (size_t i = 0; i < key_count; i++) {
+            printf("%s%s (IO expander P%d)", i ? ", " : "board_keys:  ", keys[i].label, keys[i].pin);
+        }
+        if (key_count) printf("\n");
     }
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
@@ -565,7 +575,8 @@ static int cmd_set(int argc, char **argv)
         strlcat(value, argv[i], sizeof(value));
     }
 
-    if (strcmp(key, "wifi_ssid") == 0) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));
+    /* `-` forgets the network, as time_zone's does: a frame with none. */
+    if (strcmp(key, "wifi_ssid") == 0) strlcpy(config->wifi_ssid, strcmp(value, "-") == 0 ? "" : value, sizeof(config->wifi_ssid));
     else if (strcmp(key, "wifi_pass") == 0) strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
     else if (strcmp(key, "backend") == 0) strlcpy(config->backend_url, value, sizeof(config->backend_url));
     else if (strcmp(key, "api_key") == 0) strlcpy(config->api_key, value, sizeof(config->api_key));
@@ -743,6 +754,17 @@ static int cmd_set(int argc, char **argv)
              * (fos_board_touch_pins); the microSD slot on its own SPI bus
              * (fos_board_sd_pins). USB is a CH340 on UART0. */
             { "sunton_esp32_8048s070", "LCD_EK9716_800x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "0:BOOT",
+              -1, 2.0f, -1, 0, 0 },
+            /* Waveshare ESP32-S3-Touch-AMOLED-1.75 (and its -B, the same
+             * board in a case; ESP32-S3R8, 16 MB flash): the round 466x466
+             * CO5300 AMOLED on QSPI, its wiring the driver's own board
+             * table (lcd_qspi_amoled.c), so no EPD pins; BOOT on GPIO0 and
+             * the PWR key on the IO expander's P4 (fos_board_expander_keys).
+             * Touch, the codec, the clock, the SD slot and the bus come
+             * from fos_board.c; the battery is the AXP2101's gauge. */
+            { "waveshare_esp32_s3_touch_amoled_1_75", "AMOLED_CO5300_466x466",
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
               "0:BOOT",
               -1, 2.0f, -1, 0, 0 },
@@ -2085,6 +2107,24 @@ static void print_utc(const char *label, time_t t)
 /* `i2c [sync]`: probe the configured buses again and say what answered,
  * with the clock's and the charger's readings. `sync` writes the system
  * time to the clock first (what an SNTP sync does) and says how it went. */
+static int cmd_imu(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    int x = 0, y = 0, z = 0;
+    if (!fos_imu_present()) {
+        printf("imu: none\n");
+        return 1;
+    }
+    esp_err_t err = fos_imu_read(&x, &y, &z);
+    if (err != ESP_OK) {
+        printf("imu: read failed: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    printf("imu: qmi8658 x=%d y=%d z=%d mg\n", x, y, z);
+    return 0;
+}
+
 static int cmd_i2c(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -2140,8 +2180,26 @@ static int cmd_i2c(int argc, char **argv)
  * bench check that the GT911 is wired and which way its axes run. */
 static int cmd_touch(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    if (argc >= 4 && strcmp(argv[1], "tap") == 0) {
+        /* `touch tap <x> <y> [ms]`: a finger at that panel pixel, through the
+         * touch task as the glass's own would be (the bench's press timing),
+         * and when it was seen and lit. */
+        int hold_ms = argc >= 5 ? atoi(argv[4]) : 80;
+        esp_err_t err = fos_touch_inject(atoi(argv[2]), atoi(argv[3]), hold_ms);
+        if (err != ESP_OK) {
+            printf("touch tap: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        int64_t start_us = esp_timer_get_time(), seen_us = 0, lit_us = 0;
+        while (esp_timer_get_time() - start_us < (int64_t)hold_ms * 1000 + 100000) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            fos_touch_press_times(&seen_us, &lit_us);
+            if (lit_us) break;
+        }
+        printf("touch tap: seen %lld us, lit %lld us after the touch\n",
+               seen_us ? (long long)(seen_us - start_us) : -1LL, lit_us ? (long long)(lit_us - start_us) : -1LL);
+        return 0;
+    }
     fos_touch_print_status();
     return 0;
 }
@@ -2258,8 +2316,9 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
+        {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
-        {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
+        {.command = "touch", .help = "touch [tap <x> <y> [ms]] — the touch panel's controller and its last point; a finger made up", .func = cmd_touch},
         {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
@@ -2408,15 +2467,19 @@ static void console_poll_usb_serial_jtag(void)
 static void fos_console_task(void *arg)
 {
     (void)arg;
-    static console_line_state_t states[] = {
+    static const fos_console_channel_t channels[] = {
 #if FOS_CONSOLE_HAS_UART
-        {.channel = FOS_CONSOLE_CHANNEL_UART},
+        FOS_CONSOLE_CHANNEL_UART,
 #endif
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-        {.channel = FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG},
+        FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG,
 #endif
     };
+    /* Zeroed (.bss), the channel set here: an initialised one is a kilobyte
+     * of line buffers stored in the image. */
+    static console_line_state_t states[sizeof(channels) / sizeof(channels[0])];
     const size_t count = sizeof(states) / sizeof(states[0]);
+    for (size_t i = 0; i < count; i++) states[i].channel = channels[i];
 
     console_prompt();
     while (true) {

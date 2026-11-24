@@ -11,6 +11,7 @@ import frameos/utils/font
 import system/sceneSwitcher/scene as switcher
 import system/sceneSettings/scene as settings
 import frameos/layout_choice
+import frameos/scene_store_hooks
 import frameos/ui/theme
 from frameos/events import settingsWindowId
 
@@ -420,6 +421,45 @@ block the_page_follows_the_frames_scale:
     doAssert abs(uiTarget(SceneSettingsId, 1, create = false).scale - drawn) < 0.01,
       $asked & " drew at " & $uiTarget(SceneSettingsId, 1, create = false).scale
     scene.send("close", %*{})
+
+block a_round_panel_has_the_frame_page_inside_its_circle:
+  # The Waveshare 1.75" AMOLED's frame page (where a touch board joins
+  # Wi-Fi): the square panel's page in the square inside the circle, every
+  # region on the glass, and the form's gear on the way there.
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "actions": ["restart"],
+      "wifi": {"ssid": "home", "connected": true, "networks": []}}
+  let roundConfig = FrameConfig(width: 480, height: 480, device: "amoled.co5300_466x466",
+    scalingMode: "cover", saveAssets: %*false)
+  proc allOnTheGlass(where: string) =
+    var regions = 0
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.visible[0] >= r.visible[2] or r.visible[1] >= r.visible[3]:
+        continue
+      inc regions
+      for (x, y) in [(r.visible[0], r.visible[1]), (r.visible[2] - 1, r.visible[3] - 1)]:
+        doAssert insideRound(480, 480, int(x), int(y)), where & ": a region reaches off the glass at " & $(x, y) & " " & $r
+    doAssert regions > 0, where & ": nothing to press"
+  let page = settings.exportedScene.init(SceneSettingsId.SceneId, roundConfig, logger, %*{})
+  page.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": ""}})
+  doAssert page.state["page"].getStr() == "frame"
+  var image = page.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-round-frame.png")
+  doAssert page.state["page"].getStr() == "frame", "a round panel kept its frame page"
+  allOnTheGlass("the frame page")
+  # A scene's form on the same panel: the gear is there.
+  let form = settings.exportedScene.init(SceneSettingsId.SceneId, roundConfig, logger, %*{})
+  form.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string", "placeholder": "", "secret": false}],
+    "values": {"city": "Oslo"}}})
+  image = form.draw()
+  allOnTheGlass("the form")
+  # The gear's handler is 2 (scene.nim HGear): it is there, and opens the page.
+  form.tap(regionWith(2))
+  discard form.draw()
+  doAssert form.state["page"].getStr() == "frame", "the round form's gear opens the frame page"
+  allOnTheGlass("the frame page from the form")
+  frameSettingsRead = nil
 
 block it_opens_on_the_frame_page_with_no_scene_showing:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
@@ -877,6 +917,52 @@ block the_frame_page_sets_the_clock_and_offers_an_update:
   frameSettingsAction = nil
   echo "clock and update ok"
 
+block the_frame_page_updates_the_store_scenes:
+  # The store scenes with a newer version, as the scene store's host has them
+  # from the control plane (docs/scene-store.md "What has updates"): a line,
+  # and Update scenes asks twice and hands the host `updateAll`.
+  var
+    storeFacts = %*{"busy": "", "updates": [
+      {"store": "a", "name": "Rain radar", "from": 1, "to": 2},
+      {"store": "b", "name": "Terminal", "from": 1, "to": 2, "owner": true}]}
+    storeAsked: seq[(string, string)]
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    %*{"rotate": 0, "renderScale": 0, "version": "2026.11.5", "updateState": 2}
+  sceneStoreRead = proc (asker: string): string {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: $storeFacts
+  sceneStoreAction = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: storeAsked.add((asker, action))
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  discard scene.draw()
+  scene.scrollTo(2000)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "frame-scene-updates.png")
+  scene.tap(regionWith(20007))
+  doAssert storeAsked.len == 0, "it asks twice"
+  discard scene.draw()
+  scene.scrollTo(2000)
+  image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "frame-scene-updates-again.png")
+  scene.tap(regionWith(20007))
+  doAssert storeAsked == @[(SceneSettingsId, "updateAll")], $storeAsked
+  # While they update, and with only the owner's left, nothing to press.
+  storeFacts["busy"] = %"updateAll"
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  storeFacts["busy"] = %""
+  storeFacts["updates"] = %*[storeFacts["updates"][1]]
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  # No plane (no `updates`): no line, no button.
+  storeFacts.delete("updates")
+  discard scene.draw()
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == 20007 + 1)
+  sceneStoreRead = nil
+  sceneStoreAction = nil
+  frameSettingsRead = nil
+  echo "scene updates ok"
+
 block the_frame_page_offers_tap_and_click_sounds:
   var
     applied: seq[JsonNode]
@@ -929,6 +1015,62 @@ block the_frame_page_offers_tap_and_click_sounds:
   frameSettingsRead = nil
   frameSettingsApply = nil
   echo "tap and click sounds ok"
+
+block the_frame_page_offers_how_long_a_tap_keeps_it_awake:
+  var
+    applied: seq[JsonNode]
+    awake = %300
+  frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}:
+      result = %*{"wifi": {"state": "connected", "ssid": "Home", "rssi": -61, "ip": "192.168.1.20",
+        "networks": ["Home"], "scanning": false, "password": true},
+        "rotate": 0, "renderScale": 0, "version": "2026.11.14"}
+      if not awake.isNil:
+        result["awakeAfterInputSeconds"] = awake
+  frameSettingsApply = proc (values: JsonNode) {.nimcall, gcsafe, raises: [].} =
+    {.cast(gcsafe).}: applied.add values
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather", "opened": "frame"}})
+  proc boxes(): seq[UiRegion] = uiTarget(SceneSettingsId, 1, create = false).regions.filterIt(it.field == 4)
+  proc optionShown(i: int): bool =
+    uiTarget(SceneSettingsId, 1, create = false).regions.anyIt(it.handlers[ueClick] == OptionBase + i + 1)
+  proc openLast() =
+    discard scene.draw()
+    scene.scrollToEnd()
+    discard scene.draw()
+    scene.tap(boxes()[^1])
+    discard scene.draw()
+  # A frame that deep-sleeps: the last select is the time awake, its five
+  # choices (5 minutes held: no sixth).
+  discard scene.draw()
+  scene.scrollToEnd()
+  if previews.len > 0: scene.draw().writeFile(previews / "frame-awake.png")
+  openLast()
+  if previews.len > 0: scene.draw().writeFile(previews / "frame-awake-open.png")
+  doAssert optionShown(4) and not optionShown(5), "five choices for 300 s"
+  scene.send("tap", tapAt(470, 5))
+  # A value of its own (45 s from the console) is a sixth.
+  awake = %45
+  openLast()
+  doAssert optionShown(5) and not optionShown(6), "45 s added as a sixth choice"
+  scene.send("tap", tapAt(470, 5))
+  # A frame that never sleeps has no such row: the last select is the
+  # scale's, seven or more.
+  awake = nil
+  openLast()
+  doAssert optionShown(6), "no time-awake select on a frame that does not sleep"
+  scene.send("tap", tapAt(470, 5))
+  awake = %300
+  # Sleep as soon as it can, the first choice, and Save hands the seconds over.
+  openLast()
+  scene.tap(regionWith(OptionBase + 0))
+  discard scene.draw()
+  scene.tap(regionWith(1))
+  doAssert applied.len == 1 and applied[0] == %*{"awakeAfterInputSeconds": 0}, $applied
+  scene.send("close", %*{})
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  echo "time awake after a tap ok"
 
 block a_layout_theme:
   # A layout's theme (ui/theme.nim, docs/jsx-ui.md "Themes"): the page in its

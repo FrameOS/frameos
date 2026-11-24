@@ -17,6 +17,7 @@
  *   down         [tone 14]
  *   up           [0.7 tone 14], every up: a tap's, a double press's, a long press's
  *   doublePress  its second down is [1.5 tone 14] instead of the down click
+ *   triplePress  its third down is [2 tone 14] (a key the frame's map binds three times)
  *   held         [tone 8, 0.5 tone 20] at every whole longPressMs the key is
  *                down (1 s, 2 s, ...); the scene's `longPress` comes once, with the up
  *   press        nothing of its own: its clicks were the down and the up
@@ -56,6 +57,13 @@ void fos_buzzer_click_up(void);
 /* The second down of a double press, in place of the down click: the same
  * click at 1.5 of the press pitch, so a double tap is heard as one. */
 void fos_buzzer_double_down(void);
+/* The third down of a triple press, in place of the down click: an octave
+ * over the press pitch, one step past the double's. */
+void fos_buzzer_triple_down(void);
+/* An edge swipe the touch task saw become one: four clicks stepping up
+ * (`rising`: a swipe up or sideways) or down (a swipe down from the top),
+ * 14 ms each, so a swipe is heard apart from a press's two. */
+void fos_buzzer_swipe(bool rising);
 /* A key held: at every whole longPressMs it stays down, a short note falling
  * to a longer low one. */
 void fos_buzzer_long_press(void);

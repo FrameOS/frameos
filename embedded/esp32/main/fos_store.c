@@ -20,6 +20,10 @@
  *   scenes.json is split into its scenes, one file each (fos_scenes_put).
  * - What came from the store is read off each scene's file once (its
  *   `origin`), kept by the content hash the index has for it.
+ * - Which of them the store has a newer version of is the plane's to say
+ *   (`updates`, its answer kept as it came): asked with each re-read (the
+ *   scenes changed), after a change asked here, and when a read finds it five
+ *   minutes old. A frame with no plane lists none.
  */
 #include "fos_store.h"
 
@@ -30,10 +34,14 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+
+#include "frameos_nim.h"
 
 #include "fos_backend_http.h"
 #include "fos_client.h"
@@ -49,7 +57,8 @@
 static const char *TAG = "fos_store";
 
 #define DEFAULT_STORE_URL "https://cloud.frameos.net"
-#define ANSWER_MAX 2048
+#define ANSWER_MAX 4096
+#define UPDATES_FRESH_US (5LL * 60 * 1000 * 1000)
 /* A store scene's scenes.json: its scenes, each no more than a slot holds. */
 #define SCENES_MAX (2 * FOS_SCENE_STORE_MAX_BYTES)
 #define SPLIT_MAX 8
@@ -81,6 +90,8 @@ typedef struct {
     origin_t origins[FOS_SCENE_STORE_SCENES];
     int origin_count;
     uint32_t origins_generation;
+    char *updates; /* the plane's `updates` list as it came, NULL: not known */
+    int64_t updates_at; /* when it was asked for, 0: to ask */
     /* The work asked for, until the task takes it. */
     char job[WORD_LEN];
     char job_store[STORE_ID_LEN];
@@ -92,6 +103,7 @@ typedef struct {
 
 static SemaphoreHandle_t s_lock;
 static bool s_running;
+static bool s_updates_news; /* under s_lock: the plane's updates changed */
 static store_t *S;
 
 static void lock(void) { xSemaphoreTake(s_lock, portMAX_DELAY); }
@@ -166,10 +178,18 @@ char *fos_store_json(const char *asker)
         return NULL;
     }
     snprintf(S->asker, sizeof(S->asker), "%s", asker ? asker : "");
+    const fos_config_t *config = fos_config();
+    bool plane = config->backend_url[0] || fos_cloud_state() != FOS_CLOUD_NONE;
     /* What came from the store is read again once the scenes changed, off
-     * this task. */
-    if (S->origins_generation != fos_scenes_store_generation() && !s_running && !S->job[0]) start_job("scan");
-    out_t out = {.cap = 1024 + (size_t)S->origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
+     * this task, and the plane's updates now and then. */
+    int64_t now = esp_timer_get_time();
+    bool stale = plane && (S->updates_at == 0 || now - S->updates_at > UPDATES_FRESH_US);
+    if ((stale || S->origins_generation != fos_scenes_store_generation()) && !s_running && !S->job[0]) {
+        S->updates_at = now;
+        start_job("scan");
+    }
+    size_t updates_len = plane && S->updates ? strlen(S->updates) : 0;
+    out_t out = {.cap = 1024 + updates_len + (size_t)S->origin_count * (SCENE_ID_LEN + STORE_ID_LEN + 32)};
     out.buf = fos_big_malloc(out.cap);
     if (out.buf != NULL) {
         out.buf[0] = '\0';
@@ -182,9 +202,12 @@ char *fos_store_json(const char *asker)
         store_base(base, sizeof(base));
         put_pair(&out, "url", base);
         put_pair(&out, "version", esp_app_get_description()->version);
-        const fos_config_t *config = fos_config();
-        snprintf(line, sizeof(line), "\"removeAny\":%s,\"installed\":[",
-                 config->backend_url[0] || fos_cloud_state() != FOS_CLOUD_NONE ? "false" : "true");
+        if (updates_len) {
+            put(&out, "\"updates\":");
+            put(&out, S->updates);
+            put(&out, ",");
+        }
+        snprintf(line, sizeof(line), "\"removeAny\":%s,\"installed\":[", plane ? "false" : "true");
         put(&out, line);
         for (int i = 0; i < S->origin_count; i++) {
             put(&out, i ? ",{" : "{");
@@ -234,7 +257,7 @@ void fos_store_action(const char *asker, const char *action, const char *args_js
 {
     if (s_lock == NULL || action == NULL) return;
     cJSON *args = cJSON_Parse(args_json ? args_json : "{}");
-    static const char *const known[] = {"preview", "install", "update", "remove", "discard"};
+    static const char *const known[] = {"preview", "install", "update", "updateAll", "remove", "discard"};
     bool ok = false;
     for (size_t i = 0; i < sizeof(known) / sizeof(known[0]); i++) ok = ok || strcmp(action, known[i]) == 0;
     lock();
@@ -325,13 +348,34 @@ bool fos_store_plane(const char *route, char *url, size_t len, char *auth, size_
     return *pending;
 }
 
+/* A tap is worth a few tries while the plane is not reached: a frame in a
+ * hand loses its Wi-Fi for seconds at a time, and a backend on a laptop that
+ * has just woken takes a moment to answer (the reTerminal Sticky, 2026-11-23:
+ * every Install and Preview said the store did not answer). Only a request
+ * that never reached the plane goes again: one it may have taken (sent, and
+ * no answer came) is never asked twice. Three tries are about 20 s at most
+ * against a host that is not there (a 5 s connect each). */
+#define PLANE_TRIES 3
+#define PLANE_RETRY_MS 3000
+
+/* What the store says it could not do, on the frame's log: the plane's word
+ * or ours, and how the last try went. */
+static void log_refusal(const char *action, const char *error, int status, esp_err_t err, int tries)
+{
+    char line[192];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"sceneStore:error\",\"source\":\"esp32\",\"action\":\"%s\",\"error\":\"%s\","
+             "\"httpStatus\":%d,\"tries\":%d,\"espErrName\":\"%s\"}",
+             action, error, status, tries, err == ESP_OK ? "OK" : fos_http_err_name(err));
+    frameos_nim_log_hook(line);
+}
+
 /* Ask the plane. An error code for the page, NULL when it took it;
  * `status` gets its "status" (queued, up_to_date) and `scene_id` the
- * runtime id a preview shows. */
+ * runtime id a preview shows, and an answer's `updates` list is kept. */
 static const char *ask_plane(const char *url, const char *auth, bool backend, const char *action, const char *scene_id,
                              bool show, char *status, size_t status_len, char *shown, size_t shown_len)
 {
-    if (fos_wifi_state() != FOS_WIFI_CONNECTED) return "offline";
     cJSON *body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "action", action);
     cJSON_AddStringToObject(body, "scene_id", scene_id);
@@ -341,26 +385,66 @@ static const char *ask_plane(const char *url, const char *auth, bool backend, co
     if (text == NULL) return "no_room";
     fos_http_request_t req = {.url = url, .auth = auth, .body = text, .timeout_ms = 30000};
     fos_http_response_t res = {0};
-    esp_err_t err = fos_http_fetch(&req, ANSWER_MAX, &res);
+    esp_err_t err = ESP_FAIL;
+    bool online = false;
+    int tries = 0;
+    /* A read nobody tapped for is asked once. */
+    int most = strcmp(action, "updates") == 0 ? 1 : PLANE_TRIES;
+    while (tries < most) {
+        if (tries > 0) vTaskDelay(pdMS_TO_TICKS(PLANE_RETRY_MS));
+        tries++;
+        online = fos_wifi_state() == FOS_WIFI_CONNECTED;
+        if (!online) continue;
+        /* An error is a request the plane never took: no connection, or
+         * the body not sent whole. */
+        err = fos_http_fetch(&req, ANSWER_MAX, &res);
+        if (err == ESP_OK) break;
+    }
     cJSON_free(text);
     static char refused[WORD_LEN];
-    const char *error = err != ESP_OK || res.status == 0 ? "store_unavailable" : NULL;
+    /* No answer is the plane's silence, not the store's: a plane that could
+     * not reach the store says so itself (`store_unavailable`). */
+    const char *error = !online && err != ESP_OK         ? "offline"
+                        : err != ESP_OK || res.status <= 0 ? "plane_unavailable"
+                                                         : NULL;
     cJSON *answer = res.body ? cJSON_ParseWithLength(res.body, res.body_len) : NULL;
     if (error == NULL && res.status != 200) {
+        /* The plane's own word (its letters alone, as fos_code.c reads
+         * one), else one for its status: a 404 with no word of the plane's
+         * is a plane from before the route. */
         const cJSON *code = cJSON_GetObjectItem(answer, "error");
-        /* A 404 with no word of the plane's is a plane from before the route. */
-        snprintf(refused, sizeof(refused), "%s", cJSON_IsString(code) ? code->valuestring
-                                                 : res.status == 429 ? "rate_limited"
-                                                 : res.status == 404 ? "plane_update_required"
-                                                                     : "store_unavailable");
+        size_t n = 0;
+        for (const char *c = cJSON_IsString(code) ? code->valuestring : ""; *c && n < sizeof(refused) - 1; c++) {
+            if (isalnum((unsigned char)*c) || *c == '_') refused[n++] = *c;
+        }
+        refused[n] = '\0';
+        if (n == 0) {
+            snprintf(refused, sizeof(refused), "%s", res.status == 429   ? "rate_limited"
+                                                     : res.status == 404 ? "plane_update_required"
+                                                                         : "plane_unavailable");
+        }
         error = refused;
     }
+    if (error != NULL) log_refusal(action, error, res.status, err, tries);
     copy_arg(answer, "status", status, status_len);
     copy_arg(answer, "scene_id", shown, shown_len);
+    const cJSON *list = cJSON_GetObjectItem(answer, "updates");
+    char *updates = error == NULL && cJSON_IsArray(list) ? cJSON_PrintUnformatted(list) : NULL;
+    if (updates != NULL) {
+        lock();
+        if (S->updates == NULL || strcmp(S->updates, updates) != 0) {
+            s_updates_news = true;
+            cJSON_free(S->updates);
+            S->updates = updates;
+            updates = NULL;
+        }
+        unlock();
+        cJSON_free(updates);
+    }
     cJSON_Delete(answer);
     fos_http_response_free(&res);
     /* A backend queued what it did for the frame's next pull: pull it now. */
-    if (error == NULL && backend) fos_client_request_commands_sync();
+    if (error == NULL && backend && strcmp(action, "updates") != 0) fos_client_request_commands_sync();
     return error;
 }
 
@@ -492,10 +576,11 @@ static void run(const char *job)
         unlock();
     }
 
+    bool backend = false, pending = false;
+    char status[WORD_LEN] = "", shown[SCENE_ID_LEN] = "";
+    bool plane = fos_store_plane("/panel/scenes", url, sizeof(url), auth, sizeof(auth), &backend, &pending) && !pending;
     if (strcmp(job, "scan") != 0) {
-        bool backend = false, pending = false;
-        char status[WORD_LEN] = "", shown[SCENE_ID_LEN] = "";
-        if (fos_store_plane("/panel/scenes", url, sizeof(url), auth, sizeof(auth), &backend, &pending)) {
+        if (plane || pending) {
             /* The plane's: what it holds is the store scene's (a preview's
              * Discard goes back to the scene it covered). */
             error = pending ? "offline"
@@ -529,6 +614,20 @@ static void run(const char *job)
         unlock();
     }
     bool scan = strcmp(job, "scan") == 0;
+    /* The plane's updates: with a re-read, and after a change of its list. */
+    if (plane && (scan || (error == NULL && strcmp(job, "preview") != 0 && strcmp(job, "discard") != 0))) {
+        ask_plane(url, auth, backend, "updates", "", true, status, sizeof(status), shown, sizeof(shown));
+        lock();
+        changed = s_updates_news || changed;
+        s_updates_news = false;
+        S->updates_at = esp_timer_get_time();
+        unlock();
+    } else if (scan && pending) {
+        /* The cloud is still connecting: asked again in half a minute. */
+        lock();
+        S->updates_at = esp_timer_get_time() - UPDATES_FRESH_US + 30LL * 1000 * 1000;
+        unlock();
+    }
     if (scan || fos_scenes_store_generation() != S->origins_generation) changed = scan_origins() || changed;
     lock();
     /* A re-read is nobody's: what the page says, and a tap waiting behind
@@ -540,8 +639,9 @@ static void run(const char *job)
     }
     snprintf(asker, sizeof(asker), "%s", S->asker);
     unlock();
-    /* A re-read that found what the app shows already draws nothing. */
-    if ((!scan || changed) && fos_scenes_showing(asker)) fos_client_render_now();
+    /* A re-read that found what the app shows already draws nothing. The
+     * frame page shows the updates too (system/sceneSettings). */
+    if ((!scan || changed) && (fos_scenes_showing(asker) || fos_scenes_settings_shown())) fos_client_render_now();
 }
 
 /* On the request task (fos_js_io_run): the work asked for, until none is. */

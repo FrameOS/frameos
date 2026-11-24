@@ -16,6 +16,8 @@ from app.utils import embedded_commands
 
 RADAR = "0b1e8a52-6f0e-4a33-9f39-7a0d0b0b0a01"
 OTHER = "0b1e8a52-6f0e-4a33-9f39-7a0d0b0b0a02"
+THIRD = "0b1e8a52-6f0e-4a33-9f39-7a0d0b0b0a03"
+NAMES = {RADAR: "Rain radar", OTHER: "Terminal", THIRD: "Split"}
 
 
 def store_scene(store_id: str, version: int, ids=("radar-rt",), value_default="Brussels") -> list[dict]:
@@ -41,6 +43,13 @@ def store(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         parts = request.url.path.split("/")
+        if parts[3:5] == ["device", "scenes"]:
+            # The listing for frames: a scene's name and newest version.
+            listed = parts[5] if len(parts) > 5 else ""
+            if listed not in served:
+                return httpx.Response(404, json={"error": "scene_not_found"})
+            version = int(served[listed][0]["origin"]["version"])
+            return httpx.Response(200, json={"id": listed, "name": NAMES.get(listed, "Scene"), "version": version})
         scene_id = parts[4] if len(parts) > 4 else ""
         if scene_id not in served:
             return httpx.Response(404, json={"error": "scene_not_found"})
@@ -297,3 +306,101 @@ async def test_a_layout_is_tried_in_place_and_kept_around_every_scene(
     assert frame.scenes[0]["layout"] == {"sceneId": "bar-rt", "state": {}}
     assert "layout" not in frame.scenes[1]
     assert commands(db, frame, "set_current_scene")[-1].payload["scene_id"] == "clock-1"
+
+
+def asking_for(scenes: list[dict], permissions: list[str]) -> list[dict]:
+    """The scenes with a JS app whose config.json asks for `permissions`."""
+    config = json.dumps({"name": "t", "permissions": permissions})
+    for scene in scenes:
+        scene["apps"] = {"t": {"sources": {"config.json": config, "app.ts": "export function get() {}"}}}
+    return scenes
+
+
+@pytest.mark.asyncio
+async def test_updates_lists_what_is_newer_and_what_asks_for_more(async_client, no_auth_client, db, store):
+    frame = await panel_frame(async_client, db)
+    frame.scenes = [
+        *frame.scenes,
+        *store_scene(RADAR, 1),
+        *asking_for(store_scene(OTHER, 2, ids=("term-rt",)), []),
+        *store_scene(THIRD, 1, ids=("gone-rt",)),
+    ]
+    db.add(frame)
+    db.commit()
+    store[RADAR] = store_scene(RADAR, 3)
+    # A version that starts asking for the frame's settings.
+    store[OTHER] = asking_for(store_scene(OTHER, 4, ids=("term-rt",)), ["frame"])
+    # THIRD: the store offers it no more.
+
+    response = await ask(no_auth_client, frame, {"action": "updates"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ok": True,
+        "updates": [
+            {"store": RADAR, "name": "Rain radar", "from": 1, "to": 3},
+            {"store": OTHER, "name": "Terminal", "from": 2, "to": 4, "owner": True},
+        ],
+    }
+    # A read changes nothing.
+    db.refresh(frame)
+    assert [scene["origin"]["version"] for scene in frame.scenes[1:]] == ["1", "2", "1"]
+    assert commands(db, frame, "set_current_scene") == []
+
+    # The one that asks for more is the owner's to update.
+    widened = await ask(no_auth_client, frame, {"action": "update", "scene_id": OTHER})
+    assert widened.status_code == 403
+    assert widened.json() == {"ok": False, "error": "needs_owner", "needs": ["frame"]}
+
+
+@pytest.mark.asyncio
+async def test_update_all_moves_every_scene_it_may_in_one_push(async_client, no_auth_client, db, store, monkeypatch):
+    frame = await panel_frame(async_client, db)
+    radar = store_scene(RADAR, 1)
+    radar[0]["fields"][0]["value"] = "Ghent"
+    radar[0]["eventMap"] = [{"on": "button"}]
+    radar[0]["layout"] = {"sceneId": "bar-rt", "state": {}}
+    split = store_scene(THIRD, 1, ids=("split-rt", "left-rt"))
+    frame.scenes = [*frame.scenes, *radar, *store_scene(OTHER, 1, ids=("term-rt",)), *split]
+    db.add(frame)
+    db.commit()
+    store[RADAR] = store_scene(RADAR, 2)
+    store[OTHER] = asking_for(store_scene(OTHER, 2, ids=("term-rt",)), ["code"])
+    store[THIRD] = store_scene(THIRD, 5, ids=("split-rt", "left-rt"))
+
+    async def showing(redis, frame):
+        return "clock-1"
+
+    monkeypatch.setattr(panel_scenes, "_active_scene", showing)
+    response = await ask(no_auth_client, frame, {"action": "updateAll"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True, "status": "queued", "updated": 2, "kept": 1}
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt", "term-rt", "split-rt", "left-rt"]
+    assert [scene["origin"]["version"] for scene in frame.scenes[1:]] == ["2", "1", "5", "5"]
+    # The install's own: its values, button map and layout.
+    assert frame.scenes[1]["fields"][0]["value"] == "Ghent"
+    assert frame.scenes[1]["eventMap"] == [{"on": "button"}]
+    assert frame.scenes[1]["layout"] == {"sceneId": "bar-rt", "state": {}}
+    # One push, staying on the scene showing.
+    switches = commands(db, frame, "set_current_scene")
+    assert len(switches) == 1 and switches[0].payload["scene_id"] == "clock-1"
+
+    again = await ask(no_auth_client, frame, {"action": "updateAll"})
+    assert again.json() == {"ok": True, "status": "up_to_date", "updated": 0, "kept": 1}
+    assert len(commands(db, frame, "set_current_scene")) == 1
+
+
+@pytest.mark.asyncio
+async def test_updates_are_refused_while_the_screen_settings_are_off(async_client, no_auth_client, db, store):
+    frame = await panel_frame(async_client, db)
+    frame.scenes = [*frame.scenes, *store_scene(RADAR, 1)]
+    frame.frame_settings_on_screen = False
+    db.add(frame)
+    db.commit()
+    store[RADAR] = store_scene(RADAR, 2)
+    for action in ("updates", "updateAll"):
+        locked = await ask(no_auth_client, frame, {"action": action})
+        assert locked.status_code == 403
+        assert locked.json()["error"] == "panel_locked"
+    db.refresh(frame)
+    assert frame.scenes[1]["origin"]["version"] == "1"

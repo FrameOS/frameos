@@ -376,3 +376,112 @@ void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_bo
         y += 9 * sc;
     }
 }
+
+bool fos_panel_box_hit(const fos_panel_code_box_t *box, int px, int py)
+{
+    return box != NULL && box->pw > 0 && box->ph > 0 && px >= box->px && px < box->px + box->pw &&
+           py >= box->py && py < box->py + box->ph;
+}
+
+/* --------------------------------------------------------- the sleep mark */
+
+/* 16x16, most significant bit leftmost: a crescent moon, a "z" above it. */
+static const uint16_t k_sleep_mark[16] = {
+    0x001f, 0x0002, 0x0004, 0x0708, 0x1e1f, 0x3c00, 0x7c00, 0x7c00,
+    0x7c00, 0x7e00, 0x7f00, 0x7f80, 0x7ff8, 0x3ff0, 0x1fe0, 0x0780,
+};
+
+/* Where the marks go: a tile in the scene's top-right corner, sized to the
+ * panel's shorter side, white with a black border. */
+typedef struct {
+    int x, y, tile, scale, pad;
+} mark_tile_t;
+
+static bool mark_place(const fos_panel_surface_t *s, mark_tile_t *t)
+{
+    if (s == NULL || s->buf == NULL || bits_per_pixel(s->format) == 0) return false;
+    const int sw = fos_panel_scene_width(s);
+    const int sh = fos_panel_scene_height(s);
+    t->scale = max_int(1, min_int(sw, sh) / 240);
+    t->pad = 3 * t->scale;
+    t->tile = 16 * t->scale + 2 * t->pad;
+    const int margin = 4 * t->scale;
+    if (t->tile + 2 * margin > sw || t->tile + 2 * margin > sh) return false;
+    t->x = sw - margin - t->tile;
+    t->y = margin;
+    return true;
+}
+
+static bool mark_tile(const fos_panel_surface_t *s, mark_tile_t *t)
+{
+    if (!mark_place(s, t)) return false;
+    fos_panel_fill_rect(s, t->x, t->y, t->tile, t->tile, true);
+    fos_panel_fill_rect(s, t->x + t->scale, t->y + t->scale, t->tile - 2 * t->scale, t->tile - 2 * t->scale, false);
+    return true;
+}
+
+static void mark_box(const fos_panel_surface_t *s, const mark_tile_t *t, fos_panel_code_box_t *box)
+{
+    if (!box) return;
+    memset(box, 0, sizeof(*box));
+    box->x = t->x;
+    box->y = t->y;
+    box->w = t->tile;
+    box->h = t->tile;
+    box->pad = t->pad;
+    /* The tile on the panel: its two opposite corners mapped. */
+    int ax, ay, bx, by;
+    scene_to_panel(s, box->x, box->y, &ax, &ay);
+    scene_to_panel(s, box->x + box->w - 1, box->y + box->h - 1, &bx, &by);
+    box->px = min_int(ax, bx);
+    box->py = min_int(ay, by);
+    box->pw = max_int(ax, bx) - box->px + 1;
+    box->ph = max_int(ay, by) - box->py + 1;
+}
+
+bool fos_panel_mark_box(const fos_panel_surface_t *s, fos_panel_code_box_t *box)
+{
+    mark_tile_t t;
+    if (!mark_place(s, &t)) return false;
+    mark_box(s, &t, box);
+    return true;
+}
+
+bool fos_panel_draw_sleep_mark(const fos_panel_surface_t *s, fos_panel_code_box_t *box)
+{
+    mark_tile_t t;
+    if (!mark_tile(s, &t)) return false;
+    for (int row = 0; row < 16; row++) {
+        for (int col = 0; col < 16; col++) {
+            if (k_sleep_mark[row] & (0x8000u >> col)) {
+                fos_panel_fill_rect(s, t.x + t.pad + col * t.scale, t.y + t.pad + row * t.scale, t.scale, t.scale,
+                                    true);
+            }
+        }
+    }
+    mark_box(s, &t, box);
+    return true;
+}
+
+/* The spinner's eight dots on a circle in the 16x16 grid, clockwise from the
+ * top: their centres. */
+static const int8_t k_wake_dots[8][2] = {
+    {8, 2}, {12, 4}, {14, 8}, {12, 12}, {8, 14}, {4, 12}, {2, 8}, {4, 4},
+};
+
+bool fos_panel_draw_wake_mark(const fos_panel_surface_t *s, int frame, fos_panel_code_box_t *box)
+{
+    mark_tile_t t;
+    if (!mark_tile(s, &t)) return false;
+    const int lead = ((frame % 8) + 8) % 8;
+    for (int i = 0; i < 8; i++) {
+        /* The leading dot biggest, the two behind it smaller, the rest a pixel. */
+        const int behind = (lead - i + 8) % 8;
+        const int size = behind == 0 ? 4 : behind <= 2 ? 2 : 1;
+        const int cx = k_wake_dots[i][0], cy = k_wake_dots[i][1];
+        fos_panel_fill_rect(s, t.x + t.pad + (cx - size / 2) * t.scale, t.y + t.pad + (cy - size / 2) * t.scale,
+                            size * t.scale, size * t.scale, true);
+    }
+    mark_box(s, &t, box);
+    return true;
+}

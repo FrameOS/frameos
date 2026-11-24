@@ -22,9 +22,10 @@ import frameos/ui/tree
 from frameos/ui/theme import role
 import frameos/render_probe
 from frameos/utils/memory import waitingTextDrops
+from frameos/panel_shape import RoundInset
 import frameos/utils/qr
+import frameos/panel_shape
 when not defined(frameosEmbedded):
-  import frameos/panel_shape
   from frameos/cursor_shape import csPointer, cursorCode
 
 export keyboard.KeyboardPage
@@ -54,7 +55,15 @@ type
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
     field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input, 4 a <select>
+    labelFor*: int
+      ## A `look="field"` box around one text field (its glyph, its padding):
+      ## that field's key + 1, so a tap anywhere on what looks like the field
+      ## is the field's, as an HTML <label> is (ui/events.hitAt). Under the
+      ## box's children; 0 for every other region.
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
+    scroller*: int32
+      ## The box around it that scrolls up and down, its key + 1; 0 for none.
+      ## The keys turn its pages (ui/events.nim `turnPage`).
     scene*: bool
       ## Not an element but a `<Scene>` or `<yield />`, where it is in paint
       ## order: whatever is in a region after it is drawn over the scene and
@@ -93,6 +102,7 @@ type
     accentLit*: int      ## ... which one the last layout lit, -1 for none
     flash*: int          ## a key just typed (its byte), drawn lit for a moment after the press; 0 none
     flashDrawn*: bool    ## ... and a layout has drawn it so
+    pressedDrawn*: bool  ## a layout has drawn `pressed` (a quick tap's press lingers until one has)
     reveal*: bool        ## scroll the focused field into view at the next layout
     slow*: bool          ## a change costs a refresh (panel_shape.panelIsFast): no press shows
     paper*: bool         ## the panel draws in inks: the keyboard's and a select's look
@@ -106,9 +116,15 @@ type
     link*: string        ## the link whose QR code is up over the UI ("Links"); "" for none
     ring*: int           ## where Tab and the frame's keys are (ui/events.nim "Keys"): the element's
                          ## key + 1, drawn ringed and with its `focus:` classes; 0 for none
+    turn*: int           ## a frame's button turned a page of the box that scrolls at this key + 1
+                         ## (scrolled there already): the next layout moves the ring onto it ...
+    turnBack*: bool      ## ... up, to the last element above where the ring was ...
+    turnFrom*: float32   ## ... which is this far down the box (its top), unscrolled ...
+    turnSteps*: int      ## ... and this many more, for the presses that came before that layout
 
-  TextMemo = object
+  TextMemo = ref object
     key: string          ## the runs, their styles, the width and alignment
+    gen: int             ## the layout that last used it: in that layout's `kept`
     arrangement: Arrangement
     bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
     drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
@@ -125,6 +141,12 @@ type
     count*: int
     firstYield: int ## its place + 1
     items*: array[MaxHoles, UiHole]
+
+  LayoutAnswer = object
+    ## A layout call's question (fixed sides, width, height) and its answer.
+    fix: int
+    w, h: float32
+    size: Vec2
 
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
@@ -192,6 +214,12 @@ type
     prevW, prevH: float32
     prevFix: int
     prevSize: Vec2
+    # And two before those: an item of a grid or a wrapping row is asked
+    # three questions a layout (its size in the room offered, then at its
+    # width, then at its width and height), so two answers kept missed every
+    # time and every node of a UI was laid out again at every tap, ~14 ms of
+    # the Calculator sample's on a SenseCAP Indicator (2026-11-24).
+    older: array[2, LayoutAnswer]
     asked: (int, float32, float32)
     # An item's margins and sizes while its container lays it out.
     margins: array[4, float32]
@@ -206,8 +234,17 @@ type
     arrangement: Arrangement
     arrangedW: float32
     arrangedAlign: HorizontalAlignment
-    memo: int             ## its arrangement's entry in the memo's `kept` ...
-    memoGen: int          ## ... of the layout with this number
+    memo: TextMemo        ## its arrangement's entry in the memo
+    # The arrangement before, for another width: a text is measured in the
+    # room its container offers, then set in the width it took (a grid's
+    # label: 106 px, then 19), two layout calls of the three or four a
+    # layout makes, so one arrangement was set again, or looked up by key,
+    # at every call: ~200 lookups a tap of the Calculator sample, 10 ms of
+    # its layout on a SenseCAP Indicator (2026-11-24).
+    arrangement2: Arrangement
+    arrangedW2: float32
+    arrangedAlign2: HorizontalAlignment
+    memo2: TextMemo
     # What it was built from, for the next layout to take it back unbuilt:
     # its element, the style it inherited, whether it was in a hovered
     # group, and its pointer states (`pointer`: it or one below has hover:,
@@ -228,6 +265,7 @@ type
     handlers: array[UiEvent, int]
     hover, active, group: bool
     field: uint8          # an <input>, a <textarea> or a <select> (UiRegion.field) ...
+    fieldBox: bool        # look="field": a tap on it is its one text field's (UiRegion.labelFor)
     value: string         # ... and its text
     keep: bool            # ukText: a field's text, its spaces kept as typed
     maxX, maxY: float32   # a box that clips: how much of it is out of sight ...
@@ -416,7 +454,8 @@ proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth
       child.addRuns(text, into, rootW, rootH, depth + 1, states)
 
 proc newUiNode(kind: UiKind, text: Text): UiNode =
-  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1, prevFix: -1, emittedFor: (-1, 0'f32, 0'f32))
+  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1, prevFix: -1,
+    older: [LayoutAnswer(fix: -1), LayoutAnswer(fix: -1)], emittedFor: (-1, 0'f32, 0'f32))
 
 proc sameTree(a, b: SvgNode): bool =
   ## Whether two element trees say the same: the very nodes (a walk that
@@ -670,6 +709,7 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   let flags = classFlags(classes)
   result.pointer = flags.pointer
   result.key = key
+  result.fieldBox = n.attr("look") == "field"
   result.hover = flags.hover
   result.active = flags.active
   result.group = flags.group
@@ -892,22 +932,34 @@ proc waitingBytes(entry: TextMemo): int =
   entry.key.len + 64 + (if entry.arrangement.isNil: 0 else: entry.arrangement.runes.len * 28) +
     entry.drawn.len * 90 * sizeof(pointer)
 
-proc recall(key: string): int =
-  ## The memo entry for `key`, moved to the entries this layout keeps; -1.
-  for i in 0 ..< memo.kept.len:
-    if memo.kept[i].key == key:
-      return i
-  for i in 0 ..< memo.last.len:
-    if memo.last[i].key == key:
-      memo.kept.add move(memo.last[i])
-      memo.last.del(i)
-      return memo.kept.high
-  for i in 0 ..< memo.older.len:
-    if memo.older[i].key == key:
-      memo.kept.add move(memo.older[i])
-      memo.older.del(i)
-      return memo.kept.high
-  -1
+when defined(testing):
+  var
+    textsSetForTest* = 0     ## arrangeUncached: a text recalled by key or set in type
+    layoutsMadeForTest* = 0  ## layout calls no kept answer answered
+
+proc claim(entry: TextMemo) {.inline.} =
+  ## `entry` used by this layout: in its `kept`, once.
+  if entry.gen != memo.gen:
+    entry.gen = memo.gen
+    memo.kept.add entry
+
+proc recall(key: string): TextMemo =
+  ## The memo entry for `key`, claimed for this layout; nil. An entry the
+  ## layouts before left waiting stays where it waits until the end of this
+  ## one (layoutUi leaves the claimed ones out): a list is no longer cut at
+  ## every claim.
+  for entry in memo.kept:
+    if entry.key == key:
+      return entry
+  for entry in memo.last:
+    if entry.gen != memo.gen and entry.key == key:
+      entry.claim()
+      return entry
+  for entry in memo.older:
+    if entry.gen != memo.gen and entry.key == key:
+      entry.claim()
+      return entry
+  nil
 
 proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
 
@@ -915,22 +967,42 @@ proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
-    return n.arrangement
-  probe(phText):
-    result = n.arrangeUncached(width, align)
+    discard
+  elif not n.arrangement2.isNil and n.arrangedW2 == width and n.arrangedAlign2 == align:
+    swap(n.arrangement, n.arrangement2)
+    swap(n.arrangedW, n.arrangedW2)
+    swap(n.arrangedAlign, n.arrangedAlign2)
+    swap(n.memo, n.memo2)
+    if not n.memo.isNil:
+      # As a recalled arrangement's (arrangeUncached): its bold fonts.
+      n.bold = n.memo.bold
+      n.spans.setLen(0)
+  else:
+    probe(phText):
+      result = n.arrangeUncached(width, align)
+    return
+  # Used by this layout: kept for the next, and its drawn glyphs for emitText.
+  if not memo.isNil and not n.memo.isNil:
+    n.memo.claim()
+  n.arrangement
 
 proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
-  if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
-    return n.arrangement
+  when defined(testing):
+    inc textsSetForTest
+  if not n.arrangement.isNil:
+    # The arrangement for the other width waits in the second place.
+    n.arrangement2 = n.arrangement
+    n.arrangedW2 = n.arrangedW
+    n.arrangedAlign2 = n.arrangedAlign
+    n.memo2 = n.memo
   var key: string
-  n.memo = -1
+  n.memo = nil
   if not memo.isNil:
     key = n.textKey(width, align)
     n.memo = recall(key)
-    n.memoGen = memo.gen
-    if n.memo >= 0:
-      n.arrangement = memo.kept[n.memo].arrangement
-      n.bold = memo.kept[n.memo].bold
+    if not n.memo.isNil:
+      n.arrangement = n.memo.arrangement
+      n.bold = n.memo.bold
       # The bold fonts are the recalled arrangement's now: spans set here
       # before would be typeset with fonts `bold` does not hold, and the next
       # text set from them drew its bold glyphs once (the Gallery sample's
@@ -964,9 +1036,9 @@ proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arr
   n.arrangedW = width
   n.arrangedAlign = align
   if not memo.isNil:
-    memo.kept.add TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0])
-    n.memo = memo.kept.high
-    n.memoGen = memo.gen
+    n.memo = TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0],
+      gen: memo.gen)
+    memo.kept.add n.memo
 
 # -------- Layout
 
@@ -1393,6 +1465,11 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
       return n.lastSize
     if n.prevFix == key and n.prevW == w and n.prevH == h:
       return n.prevSize # its children are placed for it before it is emitted
+    for answer in n.older:
+      if answer.fix == key and answer.w == w and answer.h == h:
+        return answer.size # likewise
+  when defined(testing):
+    inc layoutsMadeForTest
   template b: untyped = n.box
   let
     px = b.padX
@@ -1442,6 +1519,8 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
             right = max(right, c.x + c.box.padX + c.arrangement.layoutBounds().x)
       n.maxX = max(right + b.pad[1] + b.border[1] - result.x, 0)
       n.maxY = max(bottom + b.pad[2] + b.border[2] - result.y, 0)
+  n.older[1] = n.older[0]
+  n.older[0] = LayoutAnswer(fix: n.prevFix, w: n.prevW, h: n.prevH, size: n.prevSize)
   n.prevW = n.lastW
   n.prevH = n.lastH
   n.prevFix = n.lastFix
@@ -1517,6 +1596,31 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
 # on an ESP32 for that alone (2026-11-07). Absolute children may lie over
 # anything, so they are painted over nothing known.
 var emitBackdrop {.threadvar.}: ColorRGBA
+var emitRim {.threadvar.}: array[3, float32]
+  ## A round panel's whole canvas (UiInput.round): its circle's centre and
+  ## radius, where a list's scroll bar goes along the rim; radius 0 elsewhere.
+
+proc rimBar(cx, cy, r, top, bottom, shown, at: float32): Path =
+  ## A round panel's scroll bar (docs/jsx-ui.md "Round panels"): an arc
+  ## along the rim at the list's right, across its height as far as 45°
+  ## either side of 3 o'clock; `shown` of it is the bar, `at` (0 to 1) how
+  ## far down it has gone.
+  let
+    lo = arcsin(clamp((top - cy) / r, -0.7071, 0.7071))
+    hi = arcsin(clamp((bottom - cy) / r, -0.7071, 0.7071))
+    span = max(hi - lo, 0)
+    len = max(span * shown, min(span, 0.12))
+    a0 = lo + (span - len) * at
+    steps = 12
+  result = newPath()
+  for i in 0 .. steps:
+    let a = a0 + len * i.float32 / steps.float32
+    if i == 0: result.moveTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+    else: result.lineTo(cx + (r + 1.5) * cos(a), cy + (r + 1.5) * sin(a))
+  for i in countdown(steps, 0):
+    let a = a0 + len * i.float32 / steps.float32
+    result.lineTo(cx + (r - 1.5) * cos(a), cy + (r - 1.5) * sin(a))
+  result.closePath()
 var
   linkQr {.threadvar.}: Image ## the QR code of the link that is up, while one is ...
   linkQrUrl {.threadvar.}: string ## ... its URL ...
@@ -1766,9 +1870,9 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     return
   let
     at = [x, y, opacity]
-    remembered = not memo.isNil and n.memo >= 0 and n.memoGen == memo.gen
-  if remembered and memo.kept[n.memo].drawnAt == at:
-    for node in memo.kept[n.memo].drawn:
+    remembered = not memo.isNil and not n.memo.isNil and n.memo.gen == memo.gen
+  if remembered and n.memo.drawnAt == at:
+    for node in n.memo.drawn:
       drawn.add node
     return
   let first = drawn.len
@@ -1807,7 +1911,7 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       strike.paint(font.paint.color.rgba, opacity)
       drawn.add strike
   if remembered:
-    template entry: untyped = memo.kept[n.memo]
+    template entry: untyped = n.memo
     entry.drawnAt = at
     entry.drawn = drawn[first .. ^1]
     for node in entry.drawn:
@@ -2137,12 +2241,15 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
             visible: [ends[e][0], ends[e][1], ends[e][0] + 1, ends[e][1] + ends[e][3]])
       # What is inside answers the pointer where it shows, scrolled.
       var k = kids
+      let pages = scrollsY and n.maxY > 0 and n.field == 0
       for i in kids ..< regions.len:
         var r = regions[i]
         r.x -= sx
         r.y -= sy
         r.visible = [max(r.visible[0] - sx, vx), max(r.visible[1] - sy, vy),
           min(r.visible[2] - sx, vx + vw), min(r.visible[3] - sy, vy + vh)]
+        if pages and r.scroller == 0:
+          r.scroller = int32(n.key + 1)
         if r.visible[2] > r.visible[0] and r.visible[3] > r.visible[1]:
           regions[k] = r
           inc k
@@ -2152,10 +2259,25 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
         let
           barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
           bar = SvgNode(tag: "path", path: newPath())
-        bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        if emitRim[2] > 0 and vx + vw > emitRim[0]:
+          # On a round panel it runs along the rim, where a corner's bar
+          # would be off the glass.
+          bar.path = rimBar(emitRim[0], emitRim[1], emitRim[2], vy, vy + vh, vh / (vh + n.maxY), sy / n.maxY)
+        else:
+          bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
         bar.path.share()
         bar.paint(n.text.color, op * 0.35)
         drawn.add bar
+    if n.fieldBox:
+      # The one text field inside, if one: the box answers for it where its
+      # children take nothing, so its region goes under theirs.
+      var only = -1
+      for i in firstRegion ..< regions.len:
+        if regions[i].field in 1'u8 .. 3'u8:
+          only = (if only == -1: i else: -2)
+      if only >= 0:
+        regions.insert(UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
+          labelFor: regions[only].key + 1), firstRegion)
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
     n.emittedAt = at
@@ -2220,6 +2342,66 @@ proc fieldIn(n: UiNode, key: int): UiNode =
     result = c.fieldIn(key)
     if not result.isNil:
       return
+
+proc turnStops(n: UiNode, oy, shift, lo, hi: float32, into: var seq[(int, float32, float32)]) =
+  ## The elements inside `n` the keys stop at, in the order they walk them
+  ## (as `emit` lays their regions down: in-flow children, then absolute
+  ## ones), each as (key, top, bottom) where `emit` puts it, less `shift`
+  ## (the scroll of the boxes in between), and only those that show between
+  ## `lo` and `hi`.
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute != pass or c.box.display == diNone or c.box.opacity <= 0:
+        continue
+      let
+        y = round(oy + c.y)
+        top = y - shift
+        bottom = round(oy + c.y + c.size.y) - shift
+        shows = bottom > lo and top < hi
+      if shows and (c.field > 0 or c.handlers[ueClick] > 0 and c.handlers[ueClick] - 1 <= LinkOpen):
+        into.add (c.key, top, bottom)
+      if c.kind == ukBox and c.field == 0:
+        if c.box.overflowX == ovVisible and c.box.overflowY == ovVisible:
+          c.turnStops(y, shift, lo, hi, into) # what overflows it shows too
+        elif shows:
+          let sy = clamp(scrollOf(c.key)[1], 0, c.maxY)
+          c.turnStops(y, shift + sy, max(lo, top + c.box.border[0]), min(hi, bottom - c.box.border[2]), into)
+
+proc turnPage(top: UiNode, input: var UiInput) =
+  ## A frame's next or prev button turned a page of a box that scrolls
+  ## (ui/events.nim `turnPage`, which scrolled it): the ring goes to the
+  ## first element the new page shows below where it was (going back, the
+  ## last above it), and `turnSteps` on from there; with none, it stays
+  ## where it was while that shows, else it is on the box itself. Before
+  ## `reveal`, which shows the element whole.
+  let
+    box = top.fieldIn(input.turn - 1)
+    back = input.turnBack
+    at = input.turnFrom
+  var steps = input.turnSteps
+  input.turn = 0
+  input.turnSteps = 0
+  if box.isNil or box.kind != ukBox:
+    return
+  let sy = clamp(scrollOf(box.key)[1], 0, box.maxY)
+  var stops: seq[(int, float32, float32)]
+  box.turnStops(0, 0, sy + box.box.border[0], sy + box.size.y - box.box.border[2], stops)
+  var picked = -1
+  for j in 0 ..< stops.len:
+    let i = if back: stops.high - j else: j
+    if (if back: stops[i][1] < at - 0.5 else: stops[i][1] > at + 0.5):
+      picked = i
+      if steps == 0:
+        break
+      dec steps
+  if picked >= 0:
+    input.ring = stops[picked][0] + 1
+    input.reveal = true
+    return
+  for s in stops:
+    if s[0] == input.ring - 1:
+      return # nothing to press on the new page: the ring stays while its element shows
+  input.ring = box.key + 1
 
 proc ring(top: UiNode, input: var UiInput, regions: seq[UiRegion], w, h: float32, drawn: var seq[SvgNode]) =
   ## The element the keys went to (`input.ring`), ringed over everything but
@@ -2340,8 +2522,8 @@ proc popup(anchor: UiNode, r: UiRegion, width, height: float32, input: var UiInp
     gap = 4'f32
     inner = 4'f32 # the box's padding, each way
     edge = 8'f32
-  # A round panel's corners are not there, and no ESP32 board is round.
-  let margin = when defined(frameosEmbedded): edge else: (if input.round: height / 8 else: edge)
+  # A round panel's corners are not there.
+  let margin = if input.round: height / 8 else: edge
   let
     options = anchor.src.children
     count = options.len
@@ -2414,15 +2596,14 @@ proc accentPopup(r: UiRegion, width, height: int, input: var UiInput, drawn: var
   var
     lo = edge
     hi = width - edge
-  when not defined(frameosEmbedded):
-    if input.round:
-      # Inside the circle at the row's edge farther from its centre.
-      let
-        radius = max(min(width, height) div 2 - RoundInset, 8)
-        dy = max(abs(y - height div 2), abs(y + popH - height div 2))
-        half = chordHalf(radius, dy) - edge
-      lo = max(lo, width div 2 - half)
-      hi = min(hi, width div 2 + half)
+  if input.round:
+    # Inside the circle at the row's edge farther from its centre.
+    let
+      radius = max(min(width, height) div 2 - RoundInset, 8)
+      dy = max(abs(y - height div 2), abs(y + popH - height div 2))
+      half = chordHalf(radius, dy) - edge
+    lo = max(lo, width div 2 - half)
+    hi = min(hi, width div 2 + half)
   let
     centre = int(r.x + r.w / 2)
     # A letter's row has its symbol right over the key and the rest in order
@@ -2545,13 +2726,12 @@ proc dockedKeys(input: var UiInput, regions: var seq[UiRegion]) =
     gradients = 0
   let kb = int(dock.h - dock.grip)
   emitBackdrop = rgba(0, 0, 0, 0)
-  when not defined(frameosEmbedded):
-    if dock.round:
-      # Rows on no band of their own: the panel under them is the keyboard's.
-      let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
-        ("height", $int(dock.frameH - dock.y))])
-      band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
-      drawn.add band
+  if dock.round:
+    # Rows on no band of their own: the panel under them is the keyboard's.
+    let band = SvgNode(tag: "rect", attrs: @[("y", $int(dock.y)), ("width", $int(dock.frameW)),
+      ("height", $int(dock.frameH - dock.y))])
+    band.paint(if input.paper: rgba(255, 255, 255, 255) else: rgba(0, 0, 0, 255), 1)
+    drawn.add band
   if dock.grip > 0:
     # A window's bar, in the keys' look: the interpreter drags it, so nothing
     # here hears it.
@@ -2602,6 +2782,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   ## its focused field scrolled into sight, and the keyboard drawn below.
   memo = textMemo
   ui = addr input
+  if input.pressed.len > 0:
+    input.pressedDrawn = true
   focusSeen = false
   endsFound = false
   # The frame's keyboard, when it is this UI's (layoutUiDocked): laid out in
@@ -2635,6 +2817,8 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     top.size = top.layout(rw, rh, true, true)
     top.x = max(top.box.margin[3].resolve(w), 0)
     top.y = max(top.box.margin[0].resolve(h), 0)
+  if input.turn > 0:
+    top.turnPage(input)
   if input.reveal and (input.focus > 0 or input.ring > 0):
     # The focused field in sight, else the element the keys went to.
     var r: array[4, float32]
@@ -2650,8 +2834,11 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     result.children.add page
   var gradients = 0
   emitBackdrop = rgba(0, 0, 0, 0) # the root is painted over whatever the scene drew
+  # Inside the bezel (RoundInset), as everything the frame draws by itself.
+  emitRim = if input.round: [w / 2, h / 2, min(w, h) / 2 - RoundInset.float32 - 4] else: [0'f32, 0, 0]
   probe(phEmit):
     top.emit(0, 0, 1, result.children, gradients, regions)
+  emitRim = [0'f32, 0, 0]
   if input.open > 0:
     var shown = false
     let anchor = top.fieldIn(input.open - 1)
@@ -2733,16 +2920,22 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     # few layouts later (a switch's "On" and "Off", a count going up and
     # down) is not set in type again: waiting one layout only, it was set
     # again at every toggle of the Home sample.
-    var waiting = move(memo.last)
-    if waiting.len > 64:
-      waiting.setLen(64)
+    # An entry this layout claimed is in its `kept`, and waits in no list.
+    var waiting: seq[TextMemo]
+    for entry in memo.last:
+      if waiting.len >= 64:
+        break
+      if entry.gen != memo.gen:
+        waiting.add entry
     var bytes = 0
-    for i in 0 ..< memo.older.len:
-      let cost = memo.older[i].waitingBytes
+    for entry in memo.older:
+      if entry.gen == memo.gen:
+        continue
+      let cost = entry.waitingBytes
       if waiting.len >= 64 or bytes + cost > TextMemoWaitingBytes:
         break
       bytes += cost
-      waiting.add move(memo.older[i])
+      waiting.add entry
     memo.older = move(waiting)
     memo.last = move(memo.kept)
     memo.root = top

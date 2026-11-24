@@ -61,6 +61,14 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (len) *len = 0;
     return -1;
 }
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h)
+{
+    (void)x;
+    (void)y;
+    (void)w;
+    (void)h;
+    return false;
+}
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len) { return frameos_nim_render(buf, len, 1); }
 int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_t generation)
 {
@@ -135,11 +143,19 @@ double frameos_nim_scene_interval(void) { return 0; }
 bool frameos_nim_scene_awaited(void) { return true; }
 double frameos_nim_next_sleep(void) { return -1; }
 bool frameos_nim_render_requested(void) { return false; }
-bool frameos_nim_press_taken(int wire_x, int wire_y)
+void frameos_nim_keep_press_map(bool keep) { (void)keep; }
+int frameos_nim_press_map_takes(int x, int y)
 {
-    (void)wire_x;
-    (void)wire_y;
-    return false;
+    (void)x;
+    (void)y;
+    return -1;
+}
+int frameos_nim_press_map_find(int x, int y, uint16_t box[4])
+{
+    (void)x;
+    (void)y;
+    (void)box;
+    return -1;
 }
 bool frameos_nim_tick(void) { return false; }
 int frameos_nim_next_async_ms(void) { return -1; }

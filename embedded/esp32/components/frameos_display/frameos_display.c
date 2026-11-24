@@ -1,5 +1,6 @@
 #include "frameos_display.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -16,6 +17,7 @@
 #include "fos_refresh_queue.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
+#include "lcd_qspi_amoled.h"
 #include "lcd_st7701s_rgb.h"
 #include "photo_painter_pmic.h"
 
@@ -40,9 +42,13 @@ static void partial_shutdown(void);
 static uint8_t *s_glass = NULL;
 static bool s_glass_known = false;
 static uint32_t s_partials_since_full = 0;
-/* What those partial updates moved, in bytes: the ghosts are as big as that
- * (fos_partial_refresh.h). */
-static size_t s_changed_since_full = 0;
+/* Where those partial updates moved pixels, tile by tile: the ghosts are
+ * there (fos_partial_refresh.h). */
+static fos_ghost_t s_ghost;
+static uint16_t *s_ghost_flips = NULL;
+static fos_ghost_wear_t s_wear;
+/* The first partial update since the last full refresh. */
+static int64_t s_first_partial_us = 0;
 /* The panel is left awake after a partial update, its analog supply on: its
  * reset and deep sleep are 300 ms of every update, and the next tap is usually
  * moments away. A few idle seconds turn the supply off and keep the controller
@@ -58,11 +64,37 @@ static int64_t s_last_partial_us = 0;
 /* The ghosts a tapping session left (fos_partial_refresh.h), once it is
  * clearly over: the refresh is seconds in which a tap would wait. */
 #define FOS_PANEL_CLEAN_US (30 * 1000000LL)
-/* After this long without a tap the greys a tapping session drew as a halftone
- * go up properly (it8951.c). */
-#define FOS_PANEL_SETTLE_US (2500 * 1000LL)
+/* A pixel a partial update left black or white is held there by a charge no
+ * waveform balanced: a glass partially updated a day ago is cleaned when
+ * idle, ghosts or not (the panel makers' "refresh at least every 24 hours"). */
+#define FOS_PANEL_HELD_US (24 * 3600 * 1000000LL)
+/* After this long without an update the greys a tapping session drew as a
+ * halftone go up properly (it8951.c): a GC16 of 580 ms that a tap landing
+ * meanwhile waits out, so not while a finger is down or a press is queued
+ * (fos_client.c), and not 2.5 s after the last picture, the gap between two
+ * taps of somebody reading (2026-11-24). */
+#define FOS_PANEL_SETTLE_US (4500 * 1000LL)
 /* A partial update sends two whole frames: the SSD1677's rated write clock. */
 #define FOS_PARTIAL_SPI_HZ (20 * 1000 * 1000)
+
+/* The render's box for the next update (fos_display_hint_damage), and whether
+ * the controller holds exactly what the canvas held after the last render's
+ * update: a box says where the canvas changed since, so it is only good while
+ * nothing else went onto the glass or into the canvas in between. */
+static bool s_hint_armed = false;
+static bool s_hint_whole = false;
+static fos_it8951_rect_t s_hint_box;
+static bool s_chain_ok = false;
+
+/* The controller's bring-up at boot (fos_display_warm_up), given once done. */
+static SemaphoreHandle_t s_warm_done = NULL;
+static void warm_wait(void)
+{
+    SemaphoreHandle_t done = s_warm_done;
+    if (!done) return;
+    xSemaphoreTake(done, portMAX_DELAY);
+    xSemaphoreGive(done);
+}
 
 static bool is_photo_painter_hardware(const fos_display_config_t *config)
 {
@@ -166,6 +198,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
      * table, like the PhotoPainter's PMIC and the E1004's panel tuning;
      * without a preset the panel names the board. */
     fos_lcd_st7701s_select_board(config->hardware_preset, entry->name);
+    fos_lcd_qspi_select_board(config->hardware_preset, entry->name);
 
     if (photo_painter) {
         esp_err_t pmic_err = fos_photo_painter_enable_epd_power(s_lend_i2c_bus);
@@ -199,12 +232,14 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
      * (a lit white screen instead of a dark one until Wi-Fi), and its IO
      * expander's I2C bus exists before the touch controller next to it
      * asks to join (fos_display_shared_i2c_bus, fos_touch_start). */
-    if (entry->bus == FOS_PANEL_BUS_RGB) {
+    if (entry->bus == FOS_PANEL_BUS_RGB || entry->bus == FOS_PANEL_BUS_QSPI) {
         /* The driver's board table is the glass's truth: a panel entry
          * whose size disagrees with the selected board would size the
-         * render target and the backend's picture wrong. */
+         * render target and the backend's picture wrong. A QSPI AMOLED
+         * comes up now too: its splash instead of a dark glass. */
         int drv_w = 0, drv_h = 0;
-        fos_lcd_st7701s_size(&drv_w, &drv_h);
+        if (entry->bus == FOS_PANEL_BUS_QSPI) fos_lcd_qspi_size(&drv_w, &drv_h);
+        else fos_lcd_st7701s_size(&drv_w, &drv_h);
         if (drv_w != entry->width || drv_h != entry->height) {
             ESP_LOGE(TAG, "panel %s is %dx%d but the board's glass is %dx%d",
                      entry->name, entry->width, entry->height, drv_w, drv_h);
@@ -212,7 +247,7 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
             return ESP_ERR_INVALID_ARG;
         }
         s_module_ready = true;
-        if (entry->driver_init() != 0) {
+        if (fos_panel_init(entry) != 0) {
             ESP_LOGE(TAG, "panel %s failed to start", entry->name);
             s_panel = NULL;
             s_module_ready = false;
@@ -256,18 +291,37 @@ int fos_display_bus(void)
 
 bool fos_display_is_lcd(void)
 {
-    return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
+    return s_panel && (s_panel->bus == FOS_PANEL_BUS_RGB || s_panel->bus == FOS_PANEL_BUS_QSPI);
+}
+
+/* The QSPI AMOLED's driver (lcd_qspi_amoled.c) rather than the RGB LCD's:
+ * the same calls, a controller that keeps its own picture. */
+static bool is_qspi(void)
+{
+    return s_panel && s_panel->bus == FOS_PANEL_BUS_QSPI;
+}
+
+bool fos_display_round(void)
+{
+    return is_qspi() && fos_lcd_qspi_round();
 }
 
 esp_err_t fos_display_power(bool on)
 {
     if (!fos_display_is_lcd()) return ESP_ERR_NOT_SUPPORTED;
-    return fos_lcd_st7701s_backlight(on);
+    return is_qspi() ? fos_lcd_qspi_power(on) : fos_lcd_st7701s_backlight(on);
 }
 
 void fos_display_boot_status(fos_lcd_splash_status_t status)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
+    if (is_qspi()) fos_lcd_qspi_splash_status(status);
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
+}
+
+void fos_display_set_loading_mark(fos_loading_mark_fn mark)
+{
+    fos_lcd_st7701s_set_loading_mark(mark);
+    fos_lcd_qspi_set_loading_mark(mark);
 }
 
 uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
@@ -275,29 +329,33 @@ uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
     if (len) *len = 0;
     if (generation) *generation = 0;
     if (!fos_display_is_lcd()) return NULL;
-    uint8_t *target = fos_lcd_st7701s_back_buffer(generation);
+    uint8_t *target = is_qspi() ? fos_lcd_qspi_back_buffer(generation) : fos_lcd_st7701s_back_buffer(generation);
     if (target && len) *len = fos_display_buffer_size();
     return target;
 }
 
 void fos_display_mark_written(const uint8_t *buf)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
+    if (is_qspi()) fos_lcd_qspi_mark_written(buf);
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
 }
 
 int64_t fos_display_buffer_generation(const uint8_t *buf)
 {
+    if (is_qspi()) return fos_lcd_qspi_buffer_generation(buf);
     return fos_display_is_lcd() ? fos_lcd_st7701s_buffer_generation(buf) : -1;
 }
 
 void fos_display_release_render_target(void)
 {
-    if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();
+    if (is_qspi()) fos_lcd_qspi_release_back_buffer();
+    else if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();
 }
 
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf))
 {
     fos_lcd_st7701s_set_before_write_hook(hook);
+    fos_lcd_qspi_set_before_write_hook(hook);
 }
 
 esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus)
@@ -387,8 +445,11 @@ size_t fos_display_canvas_bytes(void)
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    /* An RGB LCD scans three frame buffers of its own (lcd_st7701s_rgb.c). */
-    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 3u * fos_display_buffer_size() : 0u;
+    /* An RGB LCD scans three frame buffers of its own (lcd_st7701s_rgb.c), a
+     * QSPI AMOLED keeps two (lcd_qspi_amoled.c). */
+    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB    ? 3u * fos_display_buffer_size()
+                     : s_panel->bus == FOS_PANEL_BUS_QSPI ? 2u * fos_display_buffer_size()
+                                                          : 0u;
     return fos_display_canvas_bytes() + fos_display_buffer_size() + lcd_fbs + FOS_RENDER_PSRAM_RESERVE;
 }
 
@@ -399,7 +460,8 @@ static esp_err_t ensure_module(void)
      * as SCL/SDA; bringing up the EPD SPI module on the same GPIOs would take
      * them away. An RGB LCD brings up its own peripheral and has no SPI pins
      * at all. */
-    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB ||
+                    s_panel->bus == FOS_PANEL_BUS_QSPI)) {
         s_module_ready = true;
         return ESP_OK;
     }
@@ -412,7 +474,8 @@ static esp_err_t ensure_module(void)
 
 esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
 {
-    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB ||
+                    s_panel->bus == FOS_PANEL_BUS_QSPI)) {
         return ESP_ERR_INVALID_STATE;
     }
     int shared = DEV_SPI_Bus_Share(miso_pin);
@@ -442,7 +505,7 @@ static esp_err_t refresh_in_place(const uint8_t *buf)
         s_panel->sleep();
         s_panel_awake = false;
     }
-    if (s_panel->driver_init() != 0) {
+    if (fos_panel_init(s_panel) != 0) {
         DEV_SPI_Release();
         ESP_LOGE(TAG, "panel init failed");
         return ESP_FAIL;
@@ -468,9 +531,17 @@ static void note_full_refresh(const uint8_t *buf, size_t len)
         if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
         s_glass_known = s_glass != NULL;
+        size_t row_bytes = len / (size_t)fos_display_height();
+        if (!s_ghost_flips) {
+            s_ghost_flips = heap_caps_malloc(fos_ghost_tiles(row_bytes, (size_t)fos_display_height()) * sizeof(uint16_t),
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        /* Without its table a glass is never known: no partial update. */
+        if (!s_ghost_flips) s_glass_known = false;
+        fos_ghost_init(&s_ghost, s_ghost_flips, row_bytes, (size_t)fos_display_height());
     }
+    memset(&s_wear, 0, sizeof(s_wear));
     s_partials_since_full = 0;
-    s_changed_since_full = 0;
 }
 
 /* A full refresh held whoever asked for the whole of it: the reTerminal
@@ -616,8 +687,86 @@ void fos_display_wait_for(const uint8_t *buf)
     if (fos_display_holds(buf)) refresh_wait();
 }
 
+void fos_display_hint_damage(int x, int y, int w, int h)
+{
+    if (w < 0 || h < 0) {
+        s_hint_whole = true;
+    } else if (w > 0 && h > 0) {
+        int right = x + w, bottom = y + h;
+        if (s_hint_armed && s_hint_box.w > 0 && s_hint_box.h > 0) {
+            if (s_hint_box.x < x) x = s_hint_box.x;
+            if (s_hint_box.y < y) y = s_hint_box.y;
+            if (s_hint_box.x + s_hint_box.w > right) right = s_hint_box.x + s_hint_box.w;
+            if (s_hint_box.y + s_hint_box.h > bottom) bottom = s_hint_box.y + s_hint_box.h;
+        }
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        s_hint_box = (fos_it8951_rect_t){(uint16_t)x, (uint16_t)y, (uint16_t)(right - x), (uint16_t)(bottom - y)};
+    } else if (!s_hint_armed) {
+        s_hint_box = (fos_it8951_rect_t){0, 0, 0, 0};
+    }
+    s_hint_armed = true;
+}
+
+void fos_display_hint_forget(void)
+{
+    s_chain_ok = false;
+}
+
+static esp_err_t ensure_module(void);
+
+static void warm_task(void *arg)
+{
+    (void)arg;
+    if (ensure_module() == ESP_OK) {
+        refresh_wait();
+        DEV_SPI_Acquire();
+        if (s_panel->driver_init() != 0) ESP_LOGW(TAG, "panel bring-up at boot failed: the first picture tries again");
+        DEV_SPI_Release();
+    }
+    xSemaphoreGive(s_warm_done);
+    vTaskDelete(NULL);
+}
+
+void fos_display_warm_up(void)
+{
+    if (!s_panel || !fos_display_keeps_picture() || s_warm_done) return;
+    SemaphoreHandle_t done = xSemaphoreCreateBinary();
+    if (!done) return;
+    s_warm_done = done;
+    if (xTaskCreate(warm_task, "fos_warm", 4096, NULL, 4, NULL) != pdPASS) {
+        s_warm_done = NULL;
+        vSemaphoreDelete(done);
+    }
+}
+
+static bool s_keep_controller_awake = false;
+
+void fos_display_keep_controller_awake(bool keep)
+{
+    s_keep_controller_awake = keep;
+}
+
+bool fos_display_followup_due(void)
+{
+    return s_partial && s_partial->changed && fos_it8951_10in3_stale();
+}
+
+/* Whatever the box said, it is spent: the next update starts a new one. */
+static void hint_take(bool *usable, fos_it8951_rect_t *box)
+{
+    *usable = s_hint_armed && !s_hint_whole && s_chain_ok;
+    *box = s_hint_box;
+    s_hint_armed = false;
+    s_hint_whole = false;
+}
+
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 {
+    /* Something other than the render's update: the next one hashes it all
+     * (fos_display_update keeps its own chain after it). */
+    s_chain_ok = false;
+    warm_wait();
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
     esp_err_t err = ensure_module();
@@ -637,31 +786,79 @@ bool fos_display_supports_partial(void)
     return s_partial != NULL;
 }
 
+/* What each update was, for the line it logs, and the glass's wear. */
+static const char *const k_refresh_kind[] = {
+    [FOS_REFRESH_PARTIAL] = "partial",
+    [FOS_REFRESH_FULL_UNSUPPORTED] = "full refresh (glass unknown)",
+    [FOS_REFRESH_FULL_NEW_SCENE] = "full refresh (new scene)",
+    [FOS_REFRESH_FULL_CHANGED] = "full refresh (most of it changed)",
+    [FOS_REFRESH_FULL_GHOSTS] = "full refresh (ghosts)",
+};
+
+bool fos_display_keeps_picture(void)
+{
+    return s_partial != NULL && s_partial->changed != NULL;
+}
+
+static void log_wear(const char *kind, size_t changed, const fos_ghost_wear_t *wear)
+{
+    printf("display: %s, %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n", kind, (unsigned)changed,
+           (unsigned long)wear->deepest / 10, (unsigned long)wear->deepest % 10, (unsigned long)wear->worn,
+           (unsigned long)wear->tiles);
+}
+
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
                              bool *partial)
 {
     if (partial) *partial = false;
+    /* The render task's own update comes with its box (fos_display_hint_damage,
+     * settle_panel's empty one); another caller's leaves the next one none. */
+    bool from_render = s_hint_armed;
+    bool hint_usable;
+    fos_it8951_rect_t hint_box;
+    hint_take(&hint_usable, &hint_box);
+    s_chain_ok = false;
+    warm_wait();
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
     /* A controller that keeps the picture says what changed itself. */
     bool controller_keeps = s_partial && s_partial->changed;
-    if (controller_keeps) fos_it8951_10in3_set_interactive(input_recent);
+    if (controller_keeps) {
+        fos_it8951_10in3_set_interactive(input_recent);
+        fos_it8951_10in3_hint(hint_usable ? &hint_box : NULL);
+    }
     long controller_changed = controller_keeps ? s_partial->changed(buf) : -1;
     bool known = controller_keeps ? controller_changed >= 0 : s_glass_known;
+    fos_ghost_wear_t wear = s_wear;
+    size_t changed = len;
+    if (known && controller_keeps) {
+        changed = (size_t)controller_changed;
+    } else if (known) {
+        /* Counted before it is decided: a full refresh clears the count. */
+        changed = fos_ghost_add(&s_ghost, s_glass, buf);
+        fos_ghost_wear(&s_ghost, &wear);
+    }
     fos_partial_refresh_input_t input = {
         .supported = fos_display_supports_partial(),
         .glass_known = known,
         .same_scene = same_scene,
         .input_recent = input_recent,
-        .partials_since_full = s_partials_since_full,
         /* A controller that keeps the picture (the IT8951) settles its own
          * ghosts (GC16 after DU, fos_display_settle_due). */
-        .changed_since_full = controller_keeps ? 0 : s_changed_since_full,
-        .changed_bytes = !known ? len : controller_keeps ? (size_t)controller_changed
-                                                         : fos_partial_changed_bytes(buf, s_glass, len),
+        .counted = !controller_keeps,
+        .wear = wear,
+        .partials_since_full = s_partials_since_full,
+        .changed_bytes = changed,
         .total_bytes = len,
+        .controller_keeps = controller_keeps,
     };
-    if (!fos_partial_refresh_wanted(&input)) return fos_display_blit(buf, len);
+    fos_refresh_kind_t kind = fos_partial_refresh_kind(&input);
+    if (kind != FOS_REFRESH_PARTIAL) {
+        if (input.supported && !controller_keeps) log_wear(k_refresh_kind[kind], changed, &wear);
+        esp_err_t blitted = fos_display_blit(buf, len);
+        s_chain_ok = from_render && blitted == ESP_OK;
+        return blitted;
+    }
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
@@ -674,15 +871,21 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     s_last_partial_us = esp_timer_get_time();
     s_panel_awake = true;
     s_panel_rested = false;
-    if (!controller_keeps) memcpy(s_glass, buf, len);
-    s_partials_since_full++;
-    if (!controller_keeps) s_changed_since_full += input.changed_bytes;
+    if (!controller_keeps) {
+        memcpy(s_glass, buf, len);
+        s_wear = wear;
+        log_wear(k_refresh_kind[FOS_REFRESH_PARTIAL], changed, &wear);
+    }
+    if (s_partials_since_full++ == 0) s_first_partial_us = s_last_partial_us;
     if (partial) *partial = true;
+    s_chain_ok = from_render;
     return ESP_OK;
 }
 
 esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, size_t len)
 {
+    s_chain_ok = false;
+    warm_wait();
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     if (!buf || len != fos_display_buffer_size()) return ESP_ERR_INVALID_SIZE;
     if (fos_display_is_lcd()) return fos_display_blit(buf, len);
@@ -711,6 +914,37 @@ esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, 
     return ESP_OK;
 }
 
+bool fos_display_glass_supported(void)
+{
+    return s_panel && s_partial && s_partial->changed;
+}
+
+esp_err_t fos_display_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
+{
+    if (!fos_display_glass_supported()) return ESP_ERR_NOT_SUPPORTED;
+    if (!buf) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = ensure_module();
+    if (err != ESP_OK) return err;
+    refresh_wait();
+    DEV_SPI_Acquire();
+    if (!s_panel_awake) s_partial->init();
+    bool ok = fos_it8951_10in3_glass_rect(buf, x, y, w, h);
+    DEV_SPI_Release();
+    s_last_partial_us = esp_timer_get_time();
+    s_panel_awake = true;
+    s_panel_rested = false;
+    return ok ? ESP_OK : ESP_FAIL;
+}
+
+void fos_display_glass_wait(void)
+{
+    if (!fos_display_glass_supported() || !s_panel_awake) return;
+    refresh_wait();
+    DEV_SPI_Acquire();
+    fos_it8951_10in3_wait();
+    DEV_SPI_Release();
+}
+
 bool fos_display_settle_due(int64_t now_us)
 {
     if (!s_partial || !s_partial->owed || !s_partial->owed()) return false;
@@ -723,6 +957,7 @@ bool fos_display_settle_due(int64_t now_us)
 void fos_display_park(void)
 {
     /* Before a deep sleep too: a refresh still running finishes first. */
+    warm_wait();
     refresh_wait();
     if (!s_panel || !s_panel_awake) return;
     DEV_SPI_Acquire();
@@ -733,6 +968,9 @@ void fos_display_park(void)
 
 esp_err_t fos_display_prepare_deep_sleep(void)
 {
+    /* An AMOLED's controller off and asleep: a few microamps instead of a
+     * lit glass the chip's sleep would leave on. */
+    if (is_qspi()) return fos_lcd_qspi_prepare_deep_sleep();
     if (!s_photo_painter) return ESP_ERR_NOT_SUPPORTED;
     /* Never under a waveform: a refresh still running finishes first, or its
      * supply goes with the high voltage on. */
@@ -760,24 +998,31 @@ void fos_display_park_if_idle(int64_t now_us)
 {
     /* The refresh task has the panel: nothing is idle, and waiting for it here
      * would hold the render task for the refresh after all. */
-    if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
+    if (!s_partial || fos_refresh_queue_busy(&s_refresh_queue)) return;
     int64_t idle_us = now_us - s_last_partial_us;
-    /* Ghosts worth a flash: many updates, or half a panel moved by them. */
-    bool ghosted = s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL ||
-                   s_changed_since_full * 2 >= fos_display_buffer_size();
-    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 && ghosted) {
+    bool controller_keeps = s_partial->changed != NULL;
+    /* The ghosts the partial updates left: worn tiles (fos_partial_refresh.h),
+     * a controller's count, or a glass held a day in partial updates. */
+    bool ghosted = s_partials_since_full > 0 && idle_us >= FOS_PANEL_CLEAN_US &&
+                   (controller_keeps ? s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL
+                                     : fos_ghost_due(&s_wear) || now_us - s_first_partial_us >= FOS_PANEL_HELD_US);
+    /* On USB the IT8951 is not put in standby (fos_display_keep_controller_awake). */
+    bool stays_up = s_keep_controller_awake && controller_keeps;
+    if (ghosted && controller_keeps && s_panel_awake && s_partial->clean) {
         DEV_SPI_Acquire();
         s_partial->clean();
-        s_partial->rest();
+        if (!stays_up) s_partial->rest();
         DEV_SPI_Release();
-        s_panel_awake = false;
+        s_panel_awake = stays_up;
         s_partials_since_full = 0;
-    s_changed_since_full = 0;
-    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known && s_partials_since_full > 0 && ghosted) {
+    } else if (ghosted && !controller_keeps && s_glass_known) {
+        log_wear("full refresh (ghosts, idle)", 0, &s_wear);
         fos_display_blit(s_glass, fos_display_buffer_size());
-    } else if (idle_us >= FOS_PANEL_AWAKE_US) {
+    } else if (!s_panel_awake) {
+        return;
+    } else if (idle_us >= FOS_PANEL_AWAKE_US && !stays_up) {
         fos_display_park();
-    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !s_partial->changed) {
+    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !controller_keeps) {
         DEV_SPI_Acquire();
         s_partial->rest();
         DEV_SPI_Release();
@@ -792,12 +1037,14 @@ void *fos_display_alloc_psram(size_t len)
 
 esp_err_t fos_display_clear(void)
 {
+    s_chain_ok = false;
+    warm_wait();
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
     fos_display_park();
     DEV_SPI_Acquire();
-    if (s_panel->driver_init() != 0) {
+    if (fos_panel_init(s_panel) != 0) {
         DEV_SPI_Release();
         return ESP_FAIL;
     }

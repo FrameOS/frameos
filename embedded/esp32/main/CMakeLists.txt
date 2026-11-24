@@ -11,6 +11,7 @@ idf_component_register(
         "fos_charger.c"
         "fos_climate.c"
         "fos_gauge.c"
+        "fos_imu.c"
         "fos_touch.c"
         "fos_usb_pads.c"
         "fos_usj_attach.c"
@@ -36,6 +37,7 @@ idf_component_register(
         "fos_scene_pieces.c"
         "fos_http.c"
         "fos_animation.c"
+        "fos_press.c"
         "fos_boot_scene.c"
         "fos_client.c"
         "fos_render_pull.c"
@@ -74,6 +76,7 @@ idf_component_register(
         "fos_sd_probe.c"
         "fos_sscanf.c"
         "fos_printf.c"
+        "fos_cxx_new.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -102,8 +105,21 @@ idf_component_register(
         sdmmc
         frameos_display
         frameos_nim
+        frameos_quickjs
         monocypher
 )
+
+# Calls to ROM and IRAM go through veneers in flash (fos_veneers.h): a
+# CALL8 where a call was an L32R, a CALLX8 and a literal. Not from a file
+# with IRAM code, which must not call flash: test_esp32_veneers.py holds
+# every main/*.c that says IRAM_ATTR to this list.
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    get_target_property(fos_veneered_srcs ${COMPONENT_LIB} SOURCES)
+    list(FILTER fos_veneered_srcs INCLUDE REGEX "\\.c$")
+    list(FILTER fos_veneered_srcs EXCLUDE REGEX "/?(fos_led|fos_mic|fos_touch)\\.c$")
+    set_source_files_properties(${fos_veneered_srcs} PROPERTIES
+        COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/fos_veneers.h")
+endif()
 
 # The setup page (fos_http.c's GET /) is setup_page.html gzipped here and
 # served with Content-Encoding: gzip (tools/gzip_setup_page.py).
@@ -128,15 +144,23 @@ set_source_files_properties(fos_spiffs_gc.c PROPERTIES
 # -u: the only reference is esp_spiffs.c's, which the archive scan can pass.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wrap_SPIFFS_gc")
 
-# sscanf goes through fos_sscanf.c: cJSON's "%lg" read-back is strtod there,
-# so newlib's floating-point scanf (9.6 KB) is never linked.
-target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-u __wrap_sscanf")
+# sscanf and siscanf go through fos_sscanf.c: cJSON's "%lg" read-back is
+# strtod there and tzset's five TZ formats are read by its integer scanner,
+# so neither of newlib's scanf engines (9.6 + 8.3 KB) is linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-Wl,--wrap=siscanf" "-u __wrap_sscanf")
 
-# printf, fprintf, vprintf and vfprintf go through fos_printf.c, which formats
-# with vsnprintf: newlib's FILE formatter (_vfprintf_r, 11.4 KB, a second copy
-# of the one snprintf uses) is never linked.
+# The printf family goes through fos_printf.c's formatter (doubles by QuickJS's
+# js_dtoa): newlib's two copies of its own (_vfprintf_r for FILEs,
+# _svfprintf_r for strings, 11-13 KB each) and the dtoa behind them are never
+# linked.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=printf" "-Wl,--wrap=fprintf"
-    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-u __wrap_vprintf")
+    "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-Wl,--wrap=snprintf" "-Wl,--wrap=vsnprintf"
+    "-Wl,--wrap=sprintf" "-Wl,--wrap=asprintf" "-Wl,--wrap=vasprintf" "-u __wrap_vprintf")
+
+# NVS's new[] (std::nothrow) and delete[] are fos_cxx_new.c's: libstdc++'s
+# pull in the C++ exception runtime and type_info classes (1.5 KB) for a catch
+# that cannot run. -u: NVS is linked after main, so the definitions must be in.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u _ZnajRKSt9nothrow_t")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before

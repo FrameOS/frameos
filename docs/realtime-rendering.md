@@ -769,6 +769,89 @@ turned 90 degrees; 30 touch moves, 32 frames each, 2026-10-28):
 What is left (`docs/realtime-todo.md`): the push on its own thread, and
 waking on input instead of polling.
 
+### A press shows at once
+
+A tap's answer is a render, and a render waits its turn: the press is not
+reported until it has settled (`TOUCH_SETTLE_MS`, 20 ms), the render task
+may be in the middle of another render (a clock's 385 ms, a slideshow's 0.5
+to 0.7 s on the SenseCAP Indicator), and a JSX UI's press render (its
+`active:` look) and the answer after the lift are 40 to 100 ms each there.
+Measured on 2026.11.14 (the hour of console taps in `docs/perf-todo.md`
+"Where a tap's time goes"), the pressed look came 80 to 110 ms after the
+finger, and on an element with no `active:` class nothing changed until the
+finger lifted. On the reTerminal E1003 nothing moves on the glass before the
+answer's waveform starts, ~0.2 s after the lift, and finishes ~0.5 s later.
+What the person sees sooner now (2026-11-24, `fos_press.h`, `lcd_press.h`):
+
+- **An LCD lights the press itself** (`lcd_press.c`, host-tested). The touch
+  task (core 0) asks the press map of the last render (`fos_client_press_find`:
+  every touch board keeps it now, not only e-paper) what is under the finger
+  at its first report, before the settle, and an element of the scene's UI
+  (`taken` 3: its own box, `interpreter.panelPressMap` `element`) is shaded a
+  quarter of the way to black (to white on a dark box) in the frame buffer on
+  the glass, its pixels saved first, under the loading mark's lock. The next
+  picture presented puts it away (`present_back`: it is the scene's answer,
+  its own `active:` look or the result), and so does the lift when no picture
+  follows within `FOS_PRESS_LINGER_MS` (250 ms, the mark's task), a move past
+  `FOS_PRESS_SLOP_PX` (a drag) or a second finger. A box over a quarter of
+  the panel is no button (a scene that takes every press: nothing is lit).
+  Put away by the render task it gives the buffer's write count back; put
+  away from another task the count stays moved, because a render may have
+  been copying from that buffer meanwhile (`svg_frames.nim` checks the count
+  after a whole-frame copy too now), and that buffer's next render draws it
+  whole. The mark and a press are never up together: the mark is the newer
+  news. On the SenseCAP Indicator the shade of a 200x120 button is drawn
+  5 ms after the touch task's first report of the finger (the console's
+  `touch tap`, below), so it is on the glass within the controller's 10 ms
+  poll and one scan of the panel (24 ms) of the contact, where the scene's
+  own `active:` look came 80 to 110 ms after it.
+- **A quick tap still looks pressed** (`ui/events.nim` `pressLinger`, an ESP32
+  only: `quickTapLingers`). Its press and its lift handled in one go behind a
+  busy render left no render that drew the `active:` look; now the look stays
+  with the tap's answer and goes `PressLingerMs` (150 ms) after a render drew
+  it, as a typed key's light does. The idle wait looks at a UI timer every 50
+  ms (`fos_nim_next_async_ms_impl`), so the key's light no longer stays up to
+  a whole second slice either.
+- **A handler that takes long shows the loading mark** (LCD). The mark used to
+  count from the render that answered a tap; a handler that blocks (a
+  synchronous `fetch` in an `onClick`) ran before that render and showed
+  nothing. It counts from the input's arrival now (`process_input_events`,
+  `FOS_LOADING_ANSWER_EXTRA_MS` past the usual 200 ms, so at half a second),
+  and goes where no render follows.
+- **A timed render does not start under a finger**
+  (`fos_timed_render_waits_for_finger`, host-tested): a render whose interval
+  ran out while a finger is on the glass waits for the lift, in 50 ms slices,
+  at most `FOS_TIMED_UNDER_FINGER_MAX_US` (1.5 s) past its time, so the tap's
+  render goes first. A render already running is not stopped: see
+  `docs/perf-todo.md` "Still open" for why there is no safe checkpoint.
+- **E-paper says it heard the press.** On a press the map takes, the touch
+  task lights the board's LED (`fos_led_busy`, the E1003's GPIO16) until the
+  waveform that draws the answer has run (`FOS_PRESS_WAVEFORM_MS` after it
+  starts, 4 s at most), beside the buzzer's click. On an element whose taps
+  took `FOS_PRESS_INK_AFTER_MS` (600 ms) or more to answer (contact to the
+  answer's picture ready, smoothed over its last few, by its box: the last
+  eight elements pressed, timed afresh on every scene), the render task inks the pressed box
+  before it hands the press on (`ink_press`): the box inverted in pure black
+  and white in the picture showing, for the upload alone, and one DU over it
+  (`fos_display_glass_rect`, the IT8951's `glass_rect`: its tiles marked
+  `stale`, so the next update sends the picture's own pixels whatever the
+  digests say, and the settle does when none comes). A quicker element is not
+  inked: its answer would wait for the ink's 470 ms waveform. A scene switch
+  somebody waits for (input within the hold's quiet 10 s) puts the loading
+  tile up the same way at once (`fos_client_switch_begin` at the switch call
+  sites in `fos_scenes.c`: the wake ring, `fos_panel_mark_box`), while the
+  scene loads; its first picture takes it away. On the E1003 (2026-11-24) a 1.5 s
+  button's ink went up 39 ms after the render task took the press (its 224x128
+  tiles' upload included), the answer's update sent the box's own pixels back
+  with its own, and the loading tile took 56 ms of a switch. Either one
+  invalidates the display state in memory, so the next render updates the
+  panel even when the scene drew nothing new (a switch that failed).
+
+The console's `touch tap <x> <y> [ms]` (`fos_touch_inject`) puts a finger
+on the glass through the touch task, in the controller's own coordinates, so
+the bench times all of this without one, and prints when the touch task saw
+it and lit it.
+
 ### A switch that takes a while: the loading mark
 
 On a fast panel a scene switch used to give no sign of life while the next
@@ -847,8 +930,10 @@ On the HyperPixel 2.1 Round (`frameos/panel_shape.nim` `panelIsRound`) only
 the circle inside the 480x480 square is glass, so the pill sits at the top
 middle instead, as high as its top corners stay 14 px inside the rim.
 `test_loading_mark.nim` checks that every pixel it touches there is 12 px
-inside the circle, at every turn. No ESP32 board is round, so that is not
-built there.
+inside the circle, at every turn. The Waveshare ESP32-S3-Touch-AMOLED-1.75's
+466x466 AMOLED is round the same way: the firmware says so at init
+(`fos_display_round`, `panel_shape.boardPanelRound`) and its mark sits there
+too.
 
 **On a Pi** (`frameos/loading_mark_panel.nim`, the framebuffer family only:
 HDMI, DPI, the HyperPixels) a thread of its own draws the mark straight into
@@ -927,12 +1012,11 @@ a small change cost what it should:
   that reaches the glass goes through it or `fos_display_blit`, so the copy it
   keeps is exact whoever drew it. `fos_partial_refresh.c` (host-tested) picks
   a full refresh instead for the first picture after a boot or a deep sleep, a
-  new scene, a picture that mostly changed, and every 20th update, which
-  clears the ghosts; also, tapping or not, the update that would bring what
-  the partial updates moved since the last full refresh to a panel and a half
-  (`FOS_PARTIAL_GHOST_HALF_SCREENS`): a ghost is as big as what moved, so a
-  book flashes every sixth page (a page moves about a quarter of the panel)
-  and a key's light hardly counts. Not the IT8951, which settles its own (GC16 after DU). `render:done` says `"refresh":"partial"`. The panel
+  new scene nobody switched to by hand, a picture that mostly changed, and a
+  glass the ghosts have worn (next paragraph). `render:done` says
+  `"refresh":"partial"`, and each update logs its kind and the wear
+  (`display: partial, 1834 bytes changed, ghosts 2.3 deep, 41 of 1500 tiles
+  worn`; `display: full refresh (ghosts), ...`). The panel
   stays awake between updates, its analog supply on and its waveform loaded.
   After ten idle seconds the supply goes off and the controller stays awake
   (`fos_display_park_if_idle`); after five minutes, or before the chip's own
@@ -940,6 +1024,43 @@ a small change cost what it should:
   300 ms; the supply, the waveform load and an 8 MHz bus 270 ms more. What is
   left is about 500 ms: some 40 ms for the two frames on the bus, the rest the
   waveform itself.
+- **The ghosts, counted where they are.** A partial update leaves each pixel
+  it moves a little short of black or white, and the next move of that pixel
+  starts from there; a pixel that never moved has no error at all (Waveshare:
+  "after repeated partial refreshes, this error accumulates and produces
+  ghosting"). So what wears the glass is how often each place was rewritten,
+  not how many updates there were. The display layer counts the pixels every
+  partial update flips per tile of 16x16 pixels (`fos_ghost_add`, a table of
+  1,500 counts beside the Sticky's 48 KB copy of the glass, 3 KB, cleared by a
+  full refresh), a tile's depth being its flips over its pixels: one flip of
+  every pixel is 1.0, a page of text turned about 0.2 in the text. The glass
+  is due a full refresh when a quarter of its tiles are 1.0 deep (pages of
+  text: every fifth page, as an e-reader's and the panel makers' "one full
+  update after five or six partial updates" have it), or when one tile is 16
+  deep (a digit rewritten in place: about 27 times, the Sticky's tap
+  counter). The one deep tile waits for the idle frame while someone taps or
+  pictures come quickly, up to 32 deep; a worn quarter does not wait, as a
+  page turn does not. Nothing else flashes the glass: no count of updates,
+  no timer on a glass with no ghosts. What it replaced flashed every 20th
+  update (120 while someone tapped) and once the updates since the last full
+  refresh had moved a panel and a half of bytes, and the idle frame flashed
+  30 seconds after the last update whenever 20 updates or half a panel's
+  bytes had gone by: after almost any use, the flash "about a minute after I
+  leave it". Measured on the Sticky (2026-11-24): 25 taps of the tap counter
+  then nothing, the old rule flashed 30.2 s after the last update (25
+  updates, 12.7 KB moved), the tiles left its digit 14.9 deep and nothing
+  flashed; a clock with a seconds hand flashed every 120 updates, two
+  minutes, and with the tiles every 3 min 41 s (its hand wears a quarter of
+  the glass); ePub pages flash every fifth page under both. Each update
+  takes one pass over the changed rows (`memcmp` skips the rest) and one
+  over the tiles. One exception keeps a timer: a glass partially
+  updated a day ago is cleaned when idle, ghosts or not, since a pixel a
+  partial update left black or white is held there by a charge no waveform
+  balanced (the panel makers' "refresh at least every 24 hours"). Not the
+  IT8951 (next): it keeps no copy of the glass to count against, its slow
+  pictures go up with GC16 over their grey areas, which clears them, and it
+  takes a full refresh after 20 of its partial updates (120 while someone
+  taps).
 - **A controller that keeps the picture** (the IT8951 behind the reTerminal
   E1003's 10.3" glass). The display layer holds no copy here, 1.25 MiB this
   8 MB board does not have: the driver hashes the packed picture in tiles of
@@ -955,9 +1076,39 @@ a small change cost what it should:
   rest of the picture does not flash. It draws black and white only, so a
   changed area with greys goes up as a halftone
   (`fos_it8951_row_halftone`) and its tiles are owed their greys; a tile drawn
-  in pure black and white again owes nothing. 2.5 s after the last of these
-  updates (`fos_display_settle_due`) the kept canvas is packed again, with the
-  scene not run, and those areas get GC16, three rectangles at the most.
+  in pure black and white again owes nothing. **A change of any size** goes up
+  that way while someone taps (`controller_keeps` in `fos_partial_refresh.c`):
+  a page turned by a tap is one DU, not the whole panel's GC16, which flashed
+  for 580 ms. 4.5 s after the last of these updates, and never while a finger
+  is down or a press is queued (`fos_display_settle_due`, the idle wait in
+  `fos_client.c`), the kept canvas is packed again, with the scene not run,
+  and those areas get GC16, three rectangles at the most: a tap that lands on
+  a settle waits out its 580 ms, and 2.5 s was the gap between two taps of
+  somebody reading.
+  **What goes up first is the render's box.** Hashing the whole 1.3 MB
+  picture to find what changed was 30-50 ms between a tap's render and its
+  upload, and the SHA-256 the firmware kept for "unchanged, skip the refresh"
+  another 40 (2026-11-24). The render says where it wrote the canvas
+  (`frameos_nim_render_damage`: one SVG repainted in its own frame's damage,
+  `svg_frames.nim` `takePanelPaint`; anything else is the whole canvas), the
+  render task hands that to `fos_display_hint_damage`, and the driver hashes
+  only those tiles before the upload (`fos_it8951_10in3_hint`). The whole
+  picture is hashed after the waveform has started, on both cores
+  (`fos_rows_run`), when the next upload could not go yet anyway
+  (`verify_after_hint`): a tile changed outside the box is sent at once in a
+  follow-up (`fos_display_followup_due`) and logged as `changed outside the
+  render's box`, so a wrong box costs a waveform, never a picture left
+  behind. A box is good only for the canvas as the controller last took it:
+  any other way onto the glass (a blit, a quick update) or a picture taken
+  off the canvas after its update (an overlay: `fos_display_hint_forget`)
+  makes the next update hash it all. While somebody taps, the SHA-256 is not
+  worked out at all and the hash of the last picture is written to flash when
+  the tapping stops, and before a deep sleep (`pay_display_state`): the
+  controller's tiles skip an unchanged picture already. The `it8951:` lines
+  go through the log ring (a `printf` waited 10-45 ms behind a render's own
+  lines for room on the 115200-baud console), HRDY is spun on for 5 ms before
+  a wait sleeps a tick, and a wait for the last waveform sleeps until shortly
+  before it is due and then reads LUTAFSR every half millisecond.
   **Quick pictures go up the same way** (`fos_pictures_fast`): a scene whose
   own interval is under 2.5 s (an animation, a clock's seconds) from its first
   frame, and any picture within 2.5 s of the one before. Before, an animation
@@ -969,8 +1120,16 @@ a small change cost what it should:
   black and white and GC16 for the rest. A new scene is GC16 over the whole
   panel. A panel picks this path by
   giving `PARTIAL_PANELS` a `changed`, a `clean` and an `owed`. The controller
-  is not put in standby between updates (its first waveform after one costs 600
-  ms more), only when it is parked. Measured on an E1003 (2026-11-10): five
+  is not put in standby between updates, only when it is parked, and on USB
+  power not even then (`fos_display_keep_controller_awake`; a deep sleep
+  parks it all the same): its first waveform after a standby ran 898 ms where
+  a GC16 runs 580, while SYS_RUN itself answered in 22 ms (2026-11-24), so
+  the cost is the panel's supply coming up and waking it early saves nothing.
+  An awake controller is not sent SYS_RUN and the SHT40's temperature on
+  every full refresh any more; the temperature goes again every 5 minutes. At
+  boot it is brought up on a task of its own while Wi-Fi joins
+  (`fos_display_warm_up`), not after the first render; every way onto the
+  glass waits for that task first. Measured on an E1003 (2026-11-10): five
   scattered areas in 511 ms of waveform and 15 ms of upload; a tap in about a
   second from the finger to the picture.
 - **A refresh is started, not waited for.** The IT8951 runs its waveform and the
@@ -1037,7 +1196,15 @@ a small change cost what it should:
   and a restart wait for it). On the E1003 a forced sync held the render task
   13-20 s (the download 6-13 s, the write 6-7 s) and an event sent as it
   began waited up to 11.7 s; now the worst wait is the new set's first
-  render, 3.2 s. A flash write turns the cache off for every erase and page
+  render, 3.2 s. A deploy's own sync goes the same way: a commands answer
+  that says `sync` (a deploy waiting) is handed to the render task only with
+  the set and settings it asks for, downloaded by the link task with the pull
+  (`fos_commands_fetch`); the render task takes them and only then runs the
+  answer's commands, since a switch queued behind the push names a scene
+  from it, and the link task's next pull reports the new ETags so the
+  backend records the deploy (`fos_sync_plan`). Downloaded on the render
+  task, a 35-scene, 1.48 MB deploy froze a reTerminal Sticky's screen and
+  dropped its taps for 42 s (2026-11-23). A flash write turns the cache off for every erase and page
   program and both cores wait it out, so the store task writes 2 KB at a time
   between renders and never while someone taps (`store_pace`); on an RGB LCD,
   which shows "Updating" for the write, as fast as it goes. A cloud push or an
@@ -1055,7 +1222,7 @@ a small change cost what it should:
   under `s_link_round`, and runs the commands it pulled: they would otherwise
   still be in memory as the chip sleeps (`link_hand_back`). The rules are
   host-tested in `fos_animation.c` (`fos_backend_link_on`,
-  `fos_image_push_yields`, `fos_input_hold_applies`) and the threading read
+  `fos_image_push_yields`, `fos_input_hold_applies`, `fos_sync_plan`) and the threading read
   off the source by `test_esp32_backend_link.py`. The picture stream no longer holds the snapshot for the
   whole upload: a snapshot up to 256 KB is copied out, a larger one is read a
   row at a time and a render taking the buffer back ends the stream (it held a
@@ -1074,9 +1241,10 @@ a small change cost what it should:
   `fos_animation.c`), and the idle wait then runs it once, a round trip at a
   time, giving way to the next tap. A backend's command nudge is still served
   at once, and a frame about to deep sleep runs what it held first. The full
-  refresh that clears the ghosts waits the same way: 120 updates at the most
-  while someone taps, and the frame does it from the idle wait 30 seconds
-  after the last update.
+  refresh that clears a deep tile's ghosts waits the same way (twice as deep
+  at the most, "The ghosts, counted where they are" above), and the frame
+  does it from the idle wait 30 seconds after the last update, only if the
+  glass is due one.
 - **The dither.** On the sixteen-grey panels there is no error to carry:
   `grayLevel16Ordered` is a 4x4 Bayer matrix, so a pixel's level depends on
   that pixel alone and a small change is a small change on the wire. It is

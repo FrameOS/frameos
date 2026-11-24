@@ -8,6 +8,7 @@ import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
+import { TextInput } from '../../../../components/TextInput'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneAccessTags } from './SceneAccessTags'
@@ -28,6 +29,7 @@ import {
   sceneRenderScaleFromSelect,
   sceneRenderScaleSelectValue,
 } from '../../../../utils/renderScale'
+import { sceneRoundChoice, sceneRoundFromChoice } from '../../../../utils/sceneNeeds'
 import {
   SCENE_WINDOW_SIZE_HELP,
   sceneWindowSizeFromSelect,
@@ -64,6 +66,11 @@ const refreshIntervalTooltip =
   'options. Use a large number like "60" or more for e-ink frames. A number below 1 ' +
   'activates realtime mode (0.041s = 24fps, 0.016s = 60fps): only if your hardware supports it.'
 
+// `settings.opens`, docs/scene-guide.md "Opening files": listed as it is on app.frame.scenes.
+const opensTooltip =
+  'The kinds of file this scene opens, by their extension: "pdf", or "txt md json" for several. The Files app ' +
+  'opens such a file in this scene, which gets it in its public field "file".'
+
 function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
 }
@@ -87,6 +94,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
     iconProblem,
     iconUploadError,
     categoryOptions,
+    roundOptions,
   } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
@@ -234,6 +242,34 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 )}
               </Field>
             )}
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="round"
+                label={<SceneSettingsLabel>Round screens</SceneSettingsLabel>}
+                tooltip="Whether the scene works on a round screen (only the circle inside the panel shows). The store marks it Round screen and offers it first to round frames. Automatic: it does when its code asks context.round or app.frame.round. Square and rectangular screens see no difference."
+              >
+                {({ value, onChange }) => (
+                  <Select
+                    name="round"
+                    className="h-10"
+                    value={sceneRoundChoice(value)}
+                    onChange={(next) => onChange(sceneRoundFromChoice(next))}
+                    options={roundOptions}
+                  />
+                )}
+              </Field>
+            )}
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="fullScreen"
+                label={<SceneSettingsLabel>Full screen</SceneSettingsLabel>}
+                tooltip="Ask the frame's layout for the whole panel: no bar or dock around this scene, as a book or a photo wants. A field of the scene used as full screen wins over this, so people can choose on the frame."
+              >
+                <Switch name="fullScreen" />
+              </Field>
+            )}
             <Field
               className={fieldClassName}
               name="category"
@@ -250,6 +286,24 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 />
               )}
             </Field>
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="opens"
+                label={<SceneSettingsLabel>Opens files</SceneSettingsLabel>}
+                tooltip={opensTooltip}
+              >
+                {({ value, onChange }) => (
+                  <TextInput
+                    name="opens"
+                    className="!h-10"
+                    placeholder="pdf epub"
+                    value={typeof value === 'string' ? value : ''}
+                    onChange={(next) => onChange(next || undefined)}
+                  />
+                )}
+              </Field>
+            )}
             <Field
               className={fieldClassName}
               name="icon"

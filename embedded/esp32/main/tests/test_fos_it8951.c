@@ -75,7 +75,8 @@ static void test_full_row(void)
     CHECK(memcmp(twice, row, sizeof(row)) == 0, "mirrored twice is the row");
 }
 
-static uint8_t g_packed[FOS_IT8951_10IN3_WIDTH / 2 * FOS_IT8951_10IN3_HEIGHT];
+/* Aligned as the firmware's panel buffer is: the digests read it a word at a time. */
+static _Alignas(4) uint8_t g_packed[FOS_IT8951_10IN3_WIDTH / 2 * FOS_IT8951_10IN3_HEIGHT];
 static uint32_t g_hashes[FOS_IT8951_TILES], g_after[FOS_IT8951_TILES];
 
 /* The tiles whose digest moved after one pixel of the panel changed. */
@@ -123,6 +124,105 @@ static void test_tile_hashes(void)
     }
     g_packed[15] = 0x77;
     CHECK(unchanged == 0, "%d grey steps did not move the digest", unchanged);
+}
+
+/* The digest as it was before it read words (four byte loads a word): the
+ * firmware's word loads must give the same one. */
+static void reference_hashes(const uint8_t *packed, bool mirror_x, uint32_t *out)
+{
+    size_t row_bytes = FOS_IT8951_10IN3_WIDTH / 2u;
+    for (int tile_row = 0; tile_row < FOS_IT8951_TILE_ROWS; tile_row++) {
+        for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) {
+            int left = col * FOS_IT8951_TILE_WIDTH;
+            int right = left + FOS_IT8951_TILE_WIDTH > FOS_IT8951_10IN3_WIDTH ? FOS_IT8951_10IN3_WIDTH : left + FOS_IT8951_TILE_WIDTH;
+            size_t bytes = (size_t)(right - left) / 2u;
+            size_t offset = (size_t)(mirror_x ? FOS_IT8951_10IN3_WIDTH - right : left) / 2u;
+            uint32_t hash = 0x811C9DC5u;
+            for (int y = tile_row * FOS_IT8951_TILE_HEIGHT; y < (tile_row + 1) * FOS_IT8951_TILE_HEIGHT && y < FOS_IT8951_10IN3_HEIGHT; y++) {
+                const uint8_t *at = packed + (size_t)y * row_bytes + offset;
+                for (size_t i = 0; i + 4 <= bytes; i += 4) {
+                    uint32_t word = (uint32_t)at[i] | ((uint32_t)at[i + 1] << 8) | ((uint32_t)at[i + 2] << 16) |
+                                    ((uint32_t)at[i + 3] << 24);
+                    hash = (hash ^ word) * 0x01000193u;
+                    hash ^= hash >> 15;
+                }
+            }
+            out[(size_t)tile_row * FOS_IT8951_TILE_COLS + (size_t)col] = hash;
+        }
+    }
+}
+
+static void test_word_digests_match_the_byte_ones(void)
+{
+    uint32_t seed = 12345;
+    for (size_t i = 0; i < sizeof(g_packed); i++) {
+        seed = seed * 1103515245u + 12345u;
+        g_packed[i] = (uint8_t)(seed >> 16);
+    }
+    for (int mirror = 0; mirror < 2; mirror++) {
+        reference_hashes(g_packed, mirror, g_hashes);
+        fos_it8951_tile_hashes(g_packed, mirror, g_after);
+        int differ = 0;
+        for (size_t i = 0; i < FOS_IT8951_TILES; i++) differ += g_hashes[i] != g_after[i];
+        CHECK(differ == 0, "mirror %d: %d digests differ from the byte-wise ones", mirror, differ);
+    }
+    memset(g_packed, 0xFF, sizeof(g_packed));
+}
+
+static void test_area_digests(void)
+{
+    /* An area's digests are the whole picture's there, and nothing else moves. */
+    memset(g_packed, 0x5A, sizeof(g_packed));
+    fos_it8951_tile_hashes(g_packed, true, g_hashes);
+    for (size_t i = 0; i < FOS_IT8951_TILES; i++) g_after[i] = 0xDEADBEEFu;
+    fos_it8951_tile_hash_area(g_packed, true, g_after, 3, 7, 10, 12);
+    int inside = 0, outside = 0, wrong = 0;
+    for (int row = 0; row < FOS_IT8951_TILE_ROWS; row++) {
+        for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) {
+            size_t i = (size_t)row * FOS_IT8951_TILE_COLS + (size_t)col;
+            if (row >= 3 && row < 7 && col >= 10 && col < 12) {
+                inside++;
+                if (g_after[i] != g_hashes[i]) wrong++;
+            } else if (g_after[i] != 0xDEADBEEFu) {
+                outside++;
+            }
+        }
+    }
+    CHECK(inside == 8 && wrong == 0, "area: %d tiles, %d wrong", inside, wrong);
+    CHECK(outside == 0, "area: %d tiles outside it written", outside);
+    memset(g_packed, 0xFF, sizeof(g_packed));
+}
+
+static void test_tile_range(void)
+{
+    int c0 = -1, c1 = -1, r0 = -1, r1 = -1;
+    /* One pixel at the top left: the first tile, or the last column mirrored. */
+    fos_it8951_rect_t px = {0, 0, 1, 1};
+    CHECK(fos_it8951_tile_range(&px, false, &c0, &c1, &r0, &r1) && c0 == 0 && c1 == 1 && r0 == 0 && r1 == 1,
+          "top left: cols %d..%d rows %d..%d", c0, c1, r0, r1);
+    CHECK(fos_it8951_tile_range(&px, true, &c0, &c1, &r0, &r1) && c0 == FOS_IT8951_TILE_COLS - 1 &&
+              c1 == FOS_IT8951_TILE_COLS,
+          "top left mirrored: cols %d..%d", c0, c1);
+    /* A calculator key (64x72 at 32,80, measured on an E1003) on a mirrored panel. */
+    fos_it8951_rect_t key = {32, 80, 64, 72};
+    CHECK(fos_it8951_tile_range(&key, true, &c0, &c1, &r0, &r1), "key");
+    int wire_left = FOS_IT8951_10IN3_WIDTH - 32 - 64;
+    CHECK(c0 == wire_left / 32 && c1 == (wire_left + 63) / 32 + 1 && r0 == 10 && r1 == 19,
+          "key mirrored: cols %d..%d rows %d..%d", c0, c1, r0, r1);
+    /* Every pixel of the panel: every tile. */
+    fos_it8951_rect_t all = {0, 0, FOS_IT8951_10IN3_WIDTH, FOS_IT8951_10IN3_HEIGHT};
+    CHECK(fos_it8951_tile_range(&all, true, &c0, &c1, &r0, &r1) && c0 == 0 && c1 == FOS_IT8951_TILE_COLS &&
+              r0 == 0 && r1 == FOS_IT8951_TILE_ROWS,
+          "whole: cols %d..%d rows %d..%d", c0, c1, r0, r1);
+    /* Past the panel's edge: clipped; empty or outside: nothing. */
+    fos_it8951_rect_t over = {FOS_IT8951_10IN3_WIDTH - 10, FOS_IT8951_10IN3_HEIGHT - 2, 100, 100};
+    CHECK(fos_it8951_tile_range(&over, false, &c0, &c1, &r0, &r1) && c1 == FOS_IT8951_TILE_COLS &&
+              r1 == FOS_IT8951_TILE_ROWS,
+          "clipped: cols %d..%d rows %d..%d", c0, c1, r0, r1);
+    fos_it8951_rect_t empty = {10, 10, 0, 5};
+    CHECK(!fos_it8951_tile_range(&empty, false, &c0, &c1, &r0, &r1), "empty");
+    fos_it8951_rect_t outside = {FOS_IT8951_10IN3_WIDTH, 0, 5, 5};
+    CHECK(!fos_it8951_tile_range(&outside, false, &c0, &c1, &r0, &r1), "outside");
 }
 
 static uint8_t g_dirty[FOS_IT8951_TILES];
@@ -293,11 +393,38 @@ static void test_black_and_white(void)
     }
 }
 
+static void test_glass_wire_rect(void)
+{
+    fos_it8951_rect_t r;
+    /* Unmirrored: grown to whole tiles around it. */
+    CHECK(fos_it8951_glass_wire_rect(40, 10, 50, 20, false, &r), "a box on the panel");
+    CHECK(r.x == 32 && r.y == 8 && r.w == 64 && r.h == 24, "grown to tiles: %u,%u %ux%u", r.x, r.y, r.w, r.h);
+    /* Mirrored: the same box from the other side, then grown. */
+    CHECK(fos_it8951_glass_wire_rect(40, 10, 50, 20, true, &r), "mirrored");
+    int wx = FOS_IT8951_10IN3_WIDTH - 40 - 50;
+    CHECK(r.x <= wx && r.x + r.w >= wx + 50 && r.x % FOS_IT8951_TILE_WIDTH == 0, "covers it on the wire: %u+%u", r.x,
+          r.w);
+    /* Its tiles are whole, but the last column stops at the panel's edge. */
+    CHECK(fos_it8951_glass_wire_rect(FOS_IT8951_10IN3_WIDTH - 10, FOS_IT8951_10IN3_HEIGHT - 3, 10, 3, false, &r),
+          "the far corner");
+    CHECK(r.x + r.w == FOS_IT8951_10IN3_WIDTH && r.y + r.h == FOS_IT8951_10IN3_HEIGHT, "cut at the edge");
+    CHECK(r.w % 4 == 0 && r.x % 4 == 0, "whole words of four pixels");
+    /* Off the panel: none; over its edge: cut. */
+    CHECK(!fos_it8951_glass_wire_rect(-50, 0, 40, 10, false, &r), "left of the panel");
+    CHECK(!fos_it8951_glass_wire_rect(0, 0, 0, 10, false, &r), "empty");
+    CHECK(fos_it8951_glass_wire_rect(-10, -10, 40, 20, false, &r) && r.x == 0 && r.y == 0 && r.w == 32 && r.h == 16,
+          "over the corner, cut");
+}
+
 int main(void)
 {
+    test_glass_wire_rect();
     test_wire_order();
     test_full_row();
     test_tile_hashes();
+    test_word_digests_match_the_byte_ones();
+    test_area_digests();
+    test_tile_range();
     test_tile_rects();
     test_tile_spans();
     test_row_halftone();

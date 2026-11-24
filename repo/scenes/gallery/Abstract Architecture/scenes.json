@@ -3,6 +3,7 @@
     "id": "589b58e1-8dc1-4ab1-979f-71e51509e0aa",
     "name": "Abstract Architecture",
     "settings": {
+      "round": true,
       "category": "Art & galleries",
       "backgroundColor": "#000000",
       "refreshInterval": 86400,

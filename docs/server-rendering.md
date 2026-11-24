@@ -196,16 +196,20 @@ from 3.5–4 s to 0.3–0.6 s.
 
 ### The click
 
-A frame that runs its scene clicks the buzzer when a finger lands on
-something the scene does something with (`frameos_nim_press_taken`), the
-moment it lands. Rendered on the server the board has no scene to ask, and
-its render task is in a pull or a refresh for a second at a time. So the
-plane sends, with every picture, where a press on it is taken: the
-runtime's press map (`frameos_wasm_press_map`, `interpreter.pressMap`, the
-same walk as `pressTakenAt`: a layout first, a slot answering alone for its
-part, then the UI's regions that take a press: a field, a box that scrolls,
-an element with a handler, the whole canvas for a scene that listens for
-presses itself), turned onto the panel by the frame's rotation:
+A frame clicks the buzzer when a finger lands on something its picture
+does something with, the moment it lands: from the touch task, on the other
+core, never after the render task hears of the press (it is in a render, a
+panel update or a pull for a second or more at a time). It asks the press
+map of the picture showing: the runtime's
+(`interpreter.pressMap`, the same walk as `pressTakenAt`: a layout first, a
+slot answering alone for its part, then the UI's regions that take a press:
+a field, a box that scrolls, an element with a handler, the whole canvas for
+a scene that listens for presses itself), turned onto the panel by the
+frame's rotation (`interpreter.panelPressMap`). A frame that runs its scene
+keeps the one its last render left (`frameos_nim_press_map_takes`, made
+after every render on an e-paper board with touch and read with no lock).
+Rendered on the server the board has no scene to ask, so the plane sends
+its runtime's map with every picture (`frameos_wasm_press_map`):
 
 ```http
 X-FrameOS-Press: 12,174,1428,1269;!12,90,1860,1269;1635,21,1701,75
@@ -215,10 +219,9 @@ X-FrameOS-Press: 12,174,1428,1269;!12,90,1860,1269;1635,21,1701,75
 where a press is not taken (a scene inside a layout's hole answers alone for
 it). The first entry a press lands in answers; a press in none is not
 taken; at most 64 entries, a press past the cut is not clicked at. The board
-keeps the map of the picture it shows (`fos_client_remote_press_taken`) and
-its touch task clicks at the press and its lift on its own, before the
-render task hears of it (`fos_touch.c` `remote_click`), as `touch_beep` and
-e-paper allow. No header: nothing takes a press, or a plane from before it
+keeps the map of the picture it shows, and its touch task clicks at the
+press and its lift by it (`fos_client_press_taken`, `fos_touch.c` `click`),
+as `touch_beep` and e-paper allow. No header: nothing takes a press, or a plane from before it
 said: no click. The cloud keeps the map with the picture
 (`picture_press_map`, `prerender_press_map`), the backend in the kept
 picture's record.
@@ -398,7 +401,8 @@ once the scene is open and before the drawing that comes ahead of a tap):
 
 - `targets`: what a JSX UI holds (`UiTarget.input`, `ui/events.nim`): the
   field with the focus, its caret and text, the keyboard and its page and
-  shift, a list's scroll, an open select. Not a pointer's passing marks
+  shift, a list's scroll, an open select, the keys' ring (without it every
+  `next` of the board's buttons started over from the top). Not a pointer's passing marks
   (hover, a press, a key's flash), nor a UI the pull did not draw.
 - `apps`: each JS app's `frameos.remember` values (`JsAppRuntime.memory`),
   by scene and node, for the apps the pull built. A board keeps them until

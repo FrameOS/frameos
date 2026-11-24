@@ -48,6 +48,8 @@
 #include "fos_mem.h"
 #include "fos_ota.h"
 #include "fos_panel_draw.h"
+#include "fos_press.h"
+#include "fos_led.h"
 #include "fos_power.h"
 #include "fos_render_pull.h"
 #include "fos_render_relay.h"
@@ -124,6 +126,35 @@ _Static_assert((RENDER_NOW_BIT + INPUT_EVENTS_BIT + COMMANDS_BIT + RELEASE_BIT +
  * keep-awake hold and cancels this pass's sleep). */
 #define FOS_CLOUD_SLEEP_GRACE_SEC 20
 
+/* A touch board joins Wi-Fi in the background while it draws its first
+ * picture (main.c, touch_setup). A deep sleep before the join lands would
+ * leave that picture without its data and the backend without the frame
+ * until the next wake: the sleep waits for the join this long after boot,
+ * the classic boot's own connect timeout (WIFI_CONNECT_TIMEOUT_MS). */
+#define FOS_WIFI_JOIN_SLEEP_HOLD_SEC 45
+static bool s_wifi_join_waited = false;
+/* How this boot treats Wi-Fi (main.c, fos_wake_wifi_plan): the first picture
+ * before its pulls; the first render after the join (a timer wake), until
+ * a touch or a key; the frame page on the first pass when there is nothing
+ * to join and no scene. */
+static bool s_render_first = false;
+static bool s_join_first = false;
+static bool s_frame_page_first = false;
+/* A render began this boot: a join after it draws again (fos_client_render_after_join). */
+static bool s_render_begun = false;
+
+void fos_client_set_boot_wifi(bool render_first, bool join_first, bool frame_page)
+{
+    s_render_first = render_first;
+    s_join_first = join_first;
+    s_frame_page_first = frame_page;
+}
+
+void fos_client_render_after_join(void)
+{
+    if (__atomic_load_n(&s_render_begun, __ATOMIC_SEQ_CST)) fos_client_render_now();
+}
+
 /* How long the first pass of a boot waits for the provider's session to
  * come up and deliver what waited out the sleep (the hub's ready frame says
  * how many verbs that is) before it renders. Observed on an E1004: the
@@ -177,6 +208,11 @@ RTC_DATA_ATTR static fos_render_pull_shown_t s_pull_shown;
  * renders itself until then (wall-clock seconds); 0 when it has not, which
  * is also what says a refusal was logged (note_pull_refused). */
 RTC_DATA_ATTR static uint32_t s_pull_refused_until;
+/* The deep sleep mark is on the glass over the last picture (draw_sleep_mark):
+ * the stored picture's hash no longer describes what the panel shows, and a
+ * check-in wake that drew nothing need not draw it again. A picture put on
+ * the glass clears it. */
+RTC_DATA_ATTR static bool s_sleep_mark_on_glass;
 /* Whether this board can run its scenes (main.c, at boot). */
 static bool s_local_render_capable = false;
 /* Something other than a render drew the panel (fos_client_note_panel_drawn). */
@@ -234,6 +270,19 @@ static bool s_last_refresh_skipped = false;
 /* The scene whose picture is on the glass: a new one gets a full refresh. */
 static char s_refresh_scene_id[128] = "";
 static fos_display_state_t s_display_state;
+/* While somebody taps an e-paper with a partial waveform, the hash of each
+ * picture is not written to flash after its update (an NVS commit, 12 ms with
+ * the cache off on both cores, every tap), and where the controller keeps the
+ * picture (the IT8951) it is not even worked out: a SHA-256 of 1.3 MB was 40
+ * ms between the render and the upload (2026-11-24), and the controller's
+ * tile digests skip an unchanged picture anyway. What is owed is written once
+ * the tapping stops (the input hold's release) and before a deep sleep
+ * (pay_display_state). Flash holds no hash in between (erased at the first
+ * picture that owes one): a reset meanwhile refreshes the first picture after
+ * it instead of skipping it under a hash of one the glass no longer shows. */
+static bool s_display_state_owed = false;
+static uint32_t s_display_state_owed_render = 0;
+static bool s_display_state_in_flash = true; /* not known at boot: as if */
 
 static void load_display_state(void);
 
@@ -639,7 +688,9 @@ static void load_display_state(void)
     nvs_close(nvs);
     if (err == ESP_OK && len == sizeof(state) && state.magic == FOS_DISPLAY_STATE_MAGIC) {
         s_display_state = state;
-        s_display_state_valid = true;
+        /* Asleep with the mark over it: the first render draws, unchanged
+         * scene or not, or the moon stays on an awake frame. */
+        s_display_state_valid = !s_sleep_mark_on_glass;
     }
 }
 
@@ -658,7 +709,10 @@ static void save_display_state(const fos_display_state_t *state)
     nvs_close(nvs);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "display state save failed: %s", esp_err_to_name(err));
+        return;
     }
+    s_display_state_in_flash = true;
+    s_display_state_owed = false;
 }
 
 static bool should_keep_packed_snapshot(size_t len)
@@ -812,19 +866,36 @@ static bool input_keeps_awake(void)
            esp_timer_get_time() - s_last_input_us < (int64_t)seconds * 1000000;
 }
 
+/* An LCD's loading mark begun for input a handler is running on
+ * (process_input_events): ended where it turns out no render follows. */
+static bool s_input_mark_open = false;
+static void ink_press(void);
+
 static void process_input_events(void)
 {
-    if (input_queued()) {
+    bool queued = input_queued();
+    if (queued) {
         note_input_awake();
         s_asked_us = s_last_input_us;
         if (hold_applies()) fos_input_hold_note(&s_input_hold, s_last_input_us);
+    }
+    /* A slow scene's press, inked on e-paper before anything hears of it. */
+    ink_press();
+    bool local = renders_locally(fos_config());
+    /* A handler may take its time (a synchronous fetch in an onClick): the
+     * loading mark counts from the input's arrival on an LCD, as it does
+     * from a render that answers it (FOS_LOADING_ANSWER_EXTRA_MS longer than
+     * a switch's), and shows on core 0 while the handler still runs. It goes
+     * with the next picture, or where no render follows. */
+    if (queued && local && fos_display_is_lcd()) {
+        fos_client_loading_begin(xTaskGetTickCount() + pdMS_TO_TICKS(FOS_LOADING_ANSWER_EXTRA_MS));
+        s_input_mark_open = true;
     }
     fos_buttons_process_events();
     /* Rendered on the server the edges go to the relay (fos_events.c) and the
      * plane's dispatcher times them. A finger on the glass leaves its gesture
      * in the touch queue until it lifts (its moves folded to the newest
      * there), so the plane gets it whole. */
-    bool local = renders_locally(fos_config());
     if (local || !fos_touch_finger_down()) fos_touch_process_events();
     if (local && frameos_nim_tick()) {
         fos_client_wake_for_events();
@@ -1318,17 +1389,240 @@ static void press_map_keep(const remote_pull_t *pull)
     __atomic_store_n(&s_press_count, count, __ATOMIC_RELEASE);
 }
 
-int fos_client_remote_press_taken(int wire_x, int wire_y)
+/* The glass's wire position as the panel's pixel, as the runtime reads it
+ * (utils/image.nim pointerToScenePoint). */
+static void wire_to_panel(int wire_x, int wire_y, int *x, int *y)
 {
-    if (renders_locally(fos_config()) || !fos_display_present()) return -1;
-    /* The glass's wire position as the panel's pixel, as the plane reads it
-     * (utils/image.nim pointerToScenePoint). */
     int width = fos_display_width(), height = fos_display_height();
-    int x = width * wire_x / FOS_TOUCH_WIRE_MAX;
-    int y = height * wire_y / FOS_TOUCH_WIRE_MAX;
-    if (x >= width) x = width - 1;
-    if (y >= height) y = height - 1;
+    *x = width * wire_x / FOS_TOUCH_WIRE_MAX;
+    *y = height * wire_y / FOS_TOUCH_WIRE_MAX;
+    if (*x >= width) *x = width - 1;
+    if (*y >= height) *y = height - 1;
+}
+
+int fos_client_press_taken(int wire_x, int wire_y)
+{
+    return fos_client_press_find(wire_x, wire_y, NULL);
+}
+
+int fos_client_press_find(int wire_x, int wire_y, int box[4])
+{
+    if (!fos_display_present()) return -1;
+    int x, y;
+    wire_to_panel(wire_x, wire_y, &x, &y);
+    /* A scene that runs here: the map its last render left
+     * (frameos_nim_press_map_takes), read without the runtime's lock, which
+     * the render holds. */
+    if (renders_locally(fos_config())) {
+        uint16_t found[4];
+        int taken = frameos_nim_press_map_find(x, y, found);
+        if (box && taken == 3) {
+            for (int i = 0; i < 4; i++) box[i] = found[i];
+        }
+        return taken;
+    }
     return fos_press_map_takes(s_press_map, __atomic_load_n(&s_press_count, __ATOMIC_ACQUIRE), x, y) ? 1 : 0;
+}
+
+/* ------------------------------------------- a press shows at once (e-paper)
+ *
+ * docs/realtime-rendering.md "A press shows at once". The glass takes the
+ * better part of a second to draw an answer, so the moment a press lands on
+ * something the touch task says so (fos_client_press_seen): the LED lights
+ * and stays lit until the waveform that draws the answer has run, and on a
+ * scene whose taps are slow to answer the render task inks the element's box
+ * (inverted, one DU) before it hands the press on (ink_press). An LCD's
+ * press is the touch task's own (fos_display_press_begin). */
+static bool render_held(void);
+static portMUX_TYPE s_press_lock = portMUX_INITIALIZER_UNLOCKED;
+static int s_ink_box[4];
+static bool s_ink_pending = false;
+/* A taken press waiting for its answer (esp_timer us) and its element's box
+ * (s_press_has_box), and how long this scene's elements took to answer, by
+ * box (fos_press_answers_t). Under s_press_lock. */
+static int64_t s_press_contact_us = 0;
+static int s_press_box[4];
+static bool s_press_has_box = false;
+static fos_press_answers_t s_press_answers;
+static char s_press_scene[64];
+static esp_timer_handle_t s_press_light_timer = NULL;
+
+static void press_light_off(void *arg)
+{
+    (void)arg;
+    fos_led_busy(false);
+}
+
+static void press_light_for(uint32_t ms)
+{
+    if (!s_press_light_timer) return;
+    esp_timer_stop(s_press_light_timer);
+    esp_timer_start_once(s_press_light_timer, (uint64_t)ms * 1000);
+}
+
+void fos_client_press_seen(int taken, const int box[4])
+{
+    if (taken <= 0 || fos_display_is_lcd() || !fos_display_present()) return;
+    int64_t now_us = esp_timer_get_time();
+    bool element = taken == 3 && box;
+    bool glass = element && fos_display_glass_supported();
+    portENTER_CRITICAL(&s_press_lock);
+    s_press_contact_us = now_us;
+    s_press_has_box = element;
+    if (element) memcpy(s_press_box, box, sizeof(s_press_box));
+    if (glass && fos_press_ink_wanted(fos_press_answers_get(&s_press_answers, box))) {
+        memcpy(s_ink_box, box, sizeof(s_ink_box));
+        s_ink_pending = true;
+    }
+    portEXIT_CRITICAL(&s_press_lock);
+    fos_led_busy(true);
+    /* No answer at all (a handler that changed nothing): dark again. */
+    press_light_for(4000);
+}
+
+/* The picture on the glass, packed, for something drawn over it for an
+ * upload alone (ink_press, switch_cue): the snapshot, or where a settle let
+ * go of it (settle_panel repacks into the reservation and keeps no snapshot)
+ * the reservation, which a sixteen-grey panel's canvas is and which holds the
+ * picture the panel took last. With s_snapshot_lock held; NULL for none. */
+static uint8_t *glass_picture(void)
+{
+    if (s_last_frame && s_last_frame_len == fos_display_buffer_size() && s_last_frame_width == fos_display_width() &&
+        s_last_frame_height == fos_display_height() && s_last_frame_format == fos_display_format()) {
+        return s_last_frame;
+    }
+    uint8_t *reserved = fos_framebuffer_reserved_buffer();
+    return reserved && fos_framebuffer_reserved_bytes() >= fos_display_buffer_size() ? reserved : NULL;
+}
+
+/* The render task, before the press is handed on: the pressed box inverted
+ * on the glass while its handler and render run. In the picture showing for
+ * the upload only, so nothing else ever sees it; the next update puts the
+ * box's own pixels back (fos_display_glass_rect). */
+static void ink_press(void)
+{
+    int box[4];
+    portENTER_CRITICAL(&s_press_lock);
+    bool pending = s_ink_pending;
+    s_ink_pending = false;
+    memcpy(box, s_ink_box, sizeof(box));
+    portEXIT_CRITICAL(&s_press_lock);
+    if (!pending || !s_snapshot_lock) return;
+    int64_t start_us = esp_timer_get_time();
+    /* The waveform running first, outside the lock: the picture is held
+     * changed for the upload alone. */
+    fos_display_glass_wait();
+    int64_t ready_us = esp_timer_get_time();
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    uint8_t *buf = glass_picture();
+    int width = fos_display_width(), height = fos_display_height();
+    int x0 = box[0] & ~1, y0 = box[1], x1 = (box[2] + 1) & ~1, y1 = box[3];
+    if (x1 > width) x1 = width & ~1;
+    if (y1 > height) y1 = height;
+    if (buf && fos_display_format() == FOS_PIXEL_4BPP_GRAY && x1 > x0 && y1 > y0) {
+        size_t row_bytes = (size_t)width / 2u, span = (size_t)(x1 - x0) / 2u;
+        uint8_t *saved = heap_caps_malloc(span * (size_t)(y1 - y0), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (saved) {
+            for (int y = y0; y < y1; y++) {
+                uint8_t *row = buf + (size_t)y * row_bytes + (size_t)x0 / 2u;
+                memcpy(saved + (size_t)(y - y0) * span, row, span);
+                fos_press_ink_gray4(row, span);
+            }
+            err = fos_display_glass_rect(buf, x0, y0, x1 - x0, y1 - y0);
+            /* The glass holds what no stored hash says: the next render
+             * updates the panel (and puts the picture back there) even when
+             * the scene drew nothing new, as a failed switch's does. In
+             * memory only: no flash write on a press. */
+            if (err == ESP_OK) s_display_state_valid = false;
+            for (int y = y0; y < y1; y++) {
+                memcpy(buf + (size_t)y * row_bytes + (size_t)x0 / 2u, saved + (size_t)(y - y0) * span, span);
+            }
+            heap_caps_free(saved);
+        }
+    }
+    xSemaphoreGive(s_snapshot_lock);
+    portENTER_CRITICAL(&s_press_lock);
+    uint32_t answer_ms = fos_press_answers_get(&s_press_answers, box);
+    portEXIT_CRITICAL(&s_press_lock);
+    char line[200];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"press:ink\",\"source\":\"esp32\",\"status\":\"%s\",\"waitedMs\":%lld,"
+             "\"ms\":%lld,\"box\":[%d,%d,%d,%d],\"answerMs\":%u}",
+             err == ESP_OK ? "ok" : esp_err_to_name(err), (long long)((ready_us - start_us) / 1000),
+             (long long)((esp_timer_get_time() - ready_us) / 1000), x0, y0, x1, y1, (unsigned)answer_ms);
+    frameos_nim_log_hook(line);
+}
+
+/* A picture went to the panel (`ready_us`: when it was ready, before the
+ * panel took it), of the scene `scene_id`: the answer to the press waiting,
+ * if one is. Its time joins the scene's (whether its next press is inked),
+ * and the LED goes dark once the waveform drawing it has run. */
+static void press_answered(int64_t ready_us, const char *scene_id)
+{
+    if (fos_display_is_lcd()) return;
+    bool another = strcmp(scene_id, s_press_scene) != 0;
+    if (another) strlcpy(s_press_scene, scene_id, sizeof(s_press_scene));
+    portENTER_CRITICAL(&s_press_lock);
+    int64_t contact_us = s_press_contact_us;
+    bool answers = contact_us > 0 && contact_us <= ready_us;
+    if (answers) s_press_contact_us = 0;
+    if (another) {
+        /* Another scene: its taps are timed afresh. A press that switched to
+         * it took the switch's time, which says nothing of them. */
+        fos_press_answers_clear(&s_press_answers);
+    } else if (answers && s_press_has_box) {
+        fos_press_answers_note(&s_press_answers, s_press_box, (uint32_t)((ready_us - contact_us) / 1000));
+    }
+    portEXIT_CRITICAL(&s_press_lock);
+    if (answers) press_light_for(FOS_PRESS_WAVEFORM_MS);
+}
+
+/* A switch somebody waits for, on e-paper: the loading tile (the wake ring,
+ * fos_panel_draw_wake_mark) goes up in the corner with one DU at once, while
+ * the scene loads and renders, and its picture takes it away. Only while
+ * somebody is at the frame (input within the hold's quiet time): a schedule's
+ * switch at 07:00 shows none. The render task's. */
+static void switch_cue(void)
+{
+    if (fos_display_is_lcd() || !fos_display_glass_supported() || !s_snapshot_lock || render_held()) return;
+    if (s_last_input_us == 0 || esp_timer_get_time() - s_last_input_us >= FOS_INPUT_HOLD_QUIET_US) return;
+    int64_t start_us = esp_timer_get_time();
+    fos_display_glass_wait();
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    fos_panel_surface_t surface = {
+        .buf = glass_picture(), .width = fos_display_width(), .height = fos_display_height(),
+        .format = fos_display_format(), .rotate = fos_config()->rotate,
+    };
+    fos_panel_code_box_t box;
+    if (surface.buf && fos_panel_mark_box(&surface, &box)) {
+        size_t bytes = fos_panel_box_copy(&surface, &box, NULL, false);
+        uint8_t *saved = bytes ? heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+        if (saved) {
+            fos_panel_box_copy(&surface, &box, saved, false);
+            fos_panel_draw_wake_mark(&surface, 0, NULL);
+            err = fos_display_glass_rect(surface.buf, box.px, box.py, box.pw, box.ph);
+            /* The glass holds what no stored hash says: the next render
+             * updates the panel (and puts the picture back there) even when
+             * the scene drew nothing new, as a failed switch's does. In
+             * memory only: no flash write on a press. */
+            if (err == ESP_OK) s_display_state_valid = false;
+            fos_panel_box_copy(&surface, &box, saved, true);
+            heap_caps_free(saved);
+        }
+    }
+    xSemaphoreGive(s_snapshot_lock);
+    char line[128];
+    snprintf(line, sizeof(line), "{\"event\":\"press:cue\",\"source\":\"esp32\",\"status\":\"%s\",\"ms\":%lld}",
+             err == ESP_OK ? "ok" : esp_err_to_name(err), (long long)((esp_timer_get_time() - start_us) / 1000));
+    frameos_nim_log_hook(line);
+}
+
+void fos_client_switch_begin(uint32_t since_tick)
+{
+    fos_client_loading_begin(since_tick);
+    switch_cue();
 }
 
 /* When the scene the plane drew last wants its next picture (seconds, 0: it
@@ -1961,6 +2255,9 @@ static volatile bool s_link_on = false; /* set by the render task, per pass */
 /* The next COMMANDS_BIT is pulled on the render task whatever the link does
  * (fos_client_request_commands_pull_here). __atomic. */
 static bool s_commands_here = false;
+/* The link task's next commands pull reports the ETags of a deploy's set
+ * just taken (fos_client_request_report_pull). __atomic. */
+static bool s_report_owed = false;
 static portMUX_TYPE s_link_mux = portMUX_INITIALIZER_UNLOCKED;
 /* Under s_link_mux. */
 static void *s_link_answer = NULL;
@@ -1972,6 +2269,12 @@ static fos_settings_fetched_t *s_link_settings = NULL;
  * writes it. */
 static fos_scene_set_t *s_link_payload = NULL;
 static char s_link_payload_etag[FOS_SCENES_ETAG_LEN];
+/* An answer that came with a deploy's set (fos_commands_answer_fetched) is
+ * in the mailbox or running: no scenes or settings poll until it has run.
+ * The render task takes a set the poll fetched before the answer's, which is
+ * the change from it; a poll between the two takes would name the first and
+ * download the second again. Under s_link_mux. */
+static bool s_link_sync_running = false;
 static bool s_link_push_wanted = false;
 static char s_link_scene_id[128];
 static fos_display_state_t s_link_state;
@@ -1984,17 +2287,21 @@ static SemaphoreHandle_t s_link_round = NULL;
 
 /* One commands pull into an empty mailbox: true when an answer is waiting
  * for the render task. One answer at a time: the next pull waits until this
- * one has run. */
-static bool link_pull_commands(void)
+ * one has run. An answer asking for a sync (a deploy waiting) is handed over
+ * with the set it asks for, downloaded here by fos_commands_fetch: the render
+ * task draws and takes taps meanwhile. `reporting`: fos_commands_fetch's. */
+static bool link_pull_commands(bool reporting)
 {
     portENTER_CRITICAL(&s_link_mux);
     bool slot_free = s_link_answer == NULL;
     portEXIT_CRITICAL(&s_link_mux);
     if (!slot_free) return false;
-    void *answer = fos_commands_fetch();
+    void *answer = fos_commands_fetch(reporting);
     if (answer == NULL) return false;
+    bool fetched = fos_commands_answer_fetched(answer);
     portENTER_CRITICAL(&s_link_mux);
     s_link_answer = answer;
+    if (fetched) s_link_sync_running = true;
     portEXIT_CRITICAL(&s_link_mux);
     return true;
 }
@@ -2005,13 +2312,14 @@ static bool link_pull_commands(void)
 static void link_round(int64_t *next_poll_us, bool *pull_owed)
 {
     if (!s_link_on || fos_wifi_state() != FOS_WIFI_CONNECTED) return;
-    if (*pull_owed) {
+    if (*pull_owed || __atomic_load_n(&s_report_owed, __ATOMIC_SEQ_CST)) {
         portENTER_CRITICAL(&s_link_mux);
         bool slot_free = s_link_answer == NULL;
         portEXIT_CRITICAL(&s_link_mux);
         if (slot_free) {
             *pull_owed = false;
-            if (link_pull_commands() && s_events) xEventGroupSetBits(s_events, LINK_BIT);
+            bool reporting = __atomic_exchange_n(&s_report_owed, false, __ATOMIC_SEQ_CST);
+            if (link_pull_commands(reporting) && s_events) xEventGroupSetBits(s_events, LINK_BIT);
         }
     }
     frameos_nim_flush_logs();
@@ -2034,8 +2342,8 @@ static void link_round(int64_t *next_poll_us, bool *pull_owed)
     *next_poll_us = now + LINK_POLL_US;
     bool wake = false;
     portENTER_CRITICAL(&s_link_mux);
-    bool payload_free = s_link_payload == NULL;
-    bool settings_free = s_link_settings == NULL;
+    bool payload_free = s_link_payload == NULL && !s_link_sync_running;
+    bool settings_free = s_link_settings == NULL && !s_link_sync_running;
     portEXIT_CRITICAL(&s_link_mux);
     /* One payload at a time, like the commands: the next download waits until
      * the render task has taken this one. */
@@ -2061,7 +2369,7 @@ static void link_round(int64_t *next_poll_us, bool *pull_owed)
             wake = true;
         }
     }
-    if (link_pull_commands()) wake = true;
+    if (link_pull_commands(false)) wake = true;
     if (wake && s_events) xEventGroupSetBits(s_events, LINK_BIT);
 }
 
@@ -2121,23 +2429,44 @@ static void pass_scenes_sync(void)
     if (!fos_client_take_link_payload() && !s_link_on) fos_scenes_sync(false);
 }
 
-static void pass_settings_sync(void)
+bool fos_client_take_link_settings(void)
 {
     portENTER_CRITICAL(&s_link_mux);
     fos_settings_fetched_t *settings = s_link_settings;
     s_link_settings = NULL;
     portEXIT_CRITICAL(&s_link_mux);
-    if (settings != NULL) {
-        fos_settings_apply(settings);
-    } else if (!s_link_on) {
-        fos_settings_sync(false);
-    }
+    if (settings == NULL) return false;
+    fos_settings_apply(settings);
+    return true;
+}
+
+static void pass_settings_sync(void)
+{
+    if (!fos_client_take_link_settings() && !s_link_on) fos_settings_sync(false);
+}
+
+bool fos_client_link_on(void)
+{
+    return s_link_on;
+}
+
+void fos_client_request_report_pull(void)
+{
+    __atomic_store_n(&s_report_owed, true, __ATOMIC_SEQ_CST);
+    if (s_link_task) xTaskNotify(s_link_task, LINK_NOTIFY_PULL, eSetBits);
 }
 
 static bool pass_commands_sync(void)
 {
     void *answer = link_take_answer();
-    if (answer != NULL) return fos_commands_run(answer);
+    if (answer != NULL) {
+        bool ran = fos_commands_run(answer);
+        /* Its set is taken: the link task polls again. */
+        portENTER_CRITICAL(&s_link_mux);
+        s_link_sync_running = false;
+        portEXIT_CRITICAL(&s_link_mux);
+        return ran;
+    }
     return s_link_on ? false : fos_commands_sync();
 }
 
@@ -2175,6 +2504,9 @@ static void link_hand_back(const fos_config_t *config)
     } else {
         ESP_LOGW(TAG, "backend link: its round trip is still running after 30 s");
     }
+    /* A report the link task owed is this task's now: the commands below
+     * run with the link off, and report themselves before the sleep. */
+    __atomic_store_n(&s_report_owed, false, __ATOMIC_SEQ_CST);
     /* A scene payload it downloaded is taken too: the sleep waits for the
      * store task to write it (fos_scenes_store_wait, before the sleep). */
     pass_scenes_sync();
@@ -2235,8 +2567,9 @@ static void push_status_info(void)
              name, panel, portal ? "" : fos_wifi_ip(),
              cloud_url, fos_cloud_state_name(), fos_cloud_ws_connected() ? "true" : "false",
              backend_url, app ? app->version : "",
-             /* main.c's touch_setup: no portal, the settings panel instead. */
-             fos_touch_present() && fos_display_is_lcd() ? "true" : "false");
+             /* main.c's touch_setup: no portal, the settings panel instead
+              * (fos_wake_wifi_plan), on every wake. */
+             fos_touch_present() ? "true" : "false");
     frameos_nim_set_status_info(info);
 }
 
@@ -2339,6 +2672,14 @@ static bool s_render_owed = false;
  * and the answer sat there all that time. Render task only. */
 #define NOTICE_SHOWN_MS 30000
 static int64_t s_notice_shown_us = 0;
+/* Where the notice is on the glass (panel pixels) while it is there, and
+ * whether a tap on it or a key asked it off: the touch task tests a press
+ * against the box (fos_client_notice_takes), the render task takes the
+ * notice off (notice_dismissal_due). Written under s_notice_lock;
+ * s_notice_on_glass by the render task alone. */
+static fos_panel_code_box_t s_notice_box;
+static bool s_notice_on_glass = false;
+static volatile bool s_notice_dismissed = false;
 
 void fos_client_show_notice(const char *text)
 {
@@ -2423,6 +2764,11 @@ static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, 
     fos_panel_draw_notice(&ov->surface, &ov->box, text);
     ov->drawn = true;
     s_notice_shown_us = esp_timer_get_time();
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_box = ov->box;
+    s_notice_on_glass = true;
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
     /* The bench's proof that the panel got it: the snapshot never does. */
     frameos_nim_log_hook("{\"event\":\"voice:shown\",\"source\":\"esp32\"}");
 }
@@ -2443,18 +2789,173 @@ static void notice_overlay_end(notice_overlay_t *ov)
     ov->drawn = false;
 }
 
+/* The notice is off the glass: a picture without it went up. Render task. */
+static void notice_left_glass(void)
+{
+    s_notice_shown_us = 0;
+    if (!s_notice_on_glass) return;
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_on_glass = false;
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
+}
+
+bool fos_client_notice_takes(int wire_x, int wire_y)
+{
+    if (!fos_display_present()) return false;
+    int x, y;
+    wire_to_panel(wire_x, wire_y, &x, &y);
+    portENTER_CRITICAL(&s_notice_lock);
+    bool taken = s_notice_on_glass && fos_panel_box_hit(&s_notice_box, x, y);
+    if (taken) s_notice_dismissed = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+    return taken;
+}
+
+void fos_client_notice_dismiss(void)
+{
+    portENTER_CRITICAL(&s_notice_lock);
+    if (s_notice_on_glass) s_notice_dismissed = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+}
+
+/* A tap on the notice or a key asked it off, and that press is over: the
+ * finger lifted, the key's `press` delivered (so a render it asked for takes
+ * the notice off, not a repaint before it). Not while a voice session holds
+ * the panel or a new notice waits: that one replaces it. Taken once: what
+ * does not get it off (a failed refresh) leaves it to the next render or its
+ * time. Render task. */
+static bool notice_dismissal_due(void)
+{
+    if (!s_notice_dismissed || !s_notice_on_glass || s_notice_pending || render_held() ||
+        fos_buttons_busy() || input_queued() || fos_touch_finger_down()) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
+    return true;
+}
+
 /* The panel shows something no stored hash describes (the render plus a
  * code): the next render must refresh even when the scene did not change,
  * here and after a reboot. */
+static void erase_display_state(void)
+{
+    s_display_state_owed = false;
+    if (!display_state_persists() || !s_display_state_in_flash) return;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    esp_err_t err = nvs_erase_key(nvs, "display_state");
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    nvs_close(nvs);
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) s_display_state_in_flash = false;
+}
+
 static void forget_display_state(void)
 {
     s_display_state_loaded = true;
     s_display_state_valid = false;
-    if (!display_state_persists()) return;
-    nvs_handle_t nvs;
-    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
-    if (nvs_erase_key(nvs, "display_state") == ESP_OK) nvs_commit(nvs);
-    nvs_close(nvs);
+    erase_display_state();
+}
+
+/* A picture went up while somebody taps (s_display_state_owed): its hash is
+ * written later. The first one of a session takes the old hash off flash. */
+static void owe_display_state(void)
+{
+    if (!s_display_state_owed) {
+        erase_display_state();
+        s_display_state_owed = true;
+    }
+    s_display_state_owed_render = s_render_count + 1; /* this render's, once counted */
+}
+
+/* What the taps owed: the hash of the picture on the glass, worked out now
+ * if it was not (the snapshot is that picture while no render came since),
+ * and written. Nobody is tapping: the 40 ms and the flash write are free. */
+static void pay_display_state(void)
+{
+    if (!s_display_state_owed) return;
+    s_display_state_owed = false;
+    if (!s_display_state_valid) {
+        fos_display_state_t state;
+        if (s_last_frame_render_count != s_display_state_owed_render || !snapshot_display_state(&state)) return;
+        s_display_state = state;
+        s_display_state_valid = true;
+    }
+    save_display_state(&s_display_state);
+}
+
+/* ---------------------------------------------------------- the wake mark */
+
+/* A tap or a key woke a frame asleep under its moon (draw_sleep_mark): the
+ * boot to the first picture is seconds (9 on the reTerminal Sticky), and a
+ * person at a frame that answers nothing taps again and again. So the moon
+ * turns into a loading ring at once, and the quiet loading chirp plays
+ * (every 1.3 s) until the first render puts the scene up.
+ *
+ * Once, not a spinner: the glass outside the tile is unknown after a deep
+ * sleep, so both buffers say white there, and the SSD1677 drives the whole
+ * panel on every partial update whatever its RAM window says
+ * (EPD_3in97.c): each frame nudged the picture's black pixels towards white,
+ * and a spinner left the Sticky's picture grey by its end (2026-11-23). */
+static volatile bool s_wake_mark_stop = false;
+static SemaphoreHandle_t s_wake_mark_done = NULL;
+
+static void wake_mark_task(void *arg)
+{
+    (void)arg;
+    size_t len = fos_display_buffer_size();
+    uint8_t *buf = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *prev = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf && prev) {
+        uint8_t white = fos_panel_white_fill(fos_display_format());
+        memset(buf, white, len);
+        memset(prev, white, len);
+        fos_panel_surface_t on_glass = {
+            .buf = prev, .width = fos_display_width(), .height = fos_display_height(),
+            .format = fos_display_format(), .rotate = fos_config()->rotate,
+        };
+        fos_panel_surface_t next = on_glass;
+        next.buf = buf;
+        if (fos_panel_draw_sleep_mark(&on_glass, NULL) && !s_wake_mark_stop &&
+            fos_panel_draw_wake_mark(&next, 0, NULL)) {
+            fos_display_quick_update(buf, prev, len);
+        }
+    }
+    free(buf);
+    free(prev);
+    xSemaphoreGive(s_wake_mark_done);
+    vTaskDelete(NULL);
+}
+
+void fos_client_wake_mark_begin(void)
+{
+    if (!s_sleep_mark_on_glass || !fos_display_present() || fos_display_is_lcd() ||
+        !fos_display_supports_partial() || esp_reset_reason() != ESP_RST_DEEPSLEEP) {
+        return;
+    }
+    esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    if (cause != ESP_SLEEP_WAKEUP_EXT0 && cause != ESP_SLEEP_WAKEUP_EXT1 && cause != ESP_SLEEP_WAKEUP_GPIO) return;
+    if (fos_config()->touch_beep) fos_buzzer_loading_begin(); /* ends with the first render */
+    s_wake_mark_done = xSemaphoreCreateBinary();
+    if (!s_wake_mark_done) return;
+    s_wake_mark_stop = false;
+    if (xTaskCreate(wake_mark_task, "fos_wake_mark", 4096, NULL, 4, NULL) != pdPASS) {
+        vSemaphoreDelete(s_wake_mark_done);
+        s_wake_mark_done = NULL;
+    }
+}
+
+/* Before anything else puts pixels on the panel: the ring is on the glass
+ * and its task is gone. */
+static void wake_mark_stop(void)
+{
+    if (!s_wake_mark_done) return;
+    s_wake_mark_stop = true;
+    xSemaphoreTake(s_wake_mark_done, pdMS_TO_TICKS(5000));
+    vSemaphoreDelete(s_wake_mark_done);
+    s_wake_mark_done = NULL;
 }
 
 /* The last image again, on a copy of the stored snapshot — no scene render,
@@ -2465,6 +2966,7 @@ static void forget_display_state(void)
  * or no copy fits: the caller renders instead. */
 static bool repaint_snapshot(bool with_notice)
 {
+    wake_mark_stop();
     if ((with_notice && !s_notice_pending) || !fos_display_present() || !s_snapshot_lock) return false;
     xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
     size_t len = s_last_frame ? s_last_frame_len : 0;
@@ -2484,12 +2986,16 @@ static bool repaint_snapshot(bool with_notice)
         ESP_LOGI(TAG, "repainting the last image with the notice");
         fos_display_blit(copy, len);
         s_last_refresh_skipped = false;
+        s_sleep_mark_on_glass = false;
         forget_display_state();
         notice_overlay_end(&notice);
     } else {
         ESP_LOGI(TAG, "repainting the last image without the notice");
-        esp_err_t err = fos_display_blit(copy, len);
+        /* Only the notice's rows differ from the glass: a panel with a
+         * partial waveform updates those, as after a tap. */
+        esp_err_t err = fos_display_update(copy, len, true, fos_input_hold_engaged(&s_input_hold), NULL);
         s_last_refresh_skipped = false;
+        if (err == ESP_OK) s_sleep_mark_on_glass = false;
         /* The panel shows exactly the snapshot again: its hash is good for
          * the "unchanged, skip the refresh" check once more. */
         fos_display_state_t state;
@@ -2498,7 +3004,7 @@ static bool repaint_snapshot(bool with_notice)
             s_display_state_valid = true;
             save_display_state(&state);
         }
-        s_notice_shown_us = 0;
+        notice_left_glass();
     }
     free(copy);
     return true;
@@ -2525,6 +3031,7 @@ static bool restart_notice_drawable(void)
  * Render task. Nothing when there is no stored image to draw it over. */
 static void draw_restart_notice(const char *text)
 {
+    wake_mark_stop();
     const char *status = "no-snapshot";
     /* Timed: a restart never waits on a reader of the snapshot (/image). */
     if (!restart_notice_drawable()) return;
@@ -2556,6 +3063,55 @@ static void draw_restart_notice(const char *text)
     ESP_LOGW(TAG, "restart notice: %s", status);
     char line[96];
     snprintf(line, sizeof(line), "{\"event\":\"restart:notice\",\"source\":\"esp32\",\"status\":\"%s\"}", status);
+    frameos_nim_log_hook(line);
+}
+
+/* The deep sleep mark (fos_panel_draw_sleep_mark) over the last image, in
+ * the fast waveform, as the frame goes to sleep: someone at the frame sees it
+ * is asleep (a tap or a key wakes it), not frozen. Once a picture: a check-in
+ * wake that drew nothing finds it on the glass still. E-paper with a fast
+ * waveform only: an LCD goes dark asleep, and a classic panel's full refresh
+ * (20 s on a Spectra) is too dear for a mark. Render task. */
+static void draw_sleep_mark(void)
+{
+    wake_mark_stop();
+    if (s_sleep_mark_on_glass || !fos_display_present() || fos_display_is_lcd() ||
+        !fos_display_supports_partial() || !s_snapshot_lock) {
+        return;
+    }
+    const char *status = "no-snapshot";
+    /* The picture this pass drew may still be going up on the display's
+     * task (a full refresh): the mark goes over it, not into it. */
+    int64_t refresh_until = esp_timer_get_time() + 10000000LL;
+    while (fos_display_refreshing() && esp_timer_get_time() < refresh_until) vTaskDelay(pdMS_TO_TICKS(100));
+    if (xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(200)) != pdTRUE) return;
+    size_t len = s_last_frame ? s_last_frame_len : 0;
+    fos_panel_surface_t surface = {
+        .buf = NULL, .width = s_last_frame_width, .height = s_last_frame_height,
+        .format = s_last_frame_format, .rotate = fos_config()->rotate,
+    };
+    uint8_t *copy = len ? fos_big_malloc(len) : NULL;
+    uint8_t *glass = len ? fos_big_malloc(len) : NULL;
+    if (copy) memcpy(copy, s_last_frame, len);
+    if (glass) memcpy(glass, s_last_frame, len);
+    xSemaphoreGive(s_snapshot_lock);
+    if (len && !copy) status = "no-memory";
+    surface.buf = copy;
+    if (copy && fos_panel_draw_sleep_mark(&surface, NULL)) {
+        /* The copy only: /image, the snapshot and a push stay the picture. */
+        esp_err_t err = fos_display_quick_update(copy, NULL, len);
+        /* The driver knows the glass only after a full refresh; after
+         * partial updates it does not, and the last picture is what the
+         * glass shows (a controller that keeps its own copy, the E1003's,
+         * takes the first call). */
+        if (err == ESP_ERR_NOT_SUPPORTED && glass) err = fos_display_quick_update(copy, glass, len);
+        if (err == ESP_OK) s_sleep_mark_on_glass = true;
+        status = err == ESP_OK ? "ok" : err == ESP_ERR_NOT_SUPPORTED ? "no-fast-waveform" : "error";
+    }
+    free(glass);
+    free(copy);
+    char line[96];
+    snprintf(line, sizeof(line), "{\"event\":\"sleep:mark\",\"source\":\"esp32\",\"status\":\"%s\"}", status);
     frameos_nim_log_hook(line);
 }
 
@@ -2832,7 +3388,19 @@ static esp_err_t render_once(bool quiet)
 
     tl_scene_us = esp_timer_get_time();
     int64_t framebuffer_ms = (tl_scene_us - start) / 1000;
-    if (!quiet) {
+    if (fos_display_present() && !fos_display_is_lcd()) {
+        /* Where the render changed the canvas, for a controller that hashes
+         * the picture to find what to send (fos_display_hint_damage); a pull
+         * or a render that cannot say could have written anywhere. */
+        int dx = 0, dy = 0, dw = -1, dh = -1;
+        if (!(err == ESP_OK && local_render && frameos_nim_render_damage(&dx, &dy, &dw, &dh))) dw = dh = -1;
+        fos_display_hint_damage(dx, dy, dw, dh);
+    }
+    /* An LCD's lines go after its buffer switch: formatting the two JSON
+     * lines (and reading the heaps for them) sat between a tap's render and
+     * the picture, ~1 ms of it on a SenseCAP Indicator. */
+    bool lines_after = !quiet && err == ESP_OK && fos_display_is_lcd() && fos_display_present();
+    if (!quiet && !lines_after) {
         log_render_event("render:framebuffer", scene_id, scene_name,
                          err == ESP_OK ? "rendered" : "error", "framebuffer",
                          mode, fos_display_present() ? "pending" : "none",
@@ -2854,9 +3422,13 @@ static esp_err_t render_once(bool quiet)
     /* A 304 brought no picture: `buf` holds whatever it held, and the panel
      * keeps the one it shows. */
     fos_display_state_t rendered_state;
+    /* Somebody tapping an e-paper with a partial waveform: the hash waits
+     * (s_display_state_owed), and is not even worked out where the
+     * controller keeps the picture and skips an unchanged one itself. */
+    bool state_waits = local_render && fos_display_supports_partial() && fos_input_hold_engaged(&s_input_hold);
     /* A version 2 pull checked the buffer against the plane's hash already. */
     bool rendered_state_valid = err == ESP_OK && !pulled_unchanged && fos_display_present() &&
-        !fos_display_is_lcd() &&
+        !fos_display_is_lcd() && !(state_waits && fos_display_keeps_picture()) &&
         display_state_for_buffer_sha(buf, buf_len, width, height, format,
                                      !local_render && pull.sha_checked ? pull.sha256 : NULL, &rendered_state);
     bool skipped_refresh = false;
@@ -2894,6 +3466,11 @@ static esp_err_t render_once(bool quiet)
                      pulled_unchanged ? "the plane's picture is unchanged (304)" : "packed image unchanged",
                      12, sha_hex);
             if (!quiet) {
+                if (lines_after) {
+                    log_render_event("render:framebuffer", scene_id, scene_name, "rendered", "framebuffer",
+                                     mode, "pending", "", render_attempt, framebuffer_ms, width, height,
+                                     format, buf_len, ESP_OK);
+                }
                 log_render_event("render:device", scene_id, scene_name, "skipped",
                                  "display", mode, refresh, "unchanged",
                                  render_attempt, (esp_timer_get_time() - start) / 1000,
@@ -2902,7 +3479,7 @@ static esp_err_t render_once(bool quiet)
             }
         } else {
             refresh = "update";
-            if (!quiet) {
+            if (!quiet && !lines_after) {
                 log_render_event("render:device", scene_id, scene_name, "refreshing",
                                  "display", mode, refresh, "", render_attempt,
                                  (esp_timer_get_time() - start) / 1000, width, height,
@@ -2930,12 +3507,25 @@ static esp_err_t render_once(bool quiet)
                         fos_pictures_fast(local_render ? fos_scene_interval_snap(frameos_nim_scene_interval()) : 0.0,
                                           s_last_picture_us, picture_us);
             tl_update_us = esp_timer_get_time();
+            wake_mark_stop();
             err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
                                      &partial);
             tl_updated_us = esp_timer_get_time();
+            if (err == ESP_OK) press_answered(tl_update_us, showing_id);
+            if (lines_after) {
+                log_render_event("render:framebuffer", scene_id, scene_name, "rendered", "framebuffer",
+                                 mode, "pending", "", render_attempt, framebuffer_ms, width, height,
+                                 format, buf_len, ESP_OK);
+                log_render_event("render:device", scene_id, scene_name, "refreshing", "display", mode,
+                                 "update", "", render_attempt, (tl_update_us - start) / 1000, width,
+                                 height, format, buf_len, ESP_OK);
+            }
             s_last_picture_us = picture_us;
             refresh = err != ESP_OK ? "failed" : partial ? "partial" : "updated";
-            if (err == ESP_OK) snprintf(s_refresh_scene_id, sizeof(s_refresh_scene_id), "%s", showing_id);
+            if (err == ESP_OK) {
+                snprintf(s_refresh_scene_id, sizeof(s_refresh_scene_id), "%s", showing_id);
+                s_sleep_mark_on_glass = false;
+            }
             if (overlay_drawn) {
                 if (in_panel) {
                     lan_overlay_forget(&lan_overlay);
@@ -2946,6 +3536,15 @@ static esp_err_t render_once(bool quiet)
                 }
                 s_last_refresh_skipped = false;
                 forget_display_state();
+                /* Taken off the canvas, still on the glass: the next update
+                 * hashes the whole picture, not a render's box. */
+                fos_display_hint_forget();
+            } else if (err == ESP_OK && state_waits) {
+                /* Written when the tapping stops (pay_display_state). */
+                if (rendered_state_valid) s_display_state = rendered_state;
+                s_display_state_valid = rendered_state_valid;
+                s_last_refresh_skipped = false;
+                owe_display_state();
             } else if (err == ESP_OK && rendered_state_valid) {
                 s_display_state = rendered_state;
                 s_display_state_valid = true;
@@ -2982,7 +3581,7 @@ static esp_err_t render_once(bool quiet)
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
         s_last_scene_ms = framebuffer_ms;
         /* A render without the notice took it off the panel. */
-        if (!notice.drawn && !skipped_refresh) s_notice_shown_us = 0;
+        if (!notice.drawn && !skipped_refresh) notice_left_glass();
         if (pulled_unchanged) {
             /* No new bytes. The preview keeps the picture when the buffer still
              * holds it (the reservation, lent to this pull and not written:
@@ -3311,6 +3910,43 @@ static void deep_sleep_power_down(void)
 
 static bool s_pass_battery_critical = false;
 static bool s_pass_deep_sleep = false;
+/* The pass would deep-sleep but for a press or tap in the last
+ * `awake_input` seconds: its wait ends when that window does. */
+static bool s_pass_sleep_held_by_input = false;
+/* What the last pass knew of the power source: 1 USB, 0 the cell, -1 not known. */
+static int s_pass_usb_power = -1;
+
+/* The charger, where the board has one (fos_charger.c), else the fuel gauge's
+ * discharge flag (the reTerminal Sticky): USB in means not on battery,
+ * whatever the divider reads of a charging cell. False when neither says. */
+static bool power_source_read(fos_charger_status_t *charger)
+{
+    if (fos_charger_present() && fos_charger_read(charger) == ESP_OK) return true;
+    fos_gauge_status_t gauge;
+    if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+        memset(charger, 0, sizeof(*charger));
+        charger->usb_power = !gauge.discharging;
+        charger->charging = gauge.charging;
+        charger->charge_done = gauge.full;
+        return true;
+    }
+    return false;
+}
+
+/* USB came out during an idle wait, on a frame that sleeps on battery: the
+ * power is only read on a pass, and an idle frame's next one was the scene's
+ * next render, an hour away on Form showcase, so an unplugged Sticky stayed
+ * up on its cell (2026-11-23). Two I2C reads every 5 s. */
+static bool usb_left_while_waiting(const fos_config_t *config)
+{
+    static int64_t s_checked_us = 0;
+    if (!config->deep_sleep_on_battery || s_pass_usb_power != 1) return false;
+    int64_t now_us = esp_timer_get_time();
+    if (now_us - s_checked_us < 5000000) return false;
+    s_checked_us = now_us;
+    fos_charger_status_t charger;
+    return power_source_read(&charger) && !charger.usb_power;
+}
 static int s_pass_battery_pct = -1;
 
 static void frame_timer_fired(void *arg)
@@ -3405,14 +4041,18 @@ static bool input_takes_over(void)
 /* What the input hold put off, once. One round trip at a time, so a tap waits
  * for one at the most. */
 /* The greys a tapping session drew as a halftone, from the canvas as it is:
- * the scene is not run again for this. */
-static void settle_panel(void)
+ * the scene is not run again for this. `fast`: what the check after a tap's
+ * waveform found outside its render's box (fos_display_followup_due), in the
+ * tap's own waveform. */
+static void settle_panel(bool fast)
 {
     uint8_t *buf = NULL;
     size_t len = 0;
     if (frameos_nim_repack_alloc(&buf, &len, (int)fos_display_format()) != 0 || !buf) return;
     bool partial = false;
-    esp_err_t err = fos_display_update(buf, len, true, false, &partial);
+    /* The canvas as the last update left it: nothing new in it. */
+    fos_display_hint_damage(0, 0, 0, 0);
+    esp_err_t err = fos_display_update(buf, len, true, fast, &partial);
     if (err != ESP_OK) ESP_LOGW(TAG, "settling the panel failed: %s", esp_err_to_name(err));
     fos_framebuffer_release(buf);
 }
@@ -3512,6 +4152,41 @@ static void remote_input_pass(void)
     }
 }
 
+/* A timer wake of a sleeping touch e-paper board (fos_wake_wifi_plan): its
+ * one picture before the next sleep wants the network, which joins in the
+ * background meanwhile. Waited for here, on the first pass, so the runtime
+ * and the scenes came up beside the join, and only until somebody touches
+ * the glass or a key, or the sleep's own hold runs out: a timer wake used
+ * to wait in main.c and then open the setup hotspot, which held a battery
+ * frame awake until its network came back. */
+static void wait_for_boot_join(void)
+{
+    int64_t start = esp_timer_get_time();
+    const char *result = "timeout";
+    while (true) {
+        fos_wifi_state_t state = fos_wifi_state();
+        if (state == FOS_WIFI_CONNECTED) {
+            result = "joined";
+            break;
+        }
+        if (state != FOS_WIFI_CONNECTING) {
+            result = "off";
+            break;
+        }
+        if (fos_touch_pending() || fos_touch_finger_down() || fos_buttons_pending() ||
+            fos_events_deferred_pending()) {
+            result = "input";
+            break;
+        }
+        if (esp_timer_get_time() >= (int64_t)FOS_WIFI_JOIN_SLEEP_HOLD_SEC * 1000000LL) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    char line[112];
+    snprintf(line, sizeof(line), "{\"event\":\"wifi:wait\",\"source\":\"esp32\",\"result\":\"%s\",\"ms\":%lld}",
+             result, (long long)((esp_timer_get_time() - start) / 1000));
+    frameos_nim_log_hook(line);
+}
+
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -3585,6 +4260,10 @@ static void client_task(void *arg)
             continue;
         }
         portal_screen_shown = false;
+        if (s_join_first) {
+            s_join_first = false;
+            wait_for_boot_join();
+        }
         int64_t cycle_start = esp_timer_get_time();
         s_tl_pass_us = cycle_start;
         int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;
@@ -3602,6 +4281,12 @@ static void client_task(void *arg)
          * command that arrives with the tap lands one frame later. */
         bool pulls_after_render = housekeeping && force_render && s_scene_render &&
                                   (fos_display_is_lcd() || fos_display_supports_partial());
+        /* A boot that draws before the network does so on its first pass
+         * too: the scenes, settings and commands pulls (three round trips,
+         * and the join they wait on) went in front of the picture a tap
+         * woke a sleeping Sticky for (2026-11-23: ~11 s to its first render
+         * with Wi-Fi in the background). */
+        if (housekeeping && s_render_first && s_render_attempts == 0) pulls_after_render = true;
         bool held_for_input = input_hold_on();
 
         /* First pass of a boot on a cloud-managed frame: the commands that
@@ -3609,9 +4294,11 @@ static void client_task(void *arg)
          * delivered right after the session's ready frame, and the backend
          * equivalent below (fos_commands_sync) already runs before the
          * render for the same reason. Without this the pass rendered the
-         * old scene while the socket came up, then rendered again. */
+         * old scene while the socket came up, then rendered again. Not on a
+         * boot that draws first (a touch board): its picture does not wait
+         * up to 20 s for the socket, and what the socket brings renders. */
         bool cloud_socket_waited_out = false;
-        if (s_render_attempts == 0 && !s_render_paused_for_memory &&
+        if (s_render_attempts == 0 && !s_render_paused_for_memory && !s_render_first &&
             renders_locally(config) &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED &&
             fos_wifi_state() == FOS_WIFI_CONNECTED) {
@@ -3651,6 +4338,15 @@ static void client_task(void *arg)
         if (renders_locally(config)) {
             if (housekeeping && !pulls_after_render && !held_for_input) pass_scenes_sync();
             fos_scenes_apply_pending();
+            /* A touch board with no network saved and no scene: its first
+             * picture is the frame page, where it joins one, not a status
+             * screen that says to swipe for it. */
+            if (s_frame_page_first) {
+                s_frame_page_first = false;
+                if (fos_scenes_loaded() == 0 && fos_config_frame_page_offered()) {
+                    fos_events_dispatch(FOS_ORIGIN_SYSTEM, "sceneSettings", "{\"page\":\"frame\"}");
+                }
+            }
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
              * renders, and the render shows them — as the scene's own render
@@ -3756,17 +4452,7 @@ static void client_task(void *arg)
                         battery_pct = again_pct;
                     }
                 }
-                /* The charger, where the board has one (fos_charger.c): USB in means
-                 * not on battery, whatever the divider reads of a charging cell. */
-                charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
-                fos_gauge_status_t gauge;
-                if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
-                    memset(&charger, 0, sizeof(charger));
-                    charger.usb_power = !gauge.discharging;
-                    charger.charging = gauge.charging;
-                    charger.charge_done = gauge.full;
-                    charger_known = true;
-                }
+                charger_known = power_source_read(&charger);
                 s_power_read_us = power_now_us;
                 s_power_mv = battery_mv;
                 s_power_pct = battery_pct;
@@ -3784,6 +4470,15 @@ static void client_task(void *arg)
             fos_power_decision_t power;
             fos_power_decide(&power_in, &s_power_state, &power);
             bool battery_critical = power.critical;
+            /* Someone has the frame in hand: the cable just came out (the last
+             * pass had USB), or its key switched it on (a cold boot on the
+             * cell). They are likely to use it within the minute, so it
+             * counts as a tap: up for `awake_input`, not asleep the moment
+             * it is unplugged (2026-11-23). */
+            if (power_in.usb_power == 0 &&
+                (s_pass_usb_power == 1 || (s_pass_usb_power == -1 && esp_reset_reason() == ESP_RST_POWERON))) {
+                note_input_awake();
+            }
             /* A frame someone is using is an awake frame, its interpreters
              * and its partial updates too. A cell that is nearly flat still
              * goes to sleep. */
@@ -3827,6 +4522,11 @@ static void client_task(void *arg)
             }
             s_pass_battery_critical = battery_critical;
             s_pass_deep_sleep = deep_sleep_now;
+            s_pass_sleep_held_by_input = power.deep_sleep && !deep_sleep_now;
+            s_pass_usb_power = power_in.usb_power;
+            /* On USB the IT8951 is never put in standby between taps: its
+             * first waveform after one is 300 ms longer. */
+            fos_display_keep_controller_awake(s_pass_usb_power == 1);
             /* The backend round trips leave this task while the frame stays
              * awake; a frame about to sleep, and a boot's first pass, do
              * them here (the link task, above). */
@@ -3934,6 +4634,7 @@ static void client_task(void *arg)
                 int64_t began_us = esp_timer_get_time();
                 bool answers = s_asked_us > s_render_began_us;
                 s_render_began_us = began_us;
+                s_input_mark_open = false; /* this render's picture ends it */
                 if (fos_display_is_lcd() && answers) {
                     fos_client_loading_begin(xTaskGetTickCount() + pdMS_TO_TICKS(FOS_LOADING_ANSWER_EXTRA_MS));
                 } else if (!s_anim.active && frameos_nim_scene_awaited() &&
@@ -3941,6 +4642,7 @@ static void client_task(void *arg)
                     fos_client_loading_begin(xTaskGetTickCount());
                 }
                 s_render_in_flight = true;
+                __atomic_store_n(&s_render_begun, true, __ATOMIC_SEQ_CST);
                 render_once(quiet);
                 s_render_in_flight = false;
                 /* A picture shown put a switch's loading mark away; a render
@@ -3959,6 +4661,7 @@ static void client_task(void *arg)
                 }
             }
         }
+        if (s_render_attempts > 0) fos_scenes_first_render_done();
         if (pulls_after_render && !input_hold_on()) {
             /* The pulls this pass put after its picture: a switch or a state
              * they bring is applied now and rendered by the next pass. */
@@ -4119,6 +4822,7 @@ static void client_task(void *arg)
         if (deep_sleep_now && fos_input_hold_engaged(&s_input_hold)) {
             /* Going dark: there is no quiet to wait for. */
             s_input_hold = (fos_input_hold_t){0};
+            pay_display_state();
             run_held_network(config);
             if (fos_client_render_pending()) {
                 xEventGroupClearBits(s_events, RENDER_NOW_BIT);
@@ -4190,6 +4894,26 @@ static void client_task(void *arg)
             }
             keep_awake_s = keep_awake_remaining_seconds();
         }
+        if (deep_sleep_now && fos_display_present() && keep_awake_s == 0 && !s_wifi_join_waited &&
+            fos_config_wifi_ready() && fos_wifi_state() == FOS_WIFI_CONNECTING &&
+            esp_timer_get_time() < (int64_t)FOS_WIFI_JOIN_SLEEP_HOLD_SEC * 1000000LL) {
+            /* Rendered before the network came (a touch board's boot): wait
+             * for the join, once, then render again with it. A press in the
+             * meantime keeps the frame awake anyway. */
+            s_wifi_join_waited = true;
+            frameos_nim_log_hook("{\"event\":\"sleep:held\",\"source\":\"esp32\","
+                                 "\"reason\":\"wifi\"}");
+            while (fos_wifi_state() == FOS_WIFI_CONNECTING &&
+                   esp_timer_get_time() < (int64_t)FOS_WIFI_JOIN_SLEEP_HOLD_SEC * 1000000LL &&
+                   keep_awake_remaining_seconds() == 0) {
+                vTaskDelay(pdMS_TO_TICKS(250));
+            }
+            if (fos_wifi_state() == FOS_WIFI_CONNECTED) {
+                force_render = true;
+                continue;
+            }
+            keep_awake_s = keep_awake_remaining_seconds();
+        }
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0 &&
             fos_cloud_state() == FOS_CLOUD_ENROLLED && fos_wifi_ip()[0] != '\0' &&
             !fos_cloud_ws_connected() && !cloud_socket_waited_out) {
@@ -4212,6 +4936,7 @@ static void client_task(void *arg)
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
             /* What the scene changed is all the next wake has of it. */
             fos_scene_state_flush(true);
+            fos_scenes_flush_marks();
             /* Wake early to check the control plane for commands when asked
              * to — the render schedule itself survives in s_next_render_due
              * (RTC memory), so the check-in wake does not refresh the panel. */
@@ -4263,6 +4988,7 @@ static void client_task(void *arg)
                 frameos_nim_log_hook(line);
                 frameos_nim_flush_logs();
             }
+            draw_sleep_mark();
             /* Let the cloud task put the queued lines (render:done, metrics,
              * the sleep line above) on the wire BEFORE the sleep announce:
              * the hub terminates the socket the moment it sees `sleep`. */
@@ -4281,6 +5007,9 @@ static void client_task(void *arg)
             /* USB console drops in deep sleep; that's the point (battery).
              * What the log ring still holds goes out first. */
             fos_log_ring_flush(FOS_SLEEP_LOG_DRAIN_MS);
+            /* The picture's hash the taps put off: the first render after the
+             * wake skips the refresh when nothing changed. */
+            pay_display_state();
             fos_display_park();
             /* A scene payload the store task is still writing goes to flash
              * first: the next boot loads what is on flash. */
@@ -4295,6 +5024,15 @@ static void client_task(void *arg)
             ESP_LOGI(TAG, "staying awake for %lu s after HTTP/console activity",
                      (unsigned long)keep_awake_s);
             if (sleep_s > keep_awake_s) sleep_s = keep_awake_s;
+        }
+        /* Awake only because someone pressed or tapped: the next pass comes
+         * when that window closes and decides the sleep again. Without it
+         * the wait was the scene's whole interval, and a battery Sticky left
+         * on Solitaire stayed up for half an hour after the last tap
+         * (2026-11-23). */
+        if (s_pass_sleep_held_by_input && fos_display_present()) {
+            uint32_t left_s = keep_awake_remaining_seconds() + 1;
+            if (sleep_s > left_s) sleep_s = left_s;
         }
         /* Wait in 1s slices so scene-dispatched "render" events (QuickJS
          * setting the redraw flag) take effect promptly, until a deadline:
@@ -4311,8 +5049,11 @@ static void client_task(void *arg)
         do {
             /* 50 ms while a button is busy: its `press` is due 350 ms after
              * the tap and its `longPress`es on each second, and only the
-             * process_events below delivers them. */
-            uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+             * process_events below delivers them. A finger on the glass the
+             * same: its `longPress` (a held key's accents) is the tick's, due
+             * 500 ms after it landed, and a second's slice delivered it up to
+             * a second late (the reTerminal Sticky, 2026-11-23). */
+            uint32_t max_slice = fos_buttons_busy() || fos_touch_finger_down() ? 50 : 1000;
             /* A JS app's timer (docs/async-js.md) is run by the tick below,
              * on time: the slice ends when it is due. A request's answer
              * wakes the wait itself (fos_js_io.c). */
@@ -4328,12 +5069,25 @@ static void client_task(void *arg)
             int64_t slice_until_us = wait_until_us;
             if (esp_timer_get_time() >= wait_until_us && fos_display_refreshing()) {
                 slice_until_us = esp_timer_get_time() + 250000;
+            } else if (esp_timer_get_time() >= wait_until_us && fos_touch_finger_down()) {
+                /* A timed render waits for the lift (its wake ends the
+                 * slice), in slices, so a finger held stays a tap's. */
+                slice_until_us = esp_timer_get_time() + 50000;
             }
-            if (frameos_nim_available() && fos_display_settle_due(esp_timer_get_time())) settle_panel();
+            /* Not under a finger or with a press queued: the settle's GC16 is
+             * 580 ms a tap landing meanwhile would wait out, and the press's
+             * own picture is on its way. Neither is the clean and the park. */
+            bool touching = fos_touch_finger_down() || input_queued();
+            if (frameos_nim_available() && !touching && fos_display_settle_due(esp_timer_get_time())) {
+                settle_panel(false);
+            }
+            /* What the check after a tap's waveform found outside its render's
+             * box goes up now, not with the next tap. */
+            if (frameos_nim_available() && !input_queued() && fos_display_followup_due()) settle_panel(true);
             /* The chrome a tap's frames left as it was (its clock came due while
              * someone tapped): drawn now that they stopped. */
             if (frameos_nim_available() && !input_hold_on() && frameos_nim_chrome_owed()) fos_client_render_now();
-            fos_display_park_if_idle(esp_timer_get_time());
+            if (!touching) fos_display_park_if_idle(esp_timer_get_time());
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT |
                     LINK_BIT | RESTART_NOTICE_BIT,
@@ -4391,6 +5145,12 @@ static void client_task(void *arg)
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;
                 if (frameos_nim_render_requested()) scene_asked = true;
+                /* Input handled, and nothing to draw: its loading mark, begun
+                 * in case the handler took long, goes. */
+                if (s_input_mark_open && !scene_asked && !want_render) {
+                    s_input_mark_open = false;
+                    fos_client_loading_end();
+                }
                 /* A burst a second over: its summary, and what its last
                  * frame skipped when that one was quiet. */
                 finish_burst();
@@ -4405,6 +5165,16 @@ static void client_task(void *arg)
             /* Nobody has touched it for a while: what the input hold put
              * off, and whatever that brought is picked up below. */
             if (fos_input_hold_release(&s_input_hold, esp_timer_get_time())) {
+                /* The last tap's picture and its hash: on flash now, and to the
+                 * backend, which a picture without one was not pushed to. */
+                bool owed_state = s_display_state_owed;
+                pay_display_state();
+                if (owed_state && s_link_on && s_display_state_valid && renders_locally(config)) {
+                    char scene_id[128];
+                    char scene_name[128];
+                    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+                    if (picture_push_wanted(scene_id)) link_publish_picture(scene_id);
+                }
                 run_held_network(config);
                 if (fos_client_render_pending()) {
                     xEventGroupClearBits(s_events, RENDER_NOW_BIT);
@@ -4415,6 +5185,8 @@ static void client_task(void *arg)
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */
             if (lan_access_panel_changed()) want_render = true;
+            /* Unplugged: the next pass now, which reads the cell and sleeps. */
+            if (usb_left_while_waiting(config)) wait_until_us = esp_timer_get_time();
             if (render_held() && esp_timer_get_time() >= wait_until_us) {
                 /* The interval ran out under the hold: that render is owed
                  * to the release too. */
@@ -4430,6 +5202,13 @@ static void client_task(void *arg)
                     want_render = true;
                 }
                 s_render_owed = false;
+            }
+            /* A tap on the notice or a key asked it off: the image alone
+             * again, unless a render is about to do that anyway. Without a
+             * snapshot to repaint, the scene renders. */
+            if (!want_render && !scene_asked && notice_dismissal_due()) {
+                frameos_nim_log_hook("{\"event\":\"voice:dismissed\",\"source\":\"esp32\"}");
+                if (!repaint_snapshot(false)) want_render = true;
             }
             /* The answer has been read: the panel goes back to the image
              * alone, unless a render is about to do that anyway. */
@@ -4457,7 +5236,8 @@ static void client_task(void *arg)
                 force_render = true;
                 break;
             }
-        } while (fos_idle_wait_goes_on(esp_timer_get_time(), wait_until_us, fos_display_refreshing()));
+        } while (fos_idle_wait_goes_on(esp_timer_get_time(), wait_until_us, fos_display_refreshing()) ||
+                 fos_timed_render_waits_for_finger(esp_timer_get_time(), wait_until_us, fos_touch_finger_down()));
         if (!force_render) wait_ended_us = wait_until_us;
     }
 }
@@ -4467,6 +5247,11 @@ void fos_client_start(void)
     if (s_events) return;
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
+    const esp_timer_create_args_t press_light_args = {
+        .callback = press_light_off,
+        .name = "fos_press_led",
+    };
+    if (esp_timer_create(&press_light_args, &s_press_light_timer) != ESP_OK) s_press_light_timer = NULL;
     s_restart_notice_done = xSemaphoreCreateBinary();
     /* Before any producer: HTTP, the cloud and the console start later. */
     s_relay_lock = xSemaphoreCreateMutexStatic(&s_relay_lock_buf);

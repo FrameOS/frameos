@@ -4,9 +4,11 @@
  * Boot: NVS config → display select → Wi-Fi (STA, or captive-portal
  * provisioning when unconfigured) → SNTP → HTTP server + render loop
  * (Nim runtime on-device, or thin client fetching backend bitmaps) → OTA.
- * A touch LCD (the SenseCAP Indicator) does not wait for Wi-Fi and has no
- * portal: it joins in the background and is set up on its own screen
- * (the settings panel's Frame tab, fos_frame_settings.c).
+ * A touch board (an LCD like the SenseCAP Indicator, or a fast e-paper like
+ * the reTerminal Sticky) does not wait for Wi-Fi and has no portal: it draws
+ * first, joins in the background and is set up on its own screen (the
+ * settings panel's Frame tab, fos_frame_settings.c). A sleeping e-paper
+ * board's timer wake renders once the join lands, or a touch, or 45 s.
  *
  * The serial console (USB) is always available: `help` for commands,
  * `wifi <ssid> [pass]` provisions a frame without the portal.
@@ -28,6 +30,7 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -47,6 +50,7 @@
 #include "fos_rtc.h"
 #include "fos_cpu.h"
 #include "fos_codec.h"
+#include "fos_imu.h"
 #include "fos_touch.h"
 #include "fos_usb_pads.h"
 #include "fos_voice.h"
@@ -66,6 +70,7 @@
 #include "fos_settings.h"
 #include "fos_tz.h"
 #include "fos_mem.h"
+#include "fos_wake.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "lcd_splash.h"
@@ -74,6 +79,9 @@
 #endif
 #include "frameos_nim.h"
 #include "fos_log_ring.h"
+
+/* The one external copy of fos_mem.h's inline fos_big_malloc. */
+extern inline void *fos_big_malloc(size_t size);
 
 static const char *TAG = "frameos";
 
@@ -207,7 +215,10 @@ static void scene_state_writer_task(void *arg)
     (void)arg;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-        if (!fos_client_input_held()) fos_scene_state_flush(fos_scene_state_crowded());
+        if (!fos_client_input_held()) {
+            fos_scene_state_flush(fos_scene_state_crowded());
+            fos_scenes_flush_marks();
+        }
     }
 }
 
@@ -282,6 +293,7 @@ static void boot_splash_wait(void)
 static void scene_state_flush_on_restart(void)
 {
     fos_scene_state_flush(true);
+    fos_scenes_flush_marks();
 }
 
 static void scene_state_write_behind(void)
@@ -386,7 +398,6 @@ static void online_steps(uint32_t sntp_timeout_ms)
     frameos_nim_set_log_upload_enabled(true);
     log_bootup_event(true);
     fos_ota_start_periodic_task(24);
-    fos_client_render_now();
 }
 
 static void on_portal_exit(void)
@@ -396,9 +407,10 @@ static void on_portal_exit(void)
     fos_http_stop();
     fos_http_start(false);
     online_steps(SNTP_TIMEOUT_MS);
+    fos_client_render_now();
 }
 
-/* A touch LCD's boot went on without Wi-Fi (app_main, touch_setup): the
+/* A touch board's boot went on without Wi-Fi (app_main, touch_setup): the
  * steps an online boot takes before its first render, run the first time the
  * station gets an address. Later addresses (a lost link back) need none. */
 static bool s_online_steps_done = false;
@@ -407,9 +419,14 @@ static void on_wifi_online(void)
 {
     if (__atomic_exchange_n(&s_online_steps_done, true, __ATOMIC_SEQ_CST)) return;
     ESP_LOGI(TAG, "Wi-Fi up after boot (%s)", fos_wifi_ip());
-    /* An LCD renders without the clock and again when it comes. */
+    /* It rendered without the clock (an LCD; e-paper has a clock chip or
+     * the time a deep sleep kept) and renders again when it comes. */
     fos_wifi_set_late_time_hook(action_render_now);
     online_steps(0);
+    /* A picture drawn before the join had none of its data. One that has not
+     * begun yet will: drawn again, a boot whose join beat its first render
+     * refreshed e-paper twice. */
+    fos_client_render_after_join();
 }
 
 static void log_bootup_event(bool online)
@@ -503,6 +520,8 @@ void app_main(void)
      * have answered on the bus: the speaker the buzzer's notes play on and
      * the microphone the voice chat listens with. */
     fos_codec_init();
+    /* The accelerometer, where the board has one (fos_imu.c). */
+    fos_imu_init();
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
@@ -585,6 +604,10 @@ void app_main(void)
         fos_assets_cleanup_stale_uploads();
     }
     boot_splash_start();
+    /* The IT8951 comes up while Wi-Fi joins, not after the first render; not
+     * on a timer's wake, whose picture may well be unchanged (no refresh). */
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) fos_display_warm_up();
+    fos_client_wake_mark_begin();
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
      * the module's PSRAM — it would OOM mid-render. Fall back to thin-client
@@ -648,16 +671,30 @@ void app_main(void)
     scene_state_write_behind();
     frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
-    /* A touch LCD is set up on its own screen, so it neither waits for
+    /* A touch board is set up on its own screen, so it neither waits for
      * Wi-Fi nor opens a hotspot: the settings panel (a swipe down from the
-     * top) has the network, and the frame joins it in the background. */
-    bool touch_setup = fos_touch_present() && fos_display_is_lcd();
+     * top) has the network, and the frame joins it in the background while
+     * its first picture is drawn. Every touch panel is a fast one (an LCD,
+     * or e-paper with a partial waveform: the reTerminal Sticky and E1003),
+     * and a tap that woke a sleeping Sticky waited ~11 s for Wi-Fi before the
+     * scene even started (2026-11-23). A sleeping e-paper board's timer wake
+     * is nobody's tap: its first render waits for the join (fos_client.c),
+     * so the one picture it draws before sleeping again has its data, but
+     * the runtime and the scenes come up meanwhile, a touch or a key ends the
+     * wait, and a join that does not come opens no hotspot: the frame draws
+     * and sleeps again. With no network saved it opens the frame page when it
+     * has no scene to show (fos_wake_wifi_plan). */
+    bool woke_by_timer = esp_reset_reason() == ESP_RST_DEEPSLEEP &&
+                         esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+    fos_wake_wifi_t wifi_plan = fos_wake_wifi_plan(fos_touch_present(), fos_display_is_lcd(), woke_by_timer,
+                                                   fos_config_wifi_ready());
+    bool touch_setup = wifi_plan.on_screen;
     fos_frame_settings_init();
     fos_store_init();
     fos_code_init();
     bool online = false;
     if (touch_setup) {
-        if (fos_config_wifi_ready()) {
+        if (wifi_plan.join_behind) {
             esp_err_t err = fos_wifi_start_background();
             if (err != ESP_OK) ESP_LOGW(TAG, "Wi-Fi failed to start: %s", esp_err_to_name(err));
             /* An update was asked for (console `ota`, the backend's action):
@@ -730,6 +767,7 @@ void app_main(void)
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();
     boot_splash_wait();
+    fos_client_set_boot_wifi(touch_setup && !wifi_plan.wait_first, wifi_plan.wait_first, wifi_plan.frame_page);
     fos_client_start();
 
     BOOTMEM("after-client-start");

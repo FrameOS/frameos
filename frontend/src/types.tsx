@@ -24,6 +24,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'esp32_c3_042_oled'
   | 'seeed_sensecap_indicator_d1'
   | 'sunton_esp32_8048s070'
+  | 'waveshare_esp32_s3_touch_amoled_1_75'
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
@@ -430,6 +431,7 @@ export interface FrameType {
         | 'seeed_reterminal_e1004'
         | 'seeed_reterminal_sticky'
         | 'sunton_esp32_8048s070'
+        | 'waveshare_esp32_s3_touch_amoled_1_75'
       pins?: {
         cs?: number
         sck?: number
@@ -584,6 +586,10 @@ export interface FrameType {
     networkCheck?: boolean
     networkCheckTimeoutSeconds?: number
     networkCheckUrl?: string
+    // A touch screen (a HyperPixel) draws first and checks behind its scene;
+    // true makes it wait and raise its boot hotspot like any other frame
+    // (frameos/src/frameos/boot_network.nim).
+    networkCheckOnTouch?: boolean
     wifiHotspot?: string
     wifiHotspotSsid?: string
     wifiHotspotPassword?: string
@@ -1149,7 +1155,7 @@ export interface FontMetadata {
 }
 
 /** What the runtime uses a state field for (see utils/refreshInterval.ts and utils/renderScale.ts). */
-export type StateFieldRole = 'refreshInterval' | 'renderScale' | 'backgroundColor'
+export type StateFieldRole = 'refreshInterval' | 'renderScale' | 'backgroundColor' | 'fullScreen'
 
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'
@@ -1157,6 +1163,9 @@ export interface StateField extends AppConfigField {
   /**
    * `refreshInterval`: this field's value is the scene's seconds between renders.
    * `renderScale`: this field's value is the scene's scale, over its `settings.renderScale`.
+   * `backgroundColor`: this color field's value is the scene's background, over its `settings.backgroundColor`.
+   * `fullScreen`: this boolean field says whether the scene asks its layout for the whole panel, over its
+   * `settings.fullScreen` (utils/fullScreen.ts).
    * One field per role per scene.
    */
   role?: StateFieldRole
@@ -1332,6 +1341,9 @@ export interface FrameSceneSettings {
   backgroundColor?: string
   /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); unset or 0 = the frame's. */
   renderScale?: number
+  /** The scene asks the frame's layout for the whole panel, unless a field with role fullScreen says otherwise
+   * (utils/fullScreen.ts). */
+  fullScreen?: boolean
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
@@ -1351,6 +1363,12 @@ export interface FrameSceneSettings {
   /** Its category by its name, "Photos" or "Clocks & time", picked from the store's titles
    * (utils/sceneCategory.ts): a desktop layout groups its list of scenes by it. */
   category?: string
+  /** It works on a round screen (true) or is not offered for one (false); unset = what its code says
+   * (utils/sceneNeeds.ts `round`, docs/scene-guide.md "Round panels"). */
+  round?: boolean
+  /** The file types it opens, their extensions as text ("pdf", "txt md json"): the Files app hands
+   * such a file to its public field `file` as "<storage>:<path>" (docs/scene-guide.md "Opening files"). */
+  opens?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

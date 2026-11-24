@@ -63,6 +63,7 @@ type
     windowSize*: string ## its own size in a desktop's window, "" for none: 800x480 (app.frame.scenes)
     icon*: string ## its icon, one path in 0 0 24 24 (scene_icon.nim), "" for none
     category*: string ## its category by its name ("Photos"), as the scene has it, "" for none
+    opens*: string ## the file types it opens ("pdf", "txt md"), as the scene has it, "" for none
 
   SwitcherListing* = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.}
     ## The frame's scenes in its scene list's order, with their names.
@@ -91,6 +92,9 @@ type
     ## and the title and Close sit in the arcs above and below it.
     round*: bool
     cx*, cy*, radius*, side*: int
+    lift*: int
+      ## A round panel's lens (`lens`): how far down its cell a tile drawn
+      ## smaller is put, so it stays centred where a full one would be.
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
@@ -151,14 +155,16 @@ proc putText(node: JsonNode, key, text: string, always = false) =
 
 proc listingItem*(entry: SwitcherEntry): JsonNode =
   ## The scene as `app.frame.scenes` lists it (docs/scene-layouts.md
-  ## "Windows"): `{id, name}`, and its window size, icon and category where
-  ## it has them. One builder for every host, so their listings stay alike.
+  ## "Windows"): `{id, name}`, and its window size, icon, category and the
+  ## file types it opens where it has them. One builder for every host, so
+  ## their listings stay alike.
   result = newJObject()
   result.putText("id", entry.id, always = true)
   result.putText("name", entry.name, always = true)
   result.putText("windowSize", entry.windowSize)
   result.putText("icon", entry.icon)
   result.putText("category", entry.category)
+  result.putText("opens", entry.opens)
 
 proc isBuiltInScene*(sceneId: string): bool =
   ## A scene the runtime draws itself: no slot, no file. The switcher and the
@@ -289,22 +295,21 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   var
     gw = max(width - 2 * result.pad, 1)
     gh = max(height - result.y0, 1) # the rows in sight: the list runs to the bottom edge
-  when not defined(frameosEmbedded):
-    if round:
-      result.round = true
-      result.cx = width div 2
-      result.cy = height div 2
-      result.radius = max(min(width, height) div 2 - RoundInset, 8)
-      # Two pixels inside the circle at its corners, whatever the rounding.
-      result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
-      result.x0 = result.cx - result.side div 2
-      result.y0 = result.cy - result.side div 2
-      result.listX = result.x0
-      result.listY = result.y0
-      result.listW = result.side
-      result.listH = result.side
-      gw = result.side
-      gh = result.side
+  if round:
+    result.round = true
+    result.cx = width div 2
+    result.cy = height div 2
+    result.radius = max(min(width, height) div 2 - RoundInset, 8)
+    # Two pixels inside the circle at its corners, whatever the rounding.
+    result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
+    result.x0 = result.cx - result.side div 2
+    result.y0 = result.cy - result.side div 2
+    result.listX = result.x0
+    result.listY = result.y0
+    result.listW = result.side
+    result.listH = result.side
+    gw = result.side
+    gh = result.side
   result.text = clamp(permille(cu, 30), 10, 24)
   result.inner = clamp(permille(cu, 10), 2, 8)
   result.icon = clamp(permille(cu, 100), 20, 64)
@@ -316,15 +321,36 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
 
+proc lens*(grid: SwitcherGrid, top, scroll: int): SwitcherGrid =
+  ## A round panel's list is a lens: a tile is full size at the circle's
+  ## middle and smaller towards its rim, a watch's list, following the finger
+  ## as the list scrolls (every scroll is a render). `top`: the tile's top in
+  ## the list, `scroll` how far the list is scrolled. Only what is drawn
+  ## shrinks: the cell, and what a tap there does, stay.
+  result = grid
+  let
+    dy = abs(grid.listY + top - scroll + grid.tileH div 2 - grid.cy)
+    reach = max(grid.radius, 1)
+    # 1000 at the middle, 1000 - 650 × (dy / radius)² towards the rim:
+    # about two thirds at the list's top and bottom edges.
+    k = clamp(1000 - 650 * dy * dy div reach div reach, 550, 1000)
+  if k >= 1000:
+    return
+  result.icon = max(permille(grid.icon, k), 8)
+  result.text = max(permille(grid.text, k), 8)
+  result.inner = max(permille(grid.inner, k), 1)
+  let drawn = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
+  result.lift = max((grid.tileH - drawn) div 2, 0)
+
 proc isRound*(frameConfig: FrameConfig): bool =
   ## Whether the frame's panel shows only the circle inside it
-  ## (frameos/panel_shape.nim); never on an ESP32.
-  when defined(frameosEmbedded): false
-  else: not frameConfig.isNil and panelIsRound(frameConfig.device)
+  ## (frameos/panel_shape.nim): a HyperPixel 2.1 Round on a Pi, the
+  ## Waveshare 1.75" AMOLED on an ESP32 (`boardPanelRound`).
+  not frameConfig.isNil and panelIsRound(frameConfig.device)
 
 proc grid(self: SceneSwitcherScene, width, height: int, unit = 0): SwitcherGrid =
   when defined(frameosEmbedded):
-    switcherGrid(width, height, false, unit = unit)
+    switcherGrid(width, height, false, round = isRound(self.frameConfig), unit = unit)
   else:
     switcherGrid(width, height, not sceneSwitcherThumbnail.isNil, round = isRound(self.frameConfig), unit = unit)
 
@@ -631,8 +657,8 @@ proc opened(self: SceneSwitcherScene) =
 
 proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   ## A key, by its role (the input state gives every `button` one): next /
-  ## down and prev / up walk the tiles, a press one step and a double press
-  ## two, so every tap counts; primary (OK, the reTerminal's green REFRESH,
+  ## down and prev / up walk the tiles, a press one step, a double press
+  ## two and a triple press three, so every tap counts; primary (OK, the reTerminal's green REFRESH,
   ## BOOT) shows the highlighted scene (opens the frame page on the gear),
   ## back and menu go back. A long press is the frame's where its event map binds it (walk the
   ## scenes, talk); one it leaves free goes back from the key that opens or
@@ -640,7 +666,7 @@ proc pressed(self: SceneSwitcherScene, payload: JsonNode) =
   # One way out (no early `return`): each one repeats the clean-up of what
   # was read so far.
   let action = payload{"action"}.getStr()
-  let steps = if action == "press": 1 elif action == "doublePress": 2 else: 0
+  let steps = if action == "press": 1 elif action == "doublePress": 2 elif action == "triplePress": 3 else: 0
   if steps > 0:
     if self.entries.len == 0:
       self.list()
@@ -815,7 +841,7 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
   ## (Explorer's blue label, Finder's pill); on e-paper the cell is inverted.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
-  c.px("pt", grid.inner)
+  c.px("pt", grid.inner + grid.lift)
   c.px("gap", grid.inner)
   c.px("rounded", grid.inner * 2)
   c.add " flex flex-col items-center"
@@ -878,45 +904,42 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: 
   header.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
   root.children.add header.role("bar")
 
-when not defined(frameosEmbedded):
-  # No ESP32 board is round (frameos/panel_shape.nim): the firmware
-  # carries the rectangular header alone.
-  proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
-      size, small: int, button: string) =
-    ## A round panel's: the list fills the square inside the circle, the
-    ## title is in the arc above it (12 o'clock) and Close in the one below
-    ## (6). Every box is cut to the chord it sits on, so no corner leaves the
-    ## circle `RoundInset` in from the rim.
-    let
-      gap = grid.gap * 3 # the cells' gap is a file manager's, the chrome's three of it
-      arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
-      rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - gap), 8)
-      top = grid.y0 - gap div 2 - rowH
-      titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
-    var c: string
-    c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
-    c.add " flex items-center justify-center truncate font-bold"
-    c.px("text", size)
-    root.children.add el("div", c, txt("Scenes"))
-    let
-      closeTop = grid.y0 + grid.side + gap div 2
-      closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
-      # The gear left of Close, the two centred on the chord together.
-      gearW = if self.gear: rowH + gap else: 0
-      closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
-      left = grid.cx - (closeW + gearW) div 2
-    c = ""
-    c.at(left + gearW, closeTop, closeW, rowH)
-    c.add " flex items-center justify-center rounded-full"
-    c.px("text", small)
-    c.add button
-    root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
-    if self.gear:
-      let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
-      gear.attrs[0][1].add " absolute"
-      gear.attrs[0][1].px("left", left)
-      gear.attrs[0][1].px("top", closeTop)
-      root.children.add gear
+proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, paper: bool,
+    size, small: int, button: string) =
+  ## A round panel's: the list fills the square inside the circle, the
+  ## title is in the arc above it (12 o'clock) and Close in the one below
+  ## (6). Every box is cut to the chord it sits on, so no corner leaves the
+  ## circle `RoundInset` in from the rim.
+  let
+    gap = grid.gap * 3 # the cells' gap is a file manager's, the chrome's three of it
+    arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
+    rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - gap), 8)
+    top = grid.y0 - gap div 2 - rowH
+    titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
+  var c: string
+  c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
+  c.add " flex items-center justify-center truncate font-bold"
+  c.px("text", size)
+  root.children.add el("div", c, txt("Scenes"))
+  let
+    closeTop = grid.y0 + grid.side + gap div 2
+    closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
+    # The gear left of Close, the two centred on the chord together.
+    gearW = if self.gear: rowH + gap else: 0
+    closeW = max(min(2 * closeHalf - gearW, max(small * 6, 72)), 8)
+    left = grid.cx - (closeW + gearW) div 2
+  c = ""
+  c.at(left + gearW, closeTop, closeW, rowH)
+  c.add " flex items-center justify-center rounded-full"
+  c.px("text", small)
+  c.add button
+  root.children.add el("div", c, txt("Close")).role("button").onClick(self.entries.len)
+  if self.gear:
+    let gear = self.gearButton(rowH, paper, self.highlighted() == self.entries.len, button)
+    gear.attrs[0][1].add " absolute"
+    gear.attrs[0][1].px("left", left)
+    gear.attrs[0][1].px("top", closeTop)
+    root.children.add gear
 
 proc heading(grid: SwitcherGrid, spot: Spot, span: int, title: string, paper: bool): SvgNode =
   ## A category's name over the row it starts, small, with a rule under it
@@ -963,13 +986,10 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     c.px("pb", grid.pad)
   let list = el("div", move c)
   result.children.add list
-  when defined(frameosEmbedded):
-    self.header(result, grid, paper, width, size, small, button)
+  if grid.round:
+    self.roundChrome(result, grid, paper, size, small, button)
   else:
-    if grid.round:
-      self.roundChrome(result, grid, paper, size, small, button)
-    else:
-      self.header(result, grid, paper, width, size, small, button)
+    self.header(result, grid, paper, width, size, small, button)
   if self.entries.len == 0:
     c = ""
     if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)
@@ -983,6 +1003,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   var look = TileLook(paper: paper)
   let opener = self.opener()
   let spots = self.spots(grid)
+  let scroll = if grid.round: int(listScroll()) else: 0
   var group = -1
   for index in 0 ..< self.entries.len:
     if index == 0 or self.entries[index].category != self.entries[index - 1].category:
@@ -993,7 +1014,8 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     look.hue = group
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
-    list.children.add self.tile(look, index, spots[index], grid)
+    list.children.add self.tile(look, index, spots[index],
+      if grid.round: grid.lens(spots[index].top, scroll) else: grid)
 
 const
   PaperWhite = color(1, 1, 1, 1)

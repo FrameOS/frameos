@@ -94,7 +94,7 @@ extern double fos_nim_scene_interval_impl(void);
 extern bool fos_nim_scene_awaited_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
-extern bool fos_nim_press_taken_impl(int wire_x, int wire_y);
+extern int fos_nim_press_map_impl(uint16_t *boxes, uint8_t *taken, int max_entries);
 extern bool fos_nim_tick_impl(void);
 int fos_nim_next_async_ms_impl(void);
 extern int fos_nim_recover_oom_abort_impl(size_t *js_bytes, int *http_released);
@@ -676,6 +676,77 @@ static void nim_note_healthy_render(void)
     }
 }
 
+/* The press map of what the last render drew (docs/server-rendering.md
+ * "The click", interpreter.panelPressMap): where a press on the glass does
+ * something, in the panel's pixels. Made on the render task after every
+ * render, under the runtime lock, and read by the touch task on the other
+ * core with no lock: it clicks the moment a finger lands, not when the
+ * render task is done with a render or a panel update and hears of it.
+ * Two buffers: the render writes the one nobody was handed and then
+ * publishes it (which, and how many entries) in one word. A reader that took
+ * a buffer a render ago and is still reading it when the next render writes
+ * it again reads a half-new map: a click or not, nothing worse, and a read
+ * is a few microseconds against a render's tens of milliseconds. */
+#define PRESS_MAP_MAX 64
+#define PRESS_MAP_PUBLISHED 0x80000000u
+static uint16_t s_press_boxes[2][PRESS_MAP_MAX * 4];
+static uint8_t s_press_taken[2][PRESS_MAP_MAX];
+static uint32_t s_press_state = 0; /* PUBLISHED | buffer << 8 | count */
+static bool s_press_map_kept = false;
+
+/* Under the runtime lock, inside the render's OOM guard: the map is a Nim
+ * seq. */
+static bool s_render_quiet = false;
+
+static void press_map_publish(void)
+{
+    if (!__atomic_load_n(&s_press_map_kept, __ATOMIC_RELAXED)) return;
+    uint32_t state = __atomic_load_n(&s_press_state, __ATOMIC_ACQUIRE);
+    /* An animation's quiet frame (fos_animation.h) on a scene whose last map
+     * held nothing to press (DVD Logo Bounce, a clock's seconds): not built
+     * again, frame after frame, for nothing. A frame logged in full and every
+     * other render still build it, and so does every frame of a scene with
+     * something in its map (a game's moving buttons). */
+    if (s_render_quiet && (state & PRESS_MAP_PUBLISHED) && (state & 0xFF) == 0) return;
+    int next = (state & PRESS_MAP_PUBLISHED) ? 1 - (int)((state >> 8) & 1) : 0;
+    int count = fos_nim_press_map_impl(s_press_boxes[next], s_press_taken[next], PRESS_MAP_MAX);
+    /* A map that could not be made says nothing is taken: no click is
+     * better than a click on the picture before. */
+    if (count < 0) count = 0;
+    if (count > PRESS_MAP_MAX) count = PRESS_MAP_MAX;
+    __atomic_store_n(&s_press_state, PRESS_MAP_PUBLISHED | ((uint32_t)next << 8) | (uint32_t)count,
+                     __ATOMIC_RELEASE);
+}
+
+void frameos_nim_keep_press_map(bool keep)
+{
+    __atomic_store_n(&s_press_map_kept, keep, __ATOMIC_RELAXED);
+    if (!keep) __atomic_store_n(&s_press_state, 0, __ATOMIC_RELEASE);
+}
+
+int frameos_nim_press_map_find(int x, int y, uint16_t out[4])
+{
+    uint32_t state = __atomic_load_n(&s_press_state, __ATOMIC_ACQUIRE);
+    if (!(state & PRESS_MAP_PUBLISHED)) return -1;
+    int buffer = (int)((state >> 8) & 1);
+    int count = (int)(state & 0xFF);
+    const uint16_t *box = s_press_boxes[buffer];
+    /* The first entry a press lands in answers; a press in none is not
+     * taken. */
+    for (int i = 0; i < count; i++, box += 4) {
+        if (x >= box[0] && y >= box[1] && x < box[2] && y < box[3]) {
+            if (out) memcpy(out, box, 4 * sizeof(uint16_t));
+            return s_press_taken[buffer][i];
+        }
+    }
+    return 0;
+}
+
+int frameos_nim_press_map_takes(int x, int y)
+{
+    return frameos_nim_press_map_find(x, y, NULL);
+}
+
 /* main/fos_scenes.c; main/ is not on this component's include path, and the
  * one symbol is not worth a dependency edge. Linked in every build that
  * links this glue (the C3 thin client links the stub, which never aborts). */
@@ -819,7 +890,10 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_impl(buf, len, pixel_format);
-        if (result == 0) nim_note_healthy_render();
+        if (result == 0) {
+            press_map_publish();
+            nim_note_healthy_render();
+        }
     } else {
         nim_oom_abort_note("render");
         result = -1;
@@ -838,7 +912,10 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_panel_impl(buf, len, pixel_format, generation);
-        if (result == 0) nim_note_healthy_render();
+        if (result == 0) {
+            press_map_publish();
+            nim_note_healthy_render();
+        }
     } else {
         nim_oom_abort_note("render");
         result = -1;
@@ -850,6 +927,7 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
 
 void frameos_nim_set_quiet(bool quiet)
 {
+    s_render_quiet = quiet;
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_set_quiet_impl(quiet ? 1 : 0);
@@ -881,8 +959,33 @@ size_t frameos_nim_js_runtime_bytes(void)
     return bytes;
 }
 
+/* Where the last frameos_nim_render_alloc wrote the canvas, as the render
+ * reported it (embedded_main.nim noteRenderDamage): unknown unless it did. */
+static bool s_damage_known = false;
+static int s_damage[4];
+
+void fos_nim_note_damage(int known, int x, int y, int w, int h)
+{
+    s_damage_known = known != 0;
+    s_damage[0] = x;
+    s_damage[1] = y;
+    s_damage[2] = w;
+    s_damage[3] = h;
+}
+
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h)
+{
+    if (!s_damage_known) return false;
+    *x = s_damage[0];
+    *y = s_damage[1];
+    *w = s_damage[2];
+    *h = s_damage[3];
+    return true;
+}
+
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
+    s_damage_known = false;
     if (!s_nim_ready || !buf || !len) return -1;
     if (!nim_lock_take()) return -1;
     int result;
@@ -891,7 +994,10 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
         result = fos_nim_render_alloc_impl(buf, len, pixel_format);
-        if (result == 0) nim_note_healthy_render();
+        if (result == 0) {
+            press_map_publish();
+            nim_note_healthy_render();
+        }
     } else {
         nim_oom_abort_note("render");
         if (s_pending_render_buffer != NULL) {
@@ -1243,15 +1349,6 @@ double frameos_nim_next_sleep(void)
     double next_sleep = fos_nim_next_sleep_impl();
     nim_lock_give();
     return next_sleep;
-}
-
-bool frameos_nim_press_taken(int wire_x, int wire_y)
-{
-    if (!s_nim_ready) return false;
-    if (!nim_lock_take()) return false;
-    bool taken = fos_nim_press_taken_impl(wire_x, wire_y);
-    nim_lock_give();
-    return taken;
 }
 
 bool frameos_nim_render_requested(void)

@@ -15,6 +15,7 @@ type
     gradients: Table[string, SvgGradient]
     viewBoxWidth, viewBoxHeight: float32 # what percentage lengths refer to
     lateData: bool # long path data is read when its element is drawn (parseSvg)
+    reuse: bool # nodes handed over again keep their parse (parseSvg's `reuse`)
 
   SvgNode* {.acyclic.} = ref object
     ## What `parseSvg` reads: an element (`tag`, `attrs`, `children`), a run
@@ -403,6 +404,29 @@ proc parsePathCached(d: string): Path {.raises: [PixieError].} =
     pathCacheChars -= pathCache[0][0].len
     pathCache.delete(0)
 
+type SvgAttr = enum
+  ## The attributes parseSvgProperties reads, a slot each.
+  saFillRule, saFill, saStroke, saStrokeWidth, saStrokeLineCap, saStrokeLineJoin,
+  saStrokeMiterLimit, saStrokeDashArray, saTransform, saStyle, saDisplay,
+  saOpacity, saFillOpacity, saStrokeOpacity, saFontFamily, saFontSize,
+  saFontWeight, saFontStyle, saTextAnchor, saBaseline
+
+const
+  svgAttrNames: array[SvgAttr, string] = ["fill-rule", "fill", "stroke",
+    "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-dasharray", "transform", "style", "display", "opacity",
+    "fill-opacity", "stroke-opacity", "font-family", "font-size", "font-weight",
+    "font-style", "text-anchor", "dominant-baseline"]
+  svgStyleNames: array[SvgAttr, string] = ["fill-rule", "fill", "stroke",
+    "stroke-width", "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-dasharray", "", "", "display", "opacity",
+    "fillOpacity", "strokeOpacity", "font-family", "font-size", "font-weight",
+    "font-style", "text-anchor", "dominant-baseline"]
+    ## The key a style="" pair sets each by ("": none; the opacities in camel
+    ## case, as pixie has always read them), "alignment-baseline" the
+    ## baseline's too. One table and a loop, not a variable and a branch an
+    ## attribute: 2 KB of an ESP32's flash.
+
 proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties =
   result = inherited
   result.isRect = false
@@ -410,29 +434,11 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
   result.imageClip = false
   result.imagePixelated = false
 
-  var
-    fillRule = node.attr("fill-rule")
-    fill = node.attr("fill")
-    stroke = node.attr("stroke")
-    strokeWidth = node.attr("stroke-width")
-    strokeLineCap = node.attr("stroke-linecap")
-    strokeLineJoin = node.attr("stroke-linejoin")
-    strokeMiterLimit = node.attr("stroke-miterlimit")
-    strokeDashArray = node.attr("stroke-dasharray")
-    transform = node.attr("transform")
-    style = node.attr("style")
-    display = node.attr("display")
-    opacity = node.attr("opacity")
-    fillOpacity = node.attr("fill-opacity")
-    strokeOpacity = node.attr("stroke-opacity")
-    fontFamily = node.attr("font-family")
-    fontSize = node.attr("font-size")
-    fontWeight = node.attr("font-weight")
-    fontStyle = node.attr("font-style")
-    textAnchor = node.attr("text-anchor")
-    baseline = node.attrOrDefault(
-      "dominant-baseline", node.attr("alignment-baseline")
-    )
+  var a: array[SvgAttr, string]
+  for k in SvgAttr:
+    a[k] = node.attr(svgAttrNames[k])
+  if a[saBaseline].len == 0:
+    a[saBaseline] = node.attr("alignment-baseline")
 
   when defined(pixieDebugSvg):
     proc maybeLogPair(k, v: string) =
@@ -453,72 +459,46 @@ proc parseSvgProperties(node: SvgNode, inherited: SvgProperties): SvgProperties 
       maybeLogPair(k, v)
 
   # Most elements have no style: splitting "" still allocates a seq.
-  let pairs = if style.len > 0: style.split(';') else: @[]
+  let pairs = if a[saStyle].len > 0: a[saStyle].split(';') else: @[]
   for pair in pairs:
     let parts = pair.split(':')
     if parts.len == 2:
       # Do not override element properties
-      case parts[0].strip():
-      of "fill-rule":
-        if fillRule.len == 0:
-          fillRule = parts[1].strip()
-      of "fill":
-        if fill.len == 0:
-          fill = parts[1].strip()
-      of "stroke":
-        if stroke.len == 0:
-          stroke = parts[1].strip()
-      of "stroke-linecap":
-        if strokeLineCap.len == 0:
-          strokeLineCap = parts[1].strip()
-      of "stroke-linejoin":
-        if strokeLineJoin.len == 0:
-          strokeLineJoin = parts[1].strip()
-      of "stroke-width":
-        if strokeWidth.len == 0:
-          strokeWidth = parts[1].strip()
-      of "stroke-miterlimit":
-        if strokeMiterLimit.len == 0:
-          strokeMiterLimit = parts[1].strip()
-      of "stroke-dasharray":
-        if strokeDashArray.len == 0:
-          strokeDashArray = parts[1].strip()
-      of "display":
-        if display.len == 0:
-          display = parts[1].strip()
-      of "opacity":
-        if opacity.len == 0:
-          opacity = parts[1].strip()
-      of "fillOpacity":
-        if fillOpacity.len == 0:
-          fillOpacity = parts[1].strip()
-      of "strokeOpacity":
-        if strokeOpacity.len == 0:
-          strokeOpacity = parts[1].strip()
-      of "font-family":
-        if fontFamily.len == 0:
-          fontFamily = parts[1].strip()
-      of "font-size":
-        if fontSize.len == 0:
-          fontSize = parts[1].strip()
-      of "font-weight":
-        if fontWeight.len == 0:
-          fontWeight = parts[1].strip()
-      of "font-style":
-        if fontStyle.len == 0:
-          fontStyle = parts[1].strip()
-      of "text-anchor":
-        if textAnchor.len == 0:
-          textAnchor = parts[1].strip()
-      of "dominant-baseline", "alignment-baseline":
-        if baseline.len == 0:
-          baseline = parts[1].strip()
-      else:
+      let key = parts[0].strip()
+      var known = false
+      for k in SvgAttr:
+        if svgStyleNames[k].len > 0 and (key == svgStyleNames[k] or
+            (k == saBaseline and key == "alignment-baseline")):
+          known = true
+          if a[k].len == 0:
+            a[k] = parts[1].strip()
+          break
+      if not known:
         when defined(pixieDebugSvg):
           maybeLogPair(parts[0], parts[1])
     elif pair.len > 0:
       when defined(pixieDebugSvg):
         echo "Invalid style pair: ", pair
+
+  template fillRule: untyped = a[saFillRule]
+  template fill: untyped = a[saFill]
+  template stroke: untyped = a[saStroke]
+  template strokeWidth: untyped = a[saStrokeWidth]
+  template strokeLineCap: untyped = a[saStrokeLineCap]
+  template strokeLineJoin: untyped = a[saStrokeLineJoin]
+  template strokeMiterLimit: untyped = a[saStrokeMiterLimit]
+  template strokeDashArray: untyped = a[saStrokeDashArray]
+  template transform: untyped = a[saTransform]
+  template display: untyped = a[saDisplay]
+  template opacity: untyped = a[saOpacity]
+  template fillOpacity: untyped = a[saFillOpacity]
+  template strokeOpacity: untyped = a[saStrokeOpacity]
+  template fontFamily: untyped = a[saFontFamily]
+  template fontSize: untyped = a[saFontSize]
+  template fontWeight: untyped = a[saFontWeight]
+  template fontStyle: untyped = a[saFontStyle]
+  template textAnchor: untyped = a[saTextAnchor]
+  template baseline: untyped = a[saBaseline]
 
   if display.len > 0:
     result.display = display.strip() != "none"
@@ -1123,9 +1103,89 @@ proc intersect(a, b: Rect): Rect =
 proc parseSvgElement(
   node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
   elements: var seq[SvgElement]
+)
+
+proc movedOnly(was, now: SvgProperties, d: var Vec2): bool =
+  ## Whether `now` is `was` moved: the same in everything but the
+  ## transform's translation, which moved by `d`.
+  var same = now
+  same.transform[2, 0] = was.transform[2, 0]
+  same.transform[2, 1] = was.transform[2, 1]
+  if same != was:
+    return false
+  d = vec2(now.transform[2, 0] - was.transform[2, 0], now.transform[2, 1] - was.transform[2, 1])
+  true
+
+proc movedBy(element: SvgElement, d: Vec2): SvgElement =
+  ## `element` drawn `d` further on (its transform's translation).
+  var props = element.props
+  props.transform[2, 0] += d.x
+  props.transform[2, 1] += d.y
+  SvgElement(path: element.path, props: props, bounds: rect(0, 0, -1, -1))
+
+when defined(testing):
+  var svgNodesParsedForTest* = 0 ## nodes parseSvgElement read (FrameOS's tests)
+
+proc parseViewportChildren(
+  node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
+  elements: var seq[SvgElement]
+) =
+  ## A nested `<svg>`'s children with `reuse`: a viewport that only moved (a
+  ## UI's scrolled list, whose children the layout hands over again as the
+  ## same nodes and whose viewBox alone changed) brings each child's elements
+  ## back moved with it, without a parse; one that did not move, the very
+  ## same elements. Only a child drawn wholly in this viewport's clip is kept:
+  ## a viewport inside it cuts its own clip, which a move would change.
+  let props = propertiesStack[^1]
+  var
+    under: ref SvgProperties # `props`, for the children parsed or moved here
+    was: ref SvgProperties   # the last `parsedUnder` looked at, and
+    moved = false            # whether `props` is it moved,
+    d: Vec2                  # by this much
+  for child in node.children:
+    if not child.parsedUnder.isNil:
+      if child.parsedUnder != was:
+        was = child.parsedUnder
+        moved = movedOnly(was[], props, d)
+      if moved:
+        if d.x == 0 and d.y == 0:
+          elements.add child.parsed
+        else:
+          if under.isNil:
+            under = new(SvgProperties)
+            under[] = props
+          for i in 0 ..< child.parsed.len:
+            child.parsed[i] = child.parsed[i].movedBy(d)
+          elements.add child.parsed
+          child.parsedUnder = under
+        continue
+    let
+      first = elements.len
+      gradients = svg.gradients.len
+    child.parseSvgElement(svg, propertiesStack, elements)
+    var keep = svg.gradients.len == gradients
+    for i in first ..< elements.len:
+      if elements[i].late != nil or elements[i].props.clip != props.clip:
+        keep = false
+        break
+    if keep:
+      if under.isNil:
+        under = new(SvgProperties)
+        under[] = props
+      child.parsed = elements[first .. ^1]
+      child.parsedUnder = under
+    else:
+      child.parsed = @[]
+      child.parsedUnder = nil
+
+proc parseSvgElement(
+  node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
+  elements: var seq[SvgElement]
 ) =
   if node.isText:
     return
+  when defined(testing):
+    inc svgNodesParsedForTest
 
   case node.tag:
   of "title", "desc":
@@ -1173,8 +1233,11 @@ proc parseSvgElement(
         props.transform[1, r] = m[1, r] * sy
         props.transform[2, r] = m[0, r] * tx + m[1, r] * ty + m[2, r]
     propertiesStack.add(props)
-    for child in node.children:
-      child.parseSvgElement(svg, propertiesStack, elements)
+    if node.tag == "svg" and svg.reuse:
+      node.parseViewportChildren(svg, propertiesStack, elements)
+    else:
+      for child in node.children:
+        child.parseSvgElement(svg, propertiesStack, elements)
     discard propertiesStack.pop()
 
   of "text":
@@ -1359,7 +1422,8 @@ proc parseSvg*(
     result = Svg(
       viewBoxWidth: box.width,
       viewBoxHeight: box.height,
-      lateData: lateData and not reuse
+      lateData: lateData and not reuse,
+      reuse: reuse
     )
 
     if width == 0 and height == 0: # Default to the view box size

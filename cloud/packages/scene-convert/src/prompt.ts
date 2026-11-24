@@ -88,7 +88,7 @@ outside the tool call is applied.
 
 **Code nodes** hold ONE JavaScript expression (data.codeJS). Globals: \`state.<key>\` (the scene state, any key),
 every declared argument by name, \`context\` ({event, payload, loopIndex, loopKey, hasImage, imageWidth,
-imageHeight}), \`now()\` (seconds since epoch), \`format(ts, pattern)\` and \`parseTs(pattern, text)\` with curly
+imageHeight, round}), \`now()\` (seconds since epoch), \`format(ts, pattern)\` and \`parseTs(pattern, text)\` with curly
 tokens ({year/4} {month/2} {day/2} {hour/2} {minute/2} {second/2} {weekday} {month/n} {hour/2/ap} {am/pm}),
 \`console.log\`. NO \`frameos\` object, NO fetch, NO require. Multi-statement logic goes in an IIFE:
 \`(() => { const x = …; return x })()\`. Never redeclare an argument. Argument names \`state, args, context,

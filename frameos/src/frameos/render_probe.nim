@@ -12,6 +12,7 @@
 import std/[monotimes, times, strutils]
 import pixie/paths
 from pixie/fontformats/filefont import fileFontPageReads, fileFontReadNs, fileFontOpens, fileFontClears
+from frameos/utils/memory import waitingTextDrops
 
 type RenderPhase* = enum
   phRuntime = "runtime" ## a QuickJS runtime and context made (a cold start)
@@ -35,11 +36,14 @@ type RenderPhase* = enum
   phEmit = "emit"      ## ui/layout.nim: the nodes that draw the UI
   phParse = "parse"    ## pixie's parse of the nodes (utils/svg_frames.nim)
   phDamage = "damage"  ## the boxes that changed
+  phCopy = "copy"      ## of which pixels copied in from another of the panel's buffers
   phRaster = "raster"  ## pixie's render into the panel
   phFit = "fit"        ## the automatic fit of a drawn image into the panel's range (utils/asset_colors)
 
 var cardAtStart: (int, int64, int, int)
   ## Fonts read from the card so far (filefont.nim): pages, their time, opens, clears.
+var dropsAtStart: int
+  ## utils/memory's waitingTextDrops when the render began.
 var probeOn* = false
 var
   inputNs*: int64 ## events dispatched since the last render line (single_scene_host.send)
@@ -93,6 +97,7 @@ proc probeBegin*(): (int, int, int, int) =
   for reason in CacheSkip:
     cacheSkips[reason] = 0
   cardAtStart = (fileFontPageReads, fileFontReadNs, fileFontOpens, fileFontClears)
+  dropsAtStart = waitingTextDrops
   (coverageCacheHits, coverageCacheMisses, glyphCacheHits, glyphCacheMisses)
 
 proc probeLine*(cacheAtStart: (int, int, int, int)): string =
@@ -106,6 +111,10 @@ proc probeLine*(cacheAtStart: (int, int, int, int)): string =
     $(coverageCacheMisses - cacheAtStart[1]) & " " & $(coverageCacheUsedBytes() div 1024) & "K" &
     " glyphs " & $(glyphCacheHits - cacheAtStart[2]) & "/" & $(glyphCacheMisses - cacheAtStart[3]) &
     " " & $(glyphCacheUsedBytes() div 1024) & "K |"
+  if waitingTextDrops != dropsAtStart:
+    # The caches above were let go during it (utils/memory.nim): render memory
+    # ran short, or a scene went. A render that misses every glyph says why.
+    result.add " released " & $(waitingTextDrops - dropsAtStart) & " |"
   let pages = fileFontPageReads - cardAtStart[0]
   if pages > 0 or fileFontClears > cardAtStart[3]:
     # Fonts read where they lie on the card (docs/esp32-fonts.md): pages

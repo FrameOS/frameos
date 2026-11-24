@@ -1,0 +1,213 @@
+# FrameOS fonts catalog: what the Fonts scene offers to get, made by
+# frameos/tools/generate_font_catalog.py (docs/esp32-fonts.md).
+# A family a line, tab-separated: its name, category and license, then each
+# style as "Style address bytes [file]": the address under the base line above
+# it (or a whole https:// one), the file's size, and its name in the fonts
+# folder when that is not the name without spaces, "-", the style and ".ttf".
+base https://fonts.gstatic.com/s/
+Roboto	Sans Serif	OFL	Regular roboto/v51/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWubEbWmT.ttf 123720	Italic roboto/v51/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLoHQiA8.ttf 127988	Bold roboto/v51/KFOMCnqEu92Fr1ME7kSn66aGLdTylUAMQXC89YmC2DPNWuYjammT.ttf 124292	BoldItalic roboto/v51/KFOKCnqEu92Fr1Mu53ZEC9_Vu3r1gIhOszmOClHrs6ljXfMMLmbXiA8.ttf 128772
+Open Sans	Sans Serif	OFL	Regular opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsjZ0C4n.ttf 122116	Italic opensans/v44/memQYaGs126MiZpBA-UFUIcVXSCEkx2cmqvXlWq8tWZ0Pw86hd0Rk8ZkaVc.ttf 127392	Bold opensans/v44/memSYaGs126MiZpBA-UvWbX2vVnXBbObj2OVZyOOSr4dVJWUgsg-1y4n.ttf 122132	BoldItalic opensans/v44/memQYaGs126MiZpBA-UFUIcVXSCEkx2cmqvXlWq8tWZ0Pw86hd0RkyFjaVc.ttf 127156
+Inter	Sans Serif	OFL	Regular inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuLyfMZg.ttf 324820	Italic inter/v20/UcCM3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTc2dthjQ.ttf 328252	Bold inter/v20/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuFuYMZg.ttf 326468	BoldItalic inter/v20/UcCM3FwrK3iLTcvneQg7Ca725JhhKnNqk4j1ebLhAm8SrXTcPtxhjQ.ttf 330132
+Montserrat	Sans Serif	OFL	Regular montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCtr6Ew-.ttf 180068	Italic montserrat/v31/JTUFjIg1_i6t8kCHKm459Wx7xQYXK0vOoz6jq6R9aX8.ttf 181552	Bold montserrat/v31/JTUHjIg1_i6t8kCHKm4532VJOt5-QNFgpCuM70w-.ttf 181028	BoldItalic montserrat/v31/JTUFjIg1_i6t8kCHKm459Wx7xQYXK0vOoz6jq0N6aX8.ttf 182608
+Nunito Sans	Sans Serif	OFL	Regular nunitosans/v19/pe1mMImSLYBIv1o4X1M8ce2xCx3yop4tQpF_MeTm0lfGWVpNn64CL7U8upHZIbMV51Q42ptCp5F5bxqqtQ1yiU4G1ilntA.ttf 106700	Italic nunitosans/v19/pe1kMImSLYBIv1o4X1M8cce4OdVisMz5nZRqy6cmmmU3t2FQWEAEOvV9wNvrwlNstMKW3Y6K5WMwXeVy3GboJ0kTHmqP91Ug.ttf 109516	Bold nunitosans/v19/pe1mMImSLYBIv1o4X1M8ce2xCx3yop4tQpF_MeTm0lfGWVpNn64CL7U8upHZIbMV51Q42ptCp5F5bxqqtQ1yiU4GMS5ntA.ttf 106792	BoldItalic nunitosans/v19/pe1kMImSLYBIv1o4X1M8cce4OdVisMz5nZRqy6cmmmU3t2FQWEAEOvV9wNvrwlNstMKW3Y6K5WMwXeVy3GboJ0kTHmpo8FUg.ttf 109512
+Nunito	Sans Serif	OFL	Regular nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDLshRTM.ttf 125528	Italic nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNirXA3ig.ttf 128400	Bold nunito/v32/XRXI3I6Li01BKofiOc5wtlZ2di8HDFwmRTM.ttf 125464	BoldItalic nunito/v32/XRXK3I6Li01BKofIMPyPbj8d7IEAGXNiSnc3ig.ttf 128268
+Lato	Sans Serif	OFL	Regular lato/v25/S6uyw4BMUTPHvxk.ttf 72312	Italic lato/v25/S6u8w4BMUTPHjxswWw.ttf 72936	Bold lato/v25/S6u9w4BMUTPHh6UVew8.ttf 70576	BoldItalic lato/v25/S6u_w4BMUTPHjxsI5wqPHA.ttf 74836
+Manrope	Sans Serif	OFL	Regular manrope/v23/xn7_YHE41ni1AdIRqAuZuw1Bx9mbZk79FO_F.ttf 96200	Bold manrope/v23/xn7_YHE41ni1AdIRqAuZuw1Bx9mbZk4aE-_F.ttf 96188
+Rubik	Sans Serif	OFL	Regular rubik/v31/iJWZBXyIfDnIV5PNhY1KTN7Z-Yh-B4i1UA.ttf 174992	Italic rubik/v31/iJWbBXyIfDnIV7nEt3KSJbVDV49rz8tdE0Uw.ttf 173148	Bold rubik/v31/iJWZBXyIfDnIV5PNhY1KTN7Z-Yh-4I-1UA.ttf 175628	BoldItalic rubik/v31/iJWbBXyIfDnIV7nEt3KSJbVDV49rz8u6FEUw.ttf 173968
+Archivo Black	Sans Serif	OFL	Regular archivoblack/v23/HTxqL289NzCGg4MzN6KJ7eW6OYs.ttf 87996
+Ubuntu	Sans Serif	UFL	Regular ubuntu/v21/4iCs6KVjbNBYlgo6eA.ttf 280328	Italic ubuntu/v21/4iCu6KVjbNBYlgoKeg7z.ttf 306860	Bold ubuntu/v21/4iCv6KVjbNBYlgoCxCvTtw.ttf 250284	BoldItalic ubuntu/v21/4iCp6KVjbNBYlgoKejZPsmyI.ttf 274464
+JetBrains Mono	Monospace	OFL	Regular jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjPQ.ttf 112172	Italic jetbrainsmono/v24/tDba2o-flEEny0FZhsfKu5WU4xD-IQ-PuZJJXxfpAO-LflOQ.ttf 114960	Bold jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8L6tjPQ.ttf 112092	BoldItalic jetbrainsmono/v24/tDba2o-flEEny0FZhsfKu5WU4xD-IQ-PuZJJXxfpAO9seVOQ.ttf 114956
+Outfit	Sans Serif	OFL	Regular outfit/v15/QGYyz_MVcBeNP4NjuGObqx1XmO1I4TC1C4E.ttf 47844	Bold outfit/v15/QGYyz_MVcBeNP4NjuGObqx1XmO1I4deyC4E.ttf 48340
+Work Sans	Sans Serif	OFL	Regular worksans/v24/QGY_z_wNahGAdqQ43RhVcIgYT2Xz5u32K0nXNig.ttf 114144	Italic worksans/v24/QGY9z_wNahGAdqQ43Rh_ebrnlwyYfEPxPoGU3msJow.ttf 109088	Bold worksans/v24/QGY_z_wNahGAdqQ43RhVcIgYT2Xz5u32K67QNig.ttf 115632	BoldItalic worksans/v24/QGY9z_wNahGAdqQ43Rh_ebrnlwyYfEPxPoGUOWwJow.ttf 110364
+Arimo	Sans Serif	OFL	Regular arimo/v36/P5sfzZCDf9_T_3cV7NCUECyoxNk37cxsBw.ttf 316132	Italic arimo/v36/P5sdzZCDf9_T_10c3i9MeUcyat4iJY-ERBrE.ttf 338536	Bold arimo/v36/P5sfzZCDf9_T_3cV7NCUECyoxNk3CstsBw.ttf 316668	BoldItalic arimo/v36/P5sdzZCDf9_T_10c3i9MeUcyat4iJY9jQxrE.ttf 339928
+Saira	Sans Serif	OFL	Regular saira/v23/memWYa2wxmKQyPMrZX79wwYZQMhsyuShhKMjjbU9uXuA71rCosg.ttf 70316	Italic saira/v23/memUYa2wxmKQyNkiV50dulWP7s95AqZTzZHcVdxWI9WH-pKBSosxkw.ttf 73840	Bold saira/v23/memWYa2wxmKQyPMrZX79wwYZQMhsyuShhKMjjbU9uXuA773Fosg.ttf 70196	BoldItalic saira/v23/memUYa2wxmKQyNkiV50dulWP7s95AqZTzZHcVdxWI9WH-pKBrYwxkw.ttf 73776
+Jost	Sans Serif	OFL	Regular jost/v20/92zPtBhPNqw79Ij1E865zBUv7myjJQVG.ttf 58796	Italic jost/v20/92zJtBhPNqw73oHH7BbQp4-B6XlrZu0FNI0.ttf 62580	Bold jost/v20/92zPtBhPNqw79Ij1E865zBUv7mxEIgVG.ttf 58880	BoldItalic jost/v20/92zJtBhPNqw73oHH7BbQp4-B6XlrZgoCNI0.ttf 62556
+Roboto Condensed	Sans Serif	OFL	Regular robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyWyovBJ.ttf 112600	Italic robotocondensed/v31/ieVW2ZhZI2eCN5jzbjEETS9weq8-19ehAyvMum7nfDB64RgK5Xk.ttf 116916	Bold robotocondensed/v31/ieVo2ZhZI2eCN5jzbjEETS9weq8-_d6T_POl0fRJeyVVpfBJ.ttf 113112	BoldItalic robotocondensed/v31/ieVW2ZhZI2eCN5jzbjEETS9weq8-19ehAyvMum7nfDB64f8N5Xk.ttf 117492
+Figtree	Sans Serif	OFL	Regular figtree/v9/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_d_QF5e.ttf 35976	Italic figtree/v9/_Xm9-HUzqDCFdgfMm4GnA4aZFrUvtOK3A7YdyEU.ttf 36036	Bold figtree/v9/_Xmz-HUzqDCFdgfMsYiV_F7wfS-Bs_eYR15e.ttf 36164	BoldItalic figtree/v9/_Xm9-HUzqDCFdgfMm4GnA4aZFrUvtOK3A1EayEU.ttf 36348
+IBM Plex Sans	Sans Serif	OFL	Regular ibmplexsans/v23/zYXGKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1swZSAXcomDVmadSD6llzAA.ttf 205252	Italic ibmplexsans/v23/zYXEKVElMYYaJe8bpLHnCwDKhdTEG46kmUZQCX598fQbM4jw8V78x9OWIhqbQ6g9.ttf 220108	Bold ibmplexsans/v23/zYXGKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1swZSAXcomDVmadSDDV5zAA.ttf 205220	BoldItalic ibmplexsans/v23/zYXEKVElMYYaJe8bpLHnCwDKhdTEG46kmUZQCX598fQbM4jw8V78x9OWIhp8RKg9.ttf 220136
+Roboto Mono	Monospace	OFL	Regular robotomono/v31/L0xuDF4xlVMF-BfR8bXMIhJHg45mwgGEFl0_3vqPQw.ttf 78948	Italic robotomono/v31/L0xoDF4xlVMF-BfR8bXMIjhOsXG-q2oeuFoqFrlnAOW9.ttf 85656	Bold robotomono/v31/L0xuDF4xlVMF-BfR8bXMIhJHg45mwgGEFl0_Of2PQw.ttf 79124	BoldItalic robotomono/v31/L0xoDF4xlVMF-BfR8bXMIjhOsXG-q2oeuFoqFrmAB-W9.ttf 85916
+Space Grotesk	Sans Serif	OFL	Regular spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj7oUUsj.ttf 69360	Bold spacegrotesk/v22/V8mQoQDjQSkFtoMM3T6r8E7mF71Q-gOoraIAEj4PVksj.ttf 69308
+Karla	Sans Serif	OFL	Regular karla/v33/qkBIXvYC6trAT55ZBi1ueQVIjQTD-JqqFA.ttf 41512	Italic karla/v33/qkBKXvYC6trAT7RQNNK2EG7SIwPWMNlCV0lP.ttf 42360	Bold karla/v33/qkBIXvYC6trAT55ZBi1ueQVIjQTDH52qFA.ttf 41572	BoldItalic karla/v33/qkBKXvYC6trAT7RQNNK2EG7SIwPWMNmlUElP.ttf 42384
+Lora	Serif	OFL	Regular lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787weuyJG.ttf 132188	Italic lora/v37/0QI8MX1D_JOuMw_hLdO6T2wV9KnW-MoFkqg.ttf 137328	Bold lora/v37/0QI6MX1D_JOuGQbT0gvTJPa787z5vCJG.ttf 132124	BoldItalic lora/v37/0QI8MX1D_JOuMw_hLdO6T2wV9KnW-C0Ckqg.ttf 138352
+Oswald	Sans Serif	OFL	Regular oswald/v57/TK3_WkUHHAIjg75cFRf3bXL8LICs1_FvgUE.ttf 86068	Bold oswald/v57/TK3_WkUHHAIjg75cFRf3bXL8LICs1xZogUE.ttf 86416
+Changa One	Display	OFL	Regular changaone/v22/xfu00W3wXn3QLUJXhzq46AY.ttf 20748	Italic changaone/v22/xfu20W3wXn3QLUJXhzq42ATivA.ttf 24196
+DM Sans	Sans Serif	OFL	Regular dmsans/v17/rP2tp2ywxg089UriI5-g4vlH9VoD8CmcqZG40F9JadbnoEwAopxhTg.ttf 48280	Italic dmsans/v17/rP2rp2ywxg089UriCZaSExd86J3t9jz86Mvy4qCRAL19DksVat-JDW3z.ttf 51144	Bold dmsans/v17/rP2tp2ywxg089UriI5-g4vlH9VoD8CmcqZG40F9JadbnoEwARZthTg.ttf 48200	BoldItalic dmsans/v17/rP2rp2ywxg089UriCZaSExd86J3t9jz86Mvy4qCRAL19DksVat9uCm3z.ttf 51128
+Barlow	Sans Serif	OFL	Regular barlow/v13/7cHpv4kjgoGqM7EPCw.ttf 82624	Italic barlow/v13/7cHrv4kjgoGqM7E_Ccs8.ttf 87132	Bold barlow/v13/7cHqv4kjgoGqM7E3t-4c4A.ttf 85776	BoldItalic barlow/v13/7cHsv4kjgoGqM7E_CfOA5Vop.ttf 88896
+Inter Tight	Sans Serif	OFL	Regular intertight/v9/NGSnv5HMAFg6IuGlBNMjxJEL2VmU3NS7Z2mjDw-qXA.ttf 298260	Italic intertight/v9/NGShv5HMAFg6IuGlBNMjxLsC66ZMtb8hyW62x0xCHy5X.ttf 304828	Bold intertight/v9/NGSnv5HMAFg6IuGlBNMjxJEL2VmU3NS7Z2mj6AiqXA.ttf 302808	BoldItalic intertight/v9/NGShv5HMAFg6IuGlBNMjxLsC66ZMtb8hyW62x0ylGC5X.ttf 309328
+PT Serif	Serif	OFL	Regular ptserif/v19/EJRVQgYoZZY2vCFuvDFR.ttf 202596	Italic ptserif/v19/EJRTQgYoZZY2vCFuvAFTzro.ttf 219344	Bold ptserif/v19/EJRSQgYoZZY2vCFuvAnt65qV.ttf 183172	BoldItalic ptserif/v19/EJRQQgYoZZY2vCFuvAFT9gaQVy4.ttf 180832
+Playfair Display	Serif	OFL	Regular playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKdFvUDQ.ttf 123240	Italic playfairdisplay/v40/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_qiTbtY.ttf 110816	Bold playfairdisplay/v40/nuFvD-vYSZviVYUb_rj3ij__anPXJzDwcbmjWBN2PKeiukDQ.ttf 123536	BoldItalic playfairdisplay/v40/nuFRD-vYSZviVYUb_rj3ij__anPXDTnCjmHKM4nYO7KN_k-UbtY.ttf 111128
+Black Ops One	Display	OFL	Regular blackopsone/v21/qWcsB6-ypo7xBdr6Xshe96H3WDw.ttf 162480
+Libre Franklin	Sans Serif	OFL	Regular librefranklin/v20/jizOREVItHgc8qDIbSTKq4XkRg8T88bjFuXOnduhLsWUBw.ttf 106428	Italic librefranklin/v20/jizMREVItHgc8qDIbSTKq4XkRiUawTk7f45UM9y05oZ8RNDM.ttf 115748	Bold librefranklin/v20/jizOREVItHgc8qDIbSTKq4XkRg8T88bjFuXOnduhycKUBw.ttf 106528	BoldItalic librefranklin/v20/jizMREVItHgc8qDIbSTKq4XkRiUawTk7f45UM9y05oabQ9DM.ttf 116256
+Sora	Sans Serif	OFL	Regular sora/v17/xMQOuFFYT72X5wkB_18qmnndmSdSnn-K.ttf 46040	Bold sora/v17/xMQOuFFYT72X5wkB_18qmnndmSe1mX-K.ttf 46152
+Raleway	Sans Serif	OFL	Regular raleway/v37/1Ptxg8zYS_SKggPN4iEgvnHyvveLxVvaooCP.ttf 138808	Italic raleway/v37/1Pt_g8zYS_SKggPNyCgSQamb1W0lwk4S4WjMPrQ.ttf 136572	Bold raleway/v37/1Ptxg8zYS_SKggPN4iEgvnHyvveLxVs9pYCP.ttf 138748	BoldItalic raleway/v37/1Pt_g8zYS_SKggPNyCgSQamb1W0lwk4S4Y_LPrQ.ttf 136680
+Fjalla One	Sans Serif	OFL	Regular fjallaone/v16/Yq6R-LCAWCX3-6Ky7FAFnOY.ttf 206432
+Titillium Web	Sans Serif	OFL	Regular titilliumweb/v19/NaPecZTIAOhVxoMyOr9n_E7fRMQ.ttf 53980	Italic titilliumweb/v19/NaPAcZTIAOhVxoMyOr9n_E7fdMbmCA.ttf 61372	Bold titilliumweb/v19/NaPDcZTIAOhVxoMyOr9n_E7ffHjDKIw.ttf 51416	BoldItalic titilliumweb/v19/NaPFcZTIAOhVxoMyOr9n_E7fdMbetIlzZg.ttf 59240
+Alfa Slab One	Display	OFL	Regular alfaslabone/v21/6NUQ8FmMKwSEKjnm5-4v-4Jh6dU.ttf 91272
+Libre Baskerville	Serif	OFL	Regular librebaskerville/v24/kmKUZrc3Hgbbcjq75U4uslyuy4kn0olVQ-LglH6T17uj8Q4SCQ.ttf 106728	Italic librebaskerville/v24/kmKWZrc3Hgbbcjq75U4uslyuy4kn0qNccR04_RUJeby2OU36SgNK.ttf 109748	Bold librebaskerville/v24/kmKUZrc3Hgbbcjq75U4uslyuy4kn0olVQ-LglH6T17ujFgkSCQ.ttf 106752	BoldItalic librebaskerville/v24/kmKWZrc3Hgbbcjq75U4uslyuy4kn0qNccR04_RUJeby2OU0dTQNK.ttf 110032
+Newsreader	Serif	OFL	Regular newsreader/v26/cY9qfjOCX1hbuyalUrK49dLac06G1ZGsZBtoBCzBDXXD9JVF438weI_ADA.ttf 109472	Italic newsreader/v26/cY9kfjOCX1hbuyalUrK439vogqC9yFZCYg7oRZaLP4obnf7fTXglsMwoT-ZA.ttf 119892	Bold newsreader/v26/cY9qfjOCX1hbuyalUrK49dLac06G1ZGsZBtoBCzBDXXD9JVF438wn4jADA.ttf 111520	BoldItalic newsreader/v26/cY9kfjOCX1hbuyalUrK439vogqC9yFZCYg7oRZaLP4obnf7fTXglsMzPSOZA.ttf 122080
+Roboto Slab	Serif	Apache-2.0	Regular robotoslab/v36/BngbUXZYTXPIvIBgJJSb6s3BzlRRfKOFbvjojISWaA.ttf 101564	Bold robotoslab/v36/BngbUXZYTXPIvIBgJJSb6s3BzlRRfKOFbvjoa4OWaA.ttf 102236
+Urbanist	Sans Serif	OFL	Regular urbanist/v18/L0xjDF02iFML4hGCyOCpRdycFsGxSrqDyx4fFg.ttf 41060	Italic urbanist/v18/L0xtDF02iFML4hGCyMqgdyNEf6or5L2WA133VZmv.ttf 42020	Bold urbanist/v18/L0xjDF02iFML4hGCyOCpRdycFsGxSrqDLBkfFg.ttf 40984	BoldItalic urbanist/v18/L0xtDF02iFML4hGCyMqgdyNEf6or5L2WA10QUpmv.ttf 41940
+Cabin	Sans Serif	OFL	Regular cabin/v35/u-4X0qWljRw-PfU81xCKCpdpbgZJl6XFpfEd7eA9BIxxkV2EL7E.ttf 74556	Italic cabin/v35/u-4V0qWljRw-Pd815fNqc8T_wAFcX-c37MPiNYlWniJ2hJXHx_Klwg.ttf 64648	Bold cabin/v35/u-4X0qWljRw-PfU81xCKCpdpbgZJl6XFpfEd7eA9BIxxkbqDL7E.ttf 74336	BoldItalic cabin/v35/u-4V0qWljRw-Pd815fNqc8T_wAFcX-c37MPiNYlWniJ2hJXHIPWlwg.ttf 64504
+Fredoka	Sans Serif	OFL	Regular fredoka/v17/X7nP4b87HvSqjb_WIi2yDCRwoQ_k7367_B-i2yQag0-mac3O8SLMFg.ttf 48856	Bold fredoka/v17/X7nP4b87HvSqjb_WIi2yDCRwoQ_k7367_B-i2yQag0-mac3OFiXMFg.ttf 48588
+Exo 2	Sans Serif	OFL	Regular exo2/v26/7cH1v4okm5zmbvwkAx_sfcEuiD8jvvKcPg.ttf 143780	Italic exo2/v26/7cH3v4okm5zmbtYtMeA0FKq0Jjg2drF0fdC6.ttf 143740	Bold exo2/v26/7cH1v4okm5zmbvwkAx_sfcEuiD8jWfWcPg.ttf 143896	BoldItalic exo2/v26/7cH3v4okm5zmbtYtMeA0FKq0Jjg2drGTetC6.ttf 143880
+Plus Jakarta Sans	Sans Serif	OFL	Regular plusjakartasans/v12/LDIbaomQNQcsA88c7O9yZ4KMCoOg4IA6-91aHEjcWuA_qU7NSg.ttf 63336	Italic plusjakartasans/v12/LDIZaomQNQcsA88c7O9yZ4KMCoOg4KozySKCdSNG9OcqYQ0lCR_Q.ttf 64848	Bold plusjakartasans/v12/LDIbaomQNQcsA88c7O9yZ4KMCoOg4IA6-91aHEjcWuA_TknNSg.ttf 63336	BoldItalic plusjakartasans/v12/LDIZaomQNQcsA88c7O9yZ4KMCoOg4KozySKCdSNG9OcqYQ3CDh_Q.ttf 64936
+Zeyada	Handwriting	OFL	Regular zeyada/v22/11hAGpPTxVPUbgZDNA.ttf 48520
+Slabo 27px	Serif	OFL	Regular slabo27px/v16/mFT0WbgBwKPR_Z4hGN2qsxg.ttf 52224
+Merriweather	Serif	OFL	Regular merriweather/v33/u-4D0qyriQwlOrhSvowK_l5UcA6zuSYEqOzpPe3HOZJ5eX1WtLaQwmYiScCmDxhtNOKl8yDr3icqEw.ttf 585976	Italic merriweather/v33/u-4B0qyriQwlOrhSvowK_l5-eTxCVx0ZbwLvKH2Gk9hLmp0v5yA-xXPqCzLvPee1XYk_XSf-FmTCUF3w.ttf 595652	Bold merriweather/v33/u-4D0qyriQwlOrhSvowK_l5UcA6zuSYEqOzpPe3HOZJ5eX1WtLaQwmYiScCmDxhtNOKl8yDrOSAqEw.ttf 586052	BoldItalic merriweather/v33/u-4B0qyriQwlOrhSvowK_l5-eTxCVx0ZbwLvKH2Gk9hLmp0v5yA-xXPqCzLvPee1XYk_XSf-FmQlV13w.ttf 599500
+Inconsolata	Monospace	OFL	Regular inconsolata/v37/QldgNThLqRwH-OJ1UHjlKENVzkWGVkL3GZQmAwLYxYWI2qfdm7Lpp4U8aRo.ttf 93856	Bold inconsolata/v37/QldgNThLqRwH-OJ1UHjlKENVzkWGVkL3GZQmAwLYxYWI2qfdm7Lpp2I7aRo.ttf 94252
+Orbitron	Sans Serif	OFL	Regular orbitron/v35/yMJMMIlzdpvBhQQL_SC3X9yhF25-T1nyGy6xpg.ttf 17752	Bold orbitron/v35/yMJMMIlzdpvBhQQL_SC3X9yhF25-T1ny_Cmxpg.ttf 17708
+Hanken Grotesk	Sans Serif	OFL	Regular hankengrotesk/v12/ieVq2YZDLWuGJpnzaiwFXS9tYvBRzyFLlZg_f_Ncs2Za4Q.ttf 57248	Italic hankengrotesk/v12/ieVo2YZDLWuGJpnzaiwFXS9tYtpY_d6T_POl0fRJeyWyovBJ.ttf 61224	Bold hankengrotesk/v12/ieVq2YZDLWuGJpnzaiwFXS9tYvBRzyFLlZg_f_NcVGFa4Q.ttf 57144	BoldItalic hankengrotesk/v12/ieVo2YZDLWuGJpnzaiwFXS9tYtpY_d6T_POl0fRJeyVVpfBJ.ttf 61344
+Epilogue	Sans Serif	OFL	Regular epilogue/v20/O4ZMFGj5hxF0EhjimngomvnCCtqb30OXMDPiDA.ttf 69744	Italic epilogue/v20/O4ZCFGj5hxF0EhjimlIhqAYaY7EBcUSC-HAKT5_R.ttf 69880	Bold epilogue/v20/O4ZMFGj5hxF0EhjimngomvnCCtqb30OX1zTiDA.ttf 69968	BoldItalic epilogue/v20/O4ZCFGj5hxF0EhjimlIhqAYaY7EBcUSC-HDtSJ_R.ttf 70184
+Bebas Neue	Sans Serif	OFL	Regular bebasneue/v16/JTUSjIg69CK48gW7PXooxW4.ttf 56136
+Archivo	Sans Serif	OFL	Regular archivo/v25/k3k6o8UDI-1M0wlSV9XAw6lQkqWY8Q82sJaRE-NWIDdgffTTNDNp8A.ttf 110708	Italic archivo/v25/k3k8o8UDI-1M0wlSfdzyIEkpwTM29hr-8mTYIRyOSVz60_PG_HCBsxds.ttf 121892	Bold archivo/v25/k3k6o8UDI-1M0wlSV9XAw6lQkqWY8Q82sJaRE-NWIDdgffTT0zRp8A.ttf 111948	BoldItalic archivo/v25/k3k8o8UDI-1M0wlSfdzyIEkpwTM29hr-8mTYIRyOSVz60_PG_HBmtBds.ttf 123344
+Asap	Sans Serif	OFL	Regular asap/v34/KFOOCniXp96a4Tc2DaTeuDAoKsE617JFc49knOIYdjTYkqUsLg.ttf 69844	Italic asap/v34/KFOMCniXp96ayz4E7kSn66aGLdTylUAMQXC89YmC2DPNWubEbWmT.ttf 74140	Bold asap/v34/KFOOCniXp96a4Tc2DaTeuDAoKsE617JFc49knOIYdjTYdaIsLg.ttf 70204	BoldItalic asap/v34/KFOMCniXp96ayz4E7kSn66aGLdTylUAMQXC89YmC2DPNWuYjammT.ttf 74664
+Overpass	Sans Serif	OFL	Regular overpass/v19/qFda35WCmI96Ajtm83upeyoaX6QPnlo6_PPrOQ.ttf 164136	Italic overpass/v19/qFdU35WCmI96Ajtm81GgSdXCNs-VMF0vNLADepqP.ttf 147820	Bold overpass/v19/qFda35WCmI96Ajtm83upeyoaX6QPnlo6G_TrOQ.ttf 164488	BoldItalic overpass/v19/qFdU35WCmI96Ajtm81GgSdXCNs-VMF0vNLDkfZqP.ttf 148108
+Arvo	Serif	OFL	Regular arvo/v23/tDbD2oWUg0MKmSA.ttf 38620	Italic arvo/v23/tDbN2oWUg0MKqSIQ6A.ttf 34996	Bold arvo/v23/tDbM2oWUg0MKoZw1yLQ.ttf 37504	BoldItalic arvo/v23/tDbO2oWUg0MKqSIoVLHK9g.ttf 36704
+Space Mono	Monospace	OFL	Regular spacemono/v17/i7dPIFZifjKcF5UAWdDRUEY.ttf 81124	Italic spacemono/v17/i7dNIFZifjKcF5UAWdDRYER8QA.ttf 100780	Bold spacemono/v17/i7dMIFZifjKcF5UAWdDRaPpZYFI.ttf 79904	BoldItalic spacemono/v17/i7dSIFZifjKcF5UAWdDRYERE_FeaGw.ttf 92936
+Abel	Sans Serif	OFL	Regular abel/v18/MwQ5bhbm2POE6Vg.ttf 32672
+Albert Sans	Sans Serif	OFL	Regular albertsans/v4/i7dZIFdwYjGaAMFtZd_QA3xXSKZqhr-TenSHq5P_rA.ttf 44584	Italic albertsans/v4/i7dfIFdwYjGaAMFtZd_QA1Zeelmy79QJ1HOSY9AX74fy.ttf 49556	Bold albertsans/v4/i7dZIFdwYjGaAMFtZd_QA3xXSKZqhr-TenSHTJT_rA.ttf 44500	BoldItalic albertsans/v4/i7dfIFdwYjGaAMFtZd_QA1Zeelmy79QJ1HOSY9Dw6Ify.ttf 49552
+Domine	Serif	OFL	Regular domine/v25/L0xhDFMnlVwD4h3Lt9JWnbX3jG-2X3LAI10.ttf 64468	Bold domine/v25/L0xhDFMnlVwD4h3Lt9JWnbX3jG-2X5XHI10.ttf 64552
+Archivo Narrow	Sans Serif	OFL	Regular archivonarrow/v35/tss5ApVBdCYD5Q7hcxTE1ArZ0Zz8oY2KRmwvKhhvLFGKpA.ttf 58360	Italic archivonarrow/v35/tss7ApVBdCYD5Q7hcxTE1ArZ0bb1k3JSLwe1hB965BJi53mp.ttf 60836	Bold archivonarrow/v35/tss5ApVBdCYD5Q7hcxTE1ArZ0Zz8oY2KRmwvKhhvy1aKpA.ttf 58340	BoldItalic archivonarrow/v35/tss7ApVBdCYD5Q7hcxTE1ArZ0bb1k3JSLwe1hB965BKF4Hmp.ttf 60732
+Mulish	Sans Serif	OFL	Regular mulish/v18/1Ptyg83HX_SGhgqO0yLcmjzUAuWexZNRwaA.ttf 103364	Italic mulish/v18/1Ptwg83HX_SGhgqk2hAjQlW_mEuZ0FsSKeOvHg.ttf 106504	Bold mulish/v18/1Ptyg83HX_SGhgqO0yLcmjzUAuWexXRWwaA.ttf 103404	BoldItalic mulish/v18/1Ptwg83HX_SGhgqk2hAjQlW_mEuZ0FsSzuSvHg.ttf 106720
+League Spartan	Sans Serif	OFL	Regular leaguespartan/v15/kJEnBuEW6A0lliaV_m88ja5Twtx8BWhtkDVmjZvM_oTpBA.ttf 52872	Bold leaguespartan/v15/kJEnBuEW6A0lliaV_m88ja5Twtx8BWhtkDVmjZvMGYPpBA.ttf 53028
+Pacifico	Handwriting	OFL	Regular pacifico/v23/FwZY7-Qmy14u9lezJ96A.ttf 251232
+Questrial	Sans Serif	OFL	Regular questrial/v19/QdVUSTchPBm7nuUeVf7EuQ.ttf 148120
+Marcellus	Serif	OFL	Regular marcellus/v14/wEO_EBrOk8hQLDvIAF8FUQ.ttf 43288
+Oxygen	Sans Serif	OFL	Regular oxygen/v16/2sDfZG1Wl4Lcnbu6iQ.ttf 45944	Bold oxygen/v16/2sDcZG1Wl4LcnbuCNWgDbw.ttf 46636
+PT Sans	Sans Serif	OFL	Regular ptsans/v18/jizaRExUiTo99u79P0U.ttf 265676	Italic ptsans/v18/jizYRExUiTo99u79D0eEwA.ttf 257988	Bold ptsans/v18/jizfRExUiTo99u79B_mh4Ok.ttf 275408	BoldItalic ptsans/v18/jizdRExUiTo99u79D0e8fOytKA.ttf 197292
+Share Tech	Sans Serif	OFL	Regular sharetech/v23/7cHtv4Uyi5K0OeZ7bohUwHo.ttf 45924
+Abril Fatface	Display	OFL	Regular abrilfatface/v25/zOL64pLDlL1D99S8g8PtiKchm-A.ttf 56308
+Smooch Sans	Sans Serif	OFL	Regular smoochsans/v15/c4mz1n5uGsXss2LJh1QH6b129FZvxPj6I4oiwUBodg.ttf 57940	Bold smoochsans/v15/c4mz1n5uGsXss2LJh1QH6b129FZvxPj6I4oiJkdodg.ttf 57944
+ABeeZee	Sans Serif	OFL	Regular abeezee/v23/esDR31xSG-6AGleN6tI.ttf 44828	Italic abeezee/v23/esDT31xSG-6AGleN2tCklQ.ttf 45824
+Courier Prime	Monospace	OFL	Regular courierprime/v11/u-450q2lgwslOqpF_6gQ8kELWwY.ttf 66444	Italic courierprime/v11/u-4n0q2lgwslOqpF_6gQ8kELawRpXw.ttf 75488	Bold courierprime/v11/u-4k0q2lgwslOqpF_6gQ8kELY7pMf-c.ttf 68080	BoldItalic courierprime/v11/u-4i0q2lgwslOqpF_6gQ8kELawRR4-Lfrg.ttf 76376
+Quicksand	Sans Serif	OFL	Regular quicksand/v37/6xK-dSZaM9iE8KbpRA_LJ3z8mH9BOJvgkP8o18E.ttf 73224	Bold quicksand/v37/6xK-dSZaM9iE8KbpRA_LJ3z8mH9BOJvgkBgv18E.ttf 72916
+Source Code Pro	Monospace	OFL	Regular sourcecodepro/v32/HI_diYsKILxRpg3hIP6sJ7fM7PqPMcMnZFqUwX28DMyQhM4.ttf 121080	Italic sourcecodepro/v32/HI_jiYsKILxRpg3hIP6sJ7fM7PqlOPHYvDP_W9O7GQTTbI1rSQ.ttf 101800	Bold sourcecodepro/v32/HI_diYsKILxRpg3hIP6sJ7fM7PqPMcMnZFqUwX28DCuXhM4.ttf 120940	BoldItalic sourcecodepro/v32/HI_jiYsKILxRpg3hIP6sJ7fM7PqlOPHYvDP_W9O7GQTTi4prSQ.ttf 101756
+Syne	Sans Serif	OFL	Regular syne/v24/8vIS7w4qzmVxsWxjBZRjr0FKM_04uT6k.ttf 52368	Bold syne/v24/8vIS7w4qzmVxsWxjBZRjr0FKM_3fvj6k.ttf 52732
+Cormorant Garamond	Serif	OFL	Regular cormorantgaramond/v21/co3umX5slCNuHLi8bLeY9MK7whWMhyjypVO7abI26QOD_v86GnM.ttf 290236	Italic cormorantgaramond/v21/co3smX5slCNuHLi8bLeY9MK7whWMhyjYrGFEsdtdc62E6zd58jDOjw.ttf 293036	Bold cormorantgaramond/v21/co3umX5slCNuHLi8bLeY9MK7whWMhyjypVO7abI26QOD_hg9GnM.ttf 289992	BoldItalic cormorantgaramond/v21/co3smX5slCNuHLi8bLeY9MK7whWMhyjYrGFEsdtdc62E6zd5FTfOjw.ttf 293116
+Sofia Sans	Sans Serif	OFL	Regular sofiasans/v20/Yq6E-LCVXSLy9uPBwlAThu1SY8Cx8rlT69B6sK3t.ttf 110624	Italic sofiasans/v20/Yq6G-LCVXSLy9uPBwlATrORgnBjYmSP97MWy80WupPY.ttf 99860	Bold sofiasans/v20/Yq6E-LCVXSLy9uPBwlAThu1SY8Cx8rlT69Cdt63t.ttf 110708	BoldItalic sofiasans/v20/Yq6G-LCVXSLy9uPBwlATrORgnBjYmSP97MWy86KppPY.ttf 100004
+Bricolage Grotesque	Sans Serif	OFL	Regular bricolagegrotesque/v9/3y9U6as8bTXq_nANBjzKo3IeZx8z6up5BeSl5jBNz_19PpbpMXuECpwUxJBOm_OJWiaaD30YfKfjZZoLvRviyM0.ttf 82192	Bold bricolagegrotesque/v9/3y9U6as8bTXq_nANBjzKo3IeZx8z6up5BeSl5jBNz_19PpbpMXuECpwUxJBOm_OJWiaaD30YfKfjZZoLvfzlyM0.ttf 82204
+Exo	Sans Serif	OFL	Regular exo/v25/4UaZrEtFpBI4f1ZSIK9d4LjJ4lM3CwM.ttf 58408	Italic exo/v25/4UafrEtFpBISdmSt-MY2ehbO95t040BmPg.ttf 59712	Bold exo/v25/4UaZrEtFpBI4f1ZSIK9d4LjJ4rQwCwM.ttf 58316	BoldItalic exo/v25/4UafrEtFpBISdmSt-MY2ehbO95t0BEdmPg.ttf 59712
+Lobster	Display	OFL	Regular lobster/v32/neILzCirqoswsqX9_oU.ttf 392208
+Satisfy	Handwriting	Apache-2.0	Regular satisfy/v22/rP2Hp2yn6lkG50LoOZQ.ttf 46652
+Source Sans 3	Sans Serif	OFL	Regular sourcesans3/v20/nwpBtKy2OAdR1K-IwhWudF-R9QMylBJAV3Bo8Ky461EN.ttf 234708	Italic sourcesans3/v20/nwpDtKy2OAdR1K-IwhWudF-R3woAa8opPOrG97lwqLlO9C4.ttf 209376	Bold sourcesans3/v20/nwpBtKy2OAdR1K-IwhWudF-R9QMylBJAV3Bo8Kxf7FEN.ttf 234640	BoldItalic sourcesans3/v20/nwpDtKy2OAdR1K-IwhWudF-R3woAa8opPOrG97lwqF5J9C4.ttf 209356
+Gravitas One	Display	OFL	Regular gravitasone/v21/5h1diZ4hJ3cblKy3LWakKQmaDQ.ttf 37384
+Vollkorn	Serif	OFL	Regular vollkorn/v30/0ybgGDoxxrvAnPhYGzMlQLzuMasz6Df2MHGuGQ.ttf 228856	Italic vollkorn/v30/0ybuGDoxxrvAnPhYGxksckM2WMCpRjDj-DJGWmmZ.ttf 225984	Bold vollkorn/v30/0ybgGDoxxrvAnPhYGzMlQLzuMasz6Df213auGQ.ttf 231072	BoldItalic vollkorn/v30/0ybuGDoxxrvAnPhYGxksckM2WMCpRjDj-DKhXWmZ.ttf 227548
+Instrument Serif	Serif	OFL	Regular instrumentserif/v5/jizBRFtNs2ka5fXjeivQ4LroWlx-2zI.ttf 62284	Italic instrumentserif/v5/jizHRFtNs2ka5fXjeivQ4LroWlx-6zATiw.ttf 64208
+Righteous	Display	OFL	Regular righteous/v18/1cXxaUPXBpj2rGoU7C9mjw.ttf 40364
+Fraunces	Serif	OFL	Regular fraunces/v38/6NUh8FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0K7iN7hzFUPJH58nib1603gg7S2nfgRYIctxujDg.ttf 71580	Italic fraunces/v38/6NVf8FyLNQOQZAnv9ZwNjucMHVn85Ni7emAe9lKqZTnbB-gzTK0K1ChJdt9vIVYX9G37lvd9sPEKsxx664UJf1hLTf7W.ttf 85028	Bold fraunces/v38/6NUh8FyLNQOQZAnv9bYEvDiIdE9Ea92uemAk_WBq8U_9v0c2Wa0K7iN7hzFUPJH58nib1603gg7S2nfgRYIcUByjDg.ttf 71588	BoldItalic fraunces/v38/6NVf8FyLNQOQZAnv9ZwNjucMHVn85Ni7emAe9lKqZTnbB-gzTK0K1ChJdt9vIVYX9G37lvd9sPEKsxx664UJf1isSv7W.ttf 85076
+Lilita One	Display	OFL	Regular lilitaone/v17/i7dPIFZ9Zz-WBtRtedDbUEY.ttf 26332
+Old Standard TT	Serif	OFL	Regular oldstandardtt/v22/MwQubh3o1vLImiwAVvYawgcf2eVurQ.ttf 242700	Italic oldstandardtt/v22/MwQsbh3o1vLImiwAVvYawgcf2eVer1q9.ttf 267016	Bold oldstandardtt/v22/MwQrbh3o1vLImiwAVvYawgcf2eVWEX-dTA.ttf 260156
+IBM Plex Mono	Monospace	OFL	Regular ibmplexmono/v23/-F63fjptAgt5VM-kVkqdyU8n5ig.ttf 128692	Italic ibmplexmono/v23/-F6pfjptAgt5VM-kVkqdyU8n1ioq0g.ttf 136292	Bold ibmplexmono/v23/-F6qfjptAgt5VM-kVkqdyU8n3pQP8lc.ttf 130920	BoldItalic ibmplexmono/v23/-F6sfjptAgt5VM-kVkqdyU8n1ioSblJFhw.ttf 136900
+Patua One	Display	OFL	Regular patuaone/v22/ZXuke1cDvLCKLDcimxBI5A.ttf 33336
+Cormorant	Serif	OFL	Regular cormorant/v24/H4c2BXOCl9bbnla_nHIA47NMUjsNbCVrFhFTQ7Q.ttf 177332	Italic cormorant/v24/H4c0BXOCl9bbnla_nHIq6oGzilJm9otsA9kQq_dq6A.ttf 175824	Bold cormorant/v24/H4c2BXOCl9bbnla_nHIA47NMUjsNbCVrFvZUQ7Q.ttf 177304	BoldItalic cormorant/v24/H4c0BXOCl9bbnla_nHIq6oGzilJm9otsA9kQTPBq6A.ttf 175752
+Rowdies	Display	OFL	Regular rowdies/v19/ptRJTieMYPNBAK21zrc.ttf 74648	Bold rowdies/v19/ptRMTieMYPNBAK219gtm5O4.ttf 74600
+Crete Round	Serif	OFL	Regular creteround/v16/55xoey1sJNPjPiv1ZZZrxJ18.ttf 55268	Italic creteround/v16/55xqey1sJNPjPiv1ZZZrxK1-0bg.ttf 63140
+Amatic SC	Handwriting	OFL	Regular amaticsc/v28/TUZyzwprpvBS1izr_vO0DQ.ttf 141044	Bold amaticsc/v28/TUZ3zwprpvBS1izr_vOMscG6eQ.ttf 144608
+EB Garamond	Serif	OFL	Regular ebgaramond/v33/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-6_RUAw.ttf 389868	Italic ebgaramond/v33/SlGFmQSNjdsmc35JDF1K5GRwUjcdlttVFm-rI7e8QI96.ttf 339240	Bold ebgaramond/v33/SlGDmQSNjdsmc35JDF1K5E55YMjF_7DPuGi-DPNUAw.ttf 392040	BoldItalic ebgaramond/v33/SlGFmQSNjdsmc35JDF1K5GRwUjcdlttVFm-rI7dbR496.ttf 341916
+Zilla Slab	Serif	OFL	Regular zillaslab/v12/dFa6ZfeM_74wlPZtksIFWj0.ttf 150856	Italic zillaslab/v12/dFa4ZfeM_74wlPZtksIFaj86-A.ttf 154076	Bold zillaslab/v12/dFa5ZfeM_74wlPZtksIFYoEf2HQ.ttf 154428	BoldItalic zillaslab/v12/dFanZfeM_74wlPZtksIFaj8CRHGpXg.ttf 158604
+Great Vibes	Handwriting	OFL	Regular greatvibes/v21/RWmMoKWR9v4ksMfaWd_JN-XC.ttf 362736
+Passion One	Display	OFL	Regular passionone/v20/PbynFmL8HhTPqbjUzux3JHuW.ttf 22556	Bold passionone/v20/Pby6FmL8HhTPqbjUzux3JEMq037o.ttf 22356
+Allura	Handwriting	OFL	Regular allura/v23/9oRPNYsQpS4zjuAPjA.ttf 109252
+Sacramento	Handwriting	OFL	Regular sacramento/v17/buEzpo6gcdjy0EiZMBUG0Co.ttf 64108
+Titan One	Display	OFL	Regular titanone/v17/mFTzWbsGxbbS_J5cQcjykw.ttf 52188
+Oxanium	Display	OFL	Regular oxanium/v21/RrQPboN_4yJ0JmiMUW7sIGjd1IA9G81JfniM.ttf 28376	Bold oxanium/v21/RrQPboN_4yJ0JmiMUW7sIGjd1IA9G82ueXiM.ttf 28332
+Dancing Script	Handwriting	OFL	Regular dancingscript/v29/If2cXTr6YS-zF4S-kcSWSVi_sxjsohD9F50Ruu7BMSoHTQ.ttf 76340	Bold dancingscript/v29/If2cXTr6YS-zF4S-kcSWSVi_sxjsohD9F50Ruu7B1i0HTQ.ttf 76596
+Rammetto One	Display	OFL	Regular rammettoone/v21/LhWiMV3HOfMbMetJG3lQDpp9Mg.ttf 68060
+Crimson Pro	Serif	OFL	Regular crimsonpro/v28/q5uUsoa5M_tv7IihmnkabC5XiXCAlXGks1WZzm18OA.ttf 97164	Italic crimsonpro/v28/q5uSsoa5M_tv7IihmnkabAReu49Y_Bo-HVKMBi6Ue5s7.ttf 98972	Bold crimsonpro/v28/q5uUsoa5M_tv7IihmnkabC5XiXCAlXGks1WZKWp8OA.ttf 97804	BoldItalic crimsonpro/v28/q5uSsoa5M_tv7IihmnkabAReu49Y_Bo-HVKMBi5zfJs7.ttf 99552
+Roboto Serif	Serif	OFL	Regular robotoserif/v17/R71RjywflP6FLr3gZx7K8UyuXDs9zVwDmXCb8lxYgmuii32UGoVldX6UgfjL4-3sMM_kB_qXSEXTJQCFLH5-_bcEliotp6c.ttf 215672	Italic robotoserif/v17/R71XjywflP6FLr3gZx7K8UyEVQnyR1E7VN-f51xYuGCQepOvB0KLc2v0wKKB0Q4MSZxyqf2CgAchbDJ69BcVZxkDg-JuT-R8BQ.ttf 220976	Bold robotoserif/v17/R71RjywflP6FLr3gZx7K8UyuXDs9zVwDmXCb8lxYgmuii32UGoVldX6UgfjL4-3sMM_kB_qXSEXTJQCFLH5-_bcEls0qp6c.ttf 216120	BoldItalic robotoserif/v17/R71XjywflP6FLr3gZx7K8UyEVQnyR1E7VN-f51xYuGCQepOvB0KLc2v0wKKB0Q4MSZxyqf2CgAchbDJ69BcVZxkDg-JuqON8BQ.ttf 221704
+Unna	Serif	OFL	Regular unna/v25/AYCEpXzofN0NCpg.ttf 68020	Italic unna/v25/AYCKpXzofN0NOpoLkA.ttf 76544	Bold unna/v25/AYCLpXzofN0NMiQusGk.ttf 76332	BoldItalic unna/v25/AYCJpXzofN0NOpozLGzjQA.ttf 81088
+Forum	Display	OFL	Regular forum/v19/6aey4Ky-Vb8Ew_IW.ttf 241080
+Architects Daughter	Handwriting	OFL	Regular architectsdaughter/v20/KtkxAKiDZI_td1Lkx62xHZHDtgO_Y-bvfY4.ttf 28808
+Caveat	Handwriting	OFL	Regular caveat/v23/WnznHAc5bAfYB2QRah7pcpNvOx-pjfJ9SII.ttf 251024	Bold caveat/v23/WnznHAc5bAfYB2QRah7pcpNvOx-pjRV6SII.ttf 251256
+Playball	Display	OFL	Regular playball/v22/TK3gWksYAxQ7jbsKcj8D.ttf 142624
+Lobster Two	Display	OFL	Regular lobstertwo/v22/BngMUXZGTXPUvIoyV6yN59fK.ttf 228208	Italic lobstertwo/v22/BngOUXZGTXPUvIoyV6yN5-fI5qA.ttf 222596	Bold lobstertwo/v22/BngRUXZGTXPUvIoyV6yN5-92w4CB.ttf 215604	BoldItalic lobstertwo/v22/BngTUXZGTXPUvIoyV6yN5-fI3hyEwRg.ttf 209536
+Cormorant Infant	Serif	OFL	Regular cormorantinfant/v22/HhyCU44g9vKiM1sORYSiWeAsLN99xfs9KOOc_agJPrgvYOWT.ttf 273572	Italic cormorantinfant/v22/Hhy8U44g9vKiM1sORYSiWeAsLN997_IP1zv1ljKnOa3nIw3Qjj0.ttf 285216	Bold cormorantinfant/v22/HhyCU44g9vKiM1sORYSiWeAsLN99xfs9KOOc_agJPrjIZ-WT.ttf 273368	BoldItalic cormorantinfant/v22/Hhy8U44g9vKiM1sORYSiWeAsLN997_IP1zv1ljKnOa3nI-rXjj0.ttf 285204
+Bangers	Display	OFL	Regular bangers/v25/FeVQS0BTqb0h60ACL5k.ttf 91216
+GFS Didot	Serif	OFL	Regular gfsdidot/v18/Jqzh5TybZ9vZMWFssvwiFw.ttf 163872
+Source Serif 4	Serif	OFL	Regular sourceserif4/v15/vEFy2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6OAVIJmeUDygwjihdqrhw.ttf 194464	Italic sourceserif4/v15/vEF02_tTDB4M7-auWDN0ahZJW1ge6NmXpVAHV83Bfb_US2D2QYxoUKIkn98pRl9dCw.ttf 183552	Bold sourceserif4/v15/vEFy2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6OAVIJmeUDygwjivBtrhw.ttf 194760	BoldItalic sourceserif4/v15/vEF02_tTDB4M7-auWDN0ahZJW1ge6NmXpVAHV83Bfb_US2D2QYxoUKIkn98poVhdCw.ttf 183648
+Bitter	Serif	OFL	Regular bitter/v42/raxhHiqOu8IVPmnRc6SY1KXhnF_Y8fbfCL8.ttf 149332	Italic bitter/v42/raxjHiqOu8IVPmn7epZnDMyKBvHf5D6c4PzOWA.ttf 148308	Bold bitter/v42/raxhHiqOu8IVPmnRc6SY1KXhnF_Y8RHYCL8.ttf 150600	BoldItalic bitter/v42/raxjHiqOu8IVPmn7epZnDMyKBvHf5D6cB_vOWA.ttf 149152
+Cookie	Handwriting	OFL	Regular cookie/v23/syky-y18lb0tSbfNlQ.ttf 41620
+DM Serif Display	Serif	OFL	Regular dmserifdisplay/v17/-nFnOHM81r4j6k0gjAW3mujVU2B2K_c.ttf 70348	Italic dmserifdisplay/v17/-nFhOHM81r4j6k0gjAW3mujVU2B2G_Vx1w.ttf 68312
+Libre Bodoni	Serif	OFL	Regular librebodoni/v9/_Xm--H45qDWDYULr5OfyZudXzSBgY2oMBGte6I1fwWw.ttf 71964	Italic librebodoni/v9/_Xm4-H45qDWDYULr5OfyZud9xBKfuwNnnsVZ_UUcKS_TdA.ttf 72188	Bold librebodoni/v9/_Xm--H45qDWDYULr5OfyZudXzSBgY2oMBGte6GpYwWw.ttf 72040	BoldItalic librebodoni/v9/_Xm4-H45qDWDYULr5OfyZud9xBKfuwNnnsVZ_UUczijTdA.ttf 72516
+Concert One	Display	OFL	Regular concertone/v24/VEM1Ro9xs5PjtzCu-srDqRTl.ttf 69696
+Chelsea Market	Display	OFL	Regular chelseamarket/v14/BCawqZsHqfr89WNP_IApC8tzKBhl.ttf 170912
+Petrona	Serif	OFL	Regular petrona/v38/mtGl4_NXL7bZo9XXq35wRLONYyOjFk6NsQRB.ttf 97384	Italic petrona/v38/mtGr4_NXL7bZo9XXgXdCu2vkCLkNEVtF8uwCFYo.ttf 100872	Bold petrona/v38/mtGl4_NXL7bZo9XXq35wRLONYyOjFk5qtgRB.ttf 97948	BoldItalic petrona/v38/mtGr4_NXL7bZo9XXgXdCu2vkCLkNEVtF8gsFFYo.ttf 101320
+Bowlby One SC	Display	OFL	Regular bowlbyonesc/v27/DtVlJxerQqQm37tzN3wMug9Pzgg.ttf 54152
+Cinzel	Serif	OFL	Regular cinzel/v26/8vIU7ww63mVu7gtR-kwKxNvkNOjw-tbnTYo.ttf 45884	Bold cinzel/v26/8vIU7ww63mVu7gtR-kwKxNvkNOjw-jHgTYo.ttf 46124
+Cinzel Decorative	Display	OFL	Regular cinzeldecorative/v19/daaCSScvJGqLYhG8nNt8KPPswUAPnh7U.ttf 58440	Bold cinzeldecorative/v19/daaHSScvJGqLYhG8nNt8KPPswUAPniZoaelD.ttf 60312
+Rock Salt	Handwriting	Apache-2.0	Regular rocksalt/v24/MwQ0bhv11fWD6QsAVOZbsA.ttf 118864
+Arapey	Serif	OFL	Regular arapey/v17/-W__XJn-UDDA2RC6Zw.ttf 24148	Italic arapey/v17/-W_9XJn-UDDA2RCKZdoY.ttf 26848
+Gilda Display	Serif	OFL	Regular gildadisplay/v20/t5tmIRoYMoaYG0WEOh7HwMeR7Tk.ttf 65160
+Mate	Serif	OFL	Regular mate/v19/m8JdjftRd7WZ2z0.ttf 60588	Italic mate/v19/m8JTjftRd7WZ6z-2Xg.ttf 61276
+Playfair Display SC	Serif	OFL	Regular playfairdisplaysc/v18/ke85OhoaMkR6-hSn7kbHVoFf7ZfgMPr_pb4.ttf 128324	Italic playfairdisplaysc/v18/ke87OhoaMkR6-hSn7kbHVoFf7ZfgMPr_lbwMFQ.ttf 128664	Bold playfairdisplaysc/v18/ke80OhoaMkR6-hSn7kbHVoFf7ZfgMPr_nQIpNcs.ttf 127620	BoldItalic playfairdisplaysc/v18/ke82OhoaMkR6-hSn7kbHVoFf7ZfgMPr_lbw0qc4XKw.ttf 129320
+Bodoni Moda	Serif	OFL	Regular bodonimoda/v28/aFT67PxzY382XsXX63LUYL6GYFcan6NJrKp-VPjfJMShrpsGFUt8oU7awIA.ttf 44752	Italic bodonimoda/v28/aFT07PxzY382XsXX63LUYJSPUqb0pL6OQqxrZLnVbvZedvJtj-V7tIaZKMN4sQ.ttf 47556	Bold bodonimoda/v28/aFT67PxzY382XsXX63LUYL6GYFcan6NJrKp-VPjfJMShrpsGFUt8oandwIA.ttf 44844	BoldItalic bodonimoda/v28/aFT07PxzY382XsXX63LUYJSPUqb0pL6OQqxrZLnVbvZedvJtj-V7tIaZz8R4sQ.ttf 47724
+Bowlby One	Display	OFL	Regular bowlbyone/v25/taiPGmVuC4y96PFeqp8smo4.ttf 58036
+Chivo Mono	Monospace	OFL	Regular chivomono/v11/mFThWbgRxKvF_Z5eQMO9qRMrJJrnKNtC3D7hr6fV.ttf 59412	Italic chivomono/v11/mFTjWbgRxKvF_Z5eQMO9gxoZ20KOQ0Hs2ysp7E-WIJw.ttf 61864	Bold chivomono/v11/mFThWbgRxKvF_Z5eQMO9qRMrJJrnKNtC3D4GqKfV.ttf 59356	BoldItalic chivomono/v11/mFTjWbgRxKvF_Z5eQMO9gxoZ20KOQ0Hs2ysp7KiRIJw.ttf 61820
+Big Shoulders	Display	OFL	Regular bigshoulders/v4/qFdk35CPh40oITJ69S3GFqy5-BQAcbz7z7beObrv_PytqyTi33thrko9SOP9AA.ttf 63560	Bold bigshoulders/v4/qFdk35CPh40oITJ69S3GFqy5-BQAcbz7z7beObrv_PytqyTi33thrko9r-T9AA.ttf 63680
+Yeseva One	Display	OFL	Regular yesevaone/v24/OpNJno4ck8vc-xYpwWWxpio.ttf 103264
+Faustina	Serif	OFL	Regular faustina/v23/XLY4IZPxYpJfTbZAFXWzNT2SO8wpWHlsgoEvGQ.ttf 69488	Italic faustina/v23/XLY2IZPxYpJfTbZAFV-6B8JKUqez9n55SsLHWl-S.ttf 70832	Bold faustina/v23/XLY4IZPxYpJfTbZAFXWzNT2SO8wpWHlsZYYvGQ.ttf 69352	BoldItalic faustina/v23/XLY2IZPxYpJfTbZAFV-6B8JKUqez9n55SsIgXV-S.ttf 70860
+Just Another Hand	Handwriting	Apache-2.0	Regular justanotherhand/v21/845CNN4-AJyIGvIou-6yJKyptyOpOcr_.ttf 110560
+Balsamiq Sans	Display	OFL	Regular balsamiqsans/v15/P5sEzZiAbNrN8SB3lQQX7Pnc8dk.ttf 405216	Italic balsamiqsans/v15/P5sazZiAbNrN8SB3lQQX7PncwdsXJQ.ttf 377724	Bold balsamiqsans/v15/P5sZzZiAbNrN8SB3lQQX7PncyWUyBY8.ttf 367532	BoldItalic balsamiqsans/v15/P5sfzZiAbNrN8SB3lQQX7PncwdsvmYpsBw.ttf 349016
+Fira Mono	Monospace	OFL	Regular firamono/v16/N0bX2SlFPv1weGeLZDtQIQ.ttf 162472	Bold firamono/v16/N0bS2SlFPv1weGeLZDtondv3mQ.ttf 193328
+Tangerine	Handwriting	OFL	Regular tangerine/v18/IurY6Y5j_oScZZow4VOBDg.ttf 59440	Bold tangerine/v18/Iurd6Y5j_oScZZow4VO5srNpjA.ttf 64284
+Jersey 25	Display	OFL	Regular jersey25/v4/ll8-K2eeXj2tAs6F9BXIJw.ttf 140616
+Silkscreen	Display	OFL	Regular silkscreen/v6/m8JXjfVPf62XiF7kO-i9ULQ.ttf 31320	Bold silkscreen/v6/m8JUjfVPf62XiF7kO-i9aAhATms.ttf 29744
+Marck Script	Handwriting	OFL	Regular marckscript/v22/nwpTtK2oNgBA3Or78gapdwuCzw.ttf 81208
+Chango	Display	OFL	Regular chango/v29/2V0cKI0OB5U7WaJyzw.ttf 38444
+Herr Von Muellerhoff	Handwriting	OFL	Regular herrvonmuellerhoff/v23/WBL6rFjRZkREW8WqmCWYLgCkQKXb4CAft3c6.ttf 44688
+Crimson Text	Serif	OFL	Regular crimsontext/v19/wlp2gwHKFkZgtmSR3NB0oRJvaA.ttf 98516	Italic crimsontext/v19/wlpogwHKFkZgtmSR3NB0oRJfaghW.ttf 100956	Bold crimsontext/v19/wlppgwHKFkZgtmSR3NB0oRJX1C12Cw.ttf 102364	BoldItalic crimsontext/v19/wlprgwHKFkZgtmSR3NB0oRJfajDqDtNV.ttf 104768
+Damion	Handwriting	OFL	Regular damion/v15/hv-XlzJ3KEUe_YZUbQ.ttf 73040
+Ovo	Serif	OFL	Regular ovo/v18/yYLl0h7Wyfzjyw.ttf 46164
+DM Mono	Monospace	OFL	Regular dmmono/v16/aFTU7PB1QTsUX8KYhh0.ttf 44784	Italic dmmono/v16/aFTW7PB1QTsUX8KYth-QAQ.ttf 46356
+Bellefair	Serif	OFL	Regular bellefair/v15/kJExBuYY6AAuhiXUxG19_w.ttf 62548
+Grandstander	Display	OFL	Regular grandstander/v20/ga6fawtA-GpSsTWrnNHPCSIMZhhKpFjyNZIQD1--D3g.ttf 83368	Italic grandstander/v20/ga6ZawtA-GpSsTWrnNHPCSImbyq1fDGZrzwXGpf95zvcsg.ttf 83752	Bold grandstander/v20/ga6fawtA-GpSsTWrnNHPCSIMZhhKpFjyNZIQD7i5D3g.ttf 83440	BoldItalic grandstander/v20/ga6ZawtA-GpSsTWrnNHPCSImbyq1fDGZrzwXGpf9ADzcsg.ttf 83856
+Merienda	Handwriting	OFL	Regular merienda/v22/gNMaW3x8Qoy5_mf8uUkJGHtiYXjmKFy5enhoSQ.ttf 85268	Bold merienda/v22/gNMaW3x8Qoy5_mf8uUkJGHtiYXjmKFy5nX9oSQ.ttf 87868
+Comfortaa	Display	OFL	Regular comfortaa/v47/1Pt_g8LJRfWJmhDAuUsSQamb1W0lwk4S4WjMPrQ.ttf 110000	Bold comfortaa/v47/1Pt_g8LJRfWJmhDAuUsSQamb1W0lwk4S4Y_LPrQ.ttf 110172
+Bungee	Display	OFL	Regular bungee/v17/N0bU2SZBIuF2PU_ECg.ttf 110456
+Coming Soon	Handwriting	Apache-2.0	Regular comingsoon/v20/qWcuB6mzpYL7AJ2VfdQR1u-S.ttf 46752
+Limelight	Display	OFL	Regular limelight/v21/XLYkIZL7aopJVbZJHDuYPQ.ttf 128276
+Shadows Into Light	Handwriting	OFL	Regular shadowsintolight/v22/UqyNK9UOIntux_czAvDQx_ZcHqZXBNQDcg.ttf 39508
+Covered By Your Grace	Handwriting	OFL	Regular coveredbyyourgrace/v17/QGYwz-AZahWOJJI9kykWW9mD6opopoqXSOS0Fg.ttf 41124
+UnifrakturMaguntia	Display	OFL	Regular unifrakturmaguntia/v22/WWXPlieVYwiGNomYU-ciRLRvEmK7oaVunw.ttf 73352
+Carter One	Display	OFL	Regular carterone/v18/q5uCsoe5IOB2-pXv9UcNIxQ.ttf 64664
+Neucha	Handwriting	OFL	Regular neucha/v18/q5uGsou0JOdh94bvug.ttf 106228
+Grand Hotel	Handwriting	OFL	Regular grandhotel/v21/7Au7p_IgjDKdCRWuR1azpmQN.ttf 61084
+Boogaloo	Display	OFL	Regular boogaloo/v25/kmK-Zq45GAvOdnaW6x1F.ttf 31248
+Meow Script	Handwriting	OFL	Regular meowscript/v6/0FlQVPqanlaJrtr8AnJ0ESch.ttf 160280
+Happy Monkey	Display	OFL	Regular happymonkey/v15/K2F2fZZcl-9SXwl5F_C4R_OABw.ttf 67136
+Cabin Sketch	Display	OFL	Regular cabinsketch/v23/QGYpz_kZZAGCONcK2A4bGOjMnw.ttf 153624	Bold cabinsketch/v23/QGY2z_kZZAGCONcK2A4bGOj0I_1o4Q.ttf 268404
+Leckerli One	Handwriting	OFL	Regular leckerlione/v22/V8mCoQH8VCsNttEnxnGQ-1itLQ.ttf 41048
+Tilt Warp	Display	OFL	Regular tiltwarp/v18/AlZc_zVDs5XpmO7yn3w7flUoytXJp3z29uEwmEMLEJljLXvT8UJSZTBx.ttf 59648
+Pangolin	Handwriting	OFL	Regular pangolin/v12/cY9GfjGcW0FPpi-tWPfK.ttf 588736
+MuseoModerno	Display	OFL	Regular museomoderno/v29/zrf30HnU0_7wWdMrFcWqSEXPVyEaWJ55pTleMlZEuew.ttf 54756	Italic museomoderno/v29/zrfx0HnU0_7wWdMrFcWqSEXlXhPlgPcSP5dZJ54HUa8QiQ.ttf 64448	Bold museomoderno/v29/zrf30HnU0_7wWdMrFcWqSEXPVyEaWJ55pTleMrFDuew.ttf 54904	BoldItalic museomoderno/v29/zrfx0HnU0_7wWdMrFcWqSEXlXhPlgPcSP5dZJ54HtqgQiQ.ttf 64744
+Martian Mono	Monospace	OFL	Regular martianmono/v6/2V08KIcADoYhV6w87xrTKjs4CYElh_VS9YA4TlTnQzaVMIE6j15dYY1qu86W.ttf 45744	Bold martianmono/v6/2V08KIcADoYhV6w87xrTKjs4CYElh_VS9YA4TlTnQzaVMIE6j15dYY2NvM6W.ttf 46188
+Style Script	Handwriting	OFL	Regular stylescript/v13/vm8xdRX3SV7Z0aPa88xzW5npeA.ttf 137424
+Averia Libre	Display	OFL	Regular averialibre/v16/2V0aKIcMGZEnV6xygz7eNjEiAg.ttf 107020	Italic averialibre/v16/2V0EKIcMGZEnV6xygz7eNjESAKnN.ttf 127372	Bold averialibre/v16/2V0FKIcMGZEnV6xygz7eNjEavoztbw.ttf 110832	BoldItalic averialibre/v16/2V0HKIcMGZEnV6xygz7eNjESAJFxakTp.ttf 134260
+Permanent Marker	Handwriting	Apache-2.0	Regular permanentmarker/v16/Fh4uPib9Iyv2ucM6pGQMWimMp004Hao.ttf 73276
+Sedgwick Ave Display	Handwriting	OFL	Regular sedgwickavedisplay/v23/xfuu0XPgU3jZPUoUo3ScvmPi-NapQ8OxM2cz.ttf 135440
+Press Start 2P	Display	OFL	Regular pressstart2p/v16/e3t4euO8T-267oIAQAu6jDQyK0nS.ttf 115280
+Libre Barcode 39 Extended Text	Display	OFL	Regular librebarcode39extendedtext/v30/eLG1P_rwIgOiDA7yrs9LoKaYRVLQ1YldrrOnnL7xPO4jNP68fA.ttf 34796
+Faster One	Display	OFL	Regular fasterone/v20/H4ciBXCHmdfClFb-vWhfyLs.ttf 90676
+Beth Ellen	Handwriting	OFL	Regular bethellen/v22/WwkbxPW2BE-3rb_JNT-qEIA.ttf 115624
+Mountains of Christmas	Display	Apache-2.0	Regular mountainsofchristmas/v24/3y9w6a4zcCnn5X0FDyrKi2ZRUBIy8uxoUo7ePNY.ttf 120288	Bold mountainsofchristmas/v24/3y9z6a4zcCnn5X0FDyrKi2ZRUBIy8uxoUo7eBGqJFPs.ttf 121084
+Seaweed Script	Display	OFL	Regular seaweedscript/v17/bx6cNx6Tne2pxOATYE8C_Rsoe0WJ.ttf 115220
+MedievalSharp	Display	OFL	Regular medievalsharp/v28/EvOJzAlL3oU5AQl2mP5KdgptAq8.ttf 146116
+Comic Relief	Display	OFL	Regular comicrelief/v2/BCauqZkHrvL55SZ8uaEhHMY2XA.ttf 78272 ComicRelief.ttf	Bold comicrelief/v2/BCaxqZkHrvL55SZ8uaEhHMYO4D1FBg.ttf 92512
+DynaPuff	Display	OFL	Regular dynapuff/v9/z7N5dRvsZDIVHbYPMhZJ3HQ83UaSu4uhr7-ZFeoYkgAr1x8RSxYu6Yg.ttf 87860	Bold dynapuff/v9/z7N5dRvsZDIVHbYPMhZJ3HQ83UaSu4uhr7-ZFeoYkgAr1x8RS_Ep6Yg.ttf 87860
+Beau Rivage	Handwriting	OFL	Regular beaurivage/v2/UcCi3FIgIG2bH4mMNWJUlmg3.ttf 149920
+Fredericka the Great	Display	OFL	Regular frederickathegreat/v23/9Bt33CxNwt7aOctW2xjbCstzwVKsIBVV-9Sk.ttf 483920
+Indie Flower	Handwriting	OFL	Regular indieflower/v24/m8JVjfNVeKWVnh3QMuKkFcZlbg.ttf 46456
+Corinthia	Handwriting	OFL	Regular corinthia/v13/wEO_EBrAnchaJyPMHE0FUQ.ttf 178228	Bold corinthia/v13/wEO6EBrAnchaJyPMHE097d8v1A.ttf 164908
+Yellowtail	Handwriting	Apache-2.0	Regular yellowtail/v25/OZpGg_pnoDtINPfRIlLotlw.ttf 60864
+Fragment Mono	Monospace	OFL	Regular fragmentmono/v6/4iCr6K5wfMRRjxp0DA6-2CLnN4Q.ttf 108980	Italic fragmentmono/v6/4iC16K5wfMRRjxp0DA6-2CLnB4ZHgw.ttf 111328
+Oxygen Mono	Monospace	OFL	Regular oxygenmono/v15/h0GsssGg9FxgDgCjLeAd7ijf.ttf 66932
+Calligraffitti	Handwriting	Apache-2.0	Regular calligraffitti/v20/46k2lbT3XjDVqJw3DCmCFjE0vnFZ.ttf 58524
+Google Sans Code	Monospace	OFL	Regular googlesanscode/v22/pxihyogzv91QhV44Z_GQBHsGf5PuckJMZfIVTPZaiXEp_ht12EVEHsN1sCQNcmTVsw.ttf 97764	Italic googlesanscode/v22/pxijyogzv91QhV44Z_GQBHsGf5PuWEt-oWZnOk-ljWSpwaFB6rqcd6jvHiMYuic98Akn.ttf 98392	Bold googlesanscode/v22/pxihyogzv91QhV44Z_GQBHsGf5PuckJMZfIVTPZaiXEp_ht12EVEHsN1sCQNlWPVsw.ttf 98264	BoldItalic googlesanscode/v22/pxijyogzv91QhV44Z_GQBHsGf5PuWEt-oWZnOk-ljWSpwaFB6rqcd6jvHiMYuifa9wkn.ttf 98960
+Xanh Mono	Monospace	OFL	Regular xanhmono/v19/R70YjykVmvKCep-vWhSYmA.ttf 58264	Italic xanhmono/v19/R70ejykVmvKCep-vWhSomgqU.ttf 62116
+base https://raw.githubusercontent.com/FrameOS/frameos/eae3bfe32aa2dcac2fc4805a4e4ba7c70784de93/frameos/assets/copied/fonts/
+Liberation Sans	Sans Serif	OFL	Regular LiberationSans-Regular.ttf 410712	Italic LiberationSans-Italic.ttf 415816	Bold LiberationSans-Bold.ttf 414456	BoldItalic LiberationSans-BoldItalic.ttf 408996
+Liberation Serif	Serif	OFL	Regular LiberationSerif-Regular.ttf 393576	Italic LiberationSerif-Italic.ttf 375632	Bold LiberationSerif-Bold.ttf 370096	BoldItalic LiberationSerif-BoldItalic.ttf 376772
+Liberation Mono	Monospace	OFL	Regular LiberationMono-Regular.ttf 319508	Italic LiberationMono-Italic.ttf 281536	Bold LiberationMono-Bold.ttf 307996	BoldItalic LiberationMono-BoldItalic.ttf 284068
+FiraGO	Sans Serif	OFL	Regular FiraGO-Regular.ttf 804888	Italic FiraGO-Italic.ttf 813116	Bold FiraGO-Bold.ttf 807140	BoldItalic FiraGO-BoldItalic.ttf 813028
+Cascadia Mono	Monospace	OFL	Regular CascadiaMono.ttf 714804 CascadiaMono.ttf	Italic CascadiaMonoItalic.ttf 524380 CascadiaMonoItalic.ttf
+Noto Color Emoji	Emoji	OFL	Regular NotoColorEmoji.ttf 10673480 NotoColorEmoji.ttf

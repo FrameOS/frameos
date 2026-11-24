@@ -432,7 +432,11 @@ struct ButtonMapView: View {
             loaded = true
         }
         .sheet(isPresented: $adding) {
-            AddBindingSheet(scenes: scenes, voice: app.frame(frameId).map { Microphone.present($0, plane: app.current?.kind ?? .cloud) } ?? false) { binding in
+            AddBindingSheet(
+                scenes: scenes,
+                voice: app.frame(frameId).map { Microphone.present($0, plane: app.current?.kind ?? .cloud) } ?? false,
+                triple: app.frame(frameId).map { ButtonBindings.supportsTriplePress($0, cloud: app.current?.kind != .backend) } ?? false
+            ) { binding in
                 bindings.append(binding)
                 changed = true
             }
@@ -444,6 +448,8 @@ struct AddBindingSheet: View {
     @Environment(\.dismiss) private var dismiss
     let scenes: [InstalledScene]
     let voice: Bool
+    /// The frame's FrameOS makes a triple press (ButtonBindings.supportsTriplePress).
+    let triple: Bool
     let add: (ButtonBinding) -> Void
     @State private var isSwipe = false
     @State private var label = ""
@@ -482,6 +488,7 @@ struct AddBindingSheet: View {
                         Picker("Press", selection: $press) {
                             Text("Press").tag("press")
                             Text("Double press").tag("doublePress")
+                            if triple { Text("Triple press").tag("triplePress") }
                             Text("Long press").tag("longPress")
                         }
                     }

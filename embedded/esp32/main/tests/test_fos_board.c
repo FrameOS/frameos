@@ -190,6 +190,10 @@ static void test_event_maps(void)
     CHECK(strstr(sticky, "\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
           "DOWN held is next");
     CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL, "AI held talks");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"doublePress\"},\"emit\":\"back\"") != NULL, "AI twice is back");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"triplePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
+          "AI three times is the scene list");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"press\"") == NULL, "AI once is the scene's");
     CHECK(sticky[0] == '[' && sticky[strlen(sticky) - 1] == ']' && strlen(sticky) < 1024, "a JSON list that fits");
     /* The Waveshare codec boards: their one user key held talks. */
     CHECK(strstr(event_map("waveshare_esp32_s3_photopainter"),
@@ -419,8 +423,35 @@ static void test_codec_pins(void)
     CHECK(strcmp(fos_board_codec_pins(NULL), "") == 0, "NULL preset");
 }
 
+/* The Waveshare ESP32-S3-Touch-AMOLED-1.75: PWR on its expander's P4, the
+ * board's strings, its keys' rules and its mirrored glass. */
+static void test_amoled_1_75(void)
+{
+    const char *preset = "waveshare_esp32_s3_touch_amoled_1_75";
+    fos_board_key_t keys[4];
+    CHECK(fos_board_expander_keys(preset, keys, 4) == 1 && keys[0].pin == 4 && strcmp(keys[0].label, "PWR") == 0,
+          "PWR on the expander's P4");
+    CHECK(fos_board_expander_keys(preset, keys, 0) == 0, "no room, no keys");
+    CHECK(fos_board_expander_keys("sunton_esp32_8048s070", keys, 4) == 0, "no expander keys elsewhere");
+    CHECK(fos_board_expander_keys(NULL, keys, 4) == 0, "no preset, no keys");
+    CHECK(strcmp(fos_board_touch_pins(preset), "sda=15,scl=14,int=11,rst=40,en=-1") == 0, "touch pins");
+    CHECK(fos_board_touch_mirror(preset) == (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y), "mirrored glass");
+    CHECK(strcmp(fos_board_i2c_buses(preset), "sda=15,scl=14") == 0, "one bus");
+    CHECK(strcmp(fos_board_codec_pins(preset), "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46") == 0, "codec pins");
+    CHECK(strcmp(fos_board_sd_pins(preset), "cs=41,sck=2,miso=3,mosi=1") == 0, "TF slot in SPI mode");
+    CHECK(strcmp(fos_board_rtc_chip(preset), "pcf85063") == 0, "a PCF85063");
+    char map[1024];
+    fos_board_event_map(preset, map, sizeof(map));
+    CHECK(strstr(map, "\"label\":\"PWR\",\"action\":\"press\"},\"emit\":\"toggleScreen\"") != NULL,
+          "PWR pressed toggles the screen");
+    CHECK(strstr(map, "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "BOOT held talks");
+    CHECK(strstr(map, "\"edgeSwipe\"") != NULL, "the edges swipe");
+}
+
 int main(void)
 {
+    test_amoled_1_75();
     test_touch_pins();
     test_codec_pins();
     test_target_names();

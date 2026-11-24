@@ -210,6 +210,9 @@ type
     networkCheck*: bool
     networkCheckTimeoutSeconds*: float
     networkCheckUrl*: string
+    # A touch screen's first picture waits for the check too, and a check that
+    # fails raises the boot hotspot, as on every other frame (boot_network.nim).
+    networkCheckOnTouch*: bool
     wifiHotspot*: string
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
@@ -417,6 +420,11 @@ type
     ## (0 = none). Without either the frame's applies.
     renderScaleKey*: string
     renderScaleSetting*: float
+    ## Whether the scene asks its layout for the whole panel (full_screen.nim):
+    ## the state key of a field with role fullScreen ("" = none), and
+    ## `settings.fullScreen`.
+    fullScreenKey*: string
+    fullScreenSetting*: bool
     backgroundColor*: Color
     ## The state key of a field with role backgroundColor, "" = none: its
     ## color is the background over `backgroundColor` (scene_background.nim).
@@ -443,6 +451,9 @@ type
     ## On a layout: the scene it wraps has the keyboard on the screen up
     ## (`app.frame.typing`), as its last render pass found.
     typing*: bool
+    ## On a layout: the scene it wraps asks for the whole panel
+    ## (`app.frame.fullScreen`, full_screen.nim), as its last render pass found.
+    wrapsFullScreen*: bool
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -582,10 +593,13 @@ type
     windowSize*: string ## `settings.windowSize`, "WxH": the size it opens at in a desktop's window
     icon*: string ## `settings.icon` as read by scene_icon.nim: one path in 0 0 24 24, "" for none
     category*: string ## `settings.category`, its name ("Photos") as the scene has it, "" for none
+    opens*: string ## `settings.opens`, the file types it opens ("pdf") as the scene has it, "" for none
     layoutSceneId*: SceneId ## the layout this install is wrapped in, "" for none
     layoutState*: JsonNode ## its parameters, as a scene node's config
     renderScaleKey*: string ## see FrameScene.renderScaleKey
     renderScaleSetting*: float ## see FrameScene.renderScaleSetting
+    fullScreenKey*: string ## see FrameScene.fullScreenKey
+    fullScreenSetting*: bool ## see FrameScene.fullScreenSetting
     backgroundColorKey*: string ## see FrameScene.backgroundColorKey
 
   # Imported node from scenes.json
@@ -611,6 +625,9 @@ type
     ## What the scene's JSX is laid out for, over the frame's (render_scale.nim);
     ## 0 or absent = the frame's.
     renderScale*: float
+    ## The scene asks its layout for the whole panel, unless a field with role
+    ## fullScreen says otherwise (full_screen.nim).
+    fullScreen*: bool
     ## Present on the scenes the split-screen drawer generates. The runtime
     ## only asks whether it is there, so the value is skipped, not parsed
     ## (interpreter.nim's parseHook).
@@ -630,6 +647,10 @@ type
     ## Its category, by its name ("Photos"), as the scene has it: the runtime
     ## only hands it to a desktop (`app.frame.scenes`).
     category*: string
+    ## The file types it opens, their extensions ("pdf", "txt md"), as the
+    ## scene has them: the runtime only lists them (`app.frame.scenes`), and
+    ## the Files app hands such a file to the scene's public field `file`.
+    opens*: string
 
   SplitLayoutMarker* = object
     present*: bool

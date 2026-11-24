@@ -52,6 +52,12 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
  * scene image is created. The caller owns `*buf` and must free it with free().
  * This lowers peak PSRAM on large panels. */
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
+/* Where the last frameos_nim_render_alloc changed the panel buffer it drew in
+ * (a sixteen-grey canvas that is that buffer), in its pixels: true with the
+ * box (w or h 0: nowhere) when the render knows, false when it could have
+ * written anywhere. One SVG repainted in its own frame's damage knows
+ * (svg_frames.nim takePanelPaint); fos_display_hint_damage takes it. */
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h);
 /* The picture the last render drew, packed again without running the scene:
  * what a panel settles from once nobody is tapping (fos_display_settle_due).
  * -1 when the last render did not leave one. As frameos_nim_render_alloc,
@@ -251,8 +257,20 @@ bool frameos_nim_scene_awaited(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
-/* Whether something on the frame takes a press at this glass position (0..32767). */
-bool frameos_nim_press_taken(int wire_x, int wire_y);
+/* Keep the press map of every render (true: a board with touch, from
+ * fos_touch_start), so that frameos_nim_press_map_takes can answer. */
+void frameos_nim_keep_press_map(bool keep);
+/* Whether a press at panel pixel (x, y) lands on something the picture the
+ * last render drew does something with: 1 taken, 2 taken by the frame's
+ * keyboard (a key: never an edge swipe), 0 not, -1 no map (none
+ * kept, or no render yet). No lock, any task: the touch task's click
+ * (docs/server-rendering.md "The click"). */
+int frameos_nim_press_map_takes(int x, int y);
+/* The same, and the panel rectangle of the entry that answers into `box`
+ * (x0, y0, x1, y1, x1 and y1 past the last pixel; untouched for -1 or 0):
+ * 3 is one element of the scene's UI, taken, whose box a fast panel lights
+ * at the press before any render (fos_display_press_begin). */
+int frameos_nim_press_map_find(int x, int y, uint16_t box[4]);
 /* Time passing for the dispatcher's input state (a held button is a
  * `longPress` at every whole second, a short press whose double-press window
  * closed a `press`): true when it made an event, in which case the

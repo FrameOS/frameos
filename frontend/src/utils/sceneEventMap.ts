@@ -22,7 +22,7 @@ export interface ButtonListener {
   key: string
   /** The key the listener names: its label, its role, its pin (as text). */
   identity: { label?: string; role?: string; pin?: string }
-  /** The press it filters on, when it does (`press`, `doublePress`, `longPress`). */
+  /** The press it filters on, when it does (`press`, `doublePress`, `triplePress`, `longPress`). */
   action?: string
   /** What the row says: "A", "next (role)", "A · long press". */
   title: string
@@ -37,11 +37,20 @@ export interface ButtonGesture {
 const ACTION_TITLES: Record<string, string> = {
   press: 'press',
   doublePress: 'double press',
+  triplePress: 'triple press',
   longPress: 'long press',
 }
 
 export function actionTitle(action: string): string {
   return ACTION_TITLES[action] ?? action
+}
+
+/** What people call a key whose label on the wire is something else: the reTerminal Sticky's `AI` is the Action key. */
+const KEY_TITLES: Record<string, string> = { AI: 'Action' }
+
+/** A key's name to show, by its label (case-insensitive): the label itself unless the key has a name of its own. */
+export function keyTitle(label: string): string {
+  return KEY_TITLES[label.trim().toUpperCase()] ?? label
 }
 
 /** The default role of a label (`buttons.roleByLabel`), or ''. */
@@ -158,12 +167,22 @@ export function buttonsHeardAsIs(listener: ButtonListener, buttons: readonly GPI
   )
 }
 
-/** Every press of every button, in button order: the dialog's choices. */
-export function buttonGestures(buttons: readonly GPIOButton[]): ButtonGesture[] {
+/**
+ * Every press of every button, in button order: the dialog's choices. A
+ * triple press only where the frame's FrameOS makes one (`triplePress`,
+ * frameEventMap.ts `frameSupportsTriplePress`): an older one never matches
+ * a rule for it.
+ */
+export function buttonGestures(
+  buttons: readonly GPIOButton[],
+  { triplePress = true }: { triplePress?: boolean } = {}
+): ButtonGesture[] {
   const gestures: ButtonGesture[] = []
   for (const button of buttons) {
     for (const action of buttonActions) {
-      gestures.push({ label: button.label, action })
+      if (action !== 'triplePress' || triplePress) {
+        gestures.push({ label: button.label, action })
+      }
     }
   }
   return gestures
@@ -190,7 +209,7 @@ export function parseGestureValue(value: string): ButtonGesture | null {
 }
 
 export function gestureTitle(gesture: ButtonGesture): string {
-  return `${gesture.label} · ${actionTitle(gesture.action)}`
+  return `${keyTitle(gesture.label)} · ${actionTitle(gesture.action)}`
 }
 
 /** What a rule for this listener writes over the payload: every field the listener filters on. */

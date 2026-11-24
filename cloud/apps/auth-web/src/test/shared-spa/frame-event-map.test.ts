@@ -31,6 +31,7 @@ import {
   frameSupportsBackForward,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
+  frameSupportsTriplePress,
   gestureCanVoiceChat,
   parseFrameActionValue,
   parseFrameGestureValue,
@@ -38,8 +39,10 @@ import {
   sceneSettingsMinVersion,
   sceneSwitcherMinVersion,
   showSceneStaleSettings,
+  triplePressMinVersion,
   withShowSceneSetting,
 } from "../../../../../../frontend/src/utils/frameEventMap";
+import { triplePressMinVersion as cloudTriplePressMinVersion } from "../../lib/frames";
 
 // The reTerminal preset: the arrows held walk the scenes.
 const leftHeld = { label: "LEFT", action: "longPress" };
@@ -222,6 +225,20 @@ describe("bindings and rules", () => {
     expect(frameSupportsBackForward(null, false)).toBe(true);
   });
 
+  it("offers a triple press from the FrameOS that makes one, and the cloud gates on the same floor", () => {
+    expect(triplePressMinVersion).toBe(cloudTriplePressMinVersion);
+    expect(frameSupportsTriplePress(triplePressMinVersion, true)).toBe(true);
+    expect(frameSupportsTriplePress("2026.11.14", true)).toBe(false);
+    expect(frameSupportsTriplePress(null, false)).toBe(true);
+    // The reTerminal Sticky's Action key (label AI): twice back, three times the scene list.
+    const thrice = { label: "AI", action: "triplePress" };
+    expect(frameGestureTitle(thrice)).toBe("Action · triple press");
+    expect(bindingRule({ gesture: thrice, action: { kind: "sceneSwitcher" } })).toEqual({
+      event: "button", match: thrice, emit: "sceneSwitcher", as: {},
+    });
+    expect(gestureCanVoiceChat(thrice)).toBe(false);
+  });
+
   it("offers the edges as rows on a touch screen, by select value and title", () => {
     expect(edgeGestures()).toEqual([{ edge: "left" }, { edge: "right" }, { edge: "top" }, { edge: "bottom" }]);
     for (const gesture of [...edgeGestures(), leftHeld]) {
@@ -234,6 +251,7 @@ describe("bindings and rules", () => {
     expect(frameOffersEdgeGestures(null, "pimoroni.hyperpixel4sq_touch", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.st7701s_480x480", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "lcd.ek9716_800x480", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "amoled.co5300_466x466", [])).toBe(true);
     expect(frameOffersEdgeGestures(null, "waveshare.EPD_7in5_V2", presetRules)).toBe(false);
     // A map that binds an edge already shows it as a row, whatever the device.
     expect(frameOffersEdgeGestures(null, null, [{ event: "edgeSwipe", match: { edge: "left" }, emit: "render", as: {} }])).toBe(true);

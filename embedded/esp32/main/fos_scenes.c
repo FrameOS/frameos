@@ -86,6 +86,8 @@ static volatile bool s_patch_pending = false;
 static volatile bool s_store_changing = false;
 static bool store_split_behind(void);
 static bool store_sweep_behind(void);
+/* The boot's sweep, left for after its first render (fos_scenes_init). */
+static bool s_boot_sweep_due = false;
 static void store_split_stored(void);
 static bool backend_set_written(uint32_t timeout_ms);
 /* Who installed the scenes. s_source is the RESIDENT store's source (what the
@@ -535,7 +537,26 @@ static void save_etag(const char *etag)
  * Same NVS namespace as fos_config; factory-reset clears it with the rest. */
 #define LAST_SCENE_NVS_KEY "last_scene"
 
-static void persist_last_scene(const char *scene_id)
+/* A switch on the render task leaves its marks (last_scene, pending_scene)
+ * for the state writer (main.c), one commit for both: each was a flash write
+ * of its own, both cores' caches off, between the tap and the new scene's
+ * first picture. RAM says what NVS should hold until then: a power cut
+ * meanwhile comes back on the scene from before, or on the queued one when
+ * another task wrote it (those still write at once). A deep sleep and a
+ * restart flush first (fos_scenes_flush_marks). */
+static portMUX_TYPE s_marks_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_marks_owed = false;
+static char s_mark_last[SCENE_ID_LEN] = "";
+
+static void owe_marks(const char *last_scene)
+{
+    portENTER_CRITICAL(&s_marks_lock);
+    if (last_scene != NULL && last_scene[0]) snprintf(s_mark_last, sizeof(s_mark_last), "%s", last_scene);
+    s_marks_owed = true;
+    portEXIT_CRITICAL(&s_marks_lock);
+}
+
+static void write_last_scene(const char *scene_id)
 {
     if (scene_id == NULL || scene_id[0] == '\0') return;
     nvs_handle_t nvs;
@@ -558,7 +579,7 @@ static void persist_last_scene(const char *scene_id)
  * queued, erased once the render task applied it, re-queued at init. */
 #define PENDING_SCENE_NVS_KEY "pending_scene"
 
-static void persist_pending_scene(const char *scene_id)
+static void write_pending_scene(const char *scene_id)
 {
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
@@ -574,6 +595,57 @@ static void persist_pending_scene(const char *scene_id)
         nvs_set_str(nvs, PENDING_SCENE_NVS_KEY, scene_id);
         nvs_commit(nvs);
     }
+    nvs_close(nvs);
+}
+
+static void persist_last_scene(const char *scene_id)
+{
+    if (fos_client_on_render_task()) owe_marks(scene_id);
+    else write_last_scene(scene_id);
+}
+
+static void persist_pending_scene(const char *scene_id)
+{
+    if (fos_client_on_render_task()) owe_marks(NULL);
+    else write_pending_scene(scene_id);
+}
+
+void fos_scenes_flush_marks(void)
+{
+    char last[SCENE_ID_LEN];
+    char queued[SCENE_ID_LEN] = "";
+    portENTER_CRITICAL(&s_marks_lock);
+    bool owed = s_marks_owed;
+    s_marks_owed = false;
+    snprintf(last, sizeof(last), "%s", s_mark_last);
+    s_mark_last[0] = '\0';
+    portEXIT_CRITICAL(&s_marks_lock);
+    if (!owed) return;
+    /* pending_scene names a selection queued and not applied yet, as RAM
+     * has it now; the scene switcher's and settings' never. */
+    portENTER_CRITICAL(&s_scene_select_lock);
+    if (s_scene_select_pending) snprintf(queued, sizeof(queued), "%s", s_pending_scene_id);
+    portEXIT_CRITICAL(&s_scene_select_lock);
+    if (is_built_in_scene(queued)) queued[0] = '\0';
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    bool changed = false;
+    char current[SCENE_ID_LEN] = "";
+    size_t len = sizeof(current);
+    bool present = nvs_get_str(nvs, PENDING_SCENE_NVS_KEY, current, &len) == ESP_OK && current[0];
+    if (queued[0] && (!present || strcmp(current, queued) != 0)) {
+        changed |= nvs_set_str(nvs, PENDING_SCENE_NVS_KEY, queued) == ESP_OK;
+    } else if (!queued[0] && present) {
+        changed |= nvs_erase_key(nvs, PENDING_SCENE_NVS_KEY) == ESP_OK;
+    }
+    if (last[0]) {
+        current[0] = '\0';
+        len = sizeof(current);
+        if (nvs_get_str(nvs, LAST_SCENE_NVS_KEY, current, &len) != ESP_OK || strcmp(current, last) != 0) {
+            changed |= nvs_set_str(nvs, LAST_SCENE_NVS_KEY, last) == ESP_OK;
+        }
+    }
+    if (changed) nvs_commit(nvs);
     nvs_close(nvs);
 }
 
@@ -1339,7 +1411,7 @@ bool fos_scenes_apply_pending(void)
         s_payload_stored_since_boot = false;
         s_scene_switched = true;
         /* A new scene set, from here to its first picture: as a switch. */
-        fos_client_loading_begin(xTaskGetTickCount());
+        fos_client_switch_begin(xTaskGetTickCount());
     }
     bool ok = false;
     size_t len = 0;
@@ -1563,7 +1635,7 @@ bool fos_scenes_apply_pending_selection(void)
          * while for the keys that walk it. Nothing loads, but its first
          * picture is a render like any other (drawn whole, 13 tiles take
          * ~2 s on the SenseCAP), so the loading mark counts from here too. */
-        fos_client_loading_begin(asked_at);
+        fos_client_switch_begin(asked_at);
         if (!frameos_nim_set_scene(scene_id)) {
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
@@ -1589,7 +1661,7 @@ bool fos_scenes_apply_pending_selection(void)
         s_built_in_shown = false;
         s_settings_shown = false;
         s_scene_switched = true;
-        fos_client_loading_begin(asked_at);
+        fos_client_switch_begin(asked_at);
     }
     /* Already the resident scene: nothing to load. Re-parsing it would throw
      * away everything the runtime has built for it — the interpreted graph and
@@ -1622,7 +1694,7 @@ bool fos_scenes_apply_pending_selection(void)
     /* Another scene, from here to its first picture: on an LCD the loading
      * mark shows if that takes a while, counted from when it was asked for.
      * Before the load below, which is part of the wait. */
-    fos_client_loading_begin(asked_at);
+    fos_client_switch_begin(asked_at);
     if (s_slot_count > 0 && frameos_nim_scene_running(scene_id)) {
         /* Running in a window of a desktop layout already (docs/scene-layouts.md
          * "Windows"): brought to the front, nothing read off flash. */
@@ -1753,9 +1825,12 @@ esp_err_t fos_scenes_init(void)
      * files a change left for a sweep that never came. Under the lock: the
      * sweep lets it go after each file (store_between_hook). */
     if (fos_scene_store_recover_index()) ESP_LOGW(TAG, "scene index recovered");
-    store_lock();
-    fos_scene_store_sweep();
-    store_unlock();
+    /* The sweep lists the directory to learn the slot files, under the store
+     * lock a render reads its scene's files under: 4.7 s of the 24 MB /state
+     * on the reTerminal Sticky in front of its first picture (2026-11-23).
+     * It waits for that picture (fos_scenes_first_render_done); nothing
+     * before it needs the listing, a put learns the slot files itself. */
+    s_boot_sweep_due = true;
     load_etag();
     /* Restore the stored scenes' source BEFORE any task can ask: main() calls
      * fos_cloud_start() after this, and its boot-time apply_network_policy()
@@ -2743,6 +2818,17 @@ static bool store_split_behind(void)
 static bool store_sweep_behind(void)
 {
     return store_wanted_behind(&s_store_sweep_wanted);
+}
+
+void fos_scenes_first_render_done(void)
+{
+    if (!s_boot_sweep_due) return;
+    s_boot_sweep_due = false;
+    if (!store_sweep_behind()) {
+        store_lock();
+        fos_scene_store_sweep();
+        store_unlock();
+    }
 }
 
 /* `set` to the store task, which frees it; false (and `set` still the

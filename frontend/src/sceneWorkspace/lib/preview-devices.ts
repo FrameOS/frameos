@@ -14,6 +14,9 @@ export type PreviewDevice = {
   height: number;
   /** The dither palette its panel shows; null for a full-colour screen. */
   panel: PanelPaletteKey | null;
+  /** Only the circle inside the panel shows: the preview is drawn round and
+   * the runtime told so (`context.round`, docs/scene-guide.md "Round panels"). */
+  round?: boolean;
 };
 
 export const previewDevices: PreviewDevice[] = [
@@ -32,12 +35,26 @@ export const previewDevices: PreviewDevice[] = [
   { group: "E-paper", height: 480, key: "inky-frame-7in3", label: 'Pimoroni Inky Frame 7.3" Spectra 6', panel: "spectra6", width: 800 },
   { group: "Screens", height: 480, key: "sensecap-indicator", label: 'Seeed SenseCAP Indicator, 4" LCD', panel: null, width: 480 },
   { group: "Screens", height: 480, key: "hyperpixel-4", label: "Pimoroni HyperPixel 4.0", panel: null, width: 800 },
-  { group: "Screens", height: 480, key: "hyperpixel-2-round", label: "Pimoroni HyperPixel 2.1 Round", panel: null, width: 480 },
+  { group: "Screens", height: 480, key: "hyperpixel-2-round", label: "Pimoroni HyperPixel 2.1 Round", panel: null, round: true, width: 480 },
+  { group: "Screens", height: 466, key: "waveshare-amoled-1in75", label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75, round', panel: null, round: true, width: 466 },
   { group: "Screens", height: 480, key: "pi-touch-display", label: 'Raspberry Pi Touch Display, 7"', panel: null, width: 800 },
   { group: "Screens", height: 1280, key: "pi-touch-display-2", label: 'Raspberry Pi Touch Display 2, 7"', panel: null, width: 720 },
   { group: "Screens", height: 1080, key: "screen-1080p", label: "TV or monitor, 1080p", panel: null, width: 1920 },
   { group: "Screens", height: 2160, key: "screen-4k", label: "TV or monitor, 4K", panel: null, width: 3840 },
 ];
+
+/** The Device menu entry a frame's own scene page starts its preview on, by
+ * the frame's `device`: a round panel's, so its scenes are seen in the circle
+ * (frameos/panel_shape.nim `panelIsRound`); undefined for any other. */
+export function previewDeviceKeyForFrame(device: string | null | undefined): string | undefined {
+  if (device === "pimoroni.hyperpixel2r") {
+    return "hyperpixel-2-round";
+  }
+  if (device === "amoled.co5300_466x466") {
+    return "waveshare-amoled-1in75";
+  }
+  return undefined;
+}
 
 export function previewDeviceFor(key: string | null | undefined): PreviewDevice | null {
   return previewDevices.find((device) => device.key === key) ?? null;

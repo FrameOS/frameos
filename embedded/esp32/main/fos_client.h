@@ -15,6 +15,21 @@
 #include "frameos_display.h"
 
 void fos_client_start(void);
+/* How this boot treats Wi-Fi (main.c, fos_wake_wifi_plan), before
+ * fos_client_start. `render_first`: it draws before the network, so the first
+ * pass renders and then makes its backend pulls. `join_first`: the first
+ * render waits for the background join (a timer wake nobody tapped), until a
+ * touch or a key or 45 s after boot. `frame_page`: nothing to join, so the
+ * first pass opens the frame page when there is no scene to show. */
+void fos_client_set_boot_wifi(bool render_first, bool join_first, bool frame_page);
+/* The station got its first address after the boot went on without it: the
+ * scene renders again if a render began before (it had no network), and not
+ * if none has, which will have it. Any task. */
+void fos_client_render_after_join(void);
+/* A tap or a key woke a frame asleep under its moon: a loading ring in its
+ * place, drawn once, and the loading chirp until the first picture. Early in boot, once the
+ * panel is up; nothing on any other wake. */
+void fos_client_wake_mark_begin(void);
 /* Allow the render loop to run after startup has reserved its stack. */
 void fos_client_resume(void);
 /* Trigger an immediate render from another task (HTTP action, console). */
@@ -58,6 +73,15 @@ void fos_client_keep_awake_ms(uint32_t ms);
 /* A scene payload the link task downloaded, taken into the runtime now (the
  * render task only). False when none was waiting. */
 bool fos_client_take_link_payload(void);
+/* Settings the link task fetched, applied now (the render task only). False
+ * when none were waiting. */
+bool fos_client_take_link_settings(void);
+/* The backend link task has the round trips this pass (fos_backend_link_on). */
+bool fos_client_link_on(void);
+/* One more commands pull on the link task, soon: it reports the ETags of a
+ * deploy's set just taken, so the backend records the deploy, and its own
+ * `sync` is not made (fos_commands_fetch's `reporting`). Render task. */
+void fos_client_request_report_pull(void);
 /* The voice session's hold on the panel (docs/voice-chat.md): from the
  * hold until the answer, no render starts. What arrives meanwhile — the
  * chat's scene switch, then the state for the new scene — is applied as it
@@ -70,8 +94,8 @@ void fos_client_hold_render(uint32_t ms);
 void fos_client_release_render(void);
 /* Queue `text` for the panel: a notice box across the bottom of the image
  * (docs/voice-chat.md, the voice chat's transcript and reply), drawn at the
- * release. Shown once: the render after that takes it off. Any task; the
- * text is copied. */
+ * release. Shown once: the render after that takes it off, or a tap on it
+ * or a key (fos_client_notice_takes). Any task; the text is copied. */
 void fos_client_show_notice(const char *text);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
@@ -121,6 +145,11 @@ bool fos_client_render_pending(void);
  * and after every render. */
 void fos_client_loading_begin(uint32_t since_tick);
 void fos_client_loading_end(void);
+/* A scene switch begins (fos_scenes.c): the loading mark as above, and on
+ * e-paper whose controller keeps the picture the loading tile up at once
+ * while somebody is at the frame (docs/realtime-rendering.md "A press shows
+ * at once"). Render task. */
+void fos_client_switch_begin(uint32_t since_tick);
 /* True while a render pass is rendering (fetches, scene, dither, panel
  * refresh); the OTA waits it out before it downloads (fos_ota.c). */
 bool fos_client_render_in_flight(void);
@@ -151,12 +180,33 @@ bool fos_client_renders_locally(void);
  * pull itself: fos_events.c wakes the render task, which sends what is held
  * once the input is decided. False when it was not held. Any task. */
 bool fos_client_relay_event(const char *origin, const char *name, const char *payload_json);
-/* Rendered on the server: whether a press at this wire position (0..32767
- * over the panel, fos_touch_wire) lands on something the picture showing
- * does something with, by the press map its plane sent with it
- * (docs/server-rendering.md "The click"): 1 taken, 0 not, -1 when the scene
- * runs here (the runtime answers, frameos_nim_press_taken). Any task. */
-int fos_client_remote_press_taken(int wire_x, int wire_y);
+/* Whether a press at this wire position (0..32767 over the panel,
+ * fos_touch_wire) lands on something the picture showing does something
+ * with (docs/server-rendering.md "The click"): by the press map its plane
+ * sent with it when it was rendered on the server, by the one the runtime
+ * left after its last render when the scene runs here. 1 taken, 2 taken by
+ * the frame's keyboard (the runtime's map alone says so), 0 not, -1
+ * no map (no panel, or no render yet). Any task, no lock. */
+int fos_client_press_taken(int wire_x, int wire_y);
+/* A press at this wire position lands on the voice chat's notice while it is
+ * on the panel (docs/voice-chat.md): the press is the notice's alone, and the
+ * notice comes off once the finger lifts. The touch task drops the finger's
+ * reports until then, so the scene hears none of them. Any task. */
+bool fos_client_notice_takes(int wire_x, int wire_y);
+/* A key went down: the notice comes off once the press is decided, unless
+ * the render the press asks for takes it off first. The key still goes to
+ * the scene. Any task. */
+void fos_client_notice_dismiss(void);
+/* The same, and for 3 (one element of the scene's UI, taken: the runtime's
+ * map alone says so) its box on the panel, x0, y0, x1, y1 past the last
+ * pixel, into `box`: what a press lights at once (fos_display_press_begin). */
+int fos_client_press_find(int wire_x, int wire_y, int box[4]);
+/* The touch task: a press landed that the map says is taken (`taken`, and
+ * for 3 the element's box on the panel). On e-paper the LED lights until its
+ * answer has been drawn, and on a scene whose taps are slow the render task
+ * inks the box before handing the press on. Nothing on an LCD, whose touch
+ * task lights the press itself. Any task. */
+void fos_client_press_seen(int taken, const int box[4]);
 /* Rendered on the server: a pointer pressed (true) or lifted through the
  * frame's HTTP API. While one is pressed the relay waits for its lift, as it
  * waits for a finger on the glass, so the plane hears the press whole. Any

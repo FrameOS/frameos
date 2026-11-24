@@ -361,12 +361,216 @@ static void test_notice_box(void)
     free(original);
 }
 
+/* A finger's panel pixel as the scene reads it: the touch driver's mapping
+ * (fos_touch.c fos_touch_scene_point), written out again. */
+static void touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy)
+{
+    switch (rotate) {
+        case 90: *sx = y; *sy = width - x - 1; break;
+        case 180: *sx = width - x - 1; *sy = height - y - 1; break;
+        case 270: *sx = height - y - 1; *sy = x; break;
+        default: *sx = x; *sy = y; break;
+    }
+}
+
+/* A tap on the notice takes it off (docs/voice-chat.md): the tap is tested
+ * in panel pixels against the box, and must hit exactly where the notice is
+ * drawn and where the scene sees it, in every rotation. */
+static void test_notice_hit(void)
+{
+    const fos_pixel_format_t format = FOS_PIXEL_1BPP;
+    const char *text = "\"Switch to the calendar.\"\nSwitched to Calendar.";
+    for (size_t i = 0; i < sizeof(SIZES) / sizeof(SIZES[0]); i++) {
+        const int width = SIZES[i][0], height = SIZES[i][1];
+        for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+            const int rotate = ROTATIONS[r];
+            const size_t len = buffer_len(width, height, format);
+            uint8_t *buf = malloc(len);
+            uint8_t *original = malloc(len);
+            for (size_t b = 0; b < len; b++) original[b] = next_byte();
+            memcpy(buf, original, len);
+            fos_panel_surface_t s = {buf, width, height, format, rotate};
+            fos_panel_surface_t before = {original, width, height, format, rotate};
+            fos_panel_code_box_t box;
+            if (!fos_panel_notice_box(&s, text, width >= 600 ? 3 : 2, 6, &box)) {
+                CHECK(width < 100 || height < 100, "%dx%d rot %d: no notice", width, height, rotate);
+                free(buf);
+                free(original);
+                continue;
+            }
+            fos_panel_draw_notice(&s, &box, text);
+            int hits = 0, drawn_missed = 0, scene_disagrees = 0;
+            for (int py = 0; py < height; py++) {
+                for (int px = 0; px < width; px++) {
+                    const bool hit = fos_panel_box_hit(&box, px, py);
+                    if (hit) hits++;
+                    if (!hit && panel_index(&s, px, py) != panel_index(&before, px, py)) drawn_missed++;
+                    int sx, sy;
+                    touch_scene_point(px, py, width, height, rotate, &sx, &sy);
+                    const bool on_scene_box = sx >= box.x && sx < box.x + box.w && sy >= box.y && sy < box.y + box.h;
+                    if (hit != on_scene_box) scene_disagrees++;
+                }
+            }
+            CHECK(hits == box.w * box.h, "%dx%d rot %d: %d pixels hit, the box has %d", width, height, rotate,
+                  hits, box.w * box.h);
+            CHECK(drawn_missed == 0, "%dx%d rot %d: %d drawn pixels a tap misses", width, height, rotate,
+                  drawn_missed);
+            CHECK(scene_disagrees == 0, "%dx%d rot %d: %d pixels where the tap and the scene disagree", width,
+                  height, rotate, scene_disagrees);
+            CHECK(!fos_panel_box_hit(&box, box.px - 1, box.py) && !fos_panel_box_hit(&box, box.px, box.py + box.ph),
+                  "%dx%d rot %d: a tap just off the box misses", width, height, rotate);
+            free(buf);
+            free(original);
+        }
+    }
+    fos_panel_code_box_t none = {0};
+    CHECK(!fos_panel_box_hit(&none, 0, 0) && !fos_panel_box_hit(NULL, 0, 0), "no box, no hit");
+}
+
+/* The deep sleep mark lands in the top-right corner of the SCENE whatever
+ * the rotation: its border, the moon and the "z" in black, the rest of its
+ * tile white, and nothing outside it touched. */
+static void test_sleep_mark(void)
+{
+    for (size_t f = 0; f < sizeof(FORMATS) / sizeof(FORMATS[0]); f++) {
+        for (size_t z = 0; z < sizeof(SIZES) / sizeof(SIZES[0]); z++) {
+            for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+                const fos_pixel_format_t format = FORMATS[f];
+                const int width = SIZES[z][0], height = SIZES[z][1];
+                size_t len = buffer_len(width, height, format);
+                uint8_t *buf = calloc(1, len);
+                fos_panel_surface_t s = {.buf = buf, .width = width, .height = height,
+                                         .format = format, .rotate = ROTATIONS[r]};
+                const int sw = fos_panel_scene_width(&s), sh = fos_panel_scene_height(&s);
+                fos_panel_fill_rect(&s, 0, 0, sw, sh, false);
+                const int white = white_of(format);
+                fos_panel_code_box_t box;
+                bool drawn = fos_panel_draw_sleep_mark(&s, &box);
+                CHECK(drawn, "fmt %d %dx%d rot %d: drawn", format, width, height, ROTATIONS[r]);
+                if (!drawn) { free(buf); continue; }
+                const int scale = box.w / 22;
+                CHECK(box.x + box.w == sw - 4 * scale && box.y == 4 * scale,
+                      "fmt %d %dx%d rot %d: top right (%d,%d %dx%d of %dx%d)", format, width, height,
+                      ROTATIONS[r], box.x, box.y, box.w, box.h, sw, sh);
+                CHECK(scene_index(&s, box.x, box.y) == 0, "fmt %d rot %d: border black", format, ROTATIONS[r]);
+                CHECK(scene_index(&s, box.x + box.w - 1, box.y + box.h - 1) == 0,
+                      "fmt %d rot %d: far border black", format, ROTATIONS[r]);
+                /* Row 12 col 4: the moon; row 0 col 0: tile white; row 0 col 11: the z. */
+                CHECK(scene_index(&s, box.x + box.pad + 4 * scale, box.y + box.pad + 12 * scale) == 0,
+                      "fmt %d rot %d: moon black", format, ROTATIONS[r]);
+                CHECK(scene_index(&s, box.x + box.pad, box.y + box.pad) == white,
+                      "fmt %d rot %d: tile white", format, ROTATIONS[r]);
+                CHECK(scene_index(&s, box.x + box.pad + 11 * scale, box.y + box.pad) == 0,
+                      "fmt %d rot %d: z black", format, ROTATIONS[r]);
+                CHECK(scene_index(&s, 0, sh - 1) == white && scene_index(&s, box.x - 1, box.y) == white &&
+                          scene_index(&s, box.x, box.y + box.h) == white,
+                      "fmt %d rot %d: nothing drawn outside the tile", format, ROTATIONS[r]);
+                free(buf);
+            }
+        }
+    }
+    /* The 480x800 Sticky: a 32 px moon on a 44 px tile, 8 px from the corner. */
+    size_t len = buffer_len(800, 480, FOS_PIXEL_2BPP_GRAY);
+    uint8_t *buf = calloc(1, len);
+    fos_panel_surface_t s = {.buf = buf, .width = 800, .height = 480, .format = FOS_PIXEL_2BPP_GRAY, .rotate = 270};
+    fos_panel_code_box_t box;
+    CHECK(fos_panel_draw_sleep_mark(&s, &box) && box.w == 44 && box.x == 480 - 8 - 44 && box.y == 8,
+          "sticky: 44 px tile at (%d,%d) %d", box.x, box.y, box.w);
+    free(buf);
+    /* Too small for it: nothing. */
+    uint8_t tiny[8] = {0};
+    fos_panel_surface_t t = {.buf = tiny, .width = 16, .height = 4, .format = FOS_PIXEL_1BPP, .rotate = 0};
+    CHECK(!fos_panel_draw_sleep_mark(&t, NULL), "16x4: no mark");
+}
+
+/* The wake spinner: the same tile as the sleep mark, its leading dot black
+ * and moving clockwise, nothing outside the tile. */
+static void test_wake_mark(void)
+{
+    static const int dots[8][2] = {{8, 2}, {12, 4}, {14, 8}, {12, 12}, {8, 14}, {4, 12}, {2, 8}, {4, 4}};
+    for (size_t f = 0; f < sizeof(FORMATS) / sizeof(FORMATS[0]); f++) {
+        for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+            const fos_pixel_format_t format = FORMATS[f];
+            size_t len = buffer_len(800, 480, format);
+            uint8_t *buf = calloc(1, len);
+            fos_panel_surface_t s = {.buf = buf, .width = 800, .height = 480, .format = format,
+                                     .rotate = ROTATIONS[r]};
+            const int sw = fos_panel_scene_width(&s), sh = fos_panel_scene_height(&s);
+            const int white = white_of(format);
+            fos_panel_code_box_t sleep_box, box;
+            fos_panel_fill_rect(&s, 0, 0, sw, sh, false);
+            fos_panel_draw_sleep_mark(&s, &sleep_box);
+            for (int frame = 0; frame < 9; frame++) {
+                CHECK(fos_panel_draw_wake_mark(&s, frame, &box), "fmt %d rot %d: drawn", format, ROTATIONS[r]);
+                CHECK(box.x == sleep_box.x && box.y == sleep_box.y && box.w == sleep_box.w,
+                      "fmt %d rot %d: where the moon was", format, ROTATIONS[r]);
+                const int scale = box.w / 22;
+                const int lead = frame % 8;
+                const int far = (lead + 4) % 8;
+                CHECK(scene_index(&s, box.x + box.pad + dots[lead][0] * scale,
+                                  box.y + box.pad + dots[lead][1] * scale) == 0,
+                      "fmt %d rot %d frame %d: leading dot black", format, ROTATIONS[r], frame);
+                /* The dot across from it is one pixel: next to its centre is white. */
+                CHECK(scene_index(&s, box.x + box.pad + (dots[far][0] + 1) * scale,
+                                  box.y + box.pad + (dots[far][1] + 1) * scale) == white,
+                      "fmt %d rot %d frame %d: far dot small", format, ROTATIONS[r], frame);
+                /* The moon's body (row 8 col 5, inside the ring: no dot) is gone. */
+                CHECK(scene_index(&s, box.x + box.pad + 5 * scale, box.y + box.pad + 8 * scale) == white,
+                      "fmt %d rot %d frame %d: no moon left", format, ROTATIONS[r], frame);
+                CHECK(scene_index(&s, 0, sh - 1) == white && scene_index(&s, box.x - 1, box.y) == white,
+                      "fmt %d rot %d: nothing outside the tile", format, ROTATIONS[r]);
+            }
+            free(buf);
+        }
+    }
+}
+
+static void test_mark_box(void)
+{
+    /* Where the marks go, without drawing: the wake mark's own box, and on
+     * the panel exactly the bytes it draws (copied out, drawn, copied back:
+     * the buffer as it was). */
+    for (size_t f = 0; f < sizeof(FORMATS) / sizeof(FORMATS[0]); f++) {
+        for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+            const fos_pixel_format_t format = FORMATS[f];
+            size_t len = buffer_len(800, 480, format);
+            uint8_t *buf = calloc(1, len);
+            uint8_t *before = malloc(len);
+            for (size_t i = 0; i < len; i++) buf[i] = (uint8_t)(i * 37u + 11u);
+            memcpy(before, buf, len);
+            fos_panel_surface_t s = {.buf = buf, .width = 800, .height = 480, .format = format,
+                                     .rotate = ROTATIONS[r]};
+            fos_panel_code_box_t box, drawn;
+            CHECK(fos_panel_mark_box(&s, &box), "fmt %d rot %d: a box", format, ROTATIONS[r]);
+            CHECK(memcmp(buf, before, len) == 0, "fmt %d rot %d: nothing drawn", format, ROTATIONS[r]);
+            size_t bytes = fos_panel_box_copy(&s, &box, NULL, false);
+            uint8_t *saved = malloc(bytes);
+            fos_panel_box_copy(&s, &box, saved, false);
+            fos_panel_draw_wake_mark(&s, 0, &drawn);
+            CHECK(drawn.x == box.x && drawn.y == box.y && drawn.w == box.w && drawn.h == box.h &&
+                      drawn.px == box.px && drawn.py == box.py && drawn.pw == box.pw && drawn.ph == box.ph,
+                  "fmt %d rot %d: the box the mark is drawn in", format, ROTATIONS[r]);
+            CHECK(memcmp(buf, before, len) != 0, "fmt %d rot %d: the mark drew", format, ROTATIONS[r]);
+            fos_panel_box_copy(&s, &box, saved, true);
+            CHECK(memcmp(buf, before, len) == 0, "fmt %d rot %d: and its box holds all it drew", format,
+                  ROTATIONS[r]);
+            free(saved);
+            free(before);
+            free(buf);
+        }
+    }
+}
+
 int main(void)
 {
+    test_mark_box();
     test_text_metrics();
     test_small_and_odd();
     test_every_format_size_and_rotation();
     test_notice_box();
+    test_notice_hit();
+    test_sleep_mark();
+    test_wake_mark();
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

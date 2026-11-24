@@ -35,6 +35,7 @@ static int s_refused_pin = -1; /* said why once; quiet until the pin changes */
 static bool s_on = false;       /* what the pin shows */
 static bool s_note_on = false;  /* what the notes ask for */
 static bool s_hold = false;     /* a recording: lit whatever the notes say */
+static bool s_busy = false;     /* a press on e-paper is being answered */
 
 /* The pins the rest of the board owns: the panel, the battery sense, the
  * buttons, the card, the buzzer, the microphone, the I2C buses. An LED on one
@@ -158,7 +159,7 @@ void fos_led_init(void)
 /* Show the notes' state or the hold, whichever is lit. Under s_lock. */
 static void refresh_locked(void)
 {
-    bool want = s_note_on || s_hold;
+    bool want = s_note_on || s_hold || s_busy;
     if (attach_locked() && (s_on != want || want)) show_locked(want);
 }
 
@@ -176,6 +177,15 @@ void fos_led_hold(bool held)
     if (!s_lock) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_hold = held;
+    refresh_locked();
+    xSemaphoreGive(s_lock);
+}
+
+void fos_led_busy(bool busy)
+{
+    if (!s_lock) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_busy = busy;
     refresh_locked();
     xSemaphoreGive(s_lock);
 }

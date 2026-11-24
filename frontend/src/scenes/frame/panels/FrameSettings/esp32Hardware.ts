@@ -207,6 +207,29 @@ export const ESP32_SUNTON_ESP32_8048S070_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayou
   pwr: -1,
   det: -1,
 }
+// The Waveshare ESP32-S3-Touch-AMOLED-1.75's QSPI AMOLED is wired by the
+// firmware's own board table (components/frameos_display/lcd_qspi_amoled.c):
+// no EPD pins.
+export const ESP32_WAVESHARE_AMOLED_1_75_PIN_LAYOUT: Esp32PinLayout = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
+// Its TF slot in SPI mode (CS = D3 GPIO41, SCK GPIO2, MISO = D0 GPIO3, MOSI =
+// CMD GPIO1), no power switch and no card-detect contact.
+export const ESP32_WAVESHARE_AMOLED_1_75_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 41,
+  sck: 2,
+  miso: 3,
+  mosi: 1,
+  pwr: -1,
+  det: -1,
+}
 export const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
   dc: 4,
@@ -512,6 +535,21 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       enabled: true,
       preset: 'sunton_esp32_8048s070',
       pins: ESP32_SUNTON_ESP32_8048S070_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  waveshare_esp32_s3_touch_amoled_1_75: {
+    label: 'Waveshare ESP32-S3-Touch-AMOLED-1.75 (1.75" round AMOLED)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'amoled.co5300_466x466',
+    flashSize: '16MB',
+    psramMB: 8,
+    pins: ESP32_WAVESHARE_AMOLED_1_75_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'waveshare_esp32_s3_touch_amoled_1_75',
+      pins: ESP32_WAVESHARE_AMOLED_1_75_SD_CARD_PIN_LAYOUT,
       maxFrequencyKHz: 20000,
       mountPath: '/srv/assets',
     },

@@ -5,7 +5,7 @@
 ## events a scene hears — one `pointerMove` per motion report with the position
 ## every pointer event carries, `textInput` from a key, `tap` / `doubleTap` /
 ## `longPress` / `swipe` from a down and an up, `pinch` from two fingers, a button's `gpio` edges and
-## the `button` press / doublePress / longPress they add up to — so the three hosts
+## the `button` press / doublePress / triplePress / longPress they add up to — so the three hosts
 ## agree on all of it, and a driver or a preview has to say only what it saw.
 ##
 ## Pure: no clock (every entry point takes `now`), no channel, no scene. Fed by
@@ -28,8 +28,7 @@ import std/[json, math, monotimes, strutils, tables, times]
 import ./driver_abi
 import ./events
 import ./types
-when not defined(frameosEmbedded):
-  import ./panel_shape
+import ./panel_shape
 import ./utils/image
 when not defined(frameosEmbedded):
   import std/unicode
@@ -56,8 +55,11 @@ type
     ## A key the button layer has not finished with: held (`down`), or a
     ## short press that is over and not yet a `press` (a down of the same pin
     ## within `ButtonDoublePressMs` of `releasedAt` makes the pair a
-    ## `doublePress` instead; once the window has passed it is a `press`).
-    ## One record for both, so the ESP32 carries one set of seq hooks.
+    ## `doublePress` instead; once the window has passed it is a `press`), or
+    ## a pair held back for a third press (`third`: a down within the window
+    ## makes it a `triplePress`; once the window has passed it is the
+    ## `doublePress`). One record for all three, so the ESP32 carries one set
+    ## of seq hooks.
     pin: int
     label, role: string
     origin: EventOrigin
@@ -65,7 +67,8 @@ type
     downAt, releasedAt: MonoTime
     atMs: int       ## the down edge's `atMs`, -1 without one: the `press` or `longPress` it becomes says it
     durationMs: int ## a waiting tap's hold
-    twice: bool     ## the second down of a double press: that and nothing more
+    twice: bool     ## the second (or third) down of a run: no long press, no `press`
+    third: bool     ## the second down, held back: a third may make the run a `triplePress`
     wake: bool      ## began with the down that woke the device: its button-layer event says so
 
 type PointerRecord = object
@@ -109,13 +112,18 @@ type
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
     pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
+    tripleWanted*: proc (pin: int, label, role: string): bool
+      ## Whether a rule binds this key's `triplePress` (the frame's event map
+      ## or the showing scene's; event_loop.nim). Only then does its second
+      ## down wait for a third instead of being the `doublePress` at once, so
+      ## a key no rule binds three times is no slower. nil: never.
     keyboardAt*: proc (x, y: int): bool
       ## Whether the keyboard on the screen (a JSX field's, ui/keyboard.nim) is
       ## under (x, y), from the host (event_loop.nim's EventHost); nil: none.
       ## A press there is a key: never an edge swipe, and a tap however the
       ## finger rolled, as long as it lifts on the keyboard.
+    round: bool                      ## only the inscribed circle shows and takes touches (panel_shape.nim)
     when not defined(frameosEmbedded):
-      round: bool                    ## only the inscribed circle shows and takes touches (panel_shape.nim)
       # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
       # and the preview have them, no ESP32 board does.
       cursorMovedAt: MonoTime
@@ -134,8 +142,7 @@ proc initInputState*(config: FrameConfig): InputState =
   for button in config.gpioButtons:
     if not button.isNil and button.role.len > 0:
       result.buttonRoles.add((button.pin, button.role))
-  when not defined(frameosEmbedded):
-    result.round = panelIsRound(config.device) # no ESP32 board is round
+  result.round = panelIsRound(config.device)
   result.panelWidth = config.width
   result.panelHeight = config.height
   result.rotate = config.rotate
@@ -218,14 +225,19 @@ proc keyFor(state: InputState, pin: int, label: string): int =
 
 proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
   ## Time passing for the button layer: a short press whose double-press
-  ## window has closed is a `press`. Nothing happens while a key is held; a
-  ## long press is decided by its `up`.
+  ## window has closed is a `press`, a pair held back for a third press whose
+  ## window has closed the `doublePress`. Nothing happens while a key is
+  ## held; a long press is decided by its `up`.
   var index = 0
   while index < state.buttons.len:
     let key = state.buttons[index]
     if not key.down and msSince(now, key.releasedAt) > ButtonDoublePressMs:
-      output.addButton(evButton, key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs,
-        wake = key.wake)
+      if key.third:
+        output.addButton(evButton, key.origin, key.pin, key.label, key.role, "doublePress", key.atMs,
+          wake = key.wake)
+      else:
+        output.addButton(evButton, key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs,
+          wake = key.wake)
       state.buttons.delete(index)
     else:
       inc index
@@ -237,7 +249,8 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   ## An edge — `gpio` with `level` (0 is down: the line is pulled up) or the
   ## action `down` / `up` — is delivered at once as `gpio`, and fed to the
   ## button layer, which makes a `button` `press` / `doublePress` /
-  ## `longPress` out of the edges, each press exactly one of them. Producers
+  ## `triplePress` / `longPress` out of the edges, each press exactly one of
+  ## them. Producers
   ## until 2026.10.16 sent their edges as `button` (with `level`, the action
   ## `down` / `up`, or before that `press` / `release`); such a `button` is an
   ## edge too, so they still work.
@@ -279,18 +292,24 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   let index = state.keyFor(pin, label)
   if down:
     output.addButton(evGpio, origin, pin, label, role, "down", atMs, level = 0, wake = wake)
-    # A key still waiting out its window makes this down the double press;
-    # one still held missed its `up`, and this down starts over. The down
-    # that woke the device is a press like any other: the ESP32 stamps it
-    # (at the reset when the key is still down once it can look, else when
-    # it first saw it), and its hold, its `up` and a second tap follow.
+    # A key still waiting out its window makes this down the double press,
+    # or the triple press when its pair was held back for one; one still
+    # held missed its `up`, and this down starts over. The down that woke
+    # the device is a press like any other: the ESP32 stamps it (at the
+    # reset when the key is still down once it can look, else when it first
+    # saw it), and its hold, its `up` and a second tap follow.
     let twice = index >= 0 and not state.buttons[index].down
+    let thrice = twice and state.buttons[index].third
     let startedByWake = wake or (twice and state.buttons[index].wake)
     if index >= 0:
       state.buttons.delete(index)
+    # The second down waits for a third only where a rule binds one.
+    let third = twice and not thrice and not state.tripleWanted.isNil and state.tripleWanted(pin, label, role)
     state.buttons.add(ButtonKey(pin: pin, label: label, role: role, origin: origin, down: true,
-      downAt: at, atMs: atMs, twice: twice, wake: startedByWake))
-    if twice:
+      downAt: at, atMs: atMs, twice: twice, third: third, wake: startedByWake))
+    if thrice:
+      output.addButton(evButton, origin, pin, label, role, "triplePress", atMs, wake = startedByWake)
+    elif twice and not third:
       output.addButton(evButton, origin, pin, label, role, "doublePress", atMs, wake = startedByWake)
   elif index < 0 or not state.buttons[index].down:
     # No down to measure from (a key held since before the driver started):
@@ -304,14 +323,18 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
       # The frame's own gesture took this press: the key is done, and the
       # scene hears no press of it.
       state.buttons.delete(index)
-    elif not key.twice and duration < ButtonLongPressMs:
-      # A short press: it waits out its window before it is a `press`.
+    elif (not key.twice or key.third) and duration < ButtonLongPressMs:
+      # A short press: it waits out its window before it is a `press`; a
+      # held-back pair, before it is the `doublePress`.
       state.buttons[index].down = false
       state.buttons[index].releasedAt = at
       state.buttons[index].durationMs = duration
     else:
       state.buttons.delete(index)
-      if not key.twice:
+      if key.third:
+        # A held-back pair whose second press was held: no third comes now.
+        output.addButton(evButton, key.origin, pin, label, role, "doublePress", key.atMs, wake = key.wake)
+      elif not key.twice:
         # Held at least `ButtonLongPressMs`: a long press, decided now that
         # it is over, with how long it was. Once, never while held. (A
         # double press is that and nothing more.)
@@ -323,8 +346,9 @@ proc buttonsHeld*(state: InputState): int =
       inc result
 
 proc buttonsBusy*(state: InputState): int =
-  ## Keys down plus short presses still in their double-press window: a
-  ## `press`, `doublePress` or `longPress` is still to come. A host keeps
+  ## Keys down plus short presses (and held-back pairs) still in their
+  ## window: a `press`, `doublePress`, `triplePress` or `longPress` is still
+  ## to come. A host keeps
   ## ticking while a tap waits, so its `press` arrives on time.
   state.buttons.len
 
@@ -423,15 +447,14 @@ proc edgeAt(state: InputState, x, y: int): string =
   ## named for the quarter it is in: a finger cannot reach the square's.
   if state.width < 4 * GestureEdgePx or state.height < 4 * GestureEdgePx:
     return ""
-  when not defined(frameosEmbedded):
-    if state.round:
-      if insideRound(state.width, state.height, x, y, GestureEdgePx):
-        return ""
-      let dx = 2 * x + 1 - state.width
-      let dy = 2 * y + 1 - state.height
-      if abs(dx) > abs(dy):
-        return (if dx < 0: "left" else: "right")
-      return (if dy < 0: "top" else: "bottom")
+  if state.round:
+    if insideRound(state.width, state.height, x, y, GestureEdgePx):
+      return ""
+    let dx = 2 * x + 1 - state.width
+    let dy = 2 * y + 1 - state.height
+    if abs(dx) > abs(dy):
+      return (if dx < 0: "left" else: "right")
+    return (if dy < 0: "top" else: "bottom")
   var best = GestureEdgePx
   for (edge, distance) in [("left", x), ("right", state.width - 1 - x), ("top", y),
                            ("bottom", state.height - 1 - y)]:
@@ -576,7 +599,14 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     # The keyboard on the screen reaches the screen's edges: a finger on its
     # outer keys is typing, not swiping, and the key lights up as it goes down.
     rec.onKeys = state.onKeyboard(rec.x, rec.y)
-    rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
+    rec.edge = if rec.pointerType == "mouse": "" else: state.edgeAt(rec.x, rec.y)
+    # On the keyboard only its bottom edge, where it is docked, stays one: a
+    # swipe up from there is the frame's as anywhere (the scene switcher with
+    # the keys up, the reTerminal Sticky 2026-11-23), held like any edge press
+    # until it is a swipe, a tap or a drag along the edge (the space bar's).
+    # The others are typing on the outer keys.
+    if rec.onKeys and rec.edge != "bottom":
+      rec.edge = ""
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
   when not defined(frameosEmbedded):

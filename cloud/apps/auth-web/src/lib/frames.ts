@@ -370,7 +370,33 @@ export function frameSettingsRefusal(
   ) {
     return { error: "settings_need_newer_firmware", minFrameosVersion: gpioButtonRolesMinVersion };
   }
+  // The triple press is a value inside a key older than it: a runtime before
+  // it never makes a `triplePress`, and an ESP32 before it keeps eight rules
+  // of a map at most (its compiled contract refuses the whole push on a ninth).
+  const eventMap = Array.isArray(settings.event_map) ? settings.event_map : null;
+  if (
+    eventMap &&
+    !frameSupportsSettingsFrom(triplePressMinVersion, frame.frameosVersion) &&
+    (eventMapBindsTriplePress(eventMap) || (profile === "esp32" && eventMap.length > esp32EventMapRulesBeforeTriplePress))
+  ) {
+    return { error: "settings_need_newer_firmware", minFrameosVersion: triplePressMinVersion };
+  }
   return null;
+}
+
+// 2026.11.15: a button's `triplePress` (docs/events.md "Buttons"), bound by a
+// rule of `event_map`; the same release lets an ESP32 keep twelve rules
+// where it kept eight (the reTerminal Sticky's preset is nine). The events
+// contract's `buttons.triplePressSince`.
+export const triplePressMinVersion = "2026.11.15";
+export const esp32EventMapRulesBeforeTriplePress = 8;
+
+/** Whether a rule of the map matches a `triplePress` (what it does with it is the rule's). */
+export function eventMapBindsTriplePress(rules: readonly unknown[]): boolean {
+  return rules.some((rule) => {
+    const match = rule && typeof rule === "object" ? (rule as { match?: unknown }).match : undefined;
+    return !!match && typeof match === "object" && (match as { action?: unknown }).action === "triplePress";
+  });
 }
 
 // Palette / partial-refresh / GPIO bounds, from the contract's rules.
@@ -656,6 +682,9 @@ const reportedFrameSettings: ReadonlyArray<readonly [string, string, unknown]> =
   ["renderScale", "render_scale", 0],
   // The sounds of a tap and a press (2026.11.15), set on the frame page too.
   ["clickSounds", "click_sounds", "normal"],
+  // How long a tap keeps a deep-sleeping ESP32 up, set on the frame page too
+  // (the firmware's default, 300 s).
+  ["awakeAfterInputSeconds", "awake_after_input_seconds", 300],
 ];
 
 // The stored settings with what the frame reports, or undefined when there is

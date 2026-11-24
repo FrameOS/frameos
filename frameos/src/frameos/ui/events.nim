@@ -53,6 +53,7 @@ type
                                 ## render needs no new tree (app_runtime.get)
     partial*, full*: bool       ## since the last render: a handler set signals (and only that) / did not
     declined*: bool             ## the pointer handler just run returned false: no render for it
+                                ## (a scroll handler's: no get() for it)
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
     heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
@@ -71,6 +72,13 @@ type
     # has shown it (`flashSeen`).
     flashDue: MonoTime
     flashSeen: bool
+    # A tap quicker than a render on a fast panel (its press and its lift
+    # handled before a render drew the press): its `active:` look stays with
+    # its answer for a moment once a render shows it (`pressSeen`), as a key's
+    # light does.
+    pressLinger: bool
+    pressDue: MonoTime
+    pressSeen: bool
     # A finger that went down on the space bar (-1 for none): where, in the
     # UI's pixels, how far apart its steps are, the steps it has made the
     # caret take, and whether it moved enough to be a drag. A drag's tap
@@ -106,11 +114,18 @@ const
     ## (app_runtime.windowLimit).
   FlashMs = 250
     ## How long a key just typed stays lit after a render first shows it.
+  PressLingerMs = 150
+    ## How long a quick tap's press shows after a render first draws it.
   RepeatFirstMs = 100
   RepeatFastMs = 50
   RepeatFastAfter = 12
     ## Backspace held: one erase at the long press, then one every
     ## RepeatFirstMs, every RepeatFastMs after RepeatFastAfter of them.
+
+var quickTapLingers* = defined(frameosEmbedded)
+  ## Whether a quick tap's press lingers (`pressLinger`): on an ESP32, where a
+  ## tap's two ends are often handled in one go behind a render. A test turns
+  ## it on; a Pi and the browser draw every frame they are asked for.
 
 # Flash on an ESP32: no checks the code above them already makes, and
 # nothing raises (see ui/layout.nim).
@@ -162,15 +177,16 @@ when not defined(frameosEmbedded):
   proc lastingUiInput*(): JsonNode =
     ## What every UI on the glass keeps between pictures — the field with the
     ## keyboard, its caret and text, the keyboard's page and shift, the open
-    ## <select>, how far each box is scrolled — for a host that draws each
-    ## picture in a fresh process: the wasm runtime a control plane renders a
-    ## frame with (docs/server-rendering.md, "Kept between pulls"), which
-    ## hands it back with the next pull (`restoreLastingUiInput`). What the
-    ## pointer is doing this moment (hover, press, a key's light, its
-    ## accents, a caret yet to be placed) is not kept: the pull that carried
-    ## it is over. A UI this process did not draw (no regions) is not on the
-    ## glass any more and is left out. `{}` when nothing is kept. Not in the
-    ## firmware: a device keeps its UIs in its own memory.
+    ## <select>, how far each box is scrolled, the keys' ring — for a host
+    ## that draws each picture in a fresh process: the wasm runtime a control
+    ## plane renders a frame with (docs/server-rendering.md, "Kept between
+    ## pulls"), which hands it back with the next pull
+    ## (`restoreLastingUiInput`). What the pointer is doing this moment
+    ## (hover, press, a key's light, its accents, a caret yet to be placed)
+    ## is not kept: the pull that carried it is over. A UI this process did
+    ## not draw (no regions) is not on the glass any more and is left out.
+    ## `{}` when nothing is kept. Not in the firmware: a device keeps its UIs
+    ## in its own memory.
     var kept = newJArray()
     for target in targets:
       if target.regions.len == 0:
@@ -180,7 +196,7 @@ when not defined(frameosEmbedded):
       for (key, x, y) in i.scrolls:
         if (x != 0 or y != 0) and scrolls.len < MaxKeptScrolls:
           scrolls.add %*[newJInt(key), newJFloat(x.float), newJFloat(y.float)]
-      if i.focus <= 0 and i.open <= 0 and i.link.len == 0 and scrolls.len == 0:
+      if i.focus <= 0 and i.open <= 0 and i.link.len == 0 and i.ring <= 0 and scrolls.len == 0:
         continue
       var entry = newJObject()
       entry["sceneId"] = newJString(target.sceneId)
@@ -198,6 +214,8 @@ when not defined(frameosEmbedded):
         entry["open"] = newJInt(i.open)
       if i.link.len > 0:
         entry["link"] = newJString(i.link)
+      if i.ring > 0:
+        entry["ring"] = newJInt(i.ring)
       if scrolls.len > 0:
         entry["scrolls"] = scrolls
       kept.add entry
@@ -242,6 +260,7 @@ when not defined(frameosEmbedded):
         i.sel = 0
         i.keyboard = false
       i.open = max(entry{"open"}.getInt(), 0)
+      i.ring = max(entry{"ring"}.getInt(), 0)
       let link = entry{"link"}.getStr()
       if link.isLink:
         i.link = link
@@ -276,7 +295,7 @@ proc handlerKind(event: string): int =
   else: -1
 
 proc timerPending(target: UiTarget): bool =
-  target.input.flash > 0 or target.repeatPointer >= 0
+  target.input.flash > 0 or target.repeatPointer >= 0 or target.pressLinger
 
 proc uiTimersPending*(): bool =
   ## Whether a UI is timing something (a key's light, a key held): a host
@@ -293,6 +312,7 @@ proc uiTimerDue*(sceneId: string, now: MonoTime): bool =
   for target in targets:
     if target.sceneId != sceneId:
       target.repeatPointer = -1
+      target.pressLinger = false
       continue
     if target.input.flash > 0 and target.input.flashDrawn:
       if not target.flashSeen:
@@ -302,6 +322,12 @@ proc uiTimerDue*(sceneId: string, now: MonoTime): bool =
         result = true
     if target.repeatPointer >= 0 and now >= target.repeatDue:
       result = true
+    if target.pressLinger:
+      if target.input.pressedDrawn and not target.pressSeen:
+        target.pressSeen = true
+        target.pressDue = now + initDuration(milliseconds = PressLingerMs)
+      elif now >= target.pressDue:
+        result = true
 
 template scrolls(r: UiRegion): bool = r.scrollX > 0 or r.scrollY > 0
 
@@ -323,12 +349,45 @@ template stop(r: UiRegion, list: bool): bool =
   if list: r.handlers[ueClick] - 1 >= OptionBase
   else: r.field > 0 or r.handlers[ueClick] > 0 and r.handlers[ueClick] - 1 <= LinkOpen
 
+template pages(r: UiRegion): bool =
+  ## A box that scrolls up and down (not a field's text): the keys turn its pages.
+  r.scrollY > 0 and r.field == 0
+
+proc regionOf(target: UiTarget, key: int): int
+
+proc inBox(target: UiTarget, i, box: int): bool =
+  ## Whether the region at `i` is inside the box that scrolls at `box`.
+  let key = int32(target.regions[box].key + 1)
+  var j = i
+  for _ in 0 ..< 64:
+    let s = target.regions[j].scroller
+    if s == key:
+      return true
+    if s <= 0:
+      return false
+    j = target.regionOf(s - 1)
+    if j < 0:
+      return false
+
+proc stops(target: UiTarget, i: int, list: bool): bool =
+  ## Whether Tab stops at region `i`: an element to press, or a box that
+  ## scrolls with nothing to press showing in it, whose pages the keys turn.
+  template r: untyped = target.regions[i]
+  if r.stop(list):
+    return true
+  if list or not r.pages:
+    return false
+  for j in i + 1 ..< target.regions.len:
+    if target.regions[j].stop(false) and target.inBox(j, i):
+      return false
+  true
+
 proc walkable(target: UiTarget): bool =
   ## Whether the keys have somewhere to go in the UI.
   if target.input.ring > 0 or target.input.focus > 0 or target.input.open > 0 or target.input.link.len > 0:
     return true
-  for r in target.regions:
-    if r.stop(false):
+  for i in 0 ..< target.regions.len:
+    if target.stops(i, false):
       return true
 
 proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
@@ -339,11 +398,11 @@ proc wants(r: UiRegion, event: string, slowPanel: bool): bool =
       r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0 or r.scrolls or
       # A field: a mouse pressed on it selects as it drags (no mouse on an ESP32).
       (not defined(frameosEmbedded) and event == "pointerDown" and r.typesIn)
-  of "tap": r.field > 0 or r.handlers[ueClick] > 0
+  of "tap": r.field > 0 or r.handlers[ueClick] > 0 or r.labelFor > 0
   of "longPress", "doubleTap":
     # A field: the word there is selected, as on a phone. On a slow panel a
     # hold on what only clicks is its click (dispatchUiEvent).
-    r.typesIn or r.handlers[UiEvent(handlerKind(event))] > 0 or
+    r.typesIn or r.labelFor > 0 or r.handlers[UiEvent(handlerKind(event))] > 0 or
       event == "longPress" and slowPanel and r.handlers[ueClick] > 0
   of "wheel": r.scrolls
   else:
@@ -487,14 +546,19 @@ proc hitAt(target: UiTarget, lx, ly: float32, also: UiEvent): int =
     template r: untyped = target.regions[i]
     if r.overScene(lx, ly):
       return -1
-    if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[also] > 0) and r.inside(lx, ly):
-      return i
+    if (r.field > 0 or r.handlers[ueClick] > 0 or r.handlers[also] > 0 or r.labelFor > 0) and r.inside(lx, ly):
+      if r.labelFor == 0:
+        return i
+      # Around a field (look="field"): the field's.
+      for f in 0 ..< target.regions.len:
+        if target.regions[f].key == r.labelFor - 1 and target.regions[f].labelFor == 0:
+          return f
   -1
 
 proc regionOf(target: UiTarget, key: int): int =
   ## The last render's region for the element at `key`, -1 when it drew none.
   for i in 0 ..< target.regions.len:
-    if target.regions[i].key == key:
+    if target.regions[i].key == key and target.regions[i].labelFor == 0:
       return i
   -1
 
@@ -547,12 +611,16 @@ proc blurField(target: UiTarget) =
   target.selectPointer = -1
   target.inputOnly = true
 
-proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
+template backCloses(target: UiTarget): bool =
+  ## Something up that the frame's `back` puts away (`closeForBack`).
+  target.input.focus > 0 or target.input.open > 0 or target.input.link.len > 0
+
+proc closeForBack(target: UiTarget): bool =
   ## `back` while a field has the keyboard or a <select> its list, as on a
   ## phone: the field lets go and the keyboard goes away, or the list closes.
-  ## With a key's accents up, those go first. False when none was up.
-  let target = uiTarget(sceneId, nodeId, create = false)
-  if target.isNil or (target.input.focus == 0 and target.input.open == 0 and target.input.link.len == 0):
+  ## A link's QR code goes first, then a selection made by touch or a key's
+  ## accents, the field keeping the keyboard. False when none was up.
+  if not target.backCloses:
     return false
   if target.input.link.len > 0:
     target.input.link = "" # a link's QR code goes first
@@ -569,9 +637,27 @@ proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
     target.input.accents = 0
     target.inputOnly = true
     return true
+  if target.input.open > 0 and target.input.ring > 0:
+    target.input.ring = target.input.open # the keys' ring back on the <select>, as Escape leaves it
   target.input.open = 0
   target.blurField()
   true
+
+proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
+  ## `closeForBack` for one UI (a built-in scene's form).
+  let target = uiTarget(sceneId, nodeId, create = false)
+  not target.isNil and target.closeForBack()
+
+proc uiBack*(sceneIds: openArray[string], dry = false): bool =
+  ## The frame's `back` for the UIs of `sceneIds` (the scene showing and the
+  ## layout it wears), before anything else hears it (interpreter.runEvent):
+  ## while one has a field with the keyboard, a <select>'s list or a link's
+  ## code up, that goes away (`closeForBack`) and the `back` goes no further.
+  ## True when it did (with `dry`, would).
+  for id in sceneIds:
+    for target in targets:
+      if target.sceneId == id and target.backCloses:
+        return dry or target.closeForBack()
 
 proc openLink(target: UiTarget, key: int) =
   ## A tap on a link: the host opens it if it can (a browser tab), else its
@@ -631,8 +717,12 @@ proc scrolledBy(target: UiTarget, r: UiRegion, unheard = false) =
     let payload = newJObject()
     payload["scrollTop"] = newJFloat(y)
     payload["scrollLeft"] = newJFloat(x)
+    target.declined = false
     target.call(r.handlers[ueScroll] - 1, "scroll", payload, [0'f32, 0, r.w, r.h])
-    target.inputOnly = false # whatever the handler changed, get() shows it
+    # Whatever the handler changed, get() shows it; one that returned false
+    # changed nothing it reads, and the box scrolls on the tree laid out last.
+    if not target.declined:
+      target.inputOnly = false
 
 proc keyDown(target: UiTarget, key: string) =
   let payload = newJObject()
@@ -849,6 +939,13 @@ proc timePassed(target: UiTarget, now: MonoTime): bool =
     target.flashSeen = false
     target.inputOnly = true
     result = true
+  if target.pressLinger and now >= target.pressDue:
+    target.pressLinger = false
+    target.pressSeen = false
+    if i.pressed.len > 0:
+      i.pressed.setLen(0)
+      target.inputOnly = true
+      result = true
   if target.repeatPointer >= 0 and now >= target.repeatDue:
     if i.focus == 0 or not i.keyboard:
       target.repeatPointer = -1
@@ -1096,13 +1193,74 @@ when not defined(frameosEmbedded):
 # then takes the ring away. The UIs of a scene and of the layout it wears are
 # one walk, so there is one ring on the frame, never one in each.
 
+proc pageBox(target: UiTarget, i: int, back: bool): int =
+  ## The box that scrolls around the region at `i` (or that region, a box
+  ## that scrolls), the innermost with more to show down (up with `back`);
+  ## -1 for none.
+  var j = if target.regions[i].pages: i
+    elif target.regions[i].scroller > 0: target.regionOf(target.regions[i].scroller - 1)
+    else: -1
+  for _ in 0 ..< 64:
+    if j < 0:
+      break
+    let
+      r = target.regions[j]
+      y = target.input.scrolled(r.key)[1]
+    if (if back: y > 0.5 else: y < r.scrollY - 0.5):
+      return j
+    j = if r.scroller > 0: target.regionOf(r.scroller - 1) else: -1
+  -1
+
+proc turnPage(list: seq[UiTarget], stops: seq[(int, int)], current, next: int, back: bool): bool =
+  ## A frame's next (prev with `back`) on an element in a box that scrolls,
+  ## while the box has more that way: the element Tab would go to next is
+  ## not on the page (it is outside the box, or cut off at its edge), so the
+  ## box scrolls a page instead (its height less an eighth, so the reader
+  ## keeps their place), and the next layout rings the first element on it
+  ## (ui/layout.nim `turnPage`). At the box's end Tab goes on as before.
+  let
+    (u, k) = stops[current]
+    t = list[u]
+    s = t.pageBox(k, back)
+  if s < 0:
+    return false
+  let (nu, nk) = stops[next]
+  if nu == u and nk != s and t.inBox(nk, s):
+    let
+      n = t.regions[nk]
+      topShows = n.visible[1] <= n.y + 0.5
+      bottomShows = n.visible[3] >= n.y + n.h - 0.5
+      # Taller than the box: whole it never shows, its near end is enough.
+      tall = n.h > t.regions[s].h
+    if (if back: topShows or tall and bottomShows else: bottomShows or tall and topShows):
+      return false
+  let
+    box = t.regions[s]
+    c = t.regions[k]
+    (sx, sy) = t.input.scrolled(box.key)
+    page = max(float32(int(box.h * 0.875 + 0.5)), 1)
+  if t.input.focus > 0:
+    t.blurField()
+  t.input.ring = c.key + 1
+  t.input.scrollTo(box.key, sx, if back: max(sy - page, 0) else: min(sy + page, box.scrollY))
+  t.input.turn = box.key + 1
+  t.input.turnBack = back
+  # Where the ring was, in the box's own pixels: on the box itself, its page's
+  # top edge (its bottom edge going back).
+  t.input.turnFrom = if k == s: (if back: sy + box.h else: sy) else: c.y - box.y + sy
+  t.input.turnSteps = 0
+  t.inputOnly = true
+  t.scrolledBy(box)
+  true
+
 proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
   ## Tab once: the ring to the next element of the UIs in `list` (the one
   ## before with `back`), from where it is, else from the focused field, else
   ## from the top (or the bottom). One stop per element, however many regions
   ## it drew. Typed on a keyboard, a field it lands on takes the keys too; a
-  ## frame's button only rings it, and Enter gives it the keyboard. `dry`:
-  ## whether it would, and nothing done.
+  ## frame's button only rings it (Enter gives it the keyboard), and turns
+  ## the pages of a box that scrolls (`turnPage`). `dry`: whether it would,
+  ## and nothing done.
   var at = -1
   for i, t in list:
     if t.input.open > 0:
@@ -1122,7 +1280,9 @@ proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
       continue
     let here = if i != at: -1 elif t.input.ring > 0: t.input.ring - 1 else: t.input.focus - 1
     for j, r in t.regions:
-      if not r.stop(listUp):
+      # The element ringed is on the walk whatever it is: a box whose page
+      # the keys turned (`turnPage`) is ringed with things to press in it.
+      if (i != at or r.key != here) and not t.stops(j, listUp):
         continue
       var seen = false
       for (u, k) in stops:
@@ -1135,10 +1295,20 @@ proc tabStep(list: seq[UiTarget], back, typed, dry: bool): bool =
         stops.add (i, j)
   if stops.len == 0 or dry:
     return stops.len > 0
+  if not typed and not listUp:
+    for t in list:
+      if t.input.turn > 0:
+        # A page turned that no layout has shown yet: from where the ring
+        # lands on it, one more element on (back: one less).
+        if t.input.turnBack == back: inc t.input.turnSteps
+        elif t.input.turnSteps > 0: dec t.input.turnSteps
+        return true
   let next =
     if current < 0: (if back: stops.len - 1 else: 0)
     elif back: (current + stops.len - 1) mod stops.len
     else: (current + 1) mod stops.len
+  if not typed and not listUp and current >= 0 and turnPage(list, stops, current, next, back):
+    return true
   let (u, k) = stops[next]
   for i, t in list:
     if i != u:
@@ -1249,6 +1419,7 @@ proc escape(list: seq[UiTarget], typed, dry: bool): bool =
     if t.input.ring > 0:
       if not dry:
         t.input.ring = 0
+        t.input.turn = 0
         t.inputOnly = true
       return true
 
@@ -1274,7 +1445,7 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
   ## The key an event is to a UI, and how many times; none (0) for any other.
   ## A frame's button, by its role: next and down are Tab, prev and up
   ## Shift+Tab, primary (a reTerminal's green key) Enter, back and menu
-  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one and a double press two, so every tap counts
+  ## (a way out) Escape; `refresh`, which no label is given any more, Enter; a press is one, a double press two and a triple press three, so every tap counts
   ## however quickly they come, and a long press is the frame's event map's
   ## (walk the scenes, talk), never a key. A keyboard's Tab, Shift+Tab, Enter
   ## and Escape, once; with Ctrl, Alt or Cmd held, the scene's own.
@@ -1284,6 +1455,7 @@ proc uiKeyOf*(event: string, payload: JsonNode): tuple[key: string, back: bool, 
     result.times = case payload{"action"}.getStr()
       of "press", "": 1
       of "doublePress": 2
+      of "triplePress": 3
       else: 0
     case payload{"role"}.getStr()
     of "next", "down": result.key = "Tab"
@@ -1432,7 +1604,7 @@ proc uiTakesPressAt*(sceneId: string; x, y: float32): bool =
       ly = (y - target.offsetY) / scale
     for r in target.regions:
       if r.inside(lx, ly):
-        if r.field > 0 or r.scrolls:
+        if r.field > 0 or r.scrolls or r.labelFor > 0:
           return true
         for handler in r.handlers:
           if handler > 0:
@@ -1448,7 +1620,7 @@ proc uiPressRects*(sceneId: string; into: var seq[array[4, float32]]) =
       continue
     let scale = if target.scale > 0: target.scale else: 1'f32
     for r in target.regions:
-      var takes = r.field > 0 or r.scrolls
+      var takes = r.field > 0 or r.scrolls or r.labelFor > 0
       if not takes:
         for handler in r.handlers:
           if handler > 0:
@@ -1511,6 +1683,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     # A finger or a mouse: the keys' ring goes, on every UI (docs/jsx-ui.md
     # "Keys"), as a browser's focus ring does after a click.
     for target in targets:
+      target.input.turn = 0
       if target.input.ring > 0:
         target.input.ring = 0
         target.inputOnly = true
@@ -1626,8 +1799,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
         let near = target.accentNear(lx, ly)
         target.input.accentX = if near == -1: -1 else: lx
         if near >= -1 and near != target.input.accentLit:
-          # A slow panel shows which once the finger lifts on it.
-          moved = not target.input.slow
+          # On every panel: only a touch screen slides, and a touch e-paper
+          # draws its partial update in a fraction of a second. Shown only at
+          # the lift, a slide along the row looked dead (the reTerminal
+          # Sticky, 2026-11-23); the moves a refresh sits on fold into one.
+          moved = true
       elif released:
         target.holdPointer = -1
         # Lifted on the row's x, the accent there; far from it, or before a
@@ -1686,7 +1862,16 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
-        target.input.pressed.setLen(0)
+        if showsPress and quickTapLingers and not target.input.pressedDrawn:
+          # Lifted before any render drew the press (its two ends handled in
+          # one go behind a busy render): it shows with its answer, for a
+          # moment (`pressLinger`), or a quick tap would never look pressed.
+          target.pressLinger = true
+          target.pressSeen = false
+          # A render that never draws it lets go of it after a second all the same.
+          target.pressDue = getMonoTime() + initDuration(milliseconds = 1000)
+        else:
+          target.input.pressed.setLen(0)
         moved = true
       # A finger that lifts is not over anything any more.
       if touch and target.input.hovered.len > 0:
@@ -1699,8 +1884,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode, keysOnly = fals
         moved = true
       if down:
         let pressed = target.keysOver(lx, ly, true)
+        target.pressLinger = false
         if showsPress and pressed != target.input.pressed:
           target.input.pressed = pressed
+          target.input.pressedDrawn = false
           moved = true
         # The space bar: held, the finger may drag the caret.
         target.swallowTap = -1

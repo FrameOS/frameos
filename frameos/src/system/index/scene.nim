@@ -259,6 +259,7 @@ proc inputsLine*(frameConfig: FrameConfig, sources: seq[string]): string =
 proc pressWords(action: string): string =
   case action
   of "doublePress": "double press"
+  of "triplePress": "triple press"
   of "longPress": "long press"
   else: action
 

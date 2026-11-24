@@ -502,7 +502,7 @@ proc windowScene(host: SingleSceneHost, sceneId: SceneId): FrameScene =
 proc loadedSceneListing*(order: seq[SceneId]): seq[SwitcherEntry] =
   ## The switcher's tiles and `app.frame.scenes` off the scenes held whole
   ## (the browser's payload, an ESP32 without a scene index), in `order`:
-  ## each with its name, window size, icon and category.
+  ## each with its name, window size, icon, category and the types it opens.
   let scenes = getInterpretedScenes()
   for sceneId in order:
     var entry = SwitcherEntry(id: sceneId.string)
@@ -512,6 +512,7 @@ proc loadedSceneListing*(order: seq[SceneId]): seq[SwitcherEntry] =
       entry.windowSize = scene.windowSize
       entry.icon = scene.icon
       entry.category = scene.category
+      entry.opens = scene.opens
     result.add entry
 
 proc setWindowed*(host: SingleSceneHost, enabled: bool) =

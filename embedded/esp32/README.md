@@ -39,8 +39,13 @@ main/                     boot orchestration + platform modules
                           the console then offers no USB-Serial/JTAG channel
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
-  fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
-                          newlib's floating-point scanf is never linked (host-tested)
+  fos_cxx_new.c           NVS's new[] (std::nothrow) / delete[] as malloc-or-abort / free, without
+                          libstdc++'s exception runtime
+  fos_printf.c            the printf family for the linker's --wrap: newlib's output from a small
+                          formatter, doubles by QuickJS's js_dtoa, so newlib's is never linked (host-tested)
+  fos_sscanf.c            sscanf and siscanf for the linker's --wrap: cJSON's "%lg" read-back as
+                          strtod, tzset's TZ formats by an integer scanner that reads as newlib's,
+                          so no newlib scanf engine is linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: a whole set as changes, combined payload, per-scene split, OOM-restart mark, wipe
   fos_slot_cache.c        the scene files read last, kept in PSRAM so a switch skips the SPIFFS lookup (host-tested)
@@ -307,6 +312,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_xiao_epaper_7in5` | C3 | EPD_7in5_V2 7.5" mono | XIAO 7.5" ePaper Panel, thin client; SCK8/MOSI10, CS3, DC5, RST2, BUSY4; BOOT GPIO9; no battery sense |
 | `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
 | `sunton_esp32_8048s070` | S3 | LCD_EK9716_800x480 7" IPS LCD (RGB, 16-bit colour) | Sunton (GUITION) ESP32-8048S070, 16MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table (no SPI init, no IO expander), chosen by the preset or, without one, by the panel alone (`set panel LCD_EK9716_800x480`), backlight GPIO2, no EPD pins; the BOOT key GPIO0 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); GT911 touch on the chip's I2C 19/20 (the pads are claimed from the USB-Serial/JTAG PHY first, `fos_usb_pads.c`, and the console then offers no USB-Serial/JTAG channel), reset GPIO38, polled (its interrupt line is behind an unpopulated R17); microSD on its own SPI bus (CS10/SCK12/MISO13/MOSI11); USB is a CH340 on UART0 |
+| `waveshare_esp32_s3_touch_amoled_1_75` | S3 | AMOLED_CO5300_466x466 1.75" round AMOLED (QSPI, 16-bit colour) | Waveshare ESP32-S3-Touch-AMOLED-1.75 and its -B (the same board in a case), ESP32-S3R8, 16MB flash, 8MB PSRAM (renders on-device, the generic image); the CO5300 keeps its own picture and is sent only the rectangle that changed (`lcd_qspi_amoled.c`: CS12, SCLK38, D0-D3 GPIO4-7, reset 39), so a flash write never tears it and there is no "Updating" screen; only the circle is glass (`fos_display_round`: the switcher, the settings, the keyboard, the edge swipes and the loading mark keep inside it, and with no frame page on a round panel it sets up through the hotspot like an e-paper board); BOOT GPIO0 (held: voice chat) and PWR on the TCA9554 expander's P4 (`fos_board_expander_keys`, no setting names it; pressed: the screen off or on, twice: the scene switcher); the edges swipe; CST9217 touch (0x5a, INT 11, reset 40, read on its interrupt alone), the ES8311 speaker and ES7210 microphones (MCLK42, BCLK9, WS45, DIN10, DOUT8, PA46), the AXP2101 gauge, the PCF85063 clock and the QMI8658 accelerometer (`imu`) all on SDA15/SCL14; TF slot in SPI mode (CS41/SCK2/MISO3/MOSI1) |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
   it renders on-device like the E-series; every pin below is from Seeed's
@@ -558,21 +564,37 @@ provisioned over the USB console instead (below) and never sees the portal;
 the frame's HTTPS certificate — the same per-frame material the Linux
 runtime serves with OpenSSL — arrives with its first `/embedded/settings` pull.
 
-A **touch LCD** (the SenseCAP Indicator: a touch panel found at boot on an
-RGB LCD, `touch_setup` in `main.c`) has no portal and does not wait for
-Wi-Fi: it starts its scenes at once and joins the stored network in the
-background (`fos_wifi_start_background`), retrying quickly and then every
-30 s for as long as it takes. What a boot that waited does once online (SNTP,
-log upload, the `bootup` line, the OTA check) runs the first time the station
-gets an address. The network is set on the screen: a swipe down from the top
-opens the settings panel, whose gear opens the frame page with the Wi-Fi
-status, the networks in range by name and a password field, the rotation, the
-scale, and Render again and Reboot (`fos_frame_settings.c`,
-docs/scene-settings.md "The frame page"). The frame's control plane can turn
-the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
-console turns it back on whatever the plane says. The status screen of a frame
-with no scene says to swipe. Every other board keeps the 45 s wait and the
-portal.
+A **touch board** (a touch panel found at boot: the SenseCAP Indicator's and
+the Sunton's LCDs, and the fast e-paper of the reTerminal Sticky and E1003,
+`fos_wake_wifi_plan` in `fos_wake.c`, `touch_setup` in `main.c`) never opens
+the portal and never holds its first picture for Wi-Fi: it starts its scenes
+at once and joins the stored network in the background
+(`fos_wifi_start_background`), retrying quickly and then every 30 s for as
+long as it takes. What a boot that waited does once online (SNTP, log upload,
+the `bootup` line, the OTA check) runs the first time the station gets an
+address, and the scene renders again if it drew before the join (a join that
+beats the first render costs no second refresh). The first render does not
+wait for a cloud session's queued commands either: they render after. A deep
+sleep waits up to 45 s after boot for that join (`sleep:held` `wifi`), so a
+battery frame woken by a tap does not go back to sleep before its picture had
+the network. A sleeping e-paper board's timer wake, which nobody tapped, holds
+its one render for the join, up to that same 45 s after boot, while the
+runtime and the scenes come up; a touch, a key or a console event ends the
+wait (`wifi:wait`, with how it ended), and a join that does not come opens no
+portal: the board draws without it and sleeps again (on 2026.11.14 a Sticky or
+E1003 that could not reach its network waited 21 s and then sat on the portal
+for good, no scene drawn, a battery board awake until its network came back).
+The network is set on the screen: a swipe down from the top opens the
+settings panel, whose gear opens the frame page with the Wi-Fi status, the
+networks in range by name and a password field, the rotation, the scale, and
+Render again and Reboot (`fos_frame_settings.c`, docs/scene-settings.md "The
+frame page" and "A boot that does not wait for the network"). A board with no
+network saved and no scene opens on that page; one off its network with no
+scene shows the status screen, which says to swipe. The frame's control plane can
+turn the page off (`frame_settings_on_screen`); `set settings_unlock 1` on this
+console turns it back on whatever the plane says. Every other board keeps the
+45 s wait and the portal, and so does a touch board's boot that was asked to
+update (it joins first, then runs the updater).
 
 The serial console (115200) is always available and quicker for development.
 It answers on whichever USB port the board brings out: the chip's own
@@ -714,7 +736,11 @@ writes the queued id to NVS (`pending_scene`), the boot restore prefers it
 over `last_scene`, the pass that applies it erases it and writes
 `last_scene` too — resident because of the pending key is not persisted,
 and skipping that write sent the frame back to the old scene on the next
-timer wake (2026-10-12) — and a pass that
+timer wake (2026-10-12). Both marks a switch makes on the render task (a tap
+on the switcher, the apply) are owed, not written there: the state writer
+puts them in one NVS commit when nobody taps, and a deep sleep or a restart
+flushes them first (`fos_scenes_flush_marks`), as the scene state; each was a
+flash write between a tap and the new scene's first picture. And a pass that
 switched the scene — or applied a payload pushed since boot — renders even
 when it woke only to check in (`fos_scenes_take_switched`). Work that lands
 mid-render holds the deep sleep for one more pass (`sleep:held`, reason
@@ -950,12 +976,37 @@ detected on `battery_pin` (cell voltage above ~2.5 V — the best power-source
 signal we have; no supported board exposes VBUS on a readable pin, so a
 plugged-in-and-charging frame counts as "on battery" too, which just means it
 sleeps while charging). Without a configured battery pin the flag never fires
-and the frame stays connected.
+and the frame stays connected. A board whose charger or fuel gauge says where
+its power comes from (the reTerminal E-series, the Sticky) counts USB as not
+on battery, and its idle wait looks every 5 s: USB pulled out makes a pass at
+once, not the scene's next render an interval away. The cable coming out, and a
+cold boot on the cell (the power key), count as a tap: someone has the frame
+in hand, so it stays up `awake_input` before it sleeps.
+
+A frame going to sleep on e-paper with a fast waveform (the reTerminal Sticky
+and E1003) puts a small sleep mark in the scene's top-right corner first: a
+crescent moon with a "z" on a white tile, drawn over a copy of the last
+picture in the fast waveform (`draw_sleep_mark` in `fos_client.c`,
+`fos_panel_draw_sleep_mark`), never into `/image` or a push. It is drawn once a
+picture (a check-in wake that drew nothing leaves it there, `s_sleep_mark_on_glass`
+in RTC memory), and the first render after a wake draws over it, an unchanged
+scene included. An LCD goes dark asleep and a classic panel's full refresh
+costs too much for a mark: neither draws it. A tap or a key that wakes a frame
+asleep under its moon turns the moon into a loading ring at once
+(`fos_client_wake_mark_begin`, `fos_panel_draw_wake_mark`, one update in the
+fast waveform) and starts the quiet loading chirp (`touch_beep` on), until the
+first render puts the scene up: the boot is seconds, and a frame that answers
+nothing gets tapped again and again. Once, not a spinner: after a deep sleep
+the glass outside the tile is unknown (both buffers say white there) and the
+SSD1677 drives the whole panel on a partial update whatever its RAM window
+says, so every frame greyed the picture, and a spinner left it grey by its end. How
+long a tap keeps the frame up is `awake_input` below, on the frame page too.
 
 `awake_input` (`awake_after_input_seconds` on the control planes, seconds, default
 300, 0 = off) keeps a deep-sleeping frame up after a press or a tap, as an awake
 frame with its interpreters and partial updates, so the next one is answered at
-once; a nearly flat cell still sleeps.
+once, and sleeps when the window closes (not at the scene's next render); a
+nearly flat cell still sleeps.
 
 `wake_check` (seconds, 0 = off, floored to 60) makes a deep-sleeping frame
 wake at least this often to check the control plane for queued commands. The
@@ -1268,6 +1319,7 @@ same stamps and the contract's numbers) says so:
 | `gpio` `down` | 1× 14 |
 | `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
 | `doublePress` | its second down is 1.5× 14 instead of 1× |
+| `triplePress` | its third down is 2× 14 instead of 1× (a key the frame's map binds three times) |
 | a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
@@ -1307,7 +1359,9 @@ is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
 was drained, so a tap during a render arrived as a 30 s hold.
 
 A `press` is decided 350 ms after its `up`, and only a tick of the
-dispatcher delivers it. So while a key is down or a tap is in its window
+dispatcher delivers it; so is a pair a `triplePress` rule holds back
+(docs/events.md "Buttons"). So while a key is down, or a tap or a quick pair
+is in its window
 (`fos_buttons_busy`), the idle wait runs in 50 ms slices instead of 1 s ones,
 and a frame about to deep-sleep waits, up to 10 s, until the decision is
 delivered (and renders if the scene asked).
@@ -1331,7 +1385,9 @@ buzzer's resonance). A board whose NVS predates the keys takes its preset's
 without being reprovisioned. The Waveshare PhotoPainter and 13.3E6 have a
 speaker behind an ES8311 codec instead, which needs an I2S driver: not
 supported yet. The firmware leaves a pin alone that is a display,
-button, battery or SD pin. Console: `set buzzer_pin <gpio|-1>`,
+button, battery or SD pin. The firmware takes the pin at the start of every
+boot and holds it low: a software reset (a panic, a restart) leaves the LEDC
+running, and a tone sounding then went on through the boot. Console: `set buzzer_pin <gpio|-1>`,
 `set buzzer_tone_hz <hz>` and `beep [hz] [ms]` to test it. Applied live on
 every plane: the backend's settings pull carries `buzzerPin` /
 `buzzerToneHz`, the cloud's `set_settings` carries `buzzer_pin` /
@@ -1344,6 +1400,17 @@ with a handler, a field, a box that scrolls, a scene listening for a press)
 it plays the button's down click, and its up click when it lifts; a finger
 added to one already on the glass plays the higher click of a double press.
 A press on nothing is silent, and so is an LCD, whose picture answers at once.
+The click is the touch task's, on core 0, the moment the finger lands: it
+never waits for the render task to finish a render or a panel update. What
+is taken is the press map of the picture showing, which the runtime leaves
+after every render (`docs/server-rendering.md` "The click").
+An edge swipe (the dispatcher's `edgeSwipe`: down within the contract's
+`gestures.edgePx` of an edge, then `swipeMinPx` inward and more inward than
+along) plays four clicks instead, stepping up, or down for a swipe down from
+the top, the moment the finger has gone far enough, and its lift is silent.
+The touch task mirrors the rule (`fos_touch_edge_at` / `fos_touch_edge_step`,
+the distances generated into `fos_events_gen.h`); a press on the frame's
+keyboard is a key, never a swipe (the press map marks it).
 What such a press or a key starts, if it takes over 1.5 s to load, chirps
 quietly on the buzzer until the picture lands (`docs/realtime-rendering.md`).
 `set touch_beep 0` turns both off, or "Touch beep" in the frame's settings
@@ -1419,6 +1486,9 @@ one render after the release, with the notice — else the switch alone
 started a 45 s render that the state waited out. An answer that changed
 nothing is drawn over a copy of the last image, no scene render. Shown
 once, restored before the snapshot like the local-network-access code box.
+A tap on it takes it off and goes nowhere else (`fos_client_notice_takes`:
+the touch task queues none of that finger's reports); a key takes it off
+and still goes to the scene (`docs/voice-chat.md` "Taking the notice off").
 The first 300 ms are dropped so the sparkle is not in the recording; deep
 sleep is held off for the session.
 

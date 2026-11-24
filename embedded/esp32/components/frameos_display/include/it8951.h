@@ -83,6 +83,19 @@ typedef struct {
  * `out`, row by row of tiles). Pure. */
 void fos_it8951_tile_hashes(const uint8_t *packed, bool mirror_x, uint32_t *out);
 
+/* The digests of tile rows [first_row, end_row) and columns [first_col,
+ * end_col) only, into their places in `out`; the rest of `out` is left as it
+ * is. Pure. */
+void fos_it8951_tile_hash_area(const uint8_t *packed, bool mirror_x, uint32_t *out, int first_row, int end_row,
+                               int first_col, int end_col);
+
+/* The tiles a rectangle of the packed picture covers (its pixels as the
+ * buffer has them, the panel's own columns), as tile columns [first_col,
+ * end_col) and rows [first_row, end_row) of the wire. False for a rectangle
+ * that covers nothing. Pure. */
+bool fos_it8951_tile_range(const fos_it8951_rect_t *packed_rect, bool mirror_x, int *first_col, int *end_col,
+                           int *first_row, int *end_row);
+
 /* The dirty tiles (one byte each) as non-overlapping rectangles, at most
  * `max`, each aligned to the tile grid. Pure. */
 size_t fos_it8951_tile_rects(const uint8_t *dirty, fos_it8951_rect_t *rects, size_t max);
@@ -101,6 +114,13 @@ void fos_it8951_row_halftone(uint8_t *wire, size_t bytes, int x, int y);
 /* Every pixel of these wire bytes is pure black or pure white. Pure. */
 bool fos_it8951_black_and_white(const uint8_t *wire, size_t bytes);
 
+/* The panel rectangle x, y, w, h (panel pixels) as the wire rectangle the
+ * controller loads for it: mirrored when the columns run right to left, and
+ * grown to the tile grid (whole tiles, cut at the panel's edge), so that its
+ * tiles are exactly what fos_it8951_10in3_glass_rect marks. False for one that
+ * misses the panel. Pure. */
+bool fos_it8951_glass_wire_rect(int x, int y, int w, int h, bool mirror_x, fos_it8951_rect_t *out);
+
 int fos_it8951_10in3_init(void);
 void fos_it8951_10in3_clear(void);
 void fos_it8951_10in3_display(uint8_t *buf);
@@ -116,8 +136,33 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous);
 void fos_it8951_10in3_rest(void);
 long fos_it8951_10in3_changed(const uint8_t *buf);
 void fos_it8951_10in3_clean(void);
+/* Where the next picture can differ from the one the controller holds, in
+ * packed-picture pixels (the render's own word for it, frameos_nim_render_damage
+ * by way of fos_display_hint_damage): the next `changed` hashes only those
+ * tiles, so a tap's picture goes up without reading the other 1.3 MB first.
+ * The whole picture is hashed after the waveform has started, when the next
+ * upload could not go yet anyway, and a tile that changed outside the box is
+ * sent with the next picture (`stale`) and logged: a wrong box costs a
+ * waveform, never a picture left behind. NULL: no box, the whole picture. */
+void fos_it8951_10in3_hint(const fos_it8951_rect_t *packed_box);
+/* Tiles the whole-picture check found changed outside the box: a picture is
+ * owed to them (fos_display_followup_due). */
+bool fos_it8951_10in3_stale(void);
+
 /* Someone is tapping: the next show is one DU over everything that changed,
  * greys as a halftone, and those tiles are owed their greys. `owed` says so;
  * the next show that is not interactive sends them. */
 void fos_it8951_10in3_set_interactive(bool interactive);
+
 bool fos_it8951_10in3_owed(void);
+/* Something on the glass at once and in black and white (a press's ink, the
+ * loading tile: docs/realtime-rendering.md "A press shows at once"), loaded
+ * from `buf` (a whole packed picture, as `display` takes) over the panel
+ * rectangle x, y, w, h grown to its tiles, and drawn with one DU. Those tiles
+ * then differ from every digest: the next show sends them whatever it holds,
+ * and until it does they are owed (the follow-up once the render task is
+ * idle, fos_display_followup_due, else the settle puts them back).
+ * False when the controller holds no known picture to put back. */
+bool fos_it8951_10in3_glass_rect(const uint8_t *buf, int x, int y, int w, int h);
+/* The waveform running, waited out (what the next upload would do). */
+void fos_it8951_10in3_wait(void);

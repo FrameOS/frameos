@@ -69,7 +69,11 @@ cheap is that the pictures are reconciled, not the code:
   comes back the same is not typeset again, and it is handed to pixie as
   the very same nodes, so pixie compares it by identity. What a layout did
   not use is let go. Each glyph is drawn from pixie's glyph cache ("Text and
-  fonts").
+  fonts"). A text node keeps two arrangements, for the last two widths it
+  was set in (measured in the room its container offers, then set in the
+  width it took), each with its memo entry: a label that did not change is
+  not looked up by key at all, which was ~200 lookups and 10 ms of a
+  Calculator tap on a SenseCAP Indicator.
 - **Damage is a few boxes, matched in order.** On an LCD whose canvas is
   the panel's own buffer, `utils/svg_frames.nim` keeps the parsed SVG each
   buffer holds and compares the next with it (pixie's `damageRects`): the
@@ -84,9 +88,10 @@ cheap is that the pictures are reconciled, not the code:
   objects.** The layout keeps its last tree (on the UI's `UiMemo`), and an
   element whose node at the same place is the same, or equal, and that the
   pointer left as it was takes back its laid-out node: no classes read, its
-  size from the layout cache (two calls kept per node, since a flex item is
-  measured, then placed, and its children are placed again for its final
-  call before it is drawn), and, where its place, size and opacity did not
+  size from the layout cache (four calls kept per node, since a flex item is
+  measured, then placed, and an item of a row in a column is asked three
+  questions a layout; its children are placed again for its final call
+  before it is drawn), and, where its place, size and opacity did not
   change, the very SVG nodes it emitted. pixie keeps the parse of a node it
   is handed again (`parseSvg`'s `reuse`), and damageRects knows those
   elements without comparing them. Gradient ids and handler numbers are part
@@ -619,6 +624,12 @@ export const get = () => (
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
+  On an ESP32 a tap whose press and lift were handled before any render drew
+  its `active:` look (both behind a busy render) keeps the look with its
+  answer, for 150 ms once a render has drawn it (`pressLinger`), and an
+  LCD's touch task shades the element a finger lands on in the picture on
+  the glass before any render at all, `active:` class or not, until the
+  scene's next picture (docs/realtime-rendering.md "A press shows at once").
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
   refresh, so e-paper draws no `hover:` or `active:` at all (a press asked
@@ -708,6 +719,14 @@ export function get(app) {
   landed. A tap anywhere else (a button, the page) takes it away and then
   does what it does; so do Enter in an `<input>` (a `<textarea>` gets a new
   line) and Escape.
+- **The frame's `back`** (a swipe in from the left edge, a reTerminal
+  Sticky's Action key pressed twice) puts the keyboard away as Escape does, and
+  goes no further: the scene, its layout and their apps never hear that
+  `back`, so it does not also leave the page or the scene. A key's accents
+  or a selection made by touch go first, the keyboard staying; an open
+  `<select>`'s list and a link's code go too. Every host, from
+  `interpreter.runEvent` (`ui/events.nim` `uiBack`); a built-in scene puts
+  its own away.
 - **The keyboard is on the screen** when the frame has none of its own: a
   US layout under the UI, which is laid out in what is left and scrolled so
   the field shows. Its pages are letters (shift for one capital, shift
@@ -766,7 +785,8 @@ export function get(app) {
   symbol is typed. Sliding sideways moves the light
   along the row by how far the finger went (`UiInput.accentFrom`), at any
   height from above the row to a couple of rows below it (no need to go up
-  onto the row); a row without a symbol (`$` on the symbols page) is
+  onto the row), and the light follows on e-paper too (a touch e-paper
+  draws it in a partial update); a row without a symbol (`$` on the symbols page) is
   centred on its key and lights the form nearest the finger's x. Lifting
   types the lit one. Slid far away from the row, nothing is lit, and lifted
   there the row stays up for a tap on one. Lifted or tapped anywhere else,
@@ -1007,6 +1027,21 @@ where they got to. A long press stays the frame's event map's (a reTerminal's
 arrows held walk the scenes, its green key held talks). A UI with nothing to
 press hears neither keys nor buttons.
 
+**A frame's buttons turn pages.** On an element in a box that scrolls
+([Scrolling](#scrolling-and-clipping)), while the box has more below, `next`
+goes to the next element only when it shows whole there. When it does not (it
+is cut off at the bottom, or the walk would leave the box for the scene's
+header or the layout's bar), the box scrolls down a page instead, its height
+less an eighth so the reader keeps their place, and the ring goes to the first
+element the new page shows below the one it was on. With nothing to press on
+the new page it stays where it was while that shows, else it rings the box
+itself. Only at the box's end does `next` go on past it. `prev` mirrors it
+upward. A box that scrolls with nothing to press showing in it is a stop of
+its own, so a long text pages too. Presses that come before the new page is
+drawn (a double press, taps while e-paper refreshes) go on from where the ring
+lands, one element each. A keyboard's Tab walks on without pages and brings
+what it goes to into sight by what that needs, as a browser does.
+
 **The scene's own code hears them first.** A scene or a layout with an event
 node for `keyDown` or `button` keeps every one of them. A JS app subscribed to
 them (`"events"` in its config.json) hears each one before the keys move,
@@ -1024,10 +1059,15 @@ switcher's highlight is its focus (Tab moves it a tile), and the scene
 settings' form walks alone, without the layout around it.
 
 The ring is `UiInput.ring` (the element's key + 1, kept with the UI's input
-like a field's focus), drawn by `ui/layout.nim` `ring` over the UI and under
-the keyboard; an element gone from the next render takes the ring with it and
-Tab starts over from the top. `ui/tests/test_ui_keys.nim` and
-`tests/test_frame_keys.nim` are where a rule gets its test.
+like a field's focus, and between a plane's pulls), drawn by `ui/layout.nim`
+`ring` over the UI and under the keyboard; an element gone from the next
+render takes the ring with it and Tab starts over from the top. A page is
+turned in two halves: `ui/events.nim` `turnPage` decides from the regions
+(each knows the box around it that scrolls, `UiRegion.scroller`) and scrolls
+the box, and the next layout's `turnPage`, before `reveal`, knows every
+element in the box, shown or not, and moves the ring (`UiInput.turn`).
+`ui/tests/test_ui_keys.nim` and `tests/test_frame_keys.nim` are where a rule
+gets its test.
 
 ## Select boxes
 
@@ -1068,8 +1108,8 @@ export function get(app) {
   holds, `active:` for the press. The list's box is the select's background
   and corners with a thin line of its text color around it.
 - **While it is up nothing else answers**: a tap on an option picks it and
-  closes the list, a tap anywhere else, the frame's `back` in a built-in scene
-  or Escape closes it. A drag scrolls the list and picks nothing.
+  closes the list, a tap anywhere else, the frame's `back` or Escape closes
+  it. A drag scrolls the list and picks nothing.
 - **On a round panel** it keeps an eighth of the height from the top and the
   bottom.
 
@@ -1105,7 +1145,7 @@ URL in a new tab instead.
   block) the run of text it is in: a tap anywhere on that text opens the first
   link there. Two links in one sentence want two elements.
 - **While the code is up nothing else answers**: a tap anywhere on it, the
-  frame's `back` in a built-in scene or Escape puts it away. A field's
+  frame's `back` or Escape puts it away. A field's
   keyboard and an open `<select>` go first. A board its plane renders keeps
   it between pulls (`lastingUiInput`).
 - `<a>` has no look of its own: give it `underline`, a color, or a button's
@@ -1143,6 +1183,13 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 </div>
 ```
 
+- **Its bar**: a thin bar at its right edge says where in what it holds it
+  shows. On a round panel's whole canvas (`UiInput.round`: the circle inside
+  the square shows) the bar of a box whose right edge is right of the
+  centre is an arc along the rim instead, `RoundInset` and a little in from
+  it, across the box's height as far as 45° either side of 3 o'clock
+  (`rimBar` in `ui/layout.nim`): every UI that scrolls gets it, the built-in
+  scenes' and every app's. The app does nothing for it.
 - **A finger drags it**: once a press on it moves past the tap's slop
   along the way it scrolls, the content follows the finger and nothing is
   pressed (from where the box is at each move, so a `scrollTop` the app set
@@ -1175,7 +1222,12 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
   panel, once the finger lifts): `e.scrollTop` and `e.scrollLeft` (also on
   `e.target`, as React's), in the UI's pixels. A scroll the layout makes
   itself (a caret brought into sight) is heard with the next event (a key,
-  a tap): the layout runs inside a render, where no handler can.
+  a tap): the layout runs inside a render, where no handler can. Like any
+  handler it runs `get()` again, unless it returns `false` and set no
+  signal: then it changed nothing `get()` reads, and the box scrolls on the
+  tree laid out last, as one with no `onScroll` does (2026.11.15+; a
+  `get()` after every one before). A virtualized list returns `false` while
+  the rows it built still cover what shows.
 - **`scrollTop={y}`** scrolls the box to `y` when the app changes it (a file
   opened at the top, or where it was left), kept in range; the same value
   render after render leaves the box where a finger took it, as a browser
@@ -1196,7 +1248,11 @@ y width height viewBox>` of its padding box, whose viewBox the scroll moves
 (FrameOS/pixie draws every element inside it into a view of the canvas
 that is that viewport, and keeps its damage there). Its regions are moved
 by the scroll and cut to the viewport. A scroll repaints the viewport on an
-LCD; what did not change in the tree is still taken back unbuilt.
+LCD; what did not change in the tree is still taken back unbuilt, and the
+children of a viewport that only moved keep their parse: pixie hands their
+elements back moved with it (`parseViewportChildren`), all but a child with
+a clipping box of its own. On the Waveshare 1.75" AMOLED that took a scroll
+frame's parse from 33-45 ms to 6-8 (2026-11-24).
 
 ## Themes
 
@@ -1238,7 +1294,11 @@ role the theme leaves out keeps the element's own look.
 | `keyboard`, `key`, `keyMod`, `keyLit` | the keyboard on the screen, a key, a key that does something else, one lit (shift, held, just typed) |
 
 `page`, `bar`, `muted`, `accent`, `option`, `picked` and `keyboard` are one box
-always (a list's innermost). The samples set no theme on
+always (a list's innermost). A `look="field"` box around one text field (a magnifier
+and an `<input>`, say) is that field to a finger as well: a tap anywhere on it,
+its glyph and padding too, focuses the field as an HTML `<label>` would
+(`UiRegion.labelFor`), with or without a theme. A child of it with a handler
+of its own (a clear button) keeps its taps. The samples set no theme on
 e-paper, where the pages keep their black on white, except High contrast.
 
 On every host, an ESP32 included: there a layout's theme costs about 7 KB of

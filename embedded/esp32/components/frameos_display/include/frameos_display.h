@@ -15,6 +15,7 @@
 #include "esp_err.h"
 #include "lcd_loading.h"
 #include "lcd_splash.h"
+#include "lcd_qspi_amoled.h"
 #include "lcd_st7701s_rgb.h"
 
 typedef enum {
@@ -64,13 +65,17 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* Only the circle inside the panel's square shows and takes touches (the
+ * Waveshare 1.75" AMOLED): the runtime keeps what it draws by itself inside
+ * it (frameos/panel_shape.nim `boardPanelRound`). */
+bool fos_display_round(void);
 /* The panel's power, for turnOn / turnOff / toggleScreen: an LCD's
- * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
+ * backlight, an AMOLED's display on/off. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */
 esp_err_t fos_display_power(bool on);
 /* The panel's step before a deep sleep, after the last refresh: on the
  * PhotoPainter, release the panel's lines and switch its supply (the
- * AXP2101's ALDO4) off. ESP_ERR_NOT_SUPPORTED on boards whose panel supply
+ * AXP2101's ALDO4) off; an AMOLED's controller off and asleep. ESP_ERR_NOT_SUPPORTED on boards whose panel supply
  * the firmware does not own. */
 esp_err_t fos_display_prepare_deep_sleep(void);
 /* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
@@ -107,6 +112,7 @@ void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
  * straight there: every other panel leaves them alone. */
 static inline void fos_display_updating_begin(void)
 {
+    /* A QSPI AMOLED keeps its picture through flash writes: no screen. */
     fos_lcd_st7701s_updating_begin();
 }
 static inline void fos_display_updating_end(bool picture_follows)
@@ -115,12 +121,36 @@ static inline void fos_display_updating_end(bool picture_follows)
 }
 static inline void fos_display_loading_begin(uint32_t since_tick, int rotation)
 {
+    /* Each driver does nothing before its init: one of the two is up. */
     fos_lcd_st7701s_loading_begin(since_tick, rotation);
+    fos_lcd_qspi_loading_begin(since_tick, rotation);
 }
 static inline void fos_display_loading_end(void)
 {
     fos_lcd_st7701s_loading_end();
+    fos_lcd_qspi_loading_end();
 }
+/* A press lit at once (lcd_press.h, docs/realtime-rendering.md "A press
+ * shows at once"): on an RGB LCD the touch task shades the element a finger
+ * lands on in the buffer on the glass, before the press is even reported;
+ * the next picture presented puts it away, and so does `release` (the lift)
+ * after `linger_ms` with no picture, and `end` now. Nothing on any other
+ * panel. */
+static inline void fos_display_press_begin(int x0, int y0, int x1, int y1)
+{
+    fos_lcd_st7701s_press_begin(x0, y0, x1, y1);
+}
+static inline void fos_display_press_release(int linger_ms)
+{
+    fos_lcd_st7701s_press_release(linger_ms);
+}
+static inline void fos_display_press_end(void)
+{
+    fos_lcd_st7701s_press_end();
+}
+/* The runtime's loading mark (frameos/loading_mark.nim), for whichever LCD
+ * driver runs. */
+void fos_display_set_loading_mark(fos_loading_mark_fn mark);
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device
@@ -221,6 +251,10 @@ bool fos_display_holds(const uint8_t *buf);
 void fos_display_wait_for(const uint8_t *buf);
 /* The panel has a partial waveform (fos_partial_refresh.h). */
 bool fos_display_supports_partial(void);
+/* Its controller keeps the picture and finds what changed itself (the
+ * IT8951's tile digests): an unchanged picture costs no refresh without the
+ * firmware's hash of it (fos_client.c display state). */
+bool fos_display_keeps_picture(void);
 /* fos_display_blit, or a partial update of the pixels that changed where
  * fos_partial_refresh_wanted says so. `same_scene`: the picture on the glass
  * came from the scene this one does. `input_recent`: someone is tapping, so a
@@ -228,6 +262,33 @@ bool fos_display_supports_partial(void);
  * it was. */
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
                              bool *partial);
+/* Where the render that drew the scene's canvas wrote it, in its own pixels
+ * (frameos_nim_render_damage), for the next fos_display_update of that canvas:
+ * on a controller that keeps the picture (the IT8951) only those tiles are
+ * hashed before the upload, the rest after the waveform has started (it8951.c
+ * verify_after_hint). Boxes of renders whose picture did not go up add up.
+ * `w` < 0: it could have written anywhere (the whole picture is hashed); w or
+ * h 0: nowhere. Only the render task calls it, right before its update; any
+ * other way onto the glass (a blit, a quick update) or a picture changed after
+ * its update (fos_display_hint_forget: an overlay drawn and taken off the
+ * canvas) makes the next update hash it all. */
+void fos_display_hint_damage(int x, int y, int w, int h);
+void fos_display_hint_forget(void);
+/* Tiles changed outside a render's box are still to go up, and no picture is
+ * coming: the render task hands the canvas to fos_display_update again. */
+bool fos_display_followup_due(void);
+/* A controller that keeps the picture (the IT8951) brought up on a task of its
+ * own at boot, while Wi-Fi joins and the scene loads, instead of after the
+ * first render (~1.9 s on a reTerminal E1003): every way onto the glass waits
+ * for it first. Nothing on a panel that keeps no picture. */
+void fos_display_warm_up(void);
+/* A controller that keeps the picture is not put in standby when the panel
+ * idles (FOS_PANEL_AWAKE_US, the ghost clean) while this is set: on a
+ * reTerminal E1003 the first waveform after a standby ran 898 ms where one
+ * runs 580 (its SYS_RUN answered in 22 ms: the cost is the panel supply's).
+ * The render task sets it while the board is on USB power; a deep sleep
+ * parks it all the same (fos_display_park). */
+void fos_display_keep_controller_awake(bool keep);
 /* A notice just before a restart (fos_restart.h) or as a board boots: an LCD
  * draws it at once, an e-paper with a partial waveform takes it in the fast
  * one and is put to sleep after it (no restart under a waveform), anything
@@ -241,6 +302,21 @@ esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, 
 /* Put a panel left awake after a partial update into deep sleep: before the
  * chip's own, or (the _if_idle one, from the render task's wait) once nothing
  * has been drawn for a while, clearing any ghosts it was left with first. */
+/* Something on the glass at once, in black and white, without any picture
+ * changing (docs/realtime-rendering.md "A press shows at once"): the panel
+ * rectangle x, y, w, h of `buf` (a whole packed picture: the one showing,
+ * with the ink or the tile drawn into it for the call) goes up with one fast
+ * waveform, grown to the controller's tiles, and the next update puts the
+ * picture's own pixels back there (or the follow-up once the render task is
+ * idle, fos_display_followup_due).
+ * Only a panel whose controller keeps the picture (the IT8951): false
+ * elsewhere, and when it holds no picture it knows. Render task. */
+bool fos_display_glass_supported(void);
+esp_err_t fos_display_glass_rect(const uint8_t *buf, int x, int y, int w, int h);
+/* The panel's running waveform, waited out: before a caller draws into the
+ * picture it hands fos_display_glass_rect, so it holds it changed no longer
+ * than the upload. */
+void fos_display_glass_wait(void);
 /* Parts of the picture were drawn roughly while someone tapped and nobody has
  * for a while: pack the canvas and hand it to fos_display_update, not as input. */
 bool fos_display_settle_due(int64_t now_us);

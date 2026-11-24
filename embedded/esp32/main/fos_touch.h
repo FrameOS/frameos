@@ -73,6 +73,28 @@ int fos_touch_decode(const uint8_t *report, size_t len, fos_touch_point_t *point
  * FOS_TOUCH_POINTS_MAX. Pure. */
 int fos_touch_decode_ft(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max);
 
+/* The Hynitron CST92xx (the CST9217 of the Waveshare ESP32-S3-Touch-AMOLED-
+ * 1.75): a read of the 16-bit register 0xD000 returns two fingers' records
+ * — five bytes each, the second after two more (the finger count's byte and
+ * an ack byte, 0xAB) — and the host writes 0xAB back to 0xD000 after every
+ * read, so a read with no new report finds 0xAB in its first byte. A record
+ * is the finger's track id (high nibble) and event (low nibble, 6 = down),
+ * x high, y high, and the two low nibbles (SensorLib's TouchDrvCST92xx). */
+#define FOS_TOUCH_CST92_REG_REPORT 0xD000
+#define FOS_TOUCH_CST92_ACK 0xAB
+#define FOS_TOUCH_CST92_POINTS_MAX 2
+#define FOS_TOUCH_CST92_REPORT_BYTES (FOS_TOUCH_CST92_POINTS_MAX * 5 + 5)
+#define FOS_TOUCH_CST92_EVENT_DOWN 0x06
+
+/* Decode a CST92xx report as read from FOS_TOUCH_CST92_REG_REPORT: the
+ * fingers down (0 once lifted), or -1 for no new report: the host's ack
+ * still there, the all-0xFF the controller answers between reports while a
+ * finger moves, or anything without the report's ack byte. Pure. */
+/* While a finger is down the CST92xx reports at ~200 Hz; one that has sent
+ * no report for this long has lifted, whatever its last report said. */
+#define FOS_TOUCH_CST92_SILENT_LIFT_MS 150
+int fos_touch_decode_cst92(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max);
+
 /* A coordinate in 0..max-1 onto the 0..FOS_TOUCH_WIRE_MAX wire; clamped. Pure. */
 int fos_touch_wire(int value, int max);
 
@@ -137,6 +159,36 @@ typedef enum {
 } fos_touch_beep_t;
 fos_touch_beep_t fos_touch_beep_step(uint8_t kind, uint8_t id, bool captured, uint8_t *held, uint8_t *beeped);
 
+/* The dispatcher's edge swipe (frameos/input_state.nim edgeAt / edgeTravel,
+ * the contract's `gestures`), for its chirp: the touch task sounds it the
+ * moment a press becomes one, not when the render task delivers it. In the
+ * scene's pixels (fos_touch_scene_point). */
+typedef enum {
+    FOS_TOUCH_EDGE_NONE = 0,
+    FOS_TOUCH_EDGE_LEFT,
+    FOS_TOUCH_EDGE_RIGHT,
+    FOS_TOUCH_EDGE_TOP,
+    FOS_TOUCH_EDGE_BOTTOM,
+} fos_touch_edge_t;
+/* Panel pixel (x, y) of a `width` x `height` panel as the scene's pixel and
+ * the scene canvas's size, under the frame's rotation: utils/image.nim
+ * panelToScenePoint, which the dispatcher's edges are in (top is the scene's
+ * top, whichever way the panel is mounted). Pure. */
+void fos_touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy, int *sw, int *sh);
+/* The edge within FOS_GESTURE_EDGE_PX of (x, y) on a `width` x `height`
+ * panel, the nearest in a corner; none on a panel too small to spare four
+ * edge widths across. Pure. */
+fos_touch_edge_t fos_touch_edge_at(int x, int y, int width, int height);
+/* The same on a round panel (fos_display_round), as the dispatcher reads it
+ * (input_state.nim edgeAt): the rim, within FOS_GESTURE_EDGE_PX of the circle
+ * inside the square, named for the quarter it is in. Pure. */
+fos_touch_edge_t fos_touch_edge_at_round(int x, int y, int width, int height);
+/* A press that began at that edge and is now (dx, dy) from where it began:
+ * 1 an edge swipe (FOS_GESTURE_SWIPE_MIN_PX inward, more inward than along),
+ * -1 no longer one (it went along the edge: a drag the scene gets), 0 not
+ * yet one or the other. Pure. */
+int fos_touch_edge_step(fos_touch_edge_t edge, int dx, int dy);
+
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 /* Once at boot, after fos_config_init and the display (the panel's size
@@ -165,4 +217,11 @@ esp_err_t fos_touch_arm_wake(void);
 bool fos_touch_woke_chip(void);
 /* One line for the console: the controller, its range, the last point. */
 void fos_touch_print_status(void);
+/* The console's `touch tap`: a finger at panel pixel (px, py) for `hold_ms`,
+ * read by the touch task in place of the controller's reports, so a bench
+ * times the whole of a press without a finger. */
+esp_err_t fos_touch_inject(int px, int py, int hold_ms);
+/* When the last press was first seen and when it was lit on an LCD
+ * (esp_timer us; 0: not). */
+void fos_touch_press_times(int64_t *seen_us, int64_t *lit_us);
 #endif

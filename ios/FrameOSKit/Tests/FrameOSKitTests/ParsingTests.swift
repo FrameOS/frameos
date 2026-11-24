@@ -99,7 +99,7 @@ import Testing
 
     @Test func eventMapLimits() {
         let contract = CloudSettingsContract.shared
-        #expect(contract.maxItems("event_map", profile: "esp32") == 8)
+        #expect(contract.maxItems("event_map", profile: "esp32") == 12)
         #expect(contract.maxItems("event_map", profile: "linux") == 32)
     }
 

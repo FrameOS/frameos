@@ -57,6 +57,10 @@ esp_err_t fos_scenes_take_backend_payload(fos_scene_set_t *set, const char *etag
  * for it (fos_scenes_store_wait: false when `timeout_ms` ran out first). */
 bool fos_scenes_store_busy(void);
 bool fos_scenes_store_wait(uint32_t timeout_ms);
+/* The boot's first render is done (or tried): the scene store's sweep, put
+ * off at init so it does not hold the store lock in front of that picture,
+ * goes to the store task now. Render task; once a boot, cheap after. */
+void fos_scenes_first_render_done(void);
 bool fos_scenes_state_mounted(void);
 
 /* Persist a scenes JSON payload (local push, e.g. POST /api/scenes) and mark
@@ -129,6 +133,10 @@ void fos_scenes_request_sync(void);
 /* Queue a scene switch. Safe from any task; the render task applies it before
  * the next render so Nim/QuickJS scene state stays single-threaded. */
 esp_err_t fos_scenes_select(const char *scene_id);
+/* Writes the scene marks a switch on the render task left owed (last_scene,
+ * pending_scene) in one NVS commit: the state writer's, and before a deep
+ * sleep or a restart. */
+void fos_scenes_flush_marks(void);
 
 /* Apply a queued scene switch. Render task only. True if selection changed. */
 bool fos_scenes_apply_pending_selection(void);

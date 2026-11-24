@@ -290,6 +290,58 @@ shapes and its edge list beside the partitions (about 380 KB of the largest
 fill above): making the partitions straight from the shapes is the next
 400 KB.
 
+## A fetch's body is its own string (2026-11-24)
+
+The Browser sample on a reTerminal Sticky (8 MB, 3.8 MB of PSRAM free with
+the scene loaded) never got past "Loading github.com…": `async code failed:
+out of memory (the frame's memory is short: no free block of 325592 bytes,
+2212940 free)`, and `heapinfo`'s `min_ever_free` was 324,728 bytes. It reads
+a page in 512 KB byte ranges with `useFetch`, and an async `fetch` handed its
+answer to the prelude as JSON text with the body escaped in it, which
+`__frameosSettle` parsed back out: the body, its escaped copy, a JS string of
+that and the parsed body at once, the two in JS two bytes a character (the
+page has characters past Latin-1), about 3.5 MB for one piece. The throw came
+after the wait left its map and before it settled, so the promise waited for
+ever and the page said "Loading" with no error.
+
+- **The body is made a JS string from the bytes** (`answerToJS`, for
+  `fetchAnswer` and the blocking `jsHttpRequest`), set on an object made of
+  the rest, and the Nim copy goes once it is made: the bytes and one JS
+  string, about 2 MB at the peak for a 512 KB piece.
+- **No room is an answer**: `{status: 0, error}`, so `fetch` rejects with
+  `fetch failed: out of memory (…)`, and `__frameosSettle` rejects an answer
+  it cannot read rather than leave its promise pending.
+
+With that (#1001) the page came, and three more limits showed, each the
+Browser's own (its app files, host-checked with the scene run as an ESP32: a
+4 MB JS heap, pumped fetches answering byte ranges):
+
+- **A closure that calls itself is garbage only QuickJS's collector frees.**
+  `slimCss` walked a sheet with a `walk` closure that recursed, so each
+  sheet's text stayed in a cycle after the call. The heap grew by about the
+  sheet's size per sheet (GitHub's front page links 16, 2.7 MB) until the
+  ninth was refused by the 4 MB per-runtime cap (`FOS_JS_MEMORY_LIMIT`), at
+  1.6 MB live: QuickJS collects at an object allocation over a threshold
+  that is half again the last live size, and an allocation that fails
+  collects nothing first. A plain function, and the heap stays at the live
+  1.6 MB. Big text held by a recursive closure is the pattern to avoid in a
+  JS app on an ESP32.
+- **The JS stack is 20 KB** (`FOS_JS_STACK_SIZE`), and every walk of a page
+  is a call a level: GitHub's boxes nest 26 deep (12 once plain wrappers
+  go), against Hacker News's 10. The Browser lays out no box deeper than 14
+  on an ESP32 (`maxNest`: a block past it is lines of the box it is in).
+- **A piece of a page is one JS string**, two bytes a character once one is
+  past Latin-1 (45 of GitHub's 537 KB are), and `slimPush` copies it once:
+  a few pages in, an 8 MB board had 4.4 MB free and no 1 MB block. The
+  Browser reads 256 KB ranges on an ESP32. GitHub renders a page again for
+  every request and its ranges do not line up (the second 128 KB range
+  started 132 bytes before that offset of a whole download, the third 5,492
+  bytes), so a seam can drop or repeat a few hundred bytes of markup.
+
+From a cold boot the Sticky then shows GitHub's front page and a repository
+page, slowly: the last render, the page laid out, is 38-52 s on the render
+task.
+
 ## Text keeps coverage, not outlines (2026-11-19)
 
 What a text costs in memory beside the typeface was three caches of the same
@@ -382,6 +434,19 @@ kerning searched in GPOS where it lies, any number of them at once, with
 nothing from either control plane, which sync raw TTFs (docs/esp32-fonts.md:
 a few hundred bytes a face open, a 30.5 KB page cache made when the first
 card font draws, and the whole OpenType parser out of the image, −32.7 KB).
+
+**Version 3 (2026-11-24): 74,500 → 61,108 bytes, the same RAM.** The eight
+class subtables are one table now (a glyph's row as a left glyph and its
+column as a right one, in runs of glyphs; the cells are what pixie's walk
+answers): 21,020 → 13,780 bytes of kerning, and one search a side instead of
+one a subtable. A glyph's advance and offset share three bytes (7 a glyph,
+not 8). The ASCII blocks stored raw are the preset dictionary every other
+block is deflated against (zlib's `deflateSetDictionary`): 34,314 → 29,374
+bytes of deflated blocks, read where they lie by the inflater (a
+back-reference before the output's first byte reads the dictionary), so a
+block inflates into the same block-sized buffer as before. Every glyph's
+advance, box and outline and all 1,468,944 glyph pairs' kerning read the same
+as version 2's.
 
 ## Gradient fills paint in strips (2026-08-24)
 

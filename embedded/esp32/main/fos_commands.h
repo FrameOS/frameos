@@ -18,7 +18,8 @@
  * settings pulls (so a switch lands in that pass's render) and whenever the
  * backend nudges an awake frame (`POST /api/action/commands` on the local
  * HTTP server). A frame that stays awake pulls from its backend link task
- * instead, and the render task runs what came back. Each command goes through the same verb handlers a cloud
+ * instead, downloads there the scenes a deploy waiting asks for, and the
+ * render task runs what came back. Each command goes through the same verb handlers a cloud
  * verb takes (fos_cloud_dispatch_backend_command) and is acked by id, so the
  * backend knows applied from waiting. The ETags say what this frame holds of
  * its scenes and settings pulls: a queued deploy is acked by the backend when
@@ -41,9 +42,17 @@ bool fos_commands_sync(void);
 /* fos_commands_sync in two halves, for a frame that stays awake: the pull on
  * a task of its own (fos_client.c's backend link), the answer run on the
  * render task. The backend marks what it hands over `sent`, so an answer
- * that is fetched must be run. fos_commands_fetch returns the parsed answer
- * when it holds commands or asks for a sync, NULL otherwise; any task.
- * fos_commands_run runs and frees it, as fos_commands_sync would have;
- * render task only. */
-void *fos_commands_fetch(void);
+ * that is fetched must be run. fos_commands_fetch returns the answer when it
+ * holds commands or asks for a sync, NULL otherwise; any task but the render
+ * task. An answer that asks for a sync (a deploy waiting) comes with the
+ * scenes and settings it asks for, downloaded here: on the render task a
+ * 1.48 MB deploy froze the frame for 42 s. `reporting`: this pull reports the
+ * ETags of a sync just taken (fos_client_request_report_pull), and its own
+ * sync is not made. fos_commands_run runs and frees it, the fetched set and
+ * settings taken first, as fos_commands_sync would have; render task only.
+ * fos_commands_answer_fetched: the answer carries a fetched sync (the link
+ * task polls no scenes or settings until it has run: they would be fetched
+ * against a set not taken yet). */
+void *fos_commands_fetch(bool reporting);
 bool fos_commands_run(void *answer);
+bool fos_commands_answer_fetched(const void *answer);

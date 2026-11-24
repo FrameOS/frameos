@@ -18,6 +18,7 @@ from frameos/render_scale import MaxRenderScale
 import lib/tz
 import std/[monotimes, times]
 import frameos/channels
+from frameos/events_gen import contractEventIndex, ContractEventPolicies, ecInput
 import frameos/single_scene_host
 import frameos/scene_rhythm
 import frameos/layout_choice
@@ -34,7 +35,6 @@ import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
 import frameos/utils/svg_frames
-from frameos/utils/image import pointerToScenePoint
 # The loading mark's C entry points (fos_nim_loading_mark_*_impl), drawn by
 # the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
 import frameos/loading_mark
@@ -347,7 +347,16 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
         host.renderRequested = true
         persisted = true
     result = host.send(origin.get(), event, payload) or persisted
-    persistSceneState()
+    let index = contractEventIndex(event)
+    if index >= 0 and ContractEventPolicies[index].class == ecInput:
+      # A finger's or a key's event asks for its render when a handler
+      # changed something, and that render's pass looks at the state
+      # (renderCurrentScene); until then it is owed. Looked at here, every
+      # pointerMove of a drag and each of a tap's three events built the
+      # state and compared it, ~0.6 ms each on a SenseCAP Indicator.
+      persistOwed = true
+    else:
+      persistSceneState()
   except Exception as e:
     log("event " & $eventName & " failed: " & e.msg)
     result = false
@@ -792,7 +801,8 @@ proc setSceneCatalog*(indexJson: string): int =
         continue
       entries.add SwitcherEntry(id: id, name: item.textAt("name"), windowSize: item.textAt("windowSize"),
         # The store only checked its length; what is not an icon is none.
-        icon: sceneIconPath(item.textAt("icon")), category: item.textAt("category"))
+        icon: sceneIconPath(item.textAt("icon")), category: item.textAt("category"),
+        opens: item.textAt("opens"))
       intervals.add item{"refreshInterval"}.getFloat(0.0)
   sceneCatalog = move(entries)
   catalogRefresh = move(intervals)
@@ -1279,14 +1289,15 @@ proc beginKeptCanvasFrame*(): bool =
 proc endKeptCanvasFrame*() =
   endPanelFrame()
 
-proc pressTaken*(wireX, wireY: int): bool =
-  ## A position on the glass (0..PointerAxisMax) as the showing scene's pixel,
-  ## and whether something there takes a press.
+proc panelPressMapNow*(maxEntries: int): seq[PanelPressRect] =
+  ## Where a press on the glass does something, of what the last render drew,
+  ## in the panel's pixels (interpreter.panelPressMap). Kept by the glue after
+  ## every render for the touch task, which clicks at a press the moment it
+  ## lands, on its own core, while this task renders.
   if host.scene.isNil or frameConfig.isNil:
-    return false
-  let at = pointerToScenePoint(wireX, wireY, frameConfig.width, frameConfig.height, frameConfig.rotate,
-    frameConfig.flip)
-  pressTakenAt(host.scene, at.x, at.y)
+    return
+  panelPressMap(host.scene, sceneCanvasWidth(), sceneCanvasHeight(), frameConfig.rotate, frameConfig.flip,
+    maxEntries)
 
 proc canvasGenerationForRhythm(canvas: Image): int64 {.nimcall, raises: [].} =
   ## What wrote into this kept canvas since it was drawn (scene_rhythm.nim): a

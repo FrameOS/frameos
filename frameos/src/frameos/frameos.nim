@@ -3,6 +3,7 @@ import std/oserrors
 import std/monotimes
 import drivers/drivers as drivers
 import frameos/apps
+import frameos/boot_network
 import frameos/config
 import frameos/display_detect
 import frameos/input_sources
@@ -19,6 +20,7 @@ import frameos/types
 import frameos/utils/memory
 import frameos/portal as netportal
 import frameos/frame_settings_linux
+from frameos/frame_settings_lock import framePageOffered
 import frameos/scene_store_linux
 import frameos/scene_code_linux
 from frameos/upgrade import reconcileInterruptedUpgradeStatus, installedFrameOSVersion
@@ -324,7 +326,13 @@ proc start*(self: FrameOS) {.async.} =
     self.logger.log(%*{"event": "upgrade:interrupted", "error": e.msg})
   netportal.setLogger(self.logger)
   self.renderBootScreen("Starting up…")
-  if bootScreenSupported(self.frameConfig):
+  # A touch screen is set up on that screen: its scene comes up at once and
+  # the network is checked beside it (boot_network.nim). Every other frame
+  # waits for the check, as before.
+  let network = self.frameConfig.network
+  let networkPlan = bootNetworkPlan(self.frameConfig.device, network.networkCheck, network.networkCheckOnTouch,
+                                    network.wifiHotspot, framePageOffered(self.frameConfig))
+  if bootScreenSupported(self.frameConfig) and networkPlan.waits:
     let frameOS = self
     netportal.networkCheckProgressHook = proc(status: string) {.gcsafe.} =
       {.gcsafe.}:
@@ -333,14 +341,18 @@ proc start*(self: FrameOS) {.async.} =
       {.gcsafe.}:
         frameOS.bootScreenTick()
   # Decide (and log) NetworkManager vs wpa_supplicant before anything touches
-  # the radio, and let the supplicant backend rejoin its saved network.
-  netportal.ensureNetworkBackendReady(self)
+  # the radio, and let the supplicant backend rejoin its saved network: a
+  # touch screen's join (up to 15 s on the supplicant) goes behind its scene.
+  if networkPlan.behind:
+    netportal.pinNetworkBackend(self)
+  else:
+    netportal.ensureNetworkBackendReady(self)
 
   var firstSceneId: Option[SceneId] = none(SceneId)
   # The boot hotspot needs a connectivity probe to decide whether to start,
   # so it runs the network check even when "wait for network" is switched off.
-  let hotspotBootOnly = self.frameConfig.network.wifiHotspot == "bootOnly"
-  if self.frameConfig.network.networkCheck or hotspotBootOnly:
+  let hotspotBootOnly = networkPlan.hotspot
+  if networkPlan.waits:
     let connected = checkNetwork(self)
     netportal.networkCheckProgressHook = nil
     netportal.networkCheckTickHook = nil
@@ -360,11 +372,13 @@ proc start*(self: FrameOS) {.async.} =
         else:
           self.logger.log(%*{"event": "portal:startAp:startupFailed",
                              "status": $self.network.hotspotStatus})
-  else:
+  elif not networkPlan.behind:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
-  # The supplicant backend's join ends here; from now on the watchdog rejoins
-  # a link that drops or stops passing traffic. NetworkManager needs none.
-  netportal.startLinkWatchdog(self)
+  # The supplicant backend's join ends here (behind the scene: on the check's
+  # own thread); from now on the watchdog rejoins a link that drops or stops
+  # passing traffic. NetworkManager needs none.
+  if not networkPlan.behind:
+    netportal.startLinkWatchdog(self)
 
   let bootCrashCount = registerBootCrash()
   self.logger.log(%*{"event": "boot:guard", "crashesWithoutRender": bootCrashCount})
@@ -392,6 +406,8 @@ proc start*(self: FrameOS) {.async.} =
   self.runner.start(firstSceneId)
   # The runner owns the panel from here; the boot canvas is dead weight.
   bootCanvas = nil
+  if networkPlan.behind:
+    netportal.startNetworkCheckBehind(self, networkPlan.hotspot)
 
   # Cloud-managed frames (docs/cloud-frames.md): a background thread completes
   # any pending claim-token enrollment from provisioning and, once the frame is

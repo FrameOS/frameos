@@ -13,8 +13,9 @@ control plane, and any TrueType file a user adds), and the runtime reads each
   `fontPageSlots`, set by `embedded/embedded_main.nim`.
 - Tests: `src/frameos/utils/tests/test_file_font.nim` (every shipped font
   against pixie's whole parse), `pixie/tests/test_file_font.nim`,
-  `test_glyph_cache_budget.nim`, `test_fonts_scene.nim`,
-  `backend/app/utils/tests/test_font_for_card.py`.
+  `test_glyph_cache_budget.nim`, `test_fonts_scene.nim` (its Get fonts too),
+  `test_svg_text.nim`, `backend/app/utils/tests/test_font_for_card.py`,
+  `test_font_catalog.py`.
 - The sample: **Fonts** (`repo/scenes/samples/Fonts`, scene id `fonts`).
 
 ## What a face costs
@@ -229,6 +230,61 @@ and the frame reads them as they are. A font uploaded to `fonts/` in the
 Assets panel is a font of the frame the same way. The Files scene browses the
 folder.
 
+### From the frame itself: Get fonts
+
+The **Fonts** sample gets more fonts with no control plane at all: "Get fonts"
+in its bar lists a catalog, a family at a time with its kind, license, styles
+and size, narrowed by kind and a search, and "Get" downloads the family's files
+straight from where they are into `{assets}/fonts`. Nothing in the firmware is
+for it: the scene is one JS app on the calls every app has (`useFetch` for the
+catalog, `httpRequest` with a `Range` header and `base64`, `writeAsset` /
+`appendAsset`, `assetSize`, `deleteAsset`; the app's `assets-write`
+permission).
+
+- **The catalog** is `repo/fonts/catalog.txt`, read from GitHub
+  (`raw.githubusercontent.com/FrameOS/frameos/main/repo/fonts/catalog.txt`,
+  the scene's public `catalog` field: point it at one of your own). A family a
+  line, tab-separated: name, kind, license, then each style as `Style address
+  bytes [file]`, the address under the `base` line above it (or a whole
+  `https://` one), the file named `<Name without spaces>-<Style>.ttf` unless
+  it says. `frameos/tools/generate_font_catalog.py` makes it: the most popular
+  Latin families of each Google Fonts category (60 sans serif, 40 serif, 50
+  display, 35 handwriting, 15 monospace), each as its static Regular, Italic,
+  Bold and Bold Italic from fonts.gstatic.com (the TrueType files its CSS API
+  hands a client that asks for no WOFF; versioned addresses), and FrameOS's own
+  collection where Google Fonts does not have it (Liberation, FiraGO, Cascadia
+  Mono, Noto Color Emoji) from this repository at a fixed commit. The tool
+  downloads every file once and keeps it only if `font_for_card.py` says it is
+  read in place (TrueType outlines, no variable font, at most 1.2 MB a
+  style); the license is the folder the family is in on github.com/google/fonts
+  (OFL, Apache 2.0, the Ubuntu Font Licence). 205 families, 497 files, 78 MB
+  in all; the catalog is 41 KB, kept by the app as its lines, a family read
+  only when it shows. A family FrameOS ships keeps its file names, so what
+  "Sync fonts" put there shows as there.
+- **A download** goes a range of bytes a request: 64 KB on an ESP32 (the
+  answer is base64 in a JS string, 87 KB, never a whole file), 1 MB elsewhere;
+  each written as it comes (`writeAsset` for the first, `appendAsset` after)
+  and the file checked against its size at the end, or deleted. A render
+  downloads for 1.2 s on a fast screen and asks for the next render at once
+  (the progress shows), up to 40 s on e-paper (one refresh with the font). The
+  job is the private `getting` field on disk, so a restart goes on from what
+  is on the card; a request that fails is tried at the next two renders, then
+  said. Both servers answer ranges and send `Access-Control-Allow-Origin: *`,
+  what the browser preview's direct requests need (not tried in a browser
+  yet; a request that fails there goes through the plane's preview proxy).
+- **Drawn at once.** A face named by its file (`font-[Lora-Regular.ttf]`, the
+  Text app's font) that the fonts folder has and its listing does not lists the
+  folder again (`svgFontFileFor`), so the font a download just wrote draws in
+  the same render; a family name (`font-[Lora]`) finds it within the
+  listing's 30 s. A runtime before this draws a new file's name in the
+  built-in face until then.
+- **Not in the frame page.** A fonts entry in the settings on the screen would
+  be Nim in every image for what a scene already does; the Fonts scene is on
+  the store and in every runtime's samples.
+- Free space is not shown: no call tells an app what a card has left. A write
+  that does not fit fails (`assetWriteTarget`: the file plus 64 KB on an
+  ESP32), and the scene says so.
+
 ## How a scene names a card font
 
 The same ways as on a Pi, now all honoured on an ESP32:
@@ -238,7 +294,8 @@ The same ways as on a Pi, now all honoured on an ESP32:
 - SVG `font-family` and the JSX layer's `font-[Family_Name]` (or
   `font-[File-Name.ttf]`): a family, matched loosely against the folder's
   files with weight and italic (`svgFontFileFor`; the folder is listed at
-  most every 30 s, so a scene naming forty families lists it once).
+  most every 30 s, so a scene naming forty families lists it once, and again
+  when a file named is there and the listing does not have it).
 
 A name the frame does not have draws in the built-in face. On a Pi the first
 eight faces SVG and JSX name are parsed whole as before and the rest read in

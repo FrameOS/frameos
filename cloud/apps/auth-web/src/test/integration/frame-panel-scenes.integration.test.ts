@@ -149,6 +149,7 @@ async function addVersion(
   name: string,
   riskFlags: string[] = [],
   isLayout = false,
+  extra: Record<string, unknown> = {},
 ) {
   const scenes = runtimeIds.map((id) => ({
     edges: [],
@@ -156,6 +157,7 @@ async function addVersion(
     name: `${name} ${id}`,
     nodes: [],
     settings: { execution: "interpreted", ...(isLayout ? { isLayout: true } : {}) },
+    ...extra,
   }));
   await db.insert(storeSceneVersions).values({
     content: Buffer.from(zipSync({ "scene/scenes.json": new TextEncoder().encode(JSON.stringify(scenes)) })),
@@ -345,6 +347,29 @@ describe("GET /api/store/device/scenes", () => {
     expect((await read("exclude=games")).scenes).toHaveLength(5);
   });
 
+  it("puts the scenes made for a round screen first on a round panel, the first need asked weighing most", async () => {
+    const { accountId } = await account("Publisher");
+    for (let i = 0; i < 3; i += 1) {
+      await storeScene(accountId, `Weather ${i}`);
+    }
+    const dial = await storeScene(accountId, "Dial", { category: "clocks", needs: ["round"] });
+    const spin = await storeScene(accountId, "Spin", { category: "games", needs: ["fast"] });
+    const both = await storeScene(accountId, "Orbit", { category: "fun", needs: ["fast", "round"] });
+    const read = async (query: string) =>
+      (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
+        scenes: { id: string; needs?: string[] }[];
+      };
+
+    const round = await read("prefer=round");
+    expect(round.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual([dial.id, both.id].sort());
+    expect(round.scenes.find((scene) => scene.id === dial.id)?.needs).toEqual(["round"]);
+    // A round LCD: round first, then fast among them and after them.
+    const roundFast = await read("prefer=round,fast");
+    expect(roundFast.scenes.slice(0, 3).map((scene) => scene.id)).toEqual([both.id, dial.id, spin.id]);
+    // Round rules nothing out.
+    expect((await read("without=round")).scenes).toHaveLength(6);
+  });
+
   it("answers one listed scene with its newest version and a short description", async () => {
     const { accountId } = await account("Publisher");
     const scene = await storeScene(accountId, "Rain radar", { description: "word ".repeat(100) });
@@ -452,6 +477,67 @@ describe("POST /api/frames/{id}/panel/scenes", () => {
 
     const again = await panel(frame.frame_id, frame.access_token, { action: "update", scene_id: radar.id });
     expect(await again.json()).toMatchObject({ ok: true, status: "up_to_date" });
+  });
+
+  it("lists the updates a frame may take and takes them all in one push", async () => {
+    const frame = await activeFrame();
+    const clock = await storeScene(frame.accountId, "Clock", { visibility: "private" });
+    const { accountId: publisherId } = await account("Publisher");
+    const radar = await storeScene(publisherId, "Rain radar", { runtimeIds: ["radar-rt"] });
+    const terminal = await storeScene(publisherId, "Terminal", { runtimeIds: ["term-rt"] });
+    const current = await storeScene(publisherId, "Calendar", { runtimeIds: ["cal-rt"] });
+    await assignScenes(frame.frame_id, [clock.id, radar.id, terminal.id, current.id]);
+    // The owner's private scene has a newer version too: a frame names
+    // public store scenes only.
+    await addVersion(clock.id, 2, clock.runtimeIds, "Clock");
+    await addVersion(radar.id, 2, ["radar-rt"], "Rain radar");
+    await addVersion(radar.id, 3, ["radar-rt"], "Rain radar");
+    // A version that starts asking for the frame's settings.
+    const asksForFrame = {
+      apps: { t: { sources: { "app.ts": "export function get() {}", "config.json": '{"permissions":["frame"]}' } } },
+    };
+    await addVersion(terminal.id, 2, ["term-rt"], "Terminal", [], false, asksForFrame);
+
+    const listed = await panel(frame.frame_id, frame.access_token, { action: "updates" });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({
+      ok: true,
+      updates: [
+        { from: 1, name: "Rain radar", store: radar.id, to: 3 },
+        { from: 1, name: "Terminal", owner: true, store: terminal.id, to: 2 },
+      ],
+    });
+    // A read sends nothing.
+    expect(await newestPush(frame.frame_id)).toBeUndefined();
+
+    // The one that asks for more is its owner's to update.
+    const widened = await panel(frame.frame_id, frame.access_token, { action: "update", scene_id: terminal.id });
+    expect(widened.status).toBe(403);
+    expect(await widened.json()).toMatchObject({ error: "needs_owner", needs: ["frame"], ok: false });
+    expect((await panel(frame.frame_id, frame.access_token, { action: "update", scene_id: clock.id })).status).toBe(404);
+
+    const all = await panel(frame.frame_id, frame.access_token, { action: "updateAll" });
+    expect(all.status).toBe(200);
+    expect(await all.json()).toMatchObject({ kept: 1, ok: true, status: "queued", updated: 1 });
+    // One push: the radar moved, the rest as the frame holds them.
+    const pushes = await db
+      .select({ id: frameCommands.id })
+      .from(frameCommands)
+      .where(and(eq(frameCommands.frameId, frame.frame_id), eq(frameCommands.type, "set_scenes")));
+    expect(pushes).toHaveLength(1);
+    const push = await newestPush(frame.frame_id);
+    const versionOf = (id: string) =>
+      (push?.scenes.find((scene) => scene.id === id)?.origin as { version?: string } | undefined)?.version;
+    expect(versionOf("radar-rt")).toBe("3");
+    expect(versionOf("term-rt")).toBe("1");
+    expect(versionOf(clock.runtimeIds[0]!)).toBe("1");
+
+    const again = await panel(frame.frame_id, frame.access_token, { action: "updateAll" });
+    expect(await again.json()).toMatchObject({ kept: 1, ok: true, status: "up_to_date", updated: 0 });
+    const after = await panel(frame.frame_id, frame.access_token, { action: "updates" });
+    expect(((await after.json()) as { updates: { store: string }[] }).updates.map((row) => row.store)).toEqual([
+      terminal.id,
+    ]);
   });
 
   it("removes one installed scene and pushes the rest", async () => {

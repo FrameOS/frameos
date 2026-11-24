@@ -71,9 +71,17 @@ typedef struct {
 } fos_mic_pins_t;
 
 typedef struct {
-    int8_t pin;
+    int8_t pin; /* a GPIO; in fos_buttons.c's own list also FOS_BUTTON_EXPANDER_PIN(n) */
     char label[FOS_GPIO_BUTTON_LABEL_LEN];
 } fos_gpio_button_t;
+/* A key on the board's I2C IO expander's pin `n`, not a GPIO: the Waveshare
+ * ESP32-S3-Touch-AMOLED-1.75's PWR key is its TCA9554's P4
+ * (fos_board_expander_keys). The board's, like its touch pins: no setting
+ * names it, the button task adds it to the configured keys, reads it by its
+ * poll, and it can wake nothing. */
+#define FOS_BUTTON_EXPANDER_BASE 64
+#define FOS_BUTTON_EXPANDER_PIN(n) (FOS_BUTTON_EXPANDER_BASE + (n))
+#define FOS_BUTTON_IS_EXPANDER(pin) ((pin) >= FOS_BUTTON_EXPANDER_BASE && (pin) < FOS_BUTTON_EXPANDER_BASE + 8)
 
 /* The capacitive touch panel (fos_touch.c; docs/events.md "Input"): a GT911
  * on its I2C bus, its interrupt line, its reset and the load switch that

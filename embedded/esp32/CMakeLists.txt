@@ -79,3 +79,13 @@ if(CONFIG_IDF_TARGET_ARCH_XTENSA)
     idf_build_set_property(COMPILE_OPTIONS "-mno-target-align" APPEND)
     target_link_options(${CMAKE_PROJECT_NAME}.elf PRIVATE "-Wl,--size-opt")
 endif()
+
+# A failed assert calls __assert_func with no arguments, in everything
+# compiled from source (main/fos_assert.h, which says why that is the same
+# call): newlib defines the function and QuickJS has its own, so they keep
+# the plain one. The bootloader is a project of its own and is not given it.
+idf_build_set_property(COMPILE_OPTIONS "SHELL:-include ${CMAKE_CURRENT_LIST_DIR}/main/fos_assert.h" APPEND)
+foreach(fos_plain_assert newlib frameos_quickjs)
+    idf_component_get_property(fos_plain_assert_lib ${fos_plain_assert} COMPONENT_LIB)
+    target_compile_definitions(${fos_plain_assert_lib} PRIVATE FOS_ASSERT_PLAIN)
+endforeach()

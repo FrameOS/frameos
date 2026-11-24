@@ -106,6 +106,44 @@ block:
   doAssert renderInto(42, frame(42)) == W * H
   doAssert closeTo(buffers[0], wholeRender(frame(42)))
 
+block:
+  # An e-paper's one canvas (the IT8951's, whose upload hashes only the box a
+  # render gives): every pixel a render changed is inside its box, and a
+  # render that cannot say gives none.
+  var store = newSeq[uint16](W * H)
+  let canvas = newImage565Over(W, H, addr store[0])
+  canvas.ditherStores = true
+  template paintOnce(doc: string, whole = true): tuple[known: bool, x, y, w, h: int] =
+    beginPanelFrame(canvas.bufferPointer, 0)
+    var owed = some(color(0, 0, 0, 1))
+    doAssert renderSvgFrame(doc, canvas, owed, whole)
+    let paint = takePanelPaint()
+    endPanelFrame()
+    paint
+  doAssert not paintOnce(frame(0)).known, "the first frame is drawn whole: no box"
+  for i in 1 ..< 14:
+    let before = store
+    let paint = paintOnce(frame(i))
+    doAssert paint.known, &"frame {i}: no box"
+    for y in 0 ..< H:
+      for x in 0 ..< W:
+        if store[y * W + x] != before[y * W + x]:
+          doAssert x >= paint.x and x < paint.x + paint.w and y >= paint.y and y < paint.y + paint.h,
+            &"frame {i}: ({x}, {y}) changed outside {paint}"
+  doAssert not paintOnce(frame(20), whole = false).known, "not the whole frame: no box"
+  discard paintOnce(frame(21))
+  # Two SVGs in one render: no box either.
+  beginPanelFrame(canvas.bufferPointer, 0)
+  var owed = some(color(0, 0, 0, 1))
+  doAssert renderSvgFrame(frame(22), canvas, owed, true)
+  doAssert renderSvgFrame(frame(23), canvas, owed, true)
+  doAssert not takePanelPaint().known, "two paints: no box"
+  endPanelFrame()
+  # After two paints the next render still knows its own box.
+  doAssert paintOnce(frame(24)).known
+  # This canvas goes with the block: no record of it may stay behind.
+  forgetPanelFrames()
+
 
 block:
   # Three buffers in turn (the SenseCAP Indicator's), a panel of six cards

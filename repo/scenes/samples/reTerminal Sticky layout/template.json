@@ -1,6 +1,6 @@
 {
   "name": "reTerminal Sticky layout",
-  "description": "Made for the Seeed reTerminal Sticky: the scene fills the glass, and the scene list becomes a home screen with the time, the battery, the signal and how to get around.",
+  "description": "Made for the Seeed reTerminal Sticky: a thin bar over every scene with the time, the date, the signal and the battery, and the scene list as a home screen with the same, big, and how to get around.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

@@ -1111,6 +1111,9 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "networkCheck": network.get('networkCheck', True),
             "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 30)),
             "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
+            # A touch screen draws first and checks behind its scene unless
+            # this says to wait (frameos/src/frameos/boot_network.nim).
+            "networkCheckOnTouch": bool(network.get('networkCheckOnTouch', False)),
             "wifiHotspot": network.get('wifiHotspot', "disabled"),
             # Blank: the frame makes up its own (hotspot_credentials.nim).
             # A row from before blank was the default keeps the old pair.

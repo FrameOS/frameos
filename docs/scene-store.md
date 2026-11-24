@@ -41,13 +41,14 @@ frame's credential) and two bridge calls.
   busy, error, done,     // the action running, the last one's refusal, the last that worked
   installed: [{ id, store, v }], // every scene on the frame from the store
   preview: { store, id, name } | null,
+  updates?: [{ store, name, from, to, owner? }], // the plane's: below
   removeAny,             // a frame with no plane may delete any scene
   previewOnly? }         // the browser preview's host: Preview, never Install
 ```
 
 `frameos.storeAction(action, args)` asks for work and returns at once:
 `preview {store, name}`, `install {store, name, show}`,
-`update {store}`, `remove {store}`, `discard`. One runs at a time (one asked
+`update {store}`, `updateAll`, `remove {store}`, `discard`. One runs at a time (one asked
 while another runs is dropped: `busy` says what runs). The host does it off
 the render task and renders the scene that asked again when it is done, if
 that scene still shows (the Pi checks `shownSceneId()`, the ESP32
@@ -157,12 +158,16 @@ the latest's): `fast` (it redraws more than once a second: a
 `refreshInterval` under 1 s; never a layout), `touch` (taps or a mouse, one
 thing to the runtime: JSX handlers, pointer events), `keys` (a keyboard: key
 events, text input), `buttons` (the frame's own GPIO buttons), `linux`
-(Chromium, FFmpeg, a shell command). The store front shows them on each tile
-("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only") and
-filters by them (Any screen, Fits e-paper, Made for fast screens, Touch &
-mouse, Keyboard). A frame's own store leaves out what it cannot
-run (`without=fast` on a slow panel, `linux` on an ESP32) and puts `fast`
-first on a fast one. Touch and keys rule nothing out: the frame's buttons and
+(Chromium, FFmpeg, a shell command), and `round`, which is no need but a
+fit: the scene works on a round screen too (code that asks `context.round`
+or `app.frame.round`, or `settings.round`, which wins either way;
+docs/scene-guide.md "Round panels"). The store front shows them on each tile
+("Fast screen", "Touch & mouse", "Keyboard", "Buttons", "Pi only", "Round
+screen") and filters by them (Any screen, Fits e-paper, Made for fast
+screens, Touch & mouse, Keyboard, Round screens). A frame's own store leaves
+out what it cannot run (`without=fast` on a slow panel, `linux` on an ESP32)
+and puts what fits first: `prefer=fast` on a fast panel, `round` on a round
+one (`prefer=round,fast`, the first weighing most). Round rules nothing out. Touch and keys rule nothing out: the frame's buttons and
 its pages reach any scene. Versions from before the column are read by
 `pnpm --filter @frameos-cloud/auth-web scene:backfill-needs`.
 
@@ -180,14 +185,23 @@ for the voice chat). A Pi does not know its id on the backend and posts to
 answers 404 with no `error` of its own is older than this route: both hosts
 report `plane_update_required`, and the app says the plane needs a newer
 version (it said the store did not answer, which sent people to the wrong
-place). A store id the app hands over goes into a URL path on the ESP32, so it
-must be a UUID or nothing.
+place). A plane that does not answer at all (asleep, unreachable, an error
+with no word of its own) is `plane_unavailable`, "The control plane did not
+answer", never `store_unavailable`: that word is the plane's, for a store it
+could not reach itself. Saying the store did not answer sent a Sticky's owner
+to the store while the laptop running its backend slept (2026-11-23). The
+ESP32 tries a request that never reached the plane three times, 3 s apart
+(a frame in a hand drops its Wi-Fi for seconds), never one the plane may have
+taken, and logs each refusal as `sceneStore:error`. A store id the app hands
+over goes into a URL path on the ESP32, so it must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
 | `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
 | `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it |
-| `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is) |
+| `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is); `needs_owner` when that version asks for more (below) |
+| `updates` | none | reads, changes nothing: `{"ok": true, "updates": [{store, name, from, to, owner?}]}`, each public store scene the frame holds with a newer version it can run, in the frame's order |
+| `updateAll` | none | moves every one of `updates` without `owner` in ONE push (`{"status", "updated", "kept"}`: `kept` the ones left to the owner) |
 | `remove` | the same | takes it off the list and pushes the rest |
 | `discard` | the runtime id to go back to | ends the preview and pushes the list, showing that scene (the store) |
 
@@ -208,9 +222,16 @@ What a frame may ask is narrower than what its owner may:
   never widen a grant (`docs/cloud-frames.md`, "Scenes the frame already
   had"); the answer's `needs_settings_groups` says what it asks for, and the
   owner allows it where grants are made.
+- **An update asks for nothing more.** A version whose apps ask for a
+  permission or a settings key the version the frame holds did not (the code
+  editor's rule: backend `panel_code.grants_widened_by`, cloud
+  `panel-code-grants.ts`) is refused (`needs_owner`, with `needs`), listed with
+  `owner: true` and left out of `updateAll`: the owner updates it in the
+  workspace, where access is granted.
 - **Nothing while the settings on the frame's screen are off** (`panel_locked`).
 - **A frame keeps one scene** (`last_scene`).
-- Sixty changes a quarter of an hour per frame.
+- Sixty changes a quarter of an hour per frame, and 120 `updates` reads in a
+  bucket of their own, so reading never costs a tap.
 
 A refusal is `{"ok": false, "error": <code>}`, and the app says it in words
 (`WORDS` in its `app.tsx`).
@@ -233,6 +254,35 @@ sceneId}` (`scene-origin.ts`), and the frame keeps it. The host reads it off
 each scene: the ESP32 from each scene's file, found by its keys without parsing
 the scene, cached by the content hash the index already has; the Pi from its
 scenes on disk. That is what "on frame" and Update are measured against.
+
+### What has updates
+
+Which of them the store has a newer version of is the plane's to say: it
+knows which version it sent (the cloud's `assigned_scene_state`, a backend's
+`origin.version` on `frame.scenes`), which the frame may run (the cloud leaves
+out a version that needs a newer FrameOS or runs shell commands, a backend
+what the store's listing for frames does not offer) and which asks for more.
+The host asks `updates` when a read of its facts finds the answer five
+minutes old (or another plane's), after a change it asked for, and on an
+ESP32 with the re-read after a push changed its scenes, and keeps the answer
+as it came (`updates` in the facts; the ESP32 asks it once, never three
+times, and never pulls commands after it). The Pi re-reads what came from the
+store when another scene reads the facts, at most every half a minute: on a
+desktop two readers may show at once. An old plane refuses
+the action, and the facts have no `updates`. A frame with no plane has none:
+the app lists nothing.
+
+The frame page (`docs/scene-settings.md` "The frame page") reads the same
+facts: a "Scenes" line with their count and **Update scenes**, which asks the
+host for `updateAll`. While it shows, the host's news draws it again (the
+ESP32's `fos_scenes_settings_shown`).
+
+`updateAll` is one push however many scenes move: the cloud's
+`updateAssignedScenesToLatest` with every scene it may take (the workspace's
+"Update all scenes"), a backend's saved list changed once and sent once. Each
+scene keeps its install's id, name, field values, button map and layout, as
+`update` does; the deploy progress moves as for any push, and an ESP32 gets
+the set the way it gets every set (a patch, in parts, or whole).
 
 ### Trying a layout
 
@@ -333,6 +383,14 @@ kept.
   refresh) and takes a page's covers before its one refresh. A grey or black
   and white panel (`app.frame.color === false`) gets the high-contrast look,
   as e-paper does. A layout has Try instead of Preview (above).
+- **Updates first.** Where the plane lists updates, an Updates entry with
+  their count tops the categories (the side panel of a wide window, the front
+  of a narrow one) on both sides. It opens a list: each scene's name and
+  "Version 2 to 4" with Update, Update all where more than one may be taken
+  here, and in place of Update the words for one only the owner may take. A
+  scene's page offers no Update for that one either. With no plane (or in the
+  browser preview) there is no entry, and a spot left on it opens the
+  categories.
 - **Keys alone** (a frame with buttons and no glass) cannot drive it yet: the
   JSX layer has no focus for keys (`docs/ui-todo.md`).
 
@@ -343,6 +401,27 @@ kept.
 - `frameos.listAssets(dir, { shallow: true })` lists one folder (folders end in
   `/`), so a large SD card is walked a folder at a time; a runtime before
   2026.11.8 lists every file below and the app reads the folders off the paths.
+- **A storage that cannot be read is not an empty folder.** The app lists with
+  `strict: true`, which answers null when the storage's root is not there or a
+  read fails (2026.11.15+; a runtime before says `[]`). It then says "The TF
+  card cannot be read right now." with Try again, keeps the spot (folder, page,
+  picture open), never keeps that answer, and lists again every 5 s, six
+  times (counted in the spot, on disk, so a frame that deep-sleeps between
+  tries stops too). A listing is kept 30 s otherwise, and not when the clock went back
+  (a frame sets it once online). **Reload** in the header, and opening a place
+  from the top, drop what was read (the listing, sizes, thumbnails) and list
+  the folder again.
+- **A file that is no picture opens in the scene that reads it.** A scene
+  names the kinds of file it opens (`settings.opens`, its extensions as text:
+  the PDF viewer `"pdf"`, the ePub reader `"epub"`, the Code editor
+  `"txt md json csv ..."`; docs/scene-guide.md), every host lists that as
+  `opens` on `app.frame.scenes` (`listingItem`; an ESP32 keeps it in its scene
+  index, `make_entry`'s `keep_text`), and a tap on such a file is
+  `setCurrentScene {sceneId, state: {file: "<storage>:<path>"}}`: the scene's
+  public field `file`, which it reads once and sets back to `""`. The first
+  scene in the frame's order that opens the kind wins. With none, a card over
+  the page says "Can't open .mp3 files" and a tap puts it away; in the
+  browser preview such a file is downloaded instead, as before.
 - **Thumbnails or a list**, two buttons in its header. Thumbnails are
   `frameos.loadAssetImage(path, { keep: true, width, height })`: decoded at the
   tile's size (a JPEG scaled as it decodes, `readImageIntoTarget`), one a pass

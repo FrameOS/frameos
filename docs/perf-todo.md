@@ -261,7 +261,141 @@ refill interrupt takes about half of the render's core while it scans.
   about what this board has for it. 50 fps would need the effect out of
   QuickJS.
 
+## A tap on the E1003, lift to waveform (2026-11-24)
+
+Of ~185 ms between a tap's lift and its DU starting on the reTerminal E1003,
+the render was 22 ms (main's signal() Calculator). The rest, from the
+`render:timeline` line (`set debug 1`) and the code:
+
+| | 2026.11.14 | now |
+| --- | --- | --- |
+| render done → update call (a SHA-256 of 1.3 MB for the display state) | 43.5 ms | 0.8 |
+| hash of every tile before the upload | ~30-50 (inside `update`) | 0: the render's box |
+| `it8951:` printf behind the render's lines, HRDY in 10 ms ticks | 10-45 | gone |
+| NVS commit of the display state after the update | 14.2 | 0.1 |
+| lift → DU starts | ~185 | ~37-50 |
+| `render #N done in` (probe off) | 183 | 78-98 |
+
+How (docs/realtime-rendering.md "Partial refresh on e-paper"): the render's
+box (`svg_frames` `takePanelPaint`) is what is hashed before the upload, and
+the whole picture after the waveform has started (31 ms on both cores, 20 ms
+when nothing changed), any tile it missed sent in a follow-up and logged; the
+display state is not hashed or written while somebody taps, only when the
+hold releases and before a deep sleep; the log ring; LUTAFSR polled per tick,
+then every 0.5 ms near the waveform's end (DUs ran 413-443 ms); the settle at
+4.5 s and never under a finger; any change while tapping one DU; GT911 reads
+of 9 bytes at 400 kHz. Standby: SYS_RUN answered in 22 ms, but the first
+waveform after a standby ran 898 ms against 580, so on USB power the
+controller is no longer put in standby; at boot its 1.9 s bring-up runs while
+Wi-Fi joins (done 3.0 s after `restart`, the first render at 7.0 s).
+
+## A tap lays out, sets in type and parses only what changed (2026-11-24)
+
+Where a tap's render went on a SenseCAP Indicator (2026.11.14, `set debug 1`,
+main's `signal()` Calculator sample, one key): render 46 ms (37 without the
+probe), of which **layout 25 to 29 ms, its text 10.5 ms, on every tap**,
+where the same scene on a reTerminal E1003 laid out in 2.2 ms. And a to-do
+list's tap parsed 15 ms of SVG with nothing in the list changed. Three
+caches kept too little:
+
+- **A label kept one arrangement.** A text in a flex row is measured in the
+  room its container offers (106 px for a key), then set in the width it
+  took (19 px): two widths, three or four layout calls a layout. One kept
+  arrangement missed at every other call, and each miss built the memo key
+  and looked it up in the memo's lists, 197 lookups a press of the
+  Calculator (`ui/layout.nim` `arrange`). A text node keeps two now, each
+  with its memo entry; entries are refs the node holds, so a label that did
+  not change is neither looked up nor set, and stays in the memo (`claim`).
+- **A node kept two layout answers.** An item of a row in a column is asked
+  three questions a layout (in the room, at its width, at its width and
+  height): every node of the keypad was laid out again at every press. Four
+  kept (`older`), a press of the test's keypad makes 55 layout calls where
+  it made 335, and looks up 3 texts where it looked up 161
+  (`test_ui_layout.nim` "a key pressed in a grid lays out that key alone").
+- **A changed picture deep in a UI kept its old parse.** pixie keeps the
+  parse of a nested viewport's children since #997, so a node that
+  `fillSceneImages` or `fillUrlImagesIn` changes in place (a `<Scene>`'s
+  picture, an `<img src>` that came in) is forgotten with its ancestors now,
+  not alone. A test pins the list case ("a change in a list that scrolls
+  parses that row alone": 4 nodes parsed when one of twelve rows changes).
+
+The render line gained `copy`, under `damage`: the pixels copied in from
+another of the LCD's buffers.
+
+On the SenseCAP Indicator, main (eae3bfe32) against this change, the same
+board and session, five taps each after a warm one, medians:
+
+| | main | now |
+| --- | --- | --- |
+| Calculator (`signal()`), a key's render, probe on | 45 ms: layout 25.1, text 10.2 | **24 ms**: layout 4.0, text 0.3 |
+| the same, probe off | 38 ms | **20 ms** |
+| the same, a tap's two renders (press and result, `render:burst`) | 53 ms each | **33 ms** each |
+| Calculator (2026.11.14's, `get()` every tap), layout of a render | 32.3 ms, text 10.7 | 7.5 ms, text 0.3 |
+| To-do, a tap in a row's field: parse | 16.3 ms | 4.5 ms (nested parses kept: the board ran this branch's own version, #997's landed first and is the one kept) |
+| Home, a card's toggle | 47 ms | 45 ms (raster 15: the card) |
+
+## A press shows at once (2026-11-24)
+
+An hour of console taps on release 2026.11.14 (the SenseCAP Indicator and the
+reTerminal E1003, `set debug 1`; main's `signal()` samples beside the boards'
+older copies) found the render itself no longer the main cost of a tap on
+either. On the SenseCAP the `signal()` Calculator's key renders in 37 ms (46
+with the probe on), of which layout is 25 to 29 (text 10.5 every tap); the
+same scene on the E1003 renders in 22 ms. But on the LCD nothing showed until
+that render was on the glass, 80 to 110 ms after the finger (the touch
+chip's 10 ms poll, the 20 ms settle, the dispatch, the press render, a scan),
+and on an element with no `active:` class not until the lift; a tap behind a
+timed render waited for all of it. On the E1003 nothing moved on the glass
+before the answer's waveform started (~0.2 s after the lift) and finished
+(~0.5 s more). What changed (docs/realtime-rendering.md "A press shows at
+once"):
+
+| | before | now |
+| --- | --- | --- |
+| SenseCAP: contact to the pressed element shaded on the glass | 80-110 ms (`active:` only), else at the lift | 5 ms after the first report: within the 10 ms poll and a 24 ms scan, `active:` class or not |
+| SenseCAP: a quick tap behind a busy render | never looked pressed | its `active:` look with the answer, 150 ms |
+| SenseCAP: a handler that blocks (sync fetch in `onClick`) | no sign until its render | the loading mark at 0.5 s |
+| Either: a timed render due under a finger | the tap waited for all of it | waits for the lift (1.5 s at most) |
+| E1003: contact to something showing | the answer's waveform, ~0.4-0.7 s after the lift | the LED at the press; a slow element (the Press test's 1.5 s button) inked: its DU started 39 ms after the render task took the press, the upload included; the quick button beside it is not inked |
+| E1003: a scene switch somebody waits for | nothing on the glass for 1.4-6 s | the loading tile, its DU started 56 ms into the switch |
+
+What it costs: about 7.5 KB of the S3 image (3,224,576 bytes against the
+3,217,024 of #994, the main this was built on: `fos_client.c` and
+`fos_touch.c` most of it, `lcd_press.c` 0.4 KB, `fos_press.c` 0.3 KB), 115
+KB of PSRAM on the SenseCAP once a press has been lit (a quarter of the
+panel's pixels, for the biggest box), and the press map made after every
+render on an LCD too. That build is 0.02 us on a host for DVD Logo Bounce
+(nothing to press) and 0.32 us for the Home panel (six entries), and an
+animation's quiet frame on a scene whose last map was empty builds none
+(`press_map_publish`). Main and this branch in turn on one SenseCAP, DVD
+Logo Bounce's steady ten seconds: 29.6 fps (296 frames, 28 ms a frame)
+against 29.5 (295, 29 ms; the line rounds to whole ms), twice each, before
+that gate. The 27 ms of 2026.11.14 against 30 seen earlier the same day was
+main's own change since the release: main itself measured 28.
+
 ## Still open
+
+- **A render that is already running is not stopped for a tap** (2026-11-24).
+  A timed render no longer starts under a finger (`fos_timed_render_waits_for_finger`),
+  but one under way when the finger lands runs to its end: there is no safe
+  checkpoint. The scene program runs its nodes in one go and a node's own
+  work has none (the Slideshow's 0.5-0.7 s is one JPEG decode); stopping
+  between nodes, or through QuickJS's interrupt handler, would leave a
+  `get()` half run (a slideshow's index moved on, its photo not drawn), the
+  e-paper canvas (the panel buffer itself) half drawn and the damage records
+  of `svg_frames.nim` describing a frame that is not there. It would need a
+  render to be a transaction it is not. The lit press (an LCD) and the ink
+  and LED (e-paper) are what shows meanwhile.
+- **Closing the scene switcher on the E1003 renders the covered scene again**
+  (Analog clock face 2.9 s and a GC16). Keeping its picture in the IT8951's
+  memory (a second image buffer: `LISAR` on load, `DPY_BUF_AREA` to show it)
+  was looked at and not built: the controller's buffer starts at 3.86 MB
+  (`0x003dbe78`) and a second 1872x1404 frame needs 2.6 MB more, which the
+  SDRAM's size (not reported by the controller) was not shown to hold; and the
+  frame's own canvas is the panel buffer, which the switcher draws over, so
+  the covered scene's picture would have to be kept on the board too (1.3 MB
+  of PSRAM) for the next tap's damage to be right. The loading tile shows
+  while it renders.
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
   the app node outside the probed phases: not located.
@@ -272,7 +406,29 @@ refill interrupt takes about half of the render's core while it scans.
   ESP32): needs the prelude's Proxy views of `app.config` / `state` /
   `frame` / `context` replaced first.
 - **Dirty flags and relayout boundaries** on the `UiNode` tree, an in-place
-  reconcile: what is left of layout and emit.
+  reconcile: what is left of layout and emit. With four answers kept, a
+  press of a 4x4 keypad still makes 55 layout calls: the pressed key's row,
+  the column and the root are built again, have no answers, and ask their
+  kept children again at each of their own calls.
+- **The first two renders after a scene's first picture copy a whole frame**
+  on an LCD: the other two buffers hold no record of the new scene, so each
+  takes the newest frame in whole (`copy` 22 to 25 ms on the SenseCAP, the
+  first two taps of a Home or To-do panel), and only then repaints by
+  damage. Copying the first picture into the idle buffers while the frame
+  waits (an async DMA copy, recorded as their frames) would take it off
+  those taps.
+- **The scene switcher's open on a SenseCAP** is not the 1.7 to 1.9 s of the
+  2026.11.14 bench run on main: 920 to 954 ms the first time after a boot
+  (raster 546 to 560, of which 385 ms are 187 glyphs drawn into the glyph
+  cache for the first time; layout 188 to 238, text 168 to 218), 121 to
+  206 ms after. The first open's text is the place to look.
+- **The SenseCAP's pixel clock** (12 MHz since 2026-10-25, when 16 and 18
+  dropped frames on 160 MHz DIO flash; the image runs 240 MHz QIO now):
+  `lcd pclk 14` and `16` on 2026-11-24 dropped no frame in 25 s of DVD Logo
+  Bounce, and lost 5 or 6 during a flash write as 12 MHz does. DVD Logo
+  Bounce ran 29.5 fps at 12 and 14 MHz and 27.6 at 16. 14 MHz (49.3 Hz)
+  would take ~3.4 ms off the average wait for the next frame and its scan;
+  not the default until a soak under Wi-Fi traffic says it holds.
 - **Refs with setters and a native `frameos.animate`** (a drag or an
   animation without `get()`): new API, needs a design.
 - **Scroll as a row move**: nothing on the bench board scrolls (the
@@ -284,6 +440,25 @@ refill interrupt takes about half of the render's core while it scans.
 - An e-paper board (Gray8 surface, the reTerminal E1003's touch) and a Pi
   have not been benchmarked with these changes; the cache and blits run on
   every surface and their test covers RGBX, 565 and Gray8.
+- **A DU's picture at 1 or 2 bits a pixel** (the IT8951): while somebody taps
+  every changed tile goes up as 4 bpp and is halftoned to black and white on
+  the way, so a whole-panel change is 1.3 MB on a 20 MHz bus, ~0.55 s before
+  its DU starts. The controller has a 1 bpp mode (register UP1SR bit 2 and
+  the foreground/background greys in BGVR, an 8 bpp load whose bytes are
+  eight pixels each: Waveshare's `EPD_IT8951_1bp_Refresh`), a quarter of the
+  bytes. Not done: the mirrored E1003 reverses bits as well as bytes, the
+  mode has to be switched off before the next 4 bpp load (after its
+  waveform, which the driver otherwise never waits for), and a wrong bit
+  order only shows on the glass, which no bench check can read. Worth it for
+  page turns by tap; a key's tiles are a few KB either way.
+- **An upload beside a running waveform** (the IT8951): the image buffer
+  outside the running area could take the next tap's tiles while the last DU
+  runs, so only the new waveform would wait. Built and taken out again
+  (2026-11-24): on the E1003 every pair of quick taps on the Calculator and
+  the To-do touched the same area (the display, the count left), so the
+  second upload overlapped the first waveform every time, and a tap's
+  upload is 3-16 ms anyway. Worth it only for a scene whose taps change
+  places far apart and nothing shared.
 
 ## What it costs in flash
 

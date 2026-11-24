@@ -24,7 +24,7 @@ microphone (MEMSensing MSM261DHP006: clock GPIO42, data GPIO41, power enable
 GPIO38 through a TPS22916 load switch), and the Seeed **reTerminal Sticky**
 (an MSM261DDB020 on clock GPIO19, data GPIO20 — the S3's USB pads, which its
 CH343 UART bridge leaves free — power enable GPIO38; its voice key is the
-**AI** key, GPIO4). The **E1004 has no microphone** (its schematic has none;
+**Action** key, label `AI`, GPIO4: hold Action to talk). The **E1004 has no microphone** (its schematic has none;
 GPIO41/42 are the J2 header's UART there), but a PDM microphone on J2 pins
 41/42 works with the same driver once `mic_pins` names it. The Waveshare
 **PhotoPainter and 13.3E6** have no PDM microphone but an **ES7210 codec
@@ -122,6 +122,21 @@ frame has no key hold and no microphone path (yet).
   to be the scene's own interval, an hour for a photo, and the answer sat
   there all that time. Like the local-network-access code box, it
   is restored before the image is stored, so snapshots never carry it.
+- **Taking the notice off.** A tap on it takes it off when the finger lifts,
+  and that tap is the notice's alone: the touch task tests where a finger
+  lands against the box (`fos_client_notice_takes`, in panel pixels) and
+  queues none of its reports, so the scene under it hears no `pointerDown`,
+  move, `pointerUp` or gesture, and no edge swipe starts on it. The press
+  clicks as one something took. A key takes it off too, on a frame with or
+  without touch, but still goes to the scene: a key has no place on the
+  picture, so nothing under the notice can be pressed by mistake, and on a
+  slow e-paper one press then costs one refresh. Either way the panel goes
+  back to the last image once the press is over (the finger lifted, the
+  key's `press` delivered), through the partial waveform where the panel has
+  one, unless the press asked for a render, which draws the scene without
+  the notice anyway; with no snapshot to repaint from, the scene renders.
+  `voice:dismissed` in the log. Pointer events from HTTP, the console or a
+  plane are the scene's as before: only the glass can tap the notice.
 - **Capture** (`fos_mic.c`): I2S0 in PDM RX mode with the hardware
   PDM-to-PCM filter, **16 kHz, 16-bit, mono**, little-endian; the power pin
   high for the session and low after it. Driven on the HAL's register layer

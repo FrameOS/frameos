@@ -54,6 +54,21 @@ A scenes file is a JSON array of scenes. Each scene is
   under a second is `"fast"`). Set it when the scene adapts: a game that
   animates on an LCD and turns into a slow puzzle on e-paper says
   `["touch", "keys", "buttons"]`.
+- `settings.round` (optional): `true` when the scene works on a round screen
+  (see [Round panels](#round-panels)): the store shows it as "Round screen"
+  and gives it first to round frames. Code that reads `context.round` or
+  `app.frame.round` says so by itself; set it on a scene with no code of its
+  own that already reads well in a circle (a photo filling the screen, a
+  centred clock), and `false` on one whose code reads it but should not be
+  offered there.
+- `settings.opens` (optional): the kinds of file the scene opens, by their
+  extension, as one text: `"pdf"`, or `"txt md json"` for several. The
+  frame's Files app opens such a file in this scene: it switches to it with
+  `state: { file: "<storage>:<path>" }` (`"assets:Books/Dune.epub"`, the
+  storage an id of `app.frame.storages`). A scene that says it opens files
+  gives itself that public field (`"name": "file"`, `"type": "string"`,
+  `"access": "public"`, `"persist": "memory"`), and on its next render opens
+  the file and sets the field back with `frameos.setState('file', '')`.
 - `fields`: the scene's state fields (see [Fields and state](#fields-and-state)).
 - `apps`: JavaScript apps the scene carries with it (see [JS apps](#js-apps)).
 - `customEvents`: events of the scene's own (see [Events](#events)).
@@ -191,6 +206,12 @@ part people can see and change:
   its value is then the background. Never paint the bars yourself with a
   full-screen `render/color` before the image: the background costs nothing
   when the picture covers the screen, a fill always does.
+- A scene that wants the whole panel, with no bar or dock of the frame's
+  layout around it (a book, a photo, a big clock), sets
+  `settings.fullScreen: true`. To let people choose on the frame, declare one
+  public `boolean` field with `"role": "fullScreen"` ("Full screen", `value`
+  `"true"` or `"false"`); its value then decides. It is a request: the layout
+  gives the panel where it can.
 - A scene drawn inside another (a `scene` node, such as a split's panel)
   renders on its own `refreshInterval`, and in between the frame shows the
   picture it drew last time. A split made in the editor renders at most as
@@ -215,8 +236,9 @@ several statements in an immediately called function that returns the value.
   `const latNum = Number(lat)`. Never name one `state`, `args`, `context`,
   `console`, `parseTs`, `format` or `now`: the code would see the global.
 - The only globals are `state.<field>`, the arguments, `context` (`event`,
-  `payload`, `loopIndex`, `loopKey`, `hasImage`, and `imageWidth` /
-  `imageHeight`, the canvas being drawn on, undefined outside a render),
+  `payload`, `loopIndex`, `loopKey`, `hasImage`, `imageWidth` /
+  `imageHeight`, the canvas being drawn on, undefined outside a render, and
+  `round`, true on a round panel's whole canvas),
   `console.log/warn/error`, and three time helpers: `now()` (seconds since the
   epoch), `format(ts, pattern)` (text in the frame's time zone) and
   `parseTs(pattern, text)` (seconds).
@@ -690,7 +712,9 @@ export function get(app, context) {
   text holding the link is its target. Style it yourself (`underline`).
 - Lists longer than the screen: give the box a height (`flex-1` in a
   column, `h-*`, `max-h-*`) and `overflow-y-auto`, and a finger (or a wheel)
-  scrolls it; no paging needed on an LCD. `overflow-hidden` clips.
+  scrolls it; no paging needed on an LCD. A frame's next and prev buttons
+  walk what there is to press in it and turn it a page at a time, so it
+  reads on a frame with buttons alone (e-paper) too. `overflow-hidden` clips.
 - Not there: rounded clipping, shadows, transforms, `z-*`, momentum when a
   list is flung, text selection. `docs/jsx-ui.md` has the full list.
 
@@ -744,6 +768,10 @@ export function get(app) {
   showing, and `frameos.dispatch('sceneSettings', {page: 'frame'})` the frame's.
 - A layout stays up around those built-in screens too. To give them the whole
   panel, start `get` with `if (app.frame.systemScene) return <yield />`.
+- A scene can ask for the whole panel (its `fullScreen` field or setting, see
+  Fields and state): `app.frame.fullScreen` is true then. A layout with a bar
+  around one scene returns a bare `<yield />` for it:
+  `if (app.frame.fullScreen) return <yield />`.
 - The keyboard on the screen of a field in the wrapped scene (or the layout's
   own) is the frame's: on a small screen it takes the bottom of the panel and
   the layout is laid out above it, on a desktop of windows it floats over every
@@ -755,9 +783,10 @@ export function get(app) {
   lists its scenes (`{id, name}`, and `windowSize`, `"WxH"`, where a scene says
   the size its window should open at, `icon`, its `settings.icon`, where it
   has one: draw it as `<svg viewBox="0 0 24 24" className="w-6 h-6"><path d={icon}
-  fill="currentColor" /></svg>`, and `category`, its `settings.category`, a name
+  fill="currentColor" /></svg>`, `category`, its `settings.category`, a name
   such as `"Photos"`, where it has one: group a list of scenes by it, those
-  without one last under Other) and `app.frame.sceneId` is the one wrapped.
+  without one last under Other, and `opens`, its `settings.opens`, where it
+  has one) and `app.frame.sceneId` is the one wrapped.
   There a layout's `<Scene id={...} />` (no other props: with props it is a copy
   they set, as anywhere) is that scene itself, running in its own rectangle
   beside the wrapped one, so a layout can be a desktop of windows or tiles. Keep
@@ -863,6 +892,50 @@ SVG"; in a JS app, "No image provided"): `svg` (with a `viewBox`), `g`,
   key figure. Never put pure primaries side by side or use them as large
   fills. Keep text-to-background contrast high so it survives dithering.
 
+## Round panels
+
+Some panels are round: a square canvas (480×480, 466×466) of which only the
+circle inside shows and takes touches (the HyperPixel 2.1" Round, the
+Waveshare 1.75" AMOLED). `context.round` is `true` when the app draws such a
+panel's whole canvas (it is `false` in a window, a split's cell or a layout's
+hole, which are rooms of their own), and `app.frame.round` says the panel is
+round. On every other panel, change nothing: a scene that supports round
+panels looks exactly as before on a rectangle.
+
+- Keep text, numbers and buttons inside the circle, about 12 px in from the
+  rim (the bezel covers the edge, and a finger misses it there). The circle's
+  centre is `(W / 2, H / 2)` and its radius `Math.min(W, H) / 2`. A row of
+  text `y` px from the centre may be `2 * Math.sqrt(r * r - y * y)` wide.
+- A block of UI (a form, a grid, a list) goes in the square inside the
+  circle: `side = Math.floor((Math.min(W, H) / 2 - 12) * Math.SQRT2)`, at
+  `((W - side) / 2, (H - side) / 2)`. Put the title in the arc above it and
+  one or two buttons in the arc below, each as wide as its chord.
+- Better still, use the circle: centre the main figure, put a ring of values
+  or a progress arc along the rim, lay labels around a dial instead of in
+  rows, and let a list's rows near the middle be larger than those near the
+  top and bottom edges. A picture or a background colour may fill the whole
+  square: the corners are drawn, just never seen.
+- A UI that scrolls on a round panel gets its scroll bar along the rim by
+  itself.
+- Say the scene works there: code that reads `context.round` or
+  `app.frame.round` is tagged "Round screen" in the store; a scene without
+  code sets `settings.round: true` (see [A scene](#a-scene)).
+
+```tsx
+export function get(app, context) {
+  const W = context.imageWidth, H = context.imageHeight
+  const round = context.round === true
+  const side = round ? Math.floor((Math.min(W, H) / 2 - 12) * Math.SQRT2) : 0
+  const ui = <div className="flex flex-col gap-2 p-4">…</div>
+  if (!round) return ui
+  return (
+    <div className={`relative w-[${W}px] h-[${H}px]`}>
+      <div className={`absolute left-[${(W - side) >> 1}px] top-[${(H - side) >> 1}px] w-[${side}px] h-[${side}px]`}>{ui}</div>
+    </div>
+  )
+}
+```
+
 ## Small frames
 
 The scene that runs on a Raspberry Pi with hundreds of MB also gets installed
@@ -938,7 +1011,7 @@ back gesture), and a key may be bound to them. They never change the scene.
 | `turnOff` | yes | yes |  | all | Turn the screen off |
 | `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
 | `gpio` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `claimed`? boolean, `atMs`? integer, `level`? integer | all | A GPIO button going `down` or `up`, the moment it happens. |
-| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. |
+| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress`, a `triplePress` or a `longPress`, one event per press. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes | `swap`? boolean | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
@@ -1054,7 +1127,7 @@ interface FrameOSStore {
   url: string;
   /** This frame's FrameOS: the listing offers only what runs on it. */
   version: string;
-  /** The action running ("install", "preview", "update", "remove", "discard"), else "". One at a time. */
+  /** The action running ("install", "preview", "update", "updateAll", "remove", "discard"), else "". One at a time. */
   busy: string;
   /** The last action's refusal ("offline", "too_many_scenes", "panel_locked", ...), else "". */
   error: string;
@@ -1064,6 +1137,10 @@ interface FrameOSStore {
   installed: { id: string; store: string; v: number }[];
   /** The store scene this frame previews, until it is installed or discarded. */
   preview: { store: string; id: string; name: string } | null;
+  /** The store scenes on the frame its control plane has a newer version of: the version it has (from) and the
+   * newest (to); owner when the new one asks for more access than the frame may give it (its owner updates it).
+   * Absent with no control plane and while not known yet (FrameOS 2026.11.15+). */
+  updates?: { store: string; name: string; from: number; to: number; owner?: boolean }[];
   /** A scene not from the store may be removed too (a frame with no control plane). */
   removeAny: boolean;
   /** The browser preview's host: Preview, Show and Discard only, and "preview_only" for install, update and remove. Absent on a frame. */
@@ -1247,6 +1324,11 @@ interface FrameOSApp {
      * a black-and-white or grey panel, where a scene reads better drawn in high contrast (FrameOS 2026.11.6+;
      * undefined before, so treat undefined as color). The same in every phase, as fast. */
     color?: boolean;
+    /** Whether only the circle inside the panel's square shows and takes touches, as on the HyperPixel 2.1 Round
+     * and the Waveshare ESP32-S3-Touch-AMOLED-1.75. The corners are drawn but never seen, so an app that draws the
+     * whole panel keeps its text and buttons inside the circle, or inside the square inside it (FrameOS
+     * 2026.11.15+; undefined before, so treat undefined as square). */
+    round?: boolean;
     /** The name of the scene showing. A layout's app gets the name of the scene it wraps (FrameOS 2026.11.5+;
      * undefined before). */
     sceneName?: string;
@@ -1257,6 +1339,11 @@ interface FrameOSApp {
      * frame's then, at the bottom of the panel with the layout laid out above it (on a desktop, a window over the
      * others); returning a bare <yield /> gives the scene all the room it leaves (FrameOS 2026.11.14+; undefined before). */
     typing?: boolean;
+    /** True in a layout's app while the scene it wraps asks for the whole panel, by its field with role "fullScreen"
+     * (a boolean the person at the frame sets in the scene's settings), else by its settings.fullScreen. Return a
+     * bare <yield /> then, as a reader or a photo wants no bar around it (FrameOS 2026.11.15+; undefined before, and
+     * whenever it is false). */
+    fullScreen?: boolean;
     /** True in a layout's app while the scene it wraps shows only because a built-in scene (the scene list, the
      * settings) went back to it on its own, by its Close or Cancel or its timeout. A desktop then opens no window
      * again for a scene that was closed or put away; a scene picked in the list is not one (FrameOS 2026.11.14+;
@@ -1280,8 +1367,10 @@ interface FrameOSApp {
      * path in a 0 0 24 24 box, drawn as <svg viewBox="0 0 24 24"><path d={icon} fill="currentColor" /></svg>
      * (FrameOS 2026.11.10+). category is the scene's category by its name ("Photos", "Clocks & time"; its
      * settings.category), where it has one, to group a list of scenes by, those without one last as Other
-     * (FrameOS 2026.11.10+). */
-    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string }[];
+     * (FrameOS 2026.11.10+). opens is the file types the scene opens, their extensions as the scene's
+     * settings.opens has them ("pdf", "txt md json"), where it names some. Such a file goes to the scene with
+     * setCurrentScene, its public field file set to "<storage>:<path>" (FrameOS 2026.11.15+). */
+    scenes?: { id: string; name: string; windowSize?: string; icon?: string; category?: string; opens?: string }[];
     /** The built-in scenes (the scene list, a scene's settings, the frame's page) the focus left for another
      * window without their going back, so still open beside the scene showing, their page and edits as they were.
      * A desktop keeps such a one's window and closes it once it is gone from here, on a frame that runs scenes
@@ -1298,7 +1387,7 @@ interface FrameOSApp {
     theme?: Record<string, string | string[]>;
     /** The frame's event map, what its keys and swipes do whatever scene shows (docs/events.md "Event map"), each
      * rule { event, match, emit?, as? }: a button rule matches { label, action } ("press", "doublePress",
-     * "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
+     * "triplePress", "longPress"), an edgeSwipe rule { edge }. For a layout that labels the keys beside the glass. Undefined where
      * the frame has none (the preview of a scene) (FrameOS 2026.11.14+; undefined before). */
     eventMap?: { event: string; match?: Record<string, any>; emit?: string; as?: Record<string, any> }[];
   };
@@ -1360,7 +1449,7 @@ interface FrameOSEventPayloads {
   toggleScreen: Record<string, never>;
   /** A GPIO button going `down` or `up`, the moment it happens. `up` says how long it was held. */
   gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; claimed?: boolean; atMs?: number; level?: number };
-  /** A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. */
+  /** A GPIO button pressed: a `press`, a `doublePress`, a `triplePress` or a `longPress`, one event per press. */
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
@@ -1401,6 +1490,8 @@ interface FrameOSContext {
   targetHeight?: number;
   /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
   targetFit?: string;
+  /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
+  round?: boolean;
   [key: string]: any;
 }
 
@@ -1436,9 +1527,10 @@ declare const frameos: {
    * before FrameOS 2026.11.8. Read it every render: what an action did shows up here. */
   store(): FrameOSStore | null;
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
-   * {store}, remove {store}, discard. It runs off the render and this scene renders again when it is done (see
-   * store().busy). False where there is no host (FrameOS 2026.11.8+). */
-  storeAction(action: "preview" | "install" | "update" | "remove" | "discard", args?: Record<string, any>): boolean;
+   * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
+   * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
+   * where there is no host (FrameOS 2026.11.8+). */
+  storeAction(action: "preview" | "install" | "update" | "updateAll" | "remove" | "discard", args?: Record<string, any>): boolean;
   /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
    * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the
    * frame's settings are allowed on its screen: it throws otherwise. "read" is what the page shows, null where there is
@@ -1587,8 +1679,13 @@ declare const frameos: {
     convolve(dst: FrameOSTypedArray, src: FrameOSTypedArray, width: number, kernel: number[], shift?: number): boolean;
   };
   /** Every file below dir, as paths in the assets folder; with shallow, the folder's own entries, a folder's
-   * ending in "/" (FrameOS 2026.11.8+). */
-  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal" }): string[];
+   * ending in "/" (FrameOS 2026.11.8+). A storage that cannot be read lists nothing; with strict it is null instead,
+   * which an app can tell from an empty folder: a TF card not mounted, a read that failed (FrameOS 2026.11.15+). */
+  listAssets(
+    dir: string | undefined,
+    options: { shallow?: boolean; storage?: "assets" | "internal"; strict: true }
+  ): string[] | null;
+  listAssets(dir?: string, options?: { shallow?: boolean; storage?: "assets" | "internal"; strict?: false }): string[];
   assetExists(path: string, options?: { storage?: "assets" | "internal" }): boolean;
   assetSize(path: string, options?: { storage?: "assets" | "internal" }): number;
   /** The file's bytes as base64, or with text as a string (UTF-8, without the halves of characters a slice cuts at its
@@ -1743,4 +1840,5 @@ declare const console: {
   string; its `<svg>` uses only the supported tags, and gradients use
   `userSpaceOnUse`.
 - Sizes come from the frame, not from constants.
+- On a round panel (`context.round`) what matters stays inside the circle.
 - Nothing big is embedded as an object literal or kept alive between renders.

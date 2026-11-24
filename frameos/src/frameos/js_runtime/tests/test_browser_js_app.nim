@@ -15,8 +15,10 @@ import frameos/types
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/app_tests
 import frameos/js_runtime/js_io
+import frameos/js_runtime/runtime
 import frameos/channels
 import frameos/utils/http_client
+import frameos/utils/memory
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -240,3 +242,66 @@ suite "the Browser scene":
     let page = draw(scene, config, "page")
     check "https://news.ycombinator.com/" in asked
     check page != first
+
+  test "a site with megabytes of style sheets fits an ESP32's 4 MB of JS, each sheet let go once slimmed":
+    # GitHub's front page links 16 sheets, 2.7 MB of CSS. A Sticky read them
+    # one an answer and ran out of JS heap at the ninth: slimCss's walk
+    # called itself, a cycle that held each sheet's text until QuickJS's next
+    # collection (2026-11-24).
+    asyncPumped = true
+    setSimulatedEmbedded(true)
+    defer: setSimulatedEmbedded(false)
+    var config = testConfig(480, 800)
+    config.js = JsRuntimeConfig(memoryLimitMb: 4, executionTimeoutMs: -1, maxStackKb: -1)
+    var sheet = ""
+    var n = 0
+    while sheet.len < 350_000:
+      # A design system's utilities, a few of which the page uses.
+      let cls = if n mod 500 == 0: "c" & $(n div 500) else: "u" & $n
+      sheet.add "." & cls & " .v" & $n & ", .w" & $n & ":not(.z){color:#123456;margin:0 4px;padding:2px}\n"
+      inc n
+    var links = ""
+    for i in 0 ..< 10:
+      links.add "<link rel=\"stylesheet\" href=\"https://sheets.test/s" & $i & ".css\">"
+    var body = ""
+    for i in 0 ..< 800:
+      body.add "<div class=\"c" & $i & " x" & $i & "\"><a href=\"/r" & $i & "\" class=\"y" & $i &
+        "\">Repository " & $i & "</a> <span>a line of the site's own words, " & $i & "</span></div>\n"
+    let page = "<html><head>" & links & "</head><body><h1>Sheets</h1>" & body & "</body></html>"
+    jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+      {.cast(gcsafe).}:
+        asked.add request.url
+        if request.url.endsWith(".css"): JsIoResult(code: 200, body: sheet)
+        elif request.url == "https://sheets.test/": JsIoResult(code: 200, body: page)
+        else: JsIoResult(code: 404, body: "")
+    defer: jsIoHook = nil
+    setUploadedInterpretedScenes(parseInterpretedScenes($(%*[sample])))
+    resetInterpretedScenes()
+    logger.frameConfig = config
+    let scene = init("browser".SceneId, config, logger, %*{"homepage": "https://sheets.test/"})
+    let loading = draw(scene, config, "sheets-loading")
+    var heaps: seq[int] # the JS heap after each render while sheets come
+    for i in 0 ..< 600:
+      discard pumpJsAsync()
+      var rendered = false
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "render": rendered = true
+      if rendered:
+        discard draw(scene, config, "sheets")
+        if asked.countIt(it.endsWith(".css")) < 10:
+          heaps.add sceneHeapBudgetUsedBytes("browser")
+      elif jsAsyncPending() == 0 and asked.countIt(it.endsWith(".css")) >= 10:
+        break
+      sleep(5)
+    let image = draw(scene, config, "sheets-page")
+    check asked.countIt(it.endsWith(".css")) == 10
+    if problems.len > 0: echo problems
+    check problems.len == 0
+    check image != loading
+    # A 350 KB sheet slimmed to a few rules leaves the heap as it found it
+    # (it grew by the sheet's text and more with each one before).
+    check heaps.len >= 5
+    checkpoint($heaps)
+    check max(heaps) - heaps[0] < 128 * 1024

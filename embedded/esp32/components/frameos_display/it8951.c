@@ -33,33 +33,65 @@ static void tile_span(int col, bool mirror_x, size_t *offset, size_t *bytes)
 }
 
 /* Row by row over the buffer, a tile row's digests advancing together: a
- * tile's bytes are not contiguous, and PSRAM wants its reads in order. */
-void fos_it8951_tile_hashes(const uint8_t *packed, bool mirror_x, uint32_t *out)
+ * tile's bytes are not contiguous, and PSRAM wants its reads in order. A word
+ * at a time: every tile starts on a 4-byte boundary of its row (936 bytes, the
+ * tiles 16 apart, the mirrored half tile 8 bytes), so one 32-bit load reads
+ * what four byte loads and their shifts did (the same little-endian word, the
+ * same digest). -O2: the firmware is built for size, and this loop reads the
+ * whole 1.3 MB picture when nothing says where it changed. */
+__attribute__((optimize("O2"))) void fos_it8951_tile_hash_area(const uint8_t *packed, bool mirror_x, uint32_t *out,
+                                                               int first_row, int end_row, int first_col, int end_col)
 {
     size_t row_bytes = FOS_IT8951_10IN3_WIDTH / 2u;
-    size_t offsets[FOS_IT8951_TILE_COLS], lengths[FOS_IT8951_TILE_COLS];
-    for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) tile_span(col, mirror_x, &offsets[col], &lengths[col]);
-    for (int tile_row = 0; tile_row < FOS_IT8951_TILE_ROWS; tile_row++) {
+    size_t offsets[FOS_IT8951_TILE_COLS], words[FOS_IT8951_TILE_COLS];
+    if (first_row < 0) first_row = 0;
+    if (end_row > FOS_IT8951_TILE_ROWS) end_row = FOS_IT8951_TILE_ROWS;
+    if (first_col < 0) first_col = 0;
+    if (end_col > FOS_IT8951_TILE_COLS) end_col = FOS_IT8951_TILE_COLS;
+    for (int col = first_col; col < end_col; col++) {
+        size_t bytes;
+        tile_span(col, mirror_x, &offsets[col], &bytes);
+        words[col] = bytes / 4u;
+    }
+    for (int tile_row = first_row; tile_row < end_row; tile_row++) {
         uint32_t *hashes = out + (size_t)tile_row * FOS_IT8951_TILE_COLS;
-        for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) hashes[col] = 0x811C9DC5u;
+        for (int col = first_col; col < end_col; col++) hashes[col] = 0x811C9DC5u;
         int first = tile_row * FOS_IT8951_TILE_HEIGHT;
         int end = first + FOS_IT8951_TILE_HEIGHT;
         if (end > FOS_IT8951_10IN3_HEIGHT) end = FOS_IT8951_10IN3_HEIGHT;
         for (int y = first; y < end; y++) {
             const uint8_t *row = packed + (size_t)y * row_bytes;
-            for (int col = 0; col < FOS_IT8951_TILE_COLS; col++) {
+            for (int col = first_col; col < end_col; col++) {
                 uint32_t hash = hashes[col];
-                const uint8_t *at = row + offsets[col];
-                for (size_t i = 0; i + 4 <= lengths[col]; i += 4) {
-                    uint32_t word = (uint32_t)at[i] | ((uint32_t)at[i + 1] << 8) | ((uint32_t)at[i + 2] << 16) |
-                                    ((uint32_t)at[i + 3] << 24);
-                    hash = (hash ^ word) * 0x01000193u;
+                const uint32_t *at = (const uint32_t *)__builtin_assume_aligned(row + offsets[col], 4);
+                for (size_t i = 0; i < words[col]; i++) {
+                    hash = (hash ^ at[i]) * 0x01000193u;
                     hash ^= hash >> 15;
                 }
                 hashes[col] = hash;
             }
         }
     }
+}
+
+void fos_it8951_tile_hashes(const uint8_t *packed, bool mirror_x, uint32_t *out)
+{
+    fos_it8951_tile_hash_area(packed, mirror_x, out, 0, FOS_IT8951_TILE_ROWS, 0, FOS_IT8951_TILE_COLS);
+}
+
+bool fos_it8951_tile_range(const fos_it8951_rect_t *packed_rect, bool mirror_x, int *first_col, int *end_col,
+                           int *first_row, int *end_row)
+{
+    int x = packed_rect->x, y = packed_rect->y, w = packed_rect->w, h = packed_rect->h;
+    if (x >= FOS_IT8951_10IN3_WIDTH || y >= FOS_IT8951_10IN3_HEIGHT || w <= 0 || h <= 0) return false;
+    if (x + w > FOS_IT8951_10IN3_WIDTH) w = FOS_IT8951_10IN3_WIDTH - x;
+    if (y + h > FOS_IT8951_10IN3_HEIGHT) h = FOS_IT8951_10IN3_HEIGHT - y;
+    int wire_x = mirror_x ? FOS_IT8951_10IN3_WIDTH - x - w : x;
+    *first_col = wire_x / FOS_IT8951_TILE_WIDTH;
+    *end_col = (wire_x + w - 1) / FOS_IT8951_TILE_WIDTH + 1;
+    *first_row = y / FOS_IT8951_TILE_HEIGHT;
+    *end_row = (y + h - 1) / FOS_IT8951_TILE_HEIGHT + 1;
+    return true;
 }
 
 static bool rects_near(const fos_it8951_rect_t *a, const fos_it8951_rect_t *b)
@@ -230,7 +262,36 @@ bool fos_it8951_black_and_white(const uint8_t *wire, size_t bytes)
     return true;
 }
 
+bool fos_it8951_glass_wire_rect(int x, int y, int w, int h, bool mirror_x, fos_it8951_rect_t *out)
+{
+    const int width = FOS_IT8951_10IN3_WIDTH, height = FOS_IT8951_10IN3_HEIGHT;
+    if (x < 0) {
+        w += x;
+        x = 0;
+    }
+    if (y < 0) {
+        h += y;
+        y = 0;
+    }
+    if (x + w > width) w = width - x;
+    if (y + h > height) h = height - y;
+    if (w <= 0 || h <= 0) return false;
+    int wx = mirror_x ? width - x - w : x;
+    int x0 = wx / FOS_IT8951_TILE_WIDTH * FOS_IT8951_TILE_WIDTH;
+    int x1 = (wx + w + FOS_IT8951_TILE_WIDTH - 1) / FOS_IT8951_TILE_WIDTH * FOS_IT8951_TILE_WIDTH;
+    int y0 = y / FOS_IT8951_TILE_HEIGHT * FOS_IT8951_TILE_HEIGHT;
+    int y1 = (y + h + FOS_IT8951_TILE_HEIGHT - 1) / FOS_IT8951_TILE_HEIGHT * FOS_IT8951_TILE_HEIGHT;
+    if (x1 > width) x1 = width;
+    if (y1 > height) y1 = height;
+    out->x = (uint16_t)x0;
+    out->y = (uint16_t)y0;
+    out->w = (uint16_t)(x1 - x0);
+    out->h = (uint16_t)(y1 - y0);
+    return true;
+}
+
 #ifdef ESP_PLATFORM
+#include <stdarg.h>
 #include <stdio.h>
 
 #include "esp_heap_caps.h"
@@ -238,6 +299,30 @@ bool fos_it8951_black_and_white(const uint8_t *wire, size_t bytes)
 #include "esp_timer.h"
 
 #include "DEV_Config.h"
+
+/* The firmware's log ring (components/frameos_nim/fos_log_ring.c), when it is
+ * linked: a printf here was a write to the 115200-baud console on the render
+ * task, between a tap's upload and the next one, and behind a render's own
+ * 2-3 KB of lines it waited 10-45 ms for room in the UART's buffer (a tap on
+ * the reTerminal E1003, 2026-11-24). */
+void fos_log_ring_puts(const char *line) __attribute__((weak));
+/* Both cores over a job's rows (components/frameos_nim/fos_rows.c). */
+typedef void (*it8951_rows_fn)(void *ctx, int32_t worker, int32_t first, int32_t last);
+void fos_rows_run(it8951_rows_fn fn, void *ctx, int32_t rows, int32_t block) __attribute__((weak));
+
+__attribute__((format(printf, 1, 2))) static void log_line(const char *fmt, ...)
+{
+    char line[200];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof(line), fmt, ap);
+    va_end(ap);
+    if (fos_log_ring_puts) {
+        fos_log_ring_puts(line);
+    } else {
+        printf("%s\n", line);
+    }
+}
 
 #define CMD_SYS_RUN 0x0001
 #define CMD_STANDBY 0x0002
@@ -276,8 +361,23 @@ bool fos_it8951_black_and_white(const uint8_t *wire, size_t bytes)
  * after a reset, which takes longer. A GC16 refresh of the whole panel is a
  * second or two (Zephyr allows 40 s for the worst case). */
 #define READY_TIMEOUT_MS 5000
+/* HRDY is spun on this long before a wait sleeps: a tick is 10 ms here
+ * (CONFIG_FREERTOS_HZ 100), and the controller answers a word, or takes the
+ * next area after a load, in well under that. */
+#define READY_SPIN_US 5000
 #define REFRESH_TIMEOUT_MS 40000
 #define REFRESH_POLL_MS 20
+/* How long a waveform runs (docs/realtime-rendering.md, measured on an E1003):
+ * a wait for one reads LUTAFSR every tick until REFRESH_WAKE_EARLY_US before
+ * it is due, then every REFRESH_SPIN_US until REFRESH_SPIN_MAX_US past it,
+ * and every REFRESH_POLL_MS after that (a cold panel's waveform is longer).
+ * Polled every 20 ms, the next picture went up 10 ms late on average. */
+#define DU_US (470 * 1000LL)
+#define GC16_US (580 * 1000LL)
+#define INIT_US (2000 * 1000LL)
+#define REFRESH_WAKE_EARLY_US (30 * 1000LL)
+#define REFRESH_SPIN_US 500
+#define REFRESH_SPIN_MAX_US (80 * 1000LL)
 /* Without a reading the E1003 is told what Seeed's own examples tell it. */
 #define DEFAULT_TEMPERATURE_C 16
 
@@ -315,6 +415,10 @@ typedef struct {
     uint8_t dirty[FOS_IT8951_TILES];
     /* Sent as a halftone while someone tapped: the greys are still owed. */
     uint8_t owed[FOS_IT8951_TILES];
+    /* Changed outside the box the render gave (fos_it8951_10in3_hint), or
+     * something not in any picture on the glass there (glass_rect): sent
+     * with the next picture, whatever its box and the digests say. */
+    uint8_t stale[FOS_IT8951_TILES];
 } tiles_t;
 static tiles_t *s_tiles = NULL;
 /* s_tiles->hash describes the controller's image memory. */
@@ -337,6 +441,23 @@ static bool s_waveform_pending = false;
 /* A step timed out: the rest of the pass is skipped rather than talking to
  * a controller that stopped listening, and the next one starts over. */
 static bool s_failed = false;
+/* When the waveform started last ends, about (DU_US, GC16_US). */
+static int64_t s_waveform_due_us = 0;
+static int64_t s_waveform_started_us = 0;
+/* The box the next `changed` hashes, in packed pixels (fos_it8951_10in3_hint). */
+static bool s_hint_armed = false;
+static fos_it8951_rect_t s_hint;
+/* The dirty map came from the box: the whole picture is hashed once the
+ * waveform is under way (verify_after_hint). */
+static bool s_verify_owed = false;
+static bool s_stale_any = false;
+/* How long the last hash took, for the upload's log line. */
+static int64_t s_hash_us = 0;
+/* When the temperature was last given: a controller that stays up (USB
+ * power, fos_display_keep_controller_awake) is told again every
+ * TEMPERATURE_FRESH_US. */
+static int64_t s_temperature_us = 0;
+#define TEMPERATURE_FRESH_US (300 * 1000000LL)
 
 void fos_it8951_set_variant(int variant)
 {
@@ -367,13 +488,11 @@ static void fail(void)
 static bool wait_ready(const char *stage)
 {
     if (s_failed) return false;
+    if (DEV_Digital_Read(EPD_BUSY_PIN) != 0) return true;
+    int64_t spin_until = esp_timer_get_time() + READY_SPIN_US;
+    while (DEV_Digital_Read(EPD_BUSY_PIN) == 0 && esp_timer_get_time() < spin_until) esp_rom_delay_us(2);
     int64_t start = now_ms();
-    int spins = 0;
     while (DEV_Digital_Read(EPD_BUSY_PIN) == 0) {
-        if (++spins < 1000) {
-            esp_rom_delay_us(1);
-            continue;
-        }
         if (now_ms() - start > READY_TIMEOUT_MS) {
             DEV_Error("IT8951 busy (HRDY low) for %d ms during %s", READY_TIMEOUT_MS, stage);
             fail();
@@ -476,6 +595,7 @@ static void apply_temperature(void)
     const UWORD args[] = {0x0001, (UWORD)celsius};
     command_args(CMD_TEMPERATURE, args, 2);
     s_temperature = celsius;
+    s_temperature_us = esp_timer_get_time();
 }
 
 /* The controller's firmware and LUT names: eight words of ASCII each, low
@@ -533,32 +653,53 @@ static int bring_up(void)
         char firmware[17], lut[17];
         words_to_text(info + 4, 8, firmware, sizeof(firmware));
         words_to_text(info + 12, 8, lut, sizeof(lut));
-        /* printf: WARN-only builds show it on the console too. */
-        printf("it8951: %ux%u, image buffer 0x%08lx, firmware %s, LUT %s, VCOM -%u mV%s\n", info[0], info[1],
-               (unsigned long)s_image_addr, firmware, lut, vcom, s_variant.mirror_x ? ", mirrored" : "");
+        /* Not ESP_LOGI: WARN-only builds show it on the console too. */
+        log_line("it8951: %ux%u, image buffer 0x%08lx, firmware %s, LUT %s, VCOM -%u mV%s", info[0], info[1],
+                 (unsigned long)s_image_addr, firmware, lut, vcom, s_variant.mirror_x ? ", mirrored" : "");
         s_reported = true;
     }
     s_ready = true;
     return 0;
 }
 
+/* The temperature the waveform is chosen by, when the last one is old. */
+static void temperature_due(void)
+{
+    if (!s_variant.set_temperature) return;
+    if (esp_timer_get_time() - s_temperature_us < TEMPERATURE_FRESH_US) return;
+    apply_temperature();
+}
+
 int fos_it8951_10in3_init(void)
 {
     s_failed = false;
+    if (s_ready && !s_standby) {
+        /* Up already (never put in standby): the temperature when it is old,
+         * nothing more. A full refresh sent SYS_RUN and read the SHT40 each
+         * time. */
+        temperature_due();
+        if (!s_failed) return 0;
+        s_failed = false;
+    }
     if (s_ready) {
         /* Standby kept the controller's state and its picture: wake it. */
+        int64_t start = esp_timer_get_time();
         write_command(CMD_SYS_RUN);
         if (s_variant.set_temperature) apply_temperature();
         if (!s_failed) {
             s_standby = false;
+            log_line("it8951: out of standby in %lld ms", (long long)((esp_timer_get_time() - start) / 1000));
             return 0;
         }
         s_failed = false;
     }
+    int64_t start = esp_timer_get_time();
     int err = bring_up();
     s_standby = err != 0;
+    log_line("it8951: brought up in %lld ms%s", (long long)((esp_timer_get_time() - start) / 1000), err ? " (failed)" : "");
     return err;
 }
+
 
 /* A rectangle of `packed` (all white when NULL) into the controller's image
  * buffer, a few rows to a transfer from internal RAM: the panel buffer is in
@@ -606,10 +747,17 @@ static void start_waveform(UWORD mode, const fos_it8951_rect_t *rect)
 {
     const UWORD args[] = {rect->x, rect->y, rect->w, rect->h, mode};
     command_args(CMD_DISPLAY_AREA, args, 5);
+    /* The controller took the area when the last word went: one before it
+     * ran first (HRDY held the words back). */
+    s_waveform_started_us = esp_timer_get_time();
+    s_waveform_due_us = s_waveform_started_us + (mode == MODE_DU ? DU_US : mode == MODE_GC16 ? GC16_US : INIT_US);
 }
 
 /* The waveforms running finish first: putting the controller in standby
- * while one runs cuts the refresh short. */
+ * while one runs cuts the refresh short. LUTAFSR is read every tick until
+ * shortly before the last one is due, then every half millisecond for a
+ * while (the next picture goes up at once), and every REFRESH_POLL_MS after
+ * that (a cold panel's waveform is longer). */
 static void wait_waveforms(void)
 {
     int64_t start = now_ms();
@@ -620,7 +768,14 @@ static void wait_waveforms(void)
             fail();
             return;
         }
-        DEV_Delay_ms(REFRESH_POLL_MS);
+        int64_t to_due = s_waveform_due_us - esp_timer_get_time();
+        if (to_due > REFRESH_WAKE_EARLY_US) {
+            DEV_Delay_ms(1); /* a tick */
+        } else if (-to_due < REFRESH_SPIN_MAX_US) {
+            esp_rom_delay_us(REFRESH_SPIN_US);
+        } else {
+            DEV_Delay_ms(REFRESH_POLL_MS);
+        }
     }
 }
 
@@ -631,7 +786,10 @@ static void finish_waveforms(void)
     int64_t start = now_ms();
     wait_waveforms();
     int64_t waited = now_ms() - start;
-    if (waited > 20) printf("it8951: waited %lld ms for the last waveform\n", (long long)waited);
+    if (waited > 20) {
+        log_line("it8951: waited %lld ms for the last waveform (it ran %lld ms)", (long long)waited,
+                 (long long)((esp_timer_get_time() - s_waveform_started_us) / 1000));
+    }
 }
 
 static uint8_t *chunk_buffer(void)
@@ -685,25 +843,123 @@ void fos_it8951_10in3_clear(void)
     s_damage_ready = false;
 }
 
+typedef struct {
+    const uint8_t *buf;
+    uint32_t *out;
+    bool mirror_x;
+} hash_job_t;
+
+/* A band of tile rows: fos_rows_run's job, run on both cores. Plain values
+ * and pointers only (fos_rows.c). */
+static void hash_rows(void *ctx, int32_t worker, int32_t first, int32_t last)
+{
+    (void)worker;
+    const hash_job_t *job = ctx;
+    fos_it8951_tile_hash_area(job->buf, job->mirror_x, job->out, first, last, 0, FOS_IT8951_TILE_COLS);
+}
+
+/* Every tile's digest, on both cores where the firmware has the helper: 1.3 MB
+ * of PSRAM read in about half the time. Not for the first picture after a
+ * boot or a wake, which a task other than the render task may send (the wake
+ * mark): the helper takes the priority of whoever first hands it a job. */
+static void hash_whole(const uint8_t *buf, uint32_t *out)
+{
+    hash_job_t job = {buf, out, s_variant.mirror_x};
+    if (fos_rows_run && s_rows_valid) {
+        fos_rows_run(hash_rows, &job, FOS_IT8951_TILE_ROWS, 8);
+    } else {
+        hash_rows(&job, 0, 0, FOS_IT8951_TILE_ROWS);
+    }
+}
+
 /* Digests of `buf` against what the controller holds. False without memory
- * for them: every picture then goes up whole. */
+ * for them: every picture then goes up whole. With a box from the render
+ * (fos_it8951_10in3_hint) only its tiles are read; the rest is checked once
+ * the waveform runs (verify_after_hint). */
 static bool compute_damage(const uint8_t *buf)
 {
     if (!s_tiles) {
         s_tiles = heap_caps_calloc(1, sizeof(*s_tiles), MALLOC_CAP_SPIRAM);
     }
+    bool hinted = s_hint_armed && s_rows_valid && s_tiles;
+    s_hint_armed = false;
     if (!s_tiles) return false;
-    fos_it8951_tile_hashes(buf, s_variant.mirror_x, s_tiles->next);
+    int64_t start = esp_timer_get_time();
+    if (hinted) {
+        memset(s_tiles->dirty, 0, sizeof(s_tiles->dirty));
+        int first_col, end_col, first_row, end_row;
+        if (fos_it8951_tile_range(&s_hint, s_variant.mirror_x, &first_col, &end_col, &first_row, &end_row)) {
+            fos_it8951_tile_hash_area(buf, s_variant.mirror_x, s_tiles->next, first_row, end_row, first_col, end_col);
+            for (int row = first_row; row < end_row; row++) {
+                for (int col = first_col; col < end_col; col++) {
+                    size_t i = (size_t)row * FOS_IT8951_TILE_COLS + (size_t)col;
+                    if (s_tiles->next[i] == s_tiles->hash[i]) continue;
+                    s_tiles->dirty[i] = 1;
+                    s_tiles->hash[i] = s_tiles->next[i];
+                }
+            }
+        }
+        s_verify_owed = true;
+    } else {
+        hash_whole(buf, s_tiles->next);
+        for (size_t i = 0; i < FOS_IT8951_TILES; i++) {
+            s_tiles->dirty[i] = !s_rows_valid || s_tiles->hash[i] != s_tiles->next[i];
+        }
+        memcpy(s_tiles->hash, s_tiles->next, sizeof(s_tiles->hash));
+        s_verify_owed = false;
+    }
+    s_hash_us = esp_timer_get_time() - start;
+    /* Owed greys go out once nobody is tapping (fos_display_settle_due);
+     * tiles the last check found changed outside a box go out now. */
+    bool owed = s_owed_any && !s_interactive;
     s_damage_bytes = 0;
     for (size_t i = 0; i < FOS_IT8951_TILES; i++) {
-        /* Owed greys go out once nobody is tapping (fos_display_settle_due). */
-        s_tiles->dirty[i] = !s_rows_valid || s_tiles->hash[i] != s_tiles->next[i] ||
-                            (s_owed_any && !s_interactive && s_tiles->owed[i]);
+        if ((owed && s_tiles->owed[i]) || s_tiles->stale[i]) s_tiles->dirty[i] = 1;
         if (s_tiles->dirty[i]) s_damage_bytes += FOS_IT8951_TILE_WIDTH / 2 * FOS_IT8951_TILE_HEIGHT;
     }
-    memcpy(s_tiles->hash, s_tiles->next, sizeof(s_tiles->hash));
+    if (s_stale_any) {
+        memset(s_tiles->stale, 0, sizeof(s_tiles->stale));
+        s_stale_any = false;
+    }
     s_damage_ready = true;
     return true;
+}
+
+/* After a picture whose dirty map came from the render's box: the whole
+ * picture hashed, now that the waveform runs and the next upload has to wait
+ * for it anyway. A tile that changed outside the box goes up with the next
+ * picture (`stale`, fos_display_followup_due when none comes), and the line
+ * says the box was wrong: something wrote the canvas that the render did not
+ * count (frameos_nim_render_damage). */
+static void verify_after_hint(const uint8_t *buf)
+{
+    if (!s_verify_owed || !s_tiles) return;
+    s_verify_owed = false;
+    int64_t start = esp_timer_get_time();
+    hash_whole(buf, s_tiles->next);
+    int missed = 0;
+    for (size_t i = 0; i < FOS_IT8951_TILES; i++) {
+        if (s_tiles->next[i] == s_tiles->hash[i]) continue;
+        s_tiles->hash[i] = s_tiles->next[i];
+        s_tiles->stale[i] = 1;
+        missed++;
+    }
+    if (missed) {
+        s_stale_any = true;
+        log_line("it8951: %d tile(s) changed outside the render's box, sent next (checked in %lld ms)", missed,
+                 (long long)((esp_timer_get_time() - start) / 1000));
+    }
+}
+
+void fos_it8951_10in3_hint(const fos_it8951_rect_t *packed_box)
+{
+    s_hint_armed = packed_box != NULL;
+    if (packed_box) s_hint = *packed_box;
+}
+
+bool fos_it8951_10in3_stale(void)
+{
+    return s_stale_any;
 }
 
 long fos_it8951_10in3_changed(const uint8_t *buf)
@@ -736,10 +992,12 @@ void fos_it8951_10in3_display(uint8_t *buf)
     fos_it8951_rect_t rects[FOS_IT8951_MAX_RECTS_INTERACTIVE];
     size_t count = damaged_rects(buf, rects);
     if (count == 0) {
-        printf("it8951: nothing changed, refresh skipped\n");
+        log_line("it8951: nothing changed, refresh skipped");
+        verify_after_hint(buf);
         return;
     }
     finish_waveforms();
+    temperature_due();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     for (size_t i = 0; i < count && !s_failed; i++) load_rect(buf, &rects[i], chunk, false, NULL);
@@ -752,9 +1010,9 @@ void fos_it8951_10in3_display(uint8_t *buf)
     s_waveform_pending = true;
     s_rows_valid = s_tiles != NULL;
     forget_owed();
-    printf("it8951: %u rect(s) up in %lld ms, GC16 started", (unsigned)count, (long long)(loaded - start));
-    if (s_variant.set_temperature) printf(" at %d C", s_temperature);
-    printf("\n");
+    log_line("it8951: %u rect(s) up in %lld ms (hash %lld ms), GC16 started at %d C", (unsigned)count,
+             (long long)(loaded - start), (long long)(s_hash_us / 1000), s_temperature);
+    verify_after_hint(buf);
 }
 
 void fos_it8951_10in3_partial_init(void)
@@ -771,8 +1029,12 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous)
     int64_t start = now_ms();
     fos_it8951_rect_t rects[FOS_IT8951_MAX_RECTS_INTERACTIVE];
     size_t count = damaged_rects(buf, rects);
-    if (count == 0) return;
+    if (count == 0) {
+        verify_after_hint(buf);
+        return;
+    }
     finish_waveforms();
+    temperature_due();
     uint8_t *chunk = chunk_buffer();
     if (!chunk) return;
     bool plain[FOS_IT8951_MAX_RECTS_INTERACTIVE];
@@ -804,9 +1066,10 @@ void fos_it8951_10in3_partial_show(uint8_t *buf, uint8_t *previous)
     }
     if (s_failed) return;
     s_waveform_pending = true;
-    printf("it8951: partial%s, %u rect(s) (%d grey) up in %lld ms, waveform started, %ux%u@%u,%u first\n",
-           s_interactive ? " fast" : "", (unsigned)count, grey, (long long)(loaded - start),
-           rects[0].w, rects[0].h, rects[0].x, rects[0].y);
+    log_line("it8951: partial%s, %u rect(s) (%d grey) up in %lld ms (hash %lld ms), waveform started, %ux%u@%u,%u first",
+             s_interactive ? " fast" : "", (unsigned)count, grey, (long long)(loaded - start),
+             (long long)(s_hash_us / 1000), rects[0].w, rects[0].h, rects[0].x, rects[0].y);
+    verify_after_hint(buf);
 }
 
 void fos_it8951_10in3_set_interactive(bool interactive)
@@ -816,7 +1079,37 @@ void fos_it8951_10in3_set_interactive(bool interactive)
 
 bool fos_it8951_10in3_owed(void)
 {
-    return s_owed_any;
+    return s_owed_any || s_stale_any;
+}
+
+bool fos_it8951_10in3_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
+{
+    if (s_standby && fos_it8951_10in3_init() != 0) return false;
+    /* Nothing to put back without the digests of what the controller holds. */
+    if (s_failed || !s_tiles || !s_rows_valid || !buf) return false;
+    fos_it8951_rect_t rect;
+    if (!fos_it8951_glass_wire_rect(x, y, w, h, s_variant.mirror_x, &rect)) return false;
+    finish_waveforms();
+    uint8_t *chunk = chunk_buffer();
+    if (!chunk) return false;
+    load_rect(buf, &rect, chunk, false, NULL);
+    heap_caps_free(chunk);
+    if (s_failed) return false;
+    start_waveform(MODE_DU, &rect);
+    if (s_failed) return false;
+    s_waveform_pending = true;
+    for (int row = rect.y / FOS_IT8951_TILE_HEIGHT; row <= (rect.y + rect.h - 1) / FOS_IT8951_TILE_HEIGHT; row++) {
+        for (int col = rect.x / FOS_IT8951_TILE_WIDTH; col <= (rect.x + rect.w - 1) / FOS_IT8951_TILE_WIDTH; col++) {
+            s_tiles->stale[(size_t)row * FOS_IT8951_TILE_COLS + (size_t)col] = 1;
+        }
+    }
+    s_stale_any = true;
+    return true;
+}
+
+void fos_it8951_10in3_wait(void)
+{
+    finish_waveforms();
 }
 
 void fos_it8951_10in3_rest(void)
@@ -832,7 +1125,7 @@ void fos_it8951_10in3_clean(void)
     finish_waveforms();
     start_waveform(MODE_GC16, &k_whole);
     if (!s_failed) s_waveform_pending = true;
-    printf("it8951: clean, GC16 started\n");
+    log_line("it8951: clean, GC16 started");
 }
 
 void fos_it8951_10in3_sleep(void)

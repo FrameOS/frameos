@@ -126,14 +126,20 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"}," \
     "\"emit\":\"sceneSettings\",\"as\":{}}"
-/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
- * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. The edges
- * swipe (TOUCH_EDGE_SWIPES). */
+/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list.
+ * The AI key (Seeed's "AI/Power", GPIO4) is the one key a hand finds: pressed
+ * once it is the scene's (its role is primary: Enter, the layout's refresh),
+ * twice back, three times the scene list, and held it talks to the frame.
+ * The edges swipe (TOUCH_EDGE_SWIPES). */
 #define STICKY_KEYS \
     "{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"doublePress\"}," \
+    "\"emit\":\"back\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"triplePress\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}"
 /* The Waveshare boards with a codec microphone (fos_codec.c): the one user
@@ -151,6 +157,10 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"doublePress\"}," \
     "\"emit\":\"sceneSwitcher\",\"as\":{}}"
 #define INDICATOR_KEY ONE_BUTTON_TOGGLE("BUTTON")
+/* The Waveshare ESP32-S3-Touch-AMOLED-1.75: a PWR key (read through the
+ * board's IO expander) and BOOT, a touch screen and two microphones. PWR
+ * works like the Indicator's key; BOOT held talks. */
+#define AMOLED_175_KEYS ONE_BUTTON_TOGGLE("PWR")
 
 /* Each group of rules once, joined when a frame needs its map: whole maps
  * spelled out per preset held the arrows three times and the swipes three. */
@@ -172,6 +182,7 @@ static const struct {
     /* The Sunton ESP32-8048S070: the BOOT key (GPIO0) and a touch screen,
      * no microphone. The key works like the Indicator's; the edges swipe. */
     {"sunton_esp32_8048s070", ONE_BUTTON_TOGGLE("BOOT"), NULL, true},
+    {"waveshare_esp32_s3_touch_amoled_1_75", AMOLED_175_KEYS, ONE_KEY_VOICE("BOOT"), true},
 };
 
 void fos_board_event_map(const char *hardware_preset, char *out, size_t out_len)
@@ -294,6 +305,23 @@ bool fos_board_led(const char *hardware_preset, int *pin, int *type)
     return false;
 }
 
+static const struct {
+    const char *preset;
+    fos_board_key_t key;
+} k_expander_keys[] = {
+    {"waveshare_esp32_s3_touch_amoled_1_75", {4, "PWR"}},
+};
+
+size_t fos_board_expander_keys(const char *hardware_preset, fos_board_key_t *out, size_t max)
+{
+    size_t n = 0;
+    if (!hardware_preset) return 0;
+    for (size_t i = 0; i < sizeof(k_expander_keys) / sizeof(k_expander_keys[0]) && n < max; i++) {
+        if (strcmp(hardware_preset, k_expander_keys[i].preset) == 0) out[n++] = k_expander_keys[i].key;
+    }
+    return n;
+}
+
 /* The I2C peripherals, by board, from Seeed's schematics (E1002 V1.2, E1004
  * V1.0): every E-series model has the PCF8563 clock (0x51) and the SHT40
  * sensor (0x44) on I2C0 = SDA GPIO19 / SCL GPIO20, which is also the J2
@@ -312,6 +340,12 @@ static const struct {
      * the bus, fos_display_set_i2c_lender) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
     {"waveshare_esp32_s3_photopainter", "sda=47,scl=48"},
     {"waveshare_esp32_s3_epaper_13_3e6", "sda=41,scl=42"},
+    /* The Waveshare ESP32-S3-Touch-AMOLED-1.75's one bus, SDA15/SCL14
+     * (Waveshare's BSP): the ES8311 (0x18) and ES7210 (0x40), the TCA9554
+     * expander (0x20) whose P4 is the PWR key, the AXP2101 PMIC (0x34), the
+     * PCF85063 clock (0x51), the CST9217 touch controller (0x5a) and the
+     * QMI8658 IMU (0x6b). */
+    {"waveshare_esp32_s3_touch_amoled_1_75", "sda=15,scl=14"},
     /* The reTerminal Sticky's MISC/BFG bus (Seeed's porting specification):
      * SDA GPIO1 / SCL GPIO0 with the PCF8563 clock, the SHT40 sensor, the
      * LSM6DS3TR-C IMU (0x6a) and the BQ27220 fuel gauge (0x55). GPIO0 is a
@@ -339,6 +373,7 @@ const char *fos_board_i2c_buses(const char *hardware_preset)
  * docs), a PCF8563 everywhere else FrameOS knows one. */
 static const char *const k_pcf85063_presets[] = {
     "waveshare_esp32_s3_photopainter",
+    "waveshare_esp32_s3_touch_amoled_1_75",
 };
 
 const char *fos_board_rtc_chip(const char *hardware_preset)
@@ -378,6 +413,10 @@ static const struct {
     /* The Sunton ESP32-8048S070's microSD slot on its own SPI bus
      * (CS10/MOSI11/SCK12/MISO13; no power switch or detect contact). */
     {"sunton_esp32_8048s070", "cs=10,sck=12,miso=13,mosi=11"},
+    /* The Waveshare ESP32-S3-Touch-AMOLED-1.75's slot: CLK GPIO2, CMD GPIO1,
+     * D0 GPIO3 and D3 GPIO41, read in SPI mode as Waveshare's wiki table
+     * gives it (CS = D3, MOSI = CMD, MISO = D0). */
+    {"waveshare_esp32_s3_touch_amoled_1_75", "cs=41,sck=2,miso=3,mosi=1"},
 };
 
 const char *fos_board_sd_pins(const char *hardware_preset)
@@ -414,6 +453,10 @@ static const struct {
      * interrupt line (GPIO18) is behind an unpopulated resistor (R17), so
      * the driver polls it. */
     {"sunton_esp32_8048s070", "sda=19,scl=20,int=-1,rst=38,en=-1"},
+    /* The Waveshare ESP32-S3-Touch-AMOLED-1.75's Hynitron CST9217 (0x5a) on
+     * the board's one bus (SDA15/SCL14, which fos_i2c.c lends it), INT
+     * GPIO11, reset GPIO40 (Waveshare's BSP). */
+    {"waveshare_esp32_s3_touch_amoled_1_75", "sda=15,scl=14,int=11,rst=40,en=-1"},
 };
 
 /* A glass mounted against its panel. The Indicator's sits upside down: a tap
@@ -426,6 +469,9 @@ static const struct {
 } k_touch_mirror[] = {
     {"seeed_sensecap_indicator_d1", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
     {"seeed_reterminal_sticky", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+    /* The AMOLED 1.75's CST9217 too (Waveshare's BSP mirrors both; a tap at
+     * the top read as the bottom on the bench, 2026-11-23). */
+    {"waveshare_esp32_s3_touch_amoled_1_75", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
 };
 
 int fos_board_touch_mirror(const char *hardware_preset)
@@ -458,6 +504,10 @@ static const struct {
 } k_codec_pins[] = {
     {"waveshare_esp32_s3_photopainter", "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7"},
     {"waveshare_esp32_s3_epaper_13_3e6", "mclk=14,bclk=21,ws=47,din=48,dout=45,pa=13"},
+    /* The Waveshare ESP32-S3-Touch-AMOLED-1.75: MCLK42, BCLK9, WS45, the
+     * ES7210's data on GPIO10, the ES8311's on GPIO8, the NS4150B amplifier
+     * on GPIO46 (Waveshare's BSP). */
+    {"waveshare_esp32_s3_touch_amoled_1_75", "mclk=42,bclk=9,ws=45,din=10,dout=8,pa=46"},
 };
 
 const char *fos_board_codec_pins(const char *hardware_preset)

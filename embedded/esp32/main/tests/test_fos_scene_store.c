@@ -658,6 +658,21 @@ static void test_category_in_the_index(void)
     CHECK(entry_says("desk", "category", "Desktop layouts"));
 }
 
+/* And the file types it opens (docs/scene-guide.md "Opening files"): the
+ * Files app finds the scene that opens a .pdf by them. Text as it is. */
+static void test_opens_in_the_index(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"pdf\",\"settings\":{\"opens\":\"pdf\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("pdf", "opens", "pdf"));
+    CHECK(put_one("{\"id\":\"code\",\"settings\":{\"opens\":\"txt md json\"}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("code", "opens", "txt md json"));
+    /* A list is no text: none, as a runtime reads it. */
+    CHECK(put_one("{\"id\":\"list\",\"settings\":{\"opens\":[\"pdf\"]}}", &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("list", "opens", NULL));
+}
+
 static void test_layouts_and_the_default(void)
 {
     fresh_dir();
@@ -1078,7 +1093,7 @@ static void test_a_set_staged_as_it_arrives(void)
     fos_scene_store_result_t result;
     const char *clock = "{\"apps\":{\"a\":{\"name\":\"not it\",\"sources\":{\"app.ts\":\"{}}\"}}},\"default\":true,"
                         "\"id\":\"clock\",\"name\":\"Cl\\u00f6ck\",\"nodes\":[{\"id\":\"n\"}],"
-                        "\"settings\":{\"category\":\"Real time\",\"icon\":\"M1 2Z\",\"windowSize\":\"800x600\"}}";
+                        "\"settings\":{\"category\":\"Real time\",\"icon\":\"M1 2Z\",\"opens\":\"txt\",\"windowSize\":\"800x600\"}}";
     const char *desk = "{\"id\":\"desk\",\"name\":\"Desk\",\"settings\":{\"desktop\":true,\"isLayout\":true}}";
     const char *photo = "{\"id\":\"photo\",\"name\":\"Photo\",\"refreshInterval\":300}";
 
@@ -1341,6 +1356,7 @@ int main(void)
     test_window_size_in_the_index();
     test_icon_in_the_index();
     test_category_in_the_index();
+    test_opens_in_the_index();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_set_file_from_its_scenes();
