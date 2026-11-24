@@ -46,6 +46,29 @@ def test_a_lapsed_booking_frees_the_board(bk):
     assert 'lapsed' in open(bk.PATH).read()
 
 
+def test_a_booking_ends_when_it_said_whatever_the_time_zone(bk, monkeypatch):
+    # The machine went from CET to Buenos Aires under a morning's bookings
+    # (2026-11-24): a booking stamped in local time read three hours longer.
+    import time
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setenv('TZ', 'CET-1')  # POSIX: no tzdata needed
+    time.tzset()
+    try:
+        bk.book('cloudw', 'frameos-video (video PR)', 'playback', hours=2)
+        until = bk._parse_stamp(bk.holders()['cloudw']['until'])
+        monkeypatch.setenv('TZ', '<-03>3')
+        time.tzset()
+        assert bk._parse_stamp(bk.holders()['cloudw']['until']) == until
+        assert not bk._lapsed(bk.holders()['cloudw'], until - timedelta(minutes=1))
+        assert bk._lapsed(bk.holders()['cloudw'], until)
+        assert abs((until - datetime.now(timezone.utc)).total_seconds() - 7200) < 120
+        # A stamp from before the offset reads as local time, as it did.
+        assert bk._parse_stamp('2026-11-24 12:18').utcoffset() == timedelta(hours=-3)
+    finally:
+        monkeypatch.delenv('TZ')
+        time.tzset()
+
+
 def test_names(bk):
     assert bk.resolve('all') == list(bk.boards())
     assert bk.resolve('seeed_reterminal_sticky') == ['sticky']
