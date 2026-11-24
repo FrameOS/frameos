@@ -37,6 +37,7 @@ def weather_scene() -> dict:
             {"name": "days", "type": "integer", "value": "3", "access": "public"},
             {"name": "scale", "type": "float", "value": "1.5", "access": "public"},
             {"name": "apiKey", "type": "string", "value": "", "access": "private"},
+            {"name": "token", "type": "string", "value": "tok-default", "access": "public", "secret": True},
             {"name": "layout", "type": "json", "value": "{}", "access": "public"},
             {"name": "photo", "type": "image", "value": "", "access": "public"},
         ],
@@ -124,10 +125,14 @@ def test_scene_options_keep_duplicate_names_apart():
 def test_scene_fields_payload_is_the_showing_scenes_public_fields_typed():
     frame = make_frame(scenes=[weather_scene(), {"id": "scene-1", "name": "Clock"}])
     payload = discovery.scene_fields_payload(
-        frame, "scene-2", {"city": "Rome", "days": "5", "dark": True, "apiKey": "secret", "layout": "{}"}
+        frame, "scene-2",
+        {"city": "Rome", "days": "5", "dark": True, "apiKey": "secret", "token": "tok-live", "layout": "{}"},
     )
-    # Private, json and image fields stay out; defaults are typed too; the
-    # implicit refresh interval is a field like any other.
+    # Private, secret, json and image fields stay out (a secret field is
+    # public to set, never to read: the topic is retained on the broker);
+    # defaults are typed too; the implicit refresh interval is a field like
+    # any other.
+    assert "tok-" not in json.dumps(payload)
     assert payload == {
         "scene_id": "scene-2",
         "scene": "Weather",
