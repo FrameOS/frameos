@@ -73,7 +73,9 @@ function wearingLayout(
 //   says what it asks for (the owner grants it where grants are made). What a
 //   device asks must never widen a grant (docs/cloud-frames.md). An update
 //   that asks for more than the version the frame holds (a permission, a
-//   settings key: panel-code-grants.ts) is the owner's (`needs_owner`).
+//   settings key: panel-code-grants.ts) is the owner's (`needs_owner`), as
+//   is an install whose scenes replace scenes the frame holds under the same
+//   ids and ask for more than they did.
 // - nothing when the owner turned the settings on the frame's screen off
 //   (`frame_settings_on_screen`): the store page is one of them.
 //
@@ -308,16 +310,32 @@ export async function runPanelSceneAction(
     if ("error" in scene) {
       return refused(scene.error, scene.error === "invalid_scene" ? 404 : 409);
     }
+    // The scenes the frame holds now. One under an id of the new version's
+    // (an older copy from elsewhere: the owner's own, an imported one,
+    // another store scene's) is what the new one takes the place of on the
+    // frame, so, as for an update, the scenes that take its place may ask for
+    // nothing more than the copies they replace (backend panel_scenes.py). A
+    // set that cannot be built is refused by the push below.
+    const built = await buildScenesPayloadForFrame(db, frame.id);
+    if (!("error" in built)) {
+      const newIds = new Set(scene.scenes.map((entry) => entry.id));
+      const replaced = built.scenes.filter((entry) => newIds.has((entry as { id?: unknown } | null)?.id));
+      if (replaced.length > 0) {
+        const heldIds = new Set(replaced.map((entry) => (entry as { id?: unknown }).id));
+        const needs = grantsWidenedBy(
+          scenesGrants(replaced),
+          scenesGrants(scene.scenes.filter((entry) => heldIds.has(entry.id))) ?? { permissions: [], settings: [] },
+        );
+        if (needs.length > 0) {
+          return refused("needs_owner", 403, { needs });
+        }
+      }
+    }
     // A layout is never shown on its own: shown, it goes around every scene,
     // and the frame stays on the scene it shows.
     const layout = versionIsLayout(scene.scenes.slice(0, 1)) ? (scene.scenes[0]?.id as string | undefined) : undefined;
-    let requested: RequestedScene[] = existing;
-    if (layout && show) {
-      const built = await buildScenesPayloadForFrame(db, frame.id);
-      if (!("error" in built)) {
-        requested = wearingLayout(existing, built.scenes, layout);
-      }
-    }
+    const requested: RequestedScene[] =
+      layout && show && !("error" in built) ? wearingLayout(existing, built.scenes, layout) : existing;
     const outcome = await assignScenesToFrame(db, {
       accountId,
       // Shown now, or the frame stays on the scene it shows (the store).

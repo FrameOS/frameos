@@ -24,8 +24,9 @@ service key is granted (a store scene gets the groups the owner allowed in
 the frame's settings, as for any store scene, docs/cloud-frames.md), and an
 update that asks for more than the copy it replaces (a permission, a
 settings key: panel_code's `grants_widened_by`) is the owner's
-(`needs_owner`); nothing while the owner has the settings on the frame's
-screen turned off.
+(`needs_owner`), as is an install that replaces a saved scene of the same id
+and asks for more than it; nothing while the owner has the settings on the
+frame's screen turned off.
 
 The cloud's twin is cloud/apps/auth-web/src/lib/panel-scenes.ts."""
 from __future__ import annotations
@@ -479,11 +480,19 @@ async def _panel_scenes(request: Request, id: int | None, authorization: str | N
                 return {"ok": True, "status": "queued", "already_assigned": True}
             scenes = await fetch_store_scenes(provider, store_scene_id)
             # A saved scene of the same id (an older copy from elsewhere) is
-            # replaced as an update replaces it: its values, map and layout stay.
+            # replaced as an update replaces it: its values, map and layout
+            # stay, and, as for an update, the scenes that take its place may
+            # ask for nothing more than the copies they replace.
+            new_ids = {scene["id"] for scene in scenes}
+            replaced = [scene for scene in saved if scene.get("id") in new_ids]
+            if replaced:
+                held_ids = {scene.get("id") for scene in replaced}
+                widens = update_widens(replaced, [scene for scene in scenes if scene["id"] in held_ids])
+                if widens:
+                    return _refused("needs_owner", HTTPStatus.FORBIDDEN, needs=widens)
             by_id = {scene.get("id"): scene for scene in saved}
             scenes = [_carried(by_id[scene["id"]], scene) if scene["id"] in by_id else scene for scene in scenes]
-            new_ids = {scene["id"] for scene in scenes}
-            kept = [scene for scene in saved if scene.get("id") not in new_ids]
+            kept =[scene for scene in saved if scene.get("id") not in new_ids]
             # A layout is never shown on its own: shown, it goes around every
             # scene (docs/scene-store.md "Trying a layout"), and the frame
             # stays on the scene it shows.
