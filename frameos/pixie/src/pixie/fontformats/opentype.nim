@@ -2607,7 +2607,7 @@ proc parseGlyphPath*(
   let instructionLength = buf.readUint16(i + 0).swap().int
   i += 2
 
-  buf.eofCheck(instructionLength)
+  buf.eofCheck(i + instructionLength)
 
   # let instructions = buf.readUint8Seq(i, instructionLength)
   i += instructionLength
@@ -2682,12 +2682,20 @@ proc parseGlyphPath*(
     prevY += y
     points[point].y = prevY.float32
 
+  # The contours are cut by the end points as the file gives them, and a
+  # release reads them with the checks off: each must end inside the points
+  # and after the one before (a contour of no points, ending where the one
+  # before did, is skipped). Anything else is a broken glyph, refused.
   var
     contours: seq[seq[TtfCoordinate]]
     startIdx = 0
   for endIdx in endPtsOfContours:
-    contours.add(points[startIdx .. endIdx.int])
-    startIdx = endIdx.int + 1
+    let last = endIdx.int
+    if last >= numPoints or last < startIdx - 1:
+      raise newException(PixieError, "Glyph contour end points out of order")
+    if last >= startIdx:
+      contours.add(points[startIdx .. last])
+    startIdx = last + 1
 
   for contour in contours:
     var prev, curr, next: TtfCoordinate

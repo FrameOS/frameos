@@ -44,34 +44,13 @@ proc fuzzRound*(seconds = 60) =
   when defined(posix):
     discard alarm(seconds.cuint)
 
-const GlyphParserOpen* = not defined(pixieFuzzGlyphParser)
-  ## A finding of fuzz_file_font and fuzz_indexed_font that is still open
-  ## (2026-11-24; fuzz_file_font seed 1283880294 round 824, fuzz_indexed_font
-  ## seed 882603713 round 63). Both readers hand a glyph's record to
-  ## opentype.nim's `parseGlyphPath`, which cuts the points into contours by
-  ## the end points as the file gives them: out of order or past the last
-  ## point, that is an index out of range, and an empty contour is read at
-  ## [^1] and [0]. With the checks on this is an IndexDefect; in a release
-  ## opentype.nim has them off. Until it refuses such a glyph, a Defect
-  ## raised under `parseGlyphPath` is not counted by `outline` below
-  ## (-d:pixieFuzzGlyphParser counts it). Delete this with the fix.
-
-proc underGlyphParser(e: ref Exception): bool =
-  for entry in e.getStackTraceEntries():
-    if entry.procname != nil and $entry.procname == "parseGlyphPath":
-      return true
-
 template outline*(body: untyped) =
-  ## A glyph's outline asked for: a PixieError is an answer. So, while the
-  ## finding above is open, is a Defect from the shared glyph parser. Any
-  ## other Defect, and any Defect once it is closed, ends the fuzzer.
+  ## A glyph's outline asked for: a PixieError is an answer. Any Defect ends
+  ## the fuzzer.
   try:
     body
   except PixieError:
     discard
-  except Defect as e:
-    if not (GlyphParserOpen and underGlyphParser(e)):
-      raise
 
 type
   HeapBytes* = object
