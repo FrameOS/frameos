@@ -233,6 +233,10 @@ bool fos_display_holds(const uint8_t *buf);
 void fos_display_wait_for(const uint8_t *buf);
 /* The panel has a partial waveform (fos_partial_refresh.h). */
 bool fos_display_supports_partial(void);
+/* Its controller keeps the picture and finds what changed itself (the
+ * IT8951's tile digests): an unchanged picture costs no refresh without the
+ * firmware's hash of it (fos_client.c display state). */
+bool fos_display_keeps_picture(void);
 /* fos_display_blit, or a partial update of the pixels that changed where
  * fos_partial_refresh_wanted says so. `same_scene`: the picture on the glass
  * came from the scene this one does. `input_recent`: someone is tapping, so a
@@ -240,6 +244,33 @@ bool fos_display_supports_partial(void);
  * it was. */
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
                              bool *partial);
+/* Where the render that drew the scene's canvas wrote it, in its own pixels
+ * (frameos_nim_render_damage), for the next fos_display_update of that canvas:
+ * on a controller that keeps the picture (the IT8951) only those tiles are
+ * hashed before the upload, the rest after the waveform has started (it8951.c
+ * verify_after_hint). Boxes of renders whose picture did not go up add up.
+ * `w` < 0: it could have written anywhere (the whole picture is hashed); w or
+ * h 0: nowhere. Only the render task calls it, right before its update; any
+ * other way onto the glass (a blit, a quick update) or a picture changed after
+ * its update (fos_display_hint_forget: an overlay drawn and taken off the
+ * canvas) makes the next update hash it all. */
+void fos_display_hint_damage(int x, int y, int w, int h);
+void fos_display_hint_forget(void);
+/* Tiles changed outside a render's box are still to go up, and no picture is
+ * coming: the render task hands the canvas to fos_display_update again. */
+bool fos_display_followup_due(void);
+/* A controller that keeps the picture (the IT8951) brought up on a task of its
+ * own at boot, while Wi-Fi joins and the scene loads, instead of after the
+ * first render (~1.9 s on a reTerminal E1003): every way onto the glass waits
+ * for it first. Nothing on a panel that keeps no picture. */
+void fos_display_warm_up(void);
+/* A controller that keeps the picture is not put in standby when the panel
+ * idles (FOS_PANEL_AWAKE_US, the ghost clean) while this is set: on a
+ * reTerminal E1003 the first waveform after a standby ran 898 ms where one
+ * runs 580 (its SYS_RUN answered in 22 ms: the cost is the panel supply's).
+ * The render task sets it while the board is on USB power; a deep sleep
+ * parks it all the same (fos_display_park). */
+void fos_display_keep_controller_awake(bool keep);
 /* A notice just before a restart (fos_restart.h) or as a board boots: an LCD
  * draws it at once, an e-paper with a partial waveform takes it in the fast
  * one and is put to sleep after it (no restart under a waveform), anything

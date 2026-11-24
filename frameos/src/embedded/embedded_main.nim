@@ -28,6 +28,7 @@ import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/panel_damage
 import frameos/utils/palette_pack
+from frameos/utils/svg_frames import takePanelPaint
 import frameos/render_probe
 
 # `log` comes from embedded_runtime (same frameos_nim_log_hook C hook).
@@ -433,12 +434,22 @@ proc renderFrameImage(): tuple[image: Image, source: string] =
   rhythmForgetCanvases()
   (renderDemoInto(renderCanvas(), frameName, renderCount + 1), "status screen")
 
+proc noteRenderDamage(known, x, y, w, h: cint) {.importc: "fos_nim_note_damage", cdecl.}
+
+var keptPaint: tuple[known: bool, x, y, w, h: int]
+  ## Where the last kept-canvas render wrote the canvas, when it knows
+  ## (svg_frames.takePanelPaint): reported with the picture to the firmware,
+  ## whose IT8951 hashes only that before the upload (fos_display_hint_damage).
+
 proc renderKeptFrameImage(): tuple[image: Image, source: string] =
   ## renderFrameImage for a canvas that is packed afterwards: a panel with a
   ## partial waveform keeps the SVG damage records an LCD's buffer has.
+  keptPaint = (false, 0, 0, 0, 0)
   let kept = beginKeptCanvasFrame()
   try:
-    renderFrameImage()
+    result = renderFrameImage()
+    if kept:
+      keptPaint = takePanelPaint()
   finally:
     if kept:
       endKeptCanvasFrame()
@@ -978,6 +989,11 @@ proc fos_nim_render_alloc_impl(
       # sixteen-grey canvas is its picture as it is, and keeps both.
       rhythmForgetCanvases()
       lastPackedFromCanvas = false
+    # Where this picture can differ from the last one the canvas held: only
+    # for a sixteen-grey canvas that is the panel buffer as it is (nothing
+    # packed over it) and a render that knows (renderKeptFrameImage).
+    let paintKnown = drawsInPanel and lastPackedFromCanvas and canvas.format == pfGray4 and keptPaint.known
+    noteRenderDamage(paintKnown.cint, keptPaint.x.cint, keptPaint.y.cint, keptPaint.w.cint, keptPaint.h.cint)
     image = nil
     GC_fullCollect()
     let packed = getMonoTime()

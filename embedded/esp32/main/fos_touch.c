@@ -250,6 +250,10 @@ static const char *TAG = "fos_touch";
 /* What the GT911 gets on every firmware known to run the reTerminal Sticky's
  * panel: the bus has only the chip's weak pull-ups behind it. */
 #define TOUCH_GT911_I2C_HZ 100000
+/* On a bus with the board's 4.7 kΩ pull-ups (the reTerminal E1003's, which
+ * fos_i2c.c runs for the clock): the chip's rated 400 kHz, once a read at it
+ * answers. */
+#define TOUCH_GT911_FAST_I2C_HZ 400000
 #define TOUCH_I2C_TIMEOUT_MS 50
 /* The panel's supply switch to a controller that answers (Seeed's demos). */
 #define TOUCH_POWER_SETTLE_MS 250
@@ -296,6 +300,7 @@ static bool s_bus_owned = false;
 static bool s_polled = false; /* no interrupt line: the task polls */
 static controller_t s_controller = CTRL_GT911;
 static i2c_master_dev_handle_t s_dev = NULL;
+static uint32_t s_hz = 0; /* the controller's clock (attach) */
 static uint8_t s_addr = 0;
 static int s_x_max = 0, s_y_max = 0;
 static bool s_swap = false;
@@ -583,6 +588,7 @@ static bool attach(uint8_t addr, uint32_t hz)
         .device_address = addr,
         .scl_speed_hz = hz,
     };
+    s_hz = hz;
     return i2c_master_bus_add_device(s_bus, &dev_config, &s_dev) == ESP_OK;
 }
 
@@ -656,8 +662,17 @@ static int read_points(fos_touch_point_t *points)
         if (ft_read(FOS_TOUCH_FT_REG_TOUCHES, report, sizeof(report)) != ESP_OK) return -1;
         return fos_touch_decode_ft(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     }
-    uint8_t report[FOS_TOUCH_REPORT_BYTES];
-    if (reg_read(FOS_TOUCH_REG_STATUS, report, sizeof(report)) != ESP_OK) return -1;
+    /* The status and the first finger, and the other fingers only when there
+     * are others: 9 bytes on the wire instead of 41 (at 100 kHz ~1 ms instead
+     * of ~4.5, every 10 ms while a finger is down: a lift is seen sooner). */
+    uint8_t report[FOS_TOUCH_REPORT_BYTES] = {0};
+    if (reg_read(FOS_TOUCH_REG_STATUS, report, 1 + FOS_TOUCH_POINT_BYTES) != ESP_OK) return -1;
+    int fingers = report[0] & 0x0F;
+    if ((report[0] & FOS_TOUCH_STATUS_READY) && fingers > 1 && fingers <= FOS_TOUCH_POINTS_MAX &&
+        reg_read(FOS_TOUCH_REG_STATUS + 1 + FOS_TOUCH_POINT_BYTES, report + 1 + FOS_TOUCH_POINT_BYTES,
+                 (size_t)(fingers - 1) * FOS_TOUCH_POINT_BYTES) != ESP_OK) {
+        return -1;
+    }
     int count = fos_touch_decode(report, sizeof(report), points, FOS_TOUCH_POINTS_MAX);
     /* Every ready report is cleared, one that does not decode too: left set,
      * the controller sends no other. */
@@ -927,6 +942,14 @@ esp_err_t fos_touch_start(void)
         s_x_max = range[0] | (range[1] << 8);
         s_y_max = range[2] | (range[3] << 8);
     }
+    if (s_controller == CTRL_GT911 && lent) {
+        /* The board's pull-ups: 400 kHz if the chip answers its id at it. */
+        uint8_t id[4] = {0};
+        if (!attach(s_addr, TOUCH_GT911_FAST_I2C_HZ) || reg_read(FOS_TOUCH_REG_PRODUCT_ID, id, sizeof(id)) != ESP_OK ||
+            id[0] != '9') {
+            attach(s_addr, TOUCH_GT911_I2C_HZ);
+        }
+    }
     /* A report left over from before the reset would hold the next one back. */
     if (s_controller == CTRL_GT911) reg_write_byte(FOS_TOUCH_REG_STATUS, 0);
     /* A controller with no configured range reports in the panel's. */
@@ -1041,8 +1064,9 @@ void fos_touch_print_status(void)
                (int)pins->sda, (int)pins->scl, (int)pins->irq);
         return;
     }
-    printf("touch:       %s at 0x%02x, %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
-           k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? " (axes swapped)" : "",
+    printf("touch:       %s at 0x%02x (%lu kHz), %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
+           k_controller_names[s_controller], s_addr, (unsigned long)(s_hz / 1000), s_x_max, s_y_max,
+           s_swap ? " (axes swapped)" : "",
            s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
            s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);

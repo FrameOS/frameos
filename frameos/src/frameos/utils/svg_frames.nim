@@ -101,6 +101,11 @@ var
   heldPixelFrames: seq[PixelFrame]
   panelPixelFrame: PixelFrame
   panelHasPixelFrame: bool
+  panelPaint: tuple[paints: int, known: bool, x, y, w, h: int]
+    ## What this render wrote into the panel buffer through here: a controller
+    ## that keeps the picture hashes only that before the upload (the IT8951,
+    ## embedded_main's frameos_nim_render_damage). Known only for a render that
+    ## was one SVG repainted in its own frame's damage, nothing copied in.
 
 when defined(testing):
   var svgFramePixelsForTest* = 0
@@ -117,6 +122,7 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
   panelBuffer = buffer
   panelGeneration = generation
   panelHeld = none(HeldFrame)
+  panelPaint = (0, false, 0, 0, 0, 0)
   for i in 0 ..< heldFrames.len:
     if heldFrames[i].buffer == buffer and not heldFrames[i].isRegion:
       panelHeld = some(heldFrames[i])
@@ -166,6 +172,7 @@ proc takePanelPixelFrame*(target: Image, wholeFrame: bool): tuple[panel: bool, f
   ## this render began on and nothing else draws in it, and then the cells it
   ## holds, if the firmware has not written into it since (else `frame` is
   ## empty and every cell gets written).
+  inc panelPaint.paints
   if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
       target.bufferPointer != panelBuffer:
     return
@@ -187,6 +194,13 @@ proc keepPanelPixelFrame*(frame: sink PixelFrame) =
 proc area(rects: seq[tuple[x, y, w, h: int]]): int =
   for r in rects:
     result += r.w * r.h
+
+proc takePanelPaint*(): tuple[known: bool, x, y, w, h: int] =
+  ## The box this render (since beginPanelFrame) wrote the panel buffer in,
+  ## when it is known (`panelPaint`); w and h 0 for a render that drew nothing.
+  result = (panelPaint.paints == 1 and panelPaint.known, panelPaint.x, panelPaint.y, panelPaint.w,
+    panelPaint.h)
+  panelPaint = (0, false, 0, 0, 0, 0)
 
 proc newestHeldFrame(target: Image): int =
   ## The newest record of another buffer that still holds its frame (its
@@ -363,6 +377,9 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   ## layout), for pixie to keep their parse (parseSvg's `reuse`).
   if root.isNil:
     return false
+  # Any paint but the one damage repaint below leaves the render's box unknown.
+  inc panelPaint.paints
+  panelPaint.known = false
   if panelBuffer.isNil or target.isNil or not wholeFrame or target.bufferPointer != panelBuffer:
     # Not the panel's own buffer (or not the whole frame): parsed and drawn
     # in one go, so the probe's raster carries its parse too.
@@ -398,6 +415,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   var
     rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
     base: Option[HeldFrame] # the frame the buffer holds after any copy
+    copied = false # pixels came in from another buffer
   probe(phDamage):
     if held.isSome and held.get().generation == panelGeneration and
         held.get().width == target.width and held.get().height == target.height:
@@ -421,6 +439,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
         let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
         if not found.full and found.rects.area < whole:
           copyFrameIn(target, heldFrames[source].buffer)
+          copied = true
           rects = found.rects
           base = some(heldFrames[source])
     elif rects.area >= CatchUpArea and base.isSome:
@@ -435,6 +454,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
         if not found.full and found.rects.area < rects.area:
           for r in rects:
             target.copyRectIn(heldFrames[source].buffer, r)
+          copied = true
           # The source is usually the buffer on the glass, the only one the
           # firmware's loading mark is drawn into, and drawing it counts a
           # write there: written while it was copied, the copies may hold the
@@ -461,6 +481,17 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
           svgFramePixelsForTest += r.w * r.h
   except CatchableError:
     return false
+  if not target.isView and not copied and base.isSome and rects.area < whole:
+    # The buffer's own last frame plus these boxes: all this render changed.
+    var (left, top, right, bottom) = (target.width, target.height, 0, 0)
+    for r in rects:
+      left = min(left, r.x)
+      top = min(top, r.y)
+      right = max(right, r.x + r.w)
+      bottom = max(bottom, r.y + r.h)
+    panelPaint.known = true
+    if right > left and bottom > top:
+      (panelPaint.x, panelPaint.y, panelPaint.w, panelPaint.h) = (left, top, right - left, bottom - top)
   if target.isView:
     # One record per rectangle, whoever left the last one.
     let stale = target.regionRecord

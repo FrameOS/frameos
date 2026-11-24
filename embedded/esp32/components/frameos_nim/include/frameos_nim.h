@@ -52,6 +52,12 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
  * scene image is created. The caller owns `*buf` and must free it with free().
  * This lowers peak PSRAM on large panels. */
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
+/* Where the last frameos_nim_render_alloc changed the panel buffer it drew in
+ * (a sixteen-grey canvas that is that buffer), in its pixels: true with the
+ * box (w or h 0: nowhere) when the render knows, false when it could have
+ * written anywhere. One SVG repainted in its own frame's damage knows
+ * (svg_frames.nim takePanelPaint); fos_display_hint_damage takes it. */
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h);
 /* The picture the last render drew, packed again without running the scene:
  * what a panel settles from once nobody is tapping (fos_display_settle_due).
  * -1 when the last render did not leave one. As frameos_nim_render_alloc,

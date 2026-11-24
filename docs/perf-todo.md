@@ -261,6 +261,34 @@ refill interrupt takes about half of the render's core while it scans.
   about what this board has for it. 50 fps would need the effect out of
   QuickJS.
 
+## A tap on the E1003, lift to waveform (2026-11-24)
+
+Of ~185 ms between a tap's lift and its DU starting on the reTerminal E1003,
+the render was 22 ms (main's signal() Calculator). The rest, from the
+`render:timeline` line (`set debug 1`) and the code:
+
+| | 2026.11.14 | now |
+| --- | --- | --- |
+| render done → update call (a SHA-256 of 1.3 MB for the display state) | 43.5 ms | 0.8 |
+| hash of every tile before the upload | ~30-50 (inside `update`) | 0: the render's box |
+| `it8951:` printf behind the render's lines, HRDY in 10 ms ticks | 10-45 | gone |
+| NVS commit of the display state after the update | 14.2 | 0.1 |
+| lift → DU starts | ~185 | ~37-50 |
+| `render #N done in` (probe off) | 183 | 78-98 |
+
+How (docs/realtime-rendering.md "Partial refresh on e-paper"): the render's
+box (`svg_frames` `takePanelPaint`) is what is hashed before the upload, and
+the whole picture after the waveform has started (31 ms on both cores, 20 ms
+when nothing changed), any tile it missed sent in a follow-up and logged; the
+display state is not hashed or written while somebody taps, only when the
+hold releases and before a deep sleep; the log ring; LUTAFSR polled per tick,
+then every 0.5 ms near the waveform's end (DUs ran 413-443 ms); the settle at
+4.5 s and never under a finger; any change while tapping one DU; GT911 reads
+of 9 bytes at 400 kHz. Standby: SYS_RUN answered in 22 ms, but the first
+waveform after a standby ran 898 ms against 580, so on USB power the
+controller is no longer put in standby; at boot its 1.9 s bring-up runs while
+Wi-Fi joins (done 3.0 s after `restart`, the first render at 7.0 s).
+
 ## Still open
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
@@ -284,6 +312,25 @@ refill interrupt takes about half of the render's core while it scans.
 - An e-paper board (Gray8 surface, the reTerminal E1003's touch) and a Pi
   have not been benchmarked with these changes; the cache and blits run on
   every surface and their test covers RGBX, 565 and Gray8.
+- **A DU's picture at 1 or 2 bits a pixel** (the IT8951): while somebody taps
+  every changed tile goes up as 4 bpp and is halftoned to black and white on
+  the way, so a whole-panel change is 1.3 MB on a 20 MHz bus, ~0.55 s before
+  its DU starts. The controller has a 1 bpp mode (register UP1SR bit 2 and
+  the foreground/background greys in BGVR, an 8 bpp load whose bytes are
+  eight pixels each: Waveshare's `EPD_IT8951_1bp_Refresh`), a quarter of the
+  bytes. Not done: the mirrored E1003 reverses bits as well as bytes, the
+  mode has to be switched off before the next 4 bpp load (after its
+  waveform, which the driver otherwise never waits for), and a wrong bit
+  order only shows on the glass, which no bench check can read. Worth it for
+  page turns by tap; a key's tiles are a few KB either way.
+- **An upload beside a running waveform** (the IT8951): the image buffer
+  outside the running area could take the next tap's tiles while the last DU
+  runs, so only the new waveform would wait. Built and taken out again
+  (2026-11-24): on the E1003 every pair of quick taps on the Calculator and
+  the To-do touched the same area (the display, the count left), so the
+  second upload overlapped the first waveform every time, and a tap's
+  upload is 3-16 ms anyway. Worth it only for a scene whose taps change
+  places far apart and nothing shared.
 
 ## What it costs in flash
 

@@ -993,9 +993,39 @@ a small change cost what it should:
   rest of the picture does not flash. It draws black and white only, so a
   changed area with greys goes up as a halftone
   (`fos_it8951_row_halftone`) and its tiles are owed their greys; a tile drawn
-  in pure black and white again owes nothing. 2.5 s after the last of these
-  updates (`fos_display_settle_due`) the kept canvas is packed again, with the
-  scene not run, and those areas get GC16, three rectangles at the most.
+  in pure black and white again owes nothing. **A change of any size** goes up
+  that way while someone taps (`controller_keeps` in `fos_partial_refresh.c`):
+  a page turned by a tap is one DU, not the whole panel's GC16, which flashed
+  for 580 ms. 4.5 s after the last of these updates, and never while a finger
+  is down or a press is queued (`fos_display_settle_due`, the idle wait in
+  `fos_client.c`), the kept canvas is packed again, with the scene not run,
+  and those areas get GC16, three rectangles at the most: a tap that lands on
+  a settle waits out its 580 ms, and 2.5 s was the gap between two taps of
+  somebody reading.
+  **What goes up first is the render's box.** Hashing the whole 1.3 MB
+  picture to find what changed was 30-50 ms between a tap's render and its
+  upload, and the SHA-256 the firmware kept for "unchanged, skip the refresh"
+  another 40 (2026-11-24). The render says where it wrote the canvas
+  (`frameos_nim_render_damage`: one SVG repainted in its own frame's damage,
+  `svg_frames.nim` `takePanelPaint`; anything else is the whole canvas), the
+  render task hands that to `fos_display_hint_damage`, and the driver hashes
+  only those tiles before the upload (`fos_it8951_10in3_hint`). The whole
+  picture is hashed after the waveform has started, on both cores
+  (`fos_rows_run`), when the next upload could not go yet anyway
+  (`verify_after_hint`): a tile changed outside the box is sent at once in a
+  follow-up (`fos_display_followup_due`) and logged as `changed outside the
+  render's box`, so a wrong box costs a waveform, never a picture left
+  behind. A box is good only for the canvas as the controller last took it:
+  any other way onto the glass (a blit, a quick update) or a picture taken
+  off the canvas after its update (an overlay: `fos_display_hint_forget`)
+  makes the next update hash it all. While somebody taps, the SHA-256 is not
+  worked out at all and the hash of the last picture is written to flash when
+  the tapping stops, and before a deep sleep (`pay_display_state`): the
+  controller's tiles skip an unchanged picture already. The `it8951:` lines
+  go through the log ring (a `printf` waited 10-45 ms behind a render's own
+  lines for room on the 115200-baud console), HRDY is spun on for 5 ms before
+  a wait sleeps a tick, and a wait for the last waveform sleeps until shortly
+  before it is due and then reads LUTAFSR every half millisecond.
   **Quick pictures go up the same way** (`fos_pictures_fast`): a scene whose
   own interval is under 2.5 s (an animation, a clock's seconds) from its first
   frame, and any picture within 2.5 s of the one before. Before, an animation
@@ -1007,8 +1037,16 @@ a small change cost what it should:
   black and white and GC16 for the rest. A new scene is GC16 over the whole
   panel. A panel picks this path by
   giving `PARTIAL_PANELS` a `changed`, a `clean` and an `owed`. The controller
-  is not put in standby between updates (its first waveform after one costs 600
-  ms more), only when it is parked. Measured on an E1003 (2026-11-10): five
+  is not put in standby between updates, only when it is parked, and on USB
+  power not even then (`fos_display_keep_controller_awake`; a deep sleep
+  parks it all the same): its first waveform after a standby ran 898 ms where
+  a GC16 runs 580, while SYS_RUN itself answered in 22 ms (2026-11-24), so
+  the cost is the panel's supply coming up and waking it early saves nothing.
+  An awake controller is not sent SYS_RUN and the SHT40's temperature on
+  every full refresh any more; the temperature goes again every 5 minutes. At
+  boot it is brought up on a task of its own while Wi-Fi joins
+  (`fos_display_warm_up`), not after the first render; every way onto the
+  glass waits for that task first. Measured on an E1003 (2026-11-10): five
   scattered areas in 511 ms of waveform and 15 ms of upload; a tap in about a
   second from the finger to the picture.
 - **A refresh is started, not waited for.** The IT8951 runs its waveform and the

@@ -940,8 +940,33 @@ size_t frameos_nim_js_runtime_bytes(void)
     return bytes;
 }
 
+/* Where the last frameos_nim_render_alloc wrote the canvas, as the render
+ * reported it (embedded_main.nim noteRenderDamage): unknown unless it did. */
+static bool s_damage_known = false;
+static int s_damage[4];
+
+void fos_nim_note_damage(int known, int x, int y, int w, int h)
+{
+    s_damage_known = known != 0;
+    s_damage[0] = x;
+    s_damage[1] = y;
+    s_damage[2] = w;
+    s_damage[3] = h;
+}
+
+bool frameos_nim_render_damage(int *x, int *y, int *w, int *h)
+{
+    if (!s_damage_known) return false;
+    *x = s_damage[0];
+    *y = s_damage[1];
+    *w = s_damage[2];
+    *h = s_damage[3];
+    return true;
+}
+
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
+    s_damage_known = false;
     if (!s_nim_ready || !buf || !len) return -1;
     if (!nim_lock_take()) return -1;
     int result;

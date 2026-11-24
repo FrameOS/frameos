@@ -100,6 +100,11 @@ typedef struct {
     uint32_t partials_since_full;
     size_t changed_bytes;
     size_t total_bytes;
+    /* The controller keeps the picture and settles its own ghosts (the
+     * IT8951): while someone taps, any change goes up as one DU, however big
+     * (greys as a halftone, settled when the tapping stops), not a GC16 of the
+     * whole panel that flashes for 580 ms. */
+    bool controller_keeps;
 } fos_partial_refresh_input_t;
 
 fos_refresh_kind_t fos_partial_refresh_kind(const fos_partial_refresh_input_t *input);

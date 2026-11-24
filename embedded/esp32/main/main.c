@@ -598,6 +598,9 @@ void app_main(void)
         fos_assets_cleanup_stale_uploads();
     }
     boot_splash_start();
+    /* The IT8951 comes up while Wi-Fi joins, not after the first render; not
+     * on a timer's wake, whose picture may well be unchanged (no refresh). */
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) fos_display_warm_up();
     fos_client_wake_mark_begin();
 
     /* Memory guardrail (M4): refuse to render a panel on-device that can't fit
