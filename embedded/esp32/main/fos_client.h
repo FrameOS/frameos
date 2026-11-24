@@ -97,6 +97,13 @@ void fos_client_release_render(void);
  * release. Shown once: the render after that takes it off, or a tap on it
  * or a key (fos_client_notice_takes). Any task; the text is copied. */
 void fos_client_show_notice(const char *text);
+/* What the voice chat's plane is doing while the frame waits for its answer
+ * (docs/voice-chat.md "Progress on the panel"): `text` in the notice's box
+ * over the last image, at once and in the fast waveform, on a panel that has
+ * one (an LCD, e-paper with a partial update; nothing on the others, whose
+ * refresh is seconds of flashing), while the session holds the panel. The
+ * newest one is drawn. Any task; the text is copied. */
+void fos_client_voice_progress(const char *text);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
 int64_t fos_client_last_render_ms(void);

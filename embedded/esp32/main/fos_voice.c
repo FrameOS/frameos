@@ -305,9 +305,29 @@ static bool plane_configured(void)
     return fos_cloud_api_access(NULL, 0, NULL, 0, NULL, 0);
 }
 
+/* A line of the closing chunk's answer that says how far the plane got
+ * (`{"progress": stage, "text": …}`, docs/voice-chat.md "Progress on the
+ * panel"): its text goes on the panel, in the plane's words. False for any
+ * other line: the answer. */
+static bool progress_line(const char *line)
+{
+    cJSON *json = cJSON_Parse(line);
+    const cJSON *stage = cJSON_GetObjectItem(json, "progress");
+    const cJSON *text = cJSON_GetObjectItem(json, "text");
+    if (cJSON_IsString(stage) && cJSON_IsString(text)) {
+        char folded[VOICE_LOG_TEXT_MAX + 1];
+        ascii_fold(text->valuestring, folded, sizeof(folded));
+        printf("voice: %s\n", stage->valuestring);
+        fos_client_voice_progress(folded);
+    }
+    cJSON_Delete(json);
+    return stage != NULL;
+}
+
 /* One chunk: open, write, read the answer. `*status` is the HTTP status (0
- * when nothing came back); `reply` (may be NULL) receives the body. The
- * connection stays open for the next chunk (keep-alive). */
+ * when nothing came back); `reply` (may be NULL) receives the body, for the
+ * closing chunk its last line (the progress lines before it are drawn as they
+ * come). The connection stays open for the next chunk (keep-alive). */
 static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len, bool done,
                             int *status, char *reply, size_t reply_len)
 {
@@ -338,11 +358,13 @@ static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len,
     }
     *status = esp_http_client_get_status_code(up->client);
     /* Read the whole body, kept or not: an unread body is what stops the
-     * next request from reusing the connection. */
+     * next request from reusing the connection. The closing chunk's comes a
+     * line at a time from a plane that streams it, so it is read a byte at a
+     * time: esp_http_client_read waits until it has all it was asked for. */
     size_t used = 0;
     while (true) {
         char tmp[512];
-        int r = esp_http_client_read(up->client, tmp, sizeof(tmp));
+        int r = esp_http_client_read(up->client, tmp, done ? 1 : (int)sizeof(tmp));
         if (r <= 0) break;
         if (reply && used + 1 < reply_len) {
             size_t take = (size_t)r;
@@ -350,6 +372,10 @@ static esp_err_t send_chunk(voice_upload_t *up, const uint8_t *data, size_t len,
             memcpy(reply + used, tmp, take);
             used += take;
             reply[used] = '\0';
+        }
+        if (done && reply && used > 0 && reply[used - 1] == '\n') {
+            reply[--used] = '\0';
+            if (progress_line(reply)) used = 0;
         }
     }
     up->seq++;
@@ -528,6 +554,9 @@ static void relay_task(void *arg)
     }
     esp_http_client_set_header(up.client, "Authorization", auth);
     esp_http_client_set_header(up.client, "Content-Type", "audio/L16; rate=16000; channels=1");
+    /* The closing chunk's answer with its progress lines, from a plane that
+     * has them; the others answer in one line as before. */
+    esp_http_client_set_header(up.client, "Accept", "application/x-ndjson");
 
     /* Chunks go up as the talking fills them; the release (or a full
      * buffer) sends the rest and asks for the answer. */

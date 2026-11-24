@@ -1509,7 +1509,10 @@ POSTs it a second at a time to the frame's control plane —
 `{backend}/api/frames/{id}/embedded/voice/{session}?seq=N&done=0|1` with the
 frame's `server_api_key`, or `{cloud}/api/frames/{id}/voice/{session}` with
 the enrollment token — on one kept-alive connection, and on the release
-sends the rest with `done=1` and waits for the transcript and the reply (the
+sends the rest with `done=1` and waits for the transcript and the reply,
+drawing on an LCD or a partial-waveform e-paper what the plane says it is
+doing meanwhile ("Transcribing…", the transcript, "Building the scene… 30 s":
+the answer comes as NDJSON, docs/voice-chat.md "Progress on the panel") (the
 plane's chat turn with six frame-scoped tools: switch a scene, set its state,
 redraw, show a picture as a preview scene, rotate or re-time the frame —
 `docs/voice-chat.md`; a spoken rotation's restart waits for the answer to
