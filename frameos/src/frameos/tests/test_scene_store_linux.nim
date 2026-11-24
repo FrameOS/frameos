@@ -213,6 +213,9 @@ block what_asks_for_a_red_permission:
   doAssert not scenesAskForRed([scene(%*["assets"])])
   for permission in ["shell", "files", "assets-write", "frame", "code", "store"]:
     doAssert scenesAskForRed([scene(%*["assets", permission])]), permission
+  # A list only a lenient reader takes asks for nothing: the runtime gives
+  # such an app nothing either.
+  doAssert not scenesAskForRed([scene(nil, "{\"permissions\": [\"frame\"],}")])
   # A node's own files, and a built-in app that has a red permission.
   doAssert scenesAskForRed([%*{"id": "s", "nodes": [{"id": "1", "type": "app", "data": {"keyword": "x",
     "sources": {"config.json": "{\"permissions\": [\"code\"]}"}}}]}])

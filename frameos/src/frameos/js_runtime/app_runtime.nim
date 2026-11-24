@@ -14,6 +14,7 @@ import frameos/utils/line_reader
 import frameos/utils/zip_entry
 import frameos/utils/file_slice
 import frameos/utils/base64_field
+import frameos/utils/strict_json
 import frameos/spool
 import frameos/layout_choice
 import lib/tz
@@ -115,11 +116,11 @@ type
     codeGrant*: bool
       ## config.json `permissions` asks for "code": `frameos.code`, the
       ## frame's scenes' sources and the plane's scene AI (docs/code-editor.md).
-    js*: QuickJS
     storeGrant*: bool
       ## config.json `permissions` asks for "store": `frameos.storeAction`,
       ## installing, updating and removing the frame's scenes and choosing its
       ## layout (docs/scene-store.md).
+    js*: QuickJS
     ready*: bool
     initialized*: bool
     nextImageId*: int
@@ -671,12 +672,12 @@ proc jsStoreAction(ctx: ptr JSContext, action: JSValue, argsJson: JSValue): JSVa
   let act = sceneStoreAction
   if act.isNil or e == nil:
     return nimBoolToJS(ctx, false)
-  let what = toNimString(ctx, action)
   if not e.runtime.storeGrant:
     frameos_apps.logError(e.owner, "frameos.storeAction: this app's permissions do not include store")
     return nimBoolToJS(ctx, false)
   if storeFacts(storeAsker(e)).len == 0:
     return nimBoolToJS(ctx, false)
+  let what = toNimString(ctx, action)
   if what == "layout":
     storeChooseLayout(storeAsker(e), toNimString(ctx, argsJson))
     return nimBoolToJS(ctx, true)
@@ -3353,15 +3354,23 @@ proc runtimeConfigFromNode(config: JsonNode, nodeConfig: JsonNode): JsonNode =
       else:
         result[key] = value
 
-proc configFromSources(sources: JsonNode): JsonNode =
-  if sources.isNil or sources.kind != JObject or not sources.hasKey("config.json"):
-    return %*{}
-  try:
-    result = parseJson(sources["config.json"].getStr("{}"))
-    if result.isNil or result.kind != JObject:
-      return %*{}
-  except CatchableError:
-    return %*{}
+proc configFromSources*(sources: JsonNode): JsonNode =
+  ## The app's config.json, when it is one: strict JSON and an object
+  ## (utils/strict_json.nim). Anything else is no config, so it asks for
+  ## nothing: what this reads is what a control plane's `JSON.parse` read
+  ## when it showed the owner what the app asks for.
+  if not sources.isNil and sources.kind == JObject and sources.hasKey("config.json"):
+    result = strictJsonObject(sources["config.json"].getStr())
+  if result.isNil:
+    result = newJObject()
+
+proc settingsKeysFromConfig*(config: JsonNode): seq[string] =
+  ## config.json `settings`: the settings namespaces the app reads.
+  let settingsNode = config{"settings"}
+  if not settingsNode.isNil and settingsNode.kind == JArray:
+    for key in settingsNode.items:
+      if key.kind == JString and key.getStr().len > 0:
+        result.add(key.getStr())
 
 proc grantsFromConfig*(config: JsonNode): tuple[assets: JsAssetGrant, frame, code, store: bool] =
   ## config.json `permissions`: exactly what the app asks for. No list, or a
@@ -3377,39 +3386,33 @@ proc grantsFromConfig*(config: JsonNode): tuple[assets: JsAssetGrant, frame, cod
       of "assets", "files": result.assets = max(result.assets, agRead)
       of "frame": result.frame = true
       of "code": result.code = true
+      of "store": result.store = true
       else: discard
 
 template assetGrantFromConfig*(config: JsonNode): JsAssetGrant = grantsFromConfig(config).assets
 template frameGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).frame
 template codeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).code
+template storeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).store
 
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode,
     reload: proc (): JsonNode = nil): AppRoot =
   ## `reload`: the app's files read again, so that its interpreter keeps none
-      of "store": result.store = true
   ## of them once compiled (JsAppRuntime.reload).
   let source = jsAppSourceFromSources(sources)
   if source.len == 0:
     raise newException(ValueError, "Missing JavaScript app source for keyword: " & keyword)
   let config = configFromSources(sources)
-template storeGrantFromConfig*(config: JsonNode): bool = grantsFromConfig(config).store
   let category = config{"category"}.getStr().toLowerAscii()
   let outputType = outputTypeFromConfig(config)
-  var settingsKeys: seq[string] = @[]
-  let settingsNode = config{"settings"}
-  if not settingsNode.isNil and settingsNode.kind == JArray:
-    for key in settingsNode.items:
-      if key.kind == JString and key.getStr().len > 0:
-        settingsKeys.add(key.getStr())
   let grants = grantsFromConfig(config)
-  let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
+  let runtime = newJsAppRuntime(category, outputType, source, settingsKeysFromConfig(config),
                                 jsAppSourceNameFromSources(sources), sources, grants.assets)
   runtime.frameGrant = grants.frame
   runtime.codeGrant = grants.code
+  runtime.storeGrant = grants.store
   runtime.reload = reload
   var byteIterFields: seq[string] = @[]
   let fields = config{"fields"}
-  runtime.storeGrant = grants.store
   if not fields.isNil and fields.kind == JArray:
     for field in fields.elems:
       let capabilities = if field.kind == JObject: field{"capabilities"} else: nil

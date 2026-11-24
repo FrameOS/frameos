@@ -42,24 +42,12 @@ proc runJsAppTests*(sources: JsonNode, testFile: string, frameConfig: FrameConfi
     return failedReport("No such file in the app: " & testFile)
   if not isAppTestFile(testFile):
     return failedReport("Not a test file (name it <something>.test.ts): " & testFile)
-  var config = %*{}
-  if sources.hasKey("config.json"):
-    try:
-      config = parseJson(sources["config.json"].getStr("{}"))
-      if config.kind != JObject:
-        config = %*{}
-    except CatchableError:
-      config = %*{}
-  var settingsKeys: seq[string] = @[]
-  if config.hasKey("settings") and config["settings"].kind == JArray:
-    for key in config["settings"]:
-      if key.kind == JString:
-        settingsKeys.add(key.getStr())
+  let config = configFromSources(sources)
+  let settingsKeys = settingsKeysFromConfig(config)
 
   let started = epochTime()
   var logs = new(seq[JsonNode])
   var logger = Logger(frameConfig: frameConfig, enabled: true)
-  runtime.storeGrant = storeGrantFromConfig(config)
   logger.log = proc(payload: JsonNode) = logs[].add(payload)
   logger.enable = proc() = discard
   logger.disable = proc() = discard
@@ -71,6 +59,7 @@ proc runJsAppTests*(sources: JsonNode, testFile: string, frameConfig: FrameConfi
     assetGrant = assetGrantFromConfig(config))
   runtime.frameGrant = frameGrantFromConfig(config)
   runtime.codeGrant = codeGrantFromConfig(config)
+  runtime.storeGrant = storeGrantFromConfig(config)
   runtime.extraPrelude = "globalThis.__frameosTestAppConfig = " & escapeJson($config) & ";\n" & appTestHarness
   let context = ExecutionContext(scene: scene, event: "test", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: -1)

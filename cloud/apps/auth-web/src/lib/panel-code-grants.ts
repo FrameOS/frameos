@@ -1,4 +1,5 @@
 import {
+  parseAppConfig,
   sceneAccess,
   withAppPermissions,
 } from "../../../../../frontend/src/utils/sceneAccess";
@@ -12,13 +13,17 @@ import {
 // the frame already had"). The owner installs such a scene from the
 // workspace, where grants are made.
 //
-// Read leniently: a config.json that does not parse asks for nothing (the
-// frame gives an app with no list nothing either), anything that is not a
-// string in a list is skipped. An app with JavaScript and no list at all
-// gets the list its code calls for first (withAppPermissions, the stamp
-// every push puts on such an app), so leaving the list out is not a way
-// past the check. The built-in apps a scene's nodes run count too, through
-// the SPA's own reading (sceneAccess). And an app whose code calls `frameos.storeAction` counts as
+// config.json is read as every reader reads it (parseAppConfig,
+// docs/app-config-fixtures.json): anything that is not a string in a list is
+// skipped, and a file that is not strict JSON is no config. Such an app does
+// not read as asking for nothing: the SPA's reading below counts it as asking
+// for everything a JavaScript app can be given (a frame from before the
+// strict reader may give it that), so it widens whatever it is compared
+// with. An app with JavaScript and no list at all gets the list its code
+// calls for first (withAppPermissions, the stamp every push puts on such an
+// app), so leaving the list out is not a way past the check. The built-in
+// apps a scene's nodes run count too, through the SPA's own reading
+// (sceneAccess). And an app whose code calls `frameos.storeAction` counts as
 // asking for "store" whatever its list says: a frame from before the
 // permission (STORE_PERMISSION_FROM) runs that call for any app, and a list
 // the push wrote for such a frame leaves the name out (scene-origin.ts).
@@ -46,14 +51,7 @@ function strings(value: unknown): string[] {
 // config.json as a string (the usual form) or already an object.
 function appConfig(sources: unknown): Record<string, unknown> | null {
   const config = record(sources)?.["config.json"];
-  if (typeof config === "string") {
-    try {
-      return record(JSON.parse(config));
-    } catch {
-      return null;
-    }
-  }
-  return record(config);
+  return typeof config === "string" ? parseAppConfig(config) : record(config);
 }
 
 // Every app's sources a scene carries: the scene's apps, and an app node's

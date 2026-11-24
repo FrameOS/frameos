@@ -1,5 +1,5 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
-import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { sceneAccessFlags, scenesAppConfigProblem } from "../../../../../frontend/src/utils/sceneAccess";
 import { sceneNeeds } from "../../../../../frontend/src/utils/sceneNeeds";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { isDesktopLayout, isDeviceLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
@@ -559,6 +559,13 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   // docs/scene-layouts.md: every way a scene reaches the store comes through here.
   if (scenes.some(isBrokenLayout)) {
     return { ok: false, error: "invalid_layout_scene" };
+  }
+  // An app's config.json is what it asks for (permissions, settings), read
+  // one way by the store, the workspace and the frame
+  // (docs/app-config-fixtures.json). A file that is not strict JSON would
+  // show as asking for nothing here and be given nothing there: refused.
+  if (scenesAppConfigProblem(scenes)) {
+    return { ok: false, error: "invalid_app_config" };
   }
 
   const record = manifest as Record<string, unknown>;

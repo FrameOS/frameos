@@ -358,6 +358,14 @@
   two routes alike. `frameos.storeAction` is for an app whose config.json
   `permissions` has `"store"` (a red tag, detected on save like `"frame"`
   and `"code"`; `storeGrant` in `app_runtime.nim`, one gate for every host).
+- **An app's config.json is read one way: `docs/app-config-fixtures.json`.**
+  Strict JSON, an object, at most 32 containers deep, or it is no config:
+  the runtime gives such an app nothing (`utils/strict_json.nim`; std/json
+  alone reads comments and trailing commas, which no plane's parser does),
+  and both planes refuse to save, import or publish a scene that carries one
+  (`sceneAppConfigProblem` in `utils/sceneAccess.ts`, the backend's
+  `utils/app_config.py`). Never read `permissions` or `settings` out of a
+  config.json with another parser; the three runners replay the corpus.
 - **A store zip's scenes.json is found by one function**, the cloud's
   `src/lib/scene-zip.ts` (the file beside the shallowest template.json): the
   checks at publish and every reader of a stored zip. A new reader goes

@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { createDb, frames, storeScenes, storeSceneVersions } from "@frameos-cloud/db";
+import { sceneAppConfigProblem } from "../../../../../frontend/src/utils/sceneAccess";
 import { isBrokenLayout, sceneLayoutProblem } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { createAccountScene } from "./account-scene-create";
 import { keepAppTestFiles } from "./retired-apps";
@@ -105,6 +106,13 @@ export function panelCodeSceneProblem(scene: unknown): PanelSceneOutcome | null 
   }
   if (isBrokenLayout(scene)) {
     return refused("invalid_layout", 400, { detail: sceneLayoutProblem(scene) });
+  }
+  // An app's config.json is what it asks for, read one way everywhere
+  // (docs/app-config-fixtures.json): one that is not strict JSON is saved by
+  // no plane.
+  const configProblem = sceneAppConfigProblem(scene);
+  if (configProblem) {
+    return refused("invalid_app_config", 400, { detail: configProblem });
   }
   return null;
 }

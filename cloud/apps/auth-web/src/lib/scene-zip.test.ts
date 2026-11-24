@@ -143,3 +143,28 @@ describe("a zip with two scenes.json", () => {
     expect(validateSceneZip(rebuilt!).ok).toBe(true);
   });
 });
+
+describe("validateSceneZip and an app's config.json", () => {
+  const sceneWith = (config: string) => [
+    {
+      id: "a",
+      name: "Lenient",
+      nodes: [{ id: "n", type: "app", data: { keyword: "ui" } }],
+      edges: [],
+      apps: { ui: { sources: { "app.ts": "export function get() { return 1 }", "config.json": config } } },
+    },
+  ];
+  const published = (config: string) =>
+    validateSceneZip(zip({ "template.json": json({ name: "Lenient" }), "scenes.json": json(sceneWith(config)) }));
+
+  it("refuses one that is not strict JSON: nobody could be shown what it asks for", () => {
+    for (const config of ['{\n  // hidden\n  "permissions": ["frame"]\n}', '{"permissions": ["frame"],}', "﻿{}", "[]", ""]) {
+      expect(published(config)).toEqual({ ok: false, error: "invalid_app_config" });
+    }
+  });
+
+  it("takes one that is, with what it asks for as the listing's flags", () => {
+    const validation = published('{"permissions": ["frame", "store"], "settings": ["openAI"]}');
+    expect(validation.ok && validation.value.riskFlags).toEqual(["frame", "store", "key:openAI"]);
+  });
+});

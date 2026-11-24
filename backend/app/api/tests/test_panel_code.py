@@ -144,7 +144,7 @@ async def test_save_never_widens_what_a_scene_may_do(async_client, no_auth_clien
 
 
 @pytest.mark.asyncio
-async def test_save_refuses_what_no_frame_holds(async_client, no_auth_client, db):
+async def test_save_refuses_what_no_frame_holds(async_client, no_auth_client, db, redis):
     frame = await code_frame(async_client, db)
     for bad, error in [
         ("nope", "invalid_scene"),
@@ -152,6 +152,16 @@ async def test_save_refuses_what_no_frame_holds(async_client, no_auth_client, db
         ({**scene("system/sceneSwitcher")}, "invalid_scene"),
         ({**scene("x"), "settings": {"execution": "compiled"}}, "scene_requires_compilation"),
         ({**scene("lay"), "settings": {"execution": "interpreted", "isLayout": True}}, "invalid_layout"),
+        # A config.json only a lenient parser reads: the frame gives its app
+        # nothing, and what it asks for could not be shown to the owner.
+        (
+            scene(thing={"sources": {"app.ts": "export function get() {}", "config.json": '{"permissions": ["assets"],}'}}),
+            "invalid_app_config",
+        ),
+        (
+            scene("new", thing={"sources": {"app.ts": "1", "config.json": '{\n  // why\n  "permissions": ["frame"]\n}'}}),
+            "invalid_app_config",
+        ),
     ]:
         response = await post(no_auth_client, frame, {"action": "save", "scene": bad})
         assert response.status_code == 400

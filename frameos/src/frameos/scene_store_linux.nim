@@ -39,6 +39,7 @@ import frameos/server/api
 from frameos/scenes import UPLOADED_SCENES_JSON_PATH, shownSceneId
 import frameos/scene_store_hooks
 import frameos/utils/http_client
+import frameos/utils/strict_json
 from frameos/upgrade import installedFrameOSVersion
 
 const
@@ -196,12 +197,11 @@ const
 proc asksForRed(sources: JsonNode): bool =
   if sources.isNil or sources.kind != JObject:
     return false
-  try:
-    for permission in parseJson(sources{"config.json"}.getStr("{}")){"permissions"}.getElems():
+  let config = strictJsonObject(sources{"config.json"}.getStr())
+  if not config.isNil:
+    for permission in config{"permissions"}.getElems():
       if permission.getStr() in RedPermissions:
         return true
-  except CatchableError:
-    discard
 
 proc scenesAskForRed*(scenes: openArray[JsonNode]): bool =
   ## Whether one of the scenes' apps asks for a red permission: a JavaScript

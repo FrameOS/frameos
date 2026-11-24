@@ -264,8 +264,9 @@ What a frame may ask is narrower than what its owner may:
   tags, `sceneAccessFlagIsRisky`; `needs_owner`, with `needs`, 403). The store
   on a frame shows no tags, and what asks is a scene's code, with or without
   a person at the frame: a scene that reaches past its own data is put on
-  from the workspace, where its red tag is seen and accepted. Code that
-  calls `frameos.storeAction` counts as asking for `store` whatever its list
+  from the workspace, where its red tag is seen and accepted. An app whose
+  config.json is not strict JSON counts as asking for everything, and code
+  that calls `frameos.storeAction` as asking for `store` whatever its list
   says. A backend's Pi, which previews by itself, refuses the same on its own
   (`scenesAskForRed`, `scene_store_linux.nim`); a frame with no control plane
   has its owner at the frame and installs what its store app asks for.

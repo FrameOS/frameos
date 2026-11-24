@@ -526,6 +526,14 @@ describe("POST /api/frames/{id}/panel/code: save", () => {
       error: "invalid_layout",
       ok: false,
     });
+    // An app whose config.json only a lenient parser reads: the frame gives
+    // it nothing, and what it asks for could be shown to nobody.
+    const lenient = withApp(scene("lenient-rt", "Lenient"), []);
+    (lenient.apps.helper.sources as Record<string, string>)["config.json"] = '{\n  // hidden\n  "permissions": ["frame"],\n}';
+    expect(await refusal({ action: "save", scene: lenient })).toMatchObject({
+      detail: expect.stringContaining('App "helper" in scene "Lenient": config.json is not valid JSON'),
+      error: "invalid_app_config",
+    });
     // The store's own permission is red too.
     const shop = await code(frame.frame_id, frame.access_token, {
       action: "save",

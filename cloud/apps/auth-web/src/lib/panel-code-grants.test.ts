@@ -42,7 +42,7 @@ describe("declaredSceneGrants", () => {
     expect(declaredSceneGrants(scene).permissions).toEqual(["files"]);
   });
 
-  it("is lenient: a config.json that does not parse, or junk in a list, asks for nothing", () => {
+  it("skips junk in a list, and an app no node runs asks for nothing whatever its file says", () => {
     const scene = appScene({
       broken: { "app.ts": "", "config.json": "{ not json" },
       junk: { "app.ts": "", "config.json": config({ permissions: [1, null, "", "assets"], settings: "openAI" }) },
@@ -50,6 +50,24 @@ describe("declaredSceneGrants", () => {
     expect(declaredSceneGrants(scene)).toEqual({ permissions: ["assets"], settings: [] });
     expect(declaredSceneGrants(null)).toEqual({ permissions: [], settings: [] });
     expect(declaredSceneGrants("scene")).toEqual({ permissions: [], settings: [] });
+  });
+
+  it("an app whose config.json is not strict JSON asks for everything, never for nothing", () => {
+    // A comment and a trailing comma: the frame's runtime once read this,
+    // JSON.parse never did, and the list was shown to nobody.
+    const lenient = '{\n  // hidden\n  "permissions": ["frame"],\n}';
+    const scene = appScene({ sneaky: { "app.ts": "export function get() { return 1 }", "config.json": lenient } }, [
+      { data: { keyword: "sneaky" }, id: "n", type: "app" },
+    ]);
+    const grants = declaredSceneGrants(scene);
+    expect(grants.permissions).toEqual(["assets", "assets-write", "code", "frame", "store"]);
+    expect(grantsWidenedBy(null, grants)).toEqual(["assets-write", "code", "frame", "store"]);
+    expect(grantsWidenedBy({ permissions: ["assets"], settings: [] }, grants)).toEqual([
+      "assets-write",
+      "code",
+      "frame",
+      "store",
+    ]);
   });
 
   it("counts the store's own permission, declared or called", () => {

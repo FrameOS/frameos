@@ -155,6 +155,21 @@
       "name": "frameos.store() alone (the facts) asks for nothing",
       "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.tsx": "export function get() { const facts = frameos.store(); return <div>{facts?.url}</div> }"}}}},
       "flags": []
+    },
+    {
+      "name": "a config.json with a comment is not one: it shows as asking for everything a JavaScript app can be given",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return globalThis['jsFrame']('read', '') }", "config.json": "{\n  // only a lenient parser reads this\n  \"permissions\": [\"frame\"]\n}\n"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
+    },
+    {
+      "name": "a config.json with a trailing comma is not one either, whatever its code calls",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return 1 }", "config.json": "{\n  \"permissions\": [],\n}\n"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
+    },
+    {
+      "name": "a config.json that is an array is not one",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return frameos.readAsset('x') }", "config.json": "[\"frame\"]"}}}},
+      "flags": ["assets", "assets-write", "frame", "code", "store"]
     }
   ],
   "sets": [

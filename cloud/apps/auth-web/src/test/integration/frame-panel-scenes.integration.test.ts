@@ -589,6 +589,8 @@ describe("POST /api/frames/{id}/panel/scenes", () => {
       ["Editor", asking('{"permissions":["code","store","files"]}'), ["code", "files", "store"]],
       // Code that calls a power counts when the app has no list of its own.
       ["Shop", asking('{"name":"Shop"}', "export function get() { frameos.storeAction('install', {}) }"), ["store"]],
+      // A config.json only a lenient parser reads: everything, never nothing.
+      ["Hidden", asking('{\n  // hidden\n  "permissions": ["frame"],\n}'), ["assets-write", "code", "frame", "store"]],
     ];
     for (const [name, extra, needs] of cases) {
       const scene = await storeScene(publisherId, name, { runtimeIds: [`${name}-rt`] });

@@ -443,11 +443,18 @@ async def test_a_new_scene_that_asks_for_a_red_permission_is_the_owners(async_cl
             refused = await ask(no_auth_client, frame, {"action": action, "scene_id": OTHER})
             assert refused.status_code == 403, refused.text
             assert refused.json() == {"ok": False, "error": "needs_owner", "needs": needs}
-    # Code that calls a power counts whatever its list says.
+    # Code that calls a power counts whatever its list says, and so does a
+    # config.json that is no config (a frame from before the strict reader
+    # read such a file its own way).
     sneaky = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), [])
     sneaky[0]["apps"]["t"]["sources"]["app.ts"] = "export function get() { frameos.storeAction('install', {}) }"
     store[OTHER] = sneaky
     assert (await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})).json()["needs"] == ["store"]
+    lenient = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), [])
+    lenient[0]["apps"]["t"]["sources"]["config.json"] = '{\n  // hidden\n  "permissions": ["frame"],\n}'
+    store[OTHER] = lenient
+    hidden = await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})
+    assert hidden.status_code == 403 and hidden.json()["needs"] == ["assets-write", "code", "frame", "store"]
     # In a pack, the scene that replaces a held copy is compared with it and
     # the one that is new may ask for nothing red.
     frame.scenes = [*frame.scenes, asking_for([{"id": "term-rt", "name": "Mine", "nodes": [], "edges": []}], ["frame"])[0]]

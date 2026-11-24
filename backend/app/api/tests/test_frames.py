@@ -1879,6 +1879,32 @@ def _sync_admin_login_response():
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_refuses_an_app_config_that_is_not_strict_json(async_client, db, redis):
+    # config.json is what an app asks for (permissions, settings), read one
+    # way by every surface and by the frame (utils/app_config.py). One that
+    # only a lenient parser reads would show as asking for nothing: not saved.
+    frame = await new_frame(db, redis, 'ConfigFrame', 'localhost', 'localhost')
+
+    def scene(config: str) -> dict:
+        return {
+            'id': 's', 'name': 'Scene', 'nodes': [{'id': 'a', 'type': 'app', 'data': {'keyword': 'ui'}}], 'edges': [],
+            'apps': {'ui': {'sources': {'app.ts': 'export function get() { return 1 }', 'config.json': config}}},
+        }
+
+    for lenient in ('{\n  // hidden\n  "permissions": ["frame"]\n}', '{"permissions": ["frame"],}', '\ufeff{}', '[]'):
+        resp = await async_client.post(f'/api/frames/{frame.id}', json={'scenes': [scene(lenient)]})
+        assert resp.status_code == 400, lenient
+        assert 'App "ui" in scene "Scene": config.json is not valid JSON' in resp.json()['detail']
+    db.refresh(frame)
+    assert not frame.scenes
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={'scenes': [scene('{"permissions": ["frame"]}')]})
+    assert resp.status_code == 200, resp.text
+    db.refresh(frame)
+    assert frame.scenes[0]['apps']['ui']['sources']['config.json'] == '{"permissions": ["frame"]}'
+
+
+
+@pytest.mark.asyncio
 async def test_api_frame_sync_status_reports_frame_and_scene_changes(async_client, db, redis):
     frame = await new_frame(db, redis, 'Backend Name', 'localhost', 'localhost')
     frame.frame_admin_auth = {'enabled': True, 'user': 'admin', 'pass': 'secret'}
