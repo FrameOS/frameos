@@ -8,22 +8,34 @@
 ## address, so the address is checked here (OpenSSL's `X509_check_ip_asc`,
 ## the IP SANs), after the handshake and before a byte is sent.
 ##
-## The check is looked up in the running process (`dlsym` on the program,
-## which finds the libcrypto the TLS calls already use) rather than linked:
-## the frame's Makefile links what Nim's own script listed, and a symbol
-## std/net never names is not to be assumed there. Without it an address
-## gets no TLS at all, never an unchecked one.
+## The check is looked up at run time rather than linked, the way std/net
+## finds most of OpenSSL: in the program first (a libcrypto it was linked
+## with), else in the libcrypto std/openssl loads by name (`DLLUtilName`),
+## which the release toolchain opens on its own and keeps out of the
+## program's symbols. Without it an address gets no TLS at all, never an
+## unchecked one.
 import std/[dynlib, net]
 import std/openssl
 
 when not defined(nimDisableCertificateValidation) and not defined(windows):
   type CheckIpAsc = proc (cert: PX509, address: cstring, flags: cuint): cint {.cdecl, gcsafe, raises: [].}
 
+  var checkIpAscFound: pointer
+    ## Found once and kept: a plain address, the same for every thread.
+
   proc checkIpAsc(): CheckIpAsc =
-    let program = loadLib()
-    if program.isNil:
-      return nil
-    cast[CheckIpAsc](program.symAddr("X509_check_ip_asc"))
+    {.cast(gcsafe).}:
+      if checkIpAscFound.isNil:
+        var found: pointer = nil
+        let program = loadLib()
+        if not program.isNil:
+          found = program.symAddr("X509_check_ip_asc")
+        if found.isNil:
+          let crypto = loadLibPattern(DLLUtilName)
+          if not crypto.isNil:
+            found = crypto.symAddr("X509_check_ip_asc")
+        checkIpAscFound = found
+      cast[CheckIpAsc](checkIpAscFound)
 
 proc wrapTlsClient*(ctx: SslContext, socket: Socket, host: string) =
   ## `ctx.wrapConnectedSocket(socket, handshakeAsClient, host)`, and for an
