@@ -167,11 +167,14 @@ __attribute__((noinline)) static void put_float(fos_sink_t *s, double value, int
         return;
     }
     if (prec < 0) prec = 6;
+    /* For every conversion, before anything is worked out from it: `prec + 1`
+     * below wrapped for a `%.*e` given INT_MAX, and sized the buffers under
+     * it from a negative number. */
+    if (prec > JS_DTOA_MAX_DIGITS) prec = JS_DTOA_MAX_DIGITS;
     if (conv == 'g' && prec == 0) prec = 1;
     int alt = flags & ALT;
     JSDTOATempMem tmp;
     if (conv == 'f') {
-        if (prec > JS_DTOA_MAX_DIGITS) prec = JS_DTOA_MAX_DIGITS;
         char text[js_dtoa_max_len(value, 10, prec, JS_DTOA_FORMAT_FRAC) + 2];
         int len = js_dtoa(text, value, 10, prec, JS_DTOA_FORMAT_FRAC, &tmp);
         fix_tie(bits, prec, &text[len - 1]);
