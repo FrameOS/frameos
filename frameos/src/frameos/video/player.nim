@@ -699,7 +699,8 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
           if errOpen:
             fds[n] = TPollfd(fd: errFd, events: POLLIN)
             inc n
-          if dec.started:
+          if dec.started and not dec.ended:
+            # (Past its last frame a decoder is always readable.)
             fds[n] = TPollfd(fd: dec.fd, events: POLLIN or POLLOUT or POLLPRI)
             inc n
           if sink.fd >= 0:
