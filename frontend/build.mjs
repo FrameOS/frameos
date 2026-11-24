@@ -139,13 +139,24 @@ function writeEditorHtml(outputs = {}) {
       }
     }
   }
+  // Who may frame the editor and drive it over postMessage besides its own
+  // origin (src/embed/embedOrigins.ts): only the page itself can say, so a
+  // deployment that frames the bundle from another origin names it here, or
+  // adds the tag to the served index.html by hand.
+  const parentOrigins = (process.env.FRAMEOS_EDITOR_PARENT_ORIGINS ?? '')
+    .split(/[\s,]+/)
+    .filter((origin) => /^https?:\/\/[A-Za-z0-9.\-:[\]]+$/.test(origin))
+  const parentOriginsMeta =
+    parentOrigins.length > 0
+      ? `\n    <meta name="frameos-editor-parent-origins" content="${parentOrigins.join(', ')}" />`
+      : ''
   fse.writeFileSync(
     path.resolve(distEditor, 'index.html'),
     `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />${parentOriginsMeta}
     <title>FrameOS Scene Editor</title>
     <script>
       // Serve this directory anywhere; asset URLs resolve relative to it.

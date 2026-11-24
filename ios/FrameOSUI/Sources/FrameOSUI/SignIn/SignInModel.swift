@@ -34,6 +34,18 @@ final class SignInModel {
         return URL(string: text.contains("://") ? text : "https://\(text)")
     }
 
+    /// What the backend fields say under the address when it is plain http
+    /// to somewhere that is not the local network (`LocalNetwork`): the
+    /// password typed below, and the API token the app keeps, would cross it
+    /// unencrypted. A note, not a refusal: how the address is read is the
+    /// shared rule (`ServerAddress`).
+    var backendAddressWarning: String? {
+        guard let url = ServerAddress.backendBaseURL(backendAddress), LocalNetwork.sendsInClearBeyondIt(url) else {
+            return nil
+        }
+        return "This address is plain http outside your local network: your password and the app's token are sent unencrypted. If the backend has https, start the address with https://."
+    }
+
     var canSubmit: Bool {
         switch step {
         case .cloud: return !email.isEmpty && !password.isEmpty && cloudURL != nil

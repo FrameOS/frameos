@@ -46,11 +46,16 @@ editor.destroy()
 
 ## postMessage protocol
 
-**Origins.** The editor only accepts messages from the window that framed it, and only from an origin it
-knows: pass your page's origin on the iframe URL — `editor.html?parentOrigin=https://your.host` (repeat or
-comma-separate for several) — or leave it out and the document that framed the editor (its referrer origin)
-is the one host allowed. Replies are posted to that origin, never to `*`. `previewProxyUrl` is honoured only
-when it points back at the editor's own origin.
+**Origins.** The editor only accepts messages from the window that framed it, and only from an origin its
+own page trusts: the origin the bundle is served from, and the origins listed in the served `index.html` as
+`<meta name="frameos-editor-parent-origins" content="https://your.host, https://other.host">`. Served next to
+your page (the usage above) it needs nothing. A page on another origin that frames the bundle has to be
+listed there: add the tag to the `index.html` you serve, or build the bundle with
+`FRAMEOS_EDITOR_PARENT_ORIGINS="https://your.host"`. Through 2026.11.14 the framing page's own word was enough
+(`?parentOrigin=` or its referrer), which let any page that framed the editor drive it. That word still
+narrows the choice (`index.html?parentOrigin=https://your.host`, repeat or comma-separate for several; without
+it the document that framed the editor, by its referrer), but adds no origin. Replies are posted to that
+origin, never to `*`. `previewProxyUrl` is honoured only when it points back at the editor's own origin.
 
 Parent → editor:
 

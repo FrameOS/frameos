@@ -58,6 +58,10 @@ on:
       - "repo/**"
       - "frameos/wasm/**"
       - "frameos/editor/**"
+      # No input of the cloud build (so not under `push` above: nothing to
+      # deploy), but the on-frame admin has no test runner of its own and
+      # shared-spa/frame-admin-login-link.test.ts mounts its login logic.
+      - "frameos/frontend/**"
       - "versions.json"
       - "release-assets/firmware-signing.pub"
       - "turbo.json"

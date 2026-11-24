@@ -102,6 +102,16 @@ way the SPA does, and the comment there names the SPA file.
 | Local network access | (none: a backend's frames have no block) | `POST …/lan_access/challenge`, then `POST …/lan_access {enabled, code}` |
 | API keys and telemetry switches | (none) | `POST …/service-settings/enabled`, `POST …/telemetry/enabled` |
 
+**Where the credentials go.** A backend's bearer and the cloud's cookies are
+sent to the account's own origin alone: the same scheme, host and port
+(`Account.isSameOrigin`, `SameOriginTests`). A catalog names any address for
+a scene's picture; one on the same host but another port, or over plain http,
+is fetched without them. And when a typed backend address is plain http to a
+host that is not on the local network (`LocalNetwork`: the frames' rule for
+an `http://` provider, plus the names a home network gives its hosts), the
+sign-in screen says so under the field; how the address is read stays the
+shared rule (`docs/server-address-fixtures.json`).
+
 App Store submission, TestFlight and the guidelines: `docs/ios-app-store.md`.
 
 ## What the app leaves to the web

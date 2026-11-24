@@ -1,13 +1,12 @@
-export const FRAME_ADMIN_LOGIN_USER_PARAM = '__login_user'
-export const FRAME_ADMIN_LOGIN_PASS_PARAM = '__login_pass'
+// `?__login_user=…&__login_pass=…` (in the query or the hash) used to sign
+// the admin page in from its link. Nothing makes such a link any more and
+// the page no longer reads them: a password in a URL is in the browser's
+// history, in every bookmark and in whatever logs the address. What is left
+// is the tidying: an old bookmark's password is taken out of the address
+// bar and the history entry on arrival, unread.
+const FRAME_ADMIN_LOGIN_PARAMS = ['__login_user', '__login_pass']
 
 type LocationLike = Pick<Location, 'pathname' | 'search' | 'hash'>
-
-export interface FrameAdminLoginParams {
-  username: string | null
-  password: string | null
-  hasParams: boolean
-}
 
 function parseParams(value: string): URLSearchParams {
   if (!value) {
@@ -17,30 +16,32 @@ function parseParams(value: string): URLSearchParams {
   return new URLSearchParams(value.startsWith('?') || value.startsWith('#') ? value.slice(1) : value)
 }
 
-export function getFrameAdminLoginParams(location: LocationLike = window.location): FrameAdminLoginParams {
+/** Whether the address carries the old login parameters, in its query or its hash. */
+export function hasFrameAdminLoginParams(location: LocationLike = window.location): boolean {
   const searchParams = parseParams(location.search)
   const hashParams = parseParams(location.hash)
-  const username = searchParams.get(FRAME_ADMIN_LOGIN_USER_PARAM) ?? hashParams.get(FRAME_ADMIN_LOGIN_USER_PARAM)
-  const password = searchParams.get(FRAME_ADMIN_LOGIN_PASS_PARAM) ?? hashParams.get(FRAME_ADMIN_LOGIN_PASS_PARAM)
-
-  return {
-    username,
-    password,
-    hasParams: username !== null || password !== null,
-  }
+  return FRAME_ADMIN_LOGIN_PARAMS.some((name) => searchParams.has(name) || hashParams.has(name))
 }
 
+/** The address without them, everything else kept. */
 export function stripFrameAdminLoginParams(location: LocationLike = window.location): string {
   const searchParams = parseParams(location.search)
   const hashParams = parseParams(location.hash)
 
-  searchParams.delete(FRAME_ADMIN_LOGIN_USER_PARAM)
-  searchParams.delete(FRAME_ADMIN_LOGIN_PASS_PARAM)
-  hashParams.delete(FRAME_ADMIN_LOGIN_USER_PARAM)
-  hashParams.delete(FRAME_ADMIN_LOGIN_PASS_PARAM)
+  for (const name of FRAME_ADMIN_LOGIN_PARAMS) {
+    searchParams.delete(name)
+    hashParams.delete(name)
+  }
 
   const nextSearch = searchParams.toString()
   const nextHash = hashParams.toString()
 
   return `${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${nextHash ? `#${nextHash}` : ''}`
+}
+
+/** Take the old login parameters out of the address bar and this history entry. */
+export function forgetFrameAdminLoginParams(): void {
+  if (typeof window !== 'undefined' && hasFrameAdminLoginParams()) {
+    window.history.replaceState(window.history.state, '', stripFrameAdminLoginParams())
+  }
 }

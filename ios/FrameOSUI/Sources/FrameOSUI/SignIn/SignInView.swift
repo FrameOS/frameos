@@ -160,7 +160,13 @@ struct SignInView: View {
         } header: {
             Text("Backend address")
         } footer: {
-            Text("The address you open the backend at in a browser. Without a port it is 8989.")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("The address you open the backend at in a browser. Without a port it is 8989.")
+                if let warning = model.backendAddressWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         Section {
             TextField("Email", text: $model.email).emailInput()

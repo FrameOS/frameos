@@ -1,12 +1,17 @@
+/**
+ * `bytes` random bytes as base64url text, from the browser's own generator.
+ * What is made with it is a frame's access key, an admin password, an agent
+ * secret, a view token or an upload id: where the browser has no
+ * `crypto.getRandomValues` it throws, since `Math.random` (the fallback
+ * until 2026-11-24) is predictable and none of those may be.
+ */
 export function secureToken(bytes: number): string {
-  const randomBytes = new Uint8Array(bytes)
-  if (window.crypto && window.crypto.getRandomValues) {
-    window.crypto.getRandomValues(randomBytes)
-  } else {
-    for (let i = 0; i < randomBytes.length; i++) {
-      randomBytes[i] = Math.floor(Math.random() * 256)
-    }
+  const source = globalThis.crypto
+  if (!source || typeof source.getRandomValues !== 'function') {
+    throw new Error('This browser has no secure random number generator (crypto.getRandomValues).')
   }
+  const randomBytes = new Uint8Array(bytes)
+  source.getRandomValues(randomBytes)
 
   const numberArray = Array.from(randomBytes)
   const base64String = btoa(String.fromCharCode.apply(null, numberArray))
