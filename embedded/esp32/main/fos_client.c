@@ -3119,7 +3119,11 @@ static esp_err_t render_once(bool quiet)
         if (!(err == ESP_OK && local_render && frameos_nim_render_damage(&dx, &dy, &dw, &dh))) dw = dh = -1;
         fos_display_hint_damage(dx, dy, dw, dh);
     }
-    if (!quiet) {
+    /* An LCD's lines go after its buffer switch: formatting the two JSON
+     * lines (and reading the heaps for them) sat between a tap's render and
+     * the picture, ~1 ms of it on a SenseCAP Indicator. */
+    bool lines_after = !quiet && err == ESP_OK && fos_display_is_lcd() && fos_display_present();
+    if (!quiet && !lines_after) {
         log_render_event("render:framebuffer", scene_id, scene_name,
                          err == ESP_OK ? "rendered" : "error", "framebuffer",
                          mode, fos_display_present() ? "pending" : "none",
@@ -3185,6 +3189,11 @@ static esp_err_t render_once(bool quiet)
                      pulled_unchanged ? "the plane's picture is unchanged (304)" : "packed image unchanged",
                      12, sha_hex);
             if (!quiet) {
+                if (lines_after) {
+                    log_render_event("render:framebuffer", scene_id, scene_name, "rendered", "framebuffer",
+                                     mode, "pending", "", render_attempt, framebuffer_ms, width, height,
+                                     format, buf_len, ESP_OK);
+                }
                 log_render_event("render:device", scene_id, scene_name, "skipped",
                                  "display", mode, refresh, "unchanged",
                                  render_attempt, (esp_timer_get_time() - start) / 1000,
@@ -3193,7 +3202,7 @@ static esp_err_t render_once(bool quiet)
             }
         } else {
             refresh = "update";
-            if (!quiet) {
+            if (!quiet && !lines_after) {
                 log_render_event("render:device", scene_id, scene_name, "refreshing",
                                  "display", mode, refresh, "", render_attempt,
                                  (esp_timer_get_time() - start) / 1000, width, height,
@@ -3225,6 +3234,14 @@ static esp_err_t render_once(bool quiet)
             err = fos_display_update(buf, buf_len, strcmp(showing_id, s_refresh_scene_id) == 0, fast,
                                      &partial);
             tl_updated_us = esp_timer_get_time();
+            if (lines_after) {
+                log_render_event("render:framebuffer", scene_id, scene_name, "rendered", "framebuffer",
+                                 mode, "pending", "", render_attempt, framebuffer_ms, width, height,
+                                 format, buf_len, ESP_OK);
+                log_render_event("render:device", scene_id, scene_name, "refreshing", "display", mode,
+                                 "update", "", render_attempt, (tl_update_us - start) / 1000, width,
+                                 height, format, buf_len, ESP_OK);
+            }
             s_last_picture_us = picture_us;
             refresh = err != ESP_OK ? "failed" : partial ? "partial" : "updated";
             if (err == ESP_OK) {
@@ -4634,6 +4651,7 @@ static void client_task(void *arg)
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
             /* What the scene changed is all the next wake has of it. */
             fos_scene_state_flush(true);
+            fos_scenes_flush_marks();
             /* Wake early to check the control plane for commands when asked
              * to — the render schedule itself survives in s_next_render_due
              * (RTC memory), so the check-in wake does not refresh the panel. */

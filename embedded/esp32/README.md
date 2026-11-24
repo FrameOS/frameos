@@ -725,7 +725,11 @@ writes the queued id to NVS (`pending_scene`), the boot restore prefers it
 over `last_scene`, the pass that applies it erases it and writes
 `last_scene` too — resident because of the pending key is not persisted,
 and skipping that write sent the frame back to the old scene on the next
-timer wake (2026-10-12) — and a pass that
+timer wake (2026-10-12). Both marks a switch makes on the render task (a tap
+on the switcher, the apply) are owed, not written there: the state writer
+puts them in one NVS commit when nobody taps, and a deep sleep or a restart
+flushes them first (`fos_scenes_flush_marks`), as the scene state; each was a
+flash write between a tap and the new scene's first picture. And a pass that
 switched the scene — or applied a payload pushed since boot — renders even
 when it woke only to check in (`fos_scenes_take_switched`). Work that lands
 mid-render holds the deep sleep for one more pass (`sleep:held`, reason
