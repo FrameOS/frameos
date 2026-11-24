@@ -168,10 +168,10 @@ Tracked here, not in `docs/todo.md`: each is either accepted, a design decision,
   review: limits are Postgres-backed (`rate_limit_buckets`, atomic upsert),
   so they hold across replicas and restarts; in-memory buckets remain only
   as the no-database fallback.
-- **`device/request` has no per-account rate limit**, only per-IP, so a
-  signed-in attacker can enumerate user codes at 60/15 min per IP. The keyed
-  hash above removes the offline-guessing path; an identity limit here would
-  close the online one.
+- ~~`device/request` has no per-account rate limit~~ — resolved since this
+  review: the route limits per account too (30 per 15 minutes,
+  `cloud/apps/auth-web/app/api/device/request/route.ts:49`; seen in the
+  2026-11-24 audit).
 - **First links may still request `auth:login`.** Refusing security-sensitive
   scopes on a first link was considered and rejected: frames link with
   `frame:link` + `auth:login` in one approval and have no feature manager to
