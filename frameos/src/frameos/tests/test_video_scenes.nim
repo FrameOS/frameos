@@ -16,6 +16,7 @@ from ../ids import SceneId
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
 let haveFfmpeg = findExe("ffmpeg").len > 0 and findExe("ffprobe").len > 0
+const BarY = 150 # the seek bar of a 320x180 Video player, its controls up (video-player-scrub-controls)
 let assets = getTempDir() / "frameos-video-scenes-" & $getCurrentProcessId()
 createDir(assets / "videos")
 
@@ -90,6 +91,9 @@ if haveFfmpeg:
   clip(assets / "videos" / "a.mp4", ["red"])
   clip(assets / "videos" / "b.mp4", ["blue"])
   clip(assets / "film.mp4", ["red", "blue"])
+  # Long enough to skip about in: 12 seconds of red, then 12 of blue.
+  createDir(assets / "long")
+  clip(assets / "long" / "long.mp4", ["red", "blue"], seconds = 12)
 
 suite "the video samples":
   setup:
@@ -180,6 +184,82 @@ suite "the video samples":
       let c = after[160, 6].rgba
       check c.r > 60 and c.r < 160 and c.g < 40
       check problems.len == 0
+
+  proc send(scene: FrameScene, event: string, payload: JsonNode) =
+    var p = payload
+    if event notin ["keyDown", "back", "forward"]:
+      p["pointerId"] = %0
+      p["pointerType"] = %"touch"
+    runEvent(scene, ExecutionContext(scene: scene, event: event, payload: p, loopIndex: 0, loopKey: ".",
+      nextSleep: -1))
+
+  proc key(scene: FrameScene, code, key: string) =
+    scene.send("keyDown", %*{"code": code, "key": key})
+
+  test "the Video player is played like a phone's: keys, a bar to drag, double taps, swipes":
+    if not haveFfmpeg:
+      skip()
+    else:
+      problems = @[]
+      # 24 seconds: red to 12, blue after.
+      var scene = load("Video player", "video-player", %*{"folder": "long"})
+      discard scene.play(20, proc(image: Image): bool = image.color() == "red")
+      let started = epochTime()
+      # The right arrow twice: 20 seconds in, blue, long before it would come.
+      scene.key("ArrowRight", "ArrowRight")
+      scene.key("ArrowRight", "ArrowRight")
+      var now = scene.play(10, proc(image: Image): bool = image.color() == "blue")
+      check now.color() == "blue"
+      check epochTime() - started < 8
+      # Home: from its start, red again.
+      scene.key("Home", "Home")
+      now = scene.play(10, proc(image: Image): bool = image.color() == "red")
+      check now.color() == "red"
+      # A tap shows the controls (or hides them, up since the keys: a second
+      # tap then); the bar, dragged to four fifths and let go, goes there: blue.
+      proc barUp(image: Image): bool = image[160, 6].rgba.r < 160 # the top bar darkens the red
+      scene.send("tap", %*{"x": 160, "y": 60})
+      var (controls, _) = scene.draw()
+      if not controls.barUp:
+        scene.send("tap", %*{"x": 160, "y": 60})
+        controls = scene.draw()[0]
+      check controls.barUp
+      controls.shot("video-player-scrub-controls")
+      scene.send("pointerDown", %*{"x": 40, "y": BarY, "buttons": 1})
+      scene.send("pointerMove", %*{"x": 120, "y": BarY, "buttons": 1})
+      let (dragging, _) = scene.draw()
+      dragging.shot("video-player-scrubbing")
+      check dragging.color() == "red" # not there until it lets go
+      scene.send("pointerMove", %*{"x": 16 + int(0.8 * 288), "y": BarY + 30, "buttons": 1}) # off the bar: still its
+      scene.send("pointerUp", %*{"x": 16 + int(0.8 * 288), "y": BarY + 30})
+      now = scene.play(10, proc(image: Image): bool = image.color() == "blue")
+      check now.color() == "blue"
+      # A double tap on the left: 10 seconds back, red (about 9 s in).
+      for event in ["tap", "tap", "doubleTap"]:
+        scene.send(event, %*{"x": 30, "y": 90})
+      now = scene.play(10, proc(image: Image): bool = image.color() == "red")
+      check now.color() == "red"
+      check problems.len == 0
+      if problems.len > 0: echo problems
+
+      # Two videos: a swipe left goes to the next, the frame's back (a swipe
+      # in from the edge) to the one before.
+      problems = @[]
+      scene = load("Video player", "video-player", %*{"folder": "videos", "repeat": "one"})
+      discard scene.play(20, proc(image: Image): bool = image.color() == "red")
+      scene.send("swipe", %*{"direction": "left", "startX": 250, "startY": 90, "x": 60, "y": 90})
+      now = scene.play(10, proc(image: Image): bool = image.color() == "blue")
+      check now.color() == "blue"
+      scene.send("back", %*{})
+      now = scene.play(10, proc(image: Image): bool = image.color() == "red")
+      check now.color() == "red"
+      # Space pauses: the picture stays and the controls stay up.
+      scene.key("Space", " ")
+      let (paused, _) = scene.draw()
+      paused.shot("video-player-paused")
+      check paused[160, 6].rgba.r < 160 # under the top bar
+      check problems.len == 0
+      if problems.len > 0: echo problems
 
   test "Files plays a video it opens":
     if not haveFfmpeg:

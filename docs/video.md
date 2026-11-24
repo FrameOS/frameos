@@ -144,7 +144,13 @@ hardware's fault: its next try has the hardware again.
 times to make over its first 12 is started again where it was with a slow
 decoder's shortcuts: no loop filter (`-skip_loop_filter all -flags2 fast`)
 and the scaler's `fast_bilinear`. A machine of one core (a Pi Zero, a Pi 1)
-starts with them, a relaunch costing it seconds. Measured on a Pi Zero W,
+starts with them, a relaunch costing it seconds. Such a decoder also starts a
+file at the keyframe before the time asked for (ffprobe's `-read_intervals
+t%+#1`, `keyframeBefore`), the clock from there: an exact start decodes every
+frame from that keyframe first (x264 puts them 8 s apart: two minutes of a
+Pi Zero's 1080p, black meanwhile), and `-noaccurate_seek` does not help, the
+fps filter dropping what it would show. A skip or a drag there lands up to a
+keyframe early, as a phone's player does when it seeks fast. Measured on a Pi Zero W,
 720p H.264 into its 720x720 RGB565 box (2026-11-24): 2.5 frames a second
 plain at 700 MHz, 3.3 with the shortcuts; 3.2 and 4.0 at 1 GHz. A Pi left in
 the `powersave` governor (an image from before the kernel's
@@ -218,8 +224,14 @@ Pi plays one. Its scenes say `video` among their needs, never `linux`.
 
 - **Video player**: the videos of a folder (`videos/` by default) one after
   another, for ever, by name or shuffled, the folder or one video again and
-  again; a tap shows the controls (back, pause, next, the list, the bar to
-  seek); where it was is kept on disk.
+  again, played like a phone's player: a tap shows the controls (10 s back
+  and on, pause, the video before and after, the list, a bar to drag, which
+  seeks when the finger lifts) and another hides them, as a few seconds of
+  playing does; a double tap on the left or right third skips 10 s, a swipe
+  across the picture or in from the screen's edge (`back` / `forward`)
+  changes the video; the keys too (its `onEvent`: the arrows 10 s, space or K
+  pause, N and P or Page Down and Up the video, Home its start, 0 to 9 a
+  tenth of the way in, L the list). Where it was is kept on disk.
 - **Files** plays the videos it lists: a frame of each as its thumbnail, the
   viewer playing one with a pause button and its time, the slideshow waiting
   for a video to end.

@@ -130,6 +130,18 @@ suite "video args":
     check "flags=bilinear" in plain[plain.find("-vf") + 1]
     check "-skip_loop_filter" notin plain
 
+  test "a slow decoder's start: the keyframe before, as ffprobe says":
+    let args = keyframeArgs(VideoSource(input: "/a.mp4"), 15.8)
+    check args.has("-read_intervals", "15.800%+#1")
+    check args.has("-show_entries", "packet=pts_time")
+    check args.has("-protocol_whitelist", "file")
+    check args[^1] == "/a.mp4"
+    check parseKeyframe("8.333333\n", 15.8) == 8.333333
+    check parseKeyframe("8.333333,\n", 15.8) == 8.333333
+    check parseKeyframe("", 15.8) == 15.8 # nothing read: where it was asked
+    check parseKeyframe("16.666667\n", 15.8) == 15.8 # after it: no
+    check parseKeyframe("N/A\n", 15.8) == 15.8
+
   test "what ffmpeg says it has":
     let decoders = """Decoders:
  V..... = Video

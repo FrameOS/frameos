@@ -270,6 +270,27 @@ proc probeArgs*(source: VideoSource): seq[string] =
   result.add source.inputArgs()
   result.add source.input
 
+proc keyframeArgs*(source: VideoSource, at: float): seq[string] =
+  ## ffprobe answering with the time of the keyframe at or before `at`: the
+  ## first packet read after seeking there.
+  result = @["-v", "error", "-select_streams", "v:0", "-read_intervals",
+    formatFloat(max(at, 0), ffDecimal, 3) & "%+#1", "-show_entries", "packet=pts_time", "-of", "csv=p=0"]
+  result.add source.inputArgs()
+  result.add source.input
+
+proc parseKeyframe*(text: string, at: float): float =
+  ## What keyframeArgs printed; `at` itself when it says nothing usable (no
+  ## keyframe before it, or after it).
+  for line in text.splitLines():
+    let value = line.strip().strip(chars = {','})
+    if value.len == 0: continue
+    try:
+      let t = parseFloat(value)
+      return if t >= 0 and t <= at + 0.001: t else: at
+    except ValueError:
+      return at
+  at
+
 proc jsonFloat(node: JsonNode): float =
   if node.isNil: return -1
   case node.kind

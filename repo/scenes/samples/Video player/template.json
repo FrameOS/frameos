@@ -1,6 +1,6 @@
 {
   "name": "Video player",
-  "description": "The videos in a folder of the frame's files, one after another, for ever: by name or shuffled, with controls on a tap. Plays on a Raspberry Pi.",
+  "description": "The videos in a folder of the frame's files, one after another, for ever: by name or shuffled, played like a phone's player (a tap for the controls, a bar to drag, double taps and swipes, the keys). Plays on a Raspberry Pi.",
   "embedded": false,
   "config": null,
   "image": "./image.jpg",

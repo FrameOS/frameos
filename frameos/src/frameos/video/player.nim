@@ -259,10 +259,13 @@ proc markHardwareFailed(codec: string) =
       if codec notin hwFailedCodecs:
         hwFailedCodecs.add codec
 
+var startFastForTest* = false
+  ## Tests: a player starts with the slow decoder's shortcuts, as on one core.
+
 proc slowMachine(): bool =
   ## One core (a Pi Zero, a Pi 1): the shortcuts from the first frame, not
   ## after a relaunch that costs it seconds.
-  countProcessors() <= 1
+  countProcessors() <= 1 or startFastForTest
 
 # ------------------------------------------------------------- the reader
 
@@ -338,6 +341,15 @@ proc probeSource(arg: ReaderArg): ProbeResult =
     result = ProbeResult(duration: -1, error: "ffprobe is not installed")
   except CatchableError as e:
     result = ProbeResult(duration: -1, error: e.msg)
+
+proc keyframeBefore(arg: ReaderArg, at: float): float =
+  ## The keyframe at or before `at` in a file (a few tens of milliseconds).
+  try:
+    let run = runProcessPiped(ffprobeCommand(), keyframeArgs(arg.source, at), timeoutMs = FileProbeTimeoutMs,
+      maxOutputBytes = 4096, maxErrorBytes = 4096)
+    if run.exitCode == 0: parseKeyframe(run.output, at) else: at
+  except CatchableError:
+    at
 
 type LaunchEnd = enum
   leSuperseded, leEof, leFailed, leIdle
@@ -567,6 +579,12 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       while true:
         let decode = pickDecode(probe.codec, caps, fast, software or hardwareFailed(probe.codec))
         let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
+        if decode.fast and arg.source.scheme.len == 0 and launchAt > 0.5:
+          # A slow decoder starts at the keyframe before: an exact start makes
+          # it decode every frame from there first (x264's keyframes are 8 s
+          # apart, two minutes of a Pi Zero's 1080p), and the fps filter drops
+          # what -noaccurate_seek would have shown. The clock says where.
+          launchAt = keyframeBefore(arg, launchAt)
         var made: int64 = 0
         var code = 0
         let ended = runLaunch(arg, gen, width, height, fit, pixels, launchAt, fps, loopFile, seqNo,

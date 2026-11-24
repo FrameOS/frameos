@@ -21,6 +21,16 @@ if haveFfmpeg:
     "-map \"[v]\" -pix_fmt yuv420p -c:v mpeg4 " & quoteShell(clip))
   doAssert made.exitCode == 0, made.output
 
+# Six seconds, red to 3 and blue after, a keyframe every 2 seconds (mpeg4's
+# -g 20 at 10 a second) and none where the colour changes: a slow decoder's
+# start goes to the one before.
+let keyed = dir / "keyed.mp4"
+if haveFfmpeg:
+  let made = execCmdEx("ffmpeg -hide_banner -loglevel error -y -f lavfi -i color=c=red:size=320x180:rate=10:duration=3 " &
+    "-f lavfi -i color=c=blue:size=320x180:rate=10:duration=3 -filter_complex \"[0:v][1:v]concat=n=2:v=1[v]\" " &
+    "-map \"[v]\" -pix_fmt yuv420p -c:v mpeg4 -g 20 -sc_threshold 1000000000 " & quoteShell(keyed))
+  doAssert made.exitCode == 0, made.output
+
 proc fileSource(path: string): VideoSource =
   VideoSource(input: path)
 
@@ -211,6 +221,22 @@ suite "video player":
       discard next.playUntil(200, 100, vfContain, nil, 30, proc(p: VideoPlayer): bool = not p.image.isNil)
       check next.status.decoder == "software"
       next.close()
+
+  test "a slow decoder starts at the keyframe before the time asked for, and says that time":
+    if not haveFfmpeg:
+      skip()
+    else:
+      startFastForTest = true
+      defer: startFastForTest = false
+      # 3.5 s in is blue; the keyframe before it, at 2 s, is red.
+      let player = newVideoPlayer(fileSource(keyed), "keyed.mp4", loop = false, maxFps = 30, startAt = 3.5)
+      discard player.playUntil(200, 100, vfContain, nil, 20, proc(p: VideoPlayer): bool = not p.image.isNil)
+      check player.image.red
+      check player.status.fast
+      check player.status.time >= 1.9 and player.status.time < 2.6
+      discard player.playUntil(200, 100, vfContain, nil, 20, proc(p: VideoPlayer): bool = p.image.blue)
+      check player.image.blue
+      player.close()
 
   test "closed players are joined once their reader ends":
     if not haveFfmpeg:
