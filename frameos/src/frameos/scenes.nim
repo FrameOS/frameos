@@ -580,6 +580,15 @@ proc getLastImageCopy*(): Image =
   withLock lastImageLock:
     result = copy(lastImage)
 
+proc lastImagePixels*(): tuple[width, height: int, pixels: seq[ColorRGBX]] =
+  ## The last rendered picture's pixels, the caller's own (a value, for another
+  ## thread to encode: scene_snapshot_writer.nim). Empty before the first
+  ## render.
+  if not lastImagePresent:
+    return
+  withLock lastImageLock:
+    result = (lastImage.width, lastImage.height, lastImage.toContiguousSeq())
+
 proc getLastImagePng*(): string =
   if not lastImagePresent:
     raise newException(Exception, "No image rendered yet")
@@ -600,9 +609,6 @@ proc saveSceneImagePng*(assetsPath: string, sceneId: string, png: string): Scene
     path: path,
     size: png.len,
   )
-
-proc saveLastSceneImagePng*(assetsPath: string, sceneId: SceneId): SceneImageSaveResult =
-  saveSceneImagePng(assetsPath, sceneId.string, getLastImagePng())
 
 proc getLastPublicSceneState*(): (SceneId, JsonNode, float) =
   ## The scene on the panel, a copy of its public state and when that last

@@ -1404,6 +1404,10 @@ async def test_precompiled_sd_image_shortcut_patches_root_and_boot_only(tmp_path
     assert 'step "labelling BOOT partition' in captured["boot_patch_script"]
     assert 'step "copying boot overlay files"' in captured["boot_patch_script"]
     assert 'step "mtools missing, installing it with apt"' in captured["boot_patch_script"]
+    # A card composed from a base image built before post-image.sh said so
+    # still boots on the ondemand governor, not the kernel's powersave.
+    assert 'add_kernel_arg "cmdline.txt" "cpufreq.default_governor=ondemand"' in captured["boot_patch_script"]
+    assert 'add_kernel_arg "firmware/cmdline.txt" "cpufreq.default_governor=ondemand"' in captured["boot_patch_script"]
 
 
 @pytest.mark.asyncio

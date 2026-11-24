@@ -231,8 +231,10 @@ the control plane") brings it back with the page.
 Linux host's copies stay for now.* On Linux each tile showed the scene's last snapshot: the PNG the runner writes
 under `<assets>/.frameos/scene_images/` on every switch and at most once a
 minute after (`render:sceneImage:saved`), once the panel has the picture
-(the encode is most of a second on a Pi Zero, and it used to hold every
-switch back), and never for the switcher or the settings themselves.
+and on a thread of its own below the runner's priority
+(`scene_snapshot_writer.nim`: the encode is most of a second on a Pi Zero,
+three for a photo, and on the runner it held every tap and switch back by
+that), and never for the switcher or the settings themselves.
 `scene_switcher_linux.nim` fits it to the tile (halved by pixie's box
 filter, then drawn), and keeps it until the file changes. A scene not shown
 since the card was made has its icon (or its first letter) in the picture's place.
@@ -240,14 +242,13 @@ since the card was made has its icon (or its first letter) in the picture's plac
 Opening it is fast on a Pi Zero (a 720x720 PNG is a few hundred ms to decode
 there):
 
-- The runner hands the switcher the snapshot it just wrote while it still
-  has the pixels (`noteSceneSnapshot`): kept halved down to a shorter side
-  of 320 to 639 px (360x360 on a HyperPixel 4.0 Square), with no decode.
-- It writes that small copy beside the snapshots
-  (`.frameos/scene_thumbs/<snapshot>.qoi`; QOI is a few ms to write and to
-  read), and after a restart the switcher reads the copy, unless the
-  snapshot is newer (one from an older runtime, or put there by a control
-  plane), which it decodes.
+- The snapshot writer writes a small copy beside each snapshot from the
+  pixels it has in hand, halved down to a shorter side of 320 to 639 px
+  (360x360 on a HyperPixel 4.0 Square), with no decode:
+  `.frameos/scene_thumbs/<snapshot>.qoi` (QOI is a few ms to write and to
+  read). The switcher reads the copy, unless the snapshot is newer (one from
+  an older runtime, or put there by a control plane), which it decodes, and
+  keeps what it read until the snapshot changes.
 - A render on a fast panel decodes for 120 ms at most; the tiles it did not
   get to show their older picture, or their number, and the switcher
   renders again at once (`sceneSwitcherThumbnailPass`). E-paper waits for

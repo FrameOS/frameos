@@ -2,6 +2,7 @@ import std/[json, os, strutils, times]
 import pixie
 import ../scenes
 import ../scene_switcher_linux
+import ../scene_snapshot_writer
 import ../types
 import ../events_gen
 import system/sceneSwitcher/scene as sceneSwitcher
@@ -62,42 +63,57 @@ block a_snapshot_is_fitted_to_the_tile_and_kept_until_it_changes:
   doAssert not second.isNil and second[100, 100].g > 200, "the new snapshot: " & $second[100, 100]
   removeDir(assets)
 
-block the_runner_hands_its_snapshot_over_and_a_restart_reads_the_small_copy:
-  # docs/scene-switcher.md "Pictures": no decode of a snapshot the runner
-  # just wrote, and after a restart the small copy beside it, not the PNG.
+block the_snapshot_writer_leaves_the_small_copy_the_switcher_reads:
+  # docs/scene-switcher.md "Pictures": the snapshot writer
+  # (scene_snapshot_writer.nim) puts a small copy beside every snapshot, and
+  # the switcher reads that, not the PNG.
   let assets = getTempDir() / "frameos-switcher-seeded-" & $epochTime().int
   let config = FrameConfig(width: 720, height: 720, assetsPath: assets)
   let snapshot = newImage(720, 720)
   snapshot.fill(rgba(0, 0, 255, 255))
   let path = sceneImagePath(assets, "tests/switcher/c")
-  createDir(path.parentDir)
-  snapshot.writeFile(path)
-  setLastModificationTime(path, fromUnix(getTime().toUnix() - 10))
-  noteSceneSnapshot(assets, "tests/switcher/c", snapshot)
+  doAssert writeSceneSnapshot(assets, "tests/switcher/c", snapshot) > 0
+  doAssert fileExists(path)
   let thumb = sceneThumbPath(assets, "tests/switcher/c")
   doAssert fileExists(thumb) and thumb.endsWith(".qoi") and "scene_thumbs" in thumb, thumb
   doAssert "scene_images" notin thumb, "never among the snapshots: " & thumb
   let small = decodeImage(readFile(thumb))
   doAssert small.width == 360 and small.height == 360, $small.width
-  # Seeded: the file on disk is not read. A different picture written over
-  # it under the same key would show if it were.
-  let seeded = linuxSceneThumbnail(config, "tests/switcher/c", 100, 100)
-  doAssert not seeded.isNil and seeded[50, 50].b > 200
-  # A restart: the small copy, not the snapshot (made red to tell them apart,
-  # older than the copy, so the copy stands).
-  forgetSceneThumbnails()
+  # The small copy, not the snapshot (made red to tell them apart, older than
+  # the copy, so the copy stands).
   let red = newImage(720, 720)
   red.fill(rgba(255, 0, 0, 255))
   red.writeFile(path)
   setLastModificationTime(path, fromUnix(getTime().toUnix() - 10))
-  let restarted = linuxSceneThumbnail(config, "tests/switcher/c", 100, 100)
-  doAssert not restarted.isNil and restarted[50, 50].b > 200, "the small copy: " & $restarted[50, 50]
+  let fromCopy = linuxSceneThumbnail(config, "tests/switcher/c", 100, 100)
+  doAssert not fromCopy.isNil and fromCopy[50, 50].b > 200, "the small copy: " & $fromCopy[50, 50]
   # A snapshot newer than the copy (an older runtime's, a control plane's):
   # decoded after all.
   forgetSceneThumbnails()
   setLastModificationTime(path, fromUnix(getTime().toUnix() + 10))
   let newer = linuxSceneThumbnail(config, "tests/switcher/c", 100, 100)
   doAssert not newer.isNil and newer[50, 50].r > 200, "the newer snapshot: " & $newer[50, 50]
+  removeDir(assets)
+
+block the_runner_queues_its_snapshot_and_the_writer_writes_it:
+  # scene_snapshot_writer.nim: the runner hands over the last picture's
+  # pixels and goes on; the writer thread writes the snapshot and its copy.
+  let assets = getTempDir() / "frameos-switcher-writer-" & $epochTime().int
+  let picture = newImage(64, 48)
+  picture.fill(rgba(0, 200, 0, 255))
+  setLastImage(picture)
+  doAssert queueSceneSnapshot(assets, "tests/switcher/queued")
+  # A newer picture of the scene waits in the older one's place, if it still
+  # waits; either way the last one is what ends up on disk.
+  picture.fill(rgba(200, 0, 0, 255))
+  setLastImage(picture)
+  doAssert queueSceneSnapshot(assets, "tests/switcher/queued")
+  waitSceneSnapshots()
+  doAssert not snapshotPending("tests/switcher/queued")
+  let written = decodeImage(readFile(sceneImagePath(assets, "tests/switcher/queued")))
+  doAssert written.width == 64 and written.height == 48
+  doAssert written[10, 10].r > 150 and written[10, 10].g < 50, "the newer picture: " & $written[10, 10]
+  doAssert fileExists(sceneThumbPath(assets, "tests/switcher/queued"))
   removeDir(assets)
 
 block a_render_spends_a_budget_on_decodes_and_asks_for_another:

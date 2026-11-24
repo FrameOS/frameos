@@ -3764,6 +3764,23 @@ async def test_api_frame_adopt_hands_a_keyless_card_the_backend_access_key(async
 
 
 @pytest.mark.asyncio
+async def test_api_frame_adopt_leaves_a_runtime_whose_logs_follow_the_reload_running(async_client, db, redis):
+    """From 2026.9.13 the runtime's log shipper takes the reloaded config's
+    backend, so the write-back's reload is all it needs. The restart only
+    raced that reload: on a Pi Zero it came before the runtime held the new
+    serverApiKey and got a 401 (2026-11-24 bench)."""
+    posted = []
+    payload = {**_standalone_device_payload(), 'version': '2026.11.14+1ea54241'}
+    with patch('app.api.frames._fetch_frame_http_bytes', new=AsyncMock(side_effect=_adopt_mock_fetch(payload, posted))):
+        response = await async_client.post('/api/frames/adopt', json=_adopt_request_body())
+    assert response.status_code == 200, response.text
+    assert {'__event__': 'restart'} not in posted
+    assert posted[-1]['frame_sync_mark_deployed'] is True
+    logs = (await async_client.get(f"/api/frames/{response.json()['frame']['id']}/logs")).json()['logs']
+    assert not any('could not be restarted' in entry['line'] for entry in logs)
+
+
+@pytest.mark.asyncio
 async def test_api_frame_adopt_reports_a_failed_restart_on_the_frame_log(async_client, db, redis):
     posted = []
     inner = _adopt_mock_fetch(_standalone_device_payload(), posted)
@@ -4236,9 +4253,14 @@ async def test_push_backend_state_to_device_is_the_http_fast_deploy(async_client
     # One POST with a reload, then the metadata echo.
     assert posted[0]['name'] == 'Hallway' and 'skip_runtime_reload' not in posted[0]
     assert posted[-1]['frame_sync_mark_deployed'] is True
+    # The device keeps the baseline in frame.json: without the scene set it
+    # already holds in scenes.json (the backend's own baseline keeps it).
+    assert posted[-1]['last_successful_deploy']['name'] == 'Hallway'
+    assert 'scenes' not in posted[-1]['last_successful_deploy']
     db.expire_all()
     frame = db.get(Frame, frame.id)
     assert frame.last_successful_deploy['name'] == 'Hallway'
+    assert [scene['id'] for scene in frame.last_successful_deploy['scenes']] == ['scene-2']
     assert frame.status == 'ready'
 
 

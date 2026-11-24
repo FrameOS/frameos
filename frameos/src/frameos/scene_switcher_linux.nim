@@ -8,11 +8,10 @@
 ## Fast on a Pi Zero (docs/scene-switcher.md "Pictures"): a 720x720 PNG is a
 ## few hundred ms to decode there, and opening the switcher decoded every
 ## scene whose snapshot had changed since it last showed. So the picture
-## kept per scene is a small one (`ThumbnailSourceSide`): the runner hands
-## over the snapshot it just wrote while the pixels are in memory
-## (`noteSceneSnapshot`), and writes that small copy beside it
-## (`.frameos/scene_thumbs/`, QOI: a few ms to write and to read), which is
-## what a restart reads instead of the snapshot. A switcher render decodes for `PassBudgetMs` at
+## kept per scene is a small one (`ThumbnailSourceSide`): the snapshot writer
+## (scene_snapshot_writer.nim) writes it beside every snapshot from the pixels
+## it has in hand (`.frameos/scene_thumbs/`, QOI: a few ms to write and to
+## read), and that is what is read instead of the snapshot. A switcher render decodes for `PassBudgetMs` at
 ## most and draws the rest as numbers (or their older picture), then renders
 ## again (`linuxThumbnailPass`), so it is up at once and fills in.
 ##
@@ -90,28 +89,6 @@ proc snapshotKey(path: string): string =
 proc forgetSceneThumbnails*() =
   ## Every kept picture let go, as at a restart (tests, benchmarks).
   keptThumbnails.clear()
-
-proc noteSceneSnapshot*(assetsPath, sceneId: string, image: Image) =
-  ## The runner wrote `sceneId`'s snapshot from `image`, which it still has
-  ## in memory: the switcher's picture of it is made from that, with no
-  ## decode, and its small copy written for after a restart. Called right
-  ## after the write, so the key is the file's.
-  if image.isNil:
-    return
-  try:
-    let path = sceneImagePath(assetsPath, sceneId)
-    if not fileExists(path):
-      return
-    let source = thumbnailSource(image)
-    keptThumbnails[sceneId] = KeptThumbnail(key: snapshotKey(path), source: source)
-    let thumb = sceneThumbPath(assetsPath, sceneId)
-    try:
-      createDir(thumb.parentDir)
-      writeFile(thumb, encodeImage(source, QoiFormat))
-    except CatchableError:
-      discard # a read-only disk: the snapshot is decoded after a restart
-  except CatchableError:
-    keptThumbnails.del(sceneId)
 
 proc loadSource(assetsPath, sceneId, path: string): Image =
   ## A snapshot's small copy from the disk: the one beside it when that is

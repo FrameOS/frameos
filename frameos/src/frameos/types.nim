@@ -545,8 +545,19 @@ type
     run*: proc (self: AppRoot, context: ExecutionContext): void
     get*: proc (self: AppRoot, key: string): Value
 
-  # Exported data/functions for compiled scenes
-  ExportedScene* = ref object of RootObj
+  # Exported data/functions for compiled scenes.
+  #
+  # Acyclic, by promise: a scene's export holds its graph, its fields and
+  # plain procs, never anything that leads back to it. The registry hands
+  # these out to whichever thread asks (scenes.nim, under its lock), the
+  # first generation is built on the main thread at module init, and a
+  # reload's retired generation is let go on the runner's. ORC keeps a
+  # cyclic ref's cycle candidates per thread: one parked by the main thread
+  # and destroyed by the runner was taken out of the RUNNER's list at the
+  # main thread's index, which corrupted both and crashed a Pi Zero with
+  # SIGSEGV a second or two after the second settings push from its backend
+  # (the hardware bench, 2026-11-24). An acyclic ref is never a candidate.
+  ExportedScene* {.acyclic.} = ref object of RootObj
     publicStateFields*: seq[StateField]
     persistedStateKeys*: seq[string]
     ## The state key that holds the scene's refresh interval ("" = the scene
@@ -575,7 +586,7 @@ type
     path*: string
 
   # Exported data/functions for interpreted scenes, adds some local state that's normally compiled into the scene
-  ExportedInterpretedScene* = ref object of ExportedScene
+  ExportedInterpretedScene* {.acyclic.} = ref object of ExportedScene
     name*: string
     compiled*: CompiledScene ## its program, made by the first instance (scene_compiler.nim)
     backgroundColor*: Color

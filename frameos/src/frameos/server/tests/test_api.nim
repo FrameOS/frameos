@@ -105,6 +105,13 @@ suite "Server API helpers":
     check blanked["frameApi"]["frame_admin_auth"]["user"].getStr() == "admin"
     check blanked["frameApi"]["frame_access_key"].getStr() == "access-1"
     check blanked["frameApi"]["server_api_key"].getStr() == "server-1"
+    # The scenes are scenes.json(.gz)'s, never echoed into frame.json, and an
+    # echo an older runtime kept goes at the next save.
+    check not blanked["frameApi"].hasKey("scenes")
+    let older = frontendFramePayloadToRuntimeConfig(%*{"name": "Kitchen"},
+      %*{"frameApi": {"scenes": [{"id": "scene/a"}], "name": "Hall"}})
+    check not older["frameApi"].hasKey("scenes")
+    check older["frameApi"]["name"].getStr() == "Kitchen"
 
     # A real new value still replaces, and disabling still disables.
     let changed = frontendFramePayloadToRuntimeConfig(%*{

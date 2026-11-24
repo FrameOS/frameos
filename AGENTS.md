@@ -1390,6 +1390,12 @@
   payload; `sendEventOwned(name, move(payload))` is for a fresh parse too big
   to copy. New shared state gets a four-thread test built with
   `-d:useMalloc` (`test_public_state_threads.nim` is the template).
+  A ref type that is handed between threads by design (the scene registry's
+  `ExportedScene`: built on the main thread at boot, let go on the runner's
+  after a reload) is `{.acyclic.}`: ORC files a cyclic ref's cycle candidates
+  per thread, and one filed by one thread and destroyed on another corrupts
+  both lists (`test_scene_registry_threads.nim`; a Pi's SIGSEGV after its
+  second settings push, 2026-11-24).
   A proc that can run on more than one thread takes the config it reads as
   an argument (the portal's `startAp`, `attemptConnect`): the caller hands in
   the runtime's own on the runtime's thread and a `portalRequestConfig` /
