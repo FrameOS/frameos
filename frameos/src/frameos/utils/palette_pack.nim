@@ -83,8 +83,18 @@ proc packsInPlace*(image: Image; paletteLen, panelWidth, panelHeight, rotate: in
 # y loads row y + 1 before its first pixel, and row y + 1's first pixel waits
 # for row y's third, so a row is never read before it is loaded.
 #
-# How far a row has got is `slots[y and 3]`: y * width + pixels done, which
-# only grows in a slot (row y + 4 starts past where row y ended).
+# How far a row has got is `slots[y and 3]`: y * width + pixels done. It only
+# grows in a slot (row y + 4 starts past where row y ended) because the store
+# that says row y is done is the last thing row y stores there. Once the
+# other worker sees it, that worker may take every next row by itself, around
+# the ring and into row y + 4, before this one runs again. It was not always
+# the last: with a width that is a multiple of 8, the loop's progress store at
+# the last pixel already said "done", and the store after the loop said it
+# again. A worker preempted between the two came back and wrote row y's end
+# over row y + 4's progress, and the next row to wait on that slot waited for
+# good: test_palette_pack.nim's timeouts on CI under load (2026-11-24). On an
+# ESP32 it would leave the render task spinning until the watchdog reset the
+# frame. So the loop stops a store short, and a row's end is stored once, last.
 
 const
   paletteRing = 4
@@ -251,8 +261,9 @@ proc ditherPaletteRow(job: ptr PaletteRowsJob, y: int) {.hotLoop.} =
       push(next, xx, errorR, errorG, errorB, 5)
       if xx + 1 < width:
         push(next, xx + 1, errorR, errorG, errorB, 1)
-    if (xx + 1) mod palettePublishEvery == 0:
+    if (xx + 1) mod palettePublishEvery == 0 and xx + 1 < width:
       mine[].store(rowIndex + xx + 1, moRelease)
+  # The row's end, and its last store into the slot (see above).
   mine[].store(rowIndex + width, moRelease)
 
 proc paletteRowsJob(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [], hotLoop.} =
