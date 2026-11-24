@@ -46,9 +46,14 @@ export function DeployPlanReadyIcon(props: SVGProps<SVGSVGElement>): JSX.Element
 export function FrameChangeStatusIcon({
   frameId,
   variant = 'sidebar',
+  quiet = false,
 }: {
   frameId: FrameId
   variant?: 'sidebar' | 'dashboard'
+  // A frame in the sidebar's Inactive list: one not heard from in a while
+  // falls behind every release, so a deploy or update waiting for it is the
+  // tile's gray, not the gold that asks for attention it cannot act on.
+  quiet?: boolean
 }): JSX.Element {
   const { frame, hasFrameSyncChanges, undeployedChangeDetails, undeployedChanges, unsavedChanges } = useValues(
     frameLogic({ frameId })
@@ -115,6 +120,19 @@ export function FrameChangeStatusIcon({
           ? HourglassIcon
           : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
+  // Only what waits for the frame goes quiet: unsaved edits, a sync and an
+  // update under way keep their color.
+  const waitsQuietly = quiet && (statusLabel === 'Undeployed' || statusLabel === 'Waiting')
+  const statusClassName = waitsQuietly
+    ? clsx(
+        'frameos-change-status-button--idle',
+        isDashboard ? 'frameos-change-status-button--idle-dashboard' : 'frameos-change-status-button--idle-sidebar'
+      )
+    : clsx(
+        'frameos-change-status-button',
+        isDashboard ? 'frameos-change-status-button--dashboard' : 'frameos-change-status-button--sidebar',
+        unsavedChanges ? 'frameos-change-status-button--unsaved' : 'frameos-change-status-button--undeployed'
+      )
   const wrapperClassName = isDashboard
     ? 'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition'
     : 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition'
@@ -176,15 +194,7 @@ export function FrameChangeStatusIcon({
   if (!canOpenDeployDrawer) {
     // Keep reporting the state, drop the affordance.
     return (
-      <span
-        title={statusTitle}
-        className={clsx(
-          wrapperClassName,
-          'frameos-change-status-button',
-          isDashboard ? 'frameos-change-status-button--dashboard' : 'frameos-change-status-button--sidebar',
-          'frameos-change-status-button--undeployed'
-        )}
-      >
+      <span title={statusTitle} className={clsx(wrapperClassName, statusClassName)}>
         <StatusIcon className={iconClassName} />
       </span>
     )
@@ -212,9 +222,9 @@ export function FrameChangeStatusIcon({
       onClick={openDrawer}
       className={clsx(
         wrapperClassName,
-        'frameos-change-status-button focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        isDashboard ? 'frameos-change-status-button--dashboard' : 'frameos-change-status-button--sidebar',
-        unsavedChanges ? 'frameos-change-status-button--unsaved' : 'frameos-change-status-button--undeployed'
+        statusClassName,
+        waitsQuietly && idleClassName,
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
       )}
     >
       <StatusIcon className={iconClassName} />

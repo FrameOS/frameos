@@ -323,7 +323,7 @@ function FrameTreeRow({
               : 'text-slate-700 hover:bg-slate-100'
         )}
       >
-        <FrameChangeStatusIcon frameId={frame.id} />
+        <FrameChangeStatusIcon frameId={frame.id} quiet={inactive} />
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <button
             type="button"
