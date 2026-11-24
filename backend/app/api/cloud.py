@@ -680,7 +680,22 @@ def setup_host_allowed(host_header: str | None) -> bool:
     if any(host.endswith(suffix) for suffix in LOCAL_HOST_SUFFIXES):
         return True
     allowed = {entry.strip().lower() for entry in app_config.config.FRAMEOS_SETUP_ALLOWED_HOSTS.split(",") if entry.strip()}
+    # The address the owner said this install is reached at is theirs too.
+    public_url = (app_config.config.FRAMEOS_PUBLIC_URL or "").strip()
+    if public_url:
+        try:
+            public_host = (urlparse(public_url).hostname or "").lower()
+        except ValueError:
+            public_host = ""
+        if public_host:
+            allowed.add(public_host)
     return host in allowed
+
+
+SETUP_HOST_REFUSAL = (
+    "First-run setup is served on the local network only: open this backend by its IP address or a "
+    ".local name, or list this hostname in FRAMEOS_SETUP_ALLOWED_HOSTS."
+)
 
 
 def _require_setup_mode(request: Request, db: Session) -> None:
@@ -690,13 +705,7 @@ def _require_setup_mode(request: Request, db: Session) -> None:
     # (IngressPeerGuard) and the Host is Home Assistant's own, so the name
     # check does not apply there.
     if app_config.config.HASSIO_RUN_MODE != "ingress" and not setup_host_allowed(request.headers.get("host")):
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail=(
-                "First-run setup is served on the local network only: open this backend by its IP address or a "
-                ".local name, or list this hostname in FRAMEOS_SETUP_ALLOWED_HOSTS."
-            ),
-        )
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=SETUP_HOST_REFUSAL)
 
 
 def _setup_claim_matches(request: Request, link: CloudBackendLink | None) -> bool:

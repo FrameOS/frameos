@@ -68,7 +68,11 @@ def create_user_session(db: Session, *, user_id: int, expires_at: datetime.datet
     return session_id
 
 
-def session_is_active(db: Session, session_id: str | None) -> bool:
+def session_is_active(db: Session, session_id: str | None, user_id: int | None = None) -> bool:
+    """Whether the session behind a credential is alive and, when `user_id`
+    is given, that user's own. A credential names its account by email and
+    its session by id; the two are checked together, so a session never
+    answers for whoever holds that email now."""
     if not session_id:
         return False
     row = (
@@ -77,6 +81,8 @@ def session_is_active(db: Session, session_id: str | None) -> bool:
         .first()
     )
     if row is None or row.revoked_at is not None:
+        return False
+    if user_id is not None and int(row.user_id) != int(user_id):
         return False
     return row.expires_at > datetime.datetime.utcnow()
 

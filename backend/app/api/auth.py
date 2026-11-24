@@ -284,6 +284,17 @@ def refuse_read_only_token(request: Request) -> None:
         )
 
 
+def _session_user(db: Session, email: str, session_id: str) -> User | None:
+    """The account a credential names, when its session is alive and that
+    account's own. The email alone is not enough: a session opened for one
+    account must not answer for whichever account carries that address
+    later (an address changed, then taken by another user)."""
+    user = db.query(User).filter(User.email == email).first()
+    if user is None or not session_is_active(db, session_id, user.id):
+        return None
+    return user
+
+
 async def get_current_user_from_jwt(token: str, db: Session) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -294,10 +305,7 @@ async def get_current_user_from_jwt(token: str, db: Session) -> User:
         email, session_id = _decode_jwt_claims(token)
     except JWTError:
         raise credentials_exception
-    if not session_is_active(db, session_id):
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         raise credentials_exception
     return user
@@ -344,9 +352,7 @@ async def get_current_user_from_request(
     if claims is None:
         return None
     email, session_id = claims
-    if not session_is_active(db, session_id):
-        return None
-    return db.query(User).filter(User.email == email).first()
+    return _session_user(db, email, session_id)
 
 
 def websocket_origin_allowed(websocket: WebSocket) -> bool:
@@ -384,7 +390,7 @@ def get_current_user_from_websocket(
     if not session_is_active(db, session_id):
         return None, "Session revoked"
 
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         return None, "User not found"
     return user, None
@@ -417,10 +423,7 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    if not session_is_active(db, session_id):
-        raise credentials_exception
-
-    user = db.query(User).filter(User.email == email).first()
+    user = _session_user(db, email, session_id)
     if user is None:
         raise credentials_exception
     return user
@@ -505,6 +508,16 @@ async def signup(request: Request, data: UserSignup, response: Response, db: Ses
     lock_user_table_for_first_signup(db)
     if db.query(User).first() is not None:
         raise HTTPException(status_code=400, detail="Only one user is allowed. Please login!")
+
+    # The first account is made from the network the install lives on, like
+    # the rest of first-run setup: a public name in Host here is a browser
+    # pointed at somebody's domain that resolves to this backend's LAN
+    # address (DNS rebinding), which could otherwise claim a fresh install
+    # and read the token below.
+    from app.api.cloud import SETUP_HOST_REFUSAL, setup_host_allowed
+
+    if not setup_host_allowed(request.headers.get("host")):
+        raise HTTPException(status_code=403, detail=SETUP_HOST_REFUSAL)
 
     if not data.email:
         raise HTTPException(status_code=400, detail="Email is required.")
