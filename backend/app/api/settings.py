@@ -6,7 +6,7 @@ from http import HTTPStatus
 from types import SimpleNamespace
 
 from arq import ArqRedis as Redis
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from app.utils.modal_sandbox import ModalSandboxConfig
 from app.utils.posthog import initialize_posthog
 from app.utils.settings_secrets import mask_settings, resolve_masked_settings
 from . import api_project
+from .auth import request_api_token
 
 def _form_settings(settings: dict) -> dict:
     """Only the groups POST accepts. The settings table also holds internal
@@ -35,12 +36,16 @@ def _form_settings(settings: dict) -> dict:
 
 
 @api_project.get("/settings", response_model=SettingsResponse)
-async def get_settings(reveal: str | None = None, db: Session = Depends(get_db)):
+async def get_settings(request: Request, reveal: str | None = None, db: Session = Depends(get_db)):
     """Secrets come back masked (app/utils/settings_secrets) — the form posts
     the mask back to keep a key. `?reveal=1` is for the in-browser wasm
-    preview, which runs the scene here and needs the real bytes."""
+    preview, which runs the scene here and needs the real bytes. An API token
+    never gets them (a read-only one would otherwise read every SSH key and
+    service key the project holds): it is answered masked, as the cloud does."""
     settings = _form_settings(get_settings_dict(db, project_id=current_project_id()))
-    return settings if reveal == "1" else mask_settings(settings)
+    if reveal == "1" and request_api_token(request) is None:
+        return settings
+    return mask_settings(settings)
 
 @api_project.post("/settings", response_model=SettingsResponse)
 async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):

@@ -97,7 +97,12 @@ from app.schemas.frames import (
     FrameSyncApplyRequest,
     FrameAdoptRequest,
 )
-from app.api.auth import get_current_user_from_request
+from app.api.auth import (
+    get_current_user_from_request,
+    refuse_read_only_token,
+    request_token_is_read_only,
+    require_session_credential,
+)
 from app.config import config
 from app.utils.server_address import split_address as split_typed_address
 from app.utils.network import (
@@ -108,7 +113,8 @@ from app.utils.network import (
     is_safe_host,
 )
 from app.utils.embedded_render import NETWORK_POLICY_PUBLIC, RenderQueueFull, preview_network_policy
-from app.utils.asset_headers import inert_asset_headers
+from app.utils.asset_headers import INERT_ASSET_CSP, inert_asset_headers
+from app.utils.frame_secrets import TOP_LEVEL_SECRET_KEYS, redact_frame_secrets
 from app.utils.settings_secrets import is_masked_setting_value, resolve_masked_secret
 from app.utils.upload_limits import (
     MAX_ASSET_UPLOAD_BYTES,
@@ -1363,17 +1369,26 @@ async def _frame_to_api_response_dict(
     frame: Frame,
     redis: Redis,
     latest_log_at: datetime | None | object = _LATEST_LOG_AT_UNSET,
+    *,
+    request: Request | None = None,
 ) -> dict[str, Any]:
     data = _frame_to_response_dict(frame, latest_log_at)
     sync_hint = await _frame_sync_hint_for_response(redis, frame.id)
     if sync_hint:
         data["frame_sync_hint"] = sync_hint
+    if request is not None and request_token_is_read_only(request):
+        # "May look" is not "may log in to the frame": a read-only token gets
+        # the frame without its SSH password, keys, admin login and Wi-Fi
+        # passphrases (the leaves app/utils/frame_secrets names).
+        data = redact_frame_secrets(data)
+        for key in TOP_LEVEL_SECRET_KEYS:
+            data.setdefault(key, None)  # the response schema wants the keys
     return data
 
 
 @api_project.get("/frames", response_model=FramesListResponse)
 async def api_frames_list(
-    db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
+    request: Request, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)
 ):
     project_id = current_project_id()
     frames = db.query(Frame).filter_by(project_id=project_id).all()
@@ -1391,7 +1406,7 @@ async def api_frames_list(
     pending_types = pending_command_types_by_frame(db, project_id)
     frame_items = []
     for f in frames:
-        data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id))
+        data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id), request=request)
         data["pending_command_types"] = pending_types.get(int(f.id), [])
         data["scene_preview"] = scene_preview_info(db, f)
         data["active_scene_id"] = await _active_scene_id_from_cache(redis, f.id)
@@ -2162,6 +2177,27 @@ def _device_assets(frame: Frame):
     return admin_api_assets
 
 
+# What a thumbnail may be served as. The bytes come from a device (its own
+# thumbnail cache, or the original when it would not decode) and the request
+# names a `filename` of the caller's choosing, so neither picks the type: an
+# "image" that is really HTML, served as text/html from this origin, would
+# run with the owner's session.
+_THUMBNAIL_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp"})
+
+
+def _thumbnail_response(data: bytes, media_type: str | None = None) -> StreamingResponse:
+    """One thumbnail body: a raster image type or the thumbnail default,
+    never sniffed, and inert if a browser is pointed straight at it."""
+    kind = (media_type or "").split(";", 1)[0].strip().lower()
+    if kind not in _THUMBNAIL_MEDIA_TYPES:
+        kind = THUMBNAIL_CONTENT_TYPE
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=kind,
+        headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": INERT_ASSET_CSP},
+    )
+
+
 async def _embedded_asset_file_response(
     redis: Redis,
     frame: Frame,
@@ -2191,14 +2227,15 @@ async def _embedded_asset_file_response(
         full_md5 = hashlib.md5(data).hexdigest()
         cache_key = f"asset:thumb:{full_md5}"
         if cached := await redis.get(cache_key):
-            return StreamingResponse(io.BytesIO(cached), media_type="image/jpeg")
+            return _thumbnail_response(cached, "image/jpeg")
         thumb_data = await asyncio.to_thread(embedded_assets.thumbnail_jpeg, data)
         if thumb_data is None:
-            # Undecodable image (or Pillow missing): serve the original bytes.
-            media_type = mimetypes.guess_type(filename or rel_path)[0] or "application/octet-stream"
-            return StreamingResponse(io.BytesIO(data), media_type=media_type)
+            # Undecodable image (or Pillow missing): serve the original bytes,
+            # typed by the asset's own (image) extension, which the route
+            # checked: never by the caller's `filename`.
+            return _thumbnail_response(data, mimetypes.guess_type(rel_path)[0])
         await redis.set(cache_key, thumb_data, ex=86400 * 30)
-        return StreamingResponse(io.BytesIO(thumb_data), media_type="image/jpeg")
+        return _thumbnail_response(thumb_data, "image/jpeg")
 
     md5 = hashlib.md5(data).hexdigest()
     await redis.set(f"asset:{md5}", data, ex=86400 * 30)
@@ -2238,8 +2275,7 @@ async def _admin_api_asset_file_response(
         raise
 
     if thumb:
-        media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
-        return StreamingResponse(io.BytesIO(data), media_type=media_type)
+        return _thumbnail_response(data, device_content_type)
 
     md5 = hashlib.md5(data).hexdigest()
     await redis.set(f"asset:{md5}", data, ex=86400 * 30)
@@ -2279,7 +2315,9 @@ async def _ssh_thumbnail_response(
     """A thumbnail for a frame reached over SSH or the Remote: the original's
     md5 names a redis cache entry; a miss renders the preview here from the
     original (no image FrameOS ships has ImageMagick to run)."""
-    md5_key = f"asset-md5:{full_path}"
+    # Per frame: two frames (two projects) may hold different files under one
+    # path, and the md5 names the thumbnail that is served.
+    md5_key = f"asset-md5:{frame.id}:{full_path}"
     cached_md5 = await redis.get(md5_key)
     if cached_md5:
         full_md5 = cached_md5.decode() if isinstance(cached_md5, bytes) else cached_md5
@@ -2319,7 +2357,7 @@ async def _ssh_thumbnail_response(
                 ) from exc
             await redis.set(cache_key, data, ex=86400 * 30)
 
-    return StreamingResponse(io.BytesIO(data), media_type=THUMBNAIL_CONTENT_TYPE)
+    return _thumbnail_response(data, THUMBNAIL_CONTENT_TYPE)
 
 
 @api_open.get("/projects/{project_id}/frames/{id:int}/asset")
@@ -2402,8 +2440,7 @@ async def api_frame_get_asset(
                 data, device_content_type = await admin_api_assets.download_asset(
                     frame, redis, full_path, thumb=True
                 )
-                media_type = device_content_type.split(";", 1)[0].strip() or THUMBNAIL_CONTENT_TYPE
-                return StreamingResponse(io.BytesIO(data), media_type=media_type)
+                return _thumbnail_response(data, device_content_type)
             except HTTPException as exc:
                 if exc.status_code == HTTPStatus.NOT_FOUND:
                     raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
@@ -2455,6 +2492,7 @@ async def api_frame_get_asset(
 @api_project.get("/frames/{id:int}", response_model=FrameResponse)
 async def api_frame_get(
     id: int,
+    request: Request,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -2470,7 +2508,7 @@ async def api_frame_get(
     )
     from app.utils.frame_commands import pending_command_types, scene_preview_info
 
-    data = await _frame_to_api_response_dict(frame, redis, latest_log_at)
+    data = await _frame_to_api_response_dict(frame, redis, latest_log_at, request=request)
     data["pending_command_types"] = pending_command_types(db, frame)
     # The scene the frame shows for now without holding it in its saved list
     # (the editor's "Preview on frame", the voice chat's picture): the
@@ -2518,7 +2556,7 @@ async def api_frame_discard_scene_preview(id: int, db: Session = Depends(get_db)
     return {"ok": True}
 
 
-@api_project.get("/frames/{id:int}/scene_preview_settings")
+@api_project.get("/frames/{id:int}/scene_preview_settings", dependencies=[Depends(require_session_credential)])
 async def api_frame_scene_preview_settings(
     id: int,
     db: Session = Depends(get_db),
@@ -4228,7 +4266,7 @@ async def api_frame_buildroot_sd_image(
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@api_project.get("/frames/{id:int}/buildroot/sd_image/download")
+@api_project.get("/frames/{id:int}/buildroot/sd_image/download", dependencies=[Depends(refuse_read_only_token)])
 async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
     if not frame:
@@ -4262,7 +4300,7 @@ async def api_frame_buildroot_sd_image_download(id: int, db: Session = Depends(g
     return FileResponse(download_path, media_type="application/gzip", filename=download_filename)
 
 
-@api_project.get("/frames/{id:int}/embedded/provisioning")
+@api_project.get("/frames/{id:int}/embedded/provisioning", dependencies=[Depends(refuse_read_only_token)])
 async def api_frame_embedded_provisioning(
     id: int,
     db: Session = Depends(get_db),

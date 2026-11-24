@@ -27,7 +27,7 @@ from fastapi import Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, refuse_read_only_token, require_session_credential
 from app.api.templates import parse_template_zip, safe_template_name, template_zip_bytes
 from app.database import get_db
 from app.models.cloud import current_cloud_backend_link
@@ -378,7 +378,9 @@ async def delete_cloud_backup(
 # ---- the account backup key ----------------------------------------------------
 
 
-@api_user.get("/cloud/backup-key", response_model=CloudStatusResponse)
+@api_user.get(
+    "/cloud/backup-key", response_model=CloudStatusResponse, dependencies=[Depends(require_session_credential)]
+)
 async def get_backup_key(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
@@ -397,7 +399,11 @@ async def get_backup_key(
     }
 
 
-@api_user.post("/cloud/backup-key/import", response_model=CloudStatusResponse)
+@api_user.post(
+    "/cloud/backup-key/import",
+    response_model=CloudStatusResponse,
+    dependencies=[Depends(require_session_credential)],
+)
 async def import_backup_key(
     data: CloudBackupKeyImportRequest,
     db: Session = Depends(get_db),
@@ -418,7 +424,7 @@ async def import_backup_key(
     return {"status": "imported", "fingerprint": link.backup_key_fingerprint}
 
 
-@api_user.get("/backup/export")
+@api_user.get("/backup/export", dependencies=[Depends(refuse_read_only_token)])
 async def export_backup_tarball(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):

@@ -44,11 +44,26 @@ How it plugs in (`backend/app/api/auth.py`):
   endpoint is exempt from the method check because the POST is the
   transport; its tool calls reach the routes as separate requests carrying
   the same token, and those are refused.
-- What tokens cannot do: mint tokens, change the email or the password
-  (`require_session_credential`, `403 api_token_not_allowed`), or log in to
-  the web UI. Frame credentials (SSH password, admin login, agent secret,
-  Wi-Fi) are not settable through the MCP either, by tool design rather than
-  by route.
+- What tokens cannot do: mint tokens, change the email or the password, or
+  log in to the web UI. That last one is a rule on routes, not only a
+  missing form: every route that changes the cloud link, a linked cloud
+  identity or whether the password still signs in (`/api/cloud/provider`,
+  `connect`, `poll`, `disconnect`, `identity/*`, `local-fallback`,
+  `features*`, `backup-features`, `backup-key*`) takes a browser session
+  only (`require_session_credential`, `403 api_token_not_allowed`), because
+  those are the steps a session is made from. Frame credentials (SSH
+  password, admin login, agent secret, Wi-Fi) are not settable through the
+  MCP either, by tool design rather than by route.
+- No token reads stored keys back: `GET settings?reveal=1` answers a token
+  masked, and a frame's `scene_preview_settings` refuses one.
+- A read-only token reads no credentials at all. Its frames come without
+  the SSH password, the frame's keys, the admin password, the agent secret,
+  the TLS key and the Wi-Fi passphrases (the leaves
+  `app/utils/frame_secrets.py` names), and the reads whose whole answer is
+  credentials are refused with `403 read_only_token`: `GET
+  /api/backup/export`, a frame's `embedded/provisioning` and its SD image
+  download. A full-access token still reads them: it can deploy to the
+  frame anyway.
 - A password change does not revoke tokens: they are the owner's own scripts.
   Revoke them on the settings page when a token leaks.
 

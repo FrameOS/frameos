@@ -540,6 +540,26 @@ async def test_get_asset_thumb_falls_back_to_original_on_undecodable_image(async
     assert response.content == broken
 
 
+@pytest.mark.asyncio
+async def test_asset_thumb_is_never_typed_by_the_caller_or_the_device(async_client, db, redis):
+    """A file under an image name that is really a page: the thumbnail route
+    must not hand it out as text/html from this origin, whatever `filename`
+    the link names or content type the device answers."""
+    frame = await create_embedded_frame(async_client, db)
+    page = b"<html><script>alert(document.cookie)</script></html>"
+    device = FakeDevice([(200, page, {"content-type": "text/html"})])
+
+    with patch(FETCH, new=device):
+        response = await async_client.get(
+            asset_url(async_client, frame, "path=photo.png&thumb=1&filename=a.html&mode=image")
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "sandbox" in response.headers["content-security-policy"]
+
+
 # ---------------------------------------------------------------------------
 # sync
 # ---------------------------------------------------------------------------

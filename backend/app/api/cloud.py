@@ -23,7 +23,12 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app import config as app_config
-from app.api.auth import ACCESS_TOKEN_EXPIRE_MINUTES, _should_use_secure_cookie, get_current_user
+from app.api.auth import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    _should_use_secure_cookie,
+    get_current_user,
+    require_session_credential,
+)
 from app.database import get_db
 from app.models.cloud import CloudBackendLink, CloudIdentity, current_cloud_backend_link, link_is_expired
 from app.models.user import User
@@ -336,6 +341,14 @@ def _reset_link(link: CloudBackendLink, poll_error: str | None = None) -> None:
     link.updated_at = _now()
 
 
+# Every route below that changes the link, an identity or how the owner signs
+# in takes a browser session, never an API token: with a token alone a caller
+# could point the install at a provider of their own, bind that provider's
+# identity to the owner and switch the password off, and keep the access after
+# the token is revoked (the same rule as the cloud's `session.apiToken` checks).
+_SESSION_ONLY = [Depends(require_session_credential)]
+
+
 @api_user.get("/cloud/status", response_model=CloudStatusResponse)
 async def get_cloud_status(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
@@ -373,7 +386,7 @@ async def _update_provider(data: CloudProviderUpdateRequest, db: Session) -> dic
     return _status_payload(db, link)
 
 
-@api_user.post("/cloud/provider", response_model=CloudStatusResponse)
+@api_user.post("/cloud/provider", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_cloud_provider(data: CloudProviderUpdateRequest, db: Session = Depends(get_db)):
     return await _update_provider(data, db)
 
@@ -438,7 +451,7 @@ async def _start_connect(request: Request, data: CloudConnectRequest, db: Sessio
     return _status_payload(db, link)
 
 
-@api_user.post("/cloud/connect", response_model=CloudStatusResponse)
+@api_user.post("/cloud/connect", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def connect_cloud(request: Request, data: CloudConnectRequest, db: Session = Depends(get_db)):
     return await _start_connect(request, data, db)
 
@@ -537,7 +550,7 @@ def _auto_link_identity(db: Session, user: User | None, link: CloudBackendLink, 
     db.commit()
 
 
-@api_user.post("/cloud/poll", response_model=CloudStatusResponse)
+@api_user.post("/cloud/poll", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def poll_cloud(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
@@ -574,7 +587,7 @@ async def _sync_after_connect(db: Session, link: CloudBackendLink, access_token:
     db.commit()
 
 
-@api_user.post("/cloud/disconnect", response_model=CloudStatusResponse)
+@api_user.post("/cloud/disconnect", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def disconnect_cloud(db: Session = Depends(get_db)):
     link = current_cloud_backend_link(db)
     if link is None:
@@ -919,7 +932,7 @@ async def cloud_login_start(
     return {"authorization_url": authorization_url}
 
 
-@api_user.post("/cloud/identity/link", response_model=CloudLoginStartResponse)
+@api_user.post("/cloud/identity/link", response_model=CloudLoginStartResponse, dependencies=_SESSION_ONLY)
 async def cloud_identity_link_start(
     request: Request,
     response: Response,
@@ -1119,7 +1132,7 @@ async def cloud_login_callback(
     return redirect
 
 
-@api_user.post("/cloud/identity/unlink", response_model=CloudStatusResponse)
+@api_user.post("/cloud/identity/unlink", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def cloud_identity_unlink(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
@@ -1143,7 +1156,7 @@ async def cloud_identity_unlink(
     return _status_payload(db, link, current_user)
 
 
-@api_user.post("/cloud/local-fallback", response_model=CloudStatusResponse)
+@api_user.post("/cloud/local-fallback", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_local_fallback(
     data: CloudLocalFallbackRequest,
     db: Session = Depends(get_db),
@@ -1204,7 +1217,7 @@ async def set_local_fallback(
     return _status_payload(db, link, current_user)
 
 
-@api_user.post("/cloud/backup-features", response_model=CloudStatusResponse)
+@api_user.post("/cloud/backup-features", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_backup_features(
     data: CloudBackupFeaturesRequest,
     db: Session = Depends(get_db),
@@ -1238,7 +1251,7 @@ BASE_LINK_SCOPES = ("backend:link", "backend:read")
 INCLUDED_FEATURE_SCOPES = ("backup:scenes", "backup:frames", "store:publish")
 
 
-@api_user.post("/cloud/features", response_model=CloudStatusResponse)
+@api_user.post("/cloud/features", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def set_cloud_features(
     data: CloudFeaturesRequest,
     db: Session = Depends(get_db),
@@ -1300,7 +1313,7 @@ async def set_cloud_features(
     )
 
 
-@api_user.post("/cloud/features/cancel", response_model=CloudStatusResponse)
+@api_user.post("/cloud/features/cancel", response_model=CloudStatusResponse, dependencies=_SESSION_ONLY)
 async def cancel_cloud_features(
     db: Session = Depends(get_db), current_user: User | None = Depends(get_current_user)
 ):
