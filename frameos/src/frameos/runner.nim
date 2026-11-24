@@ -503,6 +503,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     try:
       timer = getMonoTime()
       self.isRendering = true
+      noteRenderActivity() # the snapshot writer waits for the frame to rest
       # Re-enable scene render logs once the fast-render pause window elapses,
       # regardless of which render path this iteration takes. Otherwise switching
       # to a slow scene after a fast burst (when the block below is skipped) would
@@ -691,6 +692,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             "sceneId": currentScene.id.string,
             "error": e.msg,
           })
+      noteRenderActivity()
       markRuntimeDone()
 
       if interval < 1 or (nextSleep > 0 and nextSleep < interval):
