@@ -26,6 +26,18 @@ export const photoUploadTtlMs = 60 * 60 * 1000;
 export const maxPendingPhotoUploadsPerAccount = 16;
 // And across all accounts, in bytes: the parked chunks share one disk.
 export const maxPendingPhotoUploadBytes = 2 * 1024 * 1024 * 1024;
+// One account's share of that disk, checked on every chunk: without it one
+// account's 16 uploads grew past the global cap (it was only asked when an
+// upload started) and every other account's upload was refused. Two of the
+// largest photos (maxPhotoUploadBytes, 250 MiB) in flight at once fit; a
+// quarter of the disk does not go to anyone.
+export const maxPendingPhotoUploadBytesPerAccount = 512 * 1024 * 1024;
+let accountShareBytes = maxPendingPhotoUploadBytesPerAccount;
+
+/** Tests park kilobytes, not half a gigabyte. */
+export function setPhotoUploadAccountShareForTests(bytes: number | undefined) {
+  accountShareBytes = bytes ?? maxPendingPhotoUploadBytesPerAccount;
+}
 
 const sweepEveryMs = 10 * 60 * 1000;
 let lastSweepAt = 0;
@@ -101,6 +113,18 @@ export async function writePhotoUploadChunk(
         return { error: "too_many_uploads", ok: false };
       }
     }
+  }
+  // What this account would park with this chunk (a restart replaces what
+  // the upload held), against its share of the disk.
+  const replaced = offset === 0 ? (fresh?.size ?? 0) : 0;
+  if (
+    (await accountPendingBytes(accountId, now)) - replaced + bytes.length >
+    accountShareBytes
+  ) {
+    return { error: "too_many_uploads", ok: false };
+  }
+
+  if (offset === 0) {
     await mkdir(accountDirectory(accountId), { recursive: true });
     await writeFile(path, bytes);
     return { ok: true, received: bytes.length };
@@ -159,6 +183,24 @@ export async function readPhotoUpload(
 
 export async function discardPhotoUpload(accountId: string, uploadId: string): Promise<void> {
   await rm(uploadFile(accountId, uploadId), { force: true });
+}
+
+/** The bytes the account's unfinished uploads hold, within the hour. */
+async function accountPendingBytes(accountId: string, now: number) {
+  let names: string[];
+  try {
+    names = await readdir(accountDirectory(accountId));
+  } catch {
+    return 0;
+  }
+  let total = 0;
+  for (const name of names) {
+    const state = await fileState(join(accountDirectory(accountId), name)).catch(() => undefined);
+    if (state && now - state.mtimeMs <= photoUploadTtlMs) {
+      total += state.size;
+    }
+  }
+  return total;
 }
 
 /** The account's unfinished uploads that are still within the hour. */

@@ -142,7 +142,8 @@ Content-Type: application/octet-stream
 - 413 over `max_upload_bytes`, 415 when `accepts` does not list the type
   (sniffed from the bytes, not the name), 507 when the quota is used up, 422
   when a scan matched, 503 when a scanner could not answer. The cloud also
-  answers 429 `too_many_uploads` (16 unfinished uploads per account) and 507
+  answers 429 `too_many_uploads` (16 unfinished uploads or 512 MiB of
+  unfinished bytes per account, or the host's 2 GiB of them all) and 507
   `entry_limit_reached`.
 
 **A photo is stored exactly as sent.** What it carries (its EXIF, its
