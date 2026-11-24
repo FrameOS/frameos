@@ -377,3 +377,51 @@ async def test_fetch_frame_http_bytes_encodes_remote_text_as_utf8(monkeypatch):
     assert body == b'{"name":"non\xe2\x80\x91breaking hyphen"}'
     assert body.decode("utf-8") == '{"name":"non\u2011breaking hyphen"}'
     assert headers["content-type"] == "application/json"
+
+
+
+def test_the_access_key_never_reaches_an_error_detail():
+    from app.utils.frame_http import redact_access_key
+
+    frame = _frame("10.0.0.9")
+    frame.frame_access_key = "access-key-secret"
+    url = "http://10.0.0.9:8787/image?k=access-key-secret&t=1"
+    assert redact_access_key(url, frame) == "http://10.0.0.9:8787/image?k=[redacted]&t=1"
+    assert redact_access_key(f"Timeout to {url}", frame).count("access-key-secret") == 0
+    assert redact_access_key("connect failed for access-key-secret", frame) == "connect failed for [redacted]"
+    assert redact_access_key("http://h/x?a=1&k=abc", None) == "http://h/x?a=1&k=[redacted]"
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_names_the_url_without_its_key(monkeypatch):
+    frame = _frame("10.0.0.9")
+    frame.frame_port = 8787
+    frame.frame_access = "private"
+    frame.frame_access_key = "access-key-secret"
+
+    async def fake_use_remote(_frame, _redis):
+        return False
+
+    class TimingOut:
+        def __init__(self, verify=True):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def stream(self, *args, **kwargs):
+            raise httpx.ConnectTimeout("timed out")
+
+    async def resolve_lan(host):
+        return [ipaddress.ip_address("10.0.0.9")]
+
+    monkeypatch.setattr(frame_http, "_use_remote", fake_use_remote)
+    monkeypatch.setattr(frame_http.httpx, "AsyncClient", TimingOut)
+    monkeypatch.setattr(network, "resolve_target", resolve_lan)
+    monkeypatch.setattr(frame_http, "FRAME_HTTP_RETRIES", 1)
+    with pytest.raises(frame_http.HTTPException) as refused:
+        await frame_http._fetch_frame_http_bytes(frame, None, path="/image")
+    assert "Timeout to http://10.0.0.9:8787/image?k=[redacted]" == refused.value.detail

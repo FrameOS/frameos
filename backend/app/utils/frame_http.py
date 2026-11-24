@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from http import HTTPStatus
 import ipaddress
+import re
 import ssl
 from typing import Any, Optional
 
@@ -62,6 +63,21 @@ def _build_frame_path(
         sep = "&" if "?" in path else "?"
         path = f"{path}{sep}k={frame.frame_access_key}"
     return path
+
+
+_ACCESS_KEY_PARAM = re.compile(r"([?&]k=)[^&#\s]*")
+
+
+def redact_access_key(text: str, frame: Frame | None = None) -> str:
+    """`text` with the frame access key a GET URL carries (`?k=`, above)
+    taken out: a URL goes into error details, which the UI shows and the
+    frame's log keeps. The key itself is taken out too wherever else it
+    appears (an exception's own message may quote the URL)."""
+    redacted = _ACCESS_KEY_PARAM.sub(r"\1[redacted]", text)
+    key = getattr(frame, "frame_access_key", None) if frame is not None else None
+    if isinstance(key, str) and len(key) >= 8:
+        redacted = redacted.replace(key, "[redacted]")
+    return redacted
 
 
 def _frame_scheme_port(frame: Frame) -> tuple[str, int]:
@@ -438,7 +454,7 @@ async def _fetch_frame_http_bytes_once(
                             content=body,
                             timeout=timeout if timeout is not None else FRAME_HTTP_TIMEOUT,
                         ) as response:
-                            content = await _read_response_capped(response, url)
+                            content = await _read_response_capped(response, redact_access_key(url, frame))
                             return response.status_code, content, dict(response.headers)
                     except timeout_errors:
                         if attempt < attempts:
@@ -446,7 +462,7 @@ async def _fetch_frame_http_bytes_once(
                             continue
                         last_error = HTTPException(
                             status_code=HTTPStatus.REQUEST_TIMEOUT,
-                            detail=f"Timeout to {url}",
+                            detail=f"Timeout to {redact_access_key(url, frame)}",
                         )
                     except HTTPException:
                         # Our own verdict (an over-cap body): not a transport error.
@@ -465,11 +481,11 @@ async def _fetch_frame_http_bytes_once(
                             break
                         last_error = HTTPException(
                             status_code=HTTPStatus.BAD_GATEWAY,
-                            detail=str(exc),
+                            detail=redact_access_key(str(exc), frame),
                         )
                     except Exception as exc:
                         raise HTTPException(
-                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(exc)
+                            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=redact_access_key(str(exc), frame)
                         )
                     break
             if candidate_index < len(candidates) - 1:

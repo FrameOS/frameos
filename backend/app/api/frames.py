@@ -4843,30 +4843,10 @@ async def api_frame_set_next_scene(
     return {"message": "Next scene queued for boot"}
 
 
-@api_project.post("/frames/{id:int}")
-async def api_frame_update_endpoint(
-    id: int,
-    data: FrameUpdateRequest,
-    db: Session = Depends(get_db),
-    redis: Redis = Depends(get_redis),
-):
-    frame = _project_frame(db, id)
-    if not frame:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
-
-    update_data = data.model_dump(exclude_unset=True)
-    # On a frame this backend can only reach over its admin API, that login
-    # is the one way in: switching it off or blanking it locks the backend
-    # out for good. The form disables the switch and says why; this is the
-    # same rule for API callers.
-    if "frame_admin_auth" in update_data and not frame_has_shell_access(frame):
-        proposed = normalize_frame_admin_auth(update_data.get("frame_admin_auth"))
-        if not (proposed["enabled"] and proposed["user"] and proposed["pass"]):
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail="The admin login is the only way this backend reaches the frame (no SSH key, "
-                "password or FrameOS Remote on it) — it cannot be disabled or left blank",
-            )
+def check_frame_settings(update_data: dict[str, Any], frame: Frame) -> None:
+    """The checks and rewrites every write of a frame's settings goes
+    through, before any of it is set: the settings form's save and an
+    imported frame file alike (a file is somebody's JSON). Raises the 400."""
     # The schedule becomes "<schedule> root <command>" in /etc/cron.d on the
     # next deploy; refuse what cron cannot parse or what would add a line.
     reboot_update = update_data.get("reboot")
@@ -4888,11 +4868,6 @@ async def api_frame_update_endpoint(
         and not assets_path_change_allowed(assets_path_update, frame.assets_path)
     ):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=ASSETS_PATH_RULE)
-    previous_buildroot_sd_image_fingerprint = (
-        buildroot_sd_image_config_fingerprint(frame)
-        if (frame.mode or "rpios") == "buildroot"
-        else ""
-    )
     if isinstance(update_data.get("scenes"), str):
         try:
             update_data["scenes"] = json.loads(update_data["scenes"])
@@ -4924,6 +4899,56 @@ async def api_frame_update_endpoint(
         if typed.said_scheme:
             update_data["server_scheme"] = typed.scheme
 
+
+def normalize_frame_settings(frame: Frame, update_data: dict[str, Any], previous_agent: Any) -> None:
+    """What every write of a frame's settings stores in its normal form,
+    after the values are set (the form's save and an import alike)."""
+    if "agent" in update_data:
+        frame.agent = ensure_agent_shared_secret(frame.agent, previous_agent)
+    if "timezone" in update_data:
+        frame.timezone = stored_timezone(frame.timezone) or None
+    if "timezone_updater" in update_data:
+        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
+    if "https_proxy" in update_data:
+        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
+        refresh_tls_certificate_validity_dates(frame)
+    if "error_behavior" in update_data:
+        frame.error_behavior = normalize_error_behavior(frame.error_behavior)
+    if "input_settings" in update_data:
+        frame.input_settings = normalize_input_settings(frame.input_settings)
+
+
+@api_project.post("/frames/{id:int}")
+async def api_frame_update_endpoint(
+    id: int,
+    data: FrameUpdateRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    frame = _project_frame(db, id)
+    if not frame:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    # On a frame this backend can only reach over its admin API, that login
+    # is the one way in: switching it off or blanking it locks the backend
+    # out for good. The form disables the switch and says why; this is the
+    # same rule for API callers.
+    if "frame_admin_auth" in update_data and not frame_has_shell_access(frame):
+        proposed = normalize_frame_admin_auth(update_data.get("frame_admin_auth"))
+        if not (proposed["enabled"] and proposed["user"] and proposed["pass"]):
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail="The admin login is the only way this backend reaches the frame (no SSH key, "
+                "password or FrameOS Remote on it) — it cannot be disabled or left blank",
+            )
+    previous_buildroot_sd_image_fingerprint = (
+        buildroot_sd_image_config_fingerprint(frame)
+        if (frame.mode or "rpios") == "buildroot"
+        else ""
+    )
+    check_frame_settings(update_data, frame)
+
     old_mode = frame.mode
     old_device = frame.device
     previous_sd_image = (frame.buildroot or {}).get("sdImage") if isinstance(frame.buildroot, dict) else None
@@ -4932,8 +4957,7 @@ async def api_frame_update_endpoint(
     previous_agent = frame.agent
     for field, value in update_data.items():
         setattr(frame, field, value)
-    if "agent" in update_data:
-        frame.agent = ensure_agent_shared_secret(frame.agent, previous_agent)
+    normalize_frame_settings(frame, update_data, previous_agent)
 
     if "buildroot" in update_data:
         # buildroot.sdImage is build output owned by the backend (written by the
@@ -4966,19 +4990,6 @@ async def api_frame_update_endpoint(
         else:
             embedded.pop("storage", None)
         frame.embedded = embedded
-
-    if "timezone" in update_data:
-        frame.timezone = stored_timezone(frame.timezone) or None
-    if "timezone_updater" in update_data:
-        frame.timezone_updater = compact_timezone_updater(frame.timezone_updater)
-
-    if "https_proxy" in update_data:
-        frame.https_proxy = normalize_https_proxy(frame.https_proxy)
-        refresh_tls_certificate_validity_dates(frame)
-    if "error_behavior" in update_data:
-        frame.error_behavior = normalize_error_behavior(frame.error_behavior)
-    if "input_settings" in update_data:
-        frame.input_settings = normalize_input_settings(frame.input_settings)
 
     if data.mode == "buildroot" or ((frame.mode or "rpios") == "buildroot" and "buildroot" in update_data):
         try:
@@ -5262,6 +5273,16 @@ async def api_frame_import(
         FrameUpdateRequest.model_validate(importable)
     except ValidationError as exc:
         raise RequestValidationError(exc.errors())
+    # What a device reported about itself (an ESP32's last boot address, the
+    # SD image this backend built) is this backend's to learn, never a
+    # file's: a last boot address is where requests carrying the frame's
+    # key are sent.
+    for owned_key, kept in (("embedded", ("lastBoot", "storage", "layout")), ("buildroot", ("sdImage",))):
+        if isinstance(importable.get(owned_key), dict):
+            importable[owned_key] = {k: v for k, v in importable[owned_key].items() if k not in kept}
+    # The form's own checks: a cron line run as root, an assets folder
+    # outside the asset roots, scenes and layouts, the server address.
+    check_frame_settings(importable, Frame(project_id=current_project_id(), assets_path=None, mode=None))
 
     _require_valid_device_server_host(data.get("server_host"))
     try:
@@ -5270,13 +5291,14 @@ async def api_frame_import(
             redis,
             data.get("name"),
             data.get("frame_host"),
-            data.get("server_host"),
+            importable.get("server_host", data.get("server_host")),
             data.get("device"),
             project_id=current_project_id(),
-            server_port=data.get("server_port"),
-            server_scheme=data.get("server_scheme"),
+            server_port=importable.get("server_port", data.get("server_port")),
+            server_scheme=importable.get("server_scheme", data.get("server_scheme")),
         )
 
+        previous_agent = frame.agent
         for key, value in importable.items():
             if key in FRAME_IMPORT_CREATE_KEYS:
                 continue
@@ -5284,6 +5306,7 @@ async def api_frame_import(
                 if not value or db.query(Frame).filter(Frame.server_api_key == value, Frame.id != frame.id).first():
                     continue
             setattr(frame, key, value)
+        normalize_frame_settings(frame, importable, previous_agent)
 
         await update_frame(db, redis, frame)
         db.refresh(frame)

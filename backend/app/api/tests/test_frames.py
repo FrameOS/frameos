@@ -122,6 +122,8 @@ async def test_api_frame_bootstrap_command_enables_remote_and_returns_script(asy
     # The test backend is reached over http, and the response says so.
     assert command_payload['plain_http'] is True
     assert 'plain HTTP' in command_payload['warning']
+    # The script is the code: over http it can be swapped, not just read.
+    assert 'runs as root' in command_payload['warning']
     assert 'RestartSec=5' in script
     assert 'After=network.target getty@tty1.service' in script
     assert 'Conflicts=getty@tty1.service' in script
@@ -4819,3 +4821,34 @@ async def test_api_frames_carry_the_firmware_update_and_the_queued_verbs(async_c
     response = await async_client.get(f'/api/frames/{plain.id}')
     assert response.json()['frame']['pending_command_types'] == []
     assert response.json()['frame']['firmware_update'] is None
+
+
+
+@pytest.mark.asyncio
+async def test_an_imported_frame_goes_through_the_settings_forms_checks(async_client, db):
+    """A frame file is somebody's JSON: the import applies what the settings
+    form's save applies, and what a device reported about itself is never
+    taken from it."""
+    base = {"name": "Imported", "frame_host": "10.0.0.9", "server_host": "10.0.0.2"}
+    refused = [
+        # A reboot schedule becomes a root cron line.
+        {"reboot": {"enabled": "true", "crontab": "* * * * * root id\n* * * * *"}},
+        # The assets folder must be inside the asset roots.
+        {"assets_path": "/etc"},
+    ]
+    for extra in refused:
+        response = await async_client.post("/api/frames/import", json={**base, **extra})
+        assert response.status_code == 400, (extra, response.text)
+    assert db.query(Frame).filter(Frame.name == "Imported").count() == 0
+
+    response = await async_client.post("/api/frames/import", json={
+        **base,
+        "server_host": "https://backend.local:8443",
+        "embedded": {"platform": "esp32-s3", "lastBoot": {"ip": "203.0.113.9"}, "storage": {"x": 1}},
+        "https_proxy": {"enable": True, "port": "99999"},
+    })
+    assert response.status_code == 200, response.text
+    frame = db.get(Frame, response.json()["frame"]["id"])
+    assert (frame.server_host, frame.server_port, frame.server_scheme) == ("backend.local", 8443, "https")
+    assert "lastBoot" not in (frame.embedded or {}) and "storage" not in (frame.embedded or {})
+    assert frame.https_proxy["port"] == 8443
