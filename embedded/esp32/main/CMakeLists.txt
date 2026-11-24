@@ -73,6 +73,7 @@ idf_component_register(
         "fos_sd_probe.c"
         "fos_sscanf.c"
         "fos_printf.c"
+        "fos_cxx_new.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -140,6 +141,11 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-Wl,--wrap
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=printf" "-Wl,--wrap=fprintf"
     "-Wl,--wrap=vprintf" "-Wl,--wrap=vfprintf" "-Wl,--wrap=snprintf" "-Wl,--wrap=vsnprintf"
     "-Wl,--wrap=sprintf" "-Wl,--wrap=asprintf" "-Wl,--wrap=vasprintf" "-u __wrap_vprintf")
+
+# NVS's new[] (std::nothrow) and delete[] are fos_cxx_new.c's: libstdc++'s
+# pull in the C++ exception runtime and type_info classes (1.5 KB) for a catch
+# that cannot run. -u: NVS is linked after main, so the definitions must be in.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u _ZnajRKSt9nothrow_t")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before
