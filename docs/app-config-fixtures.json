@@ -1,0 +1,337 @@
+{
+  "description": "What an app's config.json is, for every reader that decides what the app may do (its `permissions`) or which settings it reads (`settings`): the device runtime (frameos/src/frameos/utils/strict_json.nim, read by js_runtime/app_runtime.nim), the SPA and the cloud (frontend/src/utils/sceneAccess.ts `parseAppConfig`) and the backend (backend/app/utils/app_config.py). The rule: strict JSON (RFC 8259), an object, at most `maxDepth` containers deep. A text that is not all three is no config: the device gives its app nothing, and both control planes refuse to save or publish the scene. `permissions` is the list as every reader takes it (known names, in the SPA's order; null: no list), `settings` the namespaces. A case with `nest` has no `text`: it is {\"permissions\":[\"frame\"],\"x\":[[...]]} with that many containers, the object included. Not in here, because JSON text cannot write them: bytes that are not UTF-8 (the planes never hold such a text) and an unpaired surrogate escape (the device refuses it, the planes read it: a device may refuse more than a plane, never less).",
+  "maxDepth": 32,
+  "permissions": [
+    "shell",
+    "files",
+    "assets",
+    "assets-write",
+    "frame",
+    "code",
+    "store"
+  ],
+  "cases": [
+    {
+      "name": "an empty object",
+      "text": "{}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "a plain config",
+      "text": "{\n  \"name\": \"Clock\",\n  \"category\": \"render\",\n  \"settings\": [\"openAI\"],\n  \"permissions\": [\"assets\", \"assets-write\"]\n}\n",
+      "config": true,
+      "permissions": [
+        "assets",
+        "assets-write"
+      ],
+      "settings": [
+        "openAI"
+      ]
+    },
+    {
+      "name": "whitespace around it",
+      "text": " \t\r\n{\"permissions\": [\"frame\"]}\r\n ",
+      "config": true,
+      "permissions": [
+        "frame"
+      ],
+      "settings": []
+    },
+    {
+      "name": "every permission a JavaScript app can ask for",
+      "text": "{\"permissions\": [\"files\", \"assets\", \"assets-write\", \"frame\", \"code\", \"store\"]}",
+      "config": true,
+      "permissions": [
+        "files",
+        "assets",
+        "assets-write",
+        "frame",
+        "code",
+        "store"
+      ],
+      "settings": []
+    },
+    {
+      "name": "an empty list asks for nothing",
+      "text": "{\"permissions\": []}",
+      "config": true,
+      "permissions": [],
+      "settings": []
+    },
+    {
+      "name": "no list at all",
+      "text": "{\"name\": \"x\", \"settings\": []}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "names it does not know are skipped",
+      "text": "{\"permissions\": [\"root\", \"frame \", \"Frame\", \"store\"]}",
+      "config": true,
+      "permissions": [
+        "store"
+      ],
+      "settings": []
+    },
+    {
+      "name": "what is not a string is skipped",
+      "text": "{\"permissions\": [\"frame\", 1, null, true, [\"code\"], {\"x\": \"store\"}], \"settings\": [\"openAI\", \"\", 3, null, [\"github\"], \"homeAssistant\"]}",
+      "config": true,
+      "permissions": [
+        "frame"
+      ],
+      "settings": [
+        "openAI",
+        "homeAssistant"
+      ]
+    },
+    {
+      "name": "a list that is not a list is no list",
+      "text": "{\"permissions\": \"frame\", \"settings\": \"openAI\"}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "a list that is an object is no list",
+      "text": "{\"permissions\": {\"0\": \"frame\"}, \"settings\": {\"0\": \"openAI\"}}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "another key's case is another key",
+      "text": "{\"Permissions\": [\"frame\"], \"SETTINGS\": [\"openAI\"]}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "the last of two keys counts (it asks)",
+      "text": "{\"permissions\": [], \"permissions\": [\"frame\"], \"settings\": [], \"settings\": [\"openAI\"]}",
+      "config": true,
+      "permissions": [
+        "frame"
+      ],
+      "settings": [
+        "openAI"
+      ]
+    },
+    {
+      "name": "the last of two keys counts (it does not)",
+      "text": "{\"permissions\": [\"frame\"], \"permissions\": [], \"settings\": [\"openAI\"], \"settings\": []}",
+      "config": true,
+      "permissions": [],
+      "settings": []
+    },
+    {
+      "name": "a key written with escapes is that key",
+      "text": "{\"\\u0070ermissions\": [\"co\\u0064e\"], \"s\\u0065ttings\": [\"open\\u0041I\"]}",
+      "config": true,
+      "permissions": [
+        "code"
+      ],
+      "settings": [
+        "openAI"
+      ]
+    },
+    {
+      "name": "a nested object's lists are not the app's",
+      "text": "{\"x\": {\"permissions\": [\"frame\"], \"settings\": [\"openAI\"]}, \"__proto__\": {\"permissions\": [\"code\"], \"settings\": [\"github\"]}}",
+      "config": true,
+      "permissions": null,
+      "settings": []
+    },
+    {
+      "name": "numbers JSON has",
+      "text": "{\"a\": -0, \"b\": 1E+2, \"c\": 0.5e-3, \"d\": 12345678901234567890123, \"permissions\": [\"code\"]}",
+      "config": true,
+      "permissions": [
+        "code"
+      ],
+      "settings": []
+    },
+    {
+      "name": "escapes JSON has",
+      "text": "{\"a\": \"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u00e9\\u0000\", \"permissions\": [\"frame\"]}",
+      "config": true,
+      "permissions": [
+        "frame"
+      ],
+      "settings": []
+    },
+    {
+      "name": "text outside ASCII",
+      "text": "{\"name\": \"\u00dcn\u00efc\u00f6d\u00e9 \u2603 \ud83d\uddbc\", \"permissions\": [\"assets\"]}",
+      "config": true,
+      "permissions": [
+        "assets"
+      ],
+      "settings": []
+    },
+    {
+      "name": "the deepest a config may be",
+      "text": null,
+      "config": true,
+      "permissions": [
+        "frame"
+      ],
+      "settings": [],
+      "nest": 32
+    },
+    {
+      "name": "the empty text",
+      "text": "",
+      "config": false
+    },
+    {
+      "name": "blanks alone",
+      "text": " \n",
+      "config": false
+    },
+    {
+      "name": "a line comment",
+      "text": "{\n  // nothing to see\n  \"permissions\": [\"frame\"]\n}",
+      "config": false
+    },
+    {
+      "name": "a comment after it",
+      "text": "{\"permissions\": [\"frame\"]} // done",
+      "config": false
+    },
+    {
+      "name": "a block comment",
+      "text": "{\"permissions\": /* really */ [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a comma after the last member",
+      "text": "{\"permissions\": [\"frame\"],}",
+      "config": false
+    },
+    {
+      "name": "a comma after the last item",
+      "text": "{\"permissions\": [\"frame\",]}",
+      "config": false
+    },
+    {
+      "name": "a byte order mark",
+      "text": "\ufeff{\"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a no-break space before it",
+      "text": "\u00a0{\"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a form feed before it",
+      "text": "\f{\"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "single quotes",
+      "text": "{'permissions': ['frame']}",
+      "config": false
+    },
+    {
+      "name": "a key without quotes",
+      "text": "{permissions: [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "NaN",
+      "text": "{\"version\": NaN, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "Infinity",
+      "text": "{\"version\": -Infinity, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a number with a leading zero",
+      "text": "{\"version\": 01, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a number ending in a point",
+      "text": "{\"version\": 1., \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a number starting with a point",
+      "text": "{\"version\": .5, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a number with a plus",
+      "text": "{\"version\": +1, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a hex number",
+      "text": "{\"version\": 0x10, \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "an escape JSON does not have",
+      "text": "{\"name\": \"\\x41\", \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a short \\u escape",
+      "text": "{\"name\": \"\\u12\", \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a raw tab in a string",
+      "text": "{\"name\": \"a\tb\", \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a raw line break in a string",
+      "text": "{\"name\": \"a\nb\", \"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a second value after it",
+      "text": "{\"permissions\": []} {\"permissions\": [\"frame\"]}",
+      "config": false
+    },
+    {
+      "name": "a string that never ends",
+      "text": "{\"permissions\": [\"frame",
+      "config": false
+    },
+    {
+      "name": "an object that never ends",
+      "text": "{\"permissions\": [\"frame\"]",
+      "config": false
+    },
+    {
+      "name": "an array",
+      "text": "[\"frame\"]",
+      "config": false
+    },
+    {
+      "name": "a string",
+      "text": "\"frame\"",
+      "config": false
+    },
+    {
+      "name": "null",
+      "text": "null",
+      "config": false
+    },
+    {
+      "name": "one level too deep",
+      "text": null,
+      "config": false,
+      "nest": 33
+    }
+  ]
+}

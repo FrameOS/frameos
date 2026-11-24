@@ -483,13 +483,18 @@ config.json's `"permissions"` list:
   while the owner allows the
   settings on the frame's screen. The Terminal sample is the worked example
   (docs/terminal.md).
+- `"store"`: `frameos.storeAction`, installing, previewing, updating and
+  removing scenes on the frame and choosing its layout, under the same
+  condition. The Scene store sample is the app that has it.
 
 Saving the scene fills a JavaScript app's list from its code, so you rarely
 write it. The frame gives the app exactly that list: with neither `"assets"`
 nor `"assets-write"`, its asset calls live in a folder of its own,
 `scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
 with no list asks for nothing, and a list written by hand is replaced on the
-next save. A scene asks for what its apps ask for, nothing more, and every
+next save. config.json must be strict JSON (no comments, no trailing
+commas): a file that is not is no config, the frame gives its app nothing,
+and a scene that carries one is not saved or published. A scene asks for what its apps ask for, nothing more, and every
 surface shows it as tags ("reads files", "writes files", "reads & writes files",
 "reads all files", "runs shell commands", "changes frame settings", and
 "uses OpenAI key" for each
@@ -1576,7 +1581,9 @@ declare const frameos: {
   /** Asks the frame's host: preview {store, name}, install {store, name, show?: false to stay on this scene}, update
    * {store}, updateAll (every one of store().updates the frame may take, in one push: FrameOS 2026.11.15+), remove
    * {store}, discard. It runs off the render and this scene renders again when it is done (see store().busy). False
-   * where there is no host (FrameOS 2026.11.8+). */
+   * where there is no host (FrameOS 2026.11.8+). For an app whose config.json permissions include "store" (saving
+   * the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the owner
+   * allows the settings on the frame's screen: without either it does nothing and answers false (FrameOS 2026.11.15+). */
   storeAction(action: "preview" | "install" | "update" | "updateAll" | "remove" | "discard", args?: Record<string, any>): boolean;
   /** The frame page's facts and powers (docs/terminal.md), for an app whose config.json permissions include "frame"
    * (saving the scene adds it when the code calls this; installing the scene is the owner's yes), and only while the

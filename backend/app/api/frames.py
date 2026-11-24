@@ -138,6 +138,7 @@ from app.utils.embedded_commands import (
     queue_embedded_command,
 )
 from app.utils.events_contract_gen import CLOUD_EVENT_ROUTE_VERBS, CONTRACT_EVENTS
+from app.utils.app_config import bad_app_configs_message
 from app.utils.scene_layouts import bad_layouts_message
 from app.utils.frame_commands import (
     cancel_frame_command,
@@ -922,6 +923,9 @@ def _validate_upload_scenes_payload(
     bad_layouts = bad_layouts_message(scenes)
     if bad_layouts:
         _bad_request(bad_layouts)
+    bad_app_configs = bad_app_configs_message(scenes)
+    if bad_app_configs:
+        _bad_request(bad_app_configs)
 
     for scene in scenes:
         nodes = scene.get("nodes") or []
@@ -4903,6 +4907,12 @@ async def api_frame_update_endpoint(
     bad_layouts = bad_layouts_message(update_data.get("scenes"))
     if bad_layouts:
         _bad_request(bad_layouts)
+    # An app's config.json is what it asks for (permissions, settings), read
+    # one way by every surface and by the frame (utils/app_config.py): one
+    # that is not strict JSON is not saved.
+    bad_app_configs = bad_app_configs_message(update_data.get("scenes"))
+    if bad_app_configs:
+        _bad_request(bad_app_configs)
     normalize_scenes_execution(update_data.get("scenes"))
     # An editor tab or a saved draft from before the upgrade still holds the
     # retired Nim keyword (data/immich); store it as the JS app it became.

@@ -161,3 +161,25 @@ async def test_api_frame_assets_upload_image_rejects_files_over_the_cap(async_cl
 
     assert response.status_code == 413
     upload_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_api_frame_upload_scenes_refuses_an_app_config_that_is_not_strict_json(async_client, db, redis):
+    # A config.json only a lenient parser reads (a comment, a trailing comma):
+    # no surface could show what the app asks for, so it is not pushed.
+    frame = await new_frame(db, redis, "UploadScenesConfig", "localhost", "localhost")
+    payload = {
+        "scenes": [
+            {
+                "id": "a",
+                "name": "Lenient",
+                "nodes": [{"id": "n", "type": "app", "data": {"keyword": "ui"}}],
+                "edges": [],
+                "apps": {"ui": {"sources": {"app.ts": "1", "config.json": '{"permissions": ["frame"],}'}}},
+            }
+        ],
+        "sceneId": "a",
+    }
+    response = await async_client.post(f"/api/frames/{frame.id}/event/uploadScenes", json=payload)
+    assert response.status_code == 400
+    assert 'App "ui" in scene "Lenient": config.json is not valid JSON' in response.json()["detail"]

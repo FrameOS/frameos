@@ -42,7 +42,7 @@ import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
 import { sceneLayoutsOf, versionIsLayout, withSceneLayouts } from "./scene-layouts";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZipScenes } from "./scene-zip";
 import { sceneHashes } from "./scenes-patch";
 import { frameosVersionSatisfies } from "./store-versions";
 import {
@@ -320,6 +320,15 @@ export function frameContractProfile(frame: { hardware: unknown }): ContractProf
 // `permissions` (and an app with no list nothing): JsAssetGrant in
 // frameos/src/frameos/js_runtime/app_runtime.nim.
 export const APP_PERMISSIONS_FROM = "2026.10.16";
+
+// The first FrameOS whose `frameos.storeAction` is for an app that asks for
+// the "store" permission (app_runtime.nim `storeGrant`). An older one runs
+// it for any app, so the list a push writes for an app that has none
+// (scene-origin.ts) names "store" from here on only: the payload changes
+// when the firmware crosses it, and the hub pushes the frame's scenes again
+// (frame-hub, the firmware-change resync) instead of leaving the Scene store
+// on the frame without the permission it now needs.
+export const STORE_PERMISSION_FROM = "2026.11.15";
 
 /** The three-way answer above, for any floor. */
 export function frameSupportsSettingsFrom(
@@ -1828,36 +1837,18 @@ export async function storeServiceSettingGroups(
     .where(eq(frames.id, frameId));
 }
 
-// Pull the shallowest scenes.json out of a published template zip. The zip is
-// untrusted input (an old version row, a future publish path), so it gets the
-// same entry-count and uncompressed-size caps validateSceneZip enforces at
-// publish time — zip-bomb defence in depth. `bytes` is the raw scenes.json
-// length, used to bound the assembled payload before it is re-serialized.
+// Pull scenes.json out of a published template zip: the file its checks read
+// when it was published (scene-zip.ts, the one rule for which file that is;
+// a frame must never be sent another). The zip is untrusted input (an old
+// version row, a future publish path), so it gets the same entry-count and
+// uncompressed-size caps validateSceneZip enforces at publish time — zip-bomb
+// defence in depth. `bytes` is the raw scenes.json length, used to bound the
+// assembled payload before it is re-serialized.
 export function extractScenesJson(
   zip: Buffer,
 ): { bytes: number; scenes: unknown[] } | undefined {
-  try {
-    let best: { path: string; data: Uint8Array } | undefined;
-    // Inflate only scenes.json; other entries still count against the caps
-    // but are never decompressed.
-    const entries = unzipBounded(new Uint8Array(zip), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    for (const [path, data] of Object.entries(entries)) {
-      if (!best || path.split("/").length < best.path.split("/").length) {
-        best = { data, path };
-      }
-    }
-    if (!best || best.data.length > maxSceneZipUncompressedBytes) {
-      return undefined;
-    }
-    const parsed = JSON.parse(Buffer.from(best.data).toString("utf8"));
-    return Array.isArray(parsed)
-      ? { bytes: best.data.length, scenes: parsed }
-      : undefined;
-  } catch {
-    return undefined;
-  }
+  const extracted = readSceneZipScenes(zip);
+  return extracted && extracted.bytes <= maxSceneZipUncompressedBytes ? extracted : undefined;
 }
 
 // Resolve the store_scene_versions row an assignment actually pins: the
@@ -2138,7 +2129,10 @@ export async function buildScenesPayloadForFrame(
               slug: assignment.sceneSlug,
               version: versionRow.version,
             },
-            { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+            {
+              appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion),
+              storePermission: frameSupportsSettingsFrom(STORE_PERMISSION_FROM, targetVersion),
+            },
           ),
           sceneEventMapsOf(assignment.eventMaps),
         ),
@@ -2235,7 +2229,10 @@ export async function publicStoreSceneForFrame(
     withStoreSceneOrigin(
       extracted.scenes,
       { id: storeSceneId, slug: scene.slug, version: versionRow.version },
-      { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, frame.frameosVersion) },
+      {
+        appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, frame.frameosVersion),
+        storePermission: frameSupportsSettingsFrom(STORE_PERMISSION_FROM, frame.frameosVersion),
+      },
     ),
     frame.frameosVersion,
   ).filter(

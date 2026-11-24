@@ -539,3 +539,45 @@ async def test_create_template_refuses_internal_urls(async_client, db, monkeypat
     monkeypatch.setattr(templates_module.httpx, "AsyncClient", fake_http_client({page_url: page}))
     response = await async_client.post("/api/templates", json={"url": page_url})
     assert response.status_code == 403, response.text
+
+
+LENIENT_CONFIG = '{\n  // only a lenient parser reads this\n  "permissions": ["frame"],\n}'
+
+
+def _scene_with_config(config: str) -> dict:
+    return {
+        "id": "main",
+        "name": "Main",
+        "nodes": [{"id": "a", "type": "app", "data": {"keyword": "ui"}}],
+        "edges": [],
+        "apps": {"ui": {"sources": {"app.ts": "export function get() { return 1 }", "config.json": config}}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_templates_refuse_an_app_config_that_is_not_strict_json(async_client, db):
+    # config.json is what an app asks for, read one way by every surface and
+    # by the frame (utils/app_config.py): a scene with one that only a lenient
+    # parser reads is neither imported nor saved.
+    created = await async_client.post(
+        "/api/templates", json={"name": "Lenient", "scenes": [_scene_with_config(LENIENT_CONFIG)]}
+    )
+    assert created.status_code == 400
+    assert 'App "ui" in scene "Main": config.json is not valid JSON' in created.json()["detail"]
+    assert db.query(Template).filter_by(name="Lenient").count() == 0
+
+    good = _scene_with_config('{"permissions": ["frame"]}')
+    t = Template(project_id=async_client.project_id, name="Strict", scenes=[good], config={})
+    db.add(t)
+    db.commit()
+    updated = await async_client.patch(f"/api/templates/{t.id}", json={"scenes": [_scene_with_config(LENIENT_CONFIG)]})
+    assert updated.status_code == 400
+    assert "config.json is not valid JSON" in updated.json()["detail"]
+    db.refresh(t)
+    assert t.scenes == [good]
+    # A change that leaves the scenes alone is not held up by them.
+    t.scenes = [_scene_with_config(LENIENT_CONFIG)]
+    db.add(t)
+    db.commit()
+    renamed = await async_client.patch(f"/api/templates/{t.id}", json={"name": "Renamed"})
+    assert renamed.status_code == 200, renamed.text

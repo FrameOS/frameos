@@ -38,6 +38,7 @@ import {
 import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src/lib/backend-auth";
 import {
   APP_PERMISSIONS_FROM,
+  STORE_PERMISSION_FROM,
   buildScenesPayloadForFrame,
   enqueueFrameCommand,
   frameCommandsNotifyChannel,
@@ -1567,10 +1568,12 @@ export async function startFrameHub(
   // was sent — a keyword the new one may no longer have — so rebuild the
   // assigned set for the version it reports now and, if that moved the
   // checksum, push the same assignments again, on the scene it is showing.
-  // Only an update across a retired app's runtime, or across the first one
+  // Only an update across a retired app's runtime, across the first one
   // that reads apps' config.json `permissions` (the payload gains the lists,
-  // scene-origin.ts), does this: any other difference between the assigned
-  // checksum and a fresh build stays the owner's call, as it always was.
+  // scene-origin.ts), or across the first one whose `frameos.storeAction`
+  // asks for the "store" permission (a list written by the push gains it)
+  // does this: any other difference between the assigned checksum and a
+  // fresh build stays the owner's call, as it always was.
   async function resyncScenesForFirmwareChange(
     session: DeviceSession,
     fromVersion: string | null | undefined,
@@ -1583,7 +1586,9 @@ export async function startFrameHub(
     const after = keywordsRuntimeLacks(toVersion);
     const crossesPermissions =
       frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, fromVersion) !==
-      frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, toVersion);
+        frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, toVersion) ||
+      frameSupportsSettingsFrom(STORE_PERMISSION_FROM, fromVersion) !==
+        frameSupportsSettingsFrom(STORE_PERMISSION_FROM, toVersion);
     if (
       !crossesPermissions &&
       before.length === after.length &&

@@ -1,4 +1,4 @@
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZip, readSceneZipScenes } from "./scene-zip";
 
 // A store listing's title and the scene title inside its scenes.json are two
 // copies of the same thing. The zip's template.json is what publishing reads
@@ -10,30 +10,13 @@ import { unzipBounded } from "./zip-bounded";
 export const maxSceneNameLength = 128;
 
 /**
- * The scenes.json inside a template interchange zip, parsed.
- *
- * The zip was validated when it was published (validateSceneZip), so this only
- * has to inflate the single file it returns; anything unexpected is reported
- * as "no scenes" rather than thrown, since callers treat it as best-effort.
+ * The scenes.json inside a template interchange zip, parsed: the file
+ * validateSceneZip checked when the zip was published (scene-zip.ts, the one
+ * rule for which file that is). Anything unexpected is reported as "no
+ * scenes" rather than thrown, since callers treat it as best-effort.
  */
 export function extractScenesFromZip(content: Buffer): unknown[] | undefined {
-  try {
-    const files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)scenes\.json$/.test(name),
-    );
-    // The shallowest scenes.json wins, mirroring validateSceneZip.
-    const path = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
-    )[0];
-    const bytes = path ? files[path] : undefined;
-    if (!bytes) {
-      return undefined;
-    }
-    const parsed: unknown = JSON.parse(Buffer.from(bytes).toString("utf8"));
-    return Array.isArray(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+  return readSceneZipScenes(content)?.scenes;
 }
 
 /**
@@ -58,19 +41,13 @@ export function sceneDisplayName(scenes: unknown): string | undefined {
 
 /**
  * The listing title the zip's template.json carries (what publishing read
- * into storeScenes.name). Same shallowest-file rule and the same trim/slice as
- * validateSceneZip's manifestName; undefined when the zip has no readable
+ * into storeScenes.name). The same file (scene-zip.ts) and the same trim/slice
+ * as validateSceneZip's manifestName; undefined when the zip has no readable
  * manifest.
  */
 export function extractManifestNameFromZip(content: Buffer): string | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)template\.json$/.test(name),
-    );
-    const path = Object.keys(files).sort(
-      (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b),
-    )[0];
-    const bytes = path ? files[path] : undefined;
+    const bytes = readSceneZip(content, { image: false })?.manifest;
     if (!bytes) {
       return undefined;
     }

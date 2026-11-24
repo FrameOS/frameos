@@ -66,6 +66,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   'assets-write': 'Write to the assets folder',
   frame: "Change the frame's settings",
   code: "Read and change the frame's scenes",
+  store: 'Install and remove scenes from the store',
 }
 
 function Section({

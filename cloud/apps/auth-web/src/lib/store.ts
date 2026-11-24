@@ -1,5 +1,5 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
-import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
+import { sceneAccessFlags, scenesAppConfigProblem } from "../../../../../frontend/src/utils/sceneAccess";
 import { sceneNeeds } from "../../../../../frontend/src/utils/sceneNeeds";
 import { isBrokenLayout } from "../../../../../frontend/src/utils/sceneLayoutRule";
 import { isDesktopLayout, isDeviceLayout, isLayoutScene, mainScene } from "../../../../../frontend/src/utils/sceneLayouts";
@@ -7,7 +7,7 @@ import { sceneIconPath } from "../../../../../frontend/src/utils/sceneIcon";
 import type { FrameScene } from "../../../../../frontend/src/types";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
-import { unzipBounded } from "./zip-bounded";
+import { readSceneZip, sceneZipManifestDepth, type SceneZipFiles } from "./scene-zip";
 import {
   categorySlugForTitle,
   isLayoutCategory,
@@ -518,41 +518,41 @@ export type SceneZipValidation =
 // model): real zip, bounded size/entries, must contain template.json and a
 // non-empty scenes.json at the root or one folder deep — the same layout
 // frameos' template_zip_bytes() produces and parse_template_zip() expects.
-// Nothing is ever written to disk; we only read the three known files.
+// Nothing is ever written to disk; we only read the three known files, and
+// which files those are is scene-zip.ts's rule, the one every reader of a
+// stored zip uses too.
 export function validateSceneZip(content: Buffer): SceneZipValidation {
   if (content.length > maxSceneZipBytes) {
     return { ok: false, error: "zip_too_large" };
   }
 
-  let files: Record<string, Uint8Array>;
+  let files: SceneZipFiles | undefined;
   try {
     // Inflate only the files we read; other entries still count against the
     // entry and size caps but are never decompressed. The size cap is
     // enforced on the bytes that actually come out, not the header's claim.
-    files = unzipBounded(new Uint8Array(content), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
+    files = readSceneZip(content);
   } catch {
     return { ok: false, error: "invalid_zip" };
   }
 
   // The shallowest template.json wins, mirroring frameos' parser.
-  const manifestPath = Object.keys(files)
-    .filter((name) => /(^|\/)template\.json$/.test(name))
-    .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-  if (!manifestPath || depth(manifestPath) > 1) {
+  if (!files || sceneZipManifestDepth(files) > 1) {
     return { ok: false, error: "missing_template_json" };
   }
-  const folder = manifestPath.slice(0, manifestPath.length - "template.json".length);
+  // One of each, anywhere in the zip: a second scenes.json or template.json
+  // is a file some reader could take for the one that was checked here. What
+  // this stores, and what rebuildZip writes, never has one.
+  if (files.templateJsonCount > 1 || files.scenesJsonCount > 1) {
+    return { ok: false, error: "duplicate_scene_files" };
+  }
 
-  const manifestBytes = files[manifestPath];
-  const manifest = manifestBytes ? parseJson(manifestBytes) : undefined;
+  const manifest = parseJson(files.manifest);
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     return { ok: false, error: "invalid_template_json" };
   }
 
-  const scenesRaw = files[`${folder}scenes.json`];
-  const scenes = scenesRaw ? parseJson(scenesRaw) : undefined;
+  const scenes = files.scenes ? parseJson(files.scenes) : undefined;
   if (!Array.isArray(scenes) || scenes.length === 0) {
     return { ok: false, error: "missing_scenes" };
   }
@@ -560,9 +560,16 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
   if (scenes.some(isBrokenLayout)) {
     return { ok: false, error: "invalid_layout_scene" };
   }
+  // An app's config.json is what it asks for (permissions, settings), read
+  // one way by the store, the workspace and the frame
+  // (docs/app-config-fixtures.json). A file that is not strict JSON would
+  // show as asking for nothing here and be given nothing there: refused.
+  if (scenesAppConfigProblem(scenes)) {
+    return { ok: false, error: "invalid_app_config" };
+  }
 
   const record = manifest as Record<string, unknown>;
-  const imageRaw = files[`${folder}image.jpg`];
+  const imageRaw = files.image;
   if (imageRaw && imageRaw.length > maxPreviewImageBytes) {
     return { ok: false, error: "preview_image_too_large" };
   }
@@ -640,23 +647,13 @@ export function rebuildZip(
   },
 ): Buffer | undefined {
   try {
-    const files = unzipBounded(new Uint8Array(zipBytes), (name) =>
-      /(^|\/)(template\.json|scenes\.json|image\.jpg)$/.test(name),
-    );
-    const manifestPath = Object.keys(files)
-      .filter((name) => /(^|\/)template\.json$/.test(name))
-      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))[0];
-    const manifestBytes = manifestPath ? files[manifestPath] : undefined;
-    if (!manifestPath || !manifestBytes) {
+    const files = readSceneZip(zipBytes);
+    if (!files) {
       return undefined;
     }
-    const folder = manifestPath.slice(
-      0,
-      manifestPath.length - "template.json".length,
-    );
-    const scenes = changes.scenesJson
-      ? strToU8(changes.scenesJson)
-      : files[`${folder}scenes.json`];
+    const { folder, manifestPath } = files;
+    const manifestBytes = files.manifest;
+    const scenes = changes.scenesJson ? strToU8(changes.scenesJson) : files.scenes;
     if (!scenes) {
       return undefined;
     }
@@ -713,7 +710,7 @@ export function rebuildZip(
       ? changes.previewImage
         ? new Uint8Array(changes.previewImage)
         : undefined
-      : files[`${folder}image.jpg`];
+      : files.image;
     if (image) {
       next[`${folder}image.jpg`] = image;
     }
@@ -742,10 +739,6 @@ export function rebuildZipWithPreview(
   previewImage?: Buffer,
 ): Buffer | undefined {
   return rebuildZip(zipBytes, { previewImage: previewImage ?? null });
-}
-
-function depth(path: string) {
-  return path.split("/").length - 1;
 }
 
 function parseJson(bytes: Uint8Array): unknown {

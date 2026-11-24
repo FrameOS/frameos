@@ -40,6 +40,7 @@ from app.utils.upload_limits import (
     reject_oversized_content_length,
 )
 from app.utils.scene_execution import normalize_scenes_execution
+from app.utils.app_config import bad_app_configs_message
 from app.utils.scene_layouts import bad_layouts_message
 from app.utils.versions import current_frameos_version
 from app.api.auth import get_current_user_from_request
@@ -389,6 +390,12 @@ async def create_template(
     # Imported templates may predate the removal of the legacy/* apps, or of
     # a retired Nim app (data/immich)
     if isinstance(create_req.scenes, list):
+        # An app's config.json is read one way everywhere
+        # (utils/app_config.py): a scene with one that is not strict JSON is
+        # not imported or saved.
+        bad_app_configs = bad_app_configs_message(create_req.scenes)
+        if bad_app_configs:
+            raise HTTPException(status_code=400, detail=bad_app_configs)
         migrate_legacy_apps_in_scenes(create_req.scenes)
         retire_apps_in_scenes(create_req.scenes)
         normalize_scenes_execution(create_req.scenes)
@@ -491,6 +498,9 @@ async def update_template(template_id: str, data: UpdateTemplateRequest, db: Ses
         bad_layouts = bad_layouts_message(scenes) if data.scenes is not None or data.isLayout else None
         if bad_layouts:
             raise HTTPException(status_code=400, detail=bad_layouts)
+        bad_app_configs = bad_app_configs_message(scenes) if data.scenes is not None else None
+        if bad_app_configs:
+            raise HTTPException(status_code=400, detail=bad_app_configs)
         template.scenes = scenes
     db.commit()
     db.refresh(template)

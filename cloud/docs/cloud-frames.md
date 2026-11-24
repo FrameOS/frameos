@@ -419,9 +419,15 @@ is the mitigation for a self-hosted frame.
 **Filesystem access is what each app asks for, and the scene shows the sum.**
 A JS app names what it needs in its `config.json` `permissions` (`assets`
 reads the frame's assets folder, `assets-write` also changes it, `frame`
-reads and changes what the frame's settings page does, `docs/terminal.md`;
+reads and changes what the frame's settings page does, `docs/terminal.md`,
+`code` reads and changes the frame's scenes, `docs/code-editor.md`, `store`
+installs and removes them as the Scene store does, `docs/scene-store.md`;
 `files` and `shell` belong to the built-in Local Image and the two
-process-spawning apps). The editor sets the list from the app's code on every save. The frame
+process-spawning apps). The file is read one way everywhere
+(`docs/app-config-fixtures.json`: strict JSON, an object): one that is not
+is refused at every save and publish (`invalid_app_config`), the frame gives
+its app nothing, and a version stored before that rule shows as asking for
+everything a JS app can be given. The editor sets the list from the app's code on every save. The frame
 enforces it per app (`JsAssetGrant`, `js_runtime/app_runtime.nim`), and asking for nothing gets
 nothing: an app with no list, or one that asks for none of them, keeps its
 files in the scene's own `<assets>/scenes/<sceneId>/`,
