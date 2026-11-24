@@ -49,6 +49,34 @@ foreach(signature IN LISTS FOS_QJS_HOT)
     endif()
     string(REPLACE "${signature}" "__attribute__((optimize(\"O2\"))) ${signature}" FOS_QJS_SOURCE "${FOS_QJS_SOURCE}")
 endforeach()
+
+# JS_ReadObject reads one kind of input on a frame: the image's own bytecode
+# (tools/prelude_bytecode.nim: the two preludes and the programs' kit, global
+# scripts compiled and serialized at build time; nothing else calls it, and
+# JS_WriteObject is not in the image). A compiled script is a function's
+# bytecode and the constants the compiler pools: strings, numbers, BigInts,
+# template arrays, nested functions. An object, a module, a typed array, a
+# buffer, a Date, a boxed value or an object reference never is, so those
+# tags are refused as an unknown tag already is ("invalid tag") and their
+# readers leave the image (-1,824 B). The three blobs of 2026-11-24 hold
+# function and string tags only, and tools/prelude_bytecode.nim walks every
+# blob it writes (checkFirmwareReads): a QuickJS that pools anything else
+# fails the build, not a frame's first scene.
+set(FOS_QJS_READ_SWITCH "    switch(tag) {\n    case BC_TAG_NULL:")
+string(FIND "${FOS_QJS_SOURCE}" "${FOS_QJS_READ_SWITCH}" found)
+string(FIND "${FOS_QJS_SOURCE}" "${FOS_QJS_READ_SWITCH}" found_last REVERSE)
+if(found EQUAL -1 OR NOT found EQUAL found_last)
+    message(FATAL_ERROR "frameos_quickjs: JS_ReadObjectRec's switch is not once in ${QUICKJS_DIR}/quickjs.c: update FOS_QJS_READ_SWITCH")
+endif()
+string(REPLACE "${FOS_QJS_READ_SWITCH}"
+    "    /* FrameOS: only the image's own bytecode is read (components/frameos_quickjs/CMakeLists.txt) */
+    if (tag == BC_TAG_OBJECT || tag == BC_TAG_MODULE ||
+        tag == BC_TAG_TYPED_ARRAY || tag == BC_TAG_ARRAY_BUFFER ||
+        tag == BC_TAG_SHARED_ARRAY_BUFFER || tag == BC_TAG_DATE ||
+        tag == BC_TAG_OBJECT_VALUE || tag == BC_TAG_OBJECT_REFERENCE)
+        goto invalid_tag;
+${FOS_QJS_READ_SWITCH}"
+    FOS_QJS_SOURCE "${FOS_QJS_SOURCE}")
 set(FOS_QJS_HOT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/quickjs_hot.c")
 file(WRITE "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_SOURCE}")
 execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_HOT_SOURCE}")
