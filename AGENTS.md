@@ -972,6 +972,17 @@
   panel chip select written behind `DEV_Digital_Write` would let a card clock
   the panel (`test_esp32_bus_share.py` reads for it). A touch
   board runs at 240 MHz like an LCD (`cpu_240` in `main.c`).
+- **A press shows at once** (`docs/realtime-rendering.md` of that name,
+  `fos_press.h`): an LCD's touch task shades the element under a finger (the
+  press map's `taken` 3, `lcd_press.c`) in the buffer on the glass at its
+  first report, before any render, under the loading mark's lock; the next
+  present puts it away. E-paper lights the LED until the answer's waveform
+  has run and, on a scene whose taps are slow, inks the box with one DU
+  (`fos_display_glass_rect`: its tiles `stale` until an update sends the
+  picture's own). A new writer into the scanned LCD buffer takes that lock and
+  moves the buffer's count; one off the render task leaves it moved
+  (`svg_frames.nim` checks the count after a copy). `touch tap` on the console
+  is a finger through the touch task, for the bench.
 - **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
   one drawing for both runtimes; doc section "A switch that takes a while"):
   after 200 ms without the new scene's first frame, a thread (Pi,

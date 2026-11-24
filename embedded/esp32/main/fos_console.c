@@ -2180,8 +2180,26 @@ static int cmd_i2c(int argc, char **argv)
  * bench check that the GT911 is wired and which way its axes run. */
 static int cmd_touch(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
+    if (argc >= 4 && strcmp(argv[1], "tap") == 0) {
+        /* `touch tap <x> <y> [ms]`: a finger at that panel pixel, through the
+         * touch task as the glass's own would be (the bench's press timing),
+         * and when it was seen and lit. */
+        int hold_ms = argc >= 5 ? atoi(argv[4]) : 80;
+        esp_err_t err = fos_touch_inject(atoi(argv[2]), atoi(argv[3]), hold_ms);
+        if (err != ESP_OK) {
+            printf("touch tap: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        int64_t start_us = esp_timer_get_time(), seen_us = 0, lit_us = 0;
+        while (esp_timer_get_time() - start_us < (int64_t)hold_ms * 1000 + 100000) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            fos_touch_press_times(&seen_us, &lit_us);
+            if (lit_us) break;
+        }
+        printf("touch tap: seen %lld us, lit %lld us after the touch\n",
+               seen_us ? (long long)(seen_us - start_us) : -1LL, lit_us ? (long long)(lit_us - start_us) : -1LL);
+        return 0;
+    }
     fos_touch_print_status();
     return 0;
 }
@@ -2300,7 +2318,7 @@ static const fos_console_cmd_t s_commands[] = {
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "imu", .help = "imu — the accelerometer's reading, in thousandths of g", .func = cmd_imu},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
-        {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
+        {.command = "touch", .help = "touch [tap <x> <y> [ms]] — the touch panel's controller and its last point; a finger made up", .func = cmd_touch},
         {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},

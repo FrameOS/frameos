@@ -141,6 +141,13 @@ int frameos_nim_press_map_takes(int x, int y)
     (void)y;
     return -1;
 }
+int frameos_nim_press_map_find(int x, int y, uint16_t box[4])
+{
+    (void)x;
+    (void)y;
+    (void)box;
+    return -1;
+}
 bool frameos_nim_tick(void) { return false; }
 int frameos_nim_next_async_ms(void) { return -1; }
 /* fos_js_io.h: no scenes run here, so no scene store either. */

@@ -37,6 +37,7 @@ idf_component_register(
         "fos_scene_pieces.c"
         "fos_http.c"
         "fos_animation.c"
+        "fos_press.c"
         "fos_boot_scene.c"
         "fos_client.c"
         "fos_render_pull.c"

@@ -1681,3 +1681,87 @@ suite "a <select>":
     discard layout.layoutUi(root, 480, 480, input, regions)
     check input.open == 0
     check regions.anyIt(it.field == 4)
+
+suite "a quick tap's press":
+  # docs/jsx-ui.md "Press and hover": on an ESP32 a tap's two ends are often
+  # handled in one go behind a busy render, so no render ever drew its
+  # `active:` look; it stays with the tap's answer for a moment instead.
+  proc button(): SvgNode =
+    result = el("div", "w-full h-full bg-white")
+    let b = el("div", "w-[100px] h-[50px] bg-orange-500 active:bg-orange-300")
+    b.attrs.add(("on-click", "1"))
+    result.children.add b
+
+  proc setup(id: string): UiTarget =
+    result = uiTarget(id, 4)
+    result.input.slow = false
+    result.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) = discard
+    result.regions.setLen(0)
+    discard layout.layoutUi(button(), 200, 100, result.input, result.regions, result.memo)
+
+  proc tap(id: string, event: string): bool =
+    dispatchUiEvent(id, event, %*{"x": 50, "y": 25, "pointerId": 1, "pointerType": "touch",
+      "buttons": (if event == "pointerUp": 0 else: 1)})
+
+  test "lifted before a render drew it: it lingers until a render has, then a moment more":
+    quickTapLingers = true
+    let id = "quick-tap"
+    let target = setup(id)
+    check tap(id, "pointerDown")
+    check target.input.pressed.len == 1 and not target.input.pressedDrawn
+    discard tap(id, "pointerUp")
+    check target.input.pressed.len == 1 # kept: no render showed it
+    check uiTimersPending()
+    let now = getMonoTime()
+    check not uiTimerDue(id, now) # not before a render draws it
+    target.regions.setLen(0)
+    discard layout.layoutUi(button(), 200, 100, target.input, target.regions, target.memo)
+    check target.input.pressedDrawn
+    check not uiTimerDue(id, now)
+    check uiTimerDue(id, now + initDuration(milliseconds = 200))
+    sleep(200)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.pressed.len == 0 and not uiTimersPending()
+    forgetUiTarget(id, 4)
+
+  test "drawn before the lift: it goes at the lift, as always":
+    quickTapLingers = true
+    let id = "slow-tap"
+    let target = setup(id)
+    check tap(id, "pointerDown")
+    target.regions.setLen(0)
+    discard layout.layoutUi(button(), 200, 100, target.input, target.regions, target.memo)
+    discard tap(id, "pointerUp")
+    check target.input.pressed.len == 0 and not uiTimersPending()
+    forgetUiTarget(id, 4)
+
+  test "never drawn at all: let go of after a second":
+    quickTapLingers = true
+    let id = "lost-tap"
+    let target = setup(id)
+    check tap(id, "pointerDown")
+    discard tap(id, "pointerUp")
+    check uiTimersPending()
+    check not uiTimerDue(id, getMonoTime())
+    check uiTimerDue(id, getMonoTime() + initDuration(milliseconds = 1100))
+    sleep(1050)
+    check dispatchUiEvent(id, "uiTimer", newJObject())
+    check target.input.pressed.len == 0 and not uiTimersPending()
+    forgetUiTarget(id, 4)
+
+  test "off an ESP32 and on e-paper it does not linger":
+    quickTapLingers = false
+    let id = "pi-tap"
+    var target = setup(id)
+    check tap(id, "pointerDown")
+    discard tap(id, "pointerUp")
+    check target.input.pressed.len == 0 and not uiTimersPending()
+    forgetUiTarget(id, 4)
+    quickTapLingers = true
+    target = setup(id)
+    target.input.slow = true
+    discard tap(id, "pointerDown")
+    discard tap(id, "pointerUp")
+    check target.input.pressed.len == 0 and not uiTimersPending()
+    forgetUiTarget(id, 4)
+    quickTapLingers = false

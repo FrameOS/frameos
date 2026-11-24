@@ -444,8 +444,13 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
         if not found.full and found.rects.area < whole:
           copyFrameIn(target, heldFrames[source].buffer)
           copied = true
-          rects = found.rects
-          base = some(heldFrames[source])
+          # Written while it was copied (the source is usually the buffer on
+          # the glass, where the loading mark and a press lit at once are
+          # drawn, lcd_press.h): the copy may hold them, so this frame is
+          # drawn whole after all.
+          if panelBufferGeneration(heldFrames[source].buffer) == heldFrames[source].generation.int64:
+            rects = found.rects
+            base = some(heldFrames[source])
     elif rects.area >= CatchUpArea and base.isSome:
       # Most of what this buffer is behind on (it was last drawn two or
       # three renders ago on an LCD's three) the newest frame of another

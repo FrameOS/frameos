@@ -242,6 +242,11 @@ bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_ref
     return now_us < wait_until_us || panel_refreshing;
 }
 
+bool fos_timed_render_waits_for_finger(int64_t now_us, int64_t due_us, bool finger_down)
+{
+    return finger_down && now_us >= due_us && now_us - due_us < FOS_TIMED_UNDER_FINGER_MAX_US;
+}
+
 bool fos_loading_taps_wanted(bool lcd, bool sounds_on, bool render_held, int64_t last_input_us, int64_t now_us)
 {
     if (lcd || !sounds_on || render_held || last_input_us == 0) return false;

@@ -1411,7 +1411,7 @@ bool fos_scenes_apply_pending(void)
         s_payload_stored_since_boot = false;
         s_scene_switched = true;
         /* A new scene set, from here to its first picture: as a switch. */
-        fos_client_loading_begin(xTaskGetTickCount());
+        fos_client_switch_begin(xTaskGetTickCount());
     }
     bool ok = false;
     size_t len = 0;
@@ -1635,7 +1635,7 @@ bool fos_scenes_apply_pending_selection(void)
          * while for the keys that walk it. Nothing loads, but its first
          * picture is a render like any other (drawn whole, 13 tiles take
          * ~2 s on the SenseCAP), so the loading mark counts from here too. */
-        fos_client_loading_begin(asked_at);
+        fos_client_switch_begin(asked_at);
         if (!frameos_nim_set_scene(scene_id)) {
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
@@ -1661,7 +1661,7 @@ bool fos_scenes_apply_pending_selection(void)
         s_built_in_shown = false;
         s_settings_shown = false;
         s_scene_switched = true;
-        fos_client_loading_begin(asked_at);
+        fos_client_switch_begin(asked_at);
     }
     /* Already the resident scene: nothing to load. Re-parsing it would throw
      * away everything the runtime has built for it — the interpreted graph and
@@ -1694,7 +1694,7 @@ bool fos_scenes_apply_pending_selection(void)
     /* Another scene, from here to its first picture: on an LCD the loading
      * mark shows if that takes a while, counted from when it was asked for.
      * Before the load below, which is part of the wait. */
-    fos_client_loading_begin(asked_at);
+    fos_client_switch_begin(asked_at);
     if (s_slot_count > 0 && frameos_nim_scene_running(scene_id)) {
         /* Running in a window of a desktop layout already (docs/scene-layouts.md
          * "Windows"): brought to the front, nothing read off flash. */

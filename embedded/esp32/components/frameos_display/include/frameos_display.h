@@ -130,6 +130,24 @@ static inline void fos_display_loading_end(void)
     fos_lcd_st7701s_loading_end();
     fos_lcd_qspi_loading_end();
 }
+/* A press lit at once (lcd_press.h, docs/realtime-rendering.md "A press
+ * shows at once"): on an RGB LCD the touch task shades the element a finger
+ * lands on in the buffer on the glass, before the press is even reported;
+ * the next picture presented puts it away, and so does `release` (the lift)
+ * after `linger_ms` with no picture, and `end` now. Nothing on any other
+ * panel. */
+static inline void fos_display_press_begin(int x0, int y0, int x1, int y1)
+{
+    fos_lcd_st7701s_press_begin(x0, y0, x1, y1);
+}
+static inline void fos_display_press_release(int linger_ms)
+{
+    fos_lcd_st7701s_press_release(linger_ms);
+}
+static inline void fos_display_press_end(void)
+{
+    fos_lcd_st7701s_press_end();
+}
 /* The runtime's loading mark (frameos/loading_mark.nim), for whichever LCD
  * driver runs. */
 void fos_display_set_loading_mark(fos_loading_mark_fn mark);
@@ -284,6 +302,21 @@ esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, 
 /* Put a panel left awake after a partial update into deep sleep: before the
  * chip's own, or (the _if_idle one, from the render task's wait) once nothing
  * has been drawn for a while, clearing any ghosts it was left with first. */
+/* Something on the glass at once, in black and white, without any picture
+ * changing (docs/realtime-rendering.md "A press shows at once"): the panel
+ * rectangle x, y, w, h of `buf` (a whole packed picture: the one showing,
+ * with the ink or the tile drawn into it for the call) goes up with one fast
+ * waveform, grown to the controller's tiles, and the next update puts the
+ * picture's own pixels back there (or the follow-up once the render task is
+ * idle, fos_display_followup_due).
+ * Only a panel whose controller keeps the picture (the IT8951): false
+ * elsewhere, and when it holds no picture it knows. Render task. */
+bool fos_display_glass_supported(void);
+esp_err_t fos_display_glass_rect(const uint8_t *buf, int x, int y, int w, int h);
+/* The panel's running waveform, waited out: before a caller draws into the
+ * picture it hands fos_display_glass_rect, so it holds it changed no longer
+ * than the upload. */
+void fos_display_glass_wait(void);
 /* Parts of the picture were drawn roughly while someone tapped and nobody has
  * for a while: pack the canvas and hand it to fos_display_update, not as input. */
 bool fos_display_settle_due(int64_t now_us);

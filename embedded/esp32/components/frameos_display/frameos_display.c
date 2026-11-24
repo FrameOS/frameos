@@ -912,6 +912,37 @@ esp_err_t fos_display_quick_update(const uint8_t *buf, const uint8_t *previous, 
     return ESP_OK;
 }
 
+bool fos_display_glass_supported(void)
+{
+    return s_panel && s_partial && s_partial->changed;
+}
+
+esp_err_t fos_display_glass_rect(const uint8_t *buf, int x, int y, int w, int h)
+{
+    if (!fos_display_glass_supported()) return ESP_ERR_NOT_SUPPORTED;
+    if (!buf) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = ensure_module();
+    if (err != ESP_OK) return err;
+    refresh_wait();
+    DEV_SPI_Acquire();
+    if (!s_panel_awake) s_partial->init();
+    bool ok = fos_it8951_10in3_glass_rect(buf, x, y, w, h);
+    DEV_SPI_Release();
+    s_last_partial_us = esp_timer_get_time();
+    s_panel_awake = true;
+    s_panel_rested = false;
+    return ok ? ESP_OK : ESP_FAIL;
+}
+
+void fos_display_glass_wait(void)
+{
+    if (!fos_display_glass_supported() || !s_panel_awake) return;
+    refresh_wait();
+    DEV_SPI_Acquire();
+    fos_it8951_10in3_wait();
+    DEV_SPI_Release();
+}
+
 bool fos_display_settle_due(int64_t now_us)
 {
     if (!s_partial || !s_partial->owed || !s_partial->owed()) return false;

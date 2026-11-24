@@ -624,6 +624,12 @@ export const get = () => (
   while it is pressed on it, **`group-hover:`** while the pointer is over an
   ancestor with the class `group`. A change renders again. A finger that
   lifts is over nothing, so on a touch screen `hover:` lasts for the press.
+  On an ESP32 a tap whose press and lift were handled before any render drew
+  its `active:` look (both behind a busy render) keeps the look with its
+  answer, for 150 ms once a render has drawn it (`pressLinger`), and an
+  LCD's touch task shades the element a finger lands on in the picture on
+  the glass before any render at all, `active:` class or not, until the
+  scene's next picture (docs/realtime-rendering.md "A press shows at once").
 - **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
   the browser preview a click answers at once; on e-paper it answers in a
   refresh, so e-paper draws no `hover:` or `active:` at all (a press asked

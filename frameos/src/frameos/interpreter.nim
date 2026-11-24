@@ -2225,6 +2225,8 @@ type PressRect* = object
   box*: array[4, float32]
   taken*: bool
   keys*: bool ## the frame's keyboard: a press there is a key, never an edge swipe
+  element*: bool ## an element of a UI with a handler: its own box, which a
+                 ## panel may light at the press before any render (fos_touch.c)
 
 proc clipped(box, clip: array[4, float32]): array[4, float32] =
   [max(box[0], clip[0]), max(box[1], clip[1]), min(box[2], clip[2]), min(box[3], clip[3])]
@@ -2255,7 +2257,7 @@ proc pressMapIn(scene: FrameScene; dx, dy: float32; clip: array[4, float32]; wea
   for region in regions:
     let box = clipped([dx + region[0], dy + region[1], dx + region[2], dy + region[3]], clip)
     if box.nonEmpty:
-      into.add PressRect(box: box, taken: true)
+      into.add PressRect(box: box, taken: true, element: true)
 
 proc pressMap*(scene: FrameScene; width, height: int): seq[PressRect] =
   ## pressTakenAt for the whole canvas at once, of what the last render drew:
@@ -2286,6 +2288,7 @@ type PanelPressRect* = object
   x0*, y0*, x1*, y1*: int
   taken*: bool
   keys*: bool ## the frame's keyboard (PressRect.keys)
+  element*: bool ## one element's box (PressRect.element)
 
 proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: string;
                     maxEntries: int): seq[PanelPressRect] =
@@ -2324,7 +2327,8 @@ proc panelPressMap*(scene: FrameScene; canvasW, canvasH, rotate: int; flip: stri
       of 180: (panelW - x1, panelH - y1, panelW - x0, panelH - y0)
       of 270: (y0, panelH - x1, y1, panelH - x0)
       else: (x0, y0, x1, y1)
-    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken, keys: entry.keys)
+    result.add PanelPressRect(x0: px0, y0: py0, x1: px1, y1: py1, taken: entry.taken, keys: entry.keys,
+                             element: entry.element)
 
 proc runEventApps(scene: InterpretedFrameScene, context: ExecutionContext) =
   ## The onEvent of the JS apps that subscribed to this event. One that returns

@@ -374,6 +374,13 @@ static void test_a_timed_render_waits_for_the_glass(void)
     CHECK(fos_idle_wait_goes_on(10 * S, 60 * S, false), "inside the interval");
     CHECK(!fos_idle_wait_goes_on(60 * S, 60 * S, false), "the interval is over");
     CHECK(fos_idle_wait_goes_on(61 * S, 60 * S, true), "over, but the glass still refreshes");
+    CHECK(!fos_timed_render_waits_for_finger(59 * S, 60 * S, true), "not due yet: the wait itself goes on");
+    CHECK(fos_timed_render_waits_for_finger(60 * S, 60 * S, true), "due under a finger: it waits");
+    CHECK(!fos_timed_render_waits_for_finger(60 * S, 60 * S, false), "due, no finger: it runs");
+    CHECK(fos_timed_render_waits_for_finger(60 * S + FOS_TIMED_UNDER_FINGER_MAX_US - 1, 60 * S, true),
+          "a finger held, up to the most it waits");
+    CHECK(!fos_timed_render_waits_for_finger(60 * S + FOS_TIMED_UNDER_FINGER_MAX_US, 60 * S, true),
+          "a finger held longer is no tap: the timed render runs");
     CHECK(!fos_idle_wait_goes_on(89 * S, 60 * S, false), "the refresh ended: render");
 }
 

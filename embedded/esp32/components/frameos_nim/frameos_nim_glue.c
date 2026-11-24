@@ -694,10 +694,18 @@ static bool s_press_map_kept = false;
 
 /* Under the runtime lock, inside the render's OOM guard: the map is a Nim
  * seq. */
+static bool s_render_quiet = false;
+
 static void press_map_publish(void)
 {
     if (!__atomic_load_n(&s_press_map_kept, __ATOMIC_RELAXED)) return;
     uint32_t state = __atomic_load_n(&s_press_state, __ATOMIC_ACQUIRE);
+    /* An animation's quiet frame (fos_animation.h) on a scene whose last map
+     * held nothing to press (DVD Logo Bounce, a clock's seconds): not built
+     * again, frame after frame, for nothing. A frame logged in full and every
+     * other render still build it, and so does every frame of a scene with
+     * something in its map (a game's moving buttons). */
+    if (s_render_quiet && (state & PRESS_MAP_PUBLISHED) && (state & 0xFF) == 0) return;
     int next = (state & PRESS_MAP_PUBLISHED) ? 1 - (int)((state >> 8) & 1) : 0;
     int count = fos_nim_press_map_impl(s_press_boxes[next], s_press_taken[next], PRESS_MAP_MAX);
     /* A map that could not be made says nothing is taken: no click is
@@ -714,7 +722,7 @@ void frameos_nim_keep_press_map(bool keep)
     if (!keep) __atomic_store_n(&s_press_state, 0, __ATOMIC_RELEASE);
 }
 
-int frameos_nim_press_map_takes(int x, int y)
+int frameos_nim_press_map_find(int x, int y, uint16_t out[4])
 {
     uint32_t state = __atomic_load_n(&s_press_state, __ATOMIC_ACQUIRE);
     if (!(state & PRESS_MAP_PUBLISHED)) return -1;
@@ -724,9 +732,17 @@ int frameos_nim_press_map_takes(int x, int y)
     /* The first entry a press lands in answers; a press in none is not
      * taken. */
     for (int i = 0; i < count; i++, box += 4) {
-        if (x >= box[0] && y >= box[1] && x < box[2] && y < box[3]) return s_press_taken[buffer][i];
+        if (x >= box[0] && y >= box[1] && x < box[2] && y < box[3]) {
+            if (out) memcpy(out, box, 4 * sizeof(uint16_t));
+            return s_press_taken[buffer][i];
+        }
     }
     return 0;
+}
+
+int frameos_nim_press_map_takes(int x, int y)
+{
+    return frameos_nim_press_map_find(x, y, NULL);
 }
 
 /* main/fos_scenes.c; main/ is not on this component's include path, and the
@@ -909,6 +925,7 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
 
 void frameos_nim_set_quiet(bool quiet)
 {
+    s_render_quiet = quiet;
     if (!s_nim_ready) return;
     if (!nim_lock_take()) return;
     fos_nim_set_quiet_impl(quiet ? 1 : 0);

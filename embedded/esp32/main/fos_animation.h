@@ -258,6 +258,15 @@ fos_sync_plan_t fos_sync_plan(bool sync, bool reporting, bool fetched_with_pull,
  * waits for it; one somebody asks for leaves the wait by its bit). */
 bool fos_idle_wait_goes_on(int64_t now_us, int64_t wait_until_us, bool panel_refreshing);
 
+/* A timed render (its interval ran out, nobody asked) does not start under a
+ * finger: the tap's own render would wait for all of it (a clock's 385 ms, a
+ * slideshow's 0.5-0.7 s on a SenseCAP Indicator). It waits for the lift, at
+ * most FOS_TIMED_UNDER_FINGER_MAX_US past its time (a finger held on the
+ * glass for long is not a tap). docs/realtime-rendering.md "A press shows at
+ * once". */
+#define FOS_TIMED_UNDER_FINGER_MAX_US 1500000
+bool fos_timed_render_waits_for_finger(int64_t now_us, int64_t due_us, bool finger_down);
+
 /* Whether a load starting now gets the buzzer's quiet taps
  * (fos_buzzer_loading_begin): e-paper has no loading mark to draw, and a
  * frame must not tap at a room nobody is in, so only when someone at the frame
