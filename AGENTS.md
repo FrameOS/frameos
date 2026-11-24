@@ -1089,36 +1089,42 @@
   one module for every runtime. A new way to get a big text into a JS app
   goes through it, never a bigger string.
 
-## Reading the web on a frame: `docs/html-digest.md`
+## Reading the web on a frame: `docs/html-slim.md`
 
-- **A JS app does not read HTML in JavaScript on an ESP32.** QuickJS there
-  runs a loop iteration in 4 to 6 µs and a regular expression over one tag
-  in ~175 µs: GitHub's front page was 5.5 s of reading, Wikipedia's ESP32
-  article ten (a SenseCAP Indicator, 2026-11-24). `fetch(url, { onChunk,
-  digest: "html" })` hands the app the page as **records**, a line a block
-  (a paragraph, a heading, a list item, a table's line, a picture, a form's
-  field, with its links and bold runs), read by
-  `frameos/src/frameos/utils/html_digest.nim` as the bytes come: one
-  implementation for a Pi, an ESP32 and the wasm runtime, hooked in where a
-  streamed piece becomes a JS string (`js_async.nim` `chunkArgs`). Scripts,
-  style sheets, comments, inline SVG and what is hidden never reach
-  JavaScript. The doc's table is the format; a new record or rule is the
-  module, the doc, the reader (`take()` in the Browser's `page.ts`) and
-  `utils/tests/test_html_digest.nim` together, and any cut of the input
-  must give the same records.
-- **The digest says what markup alone says; the app decides.** What is
-  around a page (a `<nav>`, a sidebar, the footer, an element named for one)
-  comes marked, with how much of it is links; folding it is the app's. Keep
-  policy out of the module: it is in every image, the app is a scene anyone
-  can update.
+- **The runtime slims a page; the app reads it.** A page as its server
+  sends it is mostly what an app has no use for (CNN's front page: 7 MB
+  around 26 KB of words), and QuickJS on an ESP32 walks a string slowly (a
+  loop iteration 4 to 6 µs, a regular expression over one tag ~175 µs).
+  `fetch(url, { onChunk, slim: { keep, drop, bare, classes } })` hands the
+  app HTML with its scripts, style sheets, comments and unlisted attributes
+  gone and the rest written one way (`<name a="v">`, every `<` a tag, white
+  space one space), by `frameos/src/frameos/utils/html_slim.nim` as the
+  bytes come: one implementation for a Pi, an ESP32 and the wasm runtime,
+  hooked in where a streamed piece becomes a JS string (`js_async.nim`
+  `chunkArgs`). A change to what slimmed markup is, is the module, the doc,
+  `utils/tests/test_html_slim.nim` and the Browser's reader together, and
+  any cut of the input must give the same output.
+- **The slimmer has the mechanism, the app has the lists and the meaning.**
+  Which attributes stay, which elements go, which class words matter: the
+  app passes them. What a page means (a block, a link, what is navigation,
+  what is hidden, its colors) is the app's JavaScript, the Browser's
+  `read.ts`. Do not move a rule about pages into the module: a reader in the
+  runtime was built (30 KB of flash, 0.03 s a page) and taken out for its
+  size the same day (2026-11-24); a second of reading in JavaScript was the
+  owner's call. What keeps that second a second: the reader finds its way
+  with `indexOf` on what the slimmer made regular, and runs no regular
+  expression and no loop over letters per tag.
 - **The Browser sample** (`repo/scenes/samples/Browser`) is its user, a
   browser the way Lynx and Opera Mini were: no style sheets fetched, no
-  scripts run, a page in one column in the frame's type. `page.ts` is the
-  page (records, feeds, plain text, Markdown, JSON), `lay.ts` breaks it into
+  scripts run, a page in one column in the frame's type. `read.ts` reads
+  slimmed HTML into the page, `page.ts` is the page (and feeds, plain text,
+  Markdown, JSON), `lay.ts` breaks it into
   lines as far down as is looked at, with the built-in face's letter widths
   from a table (a line is drawn as one row that does not wrap, so the page's
   height is known before anything is drawn), `app.tsx` draws the rows that
-  show. **Every letter drawn is a node the frame keeps** (a screenful of
+  show, in the colors the page's own markup states (a `bgcolor`, a
+  `<font color>`, an element's own `style`, the site's `theme-color`; what
+  reads on what is `inkOn`'s). **Every letter drawn is a node the frame keeps** (a screenful of
   text is a thousand, three times that was one 380 KB block on an 8 MB
   board): draw what shows and a little around it, in pieces with a fixed
   place in the tree (`CHUNK`, `GROUP`), so the keys' ring stays on its link

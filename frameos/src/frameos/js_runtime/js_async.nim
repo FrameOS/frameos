@@ -100,16 +100,22 @@ proc likeOf(context: ExecutionContext): Image =
 # renders (pumpJsAsync); where nothing pumps, jsFetchStream makes the request
 # and hands them over inside the call.
 import frameos/utils/piece_text
-import frameos/utils/html_digest
+import frameos/utils/html_slim
 
 type StreamText = object
   ## A streamed body on its way to its app: its bytes as text and, where the
-  ## app asked (`digest: "html"`, docs/html-digest.md), HTML read here into
-  ## records, so its markup is never a JS string.
+  ## app asked (`slim: {…}`, docs/html-slim.md), HTML slimmed here, so the
+  ## markup the app has no use for is never a JS string.
   text: PieceText
-  want: bool            ## the app asked for HTML as records
-  decided: bool         ## whether this body is HTML is known
-  html: ref HtmlDigest  ## reading it; nil for a body that is not HTML
+  decided: bool       ## whether this body is HTML is known
+  slim: ref HtmlSlim  ## what the app asked HTML slimmed by; nil without, and for a body that is not HTML
+
+proc slimAsked(options: JsonNode): ref HtmlSlim =
+  let asked = options{"slim"}
+  if not asked.isNil and asked.kind == JObject:
+    new(result)
+    result[] = initHtmlSlim(asked{"keep"}.getStr(), asked{"drop"}.getStr(), asked{"bare"}.getStr(),
+      asked{"classes"}.getStr())
 
 proc bodyIsHtml(head, start: string): bool =
   ## By the answer's Content-Type where it has one, else by its first bytes.
@@ -162,16 +168,17 @@ proc chunkArgs(ctx: ptr JSContext, id: int, state: var StreamText, raw: openArra
     head = answerHead
   if not state.decided:
     state.decided = true
-    if state.want and bodyIsHtml(head, text):
-      new(state.html)
-      state.html[] = initHtmlDigest()
-      # Told with the head, as a header of the runtime's own: the pieces are records.
-      if head.len > 0 and head[^1] != '\n': head.add '\n'
-      head.add "frameos-digest: html\n"
-  if not state.html.isNil:
-    var records = newStringOfCap(text.len div 4 + 64)
-    discard state.html[].push(text, done, records)
-    text = move(records)
+    if not state.slim.isNil:
+      if bodyIsHtml(head, text):
+        # Told with the head, as a header of the runtime's own: the pieces are slimmed.
+        if head.len > 0 and head[^1] != '\n': head.add '\n'
+        head.add "frameos-slim: html\n"
+      else:
+        state.slim = nil
+  if not state.slim.isNil:
+    var slimmed = newStringOfCap(text.len div 4 + 64)
+    state.slim[].push(text, done, slimmed)
+    text = move(slimmed)
   var
     textValue = nimStringToJS(ctx, text)
     why = error
@@ -375,7 +382,7 @@ when jsAsyncOn:
           if not asyncPumped:
             return nimIntToJS(ctx, 0) # the request is made in the call (jsFetchStream)
         wait.kind = akStream
-        wait.text.want = wait.options{"digest"}.getStr() == "html"
+        wait.text.slim = slimAsked(wait.options)
         request.pieceBytes = streamPieceBytes(wait.options)
         request.headers = streamHeaders(wait.options)
         request.maxBytes = StreamMaxBytes
@@ -666,7 +673,7 @@ else:
         headers = streamHeaders(options)
         pieceBytes = streamPieceBytes(options)
         timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
-      call.text.want = options{"digest"}.getStr() == "html"
+      call.text.slim = slimAsked(options)
       var
         resBody = ""
         head = "\n"

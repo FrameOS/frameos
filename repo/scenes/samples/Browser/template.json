@@ -1,6 +1,6 @@
 {
   "name": "Browser",
-  "description": "A web browser on the frame, the way Lynx and Opera Mini browsed: a page is read as it downloads and shown as its words, links, pictures and forms in one column, without its scripts or style sheets.",
+  "description": "A web browser on the frame, the way Lynx and Opera Mini browsed: a page is read as it downloads and shown as its words, links, pictures and forms in one column, in the colors its own markup states, without its scripts or style sheets.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,

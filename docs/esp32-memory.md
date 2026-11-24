@@ -342,7 +342,7 @@ From a cold boot the Sticky then shows GitHub's front page and a repository
 page, slowly: the last render, the page laid out, is 38-52 s on the render
 task.
 
-## A page is read by the runtime, and drawn a screen at a time (2026-11-24)
+## A page is slimmed by the runtime, and drawn a screen at a time (2026-11-24)
 
 The Browser sample as it was (HTML and CSS read in JavaScript, the page laid
 out whole) on a SenseCAP Indicator (8 MB): Hacker News in 33.6 s, one render
@@ -351,23 +351,31 @@ of it 16.8 s, with 0.7 MB of PSRAM left, and Wikipedia and GitHub after it
 style sheets fetched, the page one column in the frame's type), it found
 three things, each measured on that board:
 
-- **JavaScript is no place to read markup.** A micro-benchmark over the
-  first 128 KB of GitHub's front page (1,375 tags): finding the tags 68 ms,
-  a slice and a `Map.get` each 123 ms, one regular expression per tag 364 ms,
-  two and a class test 784 ms; 20,000 array pushes and reads 146 ms (3.6 µs a
-  loop iteration), 20,000 `charCodeAt` 128 ms. The reader written with care
-  took 5.5 s for the page's 356 KB and ten for Wikipedia's ESP32 article: a
-  quarter of a second on a desk is the same code. So the runtime reads HTML
-  (`utils/html_digest.nim`, `docs/html-digest.md`), on the way from the
-  socket to the app, and the app gets a record a block: 0.03 to 0.4 s of
-  JavaScript a page, most of it pushing 3,000 lines into arrays. Two things
-  kept that down: a block's runs stay the text they came as until the block
-  is looked at (`runsOf`), and ids stay two arrays, not a `Map` (Wikipedia
-  has 2,809 of them, and a reader follows one or two).
+- **JavaScript is no place to read markup as it is sent.** A micro-benchmark
+  over the first 128 KB of GitHub's front page (1,375 tags): finding the
+  tags 68 ms, a slice and a `Map.get` each 123 ms, one regular expression
+  per tag 364 ms, two and a class test 784 ms; 20,000 array pushes and reads
+  146 ms (3.6 µs a loop iteration), 20,000 `charCodeAt` 128 ms. The reader
+  written with care took 5.5 s for the page's 356 KB and ten for Wikipedia's
+  ESP32 article: a quarter of a second on a desk is the same code. So the
+  runtime slims HTML on the way from the socket to the app
+  (`utils/html_slim.nim`, `docs/html-slim.md`): scripts, style sheets,
+  comments and the attributes the app has no use for never become a
+  JavaScript string, and the rest is written one way, which the app reads
+  with `indexOf` and no regular expression. That reader takes 0.4 s for the
+  GitHub page and 1.1 s for the article on an e-paper board (a reTerminal
+  E1003), 0.8 and 2.4 s on the SenseCAP, whose RGB panel's refresh shares
+  the PSRAM with the interpreter; the slimming itself is 0.05 to 0.15 s of a
+  page. Two things keep the page's own arrays down: a block's runs stay the
+  text they came as until the block is looked at (`runsOf`), and ids stay
+  two arrays, not a `Map` (Wikipedia has 2,809 of them, and a reader follows
+  one or two).
 - **The body is never held.** `fetch`'s `onChunk` (docs/async-js.md) with
-  gzip: CNN's front page, 7 MB, is read in 4 s at 1.7 MB/s inflated and
-  leaves 83 KB of records. PSRAM's lowest free during ten sites in a row was
-  1.67 MB, the largest free block never under 0.9 MB.
+  gzip: CNN's front page, 7 MB, comes in 4.2 s at 1.65 MB/s inflated (the
+  TLS and the inflating are the limit: pieces of 64 KB take as long as
+  pieces of 16) and leaves 334 KB of slimmed markup, read a piece at a
+  time. PSRAM's lowest free during thirty pages in a row was 1.05 MB, free
+  between pages 2 to 3 MB with no trend.
 - **Every letter drawn is a node the frame keeps.** The page's rows were
   first drawn two and a half screens at a time: 4,000 glyph elements, whose
   parsed list is one 380 KB block, kept once a frame buffer (three on an
@@ -377,20 +385,26 @@ three things, each measured on that board:
 
 | the page on the glass, from the tap | before | now |
 |---|---|---|
-| Hacker News | 33.6 s | 3.9 s |
-| DuckDuckGo lite, a search | 9.1 s | 1.9 s |
-| text.npr.org | 7.1 s | 1.0 s |
-| Wikipedia, ESP32 (352 KB) | out of memory | 3.1 s its first screen, 4.0 s all of it |
-| GitHub, a repository (356 KB) | out of memory | 3.8 s |
-| BBC News (371 KB) | - | 3.0 s |
-| The Guardian (1.4 MB) | refused (403) | 2.1 s its first screen, 3.2 s all |
-| CNN (7 MB) | - | 5.1 s its first screen, 8.1 s all |
+| Hacker News | 33.6 s | 4.4 s |
+| DuckDuckGo lite, a search | 9.1 s | 2.0 s |
+| text.npr.org | 7.1 s | 0.4 to 2.8 s, as its server answers |
+| Wikipedia, ESP32 (352 KB) | out of memory | 3.8 s its first screen, 5.4 s all of it |
+| GitHub, a repository (356 KB) | out of memory | 4.2 s |
+| BBC News (371 KB) | - | 3.2 s |
+| The Guardian (1.4 MB) | refused (403) | 2.2 s its first screen, 5.1 s all |
+| CNN (7 MB) | - | 5.3 s its first screen, 9.9 s all |
 
-What is left of a page's time is its TLS handshake: 2.2 to 2.9 s to the
+Half of a page's time or more is its TLS handshake: 2.2 to 2.9 s to the
 first byte from a site whose certificates are ECDSA on secp384r1 (most now:
 Let's Encrypt's, GlobalSign's), which an ESP32-S3 verifies in software, and
 0.6 s from an all-RSA chain (the S3's hardware multiplier), 0.17 s over
-plain HTTP.
+plain HTTP. A second page of a site resumes the session (0.2 to 1.1 s): a
+Hacker News page after the first is on the glass in 2.3 s.
+
+A reader in the runtime was built first (`html_digest.nim`, 26 KB of flash):
+Hacker News in 3.9 s, the Wikipedia article 3.1 s to its first screen and
+4.0 s all. It was taken out for its size (docs/esp32-image-size.md); the
+table above is what the same pages take with the reader in JavaScript.
 
 ## Text keeps coverage, not outlines (2026-11-19)
 

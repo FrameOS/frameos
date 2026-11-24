@@ -3625,7 +3625,7 @@ const appJsPrelude* = compactJs("""
     try { w[0](typeof text !== "string" ? text : text ? JSON.parse(text) : undefined); } catch (e) { w[1](e); }
   };
   const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
-    chunkBytes: init.chunkBytes, digest: init.digest,
+    chunkBytes: init.chunkBytes, slim: init.slim,
     body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __appReplacer);
   const __response = (url, a) => {
     if (!a.status) throw new TypeError("fetch failed: " + (a.error || url));
@@ -3653,9 +3653,9 @@ const appJsPrelude* = compactJs("""
         const at = line.indexOf(":"), k = line.slice(0, at).trim().toLowerCase(), v = line.slice(at + 1).trim();
         if (at > 0) h[k] = k in h ? h[k] + (k === "set-cookie" ? "\n" : ", ") + v : v;
       }
-      // HTML the runtime reads on the way (docs/html-digest.md): the pieces are its records.
-      info.digest = h["frameos-digest"] || "";
-      delete h["frameos-digest"];
+      // HTML the runtime slims on the way (docs/html-slim.md): "html" when the pieces are.
+      info.slim = h["frameos-slim"] || "";
+      delete h["frameos-slim"];
     }
     let go = false;
     try {

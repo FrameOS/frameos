@@ -57,11 +57,14 @@ let utf8Body = "a" & "é€🙂Ω".repeat(900)
 let latinBody = "x".repeat(3000) & "caf\xE9 \x93quoted\x94 \x80 5 \xFCber"
 const latinText = "café “quoted” € 5 über"
 
-# A page for `digest: "html"` (docs/html-digest.md): 400 KB of script around a
-# heading, a paragraph with a link, and a letter of three bytes for a piece to end inside.
-let digestPage = "<html><head><title>A page</title><script>" & "var junk = '<p>not words</p>';".repeat(14_000) &
-  "</script></head><body><h1>Words</h1>" & "<p>Read by the runtime, with <a href=\"/next\">a link</a> and a \xE2\x82\xAC.</p>".repeat(40) &
+# A page for `slim` (docs/html-slim.md): 400 KB of script around a heading, a
+# paragraph with a link, and a letter of three bytes for a piece to end inside.
+let slimPage = "<html><head><title>A page</title><script>" & "var junk = '<p>not words</p>';".repeat(14_000) &
+  "</script></head>\n<body>\n  <H1 class=\"css-1 big\">Words</H1>\n" &
+  "<p><span>Read</span> by the runtime,\n   with <a onclick=\"go()\" href=\"/next\">a link</a> and a \xE2\x82\xAC.</p>".repeat(40) &
   "</body></html>"
+let slimmedPage = "<html><head><title>A page</title></head> <body> <h1>Words</h1> " &
+  "<p>Read by the runtime, with <a href=\"/next\">a link</a> and a \xE2\x82\xAC.</p>".repeat(40) & "</body></html>"
 
 proc streamAnswerFor(url: string): tuple[code: int, body: string, headers: seq[SimpleHttpHeader]] =
   ## stream.test's pages, for both seams.
@@ -78,12 +81,12 @@ proc streamAnswerFor(url: string): tuple[code: int, body: string, headers: seq[S
       result.body = compress(streamBody, dataFormat = dfGzip)
       result.headers.add(("Content-Encoding", "gzip"))
     elif "/page" in url:
-      result.body = digestPage
+      result.body = slimPage
     elif "/words" in url:
       result.body = "<b>not a page</b>, as its type says"
       result.headers = @[("Content-Type", "text/plain")]
     elif "/untyped" in url:
-      result.body = digestPage
+      result.body = slimPage
       result.headers = @[]
     else: result.body = streamBody
 
@@ -772,41 +775,41 @@ suite "async JavaScript":
     check a.render() == "200|" & $streamBody.len & "|2|1"
     check a.runtime.get(a.owner, %*{"want": "text"}, a.context).asString() == streamBody
 
-  test "onChunk with digest: \"html\": a page comes as its records, whole ones, and what is not a page as it is":
+  test "onChunk with slim: a page comes slimmed, a tag never cut, and what is not a page as it is":
     let a = app(collect & """
-      let digests = [], whole = true
+      let slims = [], whole = true
+      const by = { keep: "href", bare: "span" }
       const see = (piece, info) => {
-        if (!digests.includes(info.digest)) digests.push(info.digest)
-        if (info.digest === "html" && piece && !piece.endsWith("\n")) whole = false
+        if (!slims.includes(info.slim)) slims.push(info.slim)
+        if (info.slim === "html" && piece.split("<").length !== piece.split(">").length) whole = false
         onChunk(piece, info)
       }
       export async function init(app) {
-        await fetch("https://stream.test/page", { chunkBytes: 2048, digest: "html", onChunk: see })
+        await fetch("https://stream.test/page", { chunkBytes: 2048, slim: by, onChunk: see })
         const page = text
         text = ""
-        await fetch("https://stream.test/words", { digest: "html", onChunk: see })
+        await fetch("https://stream.test/words", { slim: by, onChunk: see })
         const words = text
         text = ""
         await fetch("https://stream.test/page", { onChunk: see }) // not asked for: the markup
         const raw = text.length
         text = ""
-        await fetch("https://stream.test/untyped", { digest: "html", onChunk: see }) // no Content-Type: by its first bytes
-        result = JSON.stringify({ page: page.split("\n").slice(0, 5), lines: page.split("\n").length, whole, words, raw,
-          untyped: text.slice(0, 7), digests })
+        await fetch("https://stream.test/untyped", { slim: {}, onChunk: see }) // no Content-Type: by its first bytes
+        result = JSON.stringify({ page, whole, words, raw, untyped: text.slice(0, 62), slims })
       }
       export function get() { return result }
-    """, "digest")
+    """, "slim")
     discard a.render()
     check pumpUntil(proc(): bool = a.render() != "-")
     let got = parseJson(a.render())
-    # The title, the heading, then a link's address before the paragraph it is in: no script, no tags.
-    check got["page"] == %*["TA page", "h384\t\tWords", "A/next", "p0\t0,0,26,256,32,0\tRead by the runtime, with a link and a €.", "A/next"]
-    check got["lines"].getInt() == 2 + 2 * 40 + 1
+    # No script, no attribute nobody asked for, no bare <span>, white space one space.
+    check got["page"].getStr() == slimmedPage
     check got["whole"].getBool()
     check got["words"].getStr() == "<b>not a page</b>, as its type says"
-    check got["raw"].getInt() == digestPage.len - 2 * 40 # as text: the 3-byte letters one each
-    check got["untyped"].getStr() == "TA page"
-    check got["digests"] == %*["html", ""]
+    check got["raw"].getInt() == slimPage.len - 2 * 40 # as text: the 3-byte letters one each
+    # Nothing listed: every attribute stays.
+    check got["untyped"].getStr() == "<html><head><title>A page</title></head> <body> <h1 class=\"css"
+    check got["slims"] == %*["html", ""]
 
   test "onChunk: where nothing pumps, every piece comes inside the fetch() call":
     asyncPumped = false

@@ -206,13 +206,14 @@ const r = await fetch('https://example.com/a-very-long-page', {
 - **gzip**: the request says `Accept-Encoding: gzip` unless the app set that
   header itself, and a gzip (or deflate) body is inflated as it comes. `bytes`
   and `chunkBytes` count the inflated text.
-- **`digest: "html"`**: a body that is HTML (by its `Content-Type`, else its
-  first bytes) is read by the runtime as it comes and the pieces are its
-  **records**, a line a block of the page, never its markup
-  (`docs/html-digest.md`): its scripts, style sheets and tags do not become
-  JavaScript strings at all, which on an ESP32 is the difference between
-  ten seconds for a long page and a fraction of one. `info.digest` is
-  `"html"` then, and `""` for a body that came as it is (text, a feed, JSON).
+- **`slim: { keep, drop, bare, classes }`**: a body that is HTML (by its
+  `Content-Type`, else its first bytes) is slimmed by the runtime as it
+  comes (`docs/html-slim.md`): its scripts, style sheets, comments and the
+  attributes the app did not list never become JavaScript strings, and what
+  is left is HTML written one way, which an app reads with `indexOf`. On an
+  ESP32 that is the difference between ten seconds of reading a long page
+  and one. `info.slim` is `"html"` then, and `""` for a body that came as it
+  is (text, a feed, JSON).
 - **Where nothing pumps promises** (the table below: wasm, a board that
   sleeps) the request is made inside the `fetch()` call and every piece is
   handed over before the call returns: a `get()` that starts one has the

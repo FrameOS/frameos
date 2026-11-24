@@ -106,7 +106,7 @@ suite "the Browser sample":
       if not report["ok"].getBool():
         checkpoint($report)
       check report["ok"].getBool()
-      check report["counts"]["total"].getInt() >= 12
+      check report["counts"]["total"].getInt() >= 50
 
   test "it asks for nothing":
     let config = parseJson(sample["apps"]["browser"]["sources"]["config.json"].getStr())
@@ -114,34 +114,61 @@ suite "the Browser sample":
 
 suite "the Browser's reader, timed":
   test "reads a saved page in the app's interpreter (FRAMEOS_BROWSER_PERF=<file>)":
-    # How long read.ts takes in QuickJS, where an ESP32 spends a page's time
-    # (it runs this a couple of hundred times slower than a desk does).
+    # How long read.ts takes in QuickJS over a page the slimmer made small (frameos/build/browser/slimcorpus.sh
+    # writes them), where an ESP32 spends a page's time: it runs this a couple of hundred times slower than
+    # a desk does. FRAMEOS_BROWSER_REPS readings, their mean; FRAMEOS_BROWSER_PERF_READER=<file> times another
+    # reader that exports time(html).
     let file = getEnv("FRAMEOS_BROWSER_PERF")
     if file.len == 0:
       skip()
     else:
       var sources = sample["apps"]["browser"]["sources"].copy()
-      let reps = getEnv("FRAMEOS_BROWSER_REPS", "5")
-      sources["perf.test.ts"] = %("""import { reader, push, finish } from './read'
+      let reps = getEnv("FRAMEOS_BROWSER_REPS", "20")
+      let other = getEnv("FRAMEOS_BROWSER_PERF_READER")
+      if other.len > 0:
+        sources["other.ts"] = %readFile(other)
+      sources["perf.test.ts"] = %("""import { reader } from './read'
+import { blank, finish } from './page'
 import { rows, reach } from './lay'
-const HTML = """ & $(%readFile(file)) & """
+""" & (if other.len > 0: "import { time } from './other'\n" else: "const time = null\n") & """const HTML = """ & $(%readFile(file)) & """
+
+// In pieces as the slimmer hands them over: a tag never cut.
+const pieces: string[] = []
+for (let at = 0; at < HTML.length; ) {
+  let to = Math.min(HTML.length, at + 4096)
+  if (to < HTML.length) {
+    const lt = HTML.lastIndexOf('<', to - 1)
+    if (lt > HTML.lastIndexOf('>', to - 1)) to = lt > at ? lt : HTML.indexOf('>', to) + 1
+  }
+  pieces.push(HTML.slice(at, to))
+  at = to
+}
 
 test('perf', () => {
-  let best = 1e9, wrap = 0, doc: any = null
   const reps = """ & reps & """
 
+  let doc: any = null, blocks = 0
+  const t0 = Date.now()
   for (let rep = 0; rep < reps; rep++) {
-    const t0 = Date.now()
-    const r = reader('https://example.com/')
-    for (let i = 0; i < HTML.length; i += 16384) if (!push(r, HTML.slice(i, i + 16384), i + 16384 >= HTML.length)) break
-    doc = finish(r)
-    best = Math.min(best, Date.now() - t0)
+    if (time) blocks = (time as any)(HTML)
+    else {
+      doc = blank('https://example.com/')
+      const push = reader(doc)
+      for (let i = 0; i < pieces.length; i++) if (!push(pieces[i], i === pieces.length - 1)) break
+      finish(doc)
+      blocks = doc.n
+    }
   }
-  const t1 = Date.now()
-  const rw = rows(doc, { width: 480, px: 17, pics: true, tall: 260 })
-  reach(rw, 1e9)
-  wrap = Date.now() - t1
-  frameos.log('perf: ' + Math.round(HTML.length / 1024) + ' KB, read ' + best + ' ms, ' + doc.n + ' blocks, ' + doc.chars + ' chars, wrap ' + wrap + ' ms, ' + rw.n + ' rows')
+  const read = (Date.now() - t0) / reps
+  let wrap = 0, n = 0
+  if (doc) {
+    const t1 = Date.now()
+    const rw = rows(doc, { width: 480, px: 17, pics: true, tall: 260 })
+    reach(rw, 1e9)
+    wrap = Date.now() - t1
+    n = rw.n
+  }
+  frameos.log('perf: ' + Math.round(HTML.length / 1024) + ' KB, read ' + read.toFixed(2) + ' ms, ' + blocks + ' blocks, ' + (doc ? doc.chars + ' chars, wrap ' + wrap + ' ms, ' + n + ' rows' : ''))
 })
 """)
       if getEnv("FRAMEOS_BROWSER_PERF_DUMP").len > 0:
@@ -225,6 +252,14 @@ suite "the Browser scene":
           return (x, y)
     (-1, -1)
 
+  # The first pixel from the left on row y whose color is near `color`.
+  proc findColor(image: Image, y: int, color: ColorRGBX, slack = 40): int =
+    for x in 0 ..< image.width:
+      let c = image[x, y]
+      if abs(c.r.int - color.r.int) + abs(c.g.int - color.g.int) + abs(c.b.int - color.b.int) < slack:
+        return x
+    -1
+
   proc pumped() =
     jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
       {.cast(gcsafe).}:
@@ -250,10 +285,14 @@ suite "the Browser scene":
     check asked == @["https://news.ycombinator.com/"]
     if problems.len > 0: echo problems
     check problems.len == 0
-    # Its header's links, then the story's title a few lines down.
-    let header = findLink(image, 44, 70)
-    check header[0] >= 0
-    let title = findLink(image, header[1] + 24, 140)
+    # Its header on the orange the page gives it (a bgcolor), then the story's title a few lines down.
+    var bar = -1
+    for y in 44 .. 70:
+      if findColor(image, y, rgbx(255, 102, 0, 255)) >= 0:
+        bar = y
+        break
+    check bar >= 0
+    let title = findLink(image, bar + 24, 140)
     check title[0] > 0
     scene.tap(title[0] + 30, title[1] + 4)
     let story = draw(scene, config, "story")
@@ -276,7 +315,7 @@ suite "the Browser scene":
     let page = settle(scene, config, "page")
     check asked == @["https://news.ycombinator.com/"]
     check page != first
-    check findLink(page, 44, 70)[0] >= 0
+    check findLink(page, 60, 140)[0] >= 0
     if problems.len > 0: echo problems
     check problems.len == 0
 
@@ -312,6 +351,7 @@ suite "the Browser scene":
     # The page's words and its 1,500 links, not its megabytes.
     let grew = sceneHeapBudgetUsedBytes("browser") - before
     checkpoint($grew)
+    if getEnv("FRAMEOS_BROWSER_HEAP").len > 0: echo "  the page took ", grew, " bytes of the scene's heap"
     check grew < 600_000
 
   test "a frame's buttons walk the page's links and open one":
