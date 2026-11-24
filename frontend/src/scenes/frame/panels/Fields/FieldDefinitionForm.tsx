@@ -15,6 +15,7 @@ import {
 } from '../../../../utils/refreshInterval'
 import { RENDER_SCALE_ROLE, renderScaleFieldIndex } from '../../../../utils/renderScale'
 import { BACKGROUND_COLOR_ROLE, backgroundColorFieldIndex } from '../../../../utils/sceneBackground'
+import { FULL_SCREEN_ROLE, fullScreenFieldIndex } from '../../../../utils/fullScreen'
 import { withStateFieldRole } from '../../../../utils/fieldTypes'
 
 /**
@@ -134,6 +135,48 @@ function BackgroundColorRoleField<T extends AppConfigField>({
           aria-label="Use as background"
           value={active}
           onChange={(enabled) => setFields(withStateFieldRole(fields, index, BACKGROUND_COLOR_ROLE, enabled))}
+        />
+      )}
+    </Field>
+  )
+}
+
+/**
+ * "Use as full screen": a boolean field's value says whether the scene asks the
+ * frame's layout for the whole panel, over its Full screen setting
+ * (utils/fullScreen.ts), so the person at the frame can choose. Only on boolean
+ * fields; at most one state field carries the role.
+ */
+function FullScreenRoleField<T extends AppConfigField>({
+  fields,
+  index,
+  setFields,
+}: {
+  fields: T[]
+  index: number
+  setFields: (fields: T[]) => void
+}): JSX.Element | null {
+  if (fields[index]?.type !== 'boolean') {
+    return null
+  }
+  const active = fullScreenFieldIndex(fields as StateField[]) === index
+  return (
+    <Field
+      name="role"
+      label="Use as full screen"
+      tooltip={
+        <>
+          When this field is on, the scene asks the frame's layout for the whole panel: no bar or dock around it, as a
+          book or a photo wants. It wins over Full screen in the scene's settings. Make it public so people can choose on
+          the frame. Only one field per scene can have this role.
+        </>
+      }
+    >
+      {() => (
+        <Switch
+          aria-label="Use as full screen"
+          value={active}
+          onChange={(enabled) => setFields(withStateFieldRole(fields, index, FULL_SCREEN_ROLE, enabled))}
         />
       )}
     </Field>
@@ -332,6 +375,7 @@ export function FieldDefinitionForm<T extends AppConfigField>({
           <RefreshIntervalRoleField fields={fields} index={index} setFields={setFields} />
           <RenderScaleRoleField fields={fields} index={index} setFields={setFields} />
           <BackgroundColorRoleField fields={fields} index={index} setFields={setFields} />
+          <FullScreenRoleField fields={fields} index={index} setFields={setFields} />
         </>
       ) : null}
       <div className="flex w-full items-center justify-between gap-2">

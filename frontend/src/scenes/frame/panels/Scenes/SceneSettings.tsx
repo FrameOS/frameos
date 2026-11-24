@@ -260,6 +260,16 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 )}
               </Field>
             )}
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="fullScreen"
+                label={<SceneSettingsLabel>Full screen</SceneSettingsLabel>}
+                tooltip="Ask the frame's layout for the whole panel: no bar or dock around this scene, as a book or a photo wants. A field of the scene used as full screen wins over this, so people can choose on the frame."
+              >
+                <Switch name="fullScreen" />
+              </Field>
+            )}
             <Field
               className={fieldClassName}
               name="category"

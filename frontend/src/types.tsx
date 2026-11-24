@@ -1155,7 +1155,7 @@ export interface FontMetadata {
 }
 
 /** What the runtime uses a state field for (see utils/refreshInterval.ts and utils/renderScale.ts). */
-export type StateFieldRole = 'refreshInterval' | 'renderScale' | 'backgroundColor'
+export type StateFieldRole = 'refreshInterval' | 'renderScale' | 'backgroundColor' | 'fullScreen'
 
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'
@@ -1163,6 +1163,9 @@ export interface StateField extends AppConfigField {
   /**
    * `refreshInterval`: this field's value is the scene's seconds between renders.
    * `renderScale`: this field's value is the scene's scale, over its `settings.renderScale`.
+   * `backgroundColor`: this color field's value is the scene's background, over its `settings.backgroundColor`.
+   * `fullScreen`: this boolean field says whether the scene asks its layout for the whole panel, over its
+   * `settings.fullScreen` (utils/fullScreen.ts).
    * One field per role per scene.
    */
   role?: StateFieldRole
@@ -1338,6 +1341,9 @@ export interface FrameSceneSettings {
   backgroundColor?: string
   /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); unset or 0 = the frame's. */
   renderScale?: number
+  /** The scene asks the frame's layout for the whole panel, unless a field with role fullScreen says otherwise
+   * (utils/fullScreen.ts). */
+  fullScreen?: boolean
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>

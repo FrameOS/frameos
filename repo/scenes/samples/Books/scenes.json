@@ -33,6 +33,16 @@
         "hint": "A file to open once, as \"<storage>:<path>\": what the Files app sends."
       },
       {
+        "name": "fullScreen",
+        "type": "boolean",
+        "label": "Full screen",
+        "value": "true",
+        "access": "public",
+        "persist": "disk",
+        "role": "fullScreen",
+        "hint": "The whole glass for the book: no bar of the frame's layout around it."
+      },
+      {
         "name": "spot",
         "label": "Where it is",
         "type": "json",

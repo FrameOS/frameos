@@ -165,6 +165,25 @@ export function get(app) {
 }
 """
 
+# A bar layout that gives a scene asking for the whole panel all of it.
+const fullScreenLayoutUi = """
+export function get(app) {
+  frameos.setState("heardFull", app.frame.fullScreen === true)
+  if (app.frame.fullScreen) return <yield />
+  return (
+    <div className="flex flex-col w-full h-full">
+      <div className="h-[20px] bg-white" />
+      <yield />
+    </div>
+  )
+}
+"""
+
+proc withFullScreenField(sceneJson, value: string): string =
+  ## A public boolean with role fullScreen, as the reader samples carry.
+  sceneJson.replace(""""fields": []""", """"fields": [{"name": "full", "type": "boolean", "label": "Full screen",
+    "value": "$1", "access": "public", "persist": "disk", "role": "fullScreen"}]""" % [value])
+
 const fieldUi = """
 export function get(app) {
   return <input className="w-full h-full" />
@@ -335,6 +354,11 @@ let scenesJson = "[" & [
   jsxScene("tests/escaping", escapingUi, 1.0, ""","isLayout": true"""),
   jsxScene("tests/typingLayout", typingLayoutUi, 1.0, ""","isLayout": true"""),
   jsxScene("tests/typing", fieldUi, 3000.0).withLayout("tests/typingLayout"),
+  jsxScene("tests/fullLayout", fullScreenLayoutUi, 1.0, ""","isLayout": true"""),
+  panel("tests/fullByField", "#0000ff", 600.0).withFullScreenField("true").withLayout("tests/fullLayout"),
+  panel("tests/fullBySetting", "#0000ff", 600.0, ""","fullScreen": true""").withLayout("tests/fullLayout"),
+  panel("tests/fullFieldOff", "#0000ff", 600.0, ""","fullScreen": true""").withFullScreenField("false").withLayout("tests/fullLayout"),
+  panel("tests/notFull", "#0000ff", 600.0).withLayout("tests/fullLayout"),
   panel("tests/fastChild", "#ff00ff", 1.0),
   jsxScene("tests/twoHoles", twoScenesUi, 300.0),
   jsxScene("tests/coveredScene", coveredSceneUi, 300.0),
@@ -518,6 +542,43 @@ suite "layouts":
     # The keyboard is the frame's, at the bottom of the panel: the layout is
     # laid out above it (test_frame_keyboard.nim).
     check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == keyboardBox(W, H)[0]
+
+  test "a scene asks its layout for the whole panel, by its field or its setting, and the field wins":
+    for (id, full) in [("tests/fullByField", true), ("tests/fullBySetting", true), ("tests/fullFieldOff", false),
+        ("tests/notFull", false)]:
+      let scene = newScene(id)
+      let canvas = pass(scene)
+      check scene.layoutOf.wrapsFullScreen == full
+      check scene.layoutOf.state{"heardFull"}.getBool() == full
+      if full:
+        check scene.layoutOf.holeIn.y == 0 and scene.layoutOf.holeIn.h == H
+        check canvas.color(5, 5) == colored("#0000ff")
+      else:
+        check scene.layoutOf.holeIn.y == 20 and scene.layoutOf.holeIn.h == H - 20
+        check canvas.color(5, 5) == colored("#ffffff")
+      check not ($logged).contains("error")
+
+  test "a change of the full screen field in the scene's settings shows on the next render":
+    let scene = newScene("tests/fullByField")
+    discard pass(scene)
+    check scene.layoutOf.holeIn.y == 0
+    # What the scene settings' Save and a control panel send: the public field.
+    runEvent(scene, ExecutionContext(scene: scene, event: "setSceneState", payload: %*{"state": {"full": false}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1000.01
+    var canvas = pass(scene)
+    check not scene.layoutOf.wrapsFullScreen
+    check scene.layoutOf.holeIn.y == 20
+    check canvas.color(5, 5) == colored("#ffffff")
+    check canvas.color(5, 30) == colored("#0000ff")
+    # As text, the way a form may deliver a boolean.
+    runEvent(scene, ExecutionContext(scene: scene, event: "setSceneState", payload: %*{"state": {"full": "true"}},
+      loopIndex: 0, loopKey: ".", nextSleep: -1))
+    rhythmClockOverride = 1000.02
+    canvas = pass(scene)
+    check scene.layoutOf.wrapsFullScreen
+    check scene.layoutOf.holeIn.y == 0
+    check canvas.color(5, 5) == colored("#0000ff")
 
   test "a layout is told the name of the scene it wraps":
     let scene = newScene("tests/inTaskbar")

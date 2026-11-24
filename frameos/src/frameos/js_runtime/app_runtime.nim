@@ -2416,6 +2416,13 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if not e.owner.scene.isNil and e.owner.scene.typing:
       return nimBoolToJS(ctx, true)
     return jsUndefSentinel(ctx)
+  of "fullScreen":
+    # A layout around a scene that asks for the whole panel (full_screen.nim:
+    # its role field, else settings.fullScreen): the layout gives it by
+    # returning a bare <yield />.
+    if not e.owner.scene.isNil and e.owner.scene.wrapsFullScreen:
+      return nimBoolToJS(ctx, true)
+    return jsUndefSentinel(ctx)
   of "batteryPercent":
     # An ESP32 with a battery. A Pi and the preview have nothing to say.
     when defined(freertos):
@@ -2557,7 +2564,8 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
         keys.add(key)
   of "frame":
     keys = @["width", "height", "rotate", "assetsPath", "storages", "timeZone", "debug", "embedded", "scale", "fast",
-      "paper", "color", "round", "sceneName", "systemScene", "typing", "wentBack", "batteryPercent", "wifiRssi", "theme", "eventMap"]
+      "paper", "color", "round", "sceneName", "systemScene", "typing", "fullScreen", "wentBack", "batteryPercent", "wifiRssi",
+      "theme", "eventMap"]
     keys.add("sceneId")
     if not windowSceneListing.isNil:
       keys.add("scenes")

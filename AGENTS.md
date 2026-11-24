@@ -728,6 +728,11 @@
   the field's UI past the layout (`keysTake`), so the focus and the windows stay.
   Its UI lays it out (`layoutUiDocked`), the interpreter draws it last and
   forgets the canvas when it comes, goes or moves.
+  A scene asks its layout for the whole panel (a reader) with a public boolean
+  field of `role: "fullScreen"`, else `settings.fullScreen` (`full_screen.nim`,
+  `utils/fullScreen.ts`, doc section "Full screen"); the interpreter reads it
+  each render pass where it reads `typing`, the layout hears
+  `app.frame.fullScreen` and decides (a bare `<yield />`). Never a host's.
 - `<Scene id>` and `<yield />` are holes in the canvas wherever they can be
   (`seekHoles` in `ui/layout.nim`, `holesOf` in `app_runtime.nim`; a slot with
   `hole` set): `renderSvgAround` draws the chrome, each scene goes through
