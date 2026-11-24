@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import { sendSecurityNotificationEmail } from "../../../../src/lib/email";
 import { requireRecentAuth } from "../../../../src/lib/recent-auth";
 import { readSession } from "../../../../src/lib/session";
 import { GET, POST } from "./route";
@@ -24,6 +25,9 @@ vi.mock("../../../../src/lib/session", () => ({
 vi.mock("../../../../src/lib/audit", () => ({
   recordAuditEvent: vi.fn(() => Promise.resolve()),
 }));
+vi.mock("../../../../src/lib/email", () => ({
+  sendSecurityNotificationEmail: vi.fn(() => Promise.resolve()),
+}));
 vi.mock("../../../../src/lib/recent-auth", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   requireRecentAuth: vi.fn(() => Promise.resolve(undefined)),
@@ -36,6 +40,7 @@ vi.mock("../../../../src/lib/device-flow", async (importOriginal) => ({
 const sessionMock = vi.mocked(readSession);
 const auditMock = vi.mocked(recordAuditEvent);
 const recentAuthMock = vi.mocked(requireRecentAuth);
+const mailMock = vi.mocked(sendSecurityNotificationEmail);
 
 let liveCount = 0;
 let inserted: Record<string, unknown>[] = [];
@@ -65,6 +70,8 @@ const fakeDb = {
       where: () => {
         const rows = Promise.resolve([{ count: liveCount }]);
         return Object.assign(rows, {
+          // The owner's address, for the mail a mint sends.
+          limit: () => Promise.resolve([{ primaryEmail: "owner@example.com" }]),
           orderBy: () => Promise.resolve(listed),
         });
       },
@@ -92,6 +99,7 @@ beforeEach(() => {
   listed = [];
   sessionMock.mockResolvedValue(session);
   auditMock.mockClear();
+  mailMock.mockClear();
   recentAuthMock.mockResolvedValue(undefined);
 });
 
@@ -113,6 +121,14 @@ describe("POST /api/account/api-tokens", () => {
       expect.anything(),
       expect.objectContaining({ eventType: "account.api_token_created" }),
     );
+    // The owner is told, with the token's name and access and never its secret.
+    expect(mailMock).toHaveBeenCalledTimes(1);
+    const [to, notification] = mailMock.mock.calls[0]!;
+    expect(to).toBe("owner@example.com");
+    expect(notification).toMatchObject({ what: "api_token_created" });
+    expect(notification.detail).toContain('"laptop"');
+    expect(notification.detail).toContain("read-only");
+    expect(notification.detail).not.toContain(payload.token);
   });
 
   it("refuses to mint from a token session", async () => {
@@ -124,6 +140,7 @@ describe("POST /api/account/api-tokens", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: "api_token_not_allowed" });
     expect(inserted).toHaveLength(0);
+    expect(mailMock).not.toHaveBeenCalled();
   });
 
   it("requires recent authentication", async () => {

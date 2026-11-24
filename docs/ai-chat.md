@@ -139,7 +139,13 @@ tools too (catalog and doc search, store, `save_scene`, `add_scene_to_frame`).
 other and the fixtures.
 
 Every tool result that carries text somebody else wrote is wrapped in
-`<untrusted_data source="…">` with the same notice on both planes.
+`<untrusted_data source="…">` with the same notice on both planes. So is the
+scene open in the editor when it may be somebody else's: a backend wraps it
+on every turn; the cloud wraps it (whole, with the other open scenes' names
+and the selection) when the user is on a store scene they do not own, or on
+a frame that holds a scene somebody else published, and leaves the user's
+own scene as it is. A scene's id rides the sentence in front of the frame
+only when it reads as an id.
 
 ## The prompt
 
