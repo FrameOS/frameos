@@ -130,7 +130,7 @@ jobs:
     # deploy is about to ship. Verify the tip, so that what passed here is
     # what goes out.
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
@@ -141,7 +141,7 @@ jobs:
         with:
           node-version: '24'
 
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .turbo
           key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
@@ -236,7 +236,7 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
@@ -331,7 +331,7 @@ jobs:
       # Full history and the normal remote refspec: scripts/deploy.sh proves
       # the commit it is about to ship exists on the remote before shipping
       # it, which a shallow single-ref checkout cannot answer.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
@@ -425,10 +425,10 @@ jobs:
           # the bump case above pinned a commit.
           grep -q '^target=' "$GITHUB_OUTPUT" || echo "target=main" >>"$GITHUB_OUTPUT"
 
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: steps.freshness.outputs.proceed == 'true'
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.freshness.outputs.proceed == 'true'
         with:
           node-version: 24
@@ -437,7 +437,7 @@ jobs:
 
       # verify just wrote this exact key, so the build below is mostly cache
       # replay rather than a second full build of the frontend.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: steps.freshness.outputs.proceed == 'true'
         with:
           path: .turbo
