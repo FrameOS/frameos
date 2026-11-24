@@ -51,16 +51,19 @@ export function shareTokenGrantsAccess(
 // A pulled scene is gone for the public, for share-token holders and for
 // linked frames alike — but its owner and moderators still open its page
 // (the store page itself lets them through), so the reads that page is made
-// of (images, scenes.json, the zip) follow the same rule: the owner's or a
-// superadmin's web session, nothing else. Without this the owner sees a
-// page of broken images and a "Could not load the scene (410)".
+// of (images, scenes.json, the zip) follow the same rule: the owner's
+// session, or a superadmin's web session, nothing else. Without this the
+// owner sees a page of broken images and a "Could not load the scene (410)".
+// A personal API token is its owner's for their own scenes, but never a
+// moderator's: like /api/admin/*, the cross-account read is the person's
+// (cookie) alone.
 export async function canViewPulledScene(ownerAccountId: string) {
   const session = await readSession();
   if (!session?.accountId) {
     return false;
   }
-  return (
-    session.accountId === ownerAccountId ||
-    (await accountIsSuperadmin(session.accountId))
-  );
+  if (session.accountId === ownerAccountId) {
+    return true;
+  }
+  return !session.apiToken && (await accountIsSuperadmin(session.accountId));
 }

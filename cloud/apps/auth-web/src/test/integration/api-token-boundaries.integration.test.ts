@@ -4,6 +4,7 @@
 // enrolment routes — that even a cookie session needs a recent proof.
 import { generateKeyPairSync } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
+import { strToU8, zipSync } from "fflate";
 import { NextRequest } from "next/server";
 import {
   accountApiTokens,
@@ -16,6 +17,8 @@ import {
   linkedClients,
   passwordProviderIssuer,
   sessions,
+  storeScenes,
+  storeSceneVersions,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as createApiToken } from "../../../app/api/account/api-tokens/route";
@@ -38,6 +41,7 @@ import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { GET as frameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { GET as frameAssets } from "../../../app/api/frames/[frameId]/assets/route";
 import { GET as frameImage } from "../../../app/api/frames/[frameId]/image/route";
+import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { totpCodeAtStep, totpStepFor } from "../../lib/two-factor";
 import { POST as signup } from "../../../app/api/auth/signup/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -377,6 +381,51 @@ describe("a claim token minted with an API token", () => {
     );
     expect(refused.status).toBe(403);
     expect((await refused.json()).error).toBe("api_token_not_allowed");
+  });
+});
+
+describe("a superadmin's API token is no moderator", () => {
+  // A moderator opens somebody else's pulled scene from the browser; a
+  // script holding the moderator's token does not (store-auth.ts).
+  it("reads a pulled scene of another account only with the cookie", async () => {
+    const owner = await signUpVerifiedUser();
+    const zip = zipSync({
+      "scene/scenes.json": strToU8(JSON.stringify([{ id: "s", nodes: [] }])),
+      "scene/template.json": strToU8(JSON.stringify({ name: "Gone", scenes: "./scenes.json" })),
+    });
+    const [scene] = await db
+      .insert(storeScenes)
+      .values({
+        accountId: owner.accountId,
+        latestVersion: 1,
+        name: "Gone",
+        slug: `gone-${owner.accountId.slice(0, 8)}`,
+        status: "pulled",
+        visibility: "public",
+      })
+      .returning();
+    await db.insert(storeSceneVersions).values({
+      content: Buffer.from(zip),
+      contentType: "application/zip",
+      riskFlags: [],
+      sceneId: scene!.id,
+      sha256: `sha-${scene!.id}`,
+      sizeBytes: zip.length,
+      version: 1,
+    });
+
+    const admin = await signUpVerifiedUser();
+    await db.update(accounts).set({ isSuperadmin: true }).where(eq(accounts.id, admin.accountId));
+    const read = () =>
+      getScenesJson(request(`/api/store/scenes/${scene!.id}/scenes.json`, undefined, "GET"), {
+        params: Promise.resolve({ sceneId: scene!.id }),
+      });
+
+    await establishSession(admin.accountId, admin.email);
+    expect((await read()).status).toBe(200);
+
+    await switchToApiToken(admin.accountId, admin.email);
+    expect((await read()).status).toBe(410);
   });
 });
 
