@@ -227,18 +227,24 @@ def _scenes_use_ffmpeg(frame: Frame) -> bool:
     for scene in scenes if isinstance(scenes, list) else []:
         if not isinstance(scene, dict):
             continue
-        apps = scene.get("apps") if isinstance(scene.get("apps"), dict) else {}
-        for app in apps.values():
-            sources = app.get("sources") if isinstance(app, dict) and isinstance(app.get("sources"), dict) else {}
-            for name, text in sources.items():
-                if isinstance(text, str) and not name.endswith(".json") and _VIDEO_CALL.search(text):
+        apps = scene.get("apps")
+        for app in apps.values() if isinstance(apps, dict) else []:
+            sources = app.get("sources") if isinstance(app, dict) else None
+            for name, text in sources.items() if isinstance(sources, dict) else []:
+                if isinstance(text, str) and not str(name).endswith(".json") and _VIDEO_CALL.search(text):
                     return True
-        for node in scene.get("nodes") or []:
-            data = node.get("data") if isinstance(node, dict) and isinstance(node.get("data"), dict) else {}
+        nodes = scene.get("nodes")
+        for node in nodes if isinstance(nodes, list) else []:
+            if not isinstance(node, dict):
+                continue
+            data = node.get("data")
+            if not isinstance(data, dict):
+                continue
             if node.get("type") == "app" and str(data.get("keyword") or "").endswith("rstpSnapshot"):
                 return True
             for key in ("code", "codeJS"):
-                if isinstance(data.get(key), str) and _VIDEO_CALL.search(data[key]):
+                code = data.get(key)
+                if isinstance(code, str) and _VIDEO_CALL.search(code):
                     return True
     return False
 
