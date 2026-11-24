@@ -225,11 +225,15 @@ Pi plays one. Its scenes say `video` among their needs, never `linux`.
 - **Video player**: the videos of a folder (`videos/` by default) one after
   another, for ever, by name or shuffled, the folder or one video again and
   again, played like a phone's player: a tap shows the controls (10 s back
-  and on, pause, the video before and after, the list, a bar to drag, which
-  seeks when the finger lifts) and another hides them, as a few seconds of
-  playing does; a double tap on the left or right third skips 10 s, a swipe
-  across the picture or in from the screen's edge (`back` / `forward`)
-  changes the video; the keys too (its `onEvent`: the arrows 10 s, space or K
+  and on, pause, the video before and after, the list, a bar to drag or
+  tap, which seeks when the finger lifts) and another hides them, as a few
+  seconds of playing does; a double tap on the left or right third skips
+  10 s, a swipe across the picture or in from the screen's edge (`back` /
+  `forward`) changes the video. A gesture goes to the innermost element with
+  a handler for it, so the bar and the buttons take the taps, double taps
+  and swipes that start on them (a drag along the bar lifts as a swipe too),
+  and the bar keeps 28 px from the screen's sides, where a press is held for
+  the frame's edge swipe. The keys too (its `onEvent`: the arrows 10 s, space or K
   pause, N and P or Page Down and Up the video, Home its start, 0 to 9 a
   tenth of the way in, L the list). Where it was is kept on disk.
 - **Files** plays the videos it lists: a frame of each as its thumbnail, the

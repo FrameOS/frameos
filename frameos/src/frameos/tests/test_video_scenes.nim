@@ -5,8 +5,10 @@
 ## film; Video from URL over a local HTTP server. Skipped without ffmpeg.
 ## FRAMEOS_VIDEO_SHOTS=<dir> writes the last picture of each there.
 
-import std/[json, os, osproc, strutils, times, unittest]
+import std/[json, monotimes, os, osproc, strutils, times, unittest]
 import pixie
+import ../events
+import ../input_state
 import ../interpreter
 import ../js_runtime/app_runtime
 import ../scene_rhythm
@@ -16,7 +18,11 @@ from ../ids import SceneId
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
 let haveFfmpeg = findExe("ffmpeg").len > 0 and findExe("ffprobe").len > 0
-const BarY = 150 # the seek bar of a 320x180 Video player, its controls up (video-player-scrub-controls)
+const
+  BarY = 150 # the seek bar of a 320x180 Video player, its controls up (video-player-scrub-controls)
+  TrackLeft = 42 # its track's ends, 42 pixels from the sides (the app's BAR_SIDES + BAR_GRIP)
+  TrackWidth = 320 - 2 * TrackLeft
+  TrackY = 150 # the row of its track
 let assets = getTempDir() / "frameos-video-scenes-" & $getCurrentProcessId()
 createDir(assets / "videos")
 
@@ -196,6 +202,26 @@ suite "the video samples":
   proc key(scene: FrameScene, code, key: string) =
     scene.send("keyDown", %*{"code": code, "key": key})
 
+  # A finger on the glass as a touch screen's driver reports it, through the
+  # frame's gestures (input_state.nim) as on a Pi: a drag lifts as the swipe it
+  # also is, a tap as `tap` (and `doubleTap`), a press at the screen's edge is
+  # held for the frame's swipe in. 40 ms an event. What the scene heard, by name.
+  var finger = initInputState(frame())
+  var fingerClock = getMonoTime()
+  proc touch(scene: FrameScene, event: string, x, y: int): seq[string] =
+    fingerClock = fingerClock + initDuration(milliseconds = 40)
+    var output: seq[InputDelivery]
+    let wire = %*{"x": (x * PointerWireMax + 319) div 320, "y": (y * PointerWireMax + 179) div 180,
+      "pointerId": 0, "pointerType": "touch", "button": 0, "buttons": 1}
+    doAssert finger.applyNamedInput(event, wire, eoDriver, fingerClock, output)
+    for delivery in output:
+      result.add delivery.name
+      runEvent(scene, ExecutionContext(scene: scene, event: delivery.name, payload: delivery.payload,
+        loopIndex: 0, loopKey: ".", nextSleep: -1))
+
+  proc tapAt(scene: FrameScene, x, y: int): seq[string] =
+    scene.touch("pointerDown", x, y) & scene.touch("pointerUp", x, y)
+
   test "the Video player is played like a phone's: keys, a bar to drag, double taps, swipes":
     if not haveFfmpeg:
       skip()
@@ -216,27 +242,50 @@ suite "the video samples":
       now = scene.play(10, proc(image: Image): bool = image.color() == "red")
       check now.color() == "red"
       # A tap shows the controls (or hides them, up since the keys: a second
-      # tap then); the bar, dragged to four fifths and let go, goes there: blue.
+      # tap then).
       proc barUp(image: Image): bool = image[160, 6].rgba.r < 160 # the top bar darkens the red
-      scene.send("tap", %*{"x": 160, "y": 60})
+      proc filledTo(image: Image, along: float): bool =
+        # The seek bar's sky blue that far along, not its grey track.
+        image[TrackLeft + int(along * TrackWidth), TrackY].rgba.g > 150
+      check scene.tapAt(160, 60) == @["pointerDown", "pointerUp", "tap"]
       var (controls, _) = scene.draw()
       if not controls.barUp:
-        scene.send("tap", %*{"x": 160, "y": 60})
+        discard scene.tapAt(160, 60)
         controls = scene.draw()[0]
       check controls.barUp
       controls.shot("video-player-scrub-controls")
-      scene.send("pointerDown", %*{"x": 40, "y": BarY, "buttons": 1})
-      scene.send("pointerMove", %*{"x": 120, "y": BarY, "buttons": 1})
+      # The knob, at the bar's start, dragged to four fifths and let go: the
+      # video goes there, blue. The press is the scene's at once (no edge of
+      # the screen's), and the swipe right the finger makes as it lifts is the
+      # bar's: it was this video from its start.
+      check scene.touch("pointerDown", TrackLeft - 4, BarY) == @["pointerDown"]
+      discard scene.touch("pointerMove", 120, BarY)
       let (dragging, _) = scene.draw()
       dragging.shot("video-player-scrubbing")
       check dragging.color() == "red" # not there until it lets go
-      scene.send("pointerMove", %*{"x": 16 + int(0.8 * 288), "y": BarY + 30, "buttons": 1}) # off the bar: still its
-      scene.send("pointerUp", %*{"x": 16 + int(0.8 * 288), "y": BarY + 30})
+      check dragging.barUp and dragging.filledTo(0.25) # the knob follows the finger
+      let fourFifths = TrackLeft + int(0.8 * TrackWidth)
+      discard scene.touch("pointerMove", fourFifths, BarY + 30) # off the bar: still its
+      check scene.touch("pointerUp", fourFifths, BarY + 30) == @["pointerUp", "swipe"]
       now = scene.play(10, proc(image: Image): bool = image.color() == "blue")
       check now.color() == "blue"
-      # A double tap on the left: 10 seconds back, red (about 9 s in).
-      for event in ["tap", "tap", "doubleTap"]:
-        scene.send(event, %*{"x": 30, "y": 90})
+      check now.barUp and now.filledTo(0.75) # the controls stay
+      # Back to 55 %, the swipe left it also is: there (13 s, still blue, the
+      # bar filled to it), not the next video (this one again, from its start).
+      discard scene.touch("pointerDown", fourFifths + 3, BarY)
+      discard scene.touch("pointerMove", 150, BarY)
+      check scene.touch("pointerUp", TrackLeft + int(0.55 * TrackWidth), BarY) == @["pointerUp", "swipe"]
+      now = scene.play(5, proc(image: Image): bool = image.filledTo(0.45) and not image.filledTo(0.65))
+      check now.filledTo(0.45) and not now.filledTo(0.65)
+      check now.color() == "blue"
+      # A tap on the bar goes there and keeps the controls up: 85 %.
+      check scene.tapAt(TrackLeft + int(0.85 * TrackWidth), BarY) == @["pointerDown", "pointerUp", "tap"]
+      now = scene.play(5, proc(image: Image): bool = image.filledTo(0.8))
+      check now.filledTo(0.8)
+      check now.barUp
+      # A double tap on the left: 10 seconds back, red (about 10 s in).
+      check scene.tapAt(30, 90) & scene.tapAt(30, 90) ==
+        @["pointerDown", "pointerUp", "tap", "pointerDown", "pointerUp", "tap", "doubleTap"]
       now = scene.play(10, proc(image: Image): bool = image.color() == "red")
       check now.color() == "red"
       check problems.len == 0
@@ -247,7 +296,9 @@ suite "the video samples":
       problems = @[]
       scene = load("Video player", "video-player", %*{"folder": "videos", "repeat": "one"})
       discard scene.play(20, proc(image: Image): bool = image.color() == "red")
-      scene.send("swipe", %*{"direction": "left", "startX": 250, "startY": 90, "x": 60, "y": 90})
+      discard scene.touch("pointerDown", 250, 90)
+      discard scene.touch("pointerMove", 150, 90)
+      check scene.touch("pointerUp", 60, 90) == @["pointerUp", "swipe"]
       now = scene.play(10, proc(image: Image): bool = image.color() == "blue")
       check now.color() == "blue"
       scene.send("back", %*{})
