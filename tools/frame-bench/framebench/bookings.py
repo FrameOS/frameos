@@ -28,10 +28,11 @@ HOME = os.path.expanduser(os.environ.get('FRAMEOS_BENCH_HOME', '~/.frameos-bench
 PATH = os.path.expanduser(os.environ.get('FRAMEOS_BENCH_BOOKINGS', os.path.join(HOME, 'BOOKINGS.md')))
 BOARDS_JSON = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'boards.json')
 STAMP = '%Y-%m-%d %H:%M'
-# With its UTC offset: the machine's time zone changed under a morning's
-# bookings once (CET to Buenos Aires, 2026-11-24), and every booking written
-# before it read three hours longer. A stamp from before the offset is local
-# time.
+# `since` says its UTC offset, and `until` is in the same zone: the machine's
+# time zone changed under a morning's bookings once (CET to Buenos Aires,
+# 2026-11-24), and every booking read three hours longer. `until` itself stays
+# plain local time, which a reader from before this parses (and one it could
+# not parse would be lapsed to it: the board free to take).
 STAMP_ZONED = '%Y-%m-%d %H:%M %z'
 KEEP_HISTORY = 40
 
@@ -154,15 +155,26 @@ def _stamp(when: datetime) -> str:
 
 
 def _parse_stamp(stamp: str) -> datetime:
+    """A `since`: with its offset, or from before stamps had one (local time)."""
     try:
         return datetime.strptime(stamp, STAMP_ZONED)
     except ValueError:
         return datetime.strptime(stamp, STAMP).astimezone()
 
 
+def _until(booking: dict) -> datetime:
+    """When the booking ends: its `until`, in the zone its `since` says."""
+    naive = datetime.strptime(booking['until'], STAMP)
+    try:
+        zone = datetime.strptime(booking.get('since') or '', STAMP_ZONED).tzinfo
+    except ValueError:
+        return naive.astimezone()
+    return naive.replace(tzinfo=zone)
+
+
 def _lapsed(booking: dict, now: datetime | None = None) -> bool:
     try:
-        return _parse_stamp(booking['until']) <= (now or datetime.now().astimezone())
+        return _until(booking) <= (now or datetime.now().astimezone())
     except ValueError:
         return True
 
@@ -174,7 +186,7 @@ def _same(a: str, b: str) -> bool:
 
 
 def _note(state, text):
-    state['history'].append(f"- {_stamp(_now())} {text}")
+    state['history'].append(f"- {_now().strftime(STAMP)} {text}")
 
 
 def holders(names=None) -> dict:
@@ -205,7 +217,7 @@ def book(names, who: str, what: str, hours: float = 2.0, partial: bool = False) 
         raise ValueError('--who: your session name and what you are, e.g. "frameos-16 (desktop-consistency)"')
     wanted = resolve(names)
     now = _now()
-    until = _stamp(now + timedelta(hours=hours))
+    until = (now + timedelta(hours=hours)).strftime(STAMP)
     with _locked() as state:
         held = state['held']
         refused = {b: held[b] for b in wanted if b in held and not _lapsed(held[b], now) and not _same(held[b]['holder'], who)}
@@ -218,7 +230,9 @@ def book(names, who: str, what: str, hours: float = 2.0, partial: bool = False) 
             old = held.get(b)
             if old and _lapsed(old, now) and not _same(old['holder'], who):
                 _note(state, f"{b}: {old['holder']}'s booking lapsed at {old['until']} ({old['what']})")
-            since = old['since'] if old and _same(old['holder'], who) and not _lapsed(old, now) else _stamp(now)
+            # In the zone `until` is written in, the same moment if it is kept.
+            since = (_stamp(_parse_stamp(old['since']).astimezone(now.tzinfo))
+                     if old and _same(old['holder'], who) and not _lapsed(old, now) else _stamp(now))
             # The same holder naming itself shorter (`extend --who frameos-16`) keeps its fuller name.
             name = old['holder'] if old and _same(old['holder'], who) and len(who.split()) < 2 else who
             held[b] = {'holder': name, 'since': since, 'until': until, 'what': what or ''}

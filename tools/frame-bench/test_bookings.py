@@ -55,15 +55,25 @@ def test_a_booking_ends_when_it_said_whatever_the_time_zone(bk, monkeypatch):
     time.tzset()
     try:
         bk.book('cloudw', 'frameos-video (video PR)', 'playback', hours=2)
-        until = bk._parse_stamp(bk.holders()['cloudw']['until'])
+        held = bk.holders()['cloudw']
+        until = bk._until(held)
+        # A reader from before the zones still reads `until` (and an
+        # unreadable one would be lapsed to it: the board free).
+        datetime.strptime(held['until'], bk.STAMP)
         monkeypatch.setenv('TZ', '<-03>3')
         time.tzset()
-        assert bk._parse_stamp(bk.holders()['cloudw']['until']) == until
-        assert not bk._lapsed(bk.holders()['cloudw'], until - timedelta(minutes=1))
-        assert bk._lapsed(bk.holders()['cloudw'], until)
+        held = bk.holders()['cloudw']
+        assert bk._until(held) == until
+        assert not bk._lapsed(held, until - timedelta(minutes=1))
+        assert bk._lapsed(held, until)
         assert abs((until - datetime.now(timezone.utc)).total_seconds() - 7200) < 120
-        # A stamp from before the offset reads as local time, as it did.
-        assert bk._parse_stamp('2026-11-24 12:18').utcoffset() == timedelta(hours=-3)
+        # Extended in the new zone: `until` and `since` move to it together.
+        bk.book('cloudw', 'frameos-video', 'playback', hours=1)
+        held = bk.holders()['cloudw']
+        assert abs((bk._until(held) - datetime.now(timezone.utc)).total_seconds() - 3600) < 120
+        assert held['since'].endswith('-0300')
+        # A booking from before the zones reads as local time, as it did.
+        assert bk._until({'since': '2026-11-24 09:18', 'until': '2026-11-24 12:18'}).utcoffset() == timedelta(hours=-3)
     finally:
         monkeypatch.delenv('TZ')
         time.tzset()
