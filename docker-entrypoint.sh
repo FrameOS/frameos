@@ -68,10 +68,17 @@ if [ -n "$HASSIO_TOKEN" ]; then
 
   # Ingress server on port 8990 in foreground. Always plain HTTP: only the
   # Supervisor's ingress proxy reaches it, and it brings its own TLS.
+  # --no-proxy-headers: this server mounts every router without user auth
+  # and lets in only the Supervisor's address (IngressPeerGuard). uvicorn's
+  # default trusts X-Forwarded-For from 127.0.0.1, so anything running in
+  # this container (a scene rendered on the server, a worker) could name
+  # the Supervisor's address in that header and walk in. The Supervisor is
+  # not on loopback, so it never needed the header honoured.
   echo "🔒 Launching HASSIO_RUN_MODE=ingress uvicorn on port 8990"
   HASSIO_RUN_MODE="ingress" uvicorn app.fastapi:app \
       --host 0.0.0.0 \
-      --port 8990
+      --port 8990 \
+      --no-proxy-headers
 
 else
   # No Ingress: single server on port 8989 (HTTPS when a certificate is set)

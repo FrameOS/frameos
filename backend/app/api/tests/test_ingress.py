@@ -279,3 +279,21 @@ async def test_no_ingress_guard_outside_ingress_mode(clear_env):
     assert conf.HASSIO_RUN_MODE is None
     response = TestClient(app, client=("172.30.33.7", 1)).get("/api/has_first_user")
     assert response.status_code == 200
+
+
+def test_ingress_uvicorn_does_not_take_a_forwarded_peer_from_loopback():
+    """IngressPeerGuard reads the socket peer uvicorn hands it. With proxy
+    headers on (uvicorn's default, trusting 127.0.0.1), a request from inside
+    the container that says `X-Forwarded-For: 172.30.32.2` arrives as the
+    Supervisor and reaches the unauthenticated ingress routers. The ingress
+    uvicorn must run with --no-proxy-headers."""
+    from pathlib import Path
+
+    lines = (Path(__file__).resolve().parents[4] / "docker-entrypoint.sh").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if 'HASSIO_RUN_MODE="ingress" uvicorn' in line)
+    command = [lines[start]]
+    while command[-1].rstrip().endswith("\\"):
+        command.append(lines[start + len(command)])
+    flags = " ".join(command)
+    assert "--no-proxy-headers" in flags
+    assert "--forwarded-allow-ips" not in flags
