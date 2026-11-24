@@ -16,7 +16,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from app.utils.photo_share_links import PhotoLinkRedactor
+from app.utils.photo_share_links import SCENE_DELIVERY_TOOLS, PhotoLinkRedactor
 
 logger = logging.getLogger(__name__)
 
@@ -281,7 +281,8 @@ async def run_agent_loop(
     max_rounds: int = MAX_TOOL_ROUNDS,
 ) -> AgentResult:
     # A Photos share link is a credential for a whole album: the model sees a
-    # placeholder, and the calls it makes get the real link back.
+    # placeholder, and the calls that deliver a scene get the real link back
+    # (SCENE_DELIVERY_TOOLS); every other call gets the placeholder.
     photo_links = PhotoLinkRedactor()
     input_items[:] = photo_links.redact(input_items)
     photo_links_noted = photo_links.size > 0
@@ -351,7 +352,8 @@ async def run_agent_loop(
                     })
                 else:
                     try:
-                        result = await tools.call(name, photo_links.restore(parsed))
+                        arguments = photo_links.restore(parsed) if name in SCENE_DELIVERY_TOOLS else parsed
+                        result = await tools.call(name, arguments)
                         output = result.text
                         images = result.images
                         await emit({"type": "tool", "name": name, "label": label, "status": "done"})

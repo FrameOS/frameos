@@ -1,6 +1,6 @@
 // The agent loop keeps Photos share links away from the model: the context,
-// the history and every tool result carry placeholders, and the tool calls
-// the model makes get the real link back before they run.
+// the history and every tool result carry placeholders, and the calls that
+// deliver a scene get the real link back before they run (no other call does).
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResponseInputItem, StreamedResponse } from "./openai";
@@ -142,6 +142,28 @@ describe("runAgentLoop and Photos share links", () => {
     // Noted once.
     expect(JSON.stringify(inputs[2]).split(photoLinkNote).length - 1).toBe(1);
     expect(runTool.mock.calls[1]![1]).toEqual({ album: `/api/photos/shared/${otherToken}` });
+  });
+
+  it("gives the real link back to a scene on its way in, and to no other tool", async () => {
+    const scene = { id: "album", nodes: [{ data: { config: { album: redactedLink } }, id: "n1", type: "app" }] };
+    respond(
+      round([
+        { args: { scene }, name: "update_scene" },
+        { args: { frame_id: "f", scenes: [scene] }, name: "frame_scene_install" },
+        { args: { event: "x", frame_id: "f", payload: { url: redactedLink } }, name: "scene_event" },
+        { args: { homeAssistant: { url: `https://elsewhere.example${redactedLink}` } }, name: "account_settings_update" },
+      ]),
+    );
+    runTool.mockResolvedValue(text("{}"));
+
+    await run(buildInitialInput({ contextBlock: `Album: ${link}`, history: [], prompt: "Copy the link around" }));
+
+    const byName = Object.fromEntries(runTool.mock.calls.map(([name, args]) => [name, JSON.stringify(args)]));
+    expect(byName.update_scene).toContain(link);
+    expect(byName.frame_scene_install).toContain(link);
+    expect(byName.scene_event).not.toContain(token);
+    expect(byName.scene_event).toContain("pk_photo_link_1");
+    expect(byName.account_settings_update).not.toContain(token);
   });
 
   it("leaves a conversation without links as it is", async () => {
