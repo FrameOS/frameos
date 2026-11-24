@@ -77,6 +77,18 @@ string(REPLACE "${FOS_QJS_READ_SWITCH}"
         goto invalid_tag;
 ${FOS_QJS_READ_SWITCH}"
     FOS_QJS_SOURCE "${FOS_QJS_SOURCE}")
+
+# quickjs.c's asserts print and abort as newlib's silent ones do, from a call
+# that takes no arguments (fos_qjs_assert.h), after its last own header.
+set(FOS_QJS_LAST_INCLUDE "#include \"dtoa.h\"\n")
+string(FIND "${FOS_QJS_SOURCE}" "${FOS_QJS_LAST_INCLUDE}" found)
+string(FIND "${FOS_QJS_SOURCE}" "${FOS_QJS_LAST_INCLUDE}" found_last REVERSE)
+if(found EQUAL -1 OR NOT found EQUAL found_last)
+    message(FATAL_ERROR "frameos_quickjs: #include \"dtoa.h\" is not once in ${QUICKJS_DIR}/quickjs.c: update FOS_QJS_LAST_INCLUDE")
+endif()
+string(REPLACE "${FOS_QJS_LAST_INCLUDE}"
+    "${FOS_QJS_LAST_INCLUDE}#include \"${CMAKE_CURRENT_LIST_DIR}/fos_qjs_assert.h\"\n"
+    FOS_QJS_SOURCE "${FOS_QJS_SOURCE}")
 set(FOS_QJS_HOT_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/quickjs_hot.c")
 file(WRITE "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_SOURCE}")
 execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FOS_QJS_HOT_SOURCE}.new" "${FOS_QJS_HOT_SOURCE}")
