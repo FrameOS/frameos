@@ -176,9 +176,10 @@ const
   MaxTableBits = 10
   AlphabetSize = [uint16(256 + 24), 256, 256, 256, 40]
   CodeLengthCodeOrder = [
-    17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    17'u8, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
   ]
-  DistanceMap = [
+  # Bytes, not ints: a quarter of the flash (960 -> 240 bytes on an ESP32).
+  DistanceMap: array[120, (int8, int8)] = [
     (0, 1), (1, 0), (1, 1), (-1, 1), (0, 2), (2, 0), (1, 2), (-1, 2),
     (2, 1), (-2, 1), (2, 2), (-2, 2), (0, 3), (3, 0), (1, 3), (-1, 3),
     (3, 1), (-3, 1), (2, 3), (-2, 3), (3, 2), (-3, 2), (0, 4), (4, 0),
@@ -498,7 +499,7 @@ proc planeCodeToDistance(xsize, planeCode: int): int =
     return planeCode - 120
 
   let (xoffset, yoffset) = DistanceMap[planeCode - 1]
-  return max(1, xoffset + yoffset * xsize)
+  return max(1, xoffset.int + yoffset.int * xsize)
 
 proc getHuffIndex(info: HuffmanInfo, x, y: int): int =
   if info.bits == 0:
