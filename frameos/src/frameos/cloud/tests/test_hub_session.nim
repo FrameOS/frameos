@@ -109,7 +109,10 @@ proc websocketHandler(websocket: mummy.WebSocket, event: mummy.WebSocketEvent,
           websocket.send($(%*{"type": "error", "error": "bad_signature"}))
           websocket.close()
           return
-        websocket.send($(%*{"type": "ready", "pending_commands": 2}))
+        # What the hub says the link holds: one scope a managing provider
+        # may add by itself, and one only the frame's own admin may ask for.
+        websocket.send($(%*{"type": "ready", "pending_commands": 2,
+          "scopes": ["frame:managed", "telemetry:logs", "telemetry:metrics", "auth:login"]}))
         # Drain the queue: one legitimate verb, one that must not exist.
         websocket.send($(%*{"id": "cmd-1", "type": "get_state"}))
         websocket.send($(%*{"id": "cmd-2", "type": "shell", "command": "id"}))
@@ -214,6 +217,19 @@ suite "cloud hub session over a live socket":
     let states = repliesOfType("state")
     check states.len >= 1
     check states[0]{"id"}.getStr("") == "cmd-1"
+
+  test "ready adds the telemetry scopes of a managed frame to its link, never cloud login":
+    # The link was made with frame:managed and telemetry:logs. The hub may
+    # tell a frame it manages to send metrics too; that its account may sign
+    # in as the frame's admin is not the hub's to say.
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      {.gcsafe.}:
+        withLock cloudLinkLock:
+          result = "telemetry:metrics" in linkScopes(loadCloudLinkState()))
+    withLock cloudLinkLock:
+      let scopes = linkScopes(loadCloudLinkState())
+      check "auth:login" notin scopes
+      check "frame:managed" in scopes and "telemetry:logs" in scopes
 
   test "log lines ship as batched log_batch messages (telemetry:logs granted)":
     log(%*{"event": "test:hub:logline", "n": 1})

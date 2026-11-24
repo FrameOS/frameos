@@ -5,6 +5,8 @@
 ## JS app the owner let have them (`frameos.frame`, docs/terminal.md).
 
 import std/json
+import ./scene_code_hooks
+import ./scene_store_hooks
 
 type
   # The frame's own page (docs/scene-settings.md "The frame page"), behind
@@ -32,3 +34,53 @@ var
   frameSettingsRead*: FrameSettingsRead
   frameSettingsApply*: FrameSettingsApply
   frameSettingsAction*: FrameSettingsAction
+
+# The HTTP write door (the frame access key, or `public` access: POST
+# /event/<name>, origin `http:write`) is for a frame's scenes: whoever was
+# handed the key off the frame's QR code picks a scene and sets its fields.
+# It is not the frame's (server/auth.nim `hasControlAccess`). So while a scene
+# runs on an event that came through that door, the frame offers no page, as
+# when its control plane turned the page off: the three hooks are nil, and
+# every reader of them (the frame page, `frameos.frame`) already knows what
+# to do then. So are the two other powers that are the frame's rather than a
+# scene's: the code host (`frameos.code`, scene_code_hooks.nim) and the
+# store's actions (`frameos.storeAction`, scene_store_hooks.nim), which answer
+# as on a frame with no host. The dispatcher (event_loop.nim `runOnScene`) is
+# the one caller.
+var
+  framePageWithheld*: bool
+    ## True for the length of such a run. The scene settings read it to take
+    ## no input at all (system/sceneSettings).
+  heldRead: FrameSettingsRead
+  heldApply: FrameSettingsApply
+  heldAction: FrameSettingsAction
+  heldCode: SceneCode
+  heldStoreAction: SceneStoreAction
+
+proc withholdFramePage*() =
+  if framePageWithheld:
+    return
+  framePageWithheld = true
+  heldRead = frameSettingsRead
+  heldApply = frameSettingsApply
+  heldAction = frameSettingsAction
+  heldCode = sceneCode
+  heldStoreAction = sceneStoreAction
+  frameSettingsRead = nil
+  frameSettingsApply = nil
+  frameSettingsAction = nil
+  sceneCode = nil
+  sceneStoreAction = nil
+
+proc offerFramePage*() =
+  ## The hooks back as they were. A no-op when nothing is withheld, so a host
+  ## recovering from an aborted run (event_loop.nim `resetAfterAbort`) calls
+  ## it without asking.
+  if not framePageWithheld:
+    return
+  framePageWithheld = false
+  frameSettingsRead = heldRead
+  frameSettingsApply = heldApply
+  frameSettingsAction = heldAction
+  sceneCode = heldCode
+  sceneStoreAction = heldStoreAction

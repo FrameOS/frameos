@@ -355,16 +355,19 @@ proc allowUnauthenticatedStaticAssets*(): bool =
     let access = frameAccessMode()
     adminPanelEnabled() or access == "public" or access == "protected"
 
+proc hasServerApiKeyHeader(request: Request): bool {.gcsafe.} =
+  let apiKey = frameServerApiKeyValue()
+  if apiKey.len == 0:
+    return false
+  constantTimeEquals(getHeaderValue(request, AUTH_HEADER), AUTH_TYPE & " " & apiKey)
+
 proc hasServerApiKeyBearer*(request: Request): bool {.gcsafe.} =
   ## `Authorization: Bearer <serverApiKey>` on a POST — the frame's own
   ## credential toward its backend (frame.json `serverApiKey`, the key
   ## logger.nim posts logs with), which the backend presents when it calls the
   ## frame's HTTP API. Never on GET, like the access-key bearer: a link must
   ## not be able to carry it.
-  let apiKey = frameServerApiKeyValue()
-  if apiKey.len == 0 or request.httpMethod != "POST":
-    return false
-  constantTimeEquals(getHeaderValue(request, AUTH_HEADER), AUTH_TYPE & " " & apiKey)
+  request.httpMethod == "POST" and hasServerApiKeyHeader(request)
 
 template hasAccess*(request: Request, accessType: AccessType): bool =
   {.gcsafe.}:
@@ -401,6 +404,17 @@ proc hasControlAccess*(request: Request): bool {.gcsafe.} =
   ## replacing the scene set or reboot-looping the device.
   {.gcsafe.}:
     hasAdminSession(request) or hasServerApiKeyBearer(request)
+
+proc hasControlReadAccess*(request: Request): bool {.gcsafe.} =
+  ## Who may read what a frame's scenes hold beyond their public state: the
+  ## scene JSON itself (`GET /getUploadedScenes`: every node's config, with
+  ## the share links and tokens typed into it) and the secret-typed fields
+  ## of `/state` and `/states`. An admin session, or the backend with its
+  ## serverApiKey in the Authorization header, here on a GET too (a header is
+  ## nothing a link carries). Not the frame access key and not `public` mode,
+  ## for the reason `hasControlAccess` gives.
+  {.gcsafe.}:
+    hasAdminSession(request) or hasServerApiKeyHeader(request)
 
 proc canAccessFrameSecrets*(request: Request): bool =
   {.gcsafe.}:

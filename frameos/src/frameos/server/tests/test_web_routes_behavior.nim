@@ -1,11 +1,15 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, tables, unittest]
 
 import zippy
 
 import ../../[channels, types]
+import ../../scenes
 import ./helpers/http_harness
 import ../[auth, state]
-from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest
+from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest,
+  setupPeerOutsideHotspotForTest
+import std/atomics
+from ../hotspot_listener import isHotspotPeer
 
 var server = startRouterServer(19331)
 
@@ -77,6 +81,46 @@ suite "web route behavior":
     check after["hotspot"].getBool() == false
     # Once the hotspot is down the error text (SSID, driver output) stays home.
     check after["error"].getStr() == ""
+
+  test "the open setup routes answer the hotspot, not the rest of a network the frame is on":
+    # The form sets the frame's Wi-Fi, backend and cloud claim with no login.
+    # It is served by the frame's ordinary listeners, on every interface, so
+    # while the hotspot is up a frame with Ethernet (or a listener that fell
+    # back to every interface) would have offered it to its whole LAN.
+    check isHotspotPeer("10.42.0.23")
+    check isHotspotPeer("::ffff:10.42.0.23")
+    check isHotspotPeer("127.0.0.1")
+    check isHotspotPeer("::1")
+    check not isHotspotPeer("192.168.1.40")
+    check not isHotspotPeer("10.42.1.5")
+    check not isHotspotPeer("10.4.0.16")
+    check not isHotspotPeer("")
+
+    var config = defaultFrameConfig()
+    configureServerState(config, hotspotActive = true)
+    setupPeerOutsideHotspotForTest.store(true)
+    try:
+      let post = httpRequest(server.port, "POST", "/setup",
+        headers = [("Content-Type", "application/x-www-form-urlencoded")],
+        body = "ssid=elsewhere&password=x")
+      check post.status == 403
+      check httpRequest(server.port, "GET", "/wifi").status == 403
+      # The frame's own network asks for the frame, not for the setup form.
+      let root = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+      check root.status == 401
+      check not root.body.contains("Set up your Frame")
+      let stray = httpRequest(server.port, "GET", "/some/app/page", headers = [("Host", "example.com")])
+      check stray.status == 404
+      let status = parseJson(httpRequest(server.port, "GET", "/setup/status").body)
+      check status["hotspot"].getBool()
+      check status["error"].getStr() == ""
+    finally:
+      setupPeerOutsideHotspotForTest.store(false)
+    # From the hotspot (here: loopback, the frame itself) it is all there.
+    let root = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+    check root.status == 200
+    check root.body.contains("Set up your Frame")
+    configureServerState(config, hotspotActive = false)
 
   test "captive-portal probes and stray hosts redirect to the setup form while the hotspot is up":
     var config = defaultFrameConfig()
@@ -345,11 +389,39 @@ suite "web route behavior":
     )
     check authedPrivateLogo.status == 200
 
+  test "pages are never sniffed, and only the viewer may be framed by another site":
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    configureServerState(config)
+    let adminLogin = httpRequest(server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}))
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+    for (path, headers) in [("/admin", @[("Cookie", adminCookie)]), ("/c?k=test-key", newSeq[(string, string)]())]:
+      let page = httpRequest(server.port, "GET", path, headers = headers)
+      check page.status == 200
+      check page.header("content-type").startsWith("text/html")
+      check page.header("x-content-type-options") == "nosniff"
+      check page.header("x-frame-options") == "SAMEORIGIN"
+      check page.header("content-security-policy") == "frame-ancestors 'self'"
+    config.frameAdminAuth = %*{}
+    configureServerState(config)
+    let viewer = httpRequest(server.port, "GET", "/", headers = [("Cookie", ACCESS_COOKIE & "=test-key")])
+    check viewer.status == 200
+    check viewer.header("x-content-type-options") == "nosniff"
+    check viewer.header("x-frame-options") == ""
+    let asset = httpRequest(server.port, "GET", stableStaticAssetPath, headers = [("Cookie", ACCESS_COOKIE & "=test-key")])
+    check asset.header("x-content-type-options") == "nosniff"
+    let json = httpRequest(server.port, "GET", "/states?k=test-key")
+    check json.header("content-type") == "application/json"
+    check json.header("x-content-type-options") == "nosniff"
+
   test "unauthorized gated routes return 401":
     let config = defaultFrameConfig()
     configureServerState(config)
 
-    for path in ["/static/foo.js", stableImageAssetPath, "/image", "/states", "/state", "/ws", "/ws/admin"]:
+    for path in ["/static/foo.js", stableImageAssetPath, "/image", "/states", "/state", "/getUploadedScenes", "/ws",
+                 "/ws/admin"]:
       let response = httpRequest(server.port, "GET", path)
       check response.status == 401
 
@@ -425,6 +497,72 @@ suite "web route behavior":
     let (backendReceived, backendPayload) = eventChannel.tryRecv()
     check backendReceived
     check backendPayload[1] == "setCurrentScene"
+
+  test "the scene JSON and secret fields take an admin session or the backend, never the access key":
+    # The access key is printed on the frame's QR code for whoever should
+    # pick a scene and set its fields. It reads neither the scenes themselves
+    # (node config, with the links and tokens typed into it) nor the value of
+    # a field marked secret.
+    var config = defaultFrameConfig()
+    config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    configureServerState(config)
+    let adminLogin = httpRequest(server.port, "POST", "/api/admin/login",
+      headers = [("Content-Type", "application/json")],
+      body = $(%*{"username": "admin", "password": "secret"}))
+    let adminCookie = adminLogin.header("set-cookie").split(";", 1)[0]
+
+    for headers in [@[("Authorization", "Bearer test-key")], @[("Cookie", ACCESS_COOKIE & "=test-key")]]:
+      check httpRequest(server.port, "GET", "/getUploadedScenes", headers = headers).status == 401
+    check httpRequest(server.port, "GET", "/getUploadedScenes?k=test-key").status == 401
+    for headers in [@[("Authorization", "Bearer api")], @[("Cookie", adminCookie)]]:
+      let scenes = httpRequest(server.port, "GET", "/getUploadedScenes", headers = headers)
+      check scenes.status == 200
+      check parseJson(scenes.body).hasKey("scenes")
+
+    var target = "".SceneId
+    for id, _ in exportedScenes:
+      target = id
+      break
+    require target.string.len > 0
+    let before = exportedScenes[target].publicStateFields
+    exportedScenes[target].publicStateFields = @[
+      StateField(name: "city", label: "City", fieldType: "string", value: %""),
+      StateField(name: "token", label: "Token", fieldType: "string", value: %"", secret: true),
+    ]
+    refreshExportedScenes()
+    setLastPublicSceneId(target)
+    updateLastPublicState(FrameScene(id: target, state: %*{"city": "Tallinn", "token": "s3cret-value"}))
+
+    for path in ["/states", "/state"]:
+      let viaKey = httpRequest(server.port, "GET", path & "?k=test-key")
+      check viaKey.status == 200
+      check viaKey.body.contains("Tallinn")
+      check not viaKey.body.contains("s3cret-value")
+      for headers in [@[("Authorization", "Bearer api")], @[("Cookie", adminCookie)]]:
+        let full = httpRequest(server.port, "GET", path, headers = headers)
+        check full.status == 200
+        check full.body.contains("Tallinn")
+        check full.body.contains("s3cret-value")
+
+    # The control page writes no secret into its form, and says which field
+    # is one so its script sends nothing for a field left empty.
+    let page = httpRequest(server.port, "GET", "/c?k=test-key")
+    check page.status == 200
+    check page.body.contains("Tallinn")
+    check not page.body.contains("s3cret-value")
+    check page.body.contains("type='password' id='token'")
+    check page.body.contains("\"secret\":true")
+
+    # `public` access is the access key with nobody asked for it.
+    config.frameAccess = "public"
+    configureServerState(config)
+    check httpRequest(server.port, "GET", "/getUploadedScenes").status == 401
+    let publicStates = httpRequest(server.port, "GET", "/states")
+    check publicStates.status == 200
+    check not publicStates.body.contains("s3cret-value")
+
+    exportedScenes[target].publicStateFields = before
+    refreshExportedScenes()
 
   test "control-plane verbs refuse the frame access key and public mode":
     # The access key is printed on the frame's QR code: it may pick a scene,

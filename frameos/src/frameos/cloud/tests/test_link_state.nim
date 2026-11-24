@@ -35,6 +35,24 @@ suite "link scope helpers":
     # Links minted before requested_scope existed never auto-enroll.
     check not managedEnrollmentRequested(%*{"scope": "frame:managed"})
 
+  test "a provider's word adds only what was asked for, or what managing the frame already implies":
+    # Linked for cloud login and nothing else; the provider answers with more.
+    let asked = %*{"requested_scope": "frame:link auth:login", "scope": "frame:link auth:login"}
+    check scopesTakenFromProvider(asked, ["frame:link", "auth:login", "frame:managed", "telemetry:logs"],
+      managed = false) == @["frame:link", "auth:login"]
+    # Fewer than asked for is the provider's to decide.
+    check scopesTakenFromProvider(asked, ["frame:link"], managed = false) == @["frame:link"]
+    # A managed frame (claim-token enrollment: no request on record) learns of
+    # service keys and telemetry from its hub. It does not learn that the
+    # provider's account may now sign in as its admin.
+    let managed = %*{"status": "connected", "mode": "managed", "scope": "frame:managed"}
+    check scopesTakenFromProvider(managed,
+      ["frame:managed", "settings:services", "telemetry:logs", "telemetry:metrics", "auth:login", "remote:access"],
+      managed = true) == @["frame:managed", "settings:services", "telemetry:logs", "telemetry:metrics"]
+    # What the link holds already is not taken away by being announced again.
+    let held = %*{"scope": "frame:managed auth:login"}
+    check scopesTakenFromProvider(held, ["auth:login", "auth:login", ""], managed = true) == @["auth:login"]
+
   test "resetting a link forgets the requested scopes":
     let state = %*{"provider_url": "https://cloud.frameos.net",
                    "status": "connected",
@@ -44,6 +62,23 @@ suite "link scope helpers":
     check not state.hasKey("requested_scope")
     check not state.hasKey("scope")
     check not managedEnrollmentRequested(state)
+
+suite "what may carry a cloud link":
+  test "https anywhere, plain http only where nobody is on the path":
+    for url in ["https://cloud.frameos.net", "https://203.0.113.9:8443", "HTTPS://cloud.example",
+                "http://localhost:3000", "http://frameos.local", "http://dev.localhost:3000",
+                "http://127.0.0.1:3000", "http://10.4.0.16:3000", "http://172.16.0.1", "http://172.31.255.1",
+                "http://192.168.1.20:8989", "http://169.254.1.1", "http://100.64.0.1", "http://100.127.9.9:3000",
+                "http://[::1]:3000", "http://[fe80::1]", "http://[fd12:3456::1]:3000"]:
+      check providerTransportProblem(url) == ""
+    for url in ["http://cloud.frameos.net", "http://example.com:3000", "http://203.0.113.9",
+                "http://172.32.0.1", "http://100.128.0.1", "http://192.169.1.1", "http://1.2.3",
+                "http://[2001:db8::1]", "http://localhost@evil.example", "http://10.0.0.1@evil.example/",
+                "http://local", "http://127.0.0.1.evil.example", "http://999.1.1.1", "ftp://localhost", ""]:
+      check providerTransportProblem(url) != ""
+    expect ValueError:
+      requireProviderTransport("http://cloud.example")
+    requireProviderTransport("https://cloud.example")
 
 suite "the local cloud-login switch":
   let granted = %*{"status": "connected", "scope": "frame:link auth:login"}

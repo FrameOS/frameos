@@ -43,6 +43,8 @@ proc contentTypeForAsset*(path: string): string =
     "font/woff2"
   elif path.endsWith(".woff"):
     "font/woff"
+  elif path.endsWith(".ttf"):
+    "font/ttf"
   else:
     "application/octet-stream"
 

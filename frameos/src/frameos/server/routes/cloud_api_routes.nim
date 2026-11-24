@@ -244,6 +244,10 @@ proc addCloudApiRoutes*(router: var Router) =
       if providerUrl.len == 0:
         jsonResponse(request, Http400, %*{"detail": "The FrameOS Cloud server must be an http(s) URL"})
         return
+      let transportProblem = providerTransportProblem(providerUrl)
+      if transportProblem.len > 0:
+        jsonResponse(request, Http400, %*{"detail": transportProblem})
+        return
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         discard expireIfNeeded(state)

@@ -6,6 +6,7 @@ import frameos/types
 import frameos/hal/files as halFiles
 import frameos/hal/processes
 from frameos/hal/net_client import setSocketSendRecvTimeouts
+import frameos/utils/tls_client
 
 const GzipLogTimeoutMs = 10 * 60 * 1000
 
@@ -244,7 +245,8 @@ proc postLogsTo(settings: LoggerSettings, sslContext: SslContext, body: string):
     socket.connect(settings.serverHost, Port(settings.serverPort), timeout = LogSendConnectTimeoutMs)
     socket.setSocketSendRecvTimeouts(LogSendIoTimeoutMs)
     if settings.useTls:
-      sslContext.wrapConnectedSocket(socket, handshakeAsClient, settings.serverHost)
+      # A backend reached by address: its certificate must name the address.
+      sslContext.wrapTlsClient(socket, settings.serverHost)
     let request = "POST /api/log HTTP/1.1\r\n" &
       "Host: " & settings.serverHost & ":" & $settings.serverPort & "\r\n" &
       "Authorization: Bearer " & settings.serverApiKey & "\r\n" &

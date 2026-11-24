@@ -13,7 +13,9 @@
 ## hotspot scene stays short. Binding 10.42.0.1 itself keeps the listener off
 ## the LAN; when that address is not on the interface (a NetworkManager
 ## backend that has not assigned it yet, a test machine) the listener falls
-## back to every interface, which is what the Caddy proxy always did.
+## back to every interface, which is what the Caddy proxy always did. Either
+## way the setup routes themselves answer only a peer on the hotspot
+## (`isHotspotPeer`): a listener's address is not what keeps them off the LAN.
 ##
 ## A second, redirect-only listener sits on 10.42.0.1:80 for the hotspot's
 ## lifetime: the captive-portal probes a phone sends when it joins a network
@@ -24,7 +26,7 @@
 ## to network" sheet. The unit holds CAP_NET_BIND_SERVICE for this; where
 ## port 80 cannot be bound (a dev machine, a port already taken) the portal
 ## works as before, by QR code or typed URL, and the log says so.
-import std/locks
+import std/[locks, strutils]
 import mummy
 from std/net import Port
 import frameos/types
@@ -35,6 +37,19 @@ const
   hotspotCaptivePort* = 80
   hotspotListenerFirstPort = 8000
   hotspotListenerLastPort = 8099
+
+proc isHotspotPeer*(remoteAddress: string): bool =
+  ## Whether a request came from the setup hotspot (the 10.42.0.0/24 both
+  ## network backends hand out) or from the frame itself. The setup routes
+  ## are open, with no login, for whoever joined the hotspot; they are served
+  ## by the frame's ordinary listeners too, on every interface, so on a frame
+  ## that is also on a network (Ethernet beside the hotspot, or the fallback
+  ## below) the routes ask this of the peer instead of trusting where a
+  ## listener happens to be bound.
+  var address = remoteAddress
+  if address.startsWith("::ffff:"):
+    address = address[7 .. ^1]
+  address.startsWith("10.42.0.") or address.startsWith("127.") or address == "::1"
 
 var hotspotListenerLock: Lock
 initLock(hotspotListenerLock)

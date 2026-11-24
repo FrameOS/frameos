@@ -24,7 +24,7 @@ import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
 from frameos/logger import LoggerSettings, postLogLinesOnce
 from frameos/scenes import getLastImagePng, getLastPublicState, getLastPublicSceneState, getAllPublicStates,
-    getUploadedScenePayload, getDynamicSceneOptions
+    getUploadedScenePayload, getDynamicSceneOptions, publicStateFieldsCopy
 from scenes/scenes import sceneOptions
 import ./embedded_assets
 import ./state
@@ -76,7 +76,20 @@ proc parseUrlEncoded*(body: string): Table[string, string] =
 proc jsonResponse*(request: Request, statusCode: httpcore.HttpCode, payload: JsonNode) =
   var headers: mummy.HttpHeaders
   headers["Content-Type"] = "application/json"
+  headers["X-Content-Type-Options"] = "nosniff"
   request.respond(int(statusCode), headers, $payload)
+
+proc pageHeaders*(frameable = false): mummy.HttpHeaders =
+  ## An HTML page of the frame's own. Never sniffed as anything else. Unless
+  ## `frameable`, only the frame's own pages may put it in a frame: the admin
+  ## app, the login, the control page and the setup form have buttons a page
+  ## of somebody else's could lay a frame over. The viewer stays frameable,
+  ## as a dashboard or a kiosk page shows it.
+  result["Content-Type"] = "text/html; charset=utf-8"
+  result["X-Content-Type-Options"] = "nosniff"
+  if not frameable:
+    result["X-Frame-Options"] = "SAMEORIGIN"
+    result["Content-Security-Policy"] = "frame-ancestors 'self'"
 
 proc loadConfigJson(): JsonNode =
   try:
@@ -1372,6 +1385,12 @@ proc renderControlPage*(request: Request) =
       else: $value
 
     var fieldMeta = %*{"name": key, "type": fieldType}
+    if field.secret:
+      # Never written into the page: whoever holds the access key may set a
+      # secret field, not read it. Left empty it is left as it is (the page's
+      # script sends no value for it).
+      stringValue = ""
+      fieldMeta["secret"] = %true
     if not field.showIf.isNil and field.showIf.kind == JArray and field.showIf.len > 0:
       fieldMeta["showIf"] = field.showIf
     fieldsMeta.add(fieldMeta)
@@ -1381,7 +1400,9 @@ proc renderControlPage*(request: Request) =
       else: " style='display:none'"
     fieldsHtml.add(fmt"<div class='state-field' id='stateField--{h($key)}'{hiddenStyle}>")
     fieldsHtml.add(fmt"<label for='{h($key)}'>{h(label)}</label><br/>")
-    if fieldType == "text":
+    if field.secret:
+      fieldsHtml.add(fmt"<input type='password' id='{h($key)}' placeholder='(unchanged)' autocomplete='off' value='' /><br/><br/>")
+    elif fieldType == "text":
       fieldsHtml.add(fmt"<textarea id='{h($key)}' placeholder='{h(placeholder)}' rows=5>{h(stringValue)}</textarea><br/><br/>")
     elif fieldType == "select" or fieldType == "boolean" or fieldType == "font":
       fieldsHtml.add(fmt"<select id='{h($key)}' placeholder='{h(placeholder)}'>")
@@ -1447,17 +1468,32 @@ proc renderControlPage*(request: Request) =
       ("[/*$$fieldsMetaJson$$*/]", fieldsMetaJson),
       ("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml),
       ("Frame Control", if frameName != "": h(frameName) else: "Frame Control"))
-    request.respond(int(Http200), body = controlHtml)
+    request.respond(int(Http200), pageHeaders(), controlHtml)
 
 proc appsPayload*(): string =
   appsAsset.getAppsJson()
 
-proc frameStatePayload*(): tuple[sceneId: SceneId, state: JsonNode] =
+proc withoutSecretFields(sceneId: SceneId, state: JsonNode) =
+  ## A scene's public state less its secret-typed fields (`secret: true` on
+  ## the field): what the frame access key reads. The key sets a scene's
+  ## fields; it is not shown the tokens somebody else typed into them.
+  if state.isNil or state.kind != JObject:
+    return
+  for field in publicStateFieldsCopy(sceneId):
+    if field.secret and state.hasKey(field.name):
+      state.delete(field.name)
+
+proc frameStatePayload*(exposeSecrets: bool): tuple[sceneId: SceneId, state: JsonNode] =
   let (sceneId, state, _) = getLastPublicSceneState()
+  if not exposeSecrets:
+    withoutSecretFields(sceneId, state)
   (sceneId: sceneId, state: state)
 
-proc frameStatesPayload*(): tuple[sceneId: SceneId, states: JsonNode] =
-  getAllPublicStates()
+proc frameStatesPayload*(exposeSecrets: bool): tuple[sceneId: SceneId, states: JsonNode] =
+  result = getAllPublicStates()
+  if not exposeSecrets and not result.states.isNil and result.states.kind == JObject:
+    for sceneId, state in result.states.pairs:
+      withoutSecretFields(SceneId(sceneId), state)
 
 proc uploadedScenesPayload*(): JsonNode =
   getUploadedScenePayload()

@@ -325,24 +325,37 @@ proc persistScenesChecksum(checksum: string) {.gcsafe.} =
       state["scenes_checksum"] = %checksum
       saveCloudLinkState(state)
 
-proc persistProviderScopes(scopes: seq[string]): bool {.gcsafe.} =
+proc persistProviderScopes*(scopes: seq[string]): bool {.gcsafe.} =
   ## Union the scopes the provider announced in its `ready` message into the
   ## link state. Additive on purpose (removals arrive as a fresh enroll or a
   ## link reset, never silently): older enroll responses under-reported the
   ## grant as just frame:managed, so this is how an already-enrolled frame
   ## learns it may send telemetry. Returns true when anything changed; the
   ## save bumps the link generation, which the session loop already watches.
+  ##
+  ## Only the scopes this frame takes from a provider
+  ## (link_state.scopesTakenFromProvider): what its local admin asked for
+  ## when the link was made, and the three a managing provider may add
+  ## (service keys, logs, metrics). A `ready` that announces `auth:login` on
+  ## a link that never asked for it adds nothing, and is logged.
   {.gcsafe.}:
     if scopes.len == 0:
       return false
+    var refused: seq[string]
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
       let existing = state{"scope"}.getStr("")
-      let merged = unionScopeString(existing, scopes.join(" "))
+      let taken = scopesTakenFromProvider(state, scopes, managed = true)
+      for scope in scopes:
+        if scope notin taken and scope notin refused:
+          refused.add(scope)
+      let merged = unionScopeString(existing, taken.join(" "))
       if merged != existing:
         state["scope"] = %merged
         saveCloudLinkState(state)
         result = true
+    if refused.len > 0:
+      log(%*{"event": "cloud:hub:scopesRefused", "scopes": refused.join(" ")})
 
 proc providerExemptHostPort(providerUrl: string): string =
   ## "host:port" for the provider's own API endpoint. The local admin linked
@@ -2045,6 +2058,9 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   var socket: WebSocket
   let handle = DialHandle()
   try:
+    # The upgrade carries the link token: never over plain HTTP to a host on
+    # the open internet (link_state.providerTransportProblem).
+    requireProviderTransport(link.providerUrl)
     let dialFut = dialManagementSocket(link.providerUrl, link.wsPath,
                                        link.accessToken, handle)
     if not await withTimeout(dialFut, HubHandshakeTimeoutMs):

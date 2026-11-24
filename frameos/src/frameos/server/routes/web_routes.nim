@@ -15,6 +15,7 @@ import frameos/types
 import frameos/portal as netportal
 import frameos/utils/url
 import ../state
+import ../hotspot_listener
 import ../auth
 import ../api
 import ../embedded_assets
@@ -59,7 +60,7 @@ proc respondAdminWebApp(request: Request) {.gcsafe.} =
   elif not hasAdminSession(request):
     redirectTo(request, "/login")
   else:
-    request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
+    request.respond(Http200, pageHeaders(), frameWebHtml(frameAdminMode = true))
 
 proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
   if not allowUnauthenticatedStaticAssets() and not hasAccess(request, Read):
@@ -68,6 +69,7 @@ proc respondFrameWebAsset(request: Request, assetPath: string) {.gcsafe.} =
   try:
     var headers: mummy.HttpHeaders
     headers["Content-Type"] = contentTypeForAsset(assetPath)
+    headers["X-Content-Type-Options"] = "nosniff"
     headers["Vary"] = "Accept-Encoding"
     let asset =
       if clientAcceptsGzip(request):
@@ -87,6 +89,22 @@ const captiveProbePaths* = [
   "/check_network_status.txt", "/nm-check.txt",      # NetworkManager
 ]
 
+when defined(testing):
+  import std/atomics
+  var setupPeerOutsideHotspotForTest*: Atomic[bool]
+    ## A test's requests all come from loopback: set, they count as coming
+    ## from the frame's network instead of its hotspot.
+
+proc fromSetupHotspot(request: Request): bool {.gcsafe.} =
+  ## The setup routes take no login. They are for whoever joined the frame's
+  ## own hotspot (or sits on the frame): never for the rest of a network the
+  ## frame is on as well while the hotspot is up (hotspot_listener.nim).
+  when defined(testing):
+    {.gcsafe.}:
+      if setupPeerOutsideHotspotForTest.load:
+        return false
+  isHotspotPeer(request.remoteAddress)
+
 proc hotspotSetupUrl(): string {.gcsafe.} =
   {.gcsafe.}:
     let port = hotspotSetupPort(globalFrameOS.frameConfig)
@@ -101,6 +119,10 @@ proc captivePortalRedirect*(request: Request): bool {.gcsafe.} =
   ## the request already targets the setup URL by name and port).
   {.gcsafe.}:
     if not netportal.isHotspotActive(globalFrameOS):
+      return false
+    # Only a device on the hotspot is captive: a browser on the frame's own
+    # network gets the page it asked for.
+    if not fromSetupHotspot(request):
       return false
     var host = ""
     var hostPort = 80
@@ -156,13 +178,13 @@ proc cachedAvailableNetworks*(scan: proc(): seq[string] {.gcsafe.}): seq[string]
 proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, adminConnectionsState: ConnectionsState) =
   router.get("/", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
-      if netportal.isHotspotActive(globalFrameOS):
+      if netportal.isHotspotActive(globalFrameOS) and fromSetupHotspot(request):
         # A hit on the captive listener (10.42.0.1:80) or under a foreign
         # Host goes to the one setup URL; the form itself is served there.
         if captivePortalRedirect(request):
           return
         log(%*{"event": "portal:http", "get": request.path})
-        request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
+        request.respond(Http200, pageHeaders(), netportal.setupHtml(globalFrameOS))
       else:
         let accessKey = frameAccessKeyValue()
         if accessKey != "" and request.queryParams.contains("k") and
@@ -182,7 +204,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
           else:
             request.respond(Http401, body = "Unauthorized")
         else:
-          request.respond(Http200, body = frameWebHtml())
+          request.respond(Http200, pageHeaders(frameable = true), frameWebHtml())
   )
 
   router.get("/admin", proc(request: Request) {.gcsafe.} =
@@ -204,7 +226,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     elif hasAdminSession(request):
       redirectTo(request, "/admin")
     else:
-      request.respond(Http200, body = frameWebHtml(frameAdminMode = true))
+      request.respond(Http200, pageHeaders(), frameWebHtml(frameAdminMode = true))
   )
 
   router.get("/logout", proc(request: Request) {.gcsafe.} =
@@ -244,6 +266,12 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       if not netportal.isHotspotActive(globalFrameOS):
         request.respond(Http400, body = "Not in setup mode")
         return
+      # No login guards this form: it sets the frame's Wi-Fi, its backend or
+      # its cloud claim. Whoever is on the hotspot may; whoever merely
+      # reaches the frame over a network it is also on may not.
+      if not fromSetupHotspot(request):
+        request.respond(Http403, body = "Setup is open from the frame's own hotspot only")
+        return
       let params = parseUrlEncoded(request.body)
       log(%*{"event": "portal:http", "post": request.path, "params": netportal.loggableSetupParams(params)})
       if not params.hasKey("ssid"):
@@ -258,10 +286,10 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         request.respond(Http400, body = problem)
         return
       if not netportal.persistPortalSetup(globalFrameOS, options):
-        request.respond(Http500, body = netportal.setupHtml(globalFrameOS))
+        request.respond(Http500, pageHeaders(), netportal.setupHtml(globalFrameOS))
         return
       spawn netportal.connectToWifiDetached(netportal.runtimeHandle(globalFrameOS), options)
-      request.respond(Http200, body = netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
+      request.respond(Http200, pageHeaders(), netportal.confirmHtml(globalFrameOS, ssid = options.ssid))
   )
 
   # Polled by the "Saved!" page from the hotspot origin AND from the frame's
@@ -282,7 +310,7 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
         headers["Vary"] = "Origin"
       let hotspot = netportal.isHotspotActive(globalFrameOS)
       request.respond(Http200, headers,
-        $netportal.setupStatusJson(globalFrameOS, includeError = hotspot))
+        $netportal.setupStatusJson(globalFrameOS, includeError = hotspot and fromSetupHotspot(request)))
   )
 
   # Captive-portal probes. While the setup hotspot is up, a phone that joined
@@ -311,6 +339,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
     {.gcsafe.}:
       if not netportal.isHotspotActive(globalFrameOS):
         request.respond(Http400, body = "Not in setup mode")
+      elif not fromSetupHotspot(request):
+        request.respond(Http403, body = "Setup is open from the frame's own hotspot only")
       else:
         var headers: mummy.HttpHeaders
         headers["Content-Type"] = "application/json"
@@ -353,17 +383,23 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/states", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    # Secret-typed fields only for an admin session or the backend: the
+    # access key sets a scene's fields, it does not read the tokens in them.
+    let full = hasControlReadAccess(request)
+    if not full and not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      let payload = frameStatesPayload()
+      let payload = frameStatesPayload(exposeSecrets = full)
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "states": payload.states})
   )
 
   router.get("/getUploadedScenes", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    # The scene JSON itself, every node's config with what was typed into it:
+    # an admin session or the backend's bearer, never the access key that is
+    # printed on the frame's QR code (auth.nim `hasControlReadAccess`).
+    if not hasControlReadAccess(request):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
@@ -373,12 +409,13 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   )
 
   router.get("/state", proc(request: Request) {.gcsafe.} =
-    if not hasAccess(request, Write):
+    let full = hasControlReadAccess(request)
+    if not full and not hasAccess(request, Write):
       request.respond(Http401, body = "Unauthorized")
       return
     log(%*{"event": "http", "get": request.path})
     {.gcsafe.}:
-      let payload = frameStatePayload()
+      let payload = frameStatePayload(exposeSecrets = full)
       jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "state": payload.state})
   )
 

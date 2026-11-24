@@ -61,6 +61,7 @@ proc cloudRequest*(providerUrl, path: string, httpMethod = HttpPost,
     headers["Content-Type"] = "application/json"
   if accessToken.len > 0:
     headers["Authorization"] = "Bearer " & accessToken
+  requireProviderTransport(providerUrl)
   let url = providerUrl & "/" & path.strip(leading = true, chars = {'/'})
   let response = boundedRequest(
     url,
@@ -134,6 +135,10 @@ proc startDeviceFlow*(providerUrl, displayName, localOrigin: string,
   ## Replaces any pending flow. Callers check for `connected` first (the admin
   ## route answers 409; the background tick never starts over a live link).
   {.gcsafe.}:
+    # Not a network error to try again later: the address itself is refused.
+    let transportProblem = providerTransportProblem(providerUrl)
+    if transportProblem.len > 0:
+      return DeviceFlowStart(ok: false, status: 400, networkError: false, error: transportProblem)
     var scopesJson = newJArray()
     for scope in scopes:
       scopesJson.add(%scope)
@@ -244,7 +249,11 @@ proc pollDeviceFlow*(frameConfig: FrameConfig): DeviceFlowPoll {.gcsafe.} =
         state["token_reference"] = jsonOrNull(pollResponse{"token_reference"})
         state["linked_client_id"] = jsonOrNull(pollResponse{"linked_client_id"})
         if pollResponse{"scope"}.getStr("") != "":
-          state["scope"] = pollResponse{"scope"}
+          # What was granted of what this frame asked for (`scope` still
+          # holds the request, written when the flow started): a provider
+          # answering with more does not get it.
+          state["scope"] = %scopesTakenFromProvider(state,
+            pollResponse{"scope"}.getStr("").splitWhitespace(), managed = false).join(" ")
         for key in ["device_code", "user_code", "verification_uri",
                     "verification_uri_complete", "expires_epoch", "poll_error"]:
           if state.hasKey(key):

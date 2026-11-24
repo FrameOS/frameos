@@ -546,6 +546,32 @@ block test_samba_mounts_fstab_block_uses_credentials_and_options:
   doAssert not fstabBlock.contains("bad option")
   doAssert not fstabBlock.contains("secret")
 
+block test_samba_mount_options_are_an_allow_list:
+  # /etc/fstab is root's: an option is a listed flag or a listed name with a
+  # plain value, and nosuid,nodev are always on.
+  for good in ["vers=3.0", "uid=pi", "gid=1000", "file_mode=0644", "dir_mode=0755", "ro", "noserverino",
+               "sec=ntlmssp", " iocharset=utf8 ", "NOEXEC"]:
+    doAssert sambaOptionAllowed(good), good
+  for bad in ["suid", "dev", "exec", "user", "users", "credentials=/etc/shadow", "x-systemd.requires=evil.service",
+              "x-systemd.automount", "uid=0;x", "uid=", "password=x", "username=x", "unknown=1", "vers=3.0 rw",
+              "helper=/bin/sh", "uid=$(id)"]:
+    doAssert not sambaOptionAllowed(bad), bad
+  let mountpoints = MountpointsConfig(enabled: true, items: @[
+    MountpointConfig(enabled: true, source: "//nas/photos", target: "/mnt/photos",
+      options: "uid=pi,suid,dev,credentials=/etc/shadow,x-systemd.requires=evil.service,ro"),
+  ])
+  let fstabBlock = frameosFstabBlock(mountpoints, "/tmp/frameos-samba")
+  doAssert fstabBlock.contains("nosuid")
+  doAssert fstabBlock.contains("nodev")
+  doAssert fstabBlock.contains("uid=pi")
+  doAssert fstabBlock.contains(",ro")
+  doAssert not fstabBlock.contains(",suid")
+  doAssert not fstabBlock.contains(",dev,") and not fstabBlock.contains(",dev ")
+  doAssert not fstabBlock.contains("/etc/shadow")
+  doAssert not fstabBlock.contains("evil.service")
+  # The runtime's own systemd options stay.
+  doAssert fstabBlock.contains("x-systemd.automount")
+
 block test_samba_mounts_fstab_block_uses_guest_without_credentials:
   let mountpoints = MountpointsConfig(enabled: true, items: @[
     MountpointConfig(enabled: true, source: "//nas/public", target: "/mnt/public"),

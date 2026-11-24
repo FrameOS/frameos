@@ -832,6 +832,7 @@ else:
   import std/[httpclient, locks, nativesockets, net, os, posix, strformat,
               tables, times, uri]
   import zippy
+  import frameos/utils/tls_client
 
   const
     RecvChunkBytes = 65536
@@ -1239,7 +1240,9 @@ else:
       socket.setSocketSendRecvTimeouts(ioTimeoutMs(timeoutMs, deadline))
       if isSsl:
         sslContext = newContext()
-        sslContext.wrapConnectedSocket(socket, handshakeAsClient, parsed.hostname)
+        # An IP literal's certificate must name the address too (std/net
+        # checks names only).
+        sslContext.wrapTlsClient(socket, parsed.hostname)
 
       var path = if parsed.path.len > 0: parsed.path else: "/"
       if parsed.query.len > 0:

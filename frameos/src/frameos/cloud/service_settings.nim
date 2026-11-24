@@ -32,6 +32,7 @@ import strutils
 import std/uri
 
 import frameos/utils/http_client
+from frameos/cloud/link_state import requireProviderTransport
 
 const
   ServiceSettingsScope* = "settings:services"
@@ -125,6 +126,7 @@ proc fetchServiceSettings*(providerUrl, frameId, accessToken,
       headers["If-None-Match"] = etag
     var response: BoundedHttpResponse
     try:
+      requireProviderTransport(providerUrl)
       response = boundedRequest(
         serviceSettingsUrl(providerUrl, frameId),
         httpMethod = HttpGet,

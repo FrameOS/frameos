@@ -297,7 +297,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
       else:
-        let payload = frameStatePayload()
+        let payload = frameStatePayload(exposeSecrets = true)
         jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "state": payload.state})
   )
 
@@ -308,7 +308,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if not requestedFrameMatches(request):
         request.respond(Http404, body = "Not found!")
       else:
-        let payload = frameStatesPayload()
+        let payload = frameStatesPayload(exposeSecrets = true)
         jsonResponse(request, Http200, %*{"sceneId": $payload.sceneId, "states": payload.states})
   )
 

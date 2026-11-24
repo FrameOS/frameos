@@ -173,6 +173,10 @@ def test_linux_auth_headers_use_access_key_unless_server_key_preferred():
 def test_control_paths_are_the_runtime_control_events():
     for path in ("/uploadScenes", "/reload", "/event/reboot", "/event/restart", "/event/reload", "/event/uploadScenes?x=1"):
         assert _is_control_path(path), path
+    # Reads a frame answers in full only to the server key: the scene JSON,
+    # and the secret-typed fields of a scene's state.
+    for path in ("/getUploadedScenes", "/states", "/state", "/states?x=1"):
+        assert _is_control_path(path), path
     for path in ("/event/setCurrentScene", "/event/render", "/image", "/api/frames/1/reload"):
         assert not _is_control_path(path), path
 

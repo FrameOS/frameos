@@ -117,6 +117,15 @@ runtime; a JS app the owner lets have them reads and uses the same three
 | `frameSettingsApply` | Save: what changed, `wifiSsid` with `wifiPassword`, `rotate`, `renderScale`, `clickSounds`, `awakeAfterInputSeconds`, `clock` |
 | `frameSettingsAction` | `open` and `close` as the page comes and goes, `scan`, `checkUpdate`, `installUpdate` |
 
+The page is for somebody at the frame. A key or a tap that came in over the
+frame's HTTP API with the frame access key (origin `http:write`,
+`docs/events.md` "Origins") is not that: for the run of a scene on such an
+event the dispatcher holds the three hooks nil (`withholdFramePage`), which
+every reader already takes for "no page here", with the code host and the
+store's actions (docs/code-editor.md, docs/scene-store.md), and the scene
+settings take no input from it. The key printed on a frame's QR code picks scenes; it does not
+restart, update or re-join the frame through the screen.
+
 | Host | Where | Wi-Fi | Rotation and scale | Restart |
 |---|---|---|---|---|
 | ESP32 | `main/fos_frame_settings.c`, through `embedded_runtime.nim` | the station's (`fos_wifi.c`); 64 names by name, case ignored | NVS; the scale live, a rotation restarts | is a reboot: the page shows Reboot alone |
