@@ -30,7 +30,7 @@ export const ditherAlgorithms = [
 export const defaultDitherAlgorithm = "burkes";
 export const ditherExposureRange = [0.5, 2.0] as const;
 export const ditherViewingDistanceRangeCm = [10, 500] as const;
-export const defaultViewingDistanceCm = 50;
+export const defaultViewingDistanceCm = 30;
 /** Pixel density when the panel's size is not known (a 7.3" 800x480 panel). */
 export const defaultPanelPpi = 127;
 /** Above this many pixels the DBS pass is skipped (about 4 s on a 13.3" panel). */

@@ -149,14 +149,14 @@ describe("the dither setting", () => {
       algorithm: "burkes",
       dbs: false,
       exposure: 1,
-      viewingDistanceCm: 50,
+      viewingDistanceCm: 30,
     });
     expect(normalizeDither({ method: "opendisplay", algorithm: "nope", exposure: 9, viewingDistanceCm: true })).toEqual({
       method: "opendisplay",
       algorithm: "burkes",
       dbs: false,
       exposure: 2,
-      viewingDistanceCm: 50,
+      viewingDistanceCm: 30,
     });
   });
 

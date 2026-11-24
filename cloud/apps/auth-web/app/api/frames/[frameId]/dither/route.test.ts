@@ -62,7 +62,7 @@ function post(body: unknown) {
   );
 }
 
-const opendisplay = { method: "opendisplay", dbs: true, exposure: 1.3, viewingDistanceCm: 50 };
+const opendisplay = { method: "opendisplay", dbs: true, exposure: 1.3, viewingDistanceCm: 30 };
 
 beforeEach(() => {
   updates = [];

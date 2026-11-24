@@ -34,7 +34,7 @@ export function ditherFormValue(value: FrameDither | null | undefined): Required
     algorithm: value.algorithm ?? 'burkes',
     dbs: value.dbs ?? false,
     exposure: value.exposure ?? 1,
-    viewingDistanceCm: value.viewingDistanceCm ?? 50,
+    viewingDistanceCm: value.viewingDistanceCm ?? 30,
   }
 }
 
@@ -96,7 +96,7 @@ function DitherEditor({
                 className="!w-24"
                 value={current.viewingDistanceCm}
                 onChange={(distance) =>
-                  onChange({ ...current, viewingDistanceCm: Math.min(500, Math.max(10, distance ?? 50)) })
+                  onChange({ ...current, viewingDistanceCm: Math.min(500, Math.max(10, distance ?? 30)) })
                 }
               />
               <span className="frameos-muted text-sm">cm</span>

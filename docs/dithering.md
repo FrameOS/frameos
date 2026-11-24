@@ -31,6 +31,12 @@ side-by-side tests on a 4" and a 7.3" Spectra 6 panel, photos viewed from
 +30% was picked as best every time, over Floyd-Steinberg and over OpenDisplay
 without DBS.
 
+DBS tuned for 50 cm, though, drew red outlines where light skin meets a dark
+background: red is these panels' mid-lightness ink, and DBS placed it along
+such edges. In a second round on both panels (DBS tuned for 50, 30 and 20 cm,
+and no DBS, photos with skin against dark clothes), 30 cm looked best on
+each, so 30 cm is the default.
+
 It works best with a measured `palette` (the colours this panel really
 shows, set in the Palette section above it). With the stock palette it still
 matches by perception but aims at idealised inks the panel cannot show.
@@ -45,7 +51,7 @@ matches by perception but aims at idealised inks the panel cannot show.
 | `algorithm` | `burkes`, `floyd_steinberg`, `atkinson`, `stucki`, `sierra`, `sierra_lite`, `jarvis_judice_ninke`, `ordered` | `burkes` |
 | `exposure` | 0.5 to 2.0, multiplied in linear light (the screen shows it as brightness −50% to +100%) | 1.0 |
 | `dbs` | `true` to refine with Direct Binary Search | `false` |
-| `viewingDistanceCm` | 10 to 500, what DBS tunes the dot pattern for | 50 |
+| `viewingDistanceCm` | 10 to 500, what DBS tunes the dot pattern for | 30 |
 
 Unknown keys and out-of-range values are refused when saved (backend:
 `validate_dither`; cloud: `ditherProblem`). When read, the packer fills in the

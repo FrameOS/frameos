@@ -45,7 +45,7 @@ def _image(width: int, height: int, seed: int) -> Image.Image:
 def _cases():
     """(name, pixel format, palette, dither, ppi, image)."""
     opendisplay = normalize_dither({"method": "opendisplay"})
-    measured = normalize_dither({"method": "opendisplay", "dbs": True, "exposure": 1.3, "viewingDistanceCm": 50})
+    measured = normalize_dither({"method": "opendisplay", "dbs": True, "exposure": 1.3, "viewingDistanceCm": 30})
     yield "spectra6 stock, burkes", FOS_PIXEL_4BPP_SPECTRA6, SPECTRA6_PALETTE, opendisplay, DEFAULT_PPI, _image(16, 12, 1)
     yield ("spectra6 measured, dbs, exposure 1.3", FOS_PIXEL_4BPP_SPECTRA6, MEASURED_SPECTRA6, measured, 180.0,
            _image(16, 12, 2))
@@ -134,10 +134,10 @@ def test_normalize_fills_in_and_clamps():
     assert normalize_dither(None) is None
     assert normalize_dither({"method": "floydSteinberg", "dbs": True}) is None
     assert normalize_dither({"method": "opendisplay"}) == {
-        "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 1.0, "viewingDistanceCm": 50.0,
+        "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 1.0, "viewingDistanceCm": 30.0,
     }
     assert normalize_dither({"method": "opendisplay", "algorithm": "nope", "exposure": 9, "viewingDistanceCm": True}) == {
-        "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 2.0, "viewingDistanceCm": 50.0,
+        "method": "opendisplay", "algorithm": "burkes", "dbs": False, "exposure": 2.0, "viewingDistanceCm": 30.0,
     }
 
 

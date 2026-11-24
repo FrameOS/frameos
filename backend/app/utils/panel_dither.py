@@ -40,7 +40,7 @@ ALGORITHMS = (
 DEFAULT_ALGORITHM = "burkes"
 EXPOSURE_RANGE = (0.5, 2.0)
 VIEWING_DISTANCE_RANGE_CM = (10.0, 500.0)
-DEFAULT_VIEWING_DISTANCE_CM = 50.0
+DEFAULT_VIEWING_DISTANCE_CM = 30.0
 # Pixel density when the panel's size is not known (a 7.3" 800x480 panel).
 DEFAULT_PPI = 127.0
 # DBS on a 13.3" panel (1.9 M pixels) is about 4 s on a fast laptop; above
