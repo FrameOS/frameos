@@ -104,6 +104,12 @@ Pass criteria (the script checks each and exits non-zero on any):
 - The deploy key's forced command (`frameos-cloud-deploy-command`) allows the
   four deploy commands and refuses a shell, a chained command, a prefix match
   and reading the environment file.
+- With a service user that is not root, as on the box: an archive whose
+  `RELEASE_REF` or `RELEASE` is a link to the environment file puts nothing
+  of that file into the deploy's output, the log, `--status` or a release's
+  name, a link put in `RELEASE_REF`'s place later does no better, and the
+  file carrying the migrations' database URL is never inside the release
+  tree.
 - `install.sh` converts a legacy host without moving traffic until the new
   instance is up, keeps a backup of every vhost it rewrites, and leaves the
   frame hub's own `proxy_pass` alone.

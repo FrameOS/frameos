@@ -379,9 +379,13 @@ One-time setup, in order:
    keys that open the storage box. Rotate it like any other production
    secret.
 
-   Two rules keep the key's reach at "deploy" rather than "root": the
+   Three rules keep the key's reach at "deploy" rather than "root": the
    migrations run as the service user with `DATABASE_URL` alone (not the
-   env file), and the two root-run scripts — `frameos-cloud-update` and this
+   env file); root never opens, writes or chowns a name inside a release
+   tree, which the service user unpacked and its app can write to (what a
+   release says of itself, `RELEASE` and `RELEASE_REF`, is read as the
+   service user, and the file that hands the migrations their URL lives in
+   `/run`); and the two root-run scripts — `frameos-cloud-update` and this
    wrapper — are never taken from the archive. A deploy that carries a newer
    copy only *says so* in its log; ship them yourself, from a checkout, with
    `cloud/ops/deploy/install.sh --scripts-only` on the box (the wrapper is
