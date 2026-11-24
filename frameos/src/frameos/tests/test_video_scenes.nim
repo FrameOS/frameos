@@ -11,6 +11,7 @@ import ../interpreter
 import ../js_runtime/app_runtime
 import ../scene_rhythm
 import ../types
+from ../ids import SceneId
 
 const Samples = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "scenes" / "samples"
 
@@ -281,6 +282,66 @@ suite "the video samples":
         server.terminate()
         discard server.waitForExit()
         server.close()
+
+  test "Video player plays in a window of a desktop, and paces the frame":
+    if not haveFfmpeg:
+      skip()
+    else:
+      problems = @[]
+      # A desktop: the scene it wraps on the left, a window of the Video
+      # player on the right, as the windowed layouts draw one (hostSceneFor).
+      let desk = %*{"id": "tests/desk", "name": "Desk", "settings": {"execution": "interpreted",
+        "refreshInterval": 300, "backgroundColor": "#ffffff", "isLayout": true}, "fields": [],
+        "apps": {"desk": {"name": "desk", "category": "data", "version": "1.0.0", "fields": [],
+          "output": [{"name": "image", "type": "image"}], "sources": {"config.json": "{}", "app.tsx":
+            "export function get(app) { return (<div className=\"relative w-full h-full bg-white\">" &
+            "<div className=\"absolute left-0 top-0 w-[100px] h-[180px] flex\"><yield /></div>" &
+            "<div className=\"absolute left-[120px] top-[20px] w-[180px] h-[120px] flex\"><Scene id=\"video-player\" /></div>" &
+            "</div>) }"}}},
+        "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
+          {"id": "2", "type": "app", "data": {"keyword": "desk", "config": {}}},
+          {"id": "3", "type": "app", "data": {"keyword": "render/image", "config": {"placement": "stretch"}}}],
+        "edges": [{"id": "1", "source": "1", "sourceHandle": "next", "target": "3", "targetHandle": "prev"},
+          {"id": "2", "source": "2", "sourceHandle": "fieldOutput", "target": "3", "targetHandle": "fieldInput/image"}]}
+      let front = %*{"id": "tests/front", "name": "Front", "settings": {"execution": "interpreted",
+        "refreshInterval": 600, "backgroundColor": "#00ff00"}, "fields": [], "apps": {},
+        "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}}], "edges": [],
+        "layout": {"sceneId": "tests/desk", "state": {}}}
+      setUploadedInterpretedScenes(parseInterpretedScenes($(%*[desk, front,
+        parseFile(Samples / "Video player" / "scenes.json")[0]])))
+      resetInterpretedScenes()
+      let config = frame()
+      logger.frameConfig = config
+      var hosted: seq[FrameScene]
+      hostSceneFor = proc(sceneId: SceneId): FrameScene {.closure, gcsafe.} =
+        {.cast(gcsafe).}:
+          for scene in hosted:
+            if scene.id == sceneId: return scene
+          result = init(sceneId, config, logger, %*{})
+          hosted.add result
+      defer: hostSceneFor = nil
+      let scene = hostSceneFor("tests/front".SceneId)
+      var seen: seq[string]
+      var waits: seq[float]
+      let deadline = epochTime() + 40
+      var last: Image
+      while epochTime() < deadline and seen.len < 3:
+        let (image, _) = scene.draw()
+        last = image
+        let c = image.color(210, 80) # the window's middle
+        if c in ["red", "blue"] and (seen.len == 0 or seen[^1] != c):
+          seen.add c
+        # When the frame wakes next: the video's next frame, not the desk's 300 s.
+        let wait = scene.refreshInterval
+        if c in ["red", "blue"]:
+          waits.add wait
+        sleep(int(clamp(wait, 0.001, 0.25) * 1000))
+      last.shot("video-player-window")
+      check seen.len >= 3 and seen[0 .. 2] == @["red", "blue", "red"]
+      check last.color(50, 90) != "red" and last.color(50, 90) != "blue" # the wrapped scene's half
+      check waits.len > 0 and waits[0] < 1.0
+      check problems.len == 0
+      if problems.len > 0: echo problems
 
   test "Camera wall and Immich videos say what they need":
     problems = @[]
