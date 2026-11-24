@@ -44,9 +44,11 @@ unless the function makes no such unchecked call anywhere. A check in a
 `finally` runs after `*nimErr_ = NIM_FALSE`; Nim's error paths destroy
 without checks. So no check that could ever be taken goes, and nothing a
 Defect does changes: every bounds, overflow and range check still runs and
-still raises. (A flag left set by an importc call that called back into Nim
-and let an exception escape would be seen at the next check instead: every
-callback the runtime gives QuickJS catches what it raises.)
+still raises. A check with an importc call (QuickJS, which calls back into
+Nim) on the way back to the previous check stays, so a flag a Defect left
+set on its way out through C is seen where it was. (Only inside a clean
+function entered with such a flag, which then runs to its end before the
+caller's check sees it.)
 
 Usage: drop_nim_dead_checks.py <nimcache dir>   (build_nim.sh runs it)
 """
