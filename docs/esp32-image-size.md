@@ -1489,6 +1489,35 @@ file to the list); the RGB panel's frame-done callback in
 flash is busy, so it may. A veneer costs a taken jump, about 10 ns; none of
 these callers is a pixel loop.
 
+## On a board
+
+Main at 0e152c3dc (A) and the branch (B) flashed in turn on the same board in
+one session (A B A B), the bench's benchmark suite each time (medians of the
+warm renders, ms):
+
+| | SenseCAP B | SenseCAP A | E1002 B | E1002 A |
+|---|---:|---:|---:|---:|
+| raster | 2163 / 2153 | 2216 / 2220 | 2318 / 2319 | 2410 / 2423 |
+| image | 1552 / 1566 | 1612 / 1617 | 1845 / 1850 | 1900 / 1900 |
+| JSON (cpu) | 640 / 643 | 607 / 611 | 537 / 533 | 492 / 494 |
+| float (cpu) | 1199 / 1194 | 1196 / 1194 | 1107 / 1108 | 1123 / 1115 |
+| int, str, base, UI | the same within 1.5% | | | |
+
+The raster and image benchmarks are 2.5–4% faster on both boards, and the
+JSON one 5% (SenseCAP) to 8.5% (E1002) slower: one binary on both boards, so
+a property of this image, and nothing in the change touches QuickJS's JSON
+path. It is where its functions land (the 2026-11-22 link order alone moved
+the same benchmark 0.5–4.6%); worth a look with the next `link_order.py`
+pass. Pixel toys and Slideshow with motion on the SenseCAP, in turn: 20.2 /
+20.1 fps (B) against 16.9 / 20.1 (A), 11.6 / 11.4 against 10.1 / 11.9.
+Status, reboot, builtin, input, storm and the scenes suite ran clean on the
+SenseCAP; on the E1002 the full sequence (status, reboot, benchmark,
+builtin, storm) passed twice on each image, and builtin alone three times
+each. One earlier B run there stalled 186 s after a scene settings render
+until the next console line arrived: the E1002 did the same on 2026-11-20
+(a scene switcher close), before any of this, so it is the E1002's own
+(worth its own look), not this change's.
+
 ## Measured, needs a decision
 
 | Lever | Saves | Cost |
