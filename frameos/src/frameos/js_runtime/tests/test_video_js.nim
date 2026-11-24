@@ -273,13 +273,14 @@ export function get(app) {
       check last.color(60, 40).b > 200 # ffmpeg's own played it
       var said: seq[JsonNode]
       for entry in logged:
-        if entry{"event"}.getStr().endsWith(":video:software"):
+        if entry{"event"}.getStr().endsWith(":video:fallback"):
           said.add entry
       check said.len == 1
       check not ui.scene.logger.enabled # and left as the runner had it
       if said.len == 1:
         check said[0]{"src"}.getStr() == "clip.mp4"
-        check said[0]{"decoder"}.getStr() == "mpeg4_v4l2m2m"
+        check said[0]{"from"}.getStr() == "mpeg4_v4l2m2m"
+        check said[0]{"to"}.getStr() == "software"
         check said[0]{"reason"}.getStr() == "output VIDIOC_REQBUFS failed: Cannot allocate memory"
         check said[0]{"hardwareKept"}.getBool()
 

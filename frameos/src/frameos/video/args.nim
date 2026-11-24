@@ -36,18 +36,22 @@ type
     width*, height*: int ## as it is shown: a phone's turned video turned
     fps*: float          ## 0 when unknown
     codec*: string
+    rotation*: int       ## degrees the picture is turned to be shown (0, 90, 180, 270)
 
   DecodeCaps* = object
     ## What this machine's ffmpeg can decode in hardware (docs/video.md
     ## "Hardware"): read once (`decodeCaps` in player.nim).
     v4l2Decoders*: seq[string] ## ffmpeg's V4L2 mem2mem decoders ("h264_v4l2m2m"), with a decoder device there
     vaapi*: bool               ## a VA-API render node, a VA driver and ffmpeg's vaapi hwaccel
+    v4l2Device*: string        ## a VideoCore's decoder ("bcm2835-codec-decode"), its /dev/video path
+    ispDevice*: string         ## ... and its ISP ("bcm2835-codec-isp"): the ISP path (video/isp.nim)
 
   VideoDecode* = object
     ## How one ffmpeg decodes.
     decoder*: string ## a hardware decoder for `-c:v` ("h264_v4l2m2m"); "" for ffmpeg's own
     hwaccel*: string ## "vaapi"; ""
     fast*: bool      ## the decoder is behind: no loop filter, the scaler's fast bilinear
+    isp*: bool       ## the VideoCore's decoder and ISP driven by the player, ffmpeg only demuxing
 
 const
   DefaultMaxFps* = 30.0
@@ -246,7 +250,8 @@ proc pickDecode*(codec: string, caps: DecodeCaps, fast: bool, software: bool): V
 
 proc decodeName*(decode: VideoDecode): string =
   ## What a status says decodes it.
-  if decode.decoder.len > 0: decode.decoder
+  if decode.isp: decode.decoder & "+isp"
+  elif decode.decoder.len > 0: decode.decoder
   elif decode.hwaccel.len > 0: decode.hwaccel
   else: "software"
 
@@ -324,6 +329,85 @@ proc stillArgs*(source: VideoSource, at: float, width, height: int, fit: VideoFi
     "-vf", fitFilter(width, height, fit),
     "-f", "rawvideo", "-pix_fmt", pixels.pixFmt, "pipe:1"]
 
+# ------------------------------------------------- the ISP path (video/isp.nim)
+
+const
+  IspMinEdge* = 32
+    ## The VideoCore's ISP makes no picture smaller than this a side.
+  V4l2MaxEdge* = 1920
+    ## ... and its decoder takes none bigger (bcm2835-codec).
+
+proc demuxArgs*(source: VideoSource, startAt: float, loopFile: bool): seq[string] =
+  ## ffmpeg only taking the video's H.264 out of its container, as an Annex
+  ## B stream on stdout, for the VideoCore's decoder (video/isp.nim): what
+  ## may be opened is the same as for a decode (inputArgs). A start that is
+  ## not a keyframe starts at the keyframe before it (a stream copy cannot
+  ## cut): the player drops the frames up to it (startSkip).
+  result = @["-hide_banner", "-loglevel", "error", "-nostdin", "-nostats"]
+  result.add source.inputArgs()
+  if startAt > 0.001:
+    result.add @["-ss", formatFloat(startAt, ffDecimal, 3)]
+  if loopFile and source.scheme.len == 0:
+    result.add @["-stream_loop", "-1"]
+  result.add @["-i", source.input, "-map", "0:v:0", "-an", "-sn", "-dn",
+    "-c:v", "copy", "-bsf:v", "h264_mp4toannexb", "-f", "h264", "pipe:1"]
+
+proc ispFits*(caps: DecodeCaps, decode: VideoDecode, fit: VideoFit, width, height: int,
+    probe: ProbeResult): bool =
+  ## Whether a launch goes through the VideoCore's decoder and ISP (the
+  ## player's own V4L2, video/isp.nim) rather than ffmpeg's decode and
+  ## scale: an H.264 source the VideoCore decodes (ffmpeg's `h264_v4l2m2m`
+  ## picked for it), both devices there, a source of a known size it takes,
+  ## not turned (the ISP cannot turn a picture), and a frame the ISP makes.
+  if decode.decoder != "h264_v4l2m2m" or caps.v4l2Device.len == 0 or caps.ispDevice.len == 0:
+    return false
+  if probe.codec != "h264" or probe.rotation != 0:
+    return false
+  if probe.width < IspMinEdge or probe.height < IspMinEdge or probe.width > V4l2MaxEdge or
+      probe.height > V4l2MaxEdge:
+    return false
+  let (fw, fh) = frameSize(width, height, fit, probe.width, probe.height)
+  fw >= IspMinEdge and fh >= IspMinEdge
+
+proc ispSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): tuple[width, height, x, y: int] =
+  ## What the ISP makes of a `srcWidth` x `srcHeight` picture for a `width` x
+  ## `height` box, and where in it the frame is: contain and fill are the
+  ## frame itself (frameSize); cover is the picture scaled to cover the box,
+  ## the box's part of it taken from the middle as it is copied (the ISP
+  ## crops from a picture's corner only, 2026-11-24).
+  let (fw, fh) = frameSize(width, height, fit, srcWidth, srcHeight)
+  if fit != vfCover or srcWidth <= 0 or srcHeight <= 0:
+    return (fw, fh, 0, 0)
+  let
+    w = clamp(width, 1, MaxFrameEdge)
+    h = clamp(height, 1, MaxFrameEdge)
+  var sw, sh: int
+  if srcWidth * h >= srcHeight * w:
+    # Wider than the box: its height, the sides cut off.
+    sh = h
+    sw = max(w, int(round(h.float * srcWidth.float / srcHeight.float)))
+  else:
+    sw = w
+    sh = max(h, int(round(w.float * srcHeight.float / srcWidth.float)))
+  (sw, sh, (sw - w) div 2, (sh - h) div 2)
+
+proc keepFrame*(index: int64, srcFps, outFps: float): bool =
+  ## Whether the `index`th decoded frame (from 0) is one of `outFps` a
+  ## second out of a source of `srcFps`: what ffmpeg's fps filter keeps of a
+  ## 60 frames a second video at the app's 30. All of them when the source
+  ## is not faster (or does not say).
+  if srcFps <= 0 or outFps <= 0 or srcFps <= outFps * 1.001:
+    return true
+  let ratio = outFps / srcFps
+  int64(floor(float(index + 1) * ratio)) > int64(floor(float(index) * ratio))
+
+proc startSkip*(keyframeAt, startAt, srcFps: float): int =
+  ## Frames from the keyframe a stream copy starts at to the time asked for:
+  ## decoded and dropped for an exact start.
+  if srcFps <= 0 or startAt <= keyframeAt:
+    return 0
+  int(round((startAt - keyframeAt) * srcFps))
+
 proc probeArgs*(source: VideoSource): seq[string] =
   result = @["-v", "error", "-print_format", "json",
     "-show_entries", "format=duration:stream=codec_name,width,height,avg_frame_rate,r_frame_rate" &
@@ -392,7 +476,8 @@ proc parseProbe*(text: string): ProbeResult =
   let tags = stream{"tags"}
   if rotation == 0 and not tags.isNil and tags.kind == JObject and tags.hasKey("rotate"):
     rotation = jsonFloat(tags["rotate"])
-  if int(round(abs(rotation))) mod 180 == 90:
+  result.rotation = ((int(round(rotation)) mod 360) + 360) mod 360
+  if result.rotation mod 180 == 90:
     swap(result.width, result.height)
   let duration = jsonFloat(root{"format"}{"duration"})
   if duration > 0 and duration.classify notin {fcNan, fcInf}:

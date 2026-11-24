@@ -255,8 +255,9 @@ else:
       return nimStringToJS(ctx, $(%*{"error": err.msg}))
 
   proc logFallback(owner: AppRoot, video: var JsVideo) =
-    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
-    ## ffmpeg's reason (docs/video.md "Hardware"). A video renders fast, and
+    ## A hardware launch of `video` gave way (to ffmpeg's own decoder, or from
+    ## the ISP path to ffmpeg's hardware one): said once, with the reason
+    ## (docs/video.md "Hardware"). A video renders fast, and
     ## the runner turns the scene's log off while a scene does ("render:pause"):
     ## this line goes out anyway, as the runner's own signals do.
     let count = video.player.fallbacks()
@@ -270,8 +271,8 @@ else:
     let wasEnabled = logger.enabled
     if not wasEnabled:
       logger.enable()
-    frameos_apps.log(owner, %*{"event": "video:software", "src": shownName(video.src),
-      "decoder": fallback.decoder, "reason": fallback.reason,
+    frameos_apps.log(owner, %*{"event": "video:fallback", "src": shownName(video.src),
+      "from": fallback.decoder, "to": fallback.to, "reason": fallback.reason,
       "hardwareKept": fallback.busy})
     if not wasEnabled:
       logger.disable()
