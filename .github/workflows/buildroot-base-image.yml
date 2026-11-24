@@ -74,11 +74,11 @@ jobs:
           echo "Run this workflow against a branch so the manifest commit has a target."
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.ref_name }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -181,12 +181,12 @@ jobs:
       # both jobs of a leg have to read the same versions.json — and the three
       # legs queue behind ONE epyc-32 slot, hours apart.
       - name: Checkout dispatched commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -261,7 +261,7 @@ jobs:
       # is plenty: the artifact only has to outlive this run (and a rerun of
       # its failed jobs).
       - name: Hand the image to the publish job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: buildroot-image-${{ matrix.platform }}-${{ github.run_id }}
           path: |
@@ -274,7 +274,7 @@ jobs:
 
       - name: Upload build metadata
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: buildroot-base-${{ matrix.platform }}-${{ github.run_id }}
           path: build/buildroot-images/${{ matrix.platform }}/**/metadata.json
@@ -309,12 +309,12 @@ jobs:
     steps:
       # Same commit as the build leg; see the comment on its checkout.
       - name: Checkout dispatched commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
@@ -331,7 +331,7 @@ jobs:
           fi
 
       - name: Download the built image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: buildroot-image-${{ matrix.platform }}-${{ github.run_id }}
           path: build/buildroot-images/${{ matrix.platform }}
@@ -408,7 +408,7 @@ jobs:
           echo "${FRAMEOS_NEXT_VERSION}" > "build/published/${PLATFORM}"
 
       - name: Upload published marker
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: buildroot-published-${{ matrix.platform }}-${{ github.run_id }}
           path: build/published/${{ matrix.platform }}
@@ -416,7 +416,7 @@ jobs:
 
       - name: Upload refreshed manifest
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: buildroot-manifest-${{ matrix.platform }}-${{ github.run_id }}
           path: tools/buildroot-images/manifest.json
@@ -447,18 +447,18 @@ jobs:
       FRAMEOS_NEXT_VERSION: ${{ needs.resolve-matrix.outputs.version }}
     steps:
       - name: Checkout branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
 
       - name: Download published markers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: buildroot-published-*-${{ github.run_id }}
           path: build/published

@@ -13,8 +13,9 @@ set -euo pipefail
 # moves nginx, that consecutive deploys alternate ports, that an unhealthy
 # release is refused with traffic left where it was, that a failing migration
 # never reaches the flip, that --rollback returns to the previous release,
-# that pruning keeps the pinned releases, and that a frame hub unable to store
-# a picture stops the deploy before anything moves.
+# that pruning keeps the pinned releases, that a frame hub unable to store
+# a picture stops the deploy before anything moves, and that a release tree
+# owned by the service user cannot point root at a file of root's.
 #
 # The fakes are the point of failure to keep in mind: they model systemd and
 # nginx as this script uses them, not as they are. Anything relying on real
@@ -171,11 +172,17 @@ set -euo pipefail
 # Record what the runner was given, for step 15.
 env >/tmp/fake/migrate-env
 id -un >>/tmp/fake/migrate-env
+# And what the release tree and /run held while it ran, for step 17.
+ls -A .. >/tmp/fake/migrate-tree
+stat -c '%U %a' /run/frameos-cloud-migrate.* >/tmp/fake/migrate-url-file 2>&1 || true
 psql "${DATABASE_URL:?}" -c "select 1" >/dev/null
 MIG
   chmod +x "$dir/cloud/scripts/db-migrate.sh"
   echo "$sha" >"$dir/RELEASE"
   printf 'ref rehearsal\ncommit %s\n' "$sha" >"$dir/RELEASE_REF"
+  # Step 17: a member that is a link out of the tree instead of a file.
+  [ -z "${BUNDLE_RELEASE_LINK:-}" ] || ln -sfn "$BUNDLE_RELEASE_LINK" "$dir/RELEASE"
+  [ -z "${BUNDLE_REF_LINK:-}" ] || ln -sfn "$BUNDLE_REF_LINK" "$dir/RELEASE_REF"
   tar -C "$dir" -cf - .
   rm -rf "$dir"
 }
@@ -556,6 +563,78 @@ check "the check got no other secret" "no" \
   "$(grep -q 'SESSION_SECRET' /tmp/fake/hub-check-env && echo yes || echo no)"
 check "the copy of the keys was removed" "0" \
   "$(find /run -maxdepth 1 -name 'frameos-cloud-hub-check.*' | wc -l | tr -d ' ')"
+
+# --- 17. root does not open or chown a path inside the release tree ---------
+
+# Everything above ran with root as the service user, so the line between the
+# two was never walked. Here the tree gets an owner of its own, as on the box.
+# That user unpacked the archive, links and all, and the app it runs can
+# write there: root must not read a name in that tree and print what it
+# finds, nor write, chmod or chown a name in it.
+echo "17. a release tree owned by the service user cannot point root at root's files"
+useradd --system --no-create-home --shell /usr/sbin/nologin frameos-cloud-rehearsal
+export FRAMEOS_CLOUD_SERVICE_USER=frameos-cloud-rehearsal
+chmod 600 /etc/frameos-cloud/auth-web.env # root's alone, as on the box
+# The fakes keep their notes in /tmp/fake as whoever runs them.
+chmod 1777 /tmp/fake
+rm -f /tmp/fake/migrate-env /tmp/fake/migrate-tree /tmp/fake/migrate-url-file
+secret="must-not-reach-migrations"
+: >/root/CODEX_LOG.md
+
+# A plain deploy first: the service user unpacks, migrates and is the one
+# asked what the release is.
+deploy bbbb22223333 "$hub_with_check" >/tmp/out17 2>&1 || { cat /tmp/out17; exit 1; }
+check "a deploy as a separate service user goes live" "bbbb22223333" "$(live_sha)"
+check "the runner ran as that user" "frameos-cloud-rehearsal" "$(tail -1 /tmp/fake/migrate-env)"
+check "the database URL file was not in the release tree" "no" \
+  "$(grep -q 'database-url' /tmp/fake/migrate-tree && echo yes || echo no)"
+check "it was the service user's alone, in /run" "frameos-cloud-rehearsal 600" \
+  "$(cat /tmp/fake/migrate-url-file)"
+check "and was removed afterwards" "0" \
+  "$(find /run -maxdepth 1 -name 'frameos-cloud-migrate.*' | wc -l | tr -d ' ')"
+check "the log names the release" "yes" \
+  "$(grep -q 'live: ref rehearsal commit bbbb22223333' /tmp/out17 && echo yes || { cat /tmp/out17; echo no; })"
+
+# RELEASE_REF as a link to the env file: the deploy still goes (the ref is a
+# label), and nothing of the file reaches the output, the log or --status.
+BUNDLE_REF_LINK=/etc/frameos-cloud/auth-web.env deploy cccc33334444 "$hub_with_check" >/tmp/out17b 2>&1 ||
+  { cat /tmp/out17b; exit 1; }
+check "a release whose RELEASE_REF is a link still goes live" "cccc33334444" "$(live_sha)"
+frameos-cloud-update --status >/tmp/status17 2>&1 || true
+frameos-cloud-update --release-ref >/tmp/ref17 2>&1 || true
+check "the env file is in none of: deploy output, log, --status, --release-ref" "no" \
+  "$(grep -qs "$secret" /tmp/out17b /root/CODEX_LOG.md /tmp/status17 /tmp/ref17 && echo yes || echo no)"
+check "the release is named by its sha instead" "yes" \
+  "$(grep -q 'live: cccc33334444' /tmp/out17b && echo yes || { cat /tmp/out17b; echo no; })"
+check "--release-ref says it does not know" "unknown" "$(cat /tmp/ref17)"
+
+# RELEASE as a link to the env file: its hex letters used to name the release
+# directory. Now there is no sha to read, and no release.
+releases_before="$(find /opt/frameos-cloud.releases -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
+if BUNDLE_RELEASE_LINK=/etc/frameos-cloud/auth-web.env deploy dddd44445555 "$hub_with_check" >/tmp/out17c 2>&1; then
+  check "a release whose RELEASE is a link is refused" "yes" "no"
+else
+  check "a release whose RELEASE is a link is refused" "yes" "yes"
+fi
+check "it said why" "yes" \
+  "$(grep -q "RELEASE file is not a commit sha" /tmp/out17c && echo yes || { cat /tmp/out17c; echo no; })"
+check "no release was made from it" "$releases_before" \
+  "$(find /opt/frameos-cloud.releases -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
+check "the live release is untouched" "cccc33334444" "$(live_sha)"
+
+# A file put in RELEASE_REF's place after the deploy (the app can write its
+# own tree) is no different: --status runs as root and must not read through.
+live_dir="$(readlink -f /opt/frameos-cloud)"
+rm -f "$live_dir/RELEASE_REF"
+ln -s /etc/frameos-cloud/auth-web.env "$live_dir/RELEASE_REF"
+frameos-cloud-update --status >/tmp/status17d 2>&1 || true
+frameos-cloud-update --release-ref >/tmp/ref17d 2>&1 || true
+check "--status does not read through a link put there later" "no" \
+  "$(grep -qs "$secret" /tmp/status17d /tmp/ref17d && echo yes || echo no)"
+
+# And back to an ordinary release, so the closing --status below reads one.
+deploy eeee55556666 "$hub_with_check" >/tmp/out17e 2>&1 || { cat /tmp/out17e; exit 1; }
+check "an ordinary release follows" "eeee55556666" "$(live_sha)"
 
 echo
 frameos-cloud-update --status

@@ -1,9 +1,16 @@
 name: Sync timezone data
 
+# FrameOS/tz regenerates its data every night at 00:42 UTC and commits when
+# something changed. This repository asks for it a little later, instead of
+# being told: a dispatch from there needed a token with write access to this
+# repository kept in that one's secrets, next to the tools its job downloads
+# and runs. Nothing outside this repository can start this workflow now. A
+# night with no change is two checkouts and "No FrameOS timezone changes to
+# commit"; a night whose push lost a race with a merge is made up for by the
+# next one, because the difference is still there.
 on:
-  repository_dispatch:
-    types:
-      - timezone-data-updated
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       tz_ref:
@@ -24,17 +31,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout FrameOS
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.event.repository.default_branch || 'main' }}
           fetch-depth: 1
 
       - name: Checkout tz distribution
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: FrameOS/tz
           path: tz
-          ref: ${{ github.event.client_payload.tz_ref || inputs.tz_ref || 'main' }}
+          ref: ${{ inputs.tz_ref || 'main' }}
           fetch-depth: 1
 
       - name: Import and validate timezone data
@@ -122,6 +129,9 @@ jobs:
           PY
 
       - name: Commit and push FrameOS timezone updates
+        env:
+          FRAMEOS_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          TZ_COMMIT: ${{ steps.import.outputs.tz_commit }}
         run: |
           set -euo pipefail
           if git diff --quiet -- frameos/assets/compiled/tz/tzdata.json frameos/assets/compiled/tz/timezone_aliases.json frontend/src/decorators/timezones.json; then
@@ -129,9 +139,8 @@ jobs:
             exit 0
           fi
 
-          FRAMEOS_BRANCH="${{ github.event.repository.default_branch }}"
           git config user.name "frameos-bot"
           git config user.email "git@frameos.net"
           git add frameos/assets/compiled/tz/tzdata.json frameos/assets/compiled/tz/timezone_aliases.json frontend/src/decorators/timezones.json
-          git commit -m "chore: sync timezone data from FrameOS/tz/${{ steps.import.outputs.tz_commit }}"
+          git commit -m "chore: sync timezone data from FrameOS/tz/${TZ_COMMIT}"
           git push origin "HEAD:$FRAMEOS_BRANCH"

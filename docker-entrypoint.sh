@@ -20,7 +20,15 @@ if [ -z "$REDIS_URL" ]; then
   echo "🥕 Starting local Redis (no REDIS_URL detected), data in $REDIS_DATA_DIR."
   redis-server --daemonize yes --dir "$REDIS_DATA_DIR" --appendonly yes --appendfsync everysec
 else
-  echo "REDIS_URL is set ($REDIS_URL). Skipping local Redis."
+  # The URL can carry a password (redis://:secret@host:6379/0), and this line
+  # goes to `docker logs` and the add-on's log page: say where, not with what.
+  # Everything up to the last @ goes; a form this does not understand is not
+  # shown at all.
+  redis_target="$(printf '%s' "$REDIS_URL" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://).*@#\1#')"
+  case "$redis_target" in
+    *@*) redis_target="address not shown" ;;
+  esac
+  echo "REDIS_URL is set ($redis_target). Skipping local Redis."
 fi
 
 cd backend

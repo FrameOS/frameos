@@ -156,9 +156,10 @@ RUN apt-get update \
 # The pnpm version is package.json's `packageManager` — the one pin (CI's
 # pnpm/action-setup and flox read the same field); corepack installs exactly
 # that version. Only package.json is copied here so the layer survives
-# source changes.
+# source changes. corepack itself is pinned too (it downloads and runs the
+# package manager, in the image that is published): bump it by hand.
 COPY package.json /tmp/package-manager/package.json
-RUN npm install -g corepack@latest \
+RUN npm install -g corepack@0.36.0 \
     && corepack enable \
     && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare \
          "$(node -p "require('/tmp/package-manager/package.json').packageManager")" --activate \

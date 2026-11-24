@@ -45,16 +45,16 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ inputs.ref || 'main' }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           run_install: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -62,8 +62,10 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       # Trusted publishing (OIDC) needs npm >= 11.5.1; Node 22 bundles npm 10.
+      # An exact version, not a range: this job holds the OIDC token npm
+      # publishes with, so what it installs is named here and moved by hand.
       - name: Update npm for trusted publishing
-        run: npm install -g npm@^11
+        run: npm install -g npm@11.21.3
 
       # nim-lang.org drops connections and serves 503s often enough to fail
       # real runs — one observed window outlasted curl's five retries AND a
@@ -75,14 +77,14 @@ jobs:
       - name: Cache Nim toolchain
         if: inputs.runtime_run_id == ''
         id: cache_nim_toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.choosenim
             ~/.nimble/bin
           key: ${{ runner.os }}-nim-toolchain-2.2.4
 
-      - uses: jiro4989/setup-nim-action@v1
+      - uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
         if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
         id: setup_nim
         continue-on-error: true
@@ -92,7 +94,7 @@ jobs:
 
       - name: Retry Nim setup once
         if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
+        uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -101,7 +103,7 @@ jobs:
         if: inputs.runtime_run_id == '' && steps.cache_nim_toolchain.outputs.cache-hit == 'true'
         run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         if: inputs.runtime_run_id == ''
         with:
           version: 6.0.2

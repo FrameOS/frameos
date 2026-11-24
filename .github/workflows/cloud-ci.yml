@@ -47,6 +47,12 @@ on:
   # recursion guard does not suppress, and it also lands where we want it —
   # after the artefacts and images are published, not at the version bump
   # near the start of the run.
+  #
+  # `workflows:` matches by NAME, and a pull request's own workflow file can
+  # carry any name: a fork's "Release FrameOS" finishing would start this
+  # workflow too (on main's code, with main's deploy job). So every job
+  # below also asks that the finished run is the real one: dispatched by
+  # hand (the release's only trigger), on main, in this repository.
   workflow_run:
     workflows: ["Release FrameOS"]
     types: [completed]
@@ -105,7 +111,10 @@ jobs:
     # stops it.
     if: >-
       github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     # A 16-core slot of the self-hosted pool (tools/gha-runners/README.md):
     # turbo's lint/typecheck/test/build is CPU, and auth-web's 336 test files
     # alone took two minutes on a 4-core GitHub runner. Pull requests from
@@ -121,7 +130,7 @@ jobs:
     # deploy is about to ship. Verify the tip, so that what passed here is
     # what goes out.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
@@ -132,7 +141,7 @@ jobs:
         with:
           node-version: '24'
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .turbo
           key: turbo-cloud-${{ runner.os }}-${{ github.sha }}
@@ -190,7 +199,10 @@ jobs:
     name: integration (${{ matrix.leg }})
     if: >-
       github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     # auth-web's shards on the pool; the frame hub's suite on GitHub's runner,
     # as when verify ran it. It is not what this job waits for (~80 s against
     # the auth-web shards' 1.5-2.5 min), and it drives fake devices over the
@@ -224,7 +236,7 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ github.event_name == 'workflow_run' && 'refs/heads/main' || '' }}
 
@@ -281,13 +293,17 @@ jobs:
     needs: [verify, integration]
     # Two ways in: a merge to main, and a finished release. A release that
     # failed is not a release — deploying the half of it that landed is worse
-    # than deploying nothing.
+    # than deploying nothing. And a run that only shares the release's name
+    # (see the trigger above) is not one either.
     if: >-
       vars.FRAMEOS_CLOUD_AUTO_DEPLOY == 'true' &&
       (
         (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
         (github.event_name == 'workflow_run' &&
-         github.event.workflow_run.conclusion == 'success')
+         github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'workflow_dispatch' &&
+         github.event.workflow_run.head_branch == 'main' &&
+         github.event.workflow_run.head_repository.full_name == github.repository)
       )
     runs-on: ubuntu-latest
     permissions:
