@@ -721,7 +721,7 @@ static void warm_task(void *arg)
     if (ensure_module() == ESP_OK) {
         refresh_wait();
         DEV_SPI_Acquire();
-        if (s_panel->driver_init() != 0) ESP_LOGW(TAG, "panel bring-up at boot failed: the first picture tries again");
+        if (fos_panel_init(s_panel) != 0) ESP_LOGW(TAG, "panel bring-up at boot failed: the first picture tries again");
         DEV_SPI_Release();
     }
     xSemaphoreGive(s_warm_done);

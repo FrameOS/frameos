@@ -142,31 +142,25 @@ int fos_panel_fit_scale(const char *text, int scale, int avail)
     return scale;
 }
 
-static void draw_char(const fos_panel_surface_t *s, char c, int x, int y, int scale, bool black)
+static void draw_char(const fos_panel_surface_t *s, char c, int x, int y, int scale)
 {
     const uint8_t *rows = fos_font5x7_glyph(c);
     if (!rows) return;
     for (int row = 0; row < 7; row++) {
         for (int col = 0; col < 5; col++) {
             if (rows[row] & (0x10u >> col)) {
-                fos_panel_fill_rect(s, x + col * scale, y + row * scale, scale, scale, black);
+                fos_panel_fill_rect(s, x + col * scale, y + row * scale, scale, scale, true);
             }
         }
     }
 }
 
-void fos_panel_draw_text_ink(const fos_panel_surface_t *s, const char *text, int x, int y, int scale,
-                             bool black)
+void fos_panel_draw_text(const fos_panel_surface_t *s, const char *text, int x, int y, int scale)
 {
     if (!text || scale <= 0) return;
     for (size_t i = 0; text[i]; i++) {
-        draw_char(s, text[i], x + (int)i * 6 * scale, y, scale, black);
+        draw_char(s, text[i], x + (int)i * 6 * scale, y, scale);
     }
-}
-
-void fos_panel_draw_text(const fos_panel_surface_t *s, const char *text, int x, int y, int scale)
-{
-    fos_panel_draw_text_ink(s, text, x, y, scale, true);
 }
 
 /* -------------------------------------------------------- the code's box */

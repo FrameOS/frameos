@@ -68,14 +68,9 @@ main/                     boot orchestration + platform modules
   fos_assets_flash.c      the state partition's files: /srv/internal, and the assets root with no SD card in use
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGB565, luma or 4-bit grey by panel) and dither/pack
-  fos_status_screen.c     puts the C portal screen on the panel (buffer, blit)
-  fos_portal_screen.c     the portal screen in C, for a board whose runtime does not draw it
-                          (embedded_scene.nim renderPortalInto does, in its font): the hotspot's
-                          join code and the setup page's as QR codes, like the Pi's hotspot scene
-                          (host-tested)
-  fos_qr.c                QR encoder, byte mode, level L: frameos/utils/qr.nim in C (host-tested)
+  fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
-                          aware: the portal screen and the local network access code box (host-tested)
+                          aware: the status screen and the local network access code box (host-tested)
   fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
@@ -118,8 +113,7 @@ link_order.txt            the order FrameOS's objects stand in inside the S3 ima
                           (docs/esp32-image-size.md, "Calls, alignment and strings")
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
-                          (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), portal screen
-                          (test_esp32_portal_screen.py: fos_qr + fos_portal_screen), SD probe, board,
+                          (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark,
                           slot cache, refresh queue
                           (lcd_loading.c) and scene-event (contract table +

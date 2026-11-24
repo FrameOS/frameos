@@ -51,8 +51,6 @@ idf_component_register(
         "fos_minisig.c"
         "fos_status_screen.c"
         "fos_panel_draw.c"
-        "fos_portal_screen.c"
-        "fos_qr.c"
         "fos_lan_access.c"
         "fos_console.c"
         "fos_scenes.c"
