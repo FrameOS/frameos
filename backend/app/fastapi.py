@@ -62,6 +62,11 @@ if config.HASSIO_RUN_MODE == "ingress":
 
     app.add_middleware(IngressPeerGuard)
 
+# nosniff everywhere, and who may frame the HTML (app/utils/response_headers.py).
+from app.utils.response_headers import ResponseHeadersMiddleware  # noqa: E402
+
+app.add_middleware(ResponseHeadersMiddleware)
+
 register_ws_routes(app)
 app.include_router(remote_ws_router)
 app.include_router(terminal_ws_router)
