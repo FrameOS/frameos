@@ -404,7 +404,10 @@ and `toggleScreen` switches it to what it is not; the dispatcher keeps which
 (`displayOn`), and the scene hears the `turnOn` or `turnOff` it became. A
 press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
-see what they were pressing.
+see what they were pressing. The same holds for a press on the voice chat's
+answer drawn across the bottom of an ESP32's panel: the touch driver keeps
+that finger from the dispatcher and the answer comes off
+([voice-chat.md](voice-chat.md) "Taking the notice off").
 
 From outside (a script, Home Assistant's `rest_command`), they are a POST to
 the frame's own server with its access key, as a bearer or `?k=`:

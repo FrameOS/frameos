@@ -1339,16 +1339,22 @@ static void press_map_keep(const remote_pull_t *pull)
     __atomic_store_n(&s_press_count, count, __ATOMIC_RELEASE);
 }
 
+/* The glass's wire position as the panel's pixel, as the runtime reads it
+ * (utils/image.nim pointerToScenePoint). */
+static void wire_to_panel(int wire_x, int wire_y, int *x, int *y)
+{
+    int width = fos_display_width(), height = fos_display_height();
+    *x = width * wire_x / FOS_TOUCH_WIRE_MAX;
+    *y = height * wire_y / FOS_TOUCH_WIRE_MAX;
+    if (*x >= width) *x = width - 1;
+    if (*y >= height) *y = height - 1;
+}
+
 int fos_client_press_taken(int wire_x, int wire_y)
 {
     if (!fos_display_present()) return -1;
-    /* The glass's wire position as the panel's pixel, as the runtime reads it
-     * (utils/image.nim pointerToScenePoint). */
-    int width = fos_display_width(), height = fos_display_height();
-    int x = width * wire_x / FOS_TOUCH_WIRE_MAX;
-    int y = height * wire_y / FOS_TOUCH_WIRE_MAX;
-    if (x >= width) x = width - 1;
-    if (y >= height) y = height - 1;
+    int x, y;
+    wire_to_panel(wire_x, wire_y, &x, &y);
     /* A scene that runs here: the map its last render left
      * (frameos_nim_press_map_takes), read without the runtime's lock, which
      * the render holds. */
@@ -2409,6 +2415,14 @@ static bool s_render_owed = false;
  * and the answer sat there all that time. Render task only. */
 #define NOTICE_SHOWN_MS 30000
 static int64_t s_notice_shown_us = 0;
+/* Where the notice is on the glass (panel pixels) while it is there, and
+ * whether a tap on it or a key asked it off: the touch task tests a press
+ * against the box (fos_client_notice_takes), the render task takes the
+ * notice off (notice_dismissal_due). Written under s_notice_lock;
+ * s_notice_on_glass by the render task alone. */
+static fos_panel_code_box_t s_notice_box;
+static bool s_notice_on_glass = false;
+static volatile bool s_notice_dismissed = false;
 
 void fos_client_show_notice(const char *text)
 {
@@ -2493,6 +2507,11 @@ static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, 
     fos_panel_draw_notice(&ov->surface, &ov->box, text);
     ov->drawn = true;
     s_notice_shown_us = esp_timer_get_time();
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_box = ov->box;
+    s_notice_on_glass = true;
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
     /* The bench's proof that the panel got it: the snapshot never does. */
     frameos_nim_log_hook("{\"event\":\"voice:shown\",\"source\":\"esp32\"}");
 }
@@ -2511,6 +2530,54 @@ static void notice_overlay_end(notice_overlay_t *ov)
     free(ov->saved);
     ov->saved = NULL;
     ov->drawn = false;
+}
+
+/* The notice is off the glass: a picture without it went up. Render task. */
+static void notice_left_glass(void)
+{
+    s_notice_shown_us = 0;
+    if (!s_notice_on_glass) return;
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_on_glass = false;
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
+}
+
+bool fos_client_notice_takes(int wire_x, int wire_y)
+{
+    if (!fos_display_present()) return false;
+    int x, y;
+    wire_to_panel(wire_x, wire_y, &x, &y);
+    portENTER_CRITICAL(&s_notice_lock);
+    bool taken = s_notice_on_glass && fos_panel_box_hit(&s_notice_box, x, y);
+    if (taken) s_notice_dismissed = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+    return taken;
+}
+
+void fos_client_notice_dismiss(void)
+{
+    portENTER_CRITICAL(&s_notice_lock);
+    if (s_notice_on_glass) s_notice_dismissed = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+}
+
+/* A tap on the notice or a key asked it off, and that press is over: the
+ * finger lifted, the key's `press` delivered (so a render it asked for takes
+ * the notice off, not a repaint before it). Not while a voice session holds
+ * the panel or a new notice waits: that one replaces it. Taken once: what
+ * does not get it off (a failed refresh) leaves it to the next render or its
+ * time. Render task. */
+static bool notice_dismissal_due(void)
+{
+    if (!s_notice_dismissed || !s_notice_on_glass || s_notice_pending || render_held() ||
+        fos_buttons_busy() || input_queued() || fos_touch_finger_down()) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_notice_lock);
+    s_notice_dismissed = false;
+    portEXIT_CRITICAL(&s_notice_lock);
+    return true;
 }
 
 /* The panel shows something no stored hash describes (the render plus a
@@ -2632,7 +2699,9 @@ static bool repaint_snapshot(bool with_notice)
         notice_overlay_end(&notice);
     } else {
         ESP_LOGI(TAG, "repainting the last image without the notice");
-        esp_err_t err = fos_display_blit(copy, len);
+        /* Only the notice's rows differ from the glass: a panel with a
+         * partial waveform updates those, as after a tap. */
+        esp_err_t err = fos_display_update(copy, len, true, fos_input_hold_engaged(&s_input_hold), NULL);
         s_last_refresh_skipped = false;
         if (err == ESP_OK) s_sleep_mark_on_glass = false;
         /* The panel shows exactly the snapshot again: its hash is good for
@@ -2643,7 +2712,7 @@ static bool repaint_snapshot(bool with_notice)
             s_display_state_valid = true;
             save_display_state(&state);
         }
-        s_notice_shown_us = 0;
+        notice_left_glass();
     }
     free(copy);
     return true;
@@ -3131,7 +3200,7 @@ static esp_err_t render_once(bool quiet)
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
         s_last_scene_ms = framebuffer_ms;
         /* A render without the notice took it off the panel. */
-        if (!notice.drawn && !skipped_refresh) s_notice_shown_us = 0;
+        if (!notice.drawn && !skipped_refresh) notice_left_glass();
         if (pulled_unchanged) {
             /* No new bytes. The preview keeps the picture when the buffer still
              * holds it (the reservation, lent to this pull and not written:
@@ -4653,6 +4722,13 @@ static void client_task(void *arg)
                     want_render = true;
                 }
                 s_render_owed = false;
+            }
+            /* A tap on the notice or a key asked it off: the image alone
+             * again, unless a render is about to do that anyway. Without a
+             * snapshot to repaint, the scene renders. */
+            if (!want_render && !scene_asked && notice_dismissal_due()) {
+                frameos_nim_log_hook("{\"event\":\"voice:dismissed\",\"source\":\"esp32\"}");
+                if (!repaint_snapshot(false)) want_render = true;
             }
             /* The answer has been read: the panel goes back to the image
              * alone, unless a render is about to do that anyway. */

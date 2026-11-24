@@ -85,6 +85,10 @@ bool fos_panel_notice_box(const fos_panel_surface_t *s, const char *text, int sc
                           fos_panel_code_box_t *box);
 void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
                            const char *text);
+/* Whether the panel pixel (px, py) is under the box: what a tap on the
+ * notice is tested against (fos_client_notice_takes), in panel pixels, as the
+ * touch wire scales to, so no rotation is involved. */
+bool fos_panel_box_hit(const fos_panel_code_box_t *box, int px, int py);
 
 /* The deep sleep mark: a crescent moon with a "z", black on a white tile
  * with a black border, in the scene's top-right corner, sized to the

@@ -361,6 +361,72 @@ static void test_notice_box(void)
     free(original);
 }
 
+/* A finger's panel pixel as the scene reads it: the touch driver's mapping
+ * (fos_touch.c fos_touch_scene_point), written out again. */
+static void touch_scene_point(int x, int y, int width, int height, int rotate, int *sx, int *sy)
+{
+    switch (rotate) {
+        case 90: *sx = y; *sy = width - x - 1; break;
+        case 180: *sx = width - x - 1; *sy = height - y - 1; break;
+        case 270: *sx = height - y - 1; *sy = x; break;
+        default: *sx = x; *sy = y; break;
+    }
+}
+
+/* A tap on the notice takes it off (docs/voice-chat.md): the tap is tested
+ * in panel pixels against the box, and must hit exactly where the notice is
+ * drawn and where the scene sees it, in every rotation. */
+static void test_notice_hit(void)
+{
+    const fos_pixel_format_t format = FOS_PIXEL_1BPP;
+    const char *text = "\"Switch to the calendar.\"\nSwitched to Calendar.";
+    for (size_t i = 0; i < sizeof(SIZES) / sizeof(SIZES[0]); i++) {
+        const int width = SIZES[i][0], height = SIZES[i][1];
+        for (size_t r = 0; r < sizeof(ROTATIONS) / sizeof(ROTATIONS[0]); r++) {
+            const int rotate = ROTATIONS[r];
+            const size_t len = buffer_len(width, height, format);
+            uint8_t *buf = malloc(len);
+            uint8_t *original = malloc(len);
+            for (size_t b = 0; b < len; b++) original[b] = next_byte();
+            memcpy(buf, original, len);
+            fos_panel_surface_t s = {buf, width, height, format, rotate};
+            fos_panel_surface_t before = {original, width, height, format, rotate};
+            fos_panel_code_box_t box;
+            if (!fos_panel_notice_box(&s, text, width >= 600 ? 3 : 2, 6, &box)) {
+                CHECK(width < 100 || height < 100, "%dx%d rot %d: no notice", width, height, rotate);
+                free(buf);
+                free(original);
+                continue;
+            }
+            fos_panel_draw_notice(&s, &box, text);
+            int hits = 0, drawn_missed = 0, scene_disagrees = 0;
+            for (int py = 0; py < height; py++) {
+                for (int px = 0; px < width; px++) {
+                    const bool hit = fos_panel_box_hit(&box, px, py);
+                    if (hit) hits++;
+                    if (!hit && panel_index(&s, px, py) != panel_index(&before, px, py)) drawn_missed++;
+                    int sx, sy;
+                    touch_scene_point(px, py, width, height, rotate, &sx, &sy);
+                    const bool on_scene_box = sx >= box.x && sx < box.x + box.w && sy >= box.y && sy < box.y + box.h;
+                    if (hit != on_scene_box) scene_disagrees++;
+                }
+            }
+            CHECK(hits == box.w * box.h, "%dx%d rot %d: %d pixels hit, the box has %d", width, height, rotate,
+                  hits, box.w * box.h);
+            CHECK(drawn_missed == 0, "%dx%d rot %d: %d drawn pixels a tap misses", width, height, rotate,
+                  drawn_missed);
+            CHECK(scene_disagrees == 0, "%dx%d rot %d: %d pixels where the tap and the scene disagree", width,
+                  height, rotate, scene_disagrees);
+            CHECK(!fos_panel_box_hit(&box, box.px - 1, box.py) && !fos_panel_box_hit(&box, box.px, box.py + box.ph),
+                  "%dx%d rot %d: a tap just off the box misses", width, height, rotate);
+            free(buf);
+            free(original);
+        }
+    }
+    fos_panel_code_box_t none = {0};
+    CHECK(!fos_panel_box_hit(&none, 0, 0) && !fos_panel_box_hit(NULL, 0, 0), "no box, no hit");
+}
+
 /* The deep sleep mark lands in the top-right corner of the SCENE whatever
  * the rotation: its border, the moon and the "z" in black, the rest of its
  * tile white, and nothing outside it touched. */
@@ -465,6 +531,7 @@ int main(void)
     test_small_and_odd();
     test_every_format_size_and_rotation();
     test_notice_box();
+    test_notice_hit();
     test_sleep_mark();
     test_wake_mark();
     printf("\n%d checks, %d failures\n", g_checks, g_failures);

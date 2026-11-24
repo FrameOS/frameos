@@ -122,6 +122,21 @@ frame has no key hold and no microphone path (yet).
   to be the scene's own interval, an hour for a photo, and the answer sat
   there all that time. Like the local-network-access code box, it
   is restored before the image is stored, so snapshots never carry it.
+- **Taking the notice off.** A tap on it takes it off when the finger lifts,
+  and that tap is the notice's alone: the touch task tests where a finger
+  lands against the box (`fos_client_notice_takes`, in panel pixels) and
+  queues none of its reports, so the scene under it hears no `pointerDown`,
+  move, `pointerUp` or gesture, and no edge swipe starts on it. The press
+  clicks as one something took. A key takes it off too, on a frame with or
+  without touch, but still goes to the scene: a key has no place on the
+  picture, so nothing under the notice can be pressed by mistake, and on a
+  slow e-paper one press then costs one refresh. Either way the panel goes
+  back to the last image once the press is over (the finger lifted, the
+  key's `press` delivered), through the partial waveform where the panel has
+  one, unless the press asked for a render, which draws the scene without
+  the notice anyway; with no snapshot to repaint from, the scene renders.
+  `voice:dismissed` in the log. Pointer events from HTTP, the console or a
+  plane are the scene's as before: only the glass can tap the notice.
 - **Capture** (`fos_mic.c`): I2S0 in PDM RX mode with the hardware
   PDM-to-PCM filter, **16 kHz, 16-bit, mono**, little-endian; the power pin
   high for the session and low after it. Driven on the HAL's register layer

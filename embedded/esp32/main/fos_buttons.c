@@ -547,6 +547,9 @@ void fos_buttons_process_events(void)
          * for the render when a listener took it; this is the render task, so
          * the runtime lock is free. */
         bool dispatched = fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_GPIO, payload) == FOS_EVENT_DONE;
+        /* A key takes the voice chat's notice off too, and still does
+         * what it does (docs/voice-chat.md). */
+        if (event.level == 0) fos_client_notice_dismiss();
         /* Into the frame log, not just the serial console: a press used to
          * leave no trace anywhere a user can see. When a scene ignores it the
          * interpreter says so (runEvent:noListenerMatched), but that only

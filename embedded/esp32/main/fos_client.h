@@ -86,8 +86,8 @@ void fos_client_hold_render(uint32_t ms);
 void fos_client_release_render(void);
 /* Queue `text` for the panel: a notice box across the bottom of the image
  * (docs/voice-chat.md, the voice chat's transcript and reply), drawn at the
- * release. Shown once: the render after that takes it off. Any task; the
- * text is copied. */
+ * release. Shown once: the render after that takes it off, or a tap on it
+ * or a key (fos_client_notice_takes). Any task; the text is copied. */
 void fos_client_show_notice(const char *text);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
@@ -175,6 +175,15 @@ bool fos_client_relay_event(const char *origin, const char *name, const char *pa
  * the frame's keyboard (the runtime's map alone says so), 0 not, -1
  * no map (no panel, or no render yet). Any task, no lock. */
 int fos_client_press_taken(int wire_x, int wire_y);
+/* A press at this wire position lands on the voice chat's notice while it is
+ * on the panel (docs/voice-chat.md): the press is the notice's alone, and the
+ * notice comes off once the finger lifts. The touch task drops the finger's
+ * reports until then, so the scene hears none of them. Any task. */
+bool fos_client_notice_takes(int wire_x, int wire_y);
+/* A key went down: the notice comes off once the press is decided, unless
+ * the render the press asks for takes it off first. The key still goes to
+ * the scene. Any task. */
+void fos_client_notice_dismiss(void);
 /* Rendered on the server: a pointer pressed (true) or lifted through the
  * frame's HTTP API. While one is pressed the relay waits for its lift, as it
  * waits for a finger on the glass, so the plane hears the press whole. Any
