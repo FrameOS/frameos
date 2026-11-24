@@ -52,6 +52,28 @@ suite "video args":
     check camera.has("-rtsp_transport", "tcp")
     check camera.has("-pix_fmt", "gray")
 
+  test "a contained picture comes at its own size, the bars not made at all":
+    # 16:9 into a square box: its width, bars above and below.
+    check frameSize(720, 720, vfContain, 1920, 1080) == (720, 405)
+    # A phone's tall picture into a wide box: its height, bars at the sides.
+    check frameSize(800, 480, vfContain, 1080, 1920) == (270, 480)
+    check frameSize(200, 100, vfContain, 320, 180) == (178, 100)
+    check frameSize(320, 180, vfContain, 1280, 720) == (320, 180) # its shape: the box
+    # Cover crops to the box and fill stretches to it; a size ffprobe did not
+    # say is padded to it, as before.
+    check frameSize(720, 720, vfCover, 1920, 1080) == (720, 720)
+    check frameSize(720, 720, vfFill, 1920, 1080) == (720, 720)
+    check frameSize(720, 720, vfContain, 0, 0) == (720, 720)
+    let source = VideoSource(input: "/a.mp4")
+    let contained = decodeArgs(source, 720, 720, vfContain, vpRgb565, 0, 30, loopFile = true, threads = 0,
+      srcWidth = 1920, srcHeight = 1080)
+    check contained[contained.find("-vf") + 1] == "fps=30,scale=720:405:flags=bilinear,setsar=1"
+    let unknown = decodeArgs(source, 720, 720, vfContain, vpRgb565, 0, 30, loopFile = true, threads = 0)
+    check "pad=720:720:(ow-iw)/2:(oh-ih)/2:color=black" in unknown[unknown.find("-vf") + 1]
+    # A still is the box, padded (one frame: nothing to save).
+    let still = stillArgs(source, 3, 720, 720, vfContain, vpRgb565)
+    check "pad=720:720" in still[still.find("-vf") + 1]
+
   test "rates, sizes and fits":
     check parseRate("30000/1001") > 29.96 and parseRate("30000/1001") < 29.98
     check parseRate("25/1") == 25

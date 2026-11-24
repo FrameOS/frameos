@@ -2,10 +2,11 @@
 ## process, no thread, no file. The player (video/player.nim), the stills
 ## and the tests build the same command lines from here.
 ##
-## Every frame comes out of ffmpeg at the size it is drawn at, in the canvas's
-## own pixel format, at a constant rate: the scaling and the colour conversion
-## are ffmpeg's work on the other cores, and the render thread's share of a
-## frame is one copy (docs/video.md "How it plays").
+## Every frame comes out of ffmpeg at the size it is drawn at (a contained
+## picture at its own, without the bars), in the canvas's own pixel format, at
+## a constant rate: the scaling and the colour conversion are ffmpeg's work on
+## the other cores, and the render thread's share of a frame is one copy
+## (docs/video.md "How it plays").
 
 import std/[json, math, strutils]
 
@@ -168,23 +169,51 @@ proc inputArgs*(source: VideoSource): seq[string] =
   if source.denyActive or source.scheme.len == 0:
     result.add @["-format_whitelist", PlaylistFreeFormats]
 
-proc fitFilter*(width, height: int, fit: VideoFit, fast = false): string =
-  ## Scaled to exactly `width` x `height` whatever the fit, so the draw is a
-  ## copy: contain pads with black, cover crops. `fast`: the scaler's fast
-  ## bilinear, a sixth less of a Pi Zero's 720p frame than bilinear.
+proc frameSize*(width, height: int, fit: VideoFit, srcWidth, srcHeight: int): (int, int) =
+  ## The size of the frames ffmpeg makes for a `width` x `height` box: the
+  ## picture's own when it is contained and its size is known (`srcWidth` x
+  ## `srcHeight`, as it is shown: a phone's turned video turned), the box
+  ## itself otherwise (cover crops to it, fill stretches to it). The player
+  ## puts a contained picture in the middle of a black box once (take), so
+  ## the bars are never scaled, padded, piped or copied a frame.
   let
-    w = $clamp(width, 1, MaxFrameEdge)
-    h = $clamp(height, 1, MaxFrameEdge)
-    flags = if fast: "fast_bilinear" else: "bilinear"
+    w = clamp(width, 1, MaxFrameEdge)
+    h = clamp(height, 1, MaxFrameEdge)
+  if fit != vfContain or srcWidth <= 0 or srcHeight <= 0:
+    return (w, h)
+  if srcWidth * h >= srcHeight * w:
+    # As wide as the box or wider: its width, bars above and below.
+    (w, clamp(int(round(w.float * srcHeight.float / srcWidth.float)), 1, h))
+  else:
+    (clamp(int(round(h.float * srcWidth.float / srcHeight.float)), 1, w), h)
+
+proc scaleFlags*(fast: bool, srcWidth, srcHeight, width, height: int): string =
+  ## The scaler: bilinear; a decoder that is behind (a Pi Zero from its first
+  ## frame) the fast bilinear, a sixth less of a Pi Zero's 720p frame.
+  if fast: "fast_bilinear" else: "bilinear"
+
+proc fitFilter*(width, height: int, fit: VideoFit, fast = false, srcWidth = 0, srcHeight = 0): string =
+  ## Scaled to the frame's size (frameSize): a contained picture of a known
+  ## size to its own, else exactly `width` x `height` whatever the fit
+  ## (contain pads with black, a still's way; cover crops). `fast`: a
+  ## decoder that is behind's scaler (scaleFlags).
+  let
+    w = clamp(width, 1, MaxFrameEdge)
+    h = clamp(height, 1, MaxFrameEdge)
+    flags = scaleFlags(fast, srcWidth, srcHeight, w, h)
   case fit
   of vfFill:
-    "scale=" & w & ":" & h & ":flags=" & flags & ",setsar=1"
+    "scale=" & $w & ":" & $h & ":flags=" & flags & ",setsar=1"
   of vfContain:
-    "scale=" & w & ":" & h & ":force_original_aspect_ratio=decrease:flags=" & flags & "," &
-      "pad=" & w & ":" & h & ":(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
+    if srcWidth > 0 and srcHeight > 0:
+      let (fw, fh) = frameSize(w, h, fit, srcWidth, srcHeight)
+      "scale=" & $fw & ":" & $fh & ":flags=" & scaleFlags(fast, srcWidth, srcHeight, fw, fh) & ",setsar=1"
+    else:
+      "scale=" & $w & ":" & $h & ":force_original_aspect_ratio=decrease:flags=" & flags & "," &
+        "pad=" & $w & ":" & $h & ":(ow-iw)/2:(oh-ih)/2:color=black,setsar=1"
   of vfCover:
-    "scale=" & w & ":" & h & ":force_original_aspect_ratio=increase:flags=" & flags & "," &
-      "crop=" & w & ":" & h & ",setsar=1"
+    "scale=" & $w & ":" & $h & ":force_original_aspect_ratio=increase:flags=" & flags & "," &
+      "crop=" & $w & ":" & $h & ",setsar=1"
 
 proc v4l2Decoder*(codec: string): string =
   ## ffmpeg's V4L2 mem2mem decoder for a codec as ffprobe names it.
@@ -244,12 +273,15 @@ proc fpsText(fps: float): string =
   if hundredths mod 100 == 0: $(hundredths div 100) else: $hundredths & "/100"
 
 proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels: VideoPixels,
-    startAt, fps: float, loopFile: bool, threads: int, decode = VideoDecode()): seq[string] =
+    startAt, fps: float, loopFile: bool, threads: int, decode = VideoDecode(),
+    srcWidth = 0, srcHeight = 0): seq[string] =
   ## ffmpeg playing `source` from `startAt` seconds as raw frames on stdout:
-  ## `width` x `height`, `pixels`, `fps` a second. `loopFile`: a file plays
-  ## again from its start for ever (`-stream_loop`, no gap); anything else is
-  ## started again by the player. `decode`: a hardware decoder, and the
-  ## shortcuts of a decoder that is behind (pickDecode).
+  ## for a `width` x `height` box (frameSize: a contained picture of a known
+  ## `srcWidth` x `srcHeight` comes at its own size), `pixels`, `fps` a
+  ## second. `loopFile`: a file plays again from its start for ever
+  ## (`-stream_loop`, no gap); anything else is started again by the player.
+  ## `decode`: a hardware decoder, and the shortcuts of a decoder that is
+  ## behind (pickDecode).
   result = @["-hide_banner", "-loglevel", "error", "-nostdin", "-nostats"]
   if threads > 0 and decode.decoder.len == 0:
     result.add @["-threads", $threads]
@@ -270,7 +302,7 @@ proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels:
   if loopFile and source.scheme.len == 0:
     result.add @["-stream_loop", "-1"]
   result.add @["-i", source.input, "-an", "-sn", "-dn",
-    "-vf", "fps=" & fpsText(fps) & "," & fitFilter(width, height, fit, decode.fast),
+    "-vf", "fps=" & fpsText(fps) & "," & fitFilter(width, height, fit, decode.fast, srcWidth, srcHeight),
     "-f", "rawvideo", "-pix_fmt", pixels.pixFmt, "pipe:1"]
 
 proc stillArgs*(source: VideoSource, at: float, width, height: int, fit: VideoFit,
