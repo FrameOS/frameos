@@ -230,5 +230,9 @@ describe("the playground's scenes", () => {
     // Draws its plates with the frame's OpenAI key.
     expect(excludedTemplates.has("Bird field journal")).toBe(true);
     expect(scenes.some((scene) => scene.id === "9b7f5b0e-6c3a-4d9e-8a64-2f1c7f0b1d21")).toBe(false);
+    // Video plays on a Pi alone (docs/video.md).
+    for (const id of ["video-player", "immich-videos", "camera-wall", "video-url", "archive-films", "slow-movie"]) {
+      expect(scenes.some((scene) => scene.id === id), id).toBe(false);
+    }
   });
 });

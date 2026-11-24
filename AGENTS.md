@@ -1077,6 +1077,29 @@
   store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
   making it public is those two plus the AI evals.
 
+## Video: `docs/video.md`
+
+- A Linux frame plays video through an ffmpeg CHILD PROCESS, never a linked
+  libav: `frameos/video/player.nim` (a reader thread per video, a ring of
+  frames in shared memory, no ref across threads) and `video/args.nim` (the
+  command lines, pure). ffmpeg scales each frame to the `<img>`'s box in the
+  canvas's pixel format, so the render thread's share is one copy; the
+  player's image is a registered canvas, so a frame repaints the video's box
+  alone, and the scene's `nextSleep` is the next frame's time
+  (`js_runtime/js_video.nim` `fillVideos`, after the layout).
+- JS: `frameos.video(key, {src, loop, paused, start, fps, fit, headers})`
+  drawn with `<img src={video}>`, `seekVideo`, `releaseVideo`, `videoInfo`,
+  `videoFrame`; one native, `jsVideo(op, json)`. An ESP32 and the preview
+  answer "cannot play it" (`id` 0, `state` `error`) and draw nothing: keep the
+  stub that small. A URL goes through `spawn_guard.nim` (pinned, protocol and
+  playlist whitelists): a video is no shell command, and a cloud-managed Pi
+  plays it. A new source of frames goes through the same guard.
+- Scenes that call these need `video` (`utils/sceneNeeds.ts` `VIDEO_CALL`,
+  the backend's `_scenes_use_ffmpeg` installs `ffmpeg` on Raspberry Pi OS, an
+  ESP32's store asks `without=video`): keep the three alike. The samples are
+  Video player, Files (its viewer), Immich videos, Camera wall, Video from
+  URL, Archive films and Slow movie, all out of the playground.
+
 ## ESP32 memory: `docs/esp32-memory.md`
 
 - Nim's allocator cannot refuse: on the device a failed allocation spends the

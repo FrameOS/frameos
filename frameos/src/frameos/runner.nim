@@ -608,7 +608,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         not snapshotPending(currentScene.id.string)
       clearBootCrashCount()
       successfulSceneRenders += 1
-      if interval < 1:
+      # A scene that renders many times a second (an animation, or a video
+      # whose next frame is its nextSleep: docs/video.md) tells the web
+      # sockets about a new picture once a second, not every frame.
+      if interval < 1 or (nextSleep >= 0 and nextSleep < 1):
         let now = getMonoTime()
         if now >= nextServerRenderAt:
           nextServerRenderAt = nextServerRenderAt + serverRenderDelay

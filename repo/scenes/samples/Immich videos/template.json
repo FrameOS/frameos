@@ -1,0 +1,10 @@
+{
+  "name": "Immich videos",
+  "description": "Videos from your Immich server, one after another: random ones, an album or the favorites, with when and where at the start. Plays on a Raspberry Pi.",
+  "embedded": false,
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 800,
+  "imageHeight": 480,
+  "scenes": "./scenes.json"
+}

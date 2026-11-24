@@ -1,0 +1,215 @@
+[
+  {
+    "id": "camera-wall",
+    "name": "Camera wall",
+    "settings": {
+      "category": "Notes & tools",
+      "execution": "interpreted",
+      "refreshInterval": 3600,
+      "backgroundColor": "#000000",
+      "windowSize": "800x450",
+      "icon": "M6.03 12.03L8.03 15.5L5.5 18.68L2 12.62L6.03 12.03M17 18V15.29C17.88 14.9 18.5 14.03 18.5 13C18.5 12.43 18.3 11.9 17.97 11.5L19.94 10.35C20.95 9.76 21.3 8.47 20.71 7.46L19.33 5.06C18.74 4.05 17.45 3.7 16.44 4.28L8.31 9C7.36 9.53 7.03 10.75 7.58 11.71L9.08 14.31C9.63 15.26 10.86 15.59 11.81 15.04L13.69 13.96C13.94 14.55 14.41 15.03 15 15.29V18C15 19.1 15.9 20 17 20H22V18H17Z",
+      "needs": [
+        "fast",
+        "touch",
+        "video"
+      ]
+    },
+    "fields": [
+      {
+        "name": "camera1",
+        "label": "Camera 1 address",
+        "type": "string",
+        "value": "",
+        "placeholder": "rtsp://user:password@192.168.1.20:554/stream1",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "camera2",
+        "label": "Camera 2 address",
+        "type": "string",
+        "value": "",
+        "placeholder": "rtsp://user:password@192.168.1.20:554/stream1",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "camera3",
+        "label": "Camera 3 address",
+        "type": "string",
+        "value": "",
+        "placeholder": "rtsp://user:password@192.168.1.20:554/stream1",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "camera4",
+        "label": "Camera 4 address",
+        "type": "string",
+        "value": "",
+        "placeholder": "rtsp://user:password@192.168.1.20:554/stream1",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "name1",
+        "label": "Camera 1 name",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "name2",
+        "label": "Camera 2 name",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "name3",
+        "label": "Camera 3 name",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "name4",
+        "label": "Camera 4 name",
+        "type": "string",
+        "value": "",
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "value": "cover",
+        "options": [
+          {
+            "value": "contain",
+            "label": "The whole picture, black bars around it"
+          },
+          {
+            "value": "cover",
+            "label": "Fill the screen, the edges cropped"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      },
+      {
+        "name": "fps",
+        "label": "Frames a second, at most",
+        "type": "select",
+        "value": "15",
+        "hint": "Fewer is less work for the Pi; a video slower than this keeps its own.",
+        "options": [
+          {
+            "value": "10",
+            "label": "10"
+          },
+          {
+            "value": "15",
+            "label": "15"
+          },
+          {
+            "value": "24",
+            "label": "24"
+          },
+          {
+            "value": "30",
+            "label": "30"
+          },
+          {
+            "value": "60",
+            "label": "60"
+          }
+        ],
+        "access": "public",
+        "persist": "disk"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "2a94919f-2a00-5ad5-92ba-56a8e969c8a5",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "1a4daad8-a9d2-5d90-823c-c128a769d637",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": -190
+        },
+        "data": {
+          "keyword": "cameraWall",
+          "config": {}
+        }
+      },
+      {
+        "id": "ebf14762-6e5c-59e3-83a6-fbc6c3349ac4",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch",
+            "blendMode": "normal"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "724b6331-76f8-59e1-8f24-891fe72999ec",
+        "type": "appNodeEdge",
+        "source": "2a94919f-2a00-5ad5-92ba-56a8e969c8a5",
+        "target": "ebf14762-6e5c-59e3-83a6-fbc6c3349ac4",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "01aa5b62-8607-53b0-92d2-272c52b7b3ab",
+        "type": "codeNodeEdge",
+        "source": "1a4daad8-a9d2-5d90-823c-c128a769d637",
+        "target": "ebf14762-6e5c-59e3-83a6-fbc6c3349ac4",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ],
+    "apps": {
+      "cameraWall": {
+        "name": "Camera wall",
+        "category": "data",
+        "description": "Up to four live camera feeds (rtsp://, or http(s) MJPEG and HLS streams) in a grid, a tap on one for the whole screen; a feed that drops is opened again.",
+        "version": "1.0.0",
+        "fields": [],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Camera wall\",\n  \"category\": \"data\",\n  \"description\": \"Up to four live camera feeds (rtsp://, or http(s) MJPEG and HLS streams) in a grid, a tap on one for the whole screen; a feed that drops is opened again.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// @name Camera wall\n// Up to four live cameras side by side: an RTSP feed (rtsp://user:pass@host/…)\n// or anything else ffmpeg reads over http(s), an MJPEG camera, an HLS stream\n// or a video file's URL. A tap on one fills the screen with it, another tap\n// goes back to the wall. A feed that drops is opened again. Plays on a\n// Raspberry Pi (docs/video.md); a camera on the local network needs a frame\n// that may reach it (a cloud frame's Local network access).\nconst FIELDS = [1, 2, 3, 4]\n\nlet zoomed = -1\n\nfunction Label({ name, live, k }) {\n  return (\n    <div className={`absolute left-[${Math.round(8 * k)}px] top-[${Math.round(8 * k)}px] flex items-center gap-[6px] px-[8px] py-[3px] rounded-[6px] bg-black/55`}>\n      <div className={`w-[${Math.round(8 * k)}px] h-[${Math.round(8 * k)}px] rounded-full ${live ? 'bg-red-500' : 'bg-white/40'}`} />\n      <span className={`text-[${Math.round(13 * k)}px] text-white`}>{name}</span>\n    </div>\n  )\n}\n\nfunction Camera({ camera, k, fit, fps, onClick }) {\n  const video = frameos.video(`camera${camera.n}`, { src: camera.url, loop: true, fps, fit })\n  const live = video.state === 'playing'\n  return (\n    <div className=\"relative flex-1 h-full bg-neutral-900 overflow-hidden\" onClick={onClick}>\n      <img className={`w-full h-full object-${fit}`} src={video} />\n      {video.state === 'error' ? (\n        <div className=\"absolute left-0 top-0 w-full h-full flex items-center justify-center px-[16px]\">\n          <span className={`text-[${Math.round(13 * k)}px] text-red-200 text-center`}>{video.error}</span>\n        </div>\n      ) : video.state === 'loading' ? (\n        <div className=\"absolute left-0 top-0 w-full h-full flex items-center justify-center\">\n          <span className={`text-[${Math.round(13 * k)}px] text-white/60`}>Connecting…</span>\n        </div>\n      ) : null}\n      <Label name={camera.name} live={live} k={k} />\n    </div>\n  )\n}\n\nexport function get(app, context) {\n  const width = context?.imageWidth ?? app.frame.width\n  const height = context?.imageHeight ?? app.frame.height\n  const k = Math.max(0.6, Math.min(1.4, Math.min(width / 800, height / 480)))\n  const cameras = FIELDS.map((n) => ({\n    n,\n    url: String(app.state[`camera${n}`] ?? '').trim(),\n    name: String(app.state[`name${n}`] ?? '').trim() || `Camera ${n}`,\n  })).filter((camera) => camera.url)\n  if (!cameras.length) {\n    return (\n      <div className=\"w-full h-full flex flex-col items-center justify-center gap-[8px] bg-black text-white px-[24px]\">\n        <span className={`text-[${Math.round(22 * k)}px] font-bold`}>Camera wall</span>\n        <span className={`text-[${Math.round(15 * k)}px] text-white/70 text-center`}>\n          Give up to four camera addresses in the scene's settings: rtsp://, http:// or https://.\n        </span>\n      </div>\n    )\n  }\n  const fit = app.state.fit === 'contain' ? 'contain' : 'cover'\n  const fps = Number(app.state.fps) || 15\n  if (zoomed >= cameras.length) zoomed = -1\n  if (zoomed >= 0) {\n    const camera = cameras[zoomed]\n    return (\n      <div className=\"flex w-full h-full bg-black\">\n        <Camera camera={camera} k={k} fit={fit} fps={fps} onClick={() => { zoomed = -1 }} />\n      </div>\n    )\n  }\n  const tile = (camera, i) => <Camera camera={camera} k={k} fit={fit} fps={fps} onClick={() => { zoomed = i }} />\n  const gap = Math.max(2, Math.round(4 * k))\n  // One, two side by side (above each other on a tall screen), or a grid of\n  // four (three leave a dark corner).\n  if (cameras.length === 1) {\n    return <div className=\"flex w-full h-full bg-black\">{tile(cameras[0], 0)}</div>\n  }\n  if (cameras.length === 2) {\n    return (\n      <div className={`flex ${height > width ? 'flex-col' : ''} w-full h-full gap-[${gap}px] bg-black`}>\n        {tile(cameras[0], 0)}\n        {tile(cameras[1], 1)}\n      </div>\n    )\n  }\n  return (\n    <div className={`flex flex-col w-full h-full gap-[${gap}px] bg-black`}>\n      <div className={`flex flex-1 gap-[${gap}px]`}>\n        {tile(cameras[0], 0)}\n        {tile(cameras[1], 1)}\n      </div>\n      <div className={`flex flex-1 gap-[${gap}px]`}>\n        {tile(cameras[2], 2)}\n        {cameras[3] ? tile(cameras[3], 3) : <div className=\"flex-1 h-full bg-neutral-950\" />}\n      </div>\n    </div>\n  )\n}\n"
+        }
+      }
+    }
+  }
+]

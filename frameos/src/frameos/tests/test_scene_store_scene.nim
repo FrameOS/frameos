@@ -676,6 +676,9 @@ suite "the Scene store scene":
     scene.tap(SideX, SideRow1)
     discard draw(scene, config, "side-featured")
     check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    # Its covers in (the store here is every repo sample with a picture, so
+    # a page asks for many): a fetch past the 32 in flight is refused.
+    discard settle()
     # The Layouts side: its own shelves, the first open.
     scene.tap(275, 27)
     discard draw(scene, config, "layouts-loading")

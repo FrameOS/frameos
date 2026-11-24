@@ -36,6 +36,8 @@ when not defined(frameosEmbedded):
   from frameos/utils/frame_time import frameEpochPinned
 when not defined(frameosEmbedded) and not defined(frameosWasm):
   from std/httpcore import pairs # a Pi's response headers
+  import frameos/video/player # docs/video.md: ffmpeg on a Linux frame
+  import frameos/spawn_guard
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import std/hashes
@@ -78,6 +80,16 @@ type
     at: MonoTime
     id: int
     drawn: int ## the pass (`urlPass`) it was last drawn in
+
+  JsVideo = object
+    ## `frameos.video(key, {src})` (js_video.nim): the app's video called
+    ## `key`, its image ref `id` (0: it failed, `error` says why).
+    key, src, storage, headers: string
+    id: int
+    fit: string ## the app's `fit`, else the `<img>`'s object-* class decides
+    error: string
+    when not defined(frameosEmbedded) and not defined(frameosWasm):
+      player: VideoPlayer
 
   JsAppRuntime* = ref object
     category*: string
@@ -129,6 +141,10 @@ type
     canvases: seq[tuple[key: string, id: int]]
       ## `frameos.canvas(key, ...)`: the pictures the app draws into, kept
       ## like the ones above until the interpreter goes (MaxCanvases at most).
+    videos: seq[JsVideo]
+      ## `frameos.video(key, ...)`: its videos, playing until the interpreter
+      ## goes, the key plays something else or `frameos.releaseVideo`
+      ## (MaxVideos at most; js_video.nim).
       ## `fetchImage(url, {keep: true})`'s pictures, oldest first: they stay
       ## for later renders until `frameos.releaseImage` or the interpreter
       ## goes (MaxKeptImages at most).
@@ -235,9 +251,12 @@ proc noteInterpreterDiscard(runtime: JsAppRuntime, reason: string) =
   if runtime.jsxMemo.handlers > 0:
     pendingDiscard.heldHandlers = true
 
+proc closeVideos(runtime: JsAppRuntime) {.raises: [].}
+
 proc forgetJsApp(runtime: JsAppRuntime) =
   ## What an app held for its interpreter, let go on the Nim side: the
   ## interpreter is gone (closed already), going, or not its own.
+  runtime.closeVideos()
   runtime.js = QuickJS()
   runtime.host = nil
   runtime.modulePrefix = ""
@@ -3117,6 +3136,8 @@ proc jsCanvasClear(ctx: ptr JSContext, id: JSValue, color: JSValue): JSValue {.n
     frameos_apps.logError(e.owner, "frameos.clear failed: " & err.msg)
     return nimBoolToJS(ctx, false)
 
+include frameos/js_runtime/js_video
+
 var typedArrayFirstClass = 0'u32
   ## The class id of a Uint8ClampedArray, the first typed array class: one
   ## less it is an ArrayKind (QuickJS keeps them in JSTypedArrayEnum's order).
@@ -3499,6 +3520,7 @@ const appJsPrelude* = compactJs("""
   const __frameosAsset = (op, path, data = "") => __frameosUnwrap(jsAssets(op, String(path || ""), data));
   const __frameosStream = (op, options) => __frameosUnwrap(jsStreams(op, JSON.stringify(options)));
   const __frameosStreamId = (ref) => (ref && ref.id) || ref;
+  const __frameosVideo = (op, o) => JSON.parse(jsVideo(op, JSON.stringify(o, __appReplacer)) || "null");
   // frameos.frame and frameos.code: arg as JSON text when json is true, else the
   // plain string; JSON text back, "" is null and "!" a reason to throw.
   const __frameosOp = (fn, name, op, arg, json) => {
@@ -3538,6 +3560,11 @@ const appJsPrelude* = compactJs("""
     draw: (canvas, content) => jsCanvasDraw(Number((canvas && canvas.id) || 0),
       (content && typeof content === "object") ? content : String(content || "")) === true,
     clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
+    video: (key, o) => __frameosVideo("play", { ...o, key: String(key || "video") }),
+    seekVideo: (v, at) => __frameosVideo("seek", { id: (v && v.id) || 0, at: Number(at || 0) }) === true,
+    releaseVideo: (v) => __frameosVideo("release", { id: (v && v.id) || 0 }) === true,
+    videoInfo: (src, o) => __frameosVideo("info", { ...o, src: String(src || "") }),
+    videoFrame: (src, o) => __frameosVideo("frame", { ...o, src: String(src || "") }),
     pixels: (cells, palette, options) => ({ __frameosType: "pixels", cells, palette, options: options || {} }),
     ops: {
       map: (dst, src, table, start, end) => jsTypedOps(0, dst, src, table, start ?? 0, end ?? -1) === true,
@@ -3831,7 +3858,7 @@ proc registerAppNatives(js: var QuickJS) =
       ("jsRemember", jsRemember), ("jsHttpRequest", jsHttpRequest), ("jsText", jsText),
       ("jsFetchImage", jsFetchImage),
       ("jsCanvas", jsCanvas), ("jsCanvasDraw", jsCanvasDraw), ("jsCanvasClear", jsCanvasClear),
-      ("jsStreams", jsStreams), ("jsOpenLines", jsOpenLines), ("jsNextBlock", jsNextBlock)]
+      ("jsVideo", jsVideo), ("jsStreams", jsStreams), ("jsOpenLines", jsOpenLines), ("jsNextBlock", jsNextBlock)]
   js.setModuleLoader(jsAppModuleLoader, jsAppModuleNormalize)
   for (name, fn) in natives1:
     js.registerFunction(name, fn)
@@ -4452,6 +4479,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   # way (a slow panel fetches it now: one refresh with every picture).
   if runtime.jsxMemo.sawUrl and root.tag != "svg":
     runtime.fillUrlImages(owner, context, svg, regionScale, target.input.slow)
+  # Its videos: the frame due now, at the size each `<img>` got (js_video.nim).
+  when not defined(frameosEmbedded) and not defined(frameosWasm):
+    if runtime.videos.len > 0 and root.tag != "svg":
+      runtime.fillVideos(context, svg, regionScale)
   # The scenes it embeds, each drawn now that its size is known. The offered
   # target comes after: its corner moves the slots only when it is a cell.
   let firstSlot = if owner.scene.isNil: 0 else: owner.scene.slots.len

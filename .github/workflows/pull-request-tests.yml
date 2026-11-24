@@ -122,6 +122,13 @@ jobs:
           path: frameos/quickjs
           key: ${{ runner.os }}-quickjs-${{ hashFiles('frameos/frameos.nimble', 'frameos/tools/install_prebuilt_quickjs.py', 'versions.json') }}
 
+      # The video tests play clips through a real ffmpeg (docs/video.md) and
+      # skip without one. The pool's image has it once gha-image-build.sh's
+      # list is built again; until then, and on GitHub's runners, it is
+      # installed here.
+      - name: ffmpeg for the video tests
+        run: command -v ffmpeg >/dev/null || (sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg)
+
       - name: FrameOS nim setup
         run: |
           cd frameos

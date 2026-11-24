@@ -37,6 +37,19 @@ describe("scene needs", () => {
     expect(sceneNeeds([{}], ["shell"])).toEqual(["linux"]);
   });
 
+  it("reads video from the calls that play it or read its frames, stated needs or not", () => {
+    const player = { apps: { a: { sources: { "app.tsx": "const v = frameos.video('main', { src })" } } } };
+    expect(sceneNeeds([player])).toEqual(["video"]);
+    const still = { nodes: [{ type: "code", data: { code: "frameos.videoFrame(src, { at: 3 })" } }] };
+    expect(sceneNeeds([still])).toEqual(["video"]);
+    expect(sceneNeeds([{ ...player, settings: { needs: ["fast"] } }])).toEqual(["fast", "video"]);
+    // A word in a comment or a name is no call.
+    expect(sceneNeeds([{ apps: { a: { sources: { "app.tsx": "// frameos.video plays it\nconst videoUrl = 1" } } } }])).toEqual([]);
+    // A Pi plays it, cloud-managed or not; an ESP32 does not.
+    expect(sceneFitsFrame(["video"], { linux: false, video: true })).toBe(true);
+    expect(sceneFitsFrame(["video"], { video: false })).toBe(false);
+  });
+
   it("files the samples as their descriptions say", () => {
     expect(needsOf("Star shooter")).toContain("fast");
     // Snake turns into a slow puzzle on e-paper, and says so (settings.needs).

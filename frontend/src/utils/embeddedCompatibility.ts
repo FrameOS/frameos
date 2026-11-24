@@ -2,6 +2,7 @@ import { AppConfig, AppNodeData, CodeNodeData, FrameScene, FrameType, SceneApp, 
 import { hasCompiledAppSource, hasJavaScriptAppSource, isJavaScriptCatalogApp, sceneAppToAppConfig } from './sceneApps'
 import { isCloudMode } from './cloudMode'
 import { isEsp32Frame } from '../scenes/workspace/workspaceSurfaces'
+import { sceneNeeds } from './sceneNeeds'
 
 export interface CompatibilityResult {
   supported: boolean
@@ -173,6 +174,11 @@ export function templateCompatibilityForFrame(
     )
   }
 
+  // Video takes a Pi with ffmpeg (docs/video.md): a cloud-managed one plays it.
+  if (embedded && template.needs?.includes('video')) {
+    return unsupported('This scene plays video, which takes a Raspberry Pi frame: an ESP32 cannot play it.')
+  }
+
   if (embedded && template.embedded === false) {
     return unsupported('This scene is marked as not supported on ESP32 frames.')
   }
@@ -180,6 +186,9 @@ export function templateCompatibilityForFrame(
   const scenes = Array.isArray(template.scenes) ? template.scenes : []
   if (scenes.length === 0) {
     return supported
+  }
+  if (embedded && sceneNeeds(scenes).includes('video')) {
+    return unsupported('This scene plays video, which takes a Raspberry Pi frame: an ESP32 cannot play it.')
   }
 
   for (const scene of scenes) {

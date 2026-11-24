@@ -20,18 +20,25 @@ const target = join(appDir, "public", "playground-assets", "scenes.json");
 // Samples that cannot run in a browser tab nobody configured: they need an
 // API key or an account in the frame's settings, or a process on a Pi.
 export const excludedTemplates = new Set([
+  "Archive films",
   "Bird field journal",
   // Any page, through the store's anonymous preview proxy: a public web proxy.
   "Browser",
+  "Camera wall",
   "Chromium Screenshot",
   "Google Photos",
   "Haiku of the hour",
   "Home Assistant remote",
   "Homey remote",
   "Immich",
+  "Immich videos",
   "MiniGPT",
   "OpenAI image",
+  // Video plays on a Pi (docs/video.md): the browser's runtime has no ffmpeg.
+  "Slow movie",
   "Unsplash image",
+  "Video from URL",
+  "Video player",
   "Webcam RSTP",
 ]);
 

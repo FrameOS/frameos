@@ -39,9 +39,16 @@ let networkApps = toHashSet([
   "hackerNews",
   # the Weather, Bird field journal and Flights Above Me samples' own JS apps:
   # Open-Meteo, iNaturalist and OpenSky for the scenes' default places
-  "weatherOpenMeteoJS", "birdJournal", "flightRadar"
+  "weatherOpenMeteoJS", "birdJournal", "flightRadar",
+  # the Archive films sample's own JS app: archive.org's search
+  "archiveFilms"
 ])
 let hostOnlyApps = toHashSet(["chromiumScreenshot", "rstpSnapshot"])
+# Samples on the network whose app has a generic keyword, so networkApps
+# cannot name them: the Gallery's jsxUi app draws a random picture from
+# gallery.frameos.net, and a fetch that answers for one render and not the
+# next slipped past the self-determinism bracket (CI, PR #1016, twice).
+let networkTemplates = toHashSet(["Gallery"])
 
 # A fixed budget, so both runs (and every machine) bound the same way, and a
 # large enough one that the materialized floor's raster of an 800x480 JS app
@@ -142,7 +149,7 @@ for kind, templateDir in walkDir(SamplesDir):
     var visited = initHashSet[string]()
     let apps = sceneAppKeywords(sceneInput, inputs, visited)
     let sceneLabel = templateName & " / " & sceneInput.name
-    if (apps * hostOnlyApps).len > 0 or (apps * networkApps).len > 0:
+    if (apps * hostOnlyApps).len > 0 or (apps * networkApps).len > 0 or templateName in networkTemplates:
       continue
 
     let persistedState =

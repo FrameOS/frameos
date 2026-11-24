@@ -90,6 +90,30 @@ interface FrameOSCanvasRef extends FrameOSImageRef {
   version: number;
   fresh: boolean;
 }
+/**
+ * What frameos.video returns: an image ref an img's src takes, its picture the frame due now (docs/video.md). Its
+ * id is 0 when it cannot play (an ESP32, the preview, a missing file): error says why, and an img of it draws nothing.
+ */
+interface FrameOSVideoRef extends FrameOSImageRef {
+  video: string;
+  src?: string;
+  /** loading until its first frame; ended once the last frame showed (not with loop); error: see error. */
+  state: "loading" | "playing" | "paused" | "ended" | "error";
+  /** Where it is, in seconds. */
+  time?: number;
+  /** Its length in seconds; null for a live stream (a camera) or one that does not say. */
+  duration?: number | null;
+  live?: boolean;
+  /** The source's own size and frames a second, once known. */
+  videoWidth?: number;
+  videoHeight?: number;
+  fps?: number;
+  /** What decodes it: "software", or the frame's hardware ("h264_v4l2m2m" on a Pi 0 to 4, "vaapi"). */
+  decoder?: string;
+  /** True when the decoder could not keep up and plays with shortcuts (a softer picture). */
+  fast?: boolean;
+  error?: string;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -591,6 +615,57 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * The app's video called key (FrameOS 2026.11.15+, docs/video.md): show it with <img src={video}> sized by its
+   * classes, and the frame due now is drawn, decoded by ffmpeg at the img's size (object-contain by default,
+   * object-cover, object-fill; or fit). The scene renders again when the next frame is due, and a frame repaints the
+   * video alone. src is a file in the assets (as readAsset takes it, storage too) or an http(s), rtsp(s) URL. Call it
+   * every render: options apply at once, a new src starts again from start, loop plays a file from its start again
+   * (and opens a stream that ended or failed again, every 10 s while it fails). A Raspberry Pi with ffmpeg plays it (Buildroot images have it); an ESP32
+   * and the preview (any wasm runtime) answer state "error". 4 at most; it stops with the interpreter or releaseVideo.
+   */
+  video(
+    key: string,
+    options: {
+      src: string;
+      storage?: string;
+      loop?: boolean;
+      paused?: boolean;
+      /** Where a new src starts, in seconds. */
+      start?: number;
+      /** Frames a second at most (30 by default, 60 at most): less is less work for the Pi. */
+      fps?: number;
+      fit?: "contain" | "cover" | "fill";
+      /** http(s) request headers (an API key). */
+      headers?: Record<string, string>;
+    }
+  ): FrameOSVideoRef;
+  /** Goes to a time in the video, in seconds. False when it is not playing. */
+  seekVideo(video: FrameOSVideoRef, seconds: number): boolean;
+  /** Stops the video now and lets its decoder go. */
+  releaseVideo(video: FrameOSVideoRef): boolean;
+  /** What a video file or URL holds (ffprobe), without playing it; error when it is no video or cannot be read. */
+  videoInfo(
+    src: string,
+    options?: { storage?: string; headers?: Record<string, string> }
+  ): { width?: number; height?: number; duration?: number | null; fps?: number; codec?: string; error?: string };
+  /**
+   * One frame of a video as a picture, at seconds in (0 by default), decoded at width x height (the canvas's size
+   * by default, cover by default): a thumbnail, or a very slow movie on e-paper. keep holds it for later renders as
+   * fetchImage's keep does.
+   */
+  videoFrame(
+    src: string,
+    options?: {
+      at?: number;
+      width?: number;
+      height?: number;
+      fit?: "contain" | "cover" | "fill";
+      keep?: boolean;
+      storage?: string;
+      headers?: Record<string, string>;
+    }
+  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string };
   /**
    * The 8-bit palette mode, to return from get() (FrameOS 2026.11.8+): width x height cells, a byte each, rows top to
    * bottom, each an index into palette (up to 256 0xRRGGBB colors; past its end, black) drawn as a pixelSize square.
