@@ -211,6 +211,7 @@ proc newHook*(v: var NetworkConfig) =
     networkCheck: false,
     networkCheckTimeoutSeconds: 30,
     networkCheckUrl: "https://networkcheck.frameos.net",
+    networkCheckOnTouch: false,
     wifiHotspot: "disabled",
     wifiHotspotSsid: "FrameOS-Setup",
     wifiHotspotPassword: "frame1234",

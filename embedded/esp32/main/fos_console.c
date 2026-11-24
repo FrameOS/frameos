@@ -575,7 +575,8 @@ static int cmd_set(int argc, char **argv)
         strlcat(value, argv[i], sizeof(value));
     }
 
-    if (strcmp(key, "wifi_ssid") == 0) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));
+    /* `-` forgets the network, as time_zone's does: a frame with none. */
+    if (strcmp(key, "wifi_ssid") == 0) strlcpy(config->wifi_ssid, strcmp(value, "-") == 0 ? "" : value, sizeof(config->wifi_ssid));
     else if (strcmp(key, "wifi_pass") == 0) strlcpy(config->wifi_pass, value, sizeof(config->wifi_pass));
     else if (strcmp(key, "backend") == 0) strlcpy(config->backend_url, value, sizeof(config->backend_url));
     else if (strcmp(key, "api_key") == 0) strlcpy(config->api_key, value, sizeof(config->api_key));

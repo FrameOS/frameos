@@ -199,6 +199,7 @@ FRAME_SYNC_NETWORK_KEYS = {
     "networkCheck",
     "networkCheckTimeoutSeconds",
     "networkCheckUrl",
+    "networkCheckOnTouch",
     "wifiHotspot",
     "wifiHotspotSsid",
     "wifiHotspotPassword",

@@ -210,6 +210,9 @@ type
     networkCheck*: bool
     networkCheckTimeoutSeconds*: float
     networkCheckUrl*: string
+    # A touch screen's first picture waits for the check too, and a check that
+    # fails raises the boot hotspot, as on every other frame (boot_network.nim).
+    networkCheckOnTouch*: bool
     wifiHotspot*: string
     wifiHotspotSsid*: string
     wifiHotspotPassword*: string
