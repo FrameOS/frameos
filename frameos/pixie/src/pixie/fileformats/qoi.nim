@@ -1,4 +1,4 @@
-import chroma, flatty/binny, math, ../common, ../images, ../internal
+import chroma, flatty/binny, math, ../common, ../decodebudget, ../images, ../internal
 
 # See: https://qoiformat.org/qoi-specification.pdf
 
@@ -94,8 +94,22 @@ proc decodeQoi*(data: string): Qoi {.raises: [PixieError].} =
   if channels notin {3'u8, 4} or colorspace notin {0'u8, 1}:
     raise newException(PixieError, "Invalid QOI header")
 
-  if width.int * height.int > uint32.high.int64:
+  # In int64, and divided rather than multiplied first: two u32s multiply
+  # past an int64, and an int is 32 bits on an ESP32.
+  if height > 0'u32 and width.int64 > uint32.high.int64 div height.int64:
     raise newException(PixieError, "QOI is too large to decode")
+  let pixels = width.int64 * height.int64
+  # One op byte covers 62 pixels at most (a run), so the ops between the
+  # header and the 8-byte end marker bound the picture: a header claiming
+  # more is refused before the pixels are allocated, not after gigabytes of
+  # them (fuzz_qoi, 2026-11-24, one byte of the width changed).
+  if pixels > (data.len - 14 - 8).int64 * 62:
+    raise newException(PixieError, "QOI is larger than its data")
+  if overDecodeBudget(pixels * 4):
+    raise newException(PixieError,
+      "QOI decode of " & $width & "x" & $height & " needs " &
+      $(pixels * 4 div 1024) & "K, over the " &
+      $(decodeBudgetBytes() div 1024) & "K memory budget")
 
   result = Qoi()
   result.width = width.int
