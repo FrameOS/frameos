@@ -489,16 +489,24 @@ kept.
   (`frameos/file_transfer_preview.nim`, turned on by the worker for a page
   that says it answers, `fileTransfer` in its `init`).
 - **The gesture.** A file picker opens, and a download starts, only from a
-  person's gesture in the page, and the tap on Upload is a pointer event the
-  page forwarded to the worker. The runtime hands the request to the worker
+  person's press on the preview itself, and the tap on Upload is a pointer
+  event the page forwarded to the worker (`previewHasGesture`, five seconds
+  from a pointer or a key on the picture). `frameos.transfer` is any scene's
+  to call and a store scene's preview runs on its public page, so a click
+  somewhere else on the page is not the scene's permission to save a file
+  to the computer. The runtime hands the request to the worker
   (`onFrameosFileRequest`), the worker to the page (`fileRequest`), a round
   trip of a few milliseconds; the page still has the tap's transient
   activation then (`navigator.userActivation.isActive`: about five seconds in
   Chrome and Firefox), and opens the picker or saves the file at once
-  (`frameos/wasm/src/files.ts`). When it has none left (a long render in
-  between, a browser that cannot say) the page asks with a button of its own
-  (`onFileRequest`: the editor's preview and the playground show "Choose
-  files" / "Save" and Cancel), whose click is the gesture. The files picked go
+  (`frameos/wasm/src/files.ts`). With no press behind the request, or when
+  the page has no gesture left (a long render in between, a browser that
+  cannot say), the page asks with a button of its own (`onFileRequest`: the
+  editor's preview and the playground show "Choose files" / "Save" and
+  Cancel), whose click is the gesture; a page with no such button turns a
+  request nobody pressed for down. A file is saved under its name as the
+  page cleaned it (`safeFileName`: no folders, no control or
+  direction-changing characters, no dot first). The files picked go
   back to the worker (`fileUpload`), which writes them into the folder the
   runtime named, never one the page names: no folders or dot first in a
   name, and a name that is there gets " (2)". They are in the preview's

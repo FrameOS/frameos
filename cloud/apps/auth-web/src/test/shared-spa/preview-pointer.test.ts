@@ -46,6 +46,8 @@ function pointer(type: string, init: Record<string, number | string>) {
   });
 }
 
+const pointer_ = pointer;
+
 const script: Array<[string, Record<string, number | string>]> = [
   ["pointermove", { clientX: 40, clientY: 110 }],
   ["pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }],
@@ -368,6 +370,74 @@ describe("preview pointer input, package and frontend", () => {
       packagePointer.attachKeyboardInput(canvas as unknown as HTMLCanvasElement, (name) => sent.push([name, null]));
       canvas.dispatchEvent(Object.assign(new Event("keydown"), { code: "KeyV", key: "v", ctrlKey: true }));
       expect(sent.map(([name]) => name)).toEqual(["keyDown"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The frame's Copy lands on the computer's clipboard, and scene code (which
+  // is anyone's on a store page) can move the frame's clipboard by itself:
+  // only a press on the preview a moment ago makes it the person's Copy.
+  it("writes the computer's clipboard only after a press on the preview, from either page", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const writeText = vi.fn((_text: string) => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    try {
+      let clock = Date.UTC(2031, 0, 1);
+      for (const pointer of [packagePointer, frontendPointer]) {
+        // Long after any press an earlier test made.
+        clock += 60 * 60 * 1000;
+        vi.setSystemTime(clock);
+        writeText.mockClear();
+        expect(pointer.previewHasGesture()).toBe(false);
+        pointer.writeHostClipboard("what a scene put there by itself");
+        expect(writeText).not.toHaveBeenCalled();
+
+        // A tap (the on-screen keyboard's Copy): the press and its release.
+        const canvas = new FakeCanvas();
+        const detachPointer = pointer.attachPointerInput(canvas as unknown as HTMLCanvasElement, () => undefined, {
+          inputV2: () => true,
+        });
+        // The pointer passing over the picture is no press.
+        canvas.dispatchEvent(pointer_("pointermove", { clientX: 290, clientY: 260 }));
+        expect(pointer.previewHasGesture()).toBe(false);
+        canvas.dispatchEvent(pointer_("pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }));
+        expect(pointer.previewHasGesture()).toBe(true);
+        pointer.writeHostClipboard("copied");
+        expect(writeText.mock.calls).toEqual([["copied"]]);
+        vi.setSystemTime(clock + pointer.PREVIEW_GESTURE_MS + 1);
+        pointer.writeHostClipboard("later, by itself");
+        expect(writeText).toHaveBeenCalledTimes(1);
+        canvas.dispatchEvent(pointer_("pointerup", { button: 0, clientX: 290, clientY: 260 }));
+        pointer.writeHostClipboard("on the release");
+        expect(writeText).toHaveBeenLastCalledWith("on the release");
+        detachPointer();
+
+        // Ctrl+C in a field: the key is the press.
+        clock += 60 * 60 * 1000;
+        vi.setSystemTime(clock);
+        expect(pointer.previewHasGesture()).toBe(false);
+        const detachKeys = pointer.attachKeyboardInput(canvas as unknown as HTMLCanvasElement, () => undefined);
+        canvas.dispatchEvent(
+          Object.assign(new Event("keydown", { cancelable: true }), {
+            altKey: false, code: "KeyC", ctrlKey: true, isComposing: false, key: "c", metaKey: false, repeat: false,
+            shiftKey: false,
+          }),
+        );
+        pointer.writeHostClipboard("copied with the keyboard");
+        expect(writeText).toHaveBeenLastCalledWith("copied with the keyboard");
+        detachKeys();
+
+        // Input the page is not forwarding (a bundle without it) is no press either.
+        clock += 60 * 60 * 1000;
+        vi.setSystemTime(clock);
+        const off = pointer.attachPointerInput(canvas as unknown as HTMLCanvasElement, () => undefined, {
+          enabled: () => false,
+        });
+        canvas.dispatchEvent(pointer_("pointerdown", { button: 0, buttons: 1, clientX: 290, clientY: 260 }));
+        expect(pointer.previewHasGesture()).toBe(false);
+        off();
+      }
     } finally {
       vi.useRealTimers();
     }

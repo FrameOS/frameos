@@ -151,14 +151,23 @@ Pass `browserAssets: false` for an empty in-memory folder instead.
 ### Files from and to the computer
 
 The Files scene has Upload and Download here (`fileTransfer`, on by default; a bundle that has them
-says `runtimeInfo.fileTransfer`). A file picker and a download need a gesture in the page, and the
-tap on Upload is still one when the request arrives a few milliseconds later, so the preview opens
-the picker (or saves the file) at once. When the page has no gesture left
+says `runtimeInfo.fileTransfer`). A file picker and a download need a press on the preview itself
+(a pointer or a key on a canvas `attachPointerInput` / `attachKeyboardInput` forwards, within the
+last five seconds: `previewHasGesture()`), because any scene's code can ask and a click elsewhere on
+the page is not its permission. The tap on Upload is such a press, and still the page's gesture
+when the request arrives a few milliseconds later, so the preview opens the picker (or saves the
+file) at once. With no press behind the request, or when the page has no gesture left
 (`navigator.userActivation.isActive` is false, or the browser cannot say), it calls
 `onFileRequest(request)` instead: show a button whose click calls `preview.answerFileRequest()`,
 and one for `preview.cancelFileRequest()`; `onFileRequest(null)` says it is over. Without
-`onFileRequest` the preview tries anyway. The files picked go into the folder the scene shows, in
-the browser asset folder above.
+`onFileRequest` a request that follows a press is tried anyway and any other is turned down (the
+scene hears `cancelled`). The files picked go into the folder the scene shows, in the browser asset
+folder above. A file is saved under its name cleaned by `safeFileName` (no folders, no control or
+direction-changing characters, no leading dot, 120 characters at most), which is also the `name`
+the request carries.
+
+The frame's Copy and Cut reach the computer's clipboard under the same rule: only after a press on
+the preview (`writeHostClipboard`).
 
 ```ts
 const preview = createFrameOSPreview({
