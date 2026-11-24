@@ -100,7 +100,13 @@ than skipping. Frames more than 1.5 s behind the clock (a source the Pi
 cannot decode in real time) move the clock to them, so the time shown stays
 true. A live source (no duration) shows the newest frame there is. The wait
 asked for is the next frame's time less how late renders have been coming
-(an average), so frames land on time. After the last frame one more render is
+(an average), so frames land on time. A frame not decoded yet (a decoder
+behind the clock) is waited for until the decoder's next one should be in
+(its last one's arrival plus how long it takes to make one, an average the
+reader keeps), a frame at least and a second at most, nothing taken off
+(`renderWait`): a render sooner shows nothing new, and on one core it takes
+the time the decoder needs. Before that rule a Pi Zero rendered back to back
+every 2 ms and ffmpeg got a fifth of the core. After the last frame one more render is
 asked for, so the app's `get()` sees `ended` and can move on.
 
 A scene's `get()` runs every frame: keep a player's light (no `fetch` in it,
@@ -133,6 +139,13 @@ Pi plays one. Its scenes say `video` among their needs, never `linux`.
   Measured on a Pi 5 (Cloud-5, 2026-11-24), decoding H.264 and scaling to an
   800x480 box with three threads: a 1080p clip at 64-75 frames a second, a 720p
   one at 110-130 (`ffmpeg … -f rawvideo - > /dev/null`, about 290% CPU).
+  A Pi Zero W (Cloud-W, one core at 700 MHz, the image's `powersave`
+  governor) is no video player in software: into its 720x720 RGB565 box,
+  ffmpeg alone made 6.9 frames a second of a 270p clip, 3.8 of a busy 360p
+  one and 2.7 of 720p (2026-11-24), the scale and the colour conversion
+  costing as much as the decode. It plays, slowly (the clock follows the
+  decoder); its VideoCore's H.264 decoder and ISP are the way to real time
+  there (Next).
 - **Raspberry Pi OS**: the backend's deploy installs the `ffmpeg` package when
   one of the frame's scenes plays video or uses the RTSP snapshot app
   (`_scenes_use_ffmpeg` in `frame_deploy_workflow.py`). A cloud-managed Pi OS

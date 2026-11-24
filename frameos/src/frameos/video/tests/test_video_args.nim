@@ -3,7 +3,7 @@
 
 import std/[strutils, unittest]
 import ../args
-from ../player import cleaned
+from ../player import cleaned, renderWait
 
 proc has(args: seq[string], flag, value: string): bool =
   for i in 0 ..< args.high:
@@ -80,6 +80,23 @@ suite "video args":
     check stream.ok and stream.duration < 0 and stream.fps == 25
     check not parseProbe("""{"streams": [], "format": {"duration": "3"}}""").ok
     check not parseProbe("not json").ok
+
+  test "the next render: on time for a decoded frame, a frame away while the decoder is behind":
+    # A frame in the ring due in 20 ms, renders coming 5 ms late: asked for in 15.
+    check abs(renderWait(0.020, 1 / 30, 0.005, decoded = true) - 0.015) < 1e-9
+    # One overdue: now (the floor).
+    check renderWait(-0.1, 1 / 30, 0.0, decoded = true) == 0.002
+    # Nothing decoded (a Pi Zero decoding 720p at 3 frames a second, renders
+    # 50 ms late): a frame from now, not back to back, or the render loop takes
+    # the core the decoder needs.
+    check abs(renderWait(0, 1 / 30, 0.05, decoded = false) - 1 / 30) < 1e-9
+    check renderWait(0, 0.05, 0.05, decoded = false) == 0.05
+    # The decoder makes a frame in 0.7 s and its last came 0.2 s ago: in 0.5 s,
+    # not every frame period in between.
+    check abs(renderWait(0, 1 / 30, 0.05, decoded = false, madeIn = 0.5) - 0.5) < 1e-9
+    # Overdue already: every frame until it comes; a stalled stream: a second at most.
+    check abs(renderWait(0, 1 / 30, 0.05, decoded = false, madeIn = -0.3) - 1 / 30) < 1e-9
+    check renderWait(0, 1 / 30, 0.0, decoded = false, madeIn = 6.0) == 1.0
 
   test "ffmpeg's reason, not its afterwords, the source's password left out":
     let said = "[in#0 @ 0x55aa] Error opening input: Connection refused\n" &

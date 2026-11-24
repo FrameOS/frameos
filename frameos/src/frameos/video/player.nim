@@ -78,6 +78,8 @@ type
     message: array[MessageKeep, char]
     messageLen: int
     exited: bool
+    arrivedAt: float       ## monotonic seconds the run's last frame came in (0: none yet)
+    makeSeconds: float     ## how long ffmpeg takes to make a frame once there is room (an average)
     # The ring: `count` frames from `head`, oldest first.
     buf: ptr UncheckedArray[byte]
     frameBytes: int
@@ -291,6 +293,9 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
           let slot = (s.head + s.count) mod s.slots
           dst = cast[ptr UncheckedArray[byte]](addr s.buf[slot * fb])
         # One frame into it: the slot is in no one's ring until it is counted.
+        # From here to its last byte is how long ffmpeg takes to make one
+        # when it is the slow side (its pipe holds 64 KB, not a frame).
+        let roomAt = nowSeconds()
         var got = 0
         while got < fb:
           var fds = [TPollfd(fd: outFd, events: POLLIN), TPollfd(fd: errFd, events: POLLIN)]
@@ -322,6 +327,12 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
             media = media mod s.duration
           s.slotMedia[slot] = media
           inc s.count
+          let arrived = nowSeconds()
+          if s.arrivedAt > 0:
+            # Not the first: its wait was ffmpeg starting and seeking.
+            let took = arrived - roomAt
+            s.makeSeconds = if s.makeSeconds == 0: took else: s.makeSeconds * 0.8 + took * 0.2
+          s.arrivedAt = arrived
           if s.failed:
             # A source that loops came back.
             s.failed = false
@@ -404,6 +415,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         s.failed = false
         s.idle = false
         s.messageLen = 0
+        s.arrivedAt = 0
+        s.makeSeconds = 0
         s.fps = outputFps(s.srcFps, maxFps)
         s.lastTake = nowSeconds()
       lastGen = gen
@@ -696,6 +709,20 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
   registerCanvas(player.image).drew(rect(0, 0, player.image.width.float32, player.image.height.float32))
   true
 
+proc renderWait*(dueIn, frameSeconds, late: float, decoded: bool, madeIn = 0.0): float =
+  ## How long the scene sleeps before it renders for the video again.
+  ## `decoded`: a frame is in the ring, due in `dueIn` seconds; the wait is
+  ## that less how late renders have been coming (`late`), so it lands on
+  ## time. Not decoded (a start, or a decoder behind the clock: a Pi Zero's
+  ## core decoding 720p at 3 frames a second): when the decoder's next frame
+  ## should be in (`madeIn`, a second at most) and a frame from now at
+  ## least, nothing taken off. A render sooner shows nothing new, and on one
+  ## core it takes the time the decoder needs: renders slower than a frame
+  ## (`late` near a frame) once asked back to back, and ffmpeg got a fifth
+  ## of the core.
+  if decoded: max(dueIn - late, 0.002)
+  else: max(max(frameSeconds, min(madeIn, 1.0)), 0.002)
+
 proc nextFrameIn*(player: VideoPlayer): float =
   ## Seconds until the scene should render for this video again, -1 for
   ## never: paused, ended, failed. Asked after a take.
@@ -715,13 +742,19 @@ proc nextFrameIn*(player: VideoPlayer): float =
       player.endTold = player.gen
       return 1.0 / max(s.fps, 1.0)
     let fps = max(s.fps, 0.5)
-    if s.runGen == player.gen and s.count > 0 and player.clockStart > 0 and s.duration > 0:
+    let decoded = s.runGen == player.gen and s.count > 0
+    if decoded and player.clockStart > 0 and s.duration > 0:
       let due = player.clockStart + float(s.slotSeq[s.head] - player.clockSeq) / fps
-      wait = due - now
+      wait = renderWait(due - now, 1.0 / fps, player.late, decoded = true)
+    elif decoded:
+      # A live stream shows its newest frame: the next in a frame.
+      wait = renderWait(1.0 / fps, 1.0 / fps, player.late, decoded = true)
     else:
-      # Nothing decoded yet (a start, a live stream): look again in a frame.
-      wait = if s.probed: 1.0 / fps else: 0.05
-  wait = max(wait - player.late, 0.002)
+      let madeIn =
+        if s.runGen == player.gen and s.arrivedAt > 0 and s.makeSeconds > 0:
+          s.arrivedAt + s.makeSeconds - now
+        else: 0.0
+      wait = renderWait(0, if s.probed: 1.0 / fps else: 0.05, player.late, decoded = false, madeIn)
   player.askedAt = now
   player.askedWait = wait
   wait
