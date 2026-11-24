@@ -28,9 +28,12 @@ proc compact(sp: var AnnexBSplitter) =
 
 proc room*(sp: var AnnexBSplitter, wanted: int): ptr UncheckedArray[byte] =
   ## Space for `wanted` more bytes at the end (`added` says how many came).
-  sp.compact()
+  ## What was taken is dropped only when the space is short, so a read does
+  ## not move the bytes read ahead each time.
   if sp.buf.len - sp.len < wanted:
-    sp.buf.setLen(max(sp.buf.len * 2, sp.len + wanted))
+    sp.compact()
+    if sp.buf.len - sp.len < wanted:
+      sp.buf.setLen(max(sp.buf.len * 2, sp.len + wanted))
   cast[ptr UncheckedArray[byte]](addr sp.buf[sp.len])
 
 proc added*(sp: var AnnexBSplitter, count: int) =

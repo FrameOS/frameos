@@ -587,8 +587,9 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
           s.setMessage(why)
 
 const
-  StreamAhead = 4 * 1024 * 1024
-    ## Coded video read ahead of the decoder at most (the ISP path).
+  StreamAhead = 1024 * 1024
+    ## Coded video read ahead of the decoder at most (the ISP path): seconds
+    ## of a 1080p video.
 
 proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
     probe: ProbeResult, caps: DecodeCaps, startAt, fps: float, loopFile: bool, firstSeq: int64,
@@ -685,6 +686,13 @@ proc runIspLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, p
             if not room and nowSeconds() - s.lastTake > IdleSeconds:
               result = leIdle
               break run
+            if not room and made > 0:
+              # A full ring (a pause, renders slower than the frames): nothing
+              # to do until a take. The devices are not polled meanwhile: a
+              # mem2mem device none of whose queues holds a buffer answers a
+              # poll at once (its pictures wait here, its frames there).
+              s.waitFor(PollMs)
+              continue
           if room and roomAt < 0:
             roomAt = nowSeconds()
           # Wait for any side: ffmpeg's stream (while not far ahead), its
