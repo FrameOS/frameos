@@ -8,6 +8,7 @@ import { Button } from '../../../../components/Button'
 import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
+import { TextInput } from '../../../../components/TextInput'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
 import { Tooltip } from '../../../../components/Tooltip'
 import { SceneAccessTags } from './SceneAccessTags'
@@ -63,6 +64,11 @@ const refreshIntervalTooltip =
   "The default number of seconds between renders. Anyone controlling the scene can change it from the scene's " +
   'options. Use a large number like "60" or more for e-ink frames. A number below 1 ' +
   'activates realtime mode (0.041s = 24fps, 0.016s = 60fps): only if your hardware supports it.'
+
+// `settings.opens`, docs/scene-guide.md "Opening files": listed as it is on app.frame.scenes.
+const opensTooltip =
+  'The kinds of file this scene opens, by their extension: "pdf", or "txt md json" for several. The Files app ' +
+  'opens such a file in this scene, which gets it in its public field "file".'
 
 function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
   return <span className="frame-tool-control-label text-xs font-semibold uppercase tracking-wide">{children}</span>
@@ -250,6 +256,24 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 />
               )}
             </Field>
+            {scene.settings?.isLayout ? null : (
+              <Field
+                className={fieldClassName}
+                name="opens"
+                label={<SceneSettingsLabel>Opens files</SceneSettingsLabel>}
+                tooltip={opensTooltip}
+              >
+                {({ value, onChange }) => (
+                  <TextInput
+                    name="opens"
+                    className="!h-10"
+                    placeholder="pdf epub"
+                    value={typeof value === 'string' ? value : ''}
+                    onChange={(next) => onChange(next || undefined)}
+                  />
+                )}
+              </Field>
+            )}
             <Field
               className={fieldClassName}
               name="icon"

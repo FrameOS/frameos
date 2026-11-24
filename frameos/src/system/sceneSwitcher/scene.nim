@@ -63,6 +63,7 @@ type
     windowSize*: string ## its own size in a desktop's window, "" for none: 800x480 (app.frame.scenes)
     icon*: string ## its icon, one path in 0 0 24 24 (scene_icon.nim), "" for none
     category*: string ## its category by its name ("Photos"), as the scene has it, "" for none
+    opens*: string ## the file types it opens ("pdf", "txt md"), as the scene has it, "" for none
 
   SwitcherListing* = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.}
     ## The frame's scenes in its scene list's order, with their names.
@@ -151,14 +152,16 @@ proc putText(node: JsonNode, key, text: string, always = false) =
 
 proc listingItem*(entry: SwitcherEntry): JsonNode =
   ## The scene as `app.frame.scenes` lists it (docs/scene-layouts.md
-  ## "Windows"): `{id, name}`, and its window size, icon and category where
-  ## it has them. One builder for every host, so their listings stay alike.
+  ## "Windows"): `{id, name}`, and its window size, icon, category and the
+  ## file types it opens where it has them. One builder for every host, so
+  ## their listings stay alike.
   result = newJObject()
   result.putText("id", entry.id, always = true)
   result.putText("name", entry.name, always = true)
   result.putText("windowSize", entry.windowSize)
   result.putText("icon", entry.icon)
   result.putText("category", entry.category)
+  result.putText("opens", entry.opens)
 
 proc isBuiltInScene*(sceneId: string): bool =
   ## A scene the runtime draws itself: no slot, no file. The switcher and the

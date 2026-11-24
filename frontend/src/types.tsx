@@ -1353,6 +1353,9 @@ export interface FrameSceneSettings {
   /** Its category by its name, "Photos" or "Clocks & time", picked from the store's titles
    * (utils/sceneCategory.ts): a desktop layout groups its list of scenes by it. */
   category?: string
+  /** The file types it opens, their extensions as text ("pdf", "txt md json"): the Files app hands
+   * such a file to its public field `file` as "<storage>:<path>" (docs/scene-guide.md "Opening files"). */
+  opens?: string
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

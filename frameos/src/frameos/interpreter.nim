@@ -3003,6 +3003,8 @@ proc readSettings(s: string, i: var int): FrameSceneSettings =
     of "icon": result.icon = sceneIconPath(readText(s, i))
     # Its name ("Photos"), handed to a desktop as is, like the window size.
     of "category": result.category = readText(s, i)
+    # The file types it opens ("pdf"), listed as they are, like its category.
+    of "opens": result.opens = readText(s, i)
     else: skipValue(s, i)
 
 proc readList[T](s: string, i: var int, read: proc(s: string, i: var int): T {.nimcall.}): seq[T] =
@@ -3125,6 +3127,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     windowSize: settings.windowSize,
     icon: settings.icon,
     category: settings.category,
+    opens: settings.opens,
     layoutSceneId: scene.layout{"sceneId"}.getStr().SceneId,
     layoutState: scene.layout{"state"},
     # Fields without an explicit access default to public for interpreted
