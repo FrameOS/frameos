@@ -23,6 +23,9 @@ Two shapes, mirroring the cloud:
   GET /api/frames/firmware?platform=pico-2w
     -> the pico family's .uf2, streamed as a named attachment: a person
        saves it and drops it onto the BOOTSEL drive, nothing flashes it.
+  GET /api/frames/firmware?platform=esp32-s3-generic&signature=1
+    -> that image's .minisig text, which the browser checks the bytes
+       against before it writes them (409 unsigned_release without one).
 
 Documented divergences from the cloud route:
   - ``format`` ("bin" | "uf2" | "img.gz") and the pico .uf2 assets are this
@@ -48,7 +51,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from app.tasks.embedded_firmware import (
     EMBEDDED_IMAGE_FORMAT_BIN,
@@ -361,8 +364,12 @@ async def _stream_release_asset(
     )
 
 
+def _wants_signature(value: Optional[str]) -> bool:
+    return value in ("1", "true")
+
+
 @api_project.get("/frames/firmware")
-async def api_frames_firmware_release(platform: Optional[str] = Query(None)):
+async def api_frames_firmware_release(platform: Optional[str] = Query(None), signature: Optional[str] = Query(None)):
     listing = platform is None
     if not listing and platform not in STREAMABLE_PLATFORMS:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="invalid_platform")
@@ -399,6 +406,32 @@ async def api_frames_firmware_release(platform: Optional[str] = Query(None)):
 
     entry = next((candidate for candidate in PROVISIONING_ASSETS if candidate["platform"] == platform), None)
     asset = _find_asset(release, entry["suffix"]) if entry else None
+    if _wants_signature(signature):
+        # The image's .minisig, for the browser to check the bytes with before
+        # it writes them (frontend/src/utils/releaseSigning.ts) — the same
+        # answer as the cloud route's and app/api/frames/sd-image's
+        # `signature=1`. A local development image has none: 409, and the
+        # backend's own flasher says it is writing an unsigned build.
+        if asset is None:
+            if platform == "esp32-s3-generic" and local:
+                raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="unsigned_release")
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="firmware_not_published")
+        signature_asset = _find_asset(release, f"{entry['suffix']}.minisig") if entry else None
+        if signature_asset is None or signature_asset.get("name") != f"{asset.get('name')}.minisig":
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="unsigned_release")
+        minisig = await fetch_release_asset_text(signature_asset)
+        if not minisig:
+            raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="release_lookup_failed")
+        # The URL names a platform, not a release: a cached signature is the
+        # previous release's once a new one ships.
+        return PlainTextResponse(
+            minisig,
+            headers={
+                "cache-control": "no-store",
+                "x-frameos-image-name": str(asset.get("name") or ""),
+                "x-frameos-release": release_tag,
+            },
+        )
     if asset is None and platform == "esp32-s3-generic" and local:
         return FileResponse(
             local["path"],

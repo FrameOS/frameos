@@ -151,6 +151,12 @@ export default tseslint.config(
       "**/src/test/shared-spa/scene-preview-plane-first.test.ts",
       // Mounts assetsLogic (→ frameLogic) and renders the Assets panel; out of the tsconfig too.
       "**/src/test/shared-spa/asset-storages.test.tsx",
+      // flash.frameos.net's bridge, standalone plan and the backend page's
+      // bridge logic: their graphs reach embeddedFlashShared, esp32Hardware
+      // and framesModel; out of the tsconfig too.
+      "**/src/test/shared-spa/flasher-bridge.test.ts",
+      "**/src/test/shared-spa/flasher-bridge-opener.test.ts",
+      "**/src/test/shared-spa/flasher-standalone.test.ts",
     ],
   },
   js.configs.recommended,

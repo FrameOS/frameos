@@ -30,6 +30,41 @@ await import('../frontend/scripts/generateRepoApps.mjs')
 await fs.rm(outputDir, { recursive: true, force: true })
 await fs.mkdir(staticDir, { recursive: true })
 await fs.copyFile(path.resolve(__dirname, 'src/index.html'), path.join(outputDir, 'index.html'))
+// flash.frameos.net (cloud/docs/flasher.md): a page of its own, served by
+// auth-web's app/flash route, built here beside the workspace because it is
+// the workspace's flashing engine with a page around it.
+await fs.copyFile(path.resolve(__dirname, 'src/flasher/index.html'), path.join(outputDir, 'flasher.html'))
+
+// The samples a standalone frame can start with on flash.frameos.net, read
+// from repo/scenes at build time (so a sample's fix reaches the flasher with
+// the next deploy). The Scene store is always offered first: with it the
+// frame installs everything else itself.
+const flasherStarterTemplates = [
+  { name: 'Scene store', preselected: true },
+  { name: 'Clock', preselected: true },
+  { name: 'Flip clock' },
+  { name: 'Big typographic clock' },
+  { name: 'Analog clock face' },
+  { name: 'Word clock' },
+  { name: 'Countdown' },
+  { name: 'Files' },
+  { name: 'Terminal app' },
+  { name: 'Pixel toys' },
+]
+{
+  const samplesDir = path.resolve(__dirname, '../repo/scenes/samples')
+  const starters = []
+  for (const { name, preselected = false } of flasherStarterTemplates) {
+    const dir = path.join(samplesDir, name)
+    const meta = JSON.parse(await fs.readFile(path.join(dir, 'template.json'), 'utf8'))
+    const scenes = JSON.parse(await fs.readFile(path.join(dir, String(meta.scenes ?? './scenes.json')), 'utf8'))
+    if (!Array.isArray(scenes) || scenes.length === 0) {
+      throw new Error(`flasher starter "${name}" has no scenes`)
+    }
+    starters.push({ name, description: String(meta.description ?? ''), preselected, scenes })
+  }
+  await fs.writeFile(path.join(outputDir, 'flasher-scenes.json'), JSON.stringify(starters))
+}
 
 // cloud/apps/auth-web/app/frames/[[...path]]/route.ts injects server-side
 // configuration by replacing these exact lines in the shell. Dropping one
@@ -162,7 +197,10 @@ await build({
 
 const buildOptions = {
   absWorkingDir: __dirname,
-  entryPoints: ['src/main.tsx'],
+  entryPoints: [
+    { in: 'src/main.tsx', out: 'main' },
+    { in: 'src/flasher/main.tsx', out: 'flasher' },
+  ],
   bundle: true,
   format: 'esm',
   // The cloud frontend imports shared TSX files from ../frontend/src. Force the
@@ -180,7 +218,7 @@ const buildOptions = {
   // headers) becomes harmless and the assets can be cached forever. Watch
   // and dev builds keep stable names — the dev server copies the bundle
   // once at startup and a changing name would strand its index.html.
-  entryNames: isDev || isWatch ? 'main' : 'main-[hash]',
+  entryNames: isDev || isWatch ? '[name]' : '[name]-[hash]',
   metafile: !isWatch,
   assetNames: 'asset-[hash]',
   // Assets are served by Next.js from public/frames-app/ — see README.md.
@@ -201,32 +239,35 @@ if (isWatch) {
   console.log(`👀 Watching ${staticDir}`)
 } else {
   const result = await build(buildOptions)
-  // The template keeps the stable names; point the shell at the hashed
+  // The templates keep the stable names; point each shell at its hashed
   // outputs. Failing loudly beats serving a shell whose script 404s.
-  const entry = Object.entries(result.metafile.outputs).find(
-    ([, meta]) => meta.entryPoint === 'src/main.tsx'
-  )
-  if (!entry) {
-    throw new Error('src/main.tsx entry missing from the esbuild metafile')
-  }
   const toRelative = (outputPath) =>
     path.relative(outputDir, path.resolve(__dirname, outputPath)).split(path.sep).join('/')
-  const jsFile = toRelative(entry[0])
-  if (!entry[1].cssBundle) {
-    throw new Error('css bundle missing from the esbuild metafile')
-  }
-  const cssFile = toRelative(entry[1].cssBundle)
-  const indexPath = path.join(outputDir, 'index.html')
-  let html = await fs.readFile(indexPath, 'utf8')
-  for (const [from, to] of [
-    ['/frames-app/static/main.css', `/frames-app/${cssFile}`],
-    ['/frames-app/static/main.js', `/frames-app/${jsFile}`],
+  for (const { entryPoint, name, shell } of [
+    { entryPoint: 'src/main.tsx', name: 'main', shell: 'index.html' },
+    { entryPoint: 'src/flasher/main.tsx', name: 'flasher', shell: 'flasher.html' },
   ]) {
-    if (!html.includes(from)) {
-      throw new Error(`src/index.html no longer references ${from}; the hashed-name rewrite would be a no-op`)
+    const entry = Object.entries(result.metafile.outputs).find(([, meta]) => meta.entryPoint === entryPoint)
+    if (!entry) {
+      throw new Error(`${entryPoint} entry missing from the esbuild metafile`)
     }
-    html = html.replaceAll(from, to)
+    const jsFile = toRelative(entry[0])
+    if (!entry[1].cssBundle) {
+      throw new Error(`css bundle of ${entryPoint} missing from the esbuild metafile`)
+    }
+    const cssFile = toRelative(entry[1].cssBundle)
+    const shellPath = path.join(outputDir, shell)
+    let html = await fs.readFile(shellPath, 'utf8')
+    for (const [from, to] of [
+      [`/frames-app/static/${name}.css`, `/frames-app/${cssFile}`],
+      [`/frames-app/static/${name}.js`, `/frames-app/${jsFile}`],
+    ]) {
+      if (!html.includes(from)) {
+        throw new Error(`${shell} no longer references ${from}; the hashed-name rewrite would be a no-op`)
+      }
+      html = html.replaceAll(from, to)
+    }
+    await fs.writeFile(shellPath, html)
+    console.log(`🔗 ${shell} references ${jsFile} and ${cssFile}`)
   }
-  await fs.writeFile(indexPath, html)
-  console.log(`🔗 Shell references ${jsFile} and ${cssFile}`)
 }

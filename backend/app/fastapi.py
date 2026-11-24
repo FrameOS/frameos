@@ -184,6 +184,9 @@ if serve_html:
             ingress_path = header_ingress_path or config.ingress_path
             if ingress_path:
                 app_config["ingress_path"] = ingress_path
+            if config.FRAMEOS_FLASHER_URL:
+                # Another copy of flash.frameos.net (frontend/src/utils/flasherBridge.ts).
+                app_config["flasher_url"] = config.FRAMEOS_FLASHER_URL
             return app_config
 
         def index_html(request: Request | None = None) -> str:

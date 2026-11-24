@@ -1234,7 +1234,11 @@ the primary console and USB-Serial/JTAG the secondary; `fos_console.c`
 reads commands from both. The flasher used to refuse bridge vendor ids,
 which locked the reTerminal boards out entirely. Same enrollment flow A over
 the device's own network connection afterwards. The firmware binaries come from
-the release archive; the flasher never receives per-user builds.
+the release archive; the flasher never receives per-user builds. Since
+2026-11-24 every browser flasher checks the image against its release
+signature before writing it (`/api/frames/firmware?platform=…&signature=1`),
+and the route answers without a session: `flash.frameos.net`
+(`cloud/docs/flasher.md`) flashes from it for people with no account.
 
 **"Generic" means credential- and panel-generic.** A published image carries
 no user, account or WiFi data, and it compiles in every supported Waveshare

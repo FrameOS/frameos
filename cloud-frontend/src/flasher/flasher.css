@@ -1,0 +1,12 @@
+/* flash.frameos.net (cloud/docs/flasher.md): the shared frontend's look, as
+   a page that scrolls (the workspace's index.css pins #root to the viewport). */
+@import "../../../frontend/src/index.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: "Inter", "SF Pro", system-ui, -apple-system, sans-serif;
+}

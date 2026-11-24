@@ -4328,6 +4328,53 @@ async def api_frame_embedded_provisioning(
         _bad_request(str(exc))
 
 
+# The frame setup document (cloud/docs/flasher.md "The setup document"): what
+# a browser needs to turn a blank board into this frame with nothing else to
+# ask — the console commands, the Wi-Fi, and the scenes. The backend's own
+# flasher reads its scenes from here, flash.frameos.net gets the whole thing
+# handed over by this backend's page (a page on plain http has no Web Serial),
+# and "Download setup file" saves it for the flasher on another computer.
+FRAME_SETUP_FORMAT = "frameos-setup"
+FRAME_SETUP_VERSION = 1
+
+
+@api_project.get("/frames/{id:int}/embedded/setup", dependencies=[Depends(refuse_read_only_token)])
+async def api_frame_embedded_setup(
+    id: int,
+    db: Session = Depends(get_db),
+):
+    """This frame as a setup document: the provisioning plan and the scenes
+    the board's own pull would get (`embedded_scenes_payload`: one empty scene
+    for a board rendered here, the runtime's app keywords, no app test files),
+    never the stored list as it is. Carries the frame's API key and Wi-Fi
+    password, as the provisioning plan does."""
+    from app.api.embedded_device import embedded_scenes_payload
+
+    frame = _project_frame(db, id)
+    if not frame:
+        _not_found()
+    if (frame.mode or "rpios") != "embedded":
+        _bad_request("A setup document is only available for embedded frames")
+    published_assets = await latest_published_provisioning_assets()
+    try:
+        provisioning = embedded_provisioning_plan(frame, published_assets)
+    except ValueError as exc:
+        _bad_request(str(exc))
+    backend_url = next(
+        (setting["value"] for setting in provisioning["settings"] if setting["key"] == "backend"),
+        None,
+    )
+    return {
+        "format": FRAME_SETUP_FORMAT,
+        "version": FRAME_SETUP_VERSION,
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "frame": {"id": frame.id, "name": frame.name or f"Frame {frame.id}"},
+        "backend": {"url": backend_url},
+        "provisioning": provisioning,
+        "scenes": json.loads(embedded_scenes_payload(db, frame)),
+    }
+
+
 @api_project.post("/frames/{id:int}/embedded/firmware/ota")
 async def api_frame_embedded_firmware_ota(
     id: int,

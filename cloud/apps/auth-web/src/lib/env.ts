@@ -88,6 +88,15 @@ export function getPlaygroundBaseUrl() {
   return configured ? devLocalUrl(configured) : getCloudBaseUrl();
 }
 
+// The browser flasher (cloud/docs/flasher.md): flash.frameos.net in
+// production, /flash on the cloud origin without the setting. Like the
+// playground no app origin: nobody signs in there, and its host serves every
+// request as to a stranger (surfaces.ts flasherServesApi).
+export function getFlasherBaseUrl() {
+  const configured = optionalEnv("FRAMEOS_FLASHER_APP_URL");
+  return configured ? devLocalUrl(configured) : getCloudBaseUrl();
+}
+
 // The store the playground's Scene store browses, when not the page's own
 // origin: the dev pane's (scripts/playground-dev.mjs). A store on localhost
 // is out of the runtime's reach: the page's own origin goes through the

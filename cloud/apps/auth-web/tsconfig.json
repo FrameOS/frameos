@@ -214,6 +214,16 @@
     // same reason.
     "src/test/shared-spa/home-page.test.ts",
     // Mounts scenesLogic (→ frameLogic, framesModel), same reason.
-    "src/test/shared-spa/scene-preview-plane-first.test.ts"
+    "src/test/shared-spa/scene-preview-plane-first.test.ts",
+    // Mounts flasherBridgeLogic (→ framesModel), same reason.
+    "src/test/shared-spa/flasher-bridge-opener.test.ts",
+    // The bridge's types come from embeddedFlashRun, whose graph reaches
+    // embeddedFlashShared and embeddedUsbLogsModel (see embedded-flash-shared
+    // above), same reason.
+    "src/test/shared-spa/flasher-bridge.test.ts",
+    // The flasher's board list reads esp32Hardware.ts, which reaches
+    // components/Select.tsx through devices.ts (see device-catalog-mirror),
+    // same reason.
+    "src/test/shared-spa/flasher-standalone.test.ts"
   ]
 }

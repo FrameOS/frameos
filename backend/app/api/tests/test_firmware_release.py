@@ -568,3 +568,58 @@ async def test_stream_latest_release_ota_image_error_tokens():
     assert await stream(RELEASE, "esp99-mega") == (400, "invalid_platform")
     assert await stream(RELEASE, "esp32-c3-generic") == (404, "ota_image_not_published")
     assert await stream(None, "esp32-s3-generic") == (502, "release_lookup_failed")
+
+
+@pytest.mark.asyncio
+async def test_firmware_signature_is_the_images_minisig(async_client):
+    # The browser checks a merged image against its .minisig before writing it
+    # (frontend/src/utils/releaseSigning.ts): `signature=1` hands that file
+    # over, named, from the same release the bytes come from.
+    signed = {
+        "tag_name": "v1.2.3",
+        "assets": [
+            *RELEASE["assets"],
+            # The OTA image's signature is another file and must not answer.
+            _asset("frameos-1.2.3-esp32-s3-generic-app.bin.minisig", 120),
+            _asset("frameos-1.2.3-esp32-s3-generic.bin.minisig", 120),
+        ],
+    }
+    with patch_release(release=signed), patch_minisig() as fetched:
+        response = await async_client.get("/api/frames/firmware?platform=esp32-s3-generic&signature=1")
+
+    assert response.status_code == 200, response.text
+    assert response.text == MINISIG
+    assert response.headers["x-frameos-image-name"] == "frameos-1.2.3-esp32-s3-generic.bin"
+    assert response.headers["x-frameos-release"] == "v1.2.3"
+    assert response.headers["cache-control"] == "no-store"
+    assert fetched.await_args.args[0]["name"] == "frameos-1.2.3-esp32-s3-generic.bin.minisig"
+
+
+@pytest.mark.asyncio
+async def test_firmware_signature_error_tokens(async_client, tmp_path, monkeypatch):
+    # No .minisig beside the image: nothing a browser could check it with.
+    with patch_release(), patch_minisig():
+        unsigned = await async_client.get("/api/frames/firmware?platform=esp32-s3-generic&signature=1")
+    assert unsigned.status_code == 409
+    assert unsigned.json()["detail"] == "unsigned_release"
+
+    # Not published at all.
+    firmware_release_module.clear_release_cache()
+    with patch_release(), patch_minisig():
+        missing = await async_client.get("/api/frames/firmware?platform=esp32-s3-16mb&signature=1")
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "firmware_not_published"
+
+    # A local development image is never signed.
+    local = tmp_path / "merged-binary.bin"
+    local.write_bytes(b"\xe9local-dev-image")
+    monkeypatch.setenv(firmware_release_module.LOCAL_FIRMWARE_ENV, str(local))
+    without_generic = {
+        "tag_name": "v0.9.0",
+        "assets": [asset for asset in RELEASE["assets"] if "s3-generic.bin" not in asset["name"]],
+    }
+    firmware_release_module.clear_release_cache()
+    with patch_release(release=without_generic), patch_minisig():
+        local_dev = await async_client.get("/api/frames/firmware?platform=esp32-s3-generic&signature=1")
+    assert local_dev.status_code == 409
+    assert local_dev.json()["detail"] == "unsigned_release"

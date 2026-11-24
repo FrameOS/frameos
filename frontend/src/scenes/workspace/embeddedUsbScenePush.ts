@@ -1,4 +1,4 @@
-import { embeddedUsbUploadTimeoutMs } from '../../models/framesModel'
+import { embeddedUsbUploadTimeoutMs } from '../../utils/embeddedUsbUpload'
 import { runEmbeddedUsbApiCommand } from '../../models/embeddedUsbLogsModel'
 import type { FrameId, FrameScene } from '../../types'
 

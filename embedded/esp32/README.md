@@ -647,6 +647,20 @@ frameos> ota                             # check for an OTA update now
 frameos> factory-reset
 ```
 
+## Flashing from flash.frameos.net
+
+`flash.frameos.net` (`cloud/docs/flasher.md`) flashes and provisions a board
+with no account: a **standalone** ESP32-S3 (a hardware preset or a panel,
+`hostname`, `time_zone` and the Wi-Fi over this console, and starter scenes
+with `upload-scenes`; no `backend`, no `cloud_url`), a frame of a backend
+reached over **plain http** (a page there has no Web Serial, so the backend
+hands the flasher the frame in a window of its own), or a frame saved as a
+**setup file**. It runs the same engine as the backend's buttons
+(`frontend/src/scenes/workspace/embeddedFlashRun.ts`) and writes only images
+the FrameOS release key signed for that release and layout. A standalone
+board has no OTA source (the manifests are the planes' routes): its board
+tools write a new release around the NVS partition over USB.
+
 ## Provisioning from a self-hosted backend
 
 A self-hosted backend flashes a blank board exactly like the cloud does:
@@ -658,7 +672,9 @@ settings over the USB console. Nothing is compiled. **Apply frame settings**
 under USB setup replays the same list on a board flashed by hand, and the
 device pulls whatever a console line cannot carry (its HTTPS certificate and
 key, the service API keys, the schedule) from `/embedded/settings` once it is
-on Wi-Fi.
+on Wi-Fi. A backend reached over plain http has no Web Serial in its page:
+its USB card opens flash.frameos.net, which does the same over the cable
+(above).
 
 After a render the device posts the image its panel shows to
 `/embedded/image` (the BMP `/image` serves, streamed off the packed snapshot;
