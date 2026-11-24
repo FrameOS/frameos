@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
-import type { createDb } from "@frameos-cloud/db";
+import { and, eq } from "drizzle-orm";
+import { type createDb, frameSceneAssignments, frames } from "@frameos-cloud/db";
 import { authenticateLinkedClient, linkedClientHasScope } from "./backend-auth";
+import { assignedSceneVersion } from "./frames";
 import { readSession } from "./session";
 import { storePublishScope } from "./store";
 import { accountIsSuperadmin } from "./superadmin";
@@ -66,4 +68,47 @@ export async function canViewPulledScene(ownerAccountId: string) {
     return true;
   }
   return !session.apiToken && (await accountIsSuperadmin(session.accountId));
+}
+
+// A yanked version asked for by number. A publisher yanks a version that
+// should not have gone out (a key typed into it, a broken scene); the bytes
+// are kept for whoever needs them, and that is not the public: the owner
+// (their session, token or linked backend), a moderator's browser session,
+// and an account one of whose frames was sent that version (the workspace
+// shows a frame the version it holds, docs/cloud-frames.md). Anyone else
+// gets the 404 an unknown version gets.
+export async function canReadYankedVersion(
+  db: ReturnType<typeof createDb>,
+  authorizationHeader: string | null,
+  scene: { accountId: string; id: string },
+  version: number,
+) {
+  if (
+    (await canViewPulledScene(scene.accountId)) ||
+    (await canAccessPrivateScene(db, authorizationHeader, scene.accountId))
+  ) {
+    return true;
+  }
+  const session = await readSession();
+  if (!session?.accountId) {
+    return false;
+  }
+  const held = await db
+    .select({
+      assignedSceneState: frames.assignedSceneState,
+      sceneVersion: frameSceneAssignments.sceneVersion,
+    })
+    .from(frameSceneAssignments)
+    .innerJoin(frames, eq(frames.id, frameSceneAssignments.frameId))
+    .where(
+      and(
+        eq(frames.accountId, session.accountId),
+        eq(frameSceneAssignments.sceneId, scene.id),
+      ),
+    );
+  return held.some(
+    (row) =>
+      row.sceneVersion === version ||
+      assignedSceneVersion(row, scene.id) === version,
+  );
 }

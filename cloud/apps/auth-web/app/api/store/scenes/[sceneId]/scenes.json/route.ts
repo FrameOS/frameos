@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBlob } from "../../../../../../src/lib/blobs";
 import {
   canAccessPrivateScene,
+  canReadYankedVersion,
   canViewPulledScene,
   shareTokenGrantsAccess,
 } from "../../../../../../src/lib/store-auth";
@@ -121,13 +122,15 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("invalid_version", 400);
   }
 
-  // Default to the newest non-yanked version; an explicitly requested
-  // version is served even when yanked (yank hides, it does not break).
+  // Default to the newest non-yanked version. A yanked one asked for by
+  // number is its owner's, a moderator's and the frames' that hold it, and
+  // nobody else's (canReadYankedVersion).
   const [version] = await db
     .select({
       content: storeSceneVersions.content,
       objectKey: storeSceneVersions.objectKey,
       version: storeSceneVersions.version,
+      yankedAt: storeSceneVersions.yankedAt,
     })
     .from(storeSceneVersions)
     .where(
@@ -142,6 +145,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     .limit(1);
 
   if (!version) {
+    return jsonError("version_not_found", 404);
+  }
+  if (
+    version.yankedAt &&
+    !(await canReadYankedVersion(
+      db,
+      request.headers.get("authorization"),
+      scene,
+      version.version,
+    ))
+  ) {
     return jsonError("version_not_found", 404);
   }
 
@@ -175,7 +189,8 @@ async function handleGet(request: NextRequest, context: RouteContext) {
 
   return new NextResponse(body, {
     headers: {
-      "cache-control": isPublic ? "public, max-age=300" : "no-store",
+      // A yanked version is served to some callers only: never cached.
+      "cache-control": isPublic && !version.yankedAt ? "public, max-age=300" : "no-store",
       "content-type": "application/json",
       "x-scene-version": String(version.version),
     },

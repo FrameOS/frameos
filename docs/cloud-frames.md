@@ -1583,7 +1583,11 @@ holds (`frames.assigned_scene_state`) unless that push moves it explicitly —
 the update below, a re-install (`POST …/scenes/add`), or an entry of
 `POST …/scenes` with `"latest": true` (the workspace's Save sets it on the
 scene it just edited). A held version that was yanked falls through to the
-newest one. `GET /api/frames/{id}/scenes` says where each scene is:
+newest one. A yanked version is still read by number
+(`/api/store/scenes/{id}/scenes.json?version=N`, `…/download?version=N`) by
+its owner, a moderator's browser session and an account one of whose frames
+holds it (the pin or `assigned_scene_state`), never cached, and by nobody
+else. `GET /api/frames/{id}/scenes` says where each scene is:
 `scene_version` (the pin, or null), `assigned_version` (the version the frame
 was last sent, from the per-scene deploy ledger; null only on an unpinned
 scene of a frame that predates the ledger), `latest_version`, and

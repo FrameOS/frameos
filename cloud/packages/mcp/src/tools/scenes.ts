@@ -345,7 +345,7 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
     "scene_version_yank",
     {
       description:
-        "Yank (hide from 'latest') or un-yank a version of one of the account's scenes. A yanked version is still downloadable by number; the last non-yanked version cannot be yanked.",
+        "Yank (hide from 'latest') or un-yank a version of one of the account's scenes. A yanked version is still downloadable by number for the owner and for accounts whose frames hold it, and for nobody else; the last non-yanked version cannot be yanked.",
       inputSchema: {
         scene_id: sceneId,
         version: z.number().int().min(1),

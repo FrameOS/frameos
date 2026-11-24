@@ -6,6 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   accounts,
   createDb,
+  frameSceneAssignments,
+  frames,
+  linkedClients,
   storeImages,
   storeSceneVersions,
   storeScenes,
@@ -1268,12 +1271,26 @@ describe("store publish and distribution", () => {
     );
     expect(latest.headers.get("x-scene-version")).toBe("1");
 
+    // By number, a yanked version is its owner's (and a moderator's, and a
+    // frame's that holds it), not the public's.
     const explicit = await downloadScene(
-      request(`/api/store/scenes/${sceneId}/download?version=2`, "GET"),
+      request(`/api/store/scenes/${sceneId}/download?version=2`, "GET", {
+        headers: bearer(accessToken),
+      }),
       ctx(sceneId),
     );
     expect(explicit.status).toBe(200);
     expect(explicit.headers.get("x-scene-version")).toBe("2");
+    const savedCookies = new Map(cookieJar);
+    cookieJar.clear();
+    const stranger = await downloadScene(
+      request(`/api/store/scenes/${sceneId}/download?version=2`, "GET"),
+      ctx(sceneId),
+    );
+    expect(stranger.status).toBe(404);
+    for (const [name, value] of savedCookies) {
+      cookieJar.set(name, value);
+    }
 
     // `latest_version` followed the yank: the store index, the cover SQL and
     // the immutable `?v=N` cover URL all key on it, so it must name what the
@@ -1697,14 +1714,50 @@ describe("store publish and distribution", () => {
       { params: Promise.resolve({ sceneId, version: "2" }) },
     );
     expect(yank.status).toBe(200);
+    // The owner still reads the yanked version by number, uncached.
+    const ownersCopy = await get("?version=2");
+    expect(ownersCopy.status).toBe(200);
+    expect(ownersCopy.headers.get("x-scene-version")).toBe("2");
+    expect(ownersCopy.headers.get("cache-control")).toBe("no-store");
+    expect(await ownersCopy.json()).toEqual(stamped(scenesV2, sceneId, 2));
     cookieJar.clear();
     const fallback = await get();
     expect(fallback.headers.get("x-scene-version")).toBe("1");
     expect(await fallback.json()).toEqual(stamped(scenesV1, sceneId, 1));
-    const yanked = await get("?version=2");
-    expect(yanked.status).toBe(200);
-    expect(yanked.headers.get("x-scene-version")).toBe("2");
-    expect(await yanked.json()).toEqual(stamped(scenesV2, sceneId, 2));
+    // Anyone else: a yanked version is gone (a key typed into it must not
+    // stay public by number).
+    expect((await get("?version=2")).status).toBe(404);
+    // But an account whose frame was sent v2 before the yank still reads it:
+    // its workspace shows the frame the version it holds.
+    const holder = await signIn();
+    const [client] = await db
+      .insert(linkedClients)
+      .values({
+        accountId: holder,
+        clientKind: "frame",
+        publicDisplayName: "Holder",
+        tokenReference: `yank-holder-${holder}`,
+      })
+      .returning();
+    const [frame] = await db
+      .insert(frames)
+      .values({
+        accountId: holder,
+        assignedSceneState: { [sceneId]: { version: 2 } },
+        linkedClientId: client!.id,
+        name: "Holder",
+        publicKey: `yank-holder-key-${holder}`,
+        status: "active",
+      })
+      .returning();
+    await db.insert(frameSceneAssignments).values({
+      frameId: frame!.id,
+      position: 0,
+      sceneId,
+      sceneVersion: null,
+    });
+    expect((await get("?version=2")).status).toBe(200);
+    cookieJar.clear();
 
     expect((await get("?version=9")).status).toBe(404);
     expect((await get("?version=abc")).status).toBe(400);
