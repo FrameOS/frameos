@@ -121,6 +121,10 @@ cp "$NIM_LIB/nimbase.h" "$NIMCACHE/"
 # Only *.c is compiled; drop the json metadata to keep the component clean
 rm -f "$NIMCACHE"/*.json
 
+# No error check after a call that cannot raise (~22 KB of flash; see the
+# script). Before the folds: it only takes lines out of function bodies.
+python3 "$SCRIPT_DIR/tools/drop_nim_dead_checks.py" "$NIMCACHE"
+
 # One out-of-line copy of each inline helper instead of one per C file
 # (~30 KB of flash; see the script).
 python3 "$SCRIPT_DIR/tools/fold_nim_inlines.py" "$NIMCACHE"
