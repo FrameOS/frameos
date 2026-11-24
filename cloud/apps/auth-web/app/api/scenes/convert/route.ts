@@ -230,7 +230,15 @@ export async function POST(request: NextRequest) {
       if (reports[index]?.executionAfter !== "interpreted") {
         continue;
       }
-      render.push(await renderCheck(scene, accountId ?? clientLimitKey(request)));
+      const check = await renderCheck(scene, accountId);
+      if (check) {
+        render.push(check);
+      }
+    }
+    // Nothing was checked (every anonymous render found its lane full): say
+    // so the way an absent renderer does, never as a failed render.
+    if (render.length === 0 && !accountId) {
+      render = null;
     }
   }
 
@@ -329,25 +337,48 @@ export function GET() {
 
 type RenderCheck = { sceneId: string; ok: boolean; renderMs: number | null; errors: string[]; logs: string[] };
 
-async function renderCheck(scene: Scene, owner: string): Promise<RenderCheck> {
+// The render pool is small (two at a time, eight waiting) and the signed-in
+// renders, the AI's render_scene and the install memory check share it. This
+// route needs no login, so everyone without an account is ONE owner in the
+// pool: all anonymous conversions together hold at most one running render
+// and two waiting ones (scene-render.ts's per-owner caps), whatever number
+// of addresses they come from, and a slot is always left for an account.
+const anonymousRenderOwner = "scenes:convert:anonymous";
+
+// One converted scene's render check. Null when an anonymous caller found
+// the anonymous lane full: the conversion still answers, without the check.
+// An anonymous caller gets the error lines and not the scene's log: the log
+// is whatever the scene printed, which for a stranger's scene on our server
+// is nobody's to read back.
+async function renderCheck(scene: Scene, accountId: string | null): Promise<RenderCheck | null> {
+  const anonymous = accountId === null;
   try {
     const result = await renderScenes({
       height: 480,
-      owner,
+      owner: accountId ?? anonymousRenderOwner,
       scenes: [scene],
       timeoutMs: renderTimeoutMs,
       width: 800,
     });
     return {
       errors: result.errors.slice(0, 20),
-      logs: result.logs.slice(-20),
+      logs: anonymous ? [] : result.logs.slice(-20),
       ok: result.errors.length === 0,
       renderMs: result.renderMs,
       sceneId: scene.id,
     };
   } catch (error) {
     if (error instanceof SceneRenderError) {
-      return { errors: [`${error.code}: ${error.message}`], logs: error.logs.slice(-20), ok: false, renderMs: null, sceneId: scene.id };
+      if (anonymous && (error.code === "render_concurrency_limit" || error.code === "renderer_busy")) {
+        return null;
+      }
+      return {
+        errors: [`${error.code}: ${error.message}`],
+        logs: anonymous ? [] : error.logs.slice(-20),
+        ok: false,
+        renderMs: null,
+        sceneId: scene.id,
+      };
     }
     throw error;
   }
