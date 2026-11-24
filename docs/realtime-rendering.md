@@ -929,12 +929,11 @@ a small change cost what it should:
   that reaches the glass goes through it or `fos_display_blit`, so the copy it
   keeps is exact whoever drew it. `fos_partial_refresh.c` (host-tested) picks
   a full refresh instead for the first picture after a boot or a deep sleep, a
-  new scene, a picture that mostly changed, and every 20th update, which
-  clears the ghosts; also, tapping or not, the update that would bring what
-  the partial updates moved since the last full refresh to a panel and a half
-  (`FOS_PARTIAL_GHOST_HALF_SCREENS`): a ghost is as big as what moved, so a
-  book flashes every sixth page (a page moves about a quarter of the panel)
-  and a key's light hardly counts. Not the IT8951, which settles its own (GC16 after DU). `render:done` says `"refresh":"partial"`. The panel
+  new scene nobody switched to by hand, a picture that mostly changed, and a
+  glass the ghosts have worn (next paragraph). `render:done` says
+  `"refresh":"partial"`, and each update logs its kind and the wear
+  (`display: partial, 1834 bytes changed, ghosts 2.3 deep, 41 of 1500 tiles
+  worn`; `display: full refresh (ghosts), ...`). The panel
   stays awake between updates, its analog supply on and its waveform loaded.
   After ten idle seconds the supply goes off and the controller stays awake
   (`fos_display_park_if_idle`); after five minutes, or before the chip's own
@@ -942,6 +941,43 @@ a small change cost what it should:
   300 ms; the supply, the waveform load and an 8 MHz bus 270 ms more. What is
   left is about 500 ms: some 40 ms for the two frames on the bus, the rest the
   waveform itself.
+- **The ghosts, counted where they are.** A partial update leaves each pixel
+  it moves a little short of black or white, and the next move of that pixel
+  starts from there; a pixel that never moved has no error at all (Waveshare:
+  "after repeated partial refreshes, this error accumulates and produces
+  ghosting"). So what wears the glass is how often each place was rewritten,
+  not how many updates there were. The display layer counts the pixels every
+  partial update flips per tile of 16x16 pixels (`fos_ghost_add`, a table of
+  1,500 counts beside the Sticky's 48 KB copy of the glass, 3 KB, cleared by a
+  full refresh), a tile's depth being its flips over its pixels: one flip of
+  every pixel is 1.0, a page of text turned about 0.2 in the text. The glass
+  is due a full refresh when a quarter of its tiles are 1.0 deep (pages of
+  text: every fifth page, as an e-reader's and the panel makers' "one full
+  update after five or six partial updates" have it), or when one tile is 16
+  deep (a digit rewritten in place: about 27 times, the Sticky's tap
+  counter). The one deep tile waits for the idle frame while someone taps or
+  pictures come quickly, up to 32 deep; a worn quarter does not wait, as a
+  page turn does not. Nothing else flashes the glass: no count of updates,
+  no timer on a glass with no ghosts. What it replaced flashed every 20th
+  update (120 while someone tapped) and once the updates since the last full
+  refresh had moved a panel and a half of bytes, and the idle frame flashed
+  30 seconds after the last update whenever 20 updates or half a panel's
+  bytes had gone by: after almost any use, the flash "about a minute after I
+  leave it". Measured on the Sticky (2026-11-24): 25 taps of the tap counter
+  then nothing, the old rule flashed 30.2 s after the last update (25
+  updates, 12.7 KB moved), the tiles left its digit 14.9 deep and nothing
+  flashed; a clock with a seconds hand flashed every 120 updates, two
+  minutes, and with the tiles every 3 min 41 s (its hand wears a quarter of
+  the glass); ePub pages flash every fifth page under both. Each update
+  takes one pass over the changed rows (`memcmp` skips the rest) and one
+  over the tiles. One exception keeps a timer: a glass partially
+  updated a day ago is cleaned when idle, ghosts or not, since a pixel a
+  partial update left black or white is held there by a charge no waveform
+  balanced (the panel makers' "refresh at least every 24 hours"). Not the
+  IT8951 (next): it keeps no copy of the glass to count against, its slow
+  pictures go up with GC16 over their grey areas, which clears them, and it
+  takes a full refresh after 20 of its partial updates (120 while someone
+  taps).
 - **A controller that keeps the picture** (the IT8951 behind the reTerminal
   E1003's 10.3" glass). The display layer holds no copy here, 1.25 MiB this
   8 MB board does not have: the driver hashes the packed picture in tiles of
@@ -1084,9 +1120,10 @@ a small change cost what it should:
   `fos_animation.c`), and the idle wait then runs it once, a round trip at a
   time, giving way to the next tap. A backend's command nudge is still served
   at once, and a frame about to deep sleep runs what it held first. The full
-  refresh that clears the ghosts waits the same way: 120 updates at the most
-  while someone taps, and the frame does it from the idle wait 30 seconds
-  after the last update.
+  refresh that clears a deep tile's ghosts waits the same way (twice as deep
+  at the most, "The ghosts, counted where they are" above), and the frame
+  does it from the idle wait 30 seconds after the last update, only if the
+  glass is due one.
 - **The dither.** On the sixteen-grey panels there is no error to carry:
   `grayLevel16Ordered` is a 4x4 Bayer matrix, so a pixel's level depends on
   that pixel alone and a small change is a small change on the wire. It is

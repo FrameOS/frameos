@@ -1,5 +1,6 @@
 #include "frameos_display.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -41,9 +42,13 @@ static void partial_shutdown(void);
 static uint8_t *s_glass = NULL;
 static bool s_glass_known = false;
 static uint32_t s_partials_since_full = 0;
-/* What those partial updates moved, in bytes: the ghosts are as big as that
- * (fos_partial_refresh.h). */
-static size_t s_changed_since_full = 0;
+/* Where those partial updates moved pixels, tile by tile: the ghosts are
+ * there (fos_partial_refresh.h). */
+static fos_ghost_t s_ghost;
+static uint16_t *s_ghost_flips = NULL;
+static fos_ghost_wear_t s_wear;
+/* The first partial update since the last full refresh. */
+static int64_t s_first_partial_us = 0;
 /* The panel is left awake after a partial update, its analog supply on: its
  * reset and deep sleep are 300 ms of every update, and the next tap is usually
  * moments away. A few idle seconds turn the supply off and keep the controller
@@ -59,6 +64,10 @@ static int64_t s_last_partial_us = 0;
 /* The ghosts a tapping session left (fos_partial_refresh.h), once it is
  * clearly over: the refresh is seconds in which a tap would wait. */
 #define FOS_PANEL_CLEAN_US (30 * 1000000LL)
+/* A pixel a partial update left black or white is held there by a charge no
+ * waveform balanced: a glass partially updated a day ago is cleaned when
+ * idle, ghosts or not (the panel makers' "refresh at least every 24 hours"). */
+#define FOS_PANEL_HELD_US (24 * 3600 * 1000000LL)
 /* After this long without a tap the greys a tapping session drew as a halftone
  * go up properly (it8951.c). */
 #define FOS_PANEL_SETTLE_US (2500 * 1000LL)
@@ -500,9 +509,17 @@ static void note_full_refresh(const uint8_t *buf, size_t len)
         if (!s_glass) s_glass = heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (s_glass && s_glass != buf) memcpy(s_glass, buf, len);
         s_glass_known = s_glass != NULL;
+        size_t row_bytes = len / (size_t)fos_display_height();
+        if (!s_ghost_flips) {
+            s_ghost_flips = heap_caps_malloc(fos_ghost_tiles(row_bytes, (size_t)fos_display_height()) * sizeof(uint16_t),
+                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        /* Without its table a glass is never known: no partial update. */
+        if (!s_ghost_flips) s_glass_known = false;
+        fos_ghost_init(&s_ghost, s_ghost_flips, row_bytes, (size_t)fos_display_height());
     }
+    memset(&s_wear, 0, sizeof(s_wear));
     s_partials_since_full = 0;
-    s_changed_since_full = 0;
 }
 
 /* A full refresh held whoever asked for the whole of it: the reTerminal
@@ -669,6 +686,14 @@ bool fos_display_supports_partial(void)
     return s_partial != NULL;
 }
 
+/* Why an update went full, for the line each one logs. */
+static const char *const k_full_reason[] = {
+    [FOS_REFRESH_FULL_UNSUPPORTED] = "glass unknown",
+    [FOS_REFRESH_FULL_NEW_SCENE] = "new scene",
+    [FOS_REFRESH_FULL_CHANGED] = "most of it changed",
+    [FOS_REFRESH_FULL_GHOSTS] = "ghosts",
+};
+
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
                              bool *partial)
 {
@@ -680,20 +705,37 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     if (controller_keeps) fos_it8951_10in3_set_interactive(input_recent);
     long controller_changed = controller_keeps ? s_partial->changed(buf) : -1;
     bool known = controller_keeps ? controller_changed >= 0 : s_glass_known;
+    fos_ghost_wear_t wear = s_wear;
+    size_t changed = len;
+    if (known && controller_keeps) {
+        changed = (size_t)controller_changed;
+    } else if (known) {
+        /* Counted before it is decided: a full refresh clears the count. */
+        changed = fos_ghost_add(&s_ghost, s_glass, buf);
+        fos_ghost_wear(&s_ghost, &wear);
+    }
     fos_partial_refresh_input_t input = {
         .supported = fos_display_supports_partial(),
         .glass_known = known,
         .same_scene = same_scene,
         .input_recent = input_recent,
-        .partials_since_full = s_partials_since_full,
         /* A controller that keeps the picture (the IT8951) settles its own
          * ghosts (GC16 after DU, fos_display_settle_due). */
-        .changed_since_full = controller_keeps ? 0 : s_changed_since_full,
-        .changed_bytes = !known ? len : controller_keeps ? (size_t)controller_changed
-                                                         : fos_partial_changed_bytes(buf, s_glass, len),
+        .counted = !controller_keeps,
+        .wear = wear,
+        .partials_since_full = s_partials_since_full,
+        .changed_bytes = changed,
         .total_bytes = len,
     };
-    if (!fos_partial_refresh_wanted(&input)) return fos_display_blit(buf, len);
+    fos_refresh_kind_t kind = fos_partial_refresh_kind(&input);
+    if (kind != FOS_REFRESH_PARTIAL) {
+        if (input.supported && !controller_keeps) {
+            printf("display: full refresh (%s), %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n",
+                   k_full_reason[kind], (unsigned)changed, (unsigned long)wear.deepest / 10,
+                   (unsigned long)wear.deepest % 10, (unsigned long)wear.worn, (unsigned long)wear.tiles);
+        }
+        return fos_display_blit(buf, len);
+    }
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
 
@@ -706,9 +748,14 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     s_last_partial_us = esp_timer_get_time();
     s_panel_awake = true;
     s_panel_rested = false;
-    if (!controller_keeps) memcpy(s_glass, buf, len);
-    s_partials_since_full++;
-    if (!controller_keeps) s_changed_since_full += input.changed_bytes;
+    if (!controller_keeps) {
+        memcpy(s_glass, buf, len);
+        s_wear = wear;
+        printf("display: partial, %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n", (unsigned)changed,
+               (unsigned long)wear.deepest / 10, (unsigned long)wear.deepest % 10, (unsigned long)wear.worn,
+               (unsigned long)wear.tiles);
+    }
+    if (s_partials_since_full++ == 0) s_first_partial_us = s_last_partial_us;
     if (partial) *partial = true;
     return ESP_OK;
 }
@@ -795,24 +842,31 @@ void fos_display_park_if_idle(int64_t now_us)
 {
     /* The refresh task has the panel: nothing is idle, and waiting for it here
      * would hold the render task for the refresh after all. */
-    if (!s_panel_awake || fos_refresh_queue_busy(&s_refresh_queue)) return;
+    if (!s_partial || fos_refresh_queue_busy(&s_refresh_queue)) return;
     int64_t idle_us = now_us - s_last_partial_us;
-    /* Ghosts worth a flash: many updates, or half a panel moved by them. */
-    bool ghosted = s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL ||
-                   s_changed_since_full * 2 >= fos_display_buffer_size();
-    if (idle_us >= FOS_PANEL_CLEAN_US && s_partial->clean && s_partials_since_full > 0 && ghosted) {
+    bool controller_keeps = s_partial->changed != NULL;
+    /* The ghosts the partial updates left: worn tiles (fos_partial_refresh.h),
+     * a controller's count, or a glass held a day in partial updates. */
+    bool ghosted = s_partials_since_full > 0 && idle_us >= FOS_PANEL_CLEAN_US &&
+                   (controller_keeps ? s_partials_since_full >= FOS_PARTIAL_MAX_BEFORE_FULL
+                                     : fos_ghost_due(&s_wear) || now_us - s_first_partial_us >= FOS_PANEL_HELD_US);
+    if (ghosted && controller_keeps && s_panel_awake && s_partial->clean) {
         DEV_SPI_Acquire();
         s_partial->clean();
         s_partial->rest();
         DEV_SPI_Release();
         s_panel_awake = false;
         s_partials_since_full = 0;
-    s_changed_since_full = 0;
-    } else if (idle_us >= FOS_PANEL_CLEAN_US && s_glass_known && s_partials_since_full > 0 && ghosted) {
+    } else if (ghosted && !controller_keeps && s_glass_known) {
+        printf("display: full refresh (ghosts, idle), ghosts %lu.%lu deep, %lu of %lu tiles worn, %lu updates\n",
+               (unsigned long)s_wear.deepest / 10, (unsigned long)s_wear.deepest % 10, (unsigned long)s_wear.worn,
+               (unsigned long)s_wear.tiles, (unsigned long)s_partials_since_full);
         fos_display_blit(s_glass, fos_display_buffer_size());
+    } else if (!s_panel_awake) {
+        return;
     } else if (idle_us >= FOS_PANEL_AWAKE_US) {
         fos_display_park();
-    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !s_partial->changed) {
+    } else if (idle_us >= FOS_PANEL_ANALOG_US && !s_panel_rested && !controller_keeps) {
         DEV_SPI_Acquire();
         s_partial->rest();
         DEV_SPI_Release();
