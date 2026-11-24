@@ -436,11 +436,16 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
 
   var frameApi = if result{"frameApi"} != nil and result{"frameApi"}.kind == JObject: copy(result["frameApi"]) else: %*{}
   # `settings` lives once, under its own key: the echo must not keep a
-  # second copy of the service keys that GET then has to strip again.
+  # second copy of the service keys that GET then has to strip again. Nor of
+  # the scenes, which are scenes.json(.gz) and which GET reads from there: a
+  # backend's push echoed them into frame.json, 320 KB for 20 scenes on a Pi,
+  # parsed again on every config read (2026-11-24 bench).
   for key in payload.keys:
     if key != "next_action" and key != "skip_runtime_reload" and key != frameSyncMarkDeployedKey and
-        key != "settings":
+        key != "settings" and key != "scenes":
       frameApi[key] = copy(payload[key])
+  if frameApi.hasKey("scenes"):
+    frameApi.delete("scenes") # an older runtime's echo
   # The echo is what GET prefers for these fields, so it carries what was
   # actually kept — never the blank a secret-less form sent back.
   if frameApi.hasKey("frame_admin_auth") and result{"frameAdminAuth"} != nil:
