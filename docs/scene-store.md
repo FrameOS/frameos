@@ -197,7 +197,7 @@ over goes into a URL path on the ESP32, so it must be a UUID or nothing.
 
 | Action | `scene_id` | What the plane does |
 |---|---|---|
-| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
+| `install` | store scene uuid | adds it to the list (newest version) and pushes; shows it unless `show: false` (the store installs with `show: false` and stays on the panel). One already there is shown, or nothing at all with `show: false` (`up_to_date`). One that takes the place of a scene the frame holds under the same id is `needs_owner` when it asks for more than that scene (below). A layout shown is put around every scene the frame holds and the frame stays where it is (below) |
 | `preview` | store scene uuid | pushes it beside the list as a preview (source `panel`, `docs/scene-previews.md`), shown now unless `show: false` (a layout tried): Install or Discard ends it |
 | `update` | the installed scene's `origin.storeSceneId` | moves it to the newest version (`up_to_date` when it is); `needs_owner` when that version asks for more (below) |
 | `updates` | none | reads, changes nothing: `{"ok": true, "updates": [{store, name, from, to, owner?}]}`, each public store scene the frame holds with a newer version it can run, in the frame's order |
@@ -228,6 +228,17 @@ What a frame may ask is narrower than what its owner may:
   `panel-code-grants.ts`) is refused (`needs_owner`, with `needs`), listed with
   `owner: true` and left out of `updateAll`: the owner updates it in the
   workspace, where access is granted.
+- **So does an install that takes a scene's place.** The store version's
+  scenes may have the ids of scenes the frame holds that did not come from it
+  (an older copy from elsewhere: a sample from before the store stamped its
+  origin, a scene imported from the device, another store scene's). The frame
+  then runs the store's version under that id, so those scenes may ask for
+  nothing more than the copies they take the place of (`needs_owner`, with
+  `needs`, 403: the same check as an update's). A backend compares with the
+  copies in its saved list and replaces them there, keeping their names,
+  values, maps and layouts; the cloud compares with the scenes the frame was
+  last sent (`buildScenesPayloadForFrame`). A scene of an id the frame does
+  not hold installs with what it declares, as the store's red tags say.
 - **Nothing while the settings on the frame's screen are off** (`panel_locked`).
 - **A frame keeps one scene** (`last_scene`).
 - Sixty changes a quarter of an hour per frame, and 120 `updates` reads in a

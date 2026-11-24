@@ -388,6 +388,43 @@ async def test_updates_read_the_workspace_stamp_too(async_client, no_auth_client
 
 
 @pytest.mark.asyncio
+async def test_an_install_that_replaces_a_scene_asks_for_nothing_more(async_client, no_auth_client, db, store):
+    frame = await panel_frame(async_client, db)
+    # An older copy of the store's scene, from before the store stamped its
+    # origin: what an install of the store's version replaces.
+    frame.scenes = [*frame.scenes, {"id": "radar-rt", "name": "My radar", "nodes": [], "edges": []}]
+    db.add(frame)
+    db.commit()
+    store[RADAR] = asking_for(store_scene(RADAR, 2), ["frame"])
+
+    # The store's version asks for the frame's settings, the copy did not:
+    # the owner's, as an update that asks for more is.
+    widened = await ask(no_auth_client, frame, {"action": "install", "scene_id": RADAR})
+    assert widened.status_code == 403
+    assert widened.json() == {"ok": False, "error": "needs_owner", "needs": ["frame"]}
+    db.refresh(frame)
+    assert frame.scenes[1] == {"id": "radar-rt", "name": "My radar", "nodes": [], "edges": []}
+    assert commands(db, frame, "set_current_scene") == []
+
+    # A copy that asked for it already is replaced.
+    frame.scenes = [frame.scenes[0], asking_for([{**frame.scenes[1]}], ["frame"])[0]]
+    db.add(frame)
+    db.commit()
+    replaced = await ask(no_auth_client, frame, {"action": "install", "scene_id": RADAR})
+    assert replaced.status_code == 200, replaced.text
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt"]
+    assert frame.scenes[1]["name"] == "My radar" and frame.scenes[1]["origin"]["version"] == "2"
+
+    # A scene the frame does not hold installs with what it asks for, as before.
+    store[OTHER] = asking_for(store_scene(OTHER, 1, ids=("term-rt",)), ["frame"])
+    fresh = await ask(no_auth_client, frame, {"action": "install", "scene_id": OTHER})
+    assert fresh.status_code == 200, fresh.text
+    db.refresh(frame)
+    assert [scene["id"] for scene in frame.scenes] == ["clock-1", "radar-rt", "term-rt"]
+
+
+@pytest.mark.asyncio
 async def test_update_all_moves_every_scene_it_may_in_one_push(async_client, no_auth_client, db, store, monkeypatch):
     frame = await panel_frame(async_client, db)
     radar = store_scene(RADAR, 1)

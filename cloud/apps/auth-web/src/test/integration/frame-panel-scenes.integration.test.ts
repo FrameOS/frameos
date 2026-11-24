@@ -540,6 +540,35 @@ describe("POST /api/frames/{id}/panel/scenes", () => {
     ]);
   });
 
+  it("refuses an install that replaces a scene the frame holds and asks for more than it", async () => {
+    const frame = await activeFrame();
+    // The frame's own copy of the store's scene (imported from the device,
+    // say), under the runtime id the store's version has.
+    const own = await storeScene(frame.accountId, "Scene store", { visibility: "private", runtimeIds: ["store-rt"] });
+    await assignScenes(frame.frame_id, [own.id]);
+    const { accountId: publisherId } = await account("Publisher");
+    const asksForFrame = {
+      apps: { t: { sources: { "app.ts": "export function get() {}", "config.json": '{"permissions":["frame"]}' } } },
+    };
+    const store = await storeScene(publisherId, "Scene store", { runtimeIds: ["store-rt"] });
+    await addVersion(store.id, 2, ["store-rt"], "Scene store", [], false, asksForFrame);
+
+    // The store's version asks for the frame's settings, the copy did not:
+    // the owner's, as an update that asks for more is.
+    const widened = await panel(frame.frame_id, frame.access_token, { action: "install", scene_id: store.id });
+    expect(widened.status).toBe(403);
+    expect(await widened.json()).toEqual({ error: "needs_owner", needs: ["frame"], ok: false });
+    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([own.id]);
+    expect(await newestPush(frame.frame_id)).toBeUndefined();
+
+    // A scene the frame does not hold installs with what it asks for, as before.
+    const terminal = await storeScene(publisherId, "Terminal", { runtimeIds: ["term-rt"] });
+    await addVersion(terminal.id, 2, ["term-rt"], "Terminal", [], false, asksForFrame);
+    const fresh = await panel(frame.frame_id, frame.access_token, { action: "install", scene_id: terminal.id });
+    expect(fresh.status).toBe(200);
+    expect((await assignedIds(frame.frame_id)).map((row) => row.sceneId)).toEqual([own.id, terminal.id]);
+  });
+
   it("removes one installed scene and pushes the rest", async () => {
     const frame = await activeFrame();
     const clock = await storeScene(frame.accountId, "Clock", { visibility: "private" });
