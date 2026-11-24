@@ -388,3 +388,36 @@ suite "the keys and fields":
     discard target.draw(root)
     check target.ringed == 1004 # back on the select
     forgetUiTarget("pick", 1)
+
+  test "the frame's back closes a list, the ring back on its select, then lets go of a field":
+    # interpreter.runEvent asks this before the scene hears `back`.
+    let target = uiTarget("pick", 1)
+    var options: seq[SvgNode]
+    for i in 0 ..< 3:
+      options.add el("option", "", txt("Option " & $i)).on("value", "o" & $i)
+    let box = el("select", "w-[200px] h-[30px] bg-zinc-800", options).on("value", "o0").on("on-change", "7")
+    let root = el("div", "w-full h-full bg-black text-white", box)
+    discard target.draw(root)
+    check not uiBack(["pick"], dry = true) # nothing up: the scene's back
+    check uiButtonKeys(["pick"], button("next", "press"))
+    check uiButtonKeys(["pick"], button("primary", "press"))
+    discard target.draw(root)
+    check uiButtonKeys(["pick"], button("next", "press"))
+    check uiBack(["pick"], dry = true)
+    check target.input.open > 0 # asked, nothing done
+    check uiBack(["pick"])
+    check target.input.open == 0 and calls.len == 0
+    discard target.draw(root)
+    check target.ringed == 1004
+    check not uiBack(["pick"])
+    forgetUiTarget("pick", 1)
+    let fields = uiTarget("form", 1)
+    discard fields.draw(form())
+    check uiButtonKeys(["form"], button("next", "press"))
+    check uiButtonKeys(["form"], button("primary", "press"))
+    check fields.input.focus > 0 and fields.input.keyboard
+    check uiBack(["other", "form"]) # a layout's UI and the scene's, as one
+    check fields.input.focus == 0 and not fields.input.keyboard
+    check fields.ringed == 1001
+    check not uiBack(["form"])
+    forgetUiTarget("form", 1)

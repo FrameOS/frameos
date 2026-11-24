@@ -249,7 +249,12 @@ no filter on a field hears every value of it.
   on a touch screen is the switcher's (up from the bottom). The switcher
   moves its highlight a screenful on or back on them, its list scrolling
   with it (wrapping around at the ends); the scene settings take `back`
-  as Cancel, a field's keyboard going away first.
+  as Cancel, a field's keyboard going away first. So on every scene: while
+  a JSX field of the scene showing, or of its layout, has the keyboard (or
+  a `<select>` its list, a link its code), `back` puts that away and goes
+  no further, the scene and the layout hearing nothing of it
+  (`interpreter.runEvent`, [`jsx-ui.md`](jsx-ui.md) "Fields and the
+  keyboard").
 - The input payloads are under [Input](#input).
 
 ### Input
