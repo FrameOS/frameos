@@ -36,6 +36,8 @@ export const excludedTemplates = new Set([
   "OpenAI image",
   // Video plays on a Pi (docs/video.md): the browser's runtime has no ffmpeg.
   "Slow movie",
+  // A Spotify account and an app of one's own on developer.spotify.com.
+  "Spotify remote",
   "Unsplash image",
   "Video from URL",
   "Video player",
