@@ -146,6 +146,49 @@ suite "video in a JS app":
       checkpoint $most
       check most > 0 and most <= 104 * 60 # the box and a pixel around it
 
+  test "a letterboxed frame repaints its picture, not its bars":
+    if not haveFfmpeg:
+      skip()
+    else:
+      forgetPanelFrames()
+      # The 16:9 clip in a 100x76 box: a 100x56 picture, 10 px of black above
+      # and below it, painted once.
+      let ui = newUi("""
+export function get(app) {
+  const video = frameos.video('main', { src: 'videos/clip.mp4', loop: true })
+  frameos.setState('video', { state: video.state })
+  return (
+    <div className="w-full h-full pt-[2px] pl-[10px] bg-slate-300">
+      <img className="w-[100px] h-[76px] object-contain" src={video} />
+    </div>
+  )
+}
+""", "tests/video-letterbox")
+      let target = newImage(W, H)
+      var frames = 0
+      var most = 0
+      var image: Image
+      let deadline = epochTime() + 30
+      while epochTime() < deadline and frames < 12:
+        beginPanelFrame(target.bufferPointer, 0)
+        svgFramePixelsForTest = -1
+        let (shown, wait) = ui.render(target)
+        image = shown
+        endPanelFrame()
+        if ui.videoState{"state"}.getStr() == "playing":
+          inc frames
+          if frames > 3:
+            most = max(most, svgFramePixelsForTest)
+        sleep(int(clamp(wait, 0.001, 0.2) * 1000))
+      check frames >= 6
+      checkpoint $most
+      check most > 0 and most <= 104 * 60 # the picture and a pixel around it, not the 100x76 box
+      # The bars are black, the picture is the clip.
+      check image.color(60, 5).r < 20 and image.color(60, 5).b < 20
+      check image.color(60, 74).r < 20 and image.color(60, 74).b < 20
+      let c = image.color(60, 40)
+      check c.r > 200 or c.b > 200
+
   test "seek, pause and release":
     if not haveFfmpeg:
       skip()

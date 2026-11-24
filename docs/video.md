@@ -68,9 +68,14 @@ declarations are `frontend/src/utils/appTypeDeclarations.ts`.
 Three parties, and no ref between them (`frameos/video/player.nim`):
 
 - **ffmpeg**, a child process (`video/args.nim`):
-  `-i <src> -vf fps=F,scale=…,pad|crop=W:H,setsar=1 -f rawvideo -pix_fmt X pipe:1`.
-  Every frame comes out exactly `W` x `H` (the `<img>`'s box in panel pixels),
-  so the draw is a copy; `contain` pads with black, `cover` crops. `X` is the
+  `-i <src> -vf fps=F,scale=…[,crop=W:H],setsar=1 -f rawvideo -pix_fmt X pipe:1`.
+  Every frame comes out at the size it is drawn at, so the draw is a copy:
+  `cover` crops to the `<img>`'s box `W` x `H` (in panel pixels), `fill`
+  stretches to it, and `contain` comes at the picture's own size in it
+  (`frameSize`), which the player puts in the middle of the box on black
+  painted once (`take`): the bars are never scaled, piped or copied, and a
+  frame repaints the picture, not them. A source ffprobe gave no size is
+  padded to the box (`pad`), as a still (`videoFrame`) is. `X` is the
   canvas's own format: `rgb565le` for a 565 canvas (a HyperPixel), `gray` for
   a grey one, else `rgba` (pixie's RGBX). `F` is the source's rate, at most
   the app's `fps`, held constant by the fps filter, so frame `k` is at
@@ -164,7 +169,11 @@ buffers had ffmpeg warn that all of them were in use.
 **A decoder that is behind.** A launch whose frames take more than 1.2 frame
 times to make over its first 12 is started again where it was with a slow
 decoder's shortcuts: no loop filter (`-skip_loop_filter all -flags2 fast`)
-and the scaler's `fast_bilinear`. A machine of one core (a Pi Zero, a Pi 1)
+and the scaler's `fast_bilinear`, or its nearest pixel (`neighbor`) when it
+makes the picture smaller (`scaleFlags`): it reads only the source's rows it
+keeps, and reading a VideoCore's frames is what costs a Pi Zero most (157 ms
+of ffmpeg a 1080p frame into 720x405 with the fast bilinear, 98 with the
+nearest pixel; aliasing on fine detail is the price). A machine of one core (a Pi Zero, a Pi 1)
 starts with them, a relaunch costing it seconds. Such a decoder also starts a
 file at the keyframe before the time asked for (ffprobe's `-read_intervals
 t%+#1`, `keyframeBefore`), the clock from there: an exact start decodes every
@@ -302,16 +311,15 @@ box). All three skip without ffmpeg.
   - *Not the colour conversion*: to RGB565 and to RGBX cost the same, and 565
     is half the bytes after it (the panel is 565).
   - *The pad*: 34 ms to put the 720x405 picture in a black 720x720 frame,
-    whose 1 MB then goes through the pipe (9 ms), the ring and two copies.
+    whose 1 MB then went through the pipe (9 ms), the ring and two copies.
+    Gone: a contained picture comes at its own size ("How it plays").
   - *The runtime's own*: a render of 18 to 35 ms and a push to the panel of
     13 to 17 a frame (`get()` and the layout every frame: "Holes").
 
   30 frames a second is 33 ms a frame for all of it, so the pixels have to
-  leave the CPU. In steps:
-  1. *Cheap*: no pad (ffmpeg makes the picture's own size, the `<img>`
-     centres it on black) and neighbour scaling for a decoder that is
-     behind: ffmpeg's 191 ms a 1080p frame to about 100.
-  2. *The ISP*: the VideoCore's `bcm2835-codec-isp` (`/dev/video12`, a V4L2
+  leave the CPU. Two ways, which meet in the end (the decoder's buffers
+  straight onto a plane):
+  1. *The ISP*: the VideoCore's `bcm2835-codec-isp` (`/dev/video12`, a V4L2
      mem2mem device) scales and converts to RGB565, reading the decoder's
      buffers as dma-bufs, no copy. Upstream ffmpeg has no filter for it, so
      the runtime drives the decoder and the ISP itself (V4L2's stateful
@@ -320,7 +328,7 @@ box). All three skip without ffmpeg.
      h264`). The CPU then reads 0.6 MB of RGB565 a frame; with holes, an
      estimated 20 to 30 frames a second. Pi 0 to 4 only, and testable only
      on one.
-  3. *DRM planes*: the decoder's buffers handed to KMS as a plane over the
+  2. *DRM planes*: the decoder's buffers handed to KMS as a plane over the
      video's box, the HVS scaling and converting as it scans out: no CPU a
      frame at all, 1080p at 30 and four cameras at once. FrameOS would drive
      KMS on a vc4 frame instead of `/dev/fb0` (a buffer it draws into and

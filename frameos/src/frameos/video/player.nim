@@ -94,9 +94,11 @@ type
     fallbackWhy: array[MessageKeep, char]  ## ... ffmpeg's reason
     fallbackWhyLen: int
     fallbackBusy: bool     ## ... the hardware busy (hardwareBusy), so it stays on
-    # The ring: `count` frames from `head`, oldest first.
+    # The ring: `count` frames from `head`, oldest first, each `frameWidth` x
+    # `frameHeight` (frameSize: a contained picture's own size, else the box).
     buf: ptr UncheckedArray[byte]
     frameBytes: int
+    frameWidth, frameHeight: int
     slots: int
     head, count: int
     slotSeq: array[MaxSlots, int64]   ## the frame's number since its launch began (loops go on counting)
@@ -130,6 +132,7 @@ type
     shownSeq: int64
     shownMedia: float
     hasFrame: bool
+    framed: Rect           ## where in `image` the last frame went (a contained picture's middle)
     lastDraw: float
     pausedAt: float        ## media time it was paused at
     late: float            ## how much later than asked renders come (an average)
@@ -381,7 +384,8 @@ type LaunchEnd = enum
   leSlow ## a decoder without the shortcuts fell behind: again with them
 
 proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
-    startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode, made: var int64,
+    srcWidth, srcHeight: int, startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode,
+    made: var int64,
     exitCode: var int, why: var string, busy: var bool): LaunchEnd =
   ## One ffmpeg, its frames into the ring until it ends, is told to stop or
   ## nobody takes them. `made`: frames it put in the ring; `exitCode`
@@ -389,7 +393,8 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
   ## exited with an error, and `busy` whether it said the hardware could not
   ## take the video now (hardwareBusy).
   let s = arg.shared
-  let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads, decode)
+  let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads, decode,
+    srcWidth, srcHeight)
   let shownDecoder = decodeName(decode)
   withLock s.lock:
     let n = min(shownDecoder.len, DecoderKeep)
@@ -397,7 +402,8 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
       s.decoder[i] = shownDecoder[i]
     s.decoderLen = n
     s.fast = decode.fast
-  let fb = frameBytes(width, height, pixels)
+  let (frameWidth, frameHeight) = frameSize(width, height, fit, srcWidth, srcHeight)
+  let fb = frameBytes(frameWidth, frameHeight, pixels)
   var p: Process
   try:
     p = startProcessSerialized(ffmpegCommand(), args, options = {poUsePath})
@@ -592,7 +598,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         startAt = s.startAt
         loop = s.loop
         maxFps = s.maxFps
-        let fb = frameBytes(width, height, pixels)
+        let (frameWidth, frameHeight) = frameSize(width, height, fit, probe.width, probe.height)
+        let fb = frameBytes(frameWidth, frameHeight, pixels)
         let slots = clamp(RingBudgetBytes div max(fb, 1), MinSlots, MaxSlots)
         if fb != s.frameBytes or slots != s.slots or s.buf.isNil:
           if not s.buf.isNil:
@@ -600,6 +607,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           s.buf = cast[ptr UncheckedArray[byte]](allocShared(fb * slots))
           s.frameBytes = fb
           s.slots = slots
+        s.frameWidth = frameWidth
+        s.frameHeight = frameHeight
         s.head = 0
         s.count = 0
         s.runGen = gen
@@ -631,8 +640,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         var code = 0
         var why = ""
         var busy = false
-        let ended = runLaunch(arg, gen, width, height, fit, pixels, launchAt, fps, loopFile, seqNo,
-          decode, made, code, why, busy)
+        let ended = runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
+          loopFile, seqNo, decode, made, code, why, busy)
         seqNo += made
         if suspect and not hardware and made > 0:
           # ffmpeg's own played what the hardware would not: the hardware's
@@ -838,12 +847,40 @@ proc setPaused*(player: VideoPlayer, paused: bool) =
   # Unpaused, the clock starts at the next frame taken.
   player.clockStart = 0
 
-proc copyFrame(image: Image, src: ptr UncheckedArray[byte], bytes: int) =
+proc pixelsOf(image: Image): ptr UncheckedArray[byte] =
   case image.format
-  of pfRgbx: copyMem(image.data[0].addr, src, bytes)
-  of pfRgb565: copyMem(image.data16[0].addr, src, bytes)
-  of pfGray8: copyMem(image.data8[0].addr, src, bytes)
+  of pfRgbx: cast[ptr UncheckedArray[byte]](image.data[0].addr)
+  of pfRgb565: cast[ptr UncheckedArray[byte]](image.data16[0].addr)
+  of pfGray8: cast[ptr UncheckedArray[byte]](image.data8[0].addr)
+  else: nil
+
+proc blacken(image: Image) =
+  ## The bars around a contained picture: black, opaque, painted when the
+  ## image is made or the picture moves, never a frame.
+  case image.format
+  of pfRgbx: image.fill(rgba(0, 0, 0, 255))
+  of pfRgb565: zeroMem(pixelsOf(image), image.width * image.height * 2)
+  of pfGray8: zeroMem(pixelsOf(image), image.width * image.height)
   else: discard
+
+proc copyFrame(image: Image, src: ptr UncheckedArray[byte], width, height, x, y: int) =
+  ## A `width` x `height` frame into `image` at (`x`, `y`): one copy when it
+  ## is as wide as the image, else a row at a time.
+  let dst = pixelsOf(image)
+  if dst.isNil:
+    return
+  let
+    bpp = case image.format
+      of pfRgbx: 4
+      of pfRgb565: 2
+      else: 1
+    row = width * bpp
+    stride = image.width * bpp
+  if width == image.width:
+    copyMem(dst[y * stride].addr, src, row * height)
+  else:
+    for r in 0 ..< height:
+      copyMem(dst[(y + r) * stride + x * bpp].addr, src[r * row].addr, row)
 
 proc pixelsFor*(like: Image): VideoPixels =
   ## The frames' format: the canvas's where a copy of them can be drawn as it
@@ -879,6 +916,7 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
     player.askedAt = 0
   player.lastDraw = now
   player.lastUse = now
+  var drawn: Rect
   withLock s.lock:
     s.lastTake = now
     if w != player.width or h != player.height or fit != player.fit or pixels != player.pixels or
@@ -892,7 +930,8 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
       player.error = s.messageOf()
       return false
     player.error = ""
-    if s.runGen != player.gen or s.count == 0 or s.frameBytes != frameBytes(w, h, pixels):
+    if s.runGen != player.gen or s.count == 0 or s.frameWidth <= 0 or s.frameWidth > w or s.frameHeight > h or
+        s.frameBytes != frameBytes(s.frameWidth, s.frameHeight, pixels):
       return false
     # Paused, the picture stays: the first frame of a launch is still shown
     # (a video that starts paused, a seek while paused).
@@ -930,12 +969,23 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
     if pick < 0:
       return false
     let slot = (s.head + pick) mod s.slots
+    # A contained picture goes in the middle of the box, on black.
+    let framed = rect(float32((w - s.frameWidth) div 2), float32((h - s.frameHeight) div 2),
+      s.frameWidth.float32, s.frameHeight.float32)
     if player.image.isNil or player.image.width != w or player.image.height != h or
         pixelsFor(player.image) != pixels:
       if not player.image.isNil:
         unregisterCanvas(player.image)
       player.image = if like.isNil or pixels == vpRgba: newImage(w, h) else: newImageLike(like, w, h)
-    copyFrame(player.image, cast[ptr UncheckedArray[byte]](addr s.buf[slot * s.frameBytes]), s.frameBytes)
+      player.framed = rect(0, 0, 0, 0)
+    if framed != player.framed:
+      player.image.blacken()
+      drawn = rect(0, 0, w.float32, h.float32)
+      player.framed = framed
+    else:
+      drawn = framed
+    copyFrame(player.image, cast[ptr UncheckedArray[byte]](addr s.buf[slot * s.frameBytes]),
+      s.frameWidth, s.frameHeight, framed.x.int, framed.y.int)
     player.shownGen = player.gen
     player.shownSeq = s.slotSeq[slot]
     player.shownMedia = s.slotMedia[slot]
@@ -943,7 +993,8 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
     s.head = (s.head + pick + 1) mod s.slots
     s.count -= pick + 1
     broadcast(s.cond)
-  registerCanvas(player.image).drew(rect(0, 0, player.image.width.float32, player.image.height.float32))
+  # A new frame repaints the picture, not its bars (utils/svg_frames.nim).
+  registerCanvas(player.image).drew(drawn)
   true
 
 proc renderWait*(dueIn, frameSeconds, late: float, decoded: bool, madeIn = 0.0): float =
@@ -1121,7 +1172,8 @@ proc videoStill*(source: VideoSource, shownSource: string, at: float, width, hei
       error = if why.len > 0: why elif run.output.len == 0: "no frame there" else: "the frame was cut short"
       return nil
     result = if like.isNil or pixels == vpRgba: newImage(w, h) else: newImageLike(like, w, h)
-    copyFrame(result, cast[ptr UncheckedArray[byte]](run.output[0].unsafeAddr), bytes)
+    # A still comes padded to its box (stillArgs): the whole image.
+    copyFrame(result, cast[ptr UncheckedArray[byte]](run.output[0].unsafeAddr), w, h, 0, 0)
   except OSError:
     error = "ffmpeg is not installed on this frame"
     result = nil
