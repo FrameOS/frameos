@@ -40,6 +40,7 @@ COMMON_IRRELEVANT = [
     ".github/workflows/npm-publish.yml",
     ".github/workflows/discord-release.yml",
     ".github/workflows/sync-timezones.yml",
+    ".github/workflows/pixie-fuzz.yml",
     ".github/workflows/ghcr-cache-retention.yml",
     ".github/workflows/buildroot-base-image.yml",
     ".github/workflows/frameos-buildroot.yml",

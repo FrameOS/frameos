@@ -1,0 +1,97 @@
+name: pixie fuzzers
+
+# pixie's decoders and font readers turn their own checks off in a release
+# (`{.push checks: off.}`), and they read bytes from wherever a scene's URL
+# or a card's font came from. This builds every fuzzer in frameos/pixie/tests
+# with the checks left on and under AddressSanitizer
+# (frameos/tools/run_pixie_fuzzers.sh, `make fuzz-pixie`) and runs each for a
+# bounded time: a minute on a change to what they read, five every night on
+# main, where a longer run finds what a short one missed.
+#
+# The paths below are everything a fuzzer build reads: pixie itself, the
+# nimble lock and config that give it its packages, the indexed font
+# fuzz_indexed_font breaks, the runner and the Nim setup. A change anywhere
+# else cannot change what they test; the nightly run covers main whatever
+# changed.
+on:
+  pull_request:
+    paths:
+      - "frameos/pixie/**"
+      - "frameos/tools/run_pixie_fuzzers.sh"
+      - "frameos/tools/nimble_paths.py"
+      - "frameos/Makefile"
+      - "frameos/config.nims"
+      - "frameos/nimble.lock"
+      - "frameos/frameos.nimble"
+      - "frameos/assets/compiled/fonts/**"
+      - ".github/actions/setup-nim/**"
+      - ".github/workflows/pixie-fuzz.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frameos/pixie/**"
+      - "frameos/tools/run_pixie_fuzzers.sh"
+      - "frameos/tools/nimble_paths.py"
+      - "frameos/Makefile"
+      - "frameos/config.nims"
+      - "frameos/nimble.lock"
+      - "frameos/frameos.nimble"
+      - "frameos/assets/compiled/fonts/**"
+      - ".github/actions/setup-nim/**"
+      - ".github/workflows/pixie-fuzz.yml"
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds each fuzzer runs
+        required: false
+        default: "300"
+      fuzzers:
+        description: Which fuzzers (names after fuzz_, space separated); empty for all
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: pixie fuzzers (checks on, AddressSanitizer)
+    # GitHub's runner, not the pool: the run is bounded by the clock, not by
+    # the cores, and nothing here needs the warm image.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PIXIE_FUZZ_SECONDS: ${{ inputs.seconds || (github.event_name == 'schedule' && '300') || '60' }}
+      PIXIE_FUZZERS: ${{ inputs.fuzzers || '' }}
+      PIXIE_FUZZ_LOGS: ${{ github.workspace }}/frameos/build/pixie-fuzz-logs
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Nim
+        uses: ./.github/actions/setup-nim
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fuzz
+        run: |
+          set -euo pipefail
+          cd frameos
+          nimble install -d
+          PIXIE_FUZZ_JOBS="$(nproc)" make fuzz-pixie
+
+      # Every fuzzer's log: a crash's names the round that broke it (the
+      # seed first, where the fuzzer prints one), which is the input.
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pixie-fuzz-logs
+          path: frameos/build/pixie-fuzz-logs
+          retention-days: 14
