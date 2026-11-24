@@ -1542,6 +1542,11 @@ proc copyHubConfigValues(target: FrameConfig) =
     # The hello's report of what the frame has (enrollment.nim hardwarePayload).
     target.rotate = live.rotate
     target.renderScale = live.renderScale
+    # The processor speed, the one deviceConfig value the hub reads (its
+    # report and the change that re-sends it).
+    target.deviceConfig =
+      if live.deviceConfig == nil: nil
+      else: DeviceConfig(cpuMode: live.deviceConfig.cpuMode)
     target.serverHost = live.serverHost
     target.frameHost = live.frameHost
     target.framePort = live.framePort
@@ -1564,6 +1569,9 @@ proc copyHubConfigValues(target: FrameConfig) =
     # The hello's hardware report (enrollment.nim) reads the event map: a
     # deep copy, never the runner's ref.
     target.eventMap = if live.eventMap.isNil: nil else: copy(live.eventMap)
+
+proc hubCpuMode(frameConfig: FrameConfig): string =
+  if frameConfig == nil or frameConfig.deviceConfig == nil: "" else: frameConfig.deviceConfig.cpuMode
 
 proc hubFrameConfig(): FrameConfig =
   ## This thread's copy, one object for the thread's life (the session's verb
@@ -1976,7 +1984,7 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   # changes it — the `lan_access_set` verb, the frame's admin page — the
   # provider learns it from the next `state` message.
   var lastReportedLanAccess = lanAccessEnabled(frameConfig)
-  var lastReportedLooks = $frameConfig.rotate & "/" & $frameConfig.renderScale
+  var lastReportedLooks = $frameConfig.rotate & "/" & $frameConfig.renderScale & "/" & hubCpuMode(frameConfig)
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2155,8 +2163,9 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
         let display = $frameConfig.width & "x" & $frameConfig.height
         let lanAccess = lanAccessEnabled(frameConfig)
         # A rotation or scale set on the frame's own screen: the provider's
-        # mirror follows the report (hardwarePayload).
-        let looks = $frameConfig.rotate & "/" & $frameConfig.renderScale
+        # mirror follows the report (hardwarePayload). A new processor speed
+        # reports its governor and clock the same way.
+        let looks = $frameConfig.rotate & "/" & $frameConfig.renderScale & "/" & hubCpuMode(frameConfig)
         if sceneId.string != lastActiveScene or display != lastReportedDisplay or
             lanAccess != lastReportedLanAccess or looks != lastReportedLooks:
           lastActiveScene = sceneId.string

@@ -559,6 +559,14 @@ export const esp32CpuModeFrameSettingsMinVersion = "2026.11.7";
 export const esp32CpuModeFrameSettingKeys = new Set(
   contractSettingKeysSince("esp32", esp32CpuModeFrameSettingsMinVersion),
 );
+// 2026.11.15: `cpu_mode` on a Pi/Linux frame too, its kernel's CPU governor
+// (battery powersave, performance performance, auto ondemand;
+// frameos/src/frameos/cpu_governor.nim). Live, no restart. The SPA's floor is
+// cpuModeCloudFrameSettingsMinVersion.
+export const cpuModeFrameSettingsMinVersion = "2026.11.15";
+export const cpuModeFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("linux", cpuModeFrameSettingsMinVersion)].filter((key) => key === "cpu_mode"),
+);
 // 2026.11.7 too: `render_mode`, where the scenes run (docs/server-rendering.md).
 // Live: the next render pass pulls its picture from the cloud, or renders.
 export const esp32RenderModeFrameSettingsMinVersion = "2026.11.7";

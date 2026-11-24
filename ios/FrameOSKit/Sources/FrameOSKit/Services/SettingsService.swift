@@ -137,16 +137,31 @@ public struct RenderOnServerChoice: Sendable, Equatable {
     }
 }
 
-/// "Processor speed" as the settings offer it (PowerSettingsFields.tsx).
+/// "Processor speed" as the settings offer it (PowerSettingsFields.tsx
+/// CpuModeField): an ESP32's chip clock, or a Pi/Linux frame's CPU governor
+/// (frameos/src/frameos/cpu_governor.nim).
 public struct CpuModeChoice: Sendable, Equatable {
     public var disabledReason: String?
     /// What the frame says it runs at now (cloud `hardware.cpuMhz`).
     public var reportedMhz: Int?
+    /// A Pi/Linux frame: the kernel's governor, set live, not the chip's clock.
+    public var linux: Bool = false
+    /// The governor a Linux frame reported running (cloud `hardware.cpuGovernor`).
+    public var reportedGovernor: String? = nil
+    /// When a Linux frame takes a change (live on the cloud, with the next deploy on a backend).
+    public var appliedNote: String? = nil
 
+    /// The ESP32's words; `choices` has the ones for this frame.
     public static let options: [(value: String, label: String)] = [
         ("auto", "Automatic (default)"),
         ("battery", "Battery: 160 MHz"),
         ("performance", "Performance: 240 MHz"),
+    ]
+
+    public static let linuxOptions: [(value: String, label: String)] = [
+        ("auto", "Automatic (default): fast while busy"),
+        ("battery", "Battery: always the lowest speed"),
+        ("performance", "Performance: always the highest speed"),
     ]
 
     public static let explanation = "Battery runs the chip at 160 MHz, performance at 240 MHz. Performance renders about "
@@ -154,8 +169,27 @@ public struct CpuModeChoice: Sendable, Equatable {
         + "reTerminal E1002. On a battery e-paper frame that costs roughly 5 to 10% of battery life. Automatic is battery "
         + "on e-paper and performance on LCD and touch screens. Saving a change reboots the frame."
 
+    public static let linuxExplanation = "How fast the processor runs. Automatic runs it at its highest speed while the "
+        + "frame works (a render, a video, a scene switch) and at its lowest while it waits. Performance keeps it at its "
+        + "highest speed: the quickest renders, for a little more power and heat. Battery keeps it at its lowest speed. "
+        + "A Raspberry Pi frame on mains power is best on Automatic or Performance."
+
+    public var choices: [(value: String, label: String)] { linux ? Self.linuxOptions : Self.options }
+
+    public var text: String {
+        linux ? Self.linuxExplanation + " " + (appliedNote ?? "Applied without a restart.") : Self.explanation
+    }
+
+    /// What the frame last said it runs at, in words; nil when it said nothing.
+    public var reported: String? {
+        if !linux { return reportedMhz.map { "Running at \($0) MHz now." } }
+        let parts = [reportedMhz.map { "\($0) MHz" }, reportedGovernor.map { "the \($0) governor" }].compactMap { $0 }
+        return parts.isEmpty ? nil : "Last reported: " + parts.joined(separator: ", ") + "."
+    }
+
     public static func == (lhs: CpuModeChoice, rhs: CpuModeChoice) -> Bool {
-        lhs.disabledReason == rhs.disabledReason && lhs.reportedMhz == rhs.reportedMhz
+        lhs.disabledReason == rhs.disabledReason && lhs.reportedMhz == rhs.reportedMhz && lhs.linux == rhs.linux
+            && lhs.reportedGovernor == rhs.reportedGovernor && lhs.appliedNote == rhs.appliedNote
     }
 }
 
@@ -209,7 +243,9 @@ extension FrameOSService {
                 config[camel] = value
                 deviceConfigChanged = true
             }
-            let deploys = !body.isEmpty
+            // A Pi takes its processor speed (device_config.cpuMode) in
+            // frame.json, with a deploy; an ESP32 on its settings poll.
+            let deploys = !body.isEmpty || (deviceConfigChanged && !frame.isEmbedded)
             if deviceConfigChanged { body["device_config"] = .object(config) }
             try await client.call("POST", Self.framePath(frame.id), body: .json(.object(body)))
             if !deploys {
@@ -220,7 +256,8 @@ extension FrameOSService {
     }
 
     /// Settings the app edits by their cloud name that a backend keeps in an
-    /// ESP32's device_config, under the camelCase name.
+    /// ESP32's device_config, under the camelCase name (`cpu_mode` a Pi's
+    /// too: app/utils/cpu_mode.py).
     static let deviceConfigSettings: [(String, String)] = [("render_mode", "renderMode"), ("cpu_mode", "cpuMode")]
 
     // MARK: where the scenes run, and the processor speed (Settings, Power)
@@ -265,24 +302,32 @@ extension FrameOSService {
         }
     }
 
-    /// "Processor speed" for this frame (the SPA's field next to "Render
-    /// scenes"), or nil: every cloud ESP32, gated on the firmware that takes
-    /// `cpu_mode`; on a backend an embedded board with the ESP32 power
-    /// profile.
+    /// "Processor speed" for this frame (the SPA's CpuModeField), or nil:
+    /// every cloud frame but a virtual one, gated on the firmware that takes
+    /// `cpu_mode` on its profile (an ESP32's clock from 2026.11.7, a Pi's
+    /// governor later); on a backend an embedded board with the ESP32 power
+    /// profile, and every Pi/Linux frame.
     public func cpuModeChoice(_ frame: Frame) -> CpuModeChoice? {
         switch kind {
         case .cloud:
-            guard CloudSettingsContract.profile(for: frame) == "esp32" else { return nil }
+            let profile = CloudSettingsContract.profile(for: frame)
+            if profile != "esp32" && frame.hardware["platform"]?.stringValue == "virtual" { return nil }
             let contract = CloudSettingsContract.shared
-            let since = contract.since("cpu_mode", profile: "esp32") ?? ""
+            let since = contract.since("cpu_mode", profile: profile) ?? ""
             return CpuModeChoice(
                 disabledReason: contract.keys(for: frame).contains("cpu_mode")
                     ? nil : "The processor speed needs FrameOS \(since) or newer on the frame.",
-                reportedMhz: frame.hardware["cpuMhz"]?.intValue
+                reportedMhz: frame.hardware["cpuMhz"]?.intValue,
+                linux: profile != "esp32",
+                reportedGovernor: profile != "esp32" ? frame.hardware["cpuGovernor"]?.stringValue : nil,
+                appliedNote: profile != "esp32" ? "Applied without a restart." : nil
             )
         case .backend:
-            guard frame.mode == "embedded", RenderOnServer.backendPowerProfile(platform: embeddedPlatform(frame)) == "esp32"
-            else { return nil }
+            if frame.mode != "embedded" {
+                return CpuModeChoice(disabledReason: nil, reportedMhz: nil, linux: true,
+                                     appliedNote: "The frame takes it with the next deploy, without a restart.")
+            }
+            guard RenderOnServer.backendPowerProfile(platform: embeddedPlatform(frame)) == "esp32" else { return nil }
             return CpuModeChoice(disabledReason: nil, reportedMhz: nil)
         }
     }

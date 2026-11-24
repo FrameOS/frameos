@@ -37,6 +37,7 @@ from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
 from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.render_scale import normalize_render_scale
+from app.utils.cpu_mode import CPU_MODES
 from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -604,8 +605,9 @@ EMBEDDED_SEEED_RETERMINAL_E1004_I2C = {"i2cBuses": "sda=19,scl=20"}
 # The contract's `led_type` enum (docs/cloud-frames-contract.json).
 EMBEDDED_LED_TYPES = ("gpio", "gpio_inverted", "ws2812")
 # The contract's `cpu_mode` enum: the chip's clock, set at boot (main.c).
-# Unset = auto, 160 MHz on e-paper and 240 on an LCD or a touch panel.
-EMBEDDED_CPU_MODES = ("auto", "battery", "performance")
+# Unset = auto, 160 MHz on e-paper and 240 on an LCD or a touch panel. A
+# Linux frame reads the same setting as its CPU governor (app/utils/cpu_mode.py).
+EMBEDDED_CPU_MODES = CPU_MODES
 # The sounds a tap and a press make (`click_sounds`, docs/cloud-frames-contract.json):
 # silent, or the buzzer's own. More modes may join.
 EMBEDDED_CLICK_SOUNDS = ("silent", "normal")

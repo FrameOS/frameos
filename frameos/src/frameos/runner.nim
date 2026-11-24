@@ -9,6 +9,7 @@ import apps/data/qr/app as data_qrApp
 import frameos/apps
 import frameos/channels
 import frameos/config
+from frameos/cpu_mode_linux import applyCpuMode
 import frameos/device_setup
 import frameos/event_log
 import frameos/event_loop
@@ -1054,6 +1055,8 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
       # The logger and metrics threads run on copies, not on this ref.
       applyLoggerSettings(self.frameConfig)
       applyMetricsSettings(self.frameConfig)
+      # A new processor speed (`cpu_mode`) takes effect here, no restart.
+      applyCpuMode(self.frameConfig.deviceConfig.cpuMode)
     except Exception as e:
       self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
     reloadInterpretedScenes(self.logger)

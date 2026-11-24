@@ -75,6 +75,9 @@ export const cloudFramesContractSettings = {
     "input_settings": {
       "since": "2026.9.23",
       "restart": true
+    },
+    "cpu_mode": {
+      "since": "2026.11.15"
     }
   },
   "esp32": {

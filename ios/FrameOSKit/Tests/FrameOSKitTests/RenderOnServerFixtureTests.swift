@@ -58,12 +58,24 @@ import Testing
         #expect(cloud.renderOnServerChoice(old)?.disabledReason == "Rendering on the server needs FrameOS \(since) or newer on the frame.")
         #expect(cloud.cpuModeChoice(old)?.disabledReason != nil)
 
-        // A C3 is rendered by the cloud anyway; a Pi has neither field.
+        // A C3 is rendered by the cloud anyway; a Pi renders itself, and its
+        // processor speed is its CPU governor, on the Linux profile's floor.
         let c3 = Frame(raw: ["id": "c", "hardware": ["platform": "esp32-c3"], "frameos_version": "2026.11.7"])
         #expect(cloud.renderOnServerChoice(c3) == nil)
         #expect(cloud.cpuModeChoice(c3) != nil)
         let pi = Frame(raw: ["id": "p", "hardware": ["platform": "buildroot"], "frameos_version": "2026.11.7"])
-        #expect(cloud.renderOnServerChoice(pi) == nil && cloud.cpuModeChoice(pi) == nil)
+        #expect(cloud.renderOnServerChoice(pi) == nil)
+        let piSince = try #require(CloudSettingsContract.shared.since("cpu_mode", profile: "linux"))
+        let oldPi = try #require(cloud.cpuModeChoice(pi))
+        #expect(oldPi.linux && oldPi.disabledReason == "The processor speed needs FrameOS \(piSince) or newer on the frame.")
+        let newPi = Frame(raw: ["id": "p", "frameos_version": .string(piSince),
+                                "hardware": ["platform": "buildroot", "cpuMhz": 1000, "cpuGovernor": "ondemand"]])
+        let piChoice = try #require(cloud.cpuModeChoice(newPi))
+        #expect(piChoice.disabledReason == nil && piChoice.linux)
+        #expect(piChoice.reported == "Last reported: 1000 MHz, the ondemand governor.")
+        #expect(piChoice.choices.map { $0.value } == CpuModeChoice.options.map { $0.value })
+        let virtual = Frame(raw: ["id": "v", "hardware": ["platform": "virtual"], "frameos_version": .string(piSince)])
+        #expect(cloud.cpuModeChoice(virtual) == nil)
 
         let remote = Frame(raw: ["id": "a", "hardware": ["platform": "esp32-s3"], "render_mode": "remote", "cpu_mode": "performance"])
         #expect(cloud.renderMode(remote) == .remote)
@@ -86,8 +98,12 @@ import Testing
         #expect(backend.renderOnServerChoice(pico) == nil && backend.cpuModeChoice(pico) == nil)
         let virtual = Frame(raw: ["id": 4, "mode": "embedded", "embedded": ["platform": "virtual"]])
         #expect(backend.renderOnServerChoice(virtual) == nil && backend.cpuModeChoice(virtual) == nil)
-        let pi = Frame(raw: ["id": 5, "mode": "rpios"])
-        #expect(backend.renderOnServerChoice(pi) == nil && backend.cpuModeChoice(pi) == nil)
+        let pi = Frame(raw: ["id": 5, "mode": "rpios", "device_config": ["cpuMode": "performance"]])
+        #expect(backend.renderOnServerChoice(pi) == nil)
+        // A Pi's processor speed is its CPU governor, kept in device_config as
+        // an ESP32's clock is, and deployed in frame.json.
+        #expect(backend.cpuModeChoice(pi)?.linux == true)
+        #expect(backend.cpuMode(pi) == "performance")
     }
 
     @Test func quotaRefusalInWords() {

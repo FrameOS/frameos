@@ -5,6 +5,7 @@ import drivers/drivers as drivers
 import frameos/apps
 import frameos/boot_network
 import frameos/config
+from frameos/cpu_mode_linux import applyCpuMode
 import frameos/display_detect
 import frameos/input_sources
 import frameos/logger
@@ -318,6 +319,10 @@ proc start*(self: FrameOS) {.async.} =
   if rebootInfo.len > 0:
     message["reboot"] = rebootInfo
   self.logger.log(message)
+  # The processor speed before anything slow: the network check, the drivers
+  # and the first scene's compile all run at the clock it picks
+  # (cpu_mode_linux.nim; a write that waits on root waits on its own thread).
+  applyCpuMode(self.frameConfig.deviceConfig.cpuMode)
   try:
     if reconcileInterruptedUpgradeStatus():
       self.logger.log(%*{"event": "upgrade:interrupted",

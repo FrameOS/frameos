@@ -105,12 +105,13 @@ describe("settings parity between the device planes", () => {
     // the ESP32 buzzer's notes, fos_led.c; no Pi preset has one). 16 with
     // `touch_beep` (2026.11.6): the click of a press on an ESP32's e-paper
     // glass; no Pi frame has an e-paper touch panel with a buzzer. 18 with
-    // `cpu_mode` (2026.11.7): the chip's clock, set at boot; a Pi's is the
-    // kernel governor's. 19 with `render_mode` (2026.11.7): where the scenes
-    // run (docs/server-rendering.md); a Pi always renders on its own runtime.
+    // `cpu_mode` (2026.11.7): the chip's clock, set at boot. 19 with
+    // `render_mode` (2026.11.7): where the scenes run
+    // (docs/server-rendering.md); a Pi always renders on its own runtime.
     // 20 with `click_sounds` (2026.11.15): silent or the buzzer's own clicks,
-    // the same buzzer path; a Pi has no buzzer.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(20);
+    // the same buzzer path; a Pi has no buzzer. 19 again when `cpu_mode` went
+    // both-planes (2026.11.15: a Pi's CPU governor, cpu_governor.nim).
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(19);
   });
 });
 

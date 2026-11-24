@@ -531,6 +531,30 @@ async def test_get_frame_json_carries_the_render_scale(_mock_publish, db, redis)
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_carries_the_processor_speed(_mock_publish, db, redis):
+    """`cpu_mode` lives in device_config on a backend, for a Pi as for an
+    ESP32; a Pi gets it in frame.json as cpuMode and sets its CPU governor from
+    it (cpu_governor.nim). Present-only: unset is auto on the frame."""
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    assert frame.mode != "embedded"
+    assert "cpuMode" not in get_frame_json(db, frame)["deviceConfig"]
+
+    frame.device_config = {**(frame.device_config or {}), "cpuMode": "performance", "partial": True}
+    device_config = get_frame_json(db, frame)["deviceConfig"]
+    assert device_config["cpuMode"] == "performance"
+    assert device_config["partial"] is True
+    # One home in frame.json: the runtime reads deviceConfig.cpuMode.
+    assert "cpuMode" not in get_frame_json(db, frame)
+
+    # The spelling a USB-console provisioning writes, and junk.
+    frame.device_config = {"cpu_mode": "battery"}
+    assert get_frame_json(db, frame)["deviceConfig"]["cpuMode"] == "battery"
+    frame.device_config = {"cpuMode": "ondemand"}
+    assert "cpuMode" not in get_frame_json(db, frame)["deviceConfig"]
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
     frame.width = None

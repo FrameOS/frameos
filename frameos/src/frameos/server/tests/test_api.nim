@@ -375,6 +375,25 @@ suite "a settings change is classified by what it takes to apply":
     check not change.timezone
     check not change.mounts
 
+  test "the processor speed is deviceConfig.cpuMode, and a reload, not a restart":
+    # cpu_mode_linux.nim applies the governor on the runner's reload. A cloud
+    # push says `cpu_mode`; the form (backend and this API) says it inside
+    # device_config. Both land in one place, the drivers' keys untouched.
+    let stored = %*{"name": "Kitchen", "deviceConfig": {"partial": true, "vcom": -1.5}}
+    let pushed = frontendFramePayloadToRuntimeConfig(%*{"cpu_mode": "performance"}, stored)
+    check pushed{"deviceConfig"} == %*{"partial": true, "vcom": -1.5, "cpuMode": "performance"}
+    check not pushed.hasKey("cpuMode")
+    let change = classifyFrameConfigChange(stored, pushed)
+    check change.any
+    check not change.restart
+    check not change.listeners
+    let formed = frontendFramePayloadToRuntimeConfig(%*{"device_config": {"cpuMode": "battery"}}, stored)
+    check formed{"deviceConfig"} == %*{"partial": true, "vcom": -1.5, "cpuMode": "battery"}
+    check not classifyFrameConfigChange(stored, formed).restart
+    # A driver's own key next to it still restarts.
+    check classifyFrameConfigChange(stored, frontendFramePayloadToRuntimeConfig(
+      %*{"cpu_mode": "battery", "device_config": {"partial": false}}, stored)).restart
+
   test "port, bind address and every HTTPS field are listener changes":
     check classifyFrameConfigChange(%*{"framePort": 8787}, %*{"framePort": 8080}).listeners
     check classifyFrameConfigChange(%*{}, %*{"bindHost": "127.0.0.1"}).listeners

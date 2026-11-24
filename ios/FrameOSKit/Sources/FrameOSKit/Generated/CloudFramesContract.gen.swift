@@ -186,6 +186,9 @@ enum CloudFramesContractSource {
       "control_code": {
         "since": "2026.8.30"
       },
+      "cpu_mode": {
+        "since": "2026.11.15"
+      },
       "debug": {
         "since": null
       },

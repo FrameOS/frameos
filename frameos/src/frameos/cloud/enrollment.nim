@@ -54,6 +54,7 @@ import std/httpclient
 import frameos/types
 import frameos/upgrade
 from frameos/config import getConfigFilename
+from frameos/cpu_mode_linux import cpuModeReport
 from frameos/local_access import lanAccessEnabled
 import frameos/utils/http_client
 import ./contract
@@ -194,6 +195,13 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
   if frameConfig != nil:
     result["rotate"] = %frameConfig.rotate
     result["renderScale"] = %frameConfig.renderScale
+  # The processor speed as an ESP32 reports it (hardware.cpuMode / cpuMhz),
+  # plus the governor that runs it (cpu_mode_linux.nim). The clock is the
+  # one at the report: on `auto` (ondemand) it moves with the load.
+  let cpuMode =
+    if frameConfig != nil and frameConfig.deviceConfig != nil: frameConfig.deviceConfig.cpuMode else: ""
+  for key, value in cpuModeReport(cpuMode).pairs:
+    result[key] = value
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

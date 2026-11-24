@@ -70,6 +70,9 @@ import {
   esp32FrameSettingsOnScreenCloudFrameSettingKeys,
   frameSettingsOnScreenCloudFrameSettingKeys,
   frameSettingsOnScreenCloudFrameSettingsMinVersion,
+  cloudFrameSupportsCpuMode,
+  cpuModeCloudFrameSettingKeys,
+  cpuModeCloudFrameSettingsMinVersion,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
   allowedFrameCommandTypes,
@@ -86,6 +89,8 @@ import {
   esp32CpuModeFrameSettingKeys,
   esp32ClickSoundsFrameSettingKeys,
   esp32CpuModeFrameSettingsMinVersion,
+  cpuModeFrameSettingKeys,
+  cpuModeFrameSettingsMinVersion,
   esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
@@ -376,10 +381,34 @@ describe("cloud settings push", () => {
     expect(esp32CpuModeCloudFrameSettingsMinVersion).toBe(esp32CpuModeFrameSettingsMinVersion);
     expect(cloudFrameSupportsEsp32CpuMode("2026.11.6")).toBe(false);
     expect(cloudFrameSupportsEsp32CpuMode("2026.11.7")).toBe(true);
-    expect((esp32PowerSettingKeys as readonly string[]).includes("cpu_mode")).toBe(true);
     expect(esp32CloudFrameSettingKeysForVersion("2026.11.6")).not.toContain("cpu_mode");
     expect(esp32CloudFrameSettingKeysForVersion("2026.11.7")).toContain("cpu_mode");
-    expect(esp32OnlySettableKeys.has("cpu_mode")).toBe(true);
+    // Both profiles' since 2026.11.15: no longer an ESP32-only power key, and
+    // still one the form diffs and sends.
+    expect((esp32PowerSettingKeys as readonly string[]).includes("cpu_mode")).toBe(false);
+    expect(esp32OnlySettableKeys.has("cpu_mode")).toBe(false);
+    expect((allCloudFrameSettingKeys as readonly string[]).includes("cpu_mode")).toBe(true);
+  });
+
+  it("gates a Pi's processor speed (its CPU governor) on its own floor", () => {
+    expect([...cpuModeCloudFrameSettingKeys]).toEqual(["cpu_mode"]);
+    expect([...cpuModeFrameSettingKeys]).toEqual(["cpu_mode"]);
+    expect(cpuModeCloudFrameSettingsMinVersion).toBe(cpuModeFrameSettingsMinVersion);
+    expect(cpuModeCloudFrameSettingsMinVersion).toBe("2026.11.15");
+    expect(cloudFrameSupportsCpuMode("2026.11.14")).toBe(false);
+    expect(cloudFrameSupportsCpuMode("2026.11.15")).toBe(true);
+    expect(cloudFrameSettingKeysForVersion("2026.11.14")).not.toContain("cpu_mode");
+    expect(cloudFrameSettingKeysForVersion("2026.11.15")).toContain("cpu_mode");
+    expect(cloudFrameSettingsPayload({ cpu_mode: "performance" }, ["cpu_mode"])).toEqual({ cpu_mode: "performance" });
+    const pi = { frameosVersion: "2026.11.14", hardware: { platform: "buildroot" } };
+    expect(frameSettingsRefusal(pi, { cpu_mode: "performance" })).toEqual({
+      error: "settings_need_newer_firmware",
+      minFrameosVersion: "2026.11.15",
+    });
+    expect(frameSettingsRefusal({ ...pi, frameosVersion: "2026.11.15" }, { cpu_mode: "performance" })).toBeNull();
+    expect(frameSettingsRefusal({ ...pi, frameosVersion: "2026.11.15" }, { cpu_mode: "ondemand" })).toEqual({
+      error: "invalid_settings",
+    });
   });
 
   it("gates where the scenes run on the same floor, an ESP32-only key", () => {

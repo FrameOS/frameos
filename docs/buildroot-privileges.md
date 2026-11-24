@@ -302,6 +302,7 @@ path outside `/srv/frameos/staging`:
 | `set-hostname` | `hostname` (sanitized again on the root side) | `/etc/hostname`, `/boot/frameos-hostname`, `hostname` |
 | `set-timezone` | `zone` (IANA name shape, validated on both sides) | `setupTimezone` as root — `timedatectl set-timezone`, else `/etc/timezone` + the `/etc/localtime` link under the writable mount; reports failure unless the system zone reads back as requested |
 | `sync-clock` | — | `systemctl restart systemd-timesyncd` / `ntpd -gq` / `sntp` |
+| `set-cpu-governor` | `governor`: `powersave`, `ondemand` or `performance` only (`cpu_governor.nim` `CpuGovernors`, validated on both sides) | writes it into every `/sys/devices/system/cpu/cpufreq/policy<N>/scaling_governor` that offers it; the worker enumerates the policy directories itself, the request names no path. The processor speed (`cpu_mode`, `cpu_mode_linux.nim`) |
 | `nm-device-status`, `nm-wifi-list`, `nm-connections` (`active`) | — | fixed `nmcli` queries |
 | `nm-radio-on` | — | `rfkill unblock wifi`, `nmcli radio wifi on` |
 | `nm-hotspot-start` (`device`, `ssid`, `psk`), `nm-hotspot-stop` | SSID 1–32 bytes no control chars; PSK 8–63 printable or 64 hex | the add / modify / up sequence for `frameos-hotspot`, as argv, never through a shell |
@@ -312,7 +313,7 @@ and answered with an error, and a request the worker never picks up is
 withdrawn by the client after its timeout. `requestPrivileged` and
 `privilegedDoorAvailable` are the only two calls the rest of the runtime
 uses (`device_setup.nim` for reboots, `portal.nim` for everything network,
-`upgrade.nim` for the install); when the process is root the door reports
+`upgrade.nim` for the install, `cpu_mode_linux.nim` for the CPU governor); when the process is root the door reports
 itself absent and the old in-process paths run unchanged, so Raspberry Pi OS
 installs and root Buildroot frames behave exactly as before.
 

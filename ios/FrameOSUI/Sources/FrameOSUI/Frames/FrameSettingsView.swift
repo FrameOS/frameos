@@ -129,16 +129,17 @@ struct FrameSettingsView: View {
                 if let cpu = service.cpuModeChoice(frame) {
                     Section {
                         Picker("Processor speed", selection: cpuModeBinding(frame, service)) {
-                            ForEach(CpuModeChoice.options, id: \.value) { Text($0.label).tag($0.value) }
+                            ForEach(cpu.choices, id: \.value) { Text($0.label).tag($0.value) }
                         }
                         .disabled(cpu.disabledReason != nil)
-                        if let mhz = cpu.reportedMhz {
-                            Text("Running at \(mhz) MHz now.").font(.callout).foregroundStyle(.secondary)
+                        if let reported = cpu.reported {
+                            Text(reported).font(.callout).foregroundStyle(.secondary)
                         }
                     } header: {
-                        if !sleepSection && service.renderOnServerChoice(frame) == nil { Text("Power") }
+                        if cpu.linux { Text("Processor") }
+                        else if !sleepSection && service.renderOnServerChoice(frame) == nil { Text("Power") }
                     } footer: {
-                        Text(cpu.disabledReason ?? CpuModeChoice.explanation)
+                        Text(cpu.disabledReason ?? cpu.text)
                     }
                 }
 

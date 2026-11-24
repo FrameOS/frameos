@@ -1322,6 +1322,12 @@ battery life at 240, and one that stays awake on battery more, closer to
 15%. An LCD or a touch panel is a screen someone is looking at, where a
 third off every render matters more, so `auto` gives those 240.
 
+The same setting on a Raspberry Pi (2026.11.15+) picks the kernel's CPU
+frequency governor instead, live and with no restart: `battery` is
+`powersave`, `performance` is `performance`, `auto` is `ondemand` (a Pi frame
+is on mains power). See `frameos/src/frameos/cpu_governor.nim` and
+`docs/cloud-frames.md` "The processor speed on a Pi".
+
 ### Button beep
 
 A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,

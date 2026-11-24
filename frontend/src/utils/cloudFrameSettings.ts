@@ -186,6 +186,25 @@ export function cloudFrameSupportsFrameSettingsOnScreen(frameosVersion: string |
   return cloudFrameSupportsSettingsFrom(frameSettingsOnScreenCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes the processor speed on a Pi/Linux frame. */
+export const cpuModeCloudFrameSettingsMinVersion = '2026.11.15'
+
+/**
+ * `cpu_mode` on a Pi/Linux frame (frame.json `deviceConfig.cpuMode`): the
+ * kernel's CPU frequency governor, applied live (frameos/src/frameos/
+ * cpu_governor.nim: battery is powersave, performance is performance, auto
+ * is ondemand). An ESP32 took the same key at 2026.11.7 as its chip's clock
+ * (esp32CpuModeCloudFrameSettingsMinVersion). Callers gate on
+ * cloudFrameSupportsCpuMode; below the floor the field renders disabled.
+ */
+export const cpuModeCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  cpuModeCloudFrameSettingsMinVersion
+).filter((key) => key === 'cpu_mode')
+
+export function cloudFrameSupportsCpuMode(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(cpuModeCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /**
  * The events a rule may `emit`: the contract's, those the `eventMap` origin
  * is allowed to say (docs/events-contract.json `origins`), the same list the
@@ -282,7 +301,7 @@ export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSi
   esp32BuzzerCloudFrameSettingsMinVersion
 )
 
-/** 2026.11.7: the chip's clock (`cpu_mode`), read at boot. */
+/** 2026.11.7: the chip's clock (`cpu_mode`), read at boot. A Pi's governor is cpuModeCloudFrameSettingsMinVersion. */
 export const esp32CpuModeCloudFrameSettingsMinVersion = '2026.11.7'
 
 export function cloudFrameSupportsEsp32CpuMode(frameosVersion: string | null | undefined): boolean {
@@ -446,6 +465,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...esp32RenderScaleCloudFrameSettingKeys,
     ...frameSettingsOnScreenCloudFrameSettingKeys,
     ...esp32FrameSettingsOnScreenCloudFrameSettingKeys,
+    // Both profiles' since 2026.11.15, so no longer among the ESP32-only keys.
+    ...cpuModeCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )

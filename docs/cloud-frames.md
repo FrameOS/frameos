@@ -374,6 +374,34 @@ provider's settings mirror should follow them unless a `set_settings` is still
 on its way. The frame's Wi-Fi network is never reported, and there is no verb
 that sends a frame one.
 
+### The processor speed on a Pi
+
+`cpu_mode` (`auto` | `battery` | `performance`) is both profiles' setting. On
+an ESP32 it is the chip's clock at boot (embedded/esp32/README.md "Processor
+speed"); on a Linux frame, from FrameOS 2026.11.15, it is the kernel's CPU
+frequency governor, applied live on the reload the push causes:
+
+| `cpu_mode` | governor | |
+| --- | --- | --- |
+| `auto` (default) | `ondemand` | the highest clock while busy, the lowest while idle |
+| `battery` | `powersave` | always the lowest clock |
+| `performance` | `performance` | always the highest clock |
+
+The runtime sets it at start and on every reload (`frameos/src/frameos/
+cpu_mode_linux.nim`, the mapping in `cpu_governor.nim`): a root runtime writes
+the cpufreq policies itself, a Buildroot runtime running as `frameos` asks the
+privileged door (`set-cpu-governor`, docs/buildroot-privileges.md), a
+Raspberry Pi OS `pi` user goes through `sudo -n`. A governor the kernel does
+not offer (`cpu:governor:unavailable` in the log, once) and a machine without
+cpufreq are left as they are; nothing fails over it. Buildroot images since
+`cpufreq.default_governor=ondemand` joined their cmdline.txt
+(docs/boot-partition.md) boot on `ondemand` already; older cards boot on the
+Pi kernel's `powersave` and move at the runtime's start. A push lands in
+frame.json as `deviceConfig.cpuMode`, where a backend keeps it too
+(`device_config.cpuMode`, app/utils/cpu_mode.py). The `hardware` report
+carries `cpuMode`, `cpuMhz` (the first policy's clock at the report: on
+`auto` it moves with the load) and `cpuGovernor`.
+
 `platform` is frame.json's deployment MODE (`buildroot`, `rpios`, `esp32-s3`,
 …), never a board. Linux frames additionally send **`board`** — the Buildroot
 platform key of the hardware they detected themselves to be, i.e. which SD

@@ -86,7 +86,12 @@ export interface ScenePreviewInfo {
   at: string
 }
 
-/** The ESP32's clock (the contract's `cpu_mode`): auto is 240 MHz on an LCD or touch panel, else 160. */
+/**
+ * The processor speed (the contract's `cpu_mode`). On an ESP32 the chip's
+ * clock: auto is 240 MHz on an LCD or touch panel, else 160. On a Pi/Linux
+ * frame the kernel's CPU governor: auto is ondemand, battery powersave,
+ * performance performance.
+ */
 export type CpuMode = 'auto' | 'battery' | 'performance'
 /** The sounds of a tap and a press (docs/cloud-frames-contract.json `click_sounds`). More modes may join. */
 export type ClickSounds = 'silent' | 'normal'
@@ -172,9 +177,15 @@ export interface FrameType {
     clickSounds?: ClickSounds | null
     /** ESP32 only: the board makes sounds (a buzzer, a speaker, an LED that follows them), 2026.11.15+. */
     sounds?: boolean | null
-    /** ESP32 only: the clock setting (`cpu_mode`) and the clock it gave, in MHz (2026.11.7+). */
+    /**
+     * The processor speed setting (`cpu_mode`) and the clock it gave, in MHz:
+     * an ESP32's chip clock (2026.11.7+), a Linux frame's CPU at the report
+     * under its kernel governor (2026.11.15+; on `auto` it moves with the load).
+     */
     cpuMode?: CpuMode | null
     cpuMhz?: number | null
+    /** Linux only: the CPU frequency governor running (`ondemand`, `powersave`, `performance`, …), 2026.11.15+. */
+    cpuGovernor?: string | null
     /** ESP32 only: where its scenes run now (`render_mode`, 2026.11.7+); a board
      * without a runtime of its own (`localRenderSupported: false`) is always remote. */
     renderMode?: RenderMode | null

@@ -221,6 +221,26 @@ suite "cloud hub verb dispatcher":
     check recorded.events.len == 1
     check recorded.events[0][0] == "reload"
 
+  test "set_settings cpu_mode: the governor follows on the reload, no restart":
+    # A Pi's processor speed is the kernel's governor (cpu_mode_linux.nim),
+    # set live by the runner's reload: unlike an ESP32's clock, never a
+    # restart. A governor's own name is no mode.
+    check "cpu_mode" in CLOUD_SETTINGS_ALLOWLIST
+    check "cpu_mode" notin CLOUD_SETTINGS_RESTART_KEYS
+    let recorded = Recorded()
+    let reply = handleCloudVerb(makeContext(recorded), %*{
+      "id": "cpu", "type": "set_settings", "settings": {"cpu_mode": "battery"}})
+    check reply.ack{"ok"}.getBool(false) == true
+    check recorded.persistedSettings.len == 1
+    check recorded.persistedSettings[0]{"cpu_mode"}.getStr("") == "battery"
+    check recorded.events.len == 1
+    check recorded.events[0][0] == "reload"
+    let refused = Recorded()
+    let bad = handleCloudVerb(makeContext(refused), %*{
+      "id": "cpu2", "type": "set_settings", "settings": {"cpu_mode": "ondemand"}})
+    check bad.ack{"error"}.getStr("") == "invalid_settings"
+    check refused.persistedSettings.len == 0
+
   test "set_settings applies the hardware batch and restarts the runtime for it":
     # palette / device_config / gpio_buttons are copied into the driver
     # context at init: a reload would persist them and change nothing on the
@@ -385,6 +405,7 @@ suite "cloud hub verb dispatcher":
       "device": "pimoroni.hyperpixel4sq_touch",
       "input_settings": {"keyboardLayout": "de", "grabKeyboard": true},
       "colors": {"autoFit": "on", "global": {"exposure": 0.5}},
+      "cpu_mode": "performance",
     }
     for key in CLOUD_SETTINGS_ALLOWLIST:
       check samples.hasKey(key)
