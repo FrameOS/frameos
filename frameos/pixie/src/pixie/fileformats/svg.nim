@@ -1144,6 +1144,9 @@ proc movedBy(element: SvgElement, d: Vec2): SvgElement =
   props.transform[2, 1] += d.y
   SvgElement(path: element.path, props: props, bounds: rect(0, 0, -1, -1))
 
+when defined(testing):
+  var svgNodesParsedForTest* = 0 ## nodes parseSvgElement read (FrameOS's tests)
+
 proc parseViewportChildren(
   node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
   elements: var seq[SvgElement]
@@ -1202,6 +1205,8 @@ proc parseSvgElement(
 ) =
   if node.isText:
     return
+  when defined(testing):
+    inc svgNodesParsedForTest
 
   case node.tag:
   of "title", "desc":

@@ -121,8 +121,9 @@ type
     turnFrom*: float32   ## ... which is this far down the box (its top), unscrolled ...
     turnSteps*: int      ## ... and this many more, for the presses that came before that layout
 
-  TextMemo = object
+  TextMemo = ref object
     key: string          ## the runs, their styles, the width and alignment
+    gen: int             ## the layout that last used it: in that layout's `kept`
     arrangement: Arrangement
     bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
     drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
@@ -139,6 +140,12 @@ type
     count*: int
     firstYield: int ## its place + 1
     items*: array[MaxHoles, UiHole]
+
+  LayoutAnswer = object
+    ## A layout call's question (fixed sides, width, height) and its answer.
+    fix: int
+    w, h: float32
+    size: Vec2
 
   UiMemo* = ref object
     ## What the last layout of a UI set in type, for the next one (one per
@@ -206,6 +213,12 @@ type
     prevW, prevH: float32
     prevFix: int
     prevSize: Vec2
+    # And two before those: an item of a grid or a wrapping row is asked
+    # three questions a layout (its size in the room offered, then at its
+    # width, then at its width and height), so two answers kept missed every
+    # time and every node of a UI was laid out again at every tap, ~14 ms of
+    # the Calculator sample's on a SenseCAP Indicator (2026-11-24).
+    older: array[2, LayoutAnswer]
     asked: (int, float32, float32)
     # An item's margins and sizes while its container lays it out.
     margins: array[4, float32]
@@ -220,8 +233,17 @@ type
     arrangement: Arrangement
     arrangedW: float32
     arrangedAlign: HorizontalAlignment
-    memo: int             ## its arrangement's entry in the memo's `kept` ...
-    memoGen: int          ## ... of the layout with this number
+    memo: TextMemo        ## its arrangement's entry in the memo
+    # The arrangement before, for another width: a text is measured in the
+    # room its container offers, then set in the width it took (a grid's
+    # label: 106 px, then 19), two layout calls of the three or four a
+    # layout makes, so one arrangement was set again, or looked up by key,
+    # at every call: ~200 lookups a tap of the Calculator sample, 10 ms of
+    # its layout on a SenseCAP Indicator (2026-11-24).
+    arrangement2: Arrangement
+    arrangedW2: float32
+    arrangedAlign2: HorizontalAlignment
+    memo2: TextMemo
     # What it was built from, for the next layout to take it back unbuilt:
     # its element, the style it inherited, whether it was in a hovered
     # group, and its pointer states (`pointer`: it or one below has hover:,
@@ -431,7 +453,8 @@ proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth
       child.addRuns(text, into, rootW, rootH, depth + 1, states)
 
 proc newUiNode(kind: UiKind, text: Text): UiNode =
-  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1, prevFix: -1, emittedFor: (-1, 0'f32, 0'f32))
+  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1, prevFix: -1,
+    older: [LayoutAnswer(fix: -1), LayoutAnswer(fix: -1)], emittedFor: (-1, 0'f32, 0'f32))
 
 proc sameTree(a, b: SvgNode): bool =
   ## Whether two element trees say the same: the very nodes (a walk that
@@ -908,22 +931,34 @@ proc waitingBytes(entry: TextMemo): int =
   entry.key.len + 64 + (if entry.arrangement.isNil: 0 else: entry.arrangement.runes.len * 28) +
     entry.drawn.len * 90 * sizeof(pointer)
 
-proc recall(key: string): int =
-  ## The memo entry for `key`, moved to the entries this layout keeps; -1.
-  for i in 0 ..< memo.kept.len:
-    if memo.kept[i].key == key:
-      return i
-  for i in 0 ..< memo.last.len:
-    if memo.last[i].key == key:
-      memo.kept.add move(memo.last[i])
-      memo.last.del(i)
-      return memo.kept.high
-  for i in 0 ..< memo.older.len:
-    if memo.older[i].key == key:
-      memo.kept.add move(memo.older[i])
-      memo.older.del(i)
-      return memo.kept.high
-  -1
+when defined(testing):
+  var
+    textsSetForTest* = 0     ## arrangeUncached: a text recalled by key or set in type
+    layoutsMadeForTest* = 0  ## layout calls no kept answer answered
+
+proc claim(entry: TextMemo) {.inline.} =
+  ## `entry` used by this layout: in its `kept`, once.
+  if entry.gen != memo.gen:
+    entry.gen = memo.gen
+    memo.kept.add entry
+
+proc recall(key: string): TextMemo =
+  ## The memo entry for `key`, claimed for this layout; nil. An entry the
+  ## layouts before left waiting stays where it waits until the end of this
+  ## one (layoutUi leaves the claimed ones out): a list is no longer cut at
+  ## every claim.
+  for entry in memo.kept:
+    if entry.key == key:
+      return entry
+  for entry in memo.last:
+    if entry.gen != memo.gen and entry.key == key:
+      entry.claim()
+      return entry
+  for entry in memo.older:
+    if entry.gen != memo.gen and entry.key == key:
+      entry.claim()
+      return entry
+  nil
 
 proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
 
@@ -931,22 +966,42 @@ proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
-    return n.arrangement
-  probe(phText):
-    result = n.arrangeUncached(width, align)
+    discard
+  elif not n.arrangement2.isNil and n.arrangedW2 == width and n.arrangedAlign2 == align:
+    swap(n.arrangement, n.arrangement2)
+    swap(n.arrangedW, n.arrangedW2)
+    swap(n.arrangedAlign, n.arrangedAlign2)
+    swap(n.memo, n.memo2)
+    if not n.memo.isNil:
+      # As a recalled arrangement's (arrangeUncached): its bold fonts.
+      n.bold = n.memo.bold
+      n.spans.setLen(0)
+  else:
+    probe(phText):
+      result = n.arrangeUncached(width, align)
+    return
+  # Used by this layout: kept for the next, and its drawn glyphs for emitText.
+  if not memo.isNil and not n.memo.isNil:
+    n.memo.claim()
+  n.arrangement
 
 proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
-  if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
-    return n.arrangement
+  when defined(testing):
+    inc textsSetForTest
+  if not n.arrangement.isNil:
+    # The arrangement for the other width waits in the second place.
+    n.arrangement2 = n.arrangement
+    n.arrangedW2 = n.arrangedW
+    n.arrangedAlign2 = n.arrangedAlign
+    n.memo2 = n.memo
   var key: string
-  n.memo = -1
+  n.memo = nil
   if not memo.isNil:
     key = n.textKey(width, align)
     n.memo = recall(key)
-    n.memoGen = memo.gen
-    if n.memo >= 0:
-      n.arrangement = memo.kept[n.memo].arrangement
-      n.bold = memo.kept[n.memo].bold
+    if not n.memo.isNil:
+      n.arrangement = n.memo.arrangement
+      n.bold = n.memo.bold
       # The bold fonts are the recalled arrangement's now: spans set here
       # before would be typeset with fonts `bold` does not hold, and the next
       # text set from them drew its bold glyphs once (the Gallery sample's
@@ -980,9 +1035,9 @@ proc arrangeUncached(n: UiNode, width: float32, align: HorizontalAlignment): Arr
   n.arrangedW = width
   n.arrangedAlign = align
   if not memo.isNil:
-    memo.kept.add TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0])
-    n.memo = memo.kept.high
-    n.memoGen = memo.gen
+    n.memo = TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0],
+      gen: memo.gen)
+    memo.kept.add n.memo
 
 # -------- Layout
 
@@ -1409,6 +1464,11 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
       return n.lastSize
     if n.prevFix == key and n.prevW == w and n.prevH == h:
       return n.prevSize # its children are placed for it before it is emitted
+    for answer in n.older:
+      if answer.fix == key and answer.w == w and answer.h == h:
+        return answer.size # likewise
+  when defined(testing):
+    inc layoutsMadeForTest
   template b: untyped = n.box
   let
     px = b.padX
@@ -1458,6 +1518,8 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
             right = max(right, c.x + c.box.padX + c.arrangement.layoutBounds().x)
       n.maxX = max(right + b.pad[1] + b.border[1] - result.x, 0)
       n.maxY = max(bottom + b.pad[2] + b.border[2] - result.y, 0)
+  n.older[1] = n.older[0]
+  n.older[0] = LayoutAnswer(fix: n.prevFix, w: n.prevW, h: n.prevH, size: n.prevSize)
   n.prevW = n.lastW
   n.prevH = n.lastH
   n.prevFix = n.lastFix
@@ -1807,9 +1869,9 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     return
   let
     at = [x, y, opacity]
-    remembered = not memo.isNil and n.memo >= 0 and n.memoGen == memo.gen
-  if remembered and memo.kept[n.memo].drawnAt == at:
-    for node in memo.kept[n.memo].drawn:
+    remembered = not memo.isNil and not n.memo.isNil and n.memo.gen == memo.gen
+  if remembered and n.memo.drawnAt == at:
+    for node in n.memo.drawn:
       drawn.add node
     return
   let first = drawn.len
@@ -1848,7 +1910,7 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       strike.paint(font.paint.color.rgba, opacity)
       drawn.add strike
   if remembered:
-    template entry: untyped = memo.kept[n.memo]
+    template entry: untyped = n.memo
     entry.drawnAt = at
     entry.drawn = drawn[first .. ^1]
     for node in entry.drawn:
@@ -2855,16 +2917,22 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     # few layouts later (a switch's "On" and "Off", a count going up and
     # down) is not set in type again: waiting one layout only, it was set
     # again at every toggle of the Home sample.
-    var waiting = move(memo.last)
-    if waiting.len > 64:
-      waiting.setLen(64)
+    # An entry this layout claimed is in its `kept`, and waits in no list.
+    var waiting: seq[TextMemo]
+    for entry in memo.last:
+      if waiting.len >= 64:
+        break
+      if entry.gen != memo.gen:
+        waiting.add entry
     var bytes = 0
-    for i in 0 ..< memo.older.len:
-      let cost = memo.older[i].waitingBytes
+    for entry in memo.older:
+      if entry.gen == memo.gen:
+        continue
+      let cost = entry.waitingBytes
       if waiting.len >= 64 or bytes + cost > TextMemoWaitingBytes:
         break
       bytes += cost
-      waiting.add move(memo.older[i])
+      waiting.add entry
     memo.older = move(waiting)
     memo.last = move(memo.kept)
     memo.root = top

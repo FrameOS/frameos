@@ -571,9 +571,11 @@ proc meets(view: UrlView, x, y, width, height: float32): bool {.inline.} =
   not (x + width < view[0] or x > view[2] or y + height < view[1] or y > view[3])
 
 proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
-    node: SvgNode, scale: float32, blocking: bool, view, seen: UrlView, shown: var seq[int]) =
+    node: SvgNode, scale: float32, blocking: bool, view, seen: UrlView, shown: var seq[int]): bool {.discardable.} =
   ## `view`: what is near the screen, `seen`: what is on it, both in the
-  ## node's coordinates. The kept pictures that show go in `shown`.
+  ## node's coordinates. The kept pictures that show go in `shown`. True when
+  ## what a node in it draws changed: its parse and its ancestors' go (pixie's
+  ## parseSvg keeps a parse per node at any depth).
   let url = node.attr("image-url")
   if url.len > 0:
     let
@@ -587,6 +589,7 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
       if node.image.isNil and node.tag != "g":
         node.tag = "g"
         node.forgetParse()
+        return true
       return
     let
       w = max(1, round(width * scale).int)
@@ -606,6 +609,7 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
       node.image = image
       node.tag = tag
       node.forgetParse()
+      return true
     return
   var inner = view
   var innerSeen = seen
@@ -650,7 +654,10 @@ proc fillUrlImagesIn(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     inner = UrlViewAll
     innerSeen = UrlViewAll
   for child in node.children:
-    runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner, innerSeen, shown)
+    if runtime.fillUrlImagesIn(owner, context, child, scale, blocking, inner, innerSeen, shown):
+      result = true
+  if result:
+    node.forgetParse()
 
 proc fillUrlImages(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext,
     node: SvgNode, scale: float32, blocking: bool) =

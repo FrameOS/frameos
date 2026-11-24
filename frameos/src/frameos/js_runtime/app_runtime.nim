@@ -4257,7 +4257,7 @@ var embeddedYieldReady*: proc(owner: FrameScene): bool {.nimcall.}
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off.}
 
 proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, scale: float32,
-    index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles) =
+    index: var int, ox, oy: float32, clip: array[4, float32], holes: var UiHoles): bool {.discardable.} =
   ## The layout emitted a `<Scene>` as an `<image>` waiting for its picture
   ## (it could not know the size before): the scenes run here, each at the
   ## size it got, a hole straight into the canvas. Walks the UI's tree, nested
@@ -4289,10 +4289,14 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
           [max(x, clip[0]) * scale, max(y, clip[1]) * scale, min(x + w, clip[2]) * scale, min(y + h, clip[3]) * scale],
           round(w * scale).int, round(h * scale).int, false, context)
     inc index
-    node.image = image
     let tag = if image.isNil: "g" else: "image"
-    if node.tag != tag:
-      node.tag = tag
+    # What it draws changed: its parse goes, and its ancestors' (true), which
+    # hold its elements in theirs (pixie's parseSvg keeps a parse per node at
+    # any depth).
+    result = node.image != image or node.tag != tag
+    node.image = image
+    node.tag = tag
+    if result:
       node.forgetParse()
     return
   var nx = ox
@@ -4313,7 +4317,10 @@ proc fillSceneImages(owner: AppRoot, context: ExecutionContext, node: SvgNode, s
       nx -= parseFloat(view[0]).float32
       ny -= parseFloat(view[1]).float32
   for child in node.children:
-    fillSceneImages(owner, context, child, scale, index, nx, ny, inner, holes)
+    if fillSceneImages(owner, context, child, scale, index, nx, ny, inner, holes):
+      result = true
+  if result:
+    node.forgetParse()
 
 proc placed(v, scale: float32, limit: int): int =
   clamp(round(v * scale).int, 0, limit)

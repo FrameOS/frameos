@@ -216,9 +216,7 @@ proc newestHeldFrame(target: Image): int =
       return i
   -1
 
-proc copyRectIn(target: Image, source: pointer, r: tuple[x, y, w, h: int]) =
-  ## What `source` (another of the panel's buffers) holds in the rectangle
-  ## `r` of `target`.
+proc copyRectInRaw(target: Image, source: pointer, r: tuple[x, y, w, h: int]) =
   if target.format == pfGray4:
     let raw = cast[ptr UncheckedArray[uint8]](source)
     for y in r.y ..< r.y + r.h:
@@ -232,6 +230,12 @@ proc copyRectIn(target: Image, source: pointer, r: tuple[x, y, w, h: int]) =
   for y in r.y ..< r.y + r.h:
     let offset = target.dataIndex(r.x, y) * bpp
     copyMem(d[offset].addr, s[offset].addr, r.w * bpp)
+
+proc copyRectIn(target: Image, source: pointer, r: tuple[x, y, w, h: int]) =
+  ## What `source` (another of the panel's buffers) holds in the rectangle
+  ## `r` of `target`.
+  probe(phCopy):
+    copyRectInRaw(target, source, r)
 
 proc copyFrameIn(target: Image, source: pointer) =
   ## What `source` (another of the panel's buffers) holds where `target` is.

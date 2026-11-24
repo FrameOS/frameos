@@ -289,6 +289,51 @@ waveform after a standby ran 898 ms against 580, so on USB power the
 controller is no longer put in standby; at boot its 1.9 s bring-up runs while
 Wi-Fi joins (done 3.0 s after `restart`, the first render at 7.0 s).
 
+## A tap lays out, sets in type and parses only what changed (2026-11-24)
+
+Where a tap's render went on a SenseCAP Indicator (2026.11.14, `set debug 1`,
+main's `signal()` Calculator sample, one key): render 46 ms (37 without the
+probe), of which **layout 25 to 29 ms, its text 10.5 ms, on every tap**,
+where the same scene on a reTerminal E1003 laid out in 2.2 ms. And a to-do
+list's tap parsed 15 ms of SVG with nothing in the list changed. Three
+caches kept too little:
+
+- **A label kept one arrangement.** A text in a flex row is measured in the
+  room its container offers (106 px for a key), then set in the width it
+  took (19 px): two widths, three or four layout calls a layout. One kept
+  arrangement missed at every other call, and each miss built the memo key
+  and looked it up in the memo's lists, 197 lookups a press of the
+  Calculator (`ui/layout.nim` `arrange`). A text node keeps two now, each
+  with its memo entry; entries are refs the node holds, so a label that did
+  not change is neither looked up nor set, and stays in the memo (`claim`).
+- **A node kept two layout answers.** An item of a row in a column is asked
+  three questions a layout (in the room, at its width, at its width and
+  height): every node of the keypad was laid out again at every press. Four
+  kept (`older`), a press of the test's keypad makes 55 layout calls where
+  it made 335, and looks up 3 texts where it looked up 161
+  (`test_ui_layout.nim` "a key pressed in a grid lays out that key alone").
+- **A changed picture deep in a UI kept its old parse.** pixie keeps the
+  parse of a nested viewport's children since #997, so a node that
+  `fillSceneImages` or `fillUrlImagesIn` changes in place (a `<Scene>`'s
+  picture, an `<img src>` that came in) is forgotten with its ancestors now,
+  not alone. A test pins the list case ("a change in a list that scrolls
+  parses that row alone": 4 nodes parsed when one of twelve rows changes).
+
+The render line gained `copy`, under `damage`: the pixels copied in from
+another of the LCD's buffers.
+
+On the SenseCAP Indicator, main (eae3bfe32) against this change, the same
+board and session, five taps each after a warm one, medians:
+
+| | main | now |
+| --- | --- | --- |
+| Calculator (`signal()`), a key's render, probe on | 45 ms: layout 25.1, text 10.2 | **24 ms**: layout 4.0, text 0.3 |
+| the same, probe off | 38 ms | **20 ms** |
+| the same, a tap's two renders (press and result, `render:burst`) | 53 ms each | **33 ms** each |
+| Calculator (2026.11.14's, `get()` every tap), layout of a render | 32.3 ms, text 10.7 | 7.5 ms, text 0.3 |
+| To-do, a tap in a row's field: parse | 16.3 ms | 4.5 ms (nested parses kept: the board ran this branch's own version, #997's landed first and is the one kept) |
+| Home, a card's toggle | 47 ms | 45 ms (raster 15: the card) |
+
 ## Still open
 
 - **~7 ms of interpreter** around one app node per render, and ~6 ms inside
@@ -300,7 +345,29 @@ Wi-Fi joins (done 3.0 s after `restart`, the first render at 7.0 s).
   ESP32): needs the prelude's Proxy views of `app.config` / `state` /
   `frame` / `context` replaced first.
 - **Dirty flags and relayout boundaries** on the `UiNode` tree, an in-place
-  reconcile: what is left of layout and emit.
+  reconcile: what is left of layout and emit. With four answers kept, a
+  press of a 4x4 keypad still makes 55 layout calls: the pressed key's row,
+  the column and the root are built again, have no answers, and ask their
+  kept children again at each of their own calls.
+- **The first two renders after a scene's first picture copy a whole frame**
+  on an LCD: the other two buffers hold no record of the new scene, so each
+  takes the newest frame in whole (`copy` 22 to 25 ms on the SenseCAP, the
+  first two taps of a Home or To-do panel), and only then repaints by
+  damage. Copying the first picture into the idle buffers while the frame
+  waits (an async DMA copy, recorded as their frames) would take it off
+  those taps.
+- **The scene switcher's open on a SenseCAP** is not the 1.7 to 1.9 s of the
+  2026.11.14 bench run on main: 920 to 954 ms the first time after a boot
+  (raster 546 to 560, of which 385 ms are 187 glyphs drawn into the glyph
+  cache for the first time; layout 188 to 238, text 168 to 218), 121 to
+  206 ms after. The first open's text is the place to look.
+- **The SenseCAP's pixel clock** (12 MHz since 2026-10-25, when 16 and 18
+  dropped frames on 160 MHz DIO flash; the image runs 240 MHz QIO now):
+  `lcd pclk 14` and `16` on 2026-11-24 dropped no frame in 25 s of DVD Logo
+  Bounce, and lost 5 or 6 during a flash write as 12 MHz does. DVD Logo
+  Bounce ran 29.5 fps at 12 and 14 MHz and 27.6 at 16. 14 MHz (49.3 Hz)
+  would take ~3.4 ms off the average wait for the next frame and its scan;
+  not the default until a soak under Wi-Fi traffic says it holds.
 - **Refs with setters and a native `frameos.animate`** (a drag or an
   animation without `get()`): new API, needs a design.
 - **Scroll as a row move**: nothing on the bench board scrolls (the

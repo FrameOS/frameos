@@ -424,6 +424,80 @@ suite "ui layout":
     let again = layoutUi(status("On"), 200, 60, UiInput(), regions, memo).glyphs
     check again.len == 2 and again[0] != on[0]
 
+  test "a key pressed in a grid lays out that key alone":
+    # The Calculator sample's keypad: every label is measured in the room
+    # its cell offers and then set in the width it took, and every cell is
+    # asked three questions a layout. Kept answers for each and two
+    # arrangements per label, a press (the key's active look) neither sets
+    # another label in type nor lays another key out (2026-11-24: ~200 memo
+    # lookups and every node laid out again, 25 ms of a tap on a SenseCAP).
+    proc pad(pressed: int): SvgNode =
+      # The sample's shape: a column of rows of keys, each flex-1.
+      var keys = el("div", "flex-1 flex flex-col gap-2")
+      for r, row in [["C", "±", "%", "÷"], ["7", "8", "9", "×"], ["4", "5", "6", "−"], ["1", "2", "3", "+"]]:
+        let line = el("div", "flex-1 flex gap-2")
+        for c, label in row:
+          line.children.add el("div", (if r * 4 + c == pressed: "bg-neutral-500" else: "bg-neutral-700") &
+            " flex-1 rounded-2xl flex items-center justify-center text-3xl", txt(label))
+        keys.children.add line
+      result = el("div", "flex flex-col gap-3 p-4 bg-black text-white",
+        el("div", "flex flex-col items-end justify-end px-3 h-20",
+          el("span", "text-lg h-6 text-neutral-500", txt("")),
+          el("span", "text-5xl truncate", txt("123"))),
+        keys)
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    let first = layoutUi(pad(-1), 480, 480, UiInput(), regions, memo)
+    discard layoutUi(pad(-1), 480, 480, UiInput(), regions, memo)
+    textsSetForTest = 0
+    layoutsMadeForTest = 0
+    let pressed = layoutUi(pad(4), 480, 480, UiInput(), regions, memo)
+    # The pressed key's label is new (its cell was built again): looked up,
+    # in its widths. What holds it is laid out again; the fifteen other keys
+    # and their labels answer from what they kept. Before: 161 texts looked
+    # up or set and 335 layout calls made for this press, 3 and 55 now.
+    check textsSetForTest <= 4
+    check layoutsMadeForTest <= 60
+    let released = layoutUi(pad(-1), 480, 480, UiInput(), regions, memo)
+    proc drawn(svg: SvgNode): Image = newImage(parseSvg(svg, 480, 480))
+    let (a, b, c) = (drawn(first), drawn(pressed), drawn(released))
+    var pressedDiffers, releasedSame = true
+    pressedDiffers = false
+    for y in 0 ..< 480:
+      for x in 0 ..< 480:
+        if a[x, y] != c[x, y]: releasedSame = false
+        if a[x, y] != b[x, y]: pressedDiffers = true
+    check releasedSame
+    check pressedDiffers
+
+  test "a change in a list that scrolls parses that row alone":
+    # A box that clips is a nested viewport in the SVG, and a list in one (a
+    # to-do list, the switcher's tiles) was parsed whole whenever anything in
+    # it changed: pixie kept parses for the document's own children only.
+    proc list(done: int): SvgNode =
+      result = el("div", "flex flex-col gap-2 p-2 h-full overflow-y-auto bg-slate-900 text-white")
+      for i in 0 ..< 12:
+        result.children.add el("div", (if i == done: "bg-green-600" else: "bg-slate-700") &
+          " p-2 rounded-lg", el("span", "", txt("Item number " & $i)))
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    discard parseSvg(layoutUi(list(-1), 300, 300, UiInput(), regions, memo), 300, 300, reuse = true)
+    discard parseSvg(layoutUi(list(-1), 300, 300, UiInput(), regions, memo), 300, 300, reuse = true)
+    svgNodesParsedForTest = 0
+    let changed = layoutUi(list(3), 300, 300, UiInput(), regions, memo)
+    discard parseSvg(changed, 300, 300, reuse = true)
+    # The viewport and the changed row's box (its label's glyphs are the
+    # same nodes): a handful, where the whole list was some 150.
+    check svgNodesParsedForTest < 20
+    let
+      kept = newImage(parseSvg(changed, 300, 300, reuse = true))
+      fresh = newImage(parseSvg(changed, 300, 300))
+    var same = true
+    for y in 0 ..< 300:
+      for x in 0 ..< 300:
+        if kept[x, y] != fresh[x, y]: same = false
+    check same
+
   test "a tree that did not change comes back as the same nodes":
     # React's diff, without its API: the second layout of an equal tree (a
     # new walk of the same JSX) takes every node back, laid out and emitted.
