@@ -102,6 +102,69 @@ proc normalizeProviderUrl*(value: string): string =
     url = url[0 ..< url.len - 1]
   url
 
+proc providerHostIsLocal*(host: string): bool =
+  ## A host with no third party on the path in any meaningful sense: the
+  ## machine itself, an mDNS name, a private, link-local or CGNAT address.
+  ## The ESP32's rule (embedded/esp32/main/fos_url_guard.c
+  ## `fos_url_host_is_local`), on a bare host: no port, no brackets.
+  let name = host.toLowerAscii()
+  if name.len == 0:
+    return false
+  if name == "localhost" or name.endsWith(".localhost") or name.endsWith(".local"):
+    return true
+  if ':' in name:
+    return name == "::1" or name.startsWith("fe80:") or name.startsWith("fc") or name.startsWith("fd")
+  let parts = name.split('.')
+  if parts.len != 4:
+    return false
+  var b: array[4, int]
+  for index, part in parts:
+    if part.len == 0 or part.len > 3 or not part.allCharsInSet(Digits):
+      return false
+    b[index] = parseInt(part)
+    if b[index] > 255:
+      return false
+  b[0] == 127 or b[0] == 10 or (b[0] == 172 and b[1] in 16 .. 31) or (b[0] == 192 and b[1] == 168) or
+    (b[0] == 169 and b[1] == 254) or (b[0] == 100 and b[1] in 64 .. 127)
+
+proc providerTransportProblem*(providerUrl: string): string =
+  ## "" when `providerUrl` may carry a cloud link, else why not. Everything
+  ## the link carries (the claim token, the bearer, every scene push, the
+  ## identity a cloud login is minted from) is readable and forgeable by
+  ## whoever sits on the path of plain HTTP, so `http://` is taken only for a
+  ## local host (docs/cloud-link.md; the backend's
+  ## `normalize_cloud_provider_url` and the ESP32's `fos_url_transport_ok`
+  ## say the same).
+  let lower = providerUrl.toLowerAscii()
+  if lower.startsWith("https://"):
+    return ""
+  if not lower.startsWith("http://"):
+    return "The FrameOS Cloud server must be an http(s) URL"
+  var hostPort = providerUrl[7 .. ^1]
+  for index, c in hostPort:
+    if c in {'/', '?', '#'}:
+      hostPort.setLen(index)
+      break
+  var host = hostPort
+  if '@' in hostPort:
+    host = "" # userinfo: not a bare host[:port], never guessed at
+  elif hostPort.startsWith("["):
+    let close = hostPort.find(']')
+    host = if close > 0: hostPort[1 ..< close] else: ""
+  elif hostPort.count(':') == 1:
+    host = hostPort[0 ..< hostPort.find(':')]
+  if providerHostIsLocal(host):
+    return ""
+  "The FrameOS Cloud server must use https (http is allowed only for localhost, .local and " &
+    "private-network hosts)"
+
+proc requireProviderTransport*(providerUrl: string) =
+  ## Before anything is sent to a provider: a link that was stored for a
+  ## plain-HTTP host on the open internet sends nothing, and says why.
+  let problem = providerTransportProblem(providerUrl)
+  if problem.len > 0:
+    raise newException(ValueError, problem)
+
 proc providerUrlFromState*(state: JsonNode): string =
   let stored = normalizeProviderUrl(state{"provider_url"}.getStr(""))
   if stored.len > 0: stored else: DEFAULT_CLOUD_PROVIDER_URL

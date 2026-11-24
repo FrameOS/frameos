@@ -63,6 +63,23 @@ suite "link scope helpers":
     check not state.hasKey("scope")
     check not managedEnrollmentRequested(state)
 
+suite "what may carry a cloud link":
+  test "https anywhere, plain http only where nobody is on the path":
+    for url in ["https://cloud.frameos.net", "https://203.0.113.9:8443", "HTTPS://cloud.example",
+                "http://localhost:3000", "http://frameos.local", "http://dev.localhost:3000",
+                "http://127.0.0.1:3000", "http://10.4.0.16:3000", "http://172.16.0.1", "http://172.31.255.1",
+                "http://192.168.1.20:8989", "http://169.254.1.1", "http://100.64.0.1", "http://100.127.9.9:3000",
+                "http://[::1]:3000", "http://[fe80::1]", "http://[fd12:3456::1]:3000"]:
+      check providerTransportProblem(url) == ""
+    for url in ["http://cloud.frameos.net", "http://example.com:3000", "http://203.0.113.9",
+                "http://172.32.0.1", "http://100.128.0.1", "http://192.169.1.1", "http://1.2.3",
+                "http://[2001:db8::1]", "http://localhost@evil.example", "http://10.0.0.1@evil.example/",
+                "http://local", "http://127.0.0.1.evil.example", "http://999.1.1.1", "ftp://localhost", ""]:
+      check providerTransportProblem(url) != ""
+    expect ValueError:
+      requireProviderTransport("http://cloud.example")
+    requireProviderTransport("https://cloud.example")
+
 suite "the local cloud-login switch":
   let granted = %*{"status": "connected", "scope": "frame:link auth:login"}
 

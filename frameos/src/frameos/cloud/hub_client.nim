@@ -2058,6 +2058,9 @@ proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   var socket: WebSocket
   let handle = DialHandle()
   try:
+    # The upgrade carries the link token: never over plain HTTP to a host on
+    # the open internet (link_state.providerTransportProblem).
+    requireProviderTransport(link.providerUrl)
     let dialFut = dialManagementSocket(link.providerUrl, link.wsPath,
                                        link.accessToken, handle)
     if not await withTimeout(dialFut, HubHandshakeTimeoutMs):

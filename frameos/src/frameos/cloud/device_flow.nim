@@ -61,6 +61,7 @@ proc cloudRequest*(providerUrl, path: string, httpMethod = HttpPost,
     headers["Content-Type"] = "application/json"
   if accessToken.len > 0:
     headers["Authorization"] = "Bearer " & accessToken
+  requireProviderTransport(providerUrl)
   let url = providerUrl & "/" & path.strip(leading = true, chars = {'/'})
   let response = boundedRequest(
     url,
@@ -134,6 +135,10 @@ proc startDeviceFlow*(providerUrl, displayName, localOrigin: string,
   ## Replaces any pending flow. Callers check for `connected` first (the admin
   ## route answers 409; the background tick never starts over a live link).
   {.gcsafe.}:
+    # Not a network error to try again later: the address itself is refused.
+    let transportProblem = providerTransportProblem(providerUrl)
+    if transportProblem.len > 0:
+      return DeviceFlowStart(ok: false, status: 400, networkError: false, error: transportProblem)
     var scopesJson = newJArray()
     for scope in scopes:
       scopesJson.add(%scope)

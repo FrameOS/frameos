@@ -91,6 +91,36 @@ suite "cloud enroll route behavior":
     check payload{"status"}.getStr("") == "disconnected"
     check payload{"mode"}.getStr("") == ""
 
+  test "a provider on plain http is taken only on a local host":
+    # The claim token, the link bearer and every scene push ride this
+    # connection: http:// to a host on the open internet is refused where
+    # the address is set and where it is used, with nothing sent.
+    configureServerState(adminConfig(""))
+    let cookie = loginAsAdmin()
+    # /api/admin/login is throttled per window: this sign-in is not one of
+    # the ten the suites below count on.
+    resetRateLimits()
+    let headers = @[("Content-Type", "application/json"), ("Cookie", cookie)]
+    let setInsecure = httpRequest(server.port, "POST", "/api/cloud/provider", headers = headers,
+      body = $(%*{"provider_url": "http://cloud.example.com"}))
+    check setInsecure.status == 400
+    check setInsecure.body.contains("https")
+    let enrollInsecure = httpRequest(server.port, "POST", "/api/cloud/enroll", headers = headers,
+      body = $(%*{"claim_token": "FRCT-x", "provider_url": "http://cloud.example.com"}))
+    check enrollInsecure.status == 400
+    check enrollInsecure.body.contains("https")
+    let connectInsecure = httpRequest(server.port, "POST", "/api/cloud/connect", headers = headers,
+      body = $(%*{"provider_url": "http://cloud.example.com"}))
+    check connectInsecure.status == 502
+    check connectInsecure.body.contains("https")
+    # A development provider on the LAN is still a provider.
+    let setLocal = httpRequest(server.port, "POST", "/api/cloud/provider", headers = headers,
+      body = $(%*{"provider_url": "http://192.168.1.20:3000"}))
+    check setLocal.status == 200
+    check parseJson(setLocal.body){"provider_url"}.getStr("") == "http://192.168.1.20:3000"
+    discard httpRequest(server.port, "POST", "/api/cloud/provider", headers = headers,
+      body = $(%*{"provider_url": "https://cloud.frameos.net"}))
+
   test "status reports whether a self-hosted backend blocks managed mode":
     configureServerState(adminConfig("backend.example.com"))
     var cookie = loginAsAdmin()

@@ -219,6 +219,7 @@ proc enrollRequest(providerUrl: string, accessToken: string,
                                 "Content-Type": "application/json"})
   if accessToken.len > 0:
     headers["Authorization"] = "Bearer " & accessToken
+  requireProviderTransport(providerUrl)
   let response = boundedRequest(
     providerUrl & "/api/frames/enroll",
     httpMethod = HttpPost,
@@ -280,6 +281,11 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
     let normalizedUrl = normalizeProviderUrl(providerUrl)
     if normalizedUrl.len == 0:
       return EnrollOutcome(ok: false, status: 0, error: "invalid_provider_url", retryable: false)
+    # The claim token and the bearer are not sent over plain HTTP to a host
+    # on the open internet (link_state.providerTransportProblem).
+    let transportProblem = providerTransportProblem(normalizedUrl)
+    if transportProblem.len > 0:
+      return EnrollOutcome(ok: false, status: 400, error: transportProblem, retryable: false)
     if claimToken.len == 0 and bearerToken.len == 0:
       return EnrollOutcome(ok: false, status: 0, error: "missing_credentials", retryable: false)
     if otherControlPlaneActive(frameConfig):
