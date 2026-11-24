@@ -146,6 +146,11 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
         async def go():
             if (content_base64 is None) == (url is None):
                 raise McpInputError("Pass exactly one of content_base64 or url.")
+            if ctx.auth.get("token_access") == "read_only":
+                # The upload route refuses the token, but only after the
+                # download: a read-only token must not have the backend
+                # fetch (up to 250 MiB of) a URL it chose.
+                raise McpInputError("This API token is read-only: it cannot add photos.")
             if url is not None:
                 data = await _fetch_photo(url)
                 name = filename or _filename_from_url(url)

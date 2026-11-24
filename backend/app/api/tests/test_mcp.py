@@ -578,6 +578,15 @@ async def test_photo_upload_from_a_url(async_client, photo_library, monkeypatch)
     gone = await call(async_client, "photo_upload", {"confirm": True, "url": "http://127.0.0.1/nope.jpg"})
     assert "404" in result_text(gone)
 
+    # A read-only token is refused before the backend fetches anything.
+    hits.clear()
+    read_only = await mint_token(async_client, access="read_only")
+    refused = await call(async_client, "photo_upload", {
+        "confirm": True, "folder": "Web", "url": "http://127.0.0.1/new/sunset%20glow.jpg",
+    }, headers=read_only)
+    assert refused.get("isError") is True and "read-only" in result_text(refused)
+    assert hits == []
+
 
 def test_duplicate_scenes_rewrites_references():
     scenes = [
