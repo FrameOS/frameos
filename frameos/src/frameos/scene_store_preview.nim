@@ -118,7 +118,7 @@ proc storePreviewAction*(asker, action, args: string) {.nimcall, gcsafe, raises:
       case action
       of "preview": preview(asker, given{"store"}.getStr(), given{"name"}.getStr(), given{"show"}.getBool(true))
       of "discard": discardPreview()
-      of "install", "update", "remove": lastError = "preview_only"
+      of "install", "update", "updateAll", "remove": lastError = "preview_only"
       else: discard
     except Exception:
       lastError = "store_unavailable"

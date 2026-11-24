@@ -727,3 +727,62 @@ suite "the Scene store scene":
     check scene.state{"spot"}{"page"}.getInt() == 2
     check "page=2" in fetched[^1]
     check problems.len == 0
+
+  test "the plane's updates: an entry at the top, Update on each, Update all, one only the owner may take":
+    problems = @[]
+    realStore = true
+    defer:
+      realStore = false
+      facts.delete("updates")
+      facts["error"] = %""
+      facts["done"] = %""
+      facts["busy"] = %""
+    discard settle()
+    facts["installed"] = %*[]
+    facts["previewOnly"] = %false
+    facts["updates"] = %*[
+      {"store": "00000001-0000-4000-8000-000000000001", "name": "Rain radar", "from": 2, "to": 4},
+      {"store": "00000002-0000-4000-8000-000000000002", "name": "Moon phases", "from": 1, "to": 3},
+      {"store": "00000003-0000-4000-8000-000000000003", "name": "Terminal", "from": 1, "to": 2, "owner": true}]
+    for (name, device, size) in [("color", "framebuffer", (800, 480)), ("paper", "waveshare.EPD_7in5_V2", (800, 480)),
+        ("square", "framebuffer", (480, 480))]:
+      let config = frame(size[0], size[1], device)
+      let scene = opened(config, "updates-front-" & name, %*{})[0]
+      # The first row of the categories (side panel) or of the front (narrow).
+      if size[0] >= 600:
+        scene.tap(SideX, SideRow1)
+      else:
+        scene.tap(120, 120)
+      discard draw(scene, config, "updates-" & name)
+      check scene.state{"spot"}{"cat"}.getStr() == "updates"
+      # Update all, and Update on each the frame may take (not the owner's).
+      var actions: seq[string]
+      for y in countup(BelowHeader, size[1] - 10, 8):
+        for x in countup(size[0] div 2, size[0] - 10, 16):
+          asked = @[]
+          scene.tap(x, y)
+          for (_, action, args) in asked:
+            let entry = action & ":" & args{"store"}.getStr()
+            if entry notin actions: actions.add entry
+      checkpoint name & ": " & $actions
+      check "updateAll:" in actions
+      check "update:00000001-0000-4000-8000-000000000001" in actions
+      check "update:00000002-0000-4000-8000-000000000002" in actions
+      check "update:00000003-0000-4000-8000-000000000003" notin actions
+      facts["busy"] = %"updateAll"
+      discard draw(scene, config, "updates-busy-" & name)
+      facts["busy"] = %""
+      facts["done"] = %"updateAll"
+      let left = facts["updates"]
+      facts["updates"] = %*[left[2]]
+      discard draw(scene, config, "updates-done-" & name)
+      facts["updates"] = left
+      facts["done"] = %""
+    # With no plane there is nothing to list, and a spot on Updates goes back.
+    facts["removeAny"] = %true
+    let config = frame(800, 480)
+    let scene = opened(config, "updates-no-plane", %*{"cat": "updates"})[0]
+    check scene.state{"spot"}{"cat"}.getStr() == "featured"
+    facts["removeAny"] = %false
+    check problems.len == 0
+    if problems.len > 0: echo problems
