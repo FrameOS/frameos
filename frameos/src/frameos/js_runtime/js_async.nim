@@ -114,21 +114,23 @@ proc slimAsked(options: JsonNode): ref HtmlSlim =
   let asked = options{"slim"}
   if not asked.isNil and asked.kind == JObject:
     new(result)
-    result[] = initHtmlSlim(asked{"keep"}.getStr(), asked{"drop"}.getStr(), asked{"bare"}.getStr(),
-      asked{"classes"}.getStr())
+    result[].initHtmlSlim()
+    for list in SlimList:
+      result[].ask(list, asked{$list}.getStr())
 
 proc bodyIsHtml(head, start: string): bool =
-  ## By the answer's Content-Type where it has one, else by its first bytes.
-  for line in head.splitLines():
-    if line.len > 13 and cmpIgnoreCase(line[0 .. 12], "content-type:") == 0:
-      return line.toLowerAscii().contains("html")
-  let first = start[0 ..< min(start.len, 600)].toLowerAscii()
-  if first.contains("<rss") or first.contains("<feed") or first.contains("<rdf:rdf"):
-    return false
-  for mark in ["<!doctype html", "<html", "<head", "<body", "<title", "<div", "<table", "<meta", "<p>", "<h1"]:
-    if first.contains(mark):
-      return true
-  false
+  ## By the answer's Content-Type where it has one, else by its first
+  ## letter: markup, and no feed's.
+  let lower = head.toLowerAscii()
+  let at = lower.find("\ncontent-type:")
+  if at >= 0:
+    let html = lower.find("html", at)
+    return html >= 0 and lower.find('\n', at + 1) notin at ..< html
+  var i = 0
+  while i < start.len and start[i] in {' ', '\t', '\r', '\n', '\xEF', '\xBB', '\xBF'}: inc i
+  if i >= start.len or start[i] != '<': return false
+  let first = start[i ..< min(start.len, i + 600)].toLowerAscii()
+  first.find("<rss") < 0 and first.find("<feed") < 0 and first.find("<rdf:rdf") < 0
 
 const
   StreamPieceBytes = 16 * 1024

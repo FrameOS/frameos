@@ -106,22 +106,29 @@ proc learn(s: var HtmlSlim, list: string, flag: uint8) =
       s.table[at].flags = s.table[at].flags or flag
     i = e + 1
 
-proc initHtmlSlim*(keep, drop, bare, classes: string): HtmlSlim =
-  ## `keep`: the attributes that stay (empty: all of them). `drop`: elements
-  ## dropped with all inside them. `bare`: elements dropped, tag and end tag,
-  ## when none of their attributes stays. `classes`: of a `class`, only the
-  ## words on this list stay, and those with a part on it (parts are apart at
-  ## `-` and `_`); empty: the class as it is. Words a space apart, 192 in all.
-  result.space = true
-  result.keepAll = keep.len == 0
-  result.classAll = classes.len == 0
-  result.learn(keep, isKept)
-  result.learn(drop, isDropped)
-  result.learn(bare, isBare)
-  result.learn(classes, isClass)
-  result.learn("script style", isRaw)
-  result.learn("textarea title", isText)
-  result.learn("pre", isPre)
+type SlimList* = enum
+  ## The app's lists (docs/html-slim.md), by the names it gives them.
+  slKeep = "keep"       ## the attributes that stay; none asked: all of them
+  slDrop = "drop"       ## elements dropped with all inside them
+  slBare = "bare"       ## elements dropped, tag and end tag, when none of their attributes stays
+  slClasses = "classes" ## of a `class`, the words that stay, whole or by a part (apart at `-` and `_`); none asked: all
+
+proc initHtmlSlim*(s: var HtmlSlim) =
+  ## A slimmer that knows HTML's own few words; the app's lists come by `ask`.
+  ## Set up in place: the object is a kilobyte.
+  s.space = true
+  s.keepAll = true
+  s.classAll = true
+  s.learn("script style", isRaw)
+  s.learn("textarea title", isText)
+  s.learn("pre", isPre)
+
+proc ask*(s: var HtmlSlim, list: SlimList, words: string) =
+  ## One of the app's lists: words a space apart, 192 in all lists together.
+  if words.len == 0: return
+  if list == slKeep: s.keepAll = false
+  if list == slClasses: s.classAll = false
+  s.learn(words, 1'u8 shl ord(list)) # isKept, isDropped, isBare, isClass
 
 proc starts(p: openArray[char], at: int, word: string): bool =
   ## Whether a name that is `word` starts at p[at].

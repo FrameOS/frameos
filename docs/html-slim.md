@@ -8,7 +8,7 @@ what such an app has no use for: CNN's front page is 7 MB of scripts, style
 sheets and class names around 26 KB of words. So the runtime takes that out
 as the page streams, in `frameos/src/frameos/utils/html_slim.nim`: one
 implementation for a Pi, an ESP32 and the wasm runtime, a few milliseconds a
-megabyte, 4.3 KB of an ESP32's flash. What reaches the app is still
+megabyte, 4.1 KB of an ESP32's flash. What reaches the app is still
 HTML, written one way, a tenth to a half of its size.
 
 The slimmer knows what HTML itself says (what a tag is, a comment, the
@@ -81,7 +81,7 @@ slimming at a few tens of megabytes a second:
 
 ## What it costs, and what reading the rest costs
 
-The module is 4,268 bytes of the ESP32-S3 image. A stream that asked keeps
+The module is 4,141 bytes of the ESP32-S3 image. A stream that asked keeps
 its lists as one table of words by their hash (1 KB and the words): a name
 is looked up once, whatever is asked of it. Walking a list for every
 attribute and class word was half a second of a long article; hashed, and

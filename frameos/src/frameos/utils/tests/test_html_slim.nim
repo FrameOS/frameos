@@ -14,9 +14,16 @@ const
   Bare = "span font"
   Classes = "hidden nav d-none"
 
+proc made(keep = Keep, drop = Drop, bare = Bare, classes = Classes): HtmlSlim =
+  result.initHtmlSlim()
+  result.ask(slKeep, keep)
+  result.ask(slDrop, drop)
+  result.ask(slBare, bare)
+  result.ask(slClasses, classes)
+
 proc slim(html: string, piece = 0, keep = Keep, drop = Drop, bare = Bare, classes = Classes): string =
   ## `html` slimmed, given whole or in pieces of `piece` bytes.
-  var s = initHtmlSlim(keep, drop, bare, classes)
+  var s = made(keep, drop, bare, classes)
   if piece <= 0:
     s.push(html, true, result)
     return
@@ -122,7 +129,7 @@ suite "the HTML slimmer":
           check slim(page, piece) == whole
       for cut in countup(1, page.len - 1, max(1, page.len div 2000)):
         var
-          s = initHtmlSlim(Keep, Drop, Bare, Classes)
+          s = made()
           got = ""
         s.push(page.toOpenArray(0, cut - 1), false, got)
         s.push(page.toOpenArray(cut, page.len - 1), true, got)
