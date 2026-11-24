@@ -786,17 +786,25 @@ bool fos_display_supports_partial(void)
     return s_partial != NULL;
 }
 
-/* Why an update went full, for the line each one logs. */
-static const char *const k_full_reason[] = {
-    [FOS_REFRESH_FULL_UNSUPPORTED] = "glass unknown",
-    [FOS_REFRESH_FULL_NEW_SCENE] = "new scene",
-    [FOS_REFRESH_FULL_CHANGED] = "most of it changed",
-    [FOS_REFRESH_FULL_GHOSTS] = "ghosts",
+/* What each update was, for the line it logs, and the glass's wear. */
+static const char *const k_refresh_kind[] = {
+    [FOS_REFRESH_PARTIAL] = "partial",
+    [FOS_REFRESH_FULL_UNSUPPORTED] = "full refresh (glass unknown)",
+    [FOS_REFRESH_FULL_NEW_SCENE] = "full refresh (new scene)",
+    [FOS_REFRESH_FULL_CHANGED] = "full refresh (most of it changed)",
+    [FOS_REFRESH_FULL_GHOSTS] = "full refresh (ghosts)",
 };
 
 bool fos_display_keeps_picture(void)
 {
     return s_partial != NULL && s_partial->changed != NULL;
+}
+
+static void log_wear(const char *kind, size_t changed, const fos_ghost_wear_t *wear)
+{
+    printf("display: %s, %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n", kind, (unsigned)changed,
+           (unsigned long)wear->deepest / 10, (unsigned long)wear->deepest % 10, (unsigned long)wear->worn,
+           (unsigned long)wear->tiles);
 }
 
 esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bool input_recent,
@@ -846,11 +854,7 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     };
     fos_refresh_kind_t kind = fos_partial_refresh_kind(&input);
     if (kind != FOS_REFRESH_PARTIAL) {
-        if (input.supported && !controller_keeps) {
-            printf("display: full refresh (%s), %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n",
-                   k_full_reason[kind], (unsigned)changed, (unsigned long)wear.deepest / 10,
-                   (unsigned long)wear.deepest % 10, (unsigned long)wear.worn, (unsigned long)wear.tiles);
-        }
+        if (input.supported && !controller_keeps) log_wear(k_refresh_kind[kind], changed, &wear);
         esp_err_t blitted = fos_display_blit(buf, len);
         s_chain_ok = from_render && blitted == ESP_OK;
         return blitted;
@@ -870,9 +874,7 @@ esp_err_t fos_display_update(const uint8_t *buf, size_t len, bool same_scene, bo
     if (!controller_keeps) {
         memcpy(s_glass, buf, len);
         s_wear = wear;
-        printf("display: partial, %u bytes changed, ghosts %lu.%lu deep, %lu of %lu tiles worn\n", (unsigned)changed,
-               (unsigned long)wear.deepest / 10, (unsigned long)wear.deepest % 10, (unsigned long)wear.worn,
-               (unsigned long)wear.tiles);
+        log_wear(k_refresh_kind[FOS_REFRESH_PARTIAL], changed, &wear);
     }
     if (s_partials_since_full++ == 0) s_first_partial_us = s_last_partial_us;
     if (partial) *partial = true;
@@ -1014,9 +1016,7 @@ void fos_display_park_if_idle(int64_t now_us)
         s_panel_awake = stays_up;
         s_partials_since_full = 0;
     } else if (ghosted && !controller_keeps && s_glass_known) {
-        printf("display: full refresh (ghosts, idle), ghosts %lu.%lu deep, %lu of %lu tiles worn, %lu updates\n",
-               (unsigned long)s_wear.deepest / 10, (unsigned long)s_wear.deepest % 10, (unsigned long)s_wear.worn,
-               (unsigned long)s_wear.tiles, (unsigned long)s_partials_since_full);
+        log_wear("full refresh (ghosts, idle)", 0, &s_wear);
         fos_display_blit(s_glass, fos_display_buffer_size());
     } else if (!s_panel_awake) {
         return;
