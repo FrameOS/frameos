@@ -24,8 +24,9 @@ import frameos/utils/process
 import frameos/utils/canvas_log
 import frameos/utils/redacted_url
 import frameos/video/args
+import frameos/video/planes
 
-export args
+export args, planes
 
 const
   MaxSlots = 8
@@ -53,6 +54,14 @@ const
   SlowPace = 1.2
     ## Behind: a frame takes this many frame times to make (makeSeconds).
   DecoderKeep = 32
+  PlaneBuffers = 3
+    ## A plane's frames in flight: one on the glass, one the reader fills, one
+    ## spare for a vblank late.
+  PlaneCopySeconds* = 1.0
+    ## A video on a plane is copied into the canvas this often, and when it
+    ## pauses or ends: what a snapshot or `GET /image` shows of it, and what
+    ## the canvas holds the moment the plane goes. Also how often the scene
+    ## renders for it: nothing of the video is drawn by a render.
 
 type
   Shared = object
@@ -94,6 +103,19 @@ type
     fallbackWhy: array[MessageKeep, char]  ## ... ffmpeg's reason
     fallbackWhyLen: int
     fallbackBusy: bool     ## ... the hardware busy (hardwareBusy), so it stays on
+    # A display plane (video/planes.nim). Asked for by the render thread:
+    planeWanted: bool      ## the next launch shows its frames on `plane`
+    plane: int
+    paused: bool           ## the render thread's pause, which a plane's reader keeps
+    # Told by a plane's reader:
+    planeLaunch: bool      ## the running launch (runGen) is a plane's
+    planeFailed: bool      ## the plane would not show this video: the canvas draws it
+    planeShown: bool       ## a frame is on the glass, `shownBuf`
+    shownBuf: PlaneBuffer  ## ... its memory, which the render thread copies into the canvas
+    shownGen: int          ## ... its launch, number and time in the video
+    shownSeq: int64
+    shownMedia: float
+    shownCount: int        ## frames a plane showed so far, every launch
     # The ring: `count` frames from `head`, oldest first, each `frameWidth` x
     # `frameHeight` (frameSize: a contained picture's own size, else the box).
     buf: ptr UncheckedArray[byte]
@@ -133,6 +155,11 @@ type
     shownMedia: float
     hasFrame: bool
     framed: Rect           ## where in `image` the last frame went (a contained picture's middle)
+    planeSlot: int         ## its display plane (video/planes.nim), -1 for none
+    planeMode: bool        ## its launch shows frames on the plane
+    planeFailed: bool      ## the plane would not show it: the canvas, from now on
+    copiedCount: int       ## the plane frame last copied into `image` (shownCount)
+    copiedAt: float
     lastDraw: float
     pausedAt: float        ## media time it was paused at
     late: float            ## how much later than asked renders come (an average)
@@ -140,6 +167,21 @@ type
     lastUse*: float        ## monotonic seconds the app last asked for it
     endTold: int           ## the launch whose end a render was asked for
     error: string
+
+  VideoPlaneSpot* = object
+    ## Where a video's `<img>` is on the panel when it can be a display plane
+    ## (js_video.nim): a clean hole of the panel's own canvas.
+    ok*: bool
+    x*, y*: int
+
+  PlaneRun = object
+    ## A reader's plane buffers (video/planes.nim), kept across its launches
+    ## of one size: a seek's launch shows its first frame where the last
+    ## one's stayed, nothing between them.
+    bufs: array[PlaneBuffers, PlaneBuffer]
+    count: int
+    width, height: int
+    shown: int             ## the one on the glass, -1 for none
 
 var closing {.threadvar.}: seq[VideoPlayer]
 var retrySeconds* = 10.0
@@ -385,16 +427,23 @@ type LaunchEnd = enum
 
 proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
     srcWidth, srcHeight: int, startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode,
-    made: var int64,
-    exitCode: var int, why: var string, busy: var bool): LaunchEnd =
+    made: var int64, exitCode: var int, why: var string, busy: var bool, run: ptr PlaneRun = nil,
+    plane = -1): LaunchEnd =
   ## One ffmpeg, its frames into the ring until it ends, is told to stop or
   ## nobody takes them. `made`: frames it put in the ring; `exitCode`
   ## ffmpeg's, -1 when it was stopped; `why` its reason when it failed or
   ## exited with an error, and `busy` whether it said the hardware could not
   ## take the video now (hardwareBusy).
+  ##
+  ## With `run` its frames go to display plane `plane` instead (video/planes.nim):
+  ## YUV420 at the source's size, each read straight into one of the run's
+  ## buffers and shown when it is due by the clock this launch keeps, held
+  ## while the player is paused or the plane may not show (no render pass
+  ## drew the video, something over the panel), which the clock waits out.
   let s = arg.shared
+  let onPlane = not run.isNil
   let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads, decode,
-    srcWidth, srcHeight)
+    srcWidth, srcHeight, plane = onPlane)
   let shownDecoder = decodeName(decode)
   withLock s.lock:
     let n = min(shownDecoder.len, DecoderKeep)
@@ -403,7 +452,12 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
     s.decoderLen = n
     s.fast = decode.fast
   let (frameWidth, frameHeight) = frameSize(width, height, fit, srcWidth, srcHeight)
-  let fb = frameBytes(frameWidth, frameHeight, pixels)
+  let fb = if onPlane: yuv420Bytes(run.width, run.height) else: frameBytes(frameWidth, frameHeight, pixels)
+  # A plane buffer whose rows are longer than the frame's (the device's
+  # pitch) takes each frame through this, a row at a time.
+  var staging: seq[byte]
+  if onPlane and run.bufs[0].pitch != run.width:
+    staging = newSeq[byte](fb)
   var p: Process
   try:
     p = startProcessSerialized(ffmpegCommand(), args, options = {poUsePath})
@@ -433,6 +487,9 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
     let frameTime = 1.0 / fps
     let launchedAt = nowSeconds()
     let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
+    # A plane's clock: frame `clockSeq` was shown at `clockStart`.
+    var clockStart = 0.0
+    var clockSeq: int64 = 0
     template drainErr() =
       if errOpen:
         while true:
@@ -451,19 +508,29 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
       while true:
         # A free slot, unless the render thread wants something else.
         var dst: ptr UncheckedArray[byte]
-        withLock s.lock:
-          while true:
+        var fill = -1
+        if onPlane:
+          # A plane buffer that is not on the glass.
+          fill = (if run.shown < 0: 0 else: run.shown + 1) mod run.count
+          withLock s.lock:
             if s.stop or s.gen != gen:
               result = leSuperseded
               break frames
-            if s.count < s.slots:
-              break
-            if nowSeconds() - s.lastTake > IdleSeconds:
-              result = leIdle
-              break frames
-            s.waitFor(200)
-          let slot = (s.head + s.count) mod s.slots
-          dst = cast[ptr UncheckedArray[byte]](addr s.buf[slot * fb])
+          dst = if staging.len > 0: cast[ptr UncheckedArray[byte]](addr staging[0]) else: run.bufs[fill].map
+        else:
+          withLock s.lock:
+            while true:
+              if s.stop or s.gen != gen:
+                result = leSuperseded
+                break frames
+              if s.count < s.slots:
+                break
+              if nowSeconds() - s.lastTake > IdleSeconds:
+                result = leIdle
+                break frames
+              s.waitFor(200)
+            let slot = (s.head + s.count) mod s.slots
+            dst = cast[ptr UncheckedArray[byte]](addr s.buf[slot * fb])
         # One frame into it: the slot is in no one's ring until it is counted.
         # From here to its last byte is how long ffmpeg takes to make one
         # when it is the slow side (its pipe holds 64 KB, not a frame).
@@ -493,17 +560,29 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
             elif osLastError().int32 notin [EAGAIN, EWOULDBLOCK, EINTR]:
               break frames
         var behind = false
+        var media = startAt + float(seqNo - firstSeq) * frameTime
+        if onPlane and staging.len > 0:
+          # The rows into the buffer's: Y, then U and V at half.
+          let b = run.bufs[fill]
+          let (cw, ch) = ((run.width + 1) div 2, (run.height + 1) div 2)
+          let cp = (b.pitch + 1) div 2
+          for r in 0 ..< run.height:
+            copyMem(b.map[r * b.pitch].addr, staging[r * run.width].addr, run.width)
+          let u = run.width * run.height
+          for r in 0 ..< ch:
+            copyMem(b.map[b.uOffset + r * cp].addr, staging[u + r * cw].addr, cw)
+            copyMem(b.map[b.vOffset + r * cp].addr, staging[u + cw * ch + r * cw].addr, cw)
         withLock s.lock:
           if s.stop or s.gen != gen:
             result = leSuperseded
             break frames
-          let slot = (s.head + s.count) mod s.slots
-          s.slotSeq[slot] = seqNo
-          var media = startAt + float(seqNo - firstSeq) * frameTime
           if s.duration > 0 and loopFile:
             media = media mod s.duration
-          s.slotMedia[slot] = media
-          inc s.count
+          if not onPlane:
+            let slot = (s.head + s.count) mod s.slots
+            s.slotSeq[slot] = seqNo
+            s.slotMedia[slot] = media
+            inc s.count
           let arrived = nowSeconds()
           if s.arrivedAt > 0:
             # Not the first: its wait was ffmpeg starting and seeking.
@@ -517,6 +596,63 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
             s.messageLen = 0
           behind = not decode.fast and made + 1 >= SlowAfterFrames and
             s.makeSeconds > frameTime * SlowPace
+        if onPlane:
+          # On the glass when it is due.
+          let live = s.duration <= 0
+          while true:
+            var paused, idle = false
+            withLock s.lock:
+              if s.stop or s.gen != gen:
+                result = leSuperseded
+                break frames
+              paused = s.paused
+              idle = nowSeconds() - s.lastTake > IdleSeconds
+            if idle:
+              result = leIdle
+              break frames
+            let now = nowSeconds()
+            if paused:
+              # Unpaused, the clock starts again at this frame.
+              clockStart = 0
+              withLock s.lock:
+                s.waitFor(50)
+              continue
+            if clockStart > 0 and not live:
+              let due = clockStart + float(seqNo - clockSeq) * frameTime
+              if due - now > 0.003:
+                withLock s.lock:
+                  s.waitFor(max(1, int(min(due - now, 0.05) * 1000)))
+                continue
+              if now - due > ResyncSeconds:
+                # Behind and not catching up: the clock comes to the frames.
+                clockStart = 0
+            var onGlass = false
+            if presentPlane(plane, cast[pointer](s), run.bufs[fill].id, onGlass):
+              if clockStart <= 0:
+                clockStart = nowSeconds()
+                clockSeq = seqNo
+              run.shown = fill
+              withLock s.lock:
+                s.shownBuf = run.bufs[fill]
+                s.shownGen = gen
+                s.shownSeq = seqNo
+                s.shownMedia = media
+                s.planeShown = true
+                inc s.shownCount
+                broadcast(s.cond)
+              break
+            if onGlass:
+              # The display would not show it (a size its scaler refuses):
+              # the player draws it in the canvas from now on.
+              withLock s.lock:
+                s.planeFailed = true
+                broadcast(s.cond)
+              result = leSuperseded
+              break frames
+            # Not on the glass now: held, and the clock waits as for a pause.
+            clockStart = 0
+            withLock s.lock:
+              s.waitFor(50)
         inc seqNo
         inc made
         if behind:
@@ -556,8 +692,41 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
         withLock s.lock:
           s.setMessage(why)
 
+proc dropPlaneRun(s: ptr Shared, run: var PlaneRun) =
+  ## A reader's plane buffers go (a canvas launch, a new size, its end):
+  ## first out of the render thread's reach, then off the device. One a plane
+  ## shows goes off the glass with it.
+  if run.count == 0:
+    return
+  withLock s.lock:
+    for i in 0 ..< run.count:
+      if s.shownBuf.id == run.bufs[i].id:
+        s.shownBuf = PlaneBuffer()
+        s.planeShown = false
+  for i in 0 ..< run.count:
+    freePlaneBuffer(run.bufs[i])
+  run = PlaneRun(shown: -1)
+
+proc makePlaneRun(run: var PlaneRun, width, height: int): bool =
+  ## Buffers for `width` x `height` frames; false when the device has no
+  ## room (its CMA). Kept when they are that size already.
+  if run.count == PlaneBuffers and run.width == width and run.height == height:
+    return true
+  for i in 0 ..< PlaneBuffers:
+    if not newPlaneBuffer(width, height, run.bufs[i]):
+      for j in 0 ..< i:
+        freePlaneBuffer(run.bufs[j])
+      run = PlaneRun(shown: -1)
+      return false
+  run.count = PlaneBuffers
+  run.width = width
+  run.height = height
+  run.shown = -1
+  true
+
 proc readerMain(arg: ReaderArg) {.thread.} =
   let s = arg.shared
+  var run = PlaneRun(shown: -1)
   try:
     let probe = probeSource(arg)
     withLock s.lock:
@@ -585,6 +754,8 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         pixels: VideoPixels
         startAt, maxFps: float
         loop: bool
+        onPlane = false
+        plane = -1
       withLock s.lock:
         while not s.stop and (s.gen == lastGen or s.width <= 0 or s.height <= 0):
           s.waitFor(500)
@@ -598,17 +769,32 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         startAt = s.startAt
         loop = s.loop
         maxFps = s.maxFps
-        let (frameWidth, frameHeight) = frameSize(width, height, fit, probe.width, probe.height)
-        let fb = frameBytes(frameWidth, frameHeight, pixels)
-        let slots = clamp(RingBudgetBytes div max(fb, 1), MinSlots, MaxSlots)
-        if fb != s.frameBytes or slots != s.slots or s.buf.isNil:
+        # On a display plane when the render thread asks and the size is known.
+        onPlane = s.planeWanted and s.plane >= 0 and not s.planeFailed and probe.ok
+        plane = s.plane
+        if s.planeWanted and not onPlane:
+          s.planeFailed = true
+        s.planeLaunch = onPlane
+        if onPlane:
+          # No ring: the frames go to the plane's buffers.
           if not s.buf.isNil:
             deallocShared(s.buf)
-          s.buf = cast[ptr UncheckedArray[byte]](allocShared(fb * slots))
-          s.frameBytes = fb
-          s.slots = slots
-        s.frameWidth = frameWidth
-        s.frameHeight = frameHeight
+            s.buf = nil
+          s.frameBytes = 0
+          s.frameWidth = 0
+          s.frameHeight = 0
+        else:
+          let (frameWidth, frameHeight) = frameSize(width, height, fit, probe.width, probe.height)
+          let fb = frameBytes(frameWidth, frameHeight, pixels)
+          let slots = clamp(RingBudgetBytes div max(fb, 1), MinSlots, MaxSlots)
+          if fb != s.frameBytes or slots != s.slots or s.buf.isNil:
+            if not s.buf.isNil:
+              deallocShared(s.buf)
+            s.buf = cast[ptr UncheckedArray[byte]](allocShared(fb * slots))
+            s.frameBytes = fb
+            s.slots = slots
+          s.frameWidth = frameWidth
+          s.frameHeight = frameHeight
         s.head = 0
         s.count = 0
         s.runGen = gen
@@ -622,6 +808,19 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         s.lastTake = nowSeconds()
       lastGen = gen
       seqNo = 0
+      if onPlane:
+        let (pw, ph) = planeFrameSize(probe.width, probe.height)
+        if run.count > 0 and (run.width != pw or run.height != ph):
+          dropPlaneRun(s, run)
+        if not makePlaneRun(run, pw, ph):
+          # No room for its buffers: the canvas draws it.
+          withLock s.lock:
+            s.planeFailed = true
+            s.planeLaunch = false
+            broadcast(s.cond)
+          continue
+      elif run.count > 0:
+        dropPlaneRun(s, run)
       let fps = outputFps(probe.fps, maxFps)
       # A file plays again from its start inside one ffmpeg; anything else
       # is started again here.
@@ -641,7 +840,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         var why = ""
         var busy = false
         let ended = runLaunch(arg, gen, width, height, fit, pixels, probe.width, probe.height, launchAt, fps,
-          loopFile, seqNo, decode, made, code, why, busy)
+          loopFile, seqNo, decode, made, code, why, busy, (if onPlane: addr run else: nil), plane)
         seqNo += made
         if suspect and not hardware and made > 0:
           # ffmpeg's own played what the hardware would not: the hardware's
@@ -682,6 +881,10 @@ proc readerMain(arg: ReaderArg) {.thread.} =
               deallocShared(s.buf)
               s.buf = nil
               s.frameBytes = 0
+          # A plane that shows a paused video keeps its frame there; one that
+          # does not lets its buffers go.
+          if onPlane and not planeOnGlass(plane, cast[pointer](s)):
+            dropPlaneRun(s, run)
           break
         var again, retry = false
         withLock s.lock:
@@ -720,6 +923,7 @@ proc readerMain(arg: ReaderArg) {.thread.} =
       s.ended = true
       s.setMessage(e.msg)
   finally:
+    dropPlaneRun(s, run)
     withLock s.lock:
       if not s.buf.isNil:
         deallocShared(s.buf)
@@ -740,8 +944,9 @@ proc newVideoPlayer*(source: VideoSource, shownSource: string, loop: bool, maxFp
   s.maxFps = maxFps
   s.startAt = max(startAt, 0)
   s.lastTake = nowSeconds()
+  s.plane = -1
   result = VideoPlayer(shared: s, loop: loop, maxFps: maxFps, lastUse: nowSeconds(), late: 0.004,
-    shownMedia: max(startAt, 0), pausedAt: max(startAt, 0))
+    shownMedia: max(startAt, 0), pausedAt: max(startAt, 0), planeSlot: -1)
   result.placeholder = newImage(16, 9)
   result.placeholder.fill(rgbx(0, 0, 0, 255))
   let cores = countProcessors()
@@ -778,6 +983,10 @@ proc close*(player: VideoPlayer) =
   withLock player.shared.lock:
     player.shared.stop = true
     broadcast(player.shared.cond)
+  if player.planeSlot >= 0:
+    # Off the glass now: its reader shows nothing more on it (planes.nim's owner).
+    releasePlane(player.planeSlot)
+    player.planeSlot = -1
   if not player.image.isNil:
     unregisterCanvas(player.image)
   if player notin closing:
@@ -842,6 +1051,10 @@ proc setPaused*(player: VideoPlayer, paused: bool) =
   if player.paused == paused:
     return
   player.paused = paused
+  if not player.shared.isNil:
+    withLock player.shared.lock:
+      player.shared.paused = paused
+      broadcast(player.shared.cond)
   if paused:
     player.pausedAt = player.mediaNow()
   # Unpaused, the clock starts at the next frame taken.
@@ -882,6 +1095,39 @@ proc copyFrame(image: Image, src: ptr UncheckedArray[byte], width, height, x, y:
     for r in 0 ..< height:
       copyMem(dst[(y + r) * stride + x * bpp].addr, src[r * row].addr, row)
 
+proc yuvInto*(image: Image, x, y, w, h: int, buf: PlaneBuffer, srcX, srcY, srcW, srcH: float) =
+  ## A plane's YUV420 frame into `image`'s `w` x `h` at (`x`, `y`), the
+  ## nearest pixel of its (`srcX`, `srcY`, `srcW`, `srcH`): the canvas's copy
+  ## of a video on a plane, once a second (PlaneCopySeconds), not a frame.
+  if buf.map.isNil or w <= 0 or h <= 0 or buf.width <= 0 or buf.height <= 0:
+    return
+  let cp = (buf.pitch + 1) div 2
+  var xs = newSeq[int](w)
+  for i in 0 ..< w:
+    xs[i] = clamp(int(srcX + (i.float + 0.5) * srcW / w.float), 0, buf.width - 1)
+  for row in 0 ..< h:
+    let ty = y + row
+    if ty < 0 or ty >= image.height:
+      continue
+    let
+      sy = clamp(int(srcY + (row.float + 0.5) * srcH / h.float), 0, buf.height - 1)
+      yRow = sy * buf.pitch
+      cRow = (sy div 2) * cp
+    for col in 0 ..< w:
+      let tx = x + col
+      if tx < 0 or tx >= image.width:
+        continue
+      let
+        sx = xs[col]
+        (r, g, b) = yuvToRgb(int(buf.map[yRow + sx]), int(buf.map[buf.uOffset + cRow + sx div 2]),
+          int(buf.map[buf.vOffset + cRow + sx div 2]))
+        at = ty * image.width + tx
+      case image.format
+      of pfRgb565: image.data16[at] = uint16(((r shr 3) shl 11) or ((g shr 2) shl 5) or (b shr 3))
+      of pfRgbx: image.data[at] = rgbx(r.uint8, g.uint8, b.uint8, 255)
+      of pfGray8: image.data8[at] = uint8((r * 77 + g * 150 + b * 29) shr 8)
+      else: discard
+
 proc pixelsFor*(like: Image): VideoPixels =
   ## The frames' format: the canvas's where a copy of them can be drawn as it
   ## is, RGBA where pixie converts it.
@@ -892,11 +1138,52 @@ proc pixelsFor*(like: Image): VideoPixels =
     of pfGray8: vpGray
     else: vpRgba
 
-proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image): bool =
+proc prepareImage(player: VideoPlayer, w, h: int, like: Image, pixels: VideoPixels, framed: Rect): Rect =
+  ## `player.image` at the box's size and the canvas's format, black around
+  ## where the picture goes (`framed`) when that is new: what a frame then
+  ## repaints, the box or the picture alone.
+  if player.image.isNil or player.image.width != w or player.image.height != h or
+      pixelsFor(player.image) != pixels:
+    if not player.image.isNil:
+      unregisterCanvas(player.image)
+    player.image = if like.isNil or pixels == vpRgba: newImage(w, h) else: newImageLike(like, w, h)
+    player.framed = rect(0, 0, 0, 0)
+  if framed != player.framed:
+    player.image.blacken()
+    player.framed = framed
+    rect(0, 0, w.float32, h.float32)
+  else:
+    framed
+
+proc copyPlaneFrame(player: VideoPlayer, s: ptr Shared, w, h: int, fit: VideoFit, like: Image,
+    pixels: VideoPixels): Rect =
+  ## The frame a plane shows into `player.image`, where the canvas would draw
+  ## it (under the player's lock: its reader keeps the buffer meanwhile).
+  let
+    buf = s.shownBuf
+    (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
+    framed = rect(float32((w - fw) div 2), float32((h - fh) div 2), fw.float32, fh.float32)
+  result = player.prepareImage(w, h, like, pixels, framed)
+  let r = planeRect(0, 0, w, h, ord(fit), fw, fh, buf.width, buf.height)
+  yuvInto(player.image, r.x, r.y, r.w, r.h, buf, r.srcX, r.srcY, r.srcW, r.srcH)
+  player.shownGen = s.shownGen
+  player.shownSeq = s.shownSeq
+  player.shownMedia = s.shownMedia
+  player.hasFrame = true
+
+proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image,
+    spot = VideoPlaneSpot()): bool =
   ## The render thread draws the video at `width` x `height`: the frame due
   ## now goes into `player.image` (true when it changed). The first take, a
   ## new size or fit, or one after the player went idle starts ffmpeg (again)
   ## where it was.
+  ##
+  ## `spot`: the `<img>` can be a display plane, its box's corner on the
+  ## panel there (js_video.nim). The player's frames then go to a plane
+  ## (video/planes.nim), its reader showing each when it is due; a take says
+  ## where the plane goes (claimPlane) and copies the frame it shows into
+  ## `player.image` once a second (PlaneCopySeconds). A take without one puts
+  ## the plane's frame into the image and goes back to the canvas.
   if player.shared.isNil or width <= 0 or height <= 0:
     return false
   reapClosedPlayers()
@@ -916,83 +1203,117 @@ proc take*(player: VideoPlayer, width, height: int, fit: VideoFit, like: Image):
     player.askedAt = 0
   player.lastDraw = now
   player.lastUse = now
+  if spot.ok and not player.planeFailed and player.planeSlot < 0:
+    player.planeSlot = acquirePlane(cast[pointer](s))
   var drawn: Rect
+  var claim = false
+  var placed: PlaneRect
+  var hd = false
   withLock s.lock:
     s.lastTake = now
-    if w != player.width or h != player.height or fit != player.fit or pixels != player.pixels or
-        player.gen == 0 or s.idle:
+    if player.planeMode and s.planeFailed:
+      player.planeFailed = true
+    let planeNow = spot.ok and not player.planeFailed and player.planeSlot >= 0
+    let sized = w != player.width or h != player.height or fit != player.fit or pixels != player.pixels
+    if planeNow != player.planeMode or player.gen == 0 or s.idle or (sized and not planeNow):
+      if player.planeMode and not planeNow and s.planeShown and not s.shownBuf.map.isNil:
+        # Back to the canvas: the frame on the glass into it first, so the
+        # picture does not go back to an older one until ffmpeg's next.
+        drawn = player.copyPlaneFrame(s, w, h, fit, like, pixels)
       player.width = w
       player.height = h
       player.fit = fit
       player.pixels = pixels
+      player.planeMode = planeNow
+      s.planeWanted = planeNow
+      s.plane = player.planeSlot
       player.relaunch(if player.gen == 0: s.startAt else: player.mediaNow())
+    elif sized:
+      # A plane's box moved or changed size: the plane follows, its frames do not change.
+      player.width = w
+      player.height = h
+      player.fit = fit
+      player.pixels = pixels
     if s.failed:
       player.error = s.messageOf()
       return false
     player.error = ""
-    if s.runGen != player.gen or s.count == 0 or s.frameWidth <= 0 or s.frameWidth > w or s.frameHeight > h or
-        s.frameBytes != frameBytes(s.frameWidth, s.frameHeight, pixels):
-      return false
-    # Paused, the picture stays: the first frame of a launch is still shown
-    # (a video that starts paused, a seek while paused).
-    if player.paused and player.shownGen == player.gen and player.hasFrame:
-      return false
-    let fps = max(s.fps, 0.5)
-    let live = s.duration <= 0
-    # The newest frame that is due; older ones are dropped unseen.
-    var pick = -1
-    if player.paused:
-      pick = 0
-    elif player.clockStart <= 0 or player.clockGen != player.gen:
-      pick = 0
-      player.clockGen = player.gen
-      player.clockSeq = s.slotSeq[s.head]
-      player.clockStart = now
-      player.clockFps = fps
-    elif live:
-      pick = s.count - 1
+    if player.planeMode:
+      if s.probed and s.srcWidth > 0 and s.srcHeight > 0:
+        let (fw, fh) = frameSize(w, h, fit, s.srcWidth, s.srcHeight)
+        let (pw, ph) = planeFrameSize(s.srcWidth, s.srcHeight)
+        placed = planeRect(spot.x, spot.y, w, h, ord(fit), fw, fh, pw, ph)
+        claim = true
+        hd = s.srcHeight >= 720
+      if s.planeShown and s.shownGen == player.gen:
+        player.hasFrame = true
+        player.shownGen = s.shownGen
+        player.shownSeq = s.shownSeq
+        player.shownMedia = s.shownMedia
+      # The canvas's copy of it: once a second, and when it pauses or ends.
+      if s.planeShown and not s.shownBuf.map.isNil and s.shownCount != player.copiedCount and
+          (now - player.copiedAt >= PlaneCopySeconds or player.paused or s.ended):
+        drawn = player.copyPlaneFrame(s, w, h, fit, like, pixels)
+        player.copiedCount = s.shownCount
+        player.copiedAt = now
     else:
-      for i in 0 ..< s.count:
-        let slot = (s.head + i) mod s.slots
-        let due = player.clockStart + float(s.slotSeq[slot] - player.clockSeq) / fps
-        if due <= now + 0.25 / fps:
-          pick = i
-        else:
-          break
-      if pick >= 0:
-        let slot = (s.head + pick) mod s.slots
-        let due = player.clockStart + float(s.slotSeq[slot] - player.clockSeq) / fps
-        if now - due > ResyncSeconds:
-          # Behind and not catching up: the clock comes to the frames.
-          player.clockSeq = s.slotSeq[slot]
+      block canvas:
+        if s.runGen != player.gen or s.count == 0 or s.frameWidth <= 0 or s.frameWidth > w or
+            s.frameHeight > h or s.frameBytes != frameBytes(s.frameWidth, s.frameHeight, pixels):
+          break canvas
+        # Paused, the picture stays: the first frame of a launch is still shown
+        # (a video that starts paused, a seek while paused).
+        if player.paused and player.shownGen == player.gen and player.hasFrame:
+          break canvas
+        let fps = max(s.fps, 0.5)
+        let live = s.duration <= 0
+        # The newest frame that is due; older ones are dropped unseen.
+        var pick = -1
+        if player.paused:
+          pick = 0
+        elif player.clockStart <= 0 or player.clockGen != player.gen:
+          pick = 0
+          player.clockGen = player.gen
+          player.clockSeq = s.slotSeq[s.head]
           player.clockStart = now
-    if pick < 0:
-      return false
-    let slot = (s.head + pick) mod s.slots
-    # A contained picture goes in the middle of the box, on black.
-    let framed = rect(float32((w - s.frameWidth) div 2), float32((h - s.frameHeight) div 2),
-      s.frameWidth.float32, s.frameHeight.float32)
-    if player.image.isNil or player.image.width != w or player.image.height != h or
-        pixelsFor(player.image) != pixels:
-      if not player.image.isNil:
-        unregisterCanvas(player.image)
-      player.image = if like.isNil or pixels == vpRgba: newImage(w, h) else: newImageLike(like, w, h)
-      player.framed = rect(0, 0, 0, 0)
-    if framed != player.framed:
-      player.image.blacken()
-      drawn = rect(0, 0, w.float32, h.float32)
-      player.framed = framed
-    else:
-      drawn = framed
-    copyFrame(player.image, cast[ptr UncheckedArray[byte]](addr s.buf[slot * s.frameBytes]),
-      s.frameWidth, s.frameHeight, framed.x.int, framed.y.int)
-    player.shownGen = player.gen
-    player.shownSeq = s.slotSeq[slot]
-    player.shownMedia = s.slotMedia[slot]
-    player.hasFrame = true
-    s.head = (s.head + pick + 1) mod s.slots
-    s.count -= pick + 1
-    broadcast(s.cond)
+          player.clockFps = fps
+        elif live:
+          pick = s.count - 1
+        else:
+          for i in 0 ..< s.count:
+            let slot = (s.head + i) mod s.slots
+            let due = player.clockStart + float(s.slotSeq[slot] - player.clockSeq) / fps
+            if due <= now + 0.25 / fps:
+              pick = i
+            else:
+              break
+          if pick >= 0:
+            let slot = (s.head + pick) mod s.slots
+            let due = player.clockStart + float(s.slotSeq[slot] - player.clockSeq) / fps
+            if now - due > ResyncSeconds:
+              # Behind and not catching up: the clock comes to the frames.
+              player.clockSeq = s.slotSeq[slot]
+              player.clockStart = now
+        if pick < 0:
+          break canvas
+        let slot = (s.head + pick) mod s.slots
+        # A contained picture goes in the middle of the box, on black.
+        let framed = rect(float32((w - s.frameWidth) div 2), float32((h - s.frameHeight) div 2),
+          s.frameWidth.float32, s.frameHeight.float32)
+        drawn = player.prepareImage(w, h, like, pixels, framed)
+        copyFrame(player.image, cast[ptr UncheckedArray[byte]](addr s.buf[slot * s.frameBytes]),
+          s.frameWidth, s.frameHeight, framed.x.int, framed.y.int)
+        player.shownGen = player.gen
+        player.shownSeq = s.slotSeq[slot]
+        player.shownMedia = s.slotMedia[slot]
+        player.hasFrame = true
+        s.head = (s.head + pick + 1) mod s.slots
+        s.count -= pick + 1
+        broadcast(s.cond)
+  if claim:
+    claimPlane(player.planeSlot, placed, hd)
+  if drawn.w <= 0 or player.image.isNil:
+    return false
   # A new frame repaints the picture, not its bars (utils/svg_frames.nim).
   registerCanvas(player.image).drew(drawn)
   true
@@ -1019,6 +1340,23 @@ proc nextFrameIn*(player: VideoPlayer): float =
   let s = player.shared
   let now = nowSeconds()
   var wait = -1.0
+  if player.planeMode:
+    # Its reader shows the frames: the scene renders to say where the plane
+    # goes and to copy its frame into the canvas, about once a second, and
+    # sooner until the plane shows the first (a render places it).
+    withLock s.lock:
+      if s.failed:
+        return if s.retrying: retrySeconds / 2 else: -1
+      if s.planeFailed:
+        return 0.01
+      if s.ended and s.runGen == player.gen and s.planeShown:
+        if player.endTold == player.gen:
+          return -1
+        player.endTold = player.gen
+        return 0.05
+      if not s.probed or s.shownCount == 0:
+        return 0.1
+    return PlaneCopySeconds
   withLock s.lock:
     if s.failed:
       # Opened again in a while: a render now and then shows it back.
@@ -1091,6 +1429,8 @@ proc status*(player: VideoPlayer): VideoStatus =
     for i in 0 ..< s.decoderLen:
       result.decoder[i] = s.decoder[i]
     result.fast = s.fast
+    if player.planeMode and s.planeShown and s.shownGen == player.gen:
+      result.time = s.shownMedia
     if result.state == "error":
       let text = s.messageOf()
       result.error = if text.len > 0: text else: "the video could not be played"

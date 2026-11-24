@@ -3040,6 +3040,65 @@ proc seekHoles*(memo: UiMemo, input: UiInput, yieldReady: bool): UiHoles =
     for i in 0 ..< result.count:
       result.items[i].clean = false
 
+type ImageHole* = object
+  ## An `<img>` of one of the pictures asked for (seekImageHoles), in the UI's
+  ## pixels: its content box, and whether it is clean as a hole is.
+  image*: Image
+  x*, y*, w*, h*: float32
+  clean*: bool
+
+proc seekImageHoles(n: UiNode, ox, oy, opacity: float32, scrolled: bool, images: openArray[Image],
+    found: var seq[ImageHole]) =
+  ## seekHoles' walk for `<img>`s of `images`: anything painted after one
+  ## that lands on it, a second `<img>` of the same picture, opacity, a
+  ## scroller or a place past the UI's corner makes it unclean.
+  template b: untyped = n.box
+  let op = opacity * b.opacity
+  if b.display == diNone or op <= 0:
+    return
+  let
+    x = round(ox + n.x)
+    y = round(oy + n.y)
+    w = round(ox + n.x + n.size.x) - x
+    h = round(oy + n.y + n.size.y) - y
+  if n.kind != ukBox or b.bg.a > 0 or b.gradient > 0 or b.border[0] + b.border[1] + b.border[2] + b.border[3] > 0:
+    for hole in found.mitems:
+      if x < hole.x + hole.w and x + w > hole.x and y < hole.y + hole.h and y + h > hole.y:
+        hole.clean = false
+  if n.kind == ukImage and not n.src.isNil and not n.src.image.isNil and n.src.image in images:
+    let
+      cw = w - b.padX
+      ch = h - b.padY
+    if cw <= 0 or ch <= 0:
+      return
+    for hole in found.mitems:
+      if hole.image == n.src.image:
+        hole.clean = false
+        return
+    found.add ImageHole(image: n.src.image, x: x + b.pad[3] + b.border[3], y: y + b.pad[0] + b.border[0],
+      w: cw, h: ch, clean: op >= 1 and not scrolled and n.x >= 0 and n.y >= 0)
+    return
+  if n.kind != ukBox:
+    return
+  let moves = scrolled or (b.overflowX != ovVisible or b.overflowY != ovVisible) and (n.maxX > 0 or n.maxY > 0)
+  for pass in [false, true]:
+    for c in n.children:
+      if c.box.absolute == pass:
+        c.seekImageHoles(x, y, op, moves, images, found)
+
+proc seekImageHoles*(memo: UiMemo, input: UiInput, images: openArray[Image]): seq[ImageHole] =
+  ## Where the `<img>`s of `images` sit in the UI just laid out, in its own
+  ## pixels, and which could be holes as a `<Scene>` can (seekHoles): a video
+  ## shown on a display plane (video/planes.nim) is one, the UI's pixels under
+  ## it never seen. A popup, a held key's accents or a link's code over the UI
+  ## makes every one unclean until it goes.
+  if memo.isNil or memo.root.isNil or images.len == 0:
+    return
+  memo.root.seekImageHoles(0, 0, 1, false, images, result)
+  if input.open > 0 or input.accents > 0 or input.link.len > 0:
+    for hole in result.mitems:
+      hole.clean = false
+
 proc indexAt*(holes: UiHoles, x, y: float32): int =
   ## The clean hole at this place in the UI, -1 for none.
   for i in 0 ..< holes.count:

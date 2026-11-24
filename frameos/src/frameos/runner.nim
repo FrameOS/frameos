@@ -23,6 +23,7 @@ import frameos/scene_snapshot_writer
 import frameos/local_access
 import frameos/loading_mark_panel
 import frameos/cursor_panel
+import frameos/video/planes
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -574,6 +575,9 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       let markSwitch = loadingMarkSwitches()
       if lastSceneId != sceneId:
         sceneChangedThisCycle = true
+        # The last scene's videos off the display's planes (video/planes.nim):
+        # the new scene's own come back once a render of it draws them.
+        hidePlanes()
         var sceneInitialized = true
         # The fast-render pause is the scene's that rendered fast, not the
         # next one's: a switch away from an animation logs its first render
@@ -680,6 +684,13 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
         pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
+        # Videos on the display's planes (video/planes.nim, docs/video.md
+        # "Planes"): those this frame drew stay, moved to where it drew them;
+        # the rest go, and so do all while the panel shows something over the
+        # scene that a plane would cover, or a colour correction a plane would
+        # not get.
+        settlePlanes(not (self.localAccessDrawn or self.panelOverlayDrawn) and
+          not frameColorSettings.global.hasAdjustments())
         if not (self.localAccessDrawn or self.panelOverlayDrawn):
           clearLocalAccessCodeOnPanel()
         # What the new frame has under the mouse may want another shape.
@@ -1053,6 +1064,9 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
         "contextEvent": "setCurrentScene", "payload": payload})
     return false
   if sceneId != self.currentSceneId:
+    # Its videos off the display's planes now (video/planes.nim), not when
+    # the next scene's first frame is in: the loading mark shows meanwhile.
+    hidePlanes()
     self.beginSceneLoading()
     # "close" carries nothing: it used to be handed this payload,
     # which names the NEXT scene and holds that scene's state. The

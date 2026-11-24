@@ -254,30 +254,76 @@ else:
       frameos_apps.logError(e.owner, "frameos.video " & what & " failed: " & err.msg)
       return nimStringToJS(ctx, $(%*{"error": err.msg}))
 
-  proc logFallback(owner: AppRoot, video: var JsVideo) =
-    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
-    ## ffmpeg's reason (docs/video.md "Hardware"). A video renders fast, and
-    ## the runner turns the scene's log off while a scene does ("render:pause"):
-    ## this line goes out anyway, as the runner's own signals do.
-    let count = video.player.fallbacks()
-    if count == video.toldFallbacks:
-      return
-    video.toldFallbacks = count
+  proc logSignal(owner: AppRoot, payload: JsonNode) =
+    ## A line that goes out even while the runner has the scene's log off (a
+    ## video renders fast: "render:pause"), as the runner's own signals do.
     if owner.isNil or owner.scene.isNil or owner.scene.logger.isNil:
       return
-    let fallback = video.player.lastFallback()
     let logger = owner.scene.logger
     let wasEnabled = logger.enabled
     if not wasEnabled:
       logger.enable()
-    frameos_apps.log(owner, %*{"event": "video:software", "src": shownName(video.src),
-      "decoder": fallback.decoder, "reason": fallback.reason,
-      "hardwareKept": fallback.busy})
+    frameos_apps.log(owner, payload)
     if not wasEnabled:
       logger.disable()
 
+  proc logFallback(owner: AppRoot, video: var JsVideo) =
+    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
+    ## ffmpeg's reason (docs/video.md "Hardware").
+    let count = video.player.fallbacks()
+    if count == video.toldFallbacks:
+      return
+    video.toldFallbacks = count
+    let fallback = video.player.lastFallback()
+    logSignal(owner, %*{"event": "video:software", "src": shownName(video.src),
+      "decoder": fallback.decoder, "reason": fallback.reason,
+      "hardwareKept": fallback.busy})
+
+  var planesTold: bool
+    ## The runtime's log said once whether videos go on display planes here.
+
+  proc videoSpots(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, target: UiTarget,
+      requestedWidth, requestedHeight: int, regionScale: float32): seq[(Image, VideoPlaneSpot)] =
+    ## The videos whose `<img>` can be a display plane (video/planes.nim,
+    ## docs/video.md "Planes"): a clean hole (ui/layout.nim seekImageHoles:
+    ## nothing drawn over it, opaque, not scrolled) of a UI that is the
+    ## panel's own canvas (panel_canvas.nim), drawn whole at its size, on a
+    ## panel the frame does not turn or mirror (the display's scaler cannot).
+    if owner.isNil or owner.frameConfig.isNil or target.isNil or not context.wholeFrame or
+        not context.hasImage or context.image.isNil or context.decodeTargetImage != context.image or
+        requestedWidth != context.image.width or requestedHeight != context.image.height or
+        not context.image.isPanelCanvas:
+      return
+    let config = owner.frameConfig
+    if ((config.rotate mod 360) + 360) mod 360 != 0 or config.flip in ["horizontal", "vertical", "both"]:
+      return
+    let ready = planesReady(context.image.width, context.image.height)
+    if not planesTold:
+      planesTold = true
+      logSignal(owner, %*{"event": "video:planes", "on": ready, "why": planesWhyNot()})
+    if not ready:
+      return
+    var images: seq[Image]
+    for video in runtime.videos:
+      if not video.player.isNil:
+        images.add video.player.placeholder
+        if not video.player.image.isNil:
+          images.add video.player.image
+    for hole in seekImageHoles(target.memo, target.input, images):
+      if not hole.clean:
+        continue
+      let
+        left = round(hole.x * regionScale).int
+        top = round(hole.y * regionScale).int
+        right = round((hole.x + hole.w) * regionScale).int
+        bottom = round((hole.y + hole.h) * regionScale).int
+      if left < 0 or top < 0 or right > requestedWidth or bottom > requestedHeight or right <= left or
+          bottom <= top:
+        continue
+      result.add (hole.image, VideoPlaneSpot(ok: true, x: left, y: top))
+
   proc fillVideosIn(runtime: JsAppRuntime, owner: AppRoot, node: SvgNode, scale: float32, like: Image,
-      wait: var float, taken: var seq[VideoPlayer]) =
+      spots: seq[(Image, VideoPlaneSpot)], wait: var float, taken: var seq[VideoPlayer]) =
     if node.tag == "image" and not node.image.isNil:
       for i in 0 ..< runtime.videos.len:
         let player = runtime.videos[i].player
@@ -301,7 +347,11 @@ else:
               of "none": vfFill
               of "xMidYMid slice": vfCover
               else: vfContain
-        discard player.take(width, height, fit, like)
+        var spot: VideoPlaneSpot
+        for (image, at) in spots:
+          if image == node.image:
+            spot = at
+        discard player.take(width, height, fit, like, spot)
         logFallback(owner, runtime.videos[i])
         let shown = player.shownImage()
         if node.image != shown:
@@ -314,15 +364,15 @@ else:
         return
       return
     for child in node.children:
-      runtime.fillVideosIn(owner, child, scale, like, wait, taken)
+      runtime.fillVideosIn(owner, child, scale, like, spots, wait, taken)
 
   proc fillVideos(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, svg: SvgNode,
-      scale: float32) =
+      scale: float32, spots: seq[(Image, VideoPlaneSpot)] = @[]) =
     ## The layout's `<img>`s of this app's videos: each given the frame that
     ## is due at the size it was laid out at, in panel pixels. The scene
     ## renders again when the next frame is due.
     var wait = -1.0
     var taken: seq[VideoPlayer]
-    runtime.fillVideosIn(owner, svg, scale, pictureFormatLike(context), wait, taken)
+    runtime.fillVideosIn(owner, svg, scale, pictureFormatLike(context), spots, wait, taken)
     if wait >= 0:
       context.nextSleep = if context.nextSleep < 0: wait else: min(context.nextSleep, wait)
