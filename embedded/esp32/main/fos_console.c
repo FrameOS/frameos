@@ -2449,15 +2449,19 @@ static void console_poll_usb_serial_jtag(void)
 static void fos_console_task(void *arg)
 {
     (void)arg;
-    static console_line_state_t states[] = {
+    static const fos_console_channel_t channels[] = {
 #if FOS_CONSOLE_HAS_UART
-        {.channel = FOS_CONSOLE_CHANNEL_UART},
+        FOS_CONSOLE_CHANNEL_UART,
 #endif
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-        {.channel = FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG},
+        FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG,
 #endif
     };
+    /* Zeroed (.bss), the channel set here: an initialised one is a kilobyte
+     * of line buffers stored in the image. */
+    static console_line_state_t states[sizeof(channels) / sizeof(channels[0])];
     const size_t count = sizeof(states) / sizeof(states[0]);
+    for (size_t i = 0; i < count; i++) states[i].channel = channels[i];
 
     console_prompt();
     while (true) {
