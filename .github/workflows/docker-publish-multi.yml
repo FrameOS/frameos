@@ -8,9 +8,14 @@ on:
         required: false
         type: string
 
+# Read-only unless a job says otherwise. The build jobs run hours of build
+# scripts, third-party actions and downloads, some of them on the self-hosted
+# pool, and a write token left in their checkout could replace release assets
+# or push to main. The jobs that write: update-versions (the version commit),
+# publish-npm (dispatches a workflow), build-runtime-image (GHCR) and
+# github-release (the release, a dispatch).
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 jobs:
   # Runner sizing (post-Depot-runners, 2026-08): the bookkeeping jobs
@@ -36,19 +41,21 @@ jobs:
   # after both are fixed.
   update-versions:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write # pushes the version commit to main
     outputs:
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
       docker_version: ${{ steps.release-ref.outputs.docker_version }}
       release_tag: ${{ steps.release-ref.outputs.release_tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: main
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
 
@@ -104,15 +111,18 @@ jobs:
 
   publish-npm:
     name: Publish FrameOS npm packages
-    needs: [update-versions, build-wasm-runtime]
+    needs: [update-versions, sign-wasm-runtime]
     runs-on: ubuntu-24.04
+    permissions:
+      actions: write # gh workflow run
+      contents: read
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
       # is dispatched here rather than run inline. That workflow is also
       # manually dispatchable to re-publish without bumping versions.
       # The run id lets it download the wasm runtime this run already built
-      # (build-wasm-runtime) instead of compiling a second copy: the npm
+      # and signed (sign-wasm-runtime) instead of compiling a second copy: the npm
       # package then ships byte-for-byte what the release attached.
       - name: Dispatch npm publish workflow
         env:
@@ -131,7 +141,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
           fetch-depth: 0
@@ -150,7 +160,7 @@ jobs:
             --output release-notes.md
 
       - name: Upload release notes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
           path: release-notes.md
@@ -163,7 +173,7 @@ jobs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
@@ -191,20 +201,18 @@ jobs:
         run: git config --global http.https://github.com/.version HTTP/1.1
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - uses: docker/setup-qemu-action@v3
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: pnpm/action-setup@v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           run_install: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -213,7 +221,7 @@ jobs:
       # Cache pip's wheel cache: installing backend requirements from a warm
       # cache saves ~35-45s on each of the 11 matrix jobs.
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -276,7 +284,7 @@ jobs:
           rm -rf "release-assets/${archive_root}"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-${{ matrix.slug }}
           path: release-assets/*.tar.gz
@@ -291,12 +299,12 @@ jobs:
     runs-on: epyc-32
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Download prebuilt cross artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: frameos-${{ needs.update-versions.outputs.docker_version }}-*
           path: release-assets
@@ -305,7 +313,7 @@ jobs:
       # Same warm pip cache as the cross matrix: this job's requirements
       # install spent ~31s of its ~150s wall clock building cffi from sdist.
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -387,7 +395,7 @@ jobs:
           ls -lh release-assets/*.img.gz release-assets/*.metadata.json
 
       - name: Upload Buildroot release images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-buildroot-images
           path: |
@@ -418,14 +426,13 @@ jobs:
       packages: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - uses: docker/setup-buildx-action@v3
-
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -437,7 +444,7 @@ jobs:
       # so the cache it writes is the cache this reads. load: true puts the
       # image into the local Docker daemon for the `docker run` below.
       - name: Build ESP32 CI Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           target: esp32-ci
@@ -505,7 +512,7 @@ jobs:
       # the device-side verification and the cloud's 409 unsigned_release make
       # a release with an unsigned image fail there, loudly.
       - name: Upload ESP32 firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # The github-release job downloads artifacts by the
           # frameos-<version>-* name pattern, so this name must keep that
@@ -547,14 +554,13 @@ jobs:
             layouts: "8mb 16mb 32mb"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - uses: docker/setup-buildx-action@v3
-
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -562,7 +568,7 @@ jobs:
 
       # Same target, context and cache as the generic job's build: read-only.
       - name: Build ESP32 CI Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           target: esp32-ci
@@ -613,46 +619,19 @@ jobs:
             '
           ls -lh release-assets/
 
-      # Same signing step as the generic job: every image gets its .minisig,
-      # a missing secret fails the release.
-      - name: Sign ESP32 firmware
-        env:
-          FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${FRAMEOS_FIRMWARE_SIGNING_KEY:-}" ]; then
-            echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish unsigned firmware"
-            exit 1
-          fi
-          # Hash-pinned (tools/requirements-signing.txt): this runner holds
-          # the signing key, so nothing unverified from PyPI runs on it.
-          python3 -m pip install --quiet --require-hashes --break-system-packages \
-              -r tools/requirements-signing.txt \
-            || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
-          keyfile=$(mktemp)
-          printf '%s\n' "$FRAMEOS_FIRMWARE_SIGNING_KEY" > "$keyfile"
-          status=0
-          python3 tools/sign_firmware.py sign --secret "$keyfile" \
-            release-assets/frameos-*.bin || status=$?
-          shred -u "$keyfile"
-          [ "$status" -eq 0 ] || exit "$status"
-          for bin in release-assets/frameos-*.bin; do
-            python3 tools/sign_firmware.py verify \
-              --public release-assets/firmware-signing.pub "$bin"
-          done
-          ls -lh release-assets/
-
+      # NOT signed here, like the generic job: this job runs a container
+      # build and tag-pinned Docker actions, and the signing key must not be
+      # unsealed beside them. The github-release job signs every
+      # frameos-*.bin it downloads.
       - name: Upload ESP32 firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Downloaded by the github-release job by the frameos-<version>-*
           # name pattern.
           name: frameos-${{ needs.update-versions.outputs.docker_version }}-${{ matrix.chip }}-layouts
           path: |
             release-assets/*-${{ matrix.chip }}-*mb.bin
-            release-assets/*-${{ matrix.chip }}-*mb.bin.minisig
             release-assets/*-${{ matrix.chip }}-*mb-app.bin
-            release-assets/*-${{ matrix.chip }}-*mb-app.bin.minisig
             release-assets/*-${{ matrix.chip }}-*mb-size.json
           if-no-files-found: error
 
@@ -660,7 +639,7 @@ jobs:
   # browser preview and headless renderer run, and what the frameos-wasm npm
   # package ships. Built once here from the release commit and attached to
   # the release as frameos-<version>-wasm.tar.gz — signed with the firmware
-  # key in the github-release job like every other .tar.gz — so FrameOS
+  # key by the sign-wasm-runtime job below — so FrameOS
   # Cloud installs the runtime frames actually run instead of compiling one
   # from main (cloud/apps/auth-web/scripts/lib/wasm-runtime.mjs pins the
   # release version from versions.json and verifies the .minisig). The npm
@@ -671,7 +650,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
@@ -679,14 +658,14 @@ jobs:
       # (nim-lang.org drops connections often enough to fail real runs).
       - name: Cache Nim toolchain
         id: cache_nim_toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.choosenim
             ~/.nimble/bin
           key: ${{ runner.os }}-nim-toolchain-2.2.4
 
-      - uses: jiro4989/setup-nim-action@v1
+      - uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
         if: steps.cache_nim_toolchain.outputs.cache-hit != 'true'
         id: setup_nim
         continue-on-error: true
@@ -696,7 +675,7 @@ jobs:
 
       - name: Retry Nim setup once
         if: steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-        uses: jiro4989/setup-nim-action@v1
+        uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
         with:
           nim-version: 2.2.4
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -705,7 +684,7 @@ jobs:
         if: steps.cache_nim_toolchain.outputs.cache-hit == 'true'
         run: echo "$HOME/.nimble/bin" >> "$GITHUB_PATH"
 
-      - uses: mymindstorm/setup-emsdk@v14
+      - uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
           version: 6.0.2
 
@@ -729,11 +708,42 @@ jobs:
           rm -rf "$out"
           ls -lh release-assets/
 
-      # Signed here, on the GitHub-hosted runner, the same way the ESP32
-      # firmware is: the .minisig travels with the artifact so npm-publish.yml
-      # can verify the bundle it downloads by run id (an arbitrary run id is
-      # otherwise a way to publish any tarball to npm), and the github-release
-      # job keeps a signature that already exists.
+      # NOT signed here: this job runs a toolchain installer, the emsdk
+      # action and `nimble install`, and the signing key must not be unsealed
+      # beside them. The tarball goes to sign-wasm-runtime under a name the
+      # release's frameos-<version>-* download does not match.
+      - name: Upload unsigned wasm runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-wasm-runtime-${{ needs.update-versions.outputs.docker_version }}
+          path: release-assets/*-wasm.tar.gz
+          if-no-files-found: error
+
+  # Signs the wasm runtime and nothing else: a GitHub-hosted runner, the
+  # repository's own signing script, first-party actions pinned by commit, no
+  # build. The .minisig travels with the artifact so npm-publish.yml can
+  # verify the bundle it downloads by run id (an arbitrary run id is otherwise
+  # a way to publish any tarball to npm), and the github-release job keeps a
+  # signature that already exists.
+  sign-wasm-runtime:
+    name: Sign wasm runtime
+    needs: [update-versions, build-wasm-runtime]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.update-versions.outputs.release_sha }}
+          fetch-depth: 1
+
+      - name: Download unsigned wasm runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-wasm-runtime-${{ needs.update-versions.outputs.docker_version }}
+          path: release-assets
+
       - name: Sign wasm runtime
         env:
           FRAMEOS_FIRMWARE_SIGNING_KEY: ${{ secrets.FRAMEOS_FIRMWARE_SIGNING_KEY }}
@@ -743,6 +753,8 @@ jobs:
             echo "::error::FRAMEOS_FIRMWARE_SIGNING_KEY secret is not set — refusing to publish an unsigned wasm runtime"
             exit 1
           fi
+          # Hash-pinned (tools/requirements-signing.txt): this runner holds
+          # the signing key, so nothing unverified from PyPI runs on it.
           python3 -m pip install --quiet --require-hashes --break-system-packages \
               -r tools/requirements-signing.txt \
             || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
@@ -757,7 +769,7 @@ jobs:
             --public release-assets/firmware-signing.pub release-assets/frameos-*-wasm.tar.gz
 
       - name: Upload wasm runtime
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # frameos-<version>-* so the github-release job picks it up and
           # attaches it (with its signature) next to the other archives.
@@ -779,7 +791,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
@@ -788,7 +800,7 @@ jobs:
 
       - name: Cache pico-sdk
         id: pico-sdk-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/pico-sdk
           key: pico-sdk-2.1.1
@@ -820,7 +832,7 @@ jobs:
           ls -lh ../../release-assets/
 
       - name: Upload Pico firmware
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # github-release downloads artifacts by the frameos-<version>-*
           # name pattern, so this name must keep that prefix.
@@ -862,20 +874,19 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
-      - uses: docker/setup-buildx-action@v3
-
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -883,7 +894,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -902,7 +913,7 @@ jobs:
           touch "/tmp/digests/${DIGEST#sha256:}"
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: runtime-image-digest-${{ matrix.arch }}
           path: /tmp/digests/*
@@ -919,19 +930,19 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
 
       - name: Download image digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: runtime-image-digest-*
           path: /tmp/digests
           merge-multiple: true
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -946,8 +957,7 @@ jobs:
             echo "DOCKER_VERSION_MAJOR=${DOCKER_VERSION%%.*}"
           } >> "$GITHUB_ENV"
 
-      - uses: docker/setup-buildx-action@v3
-
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Push multi-arch manifest
         shell: bash
         run: |
@@ -977,13 +987,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout frameos
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
           path: frameos
 
       - name: Checkout frameos-home-assistant-addon
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: frameos/frameos-home-assistant-addon
           token: ${{ secrets.ACTIONS_WRITE_TOKEN }}
@@ -991,7 +1001,7 @@ jobs:
           path: home-assistant-addon
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
 
@@ -1052,38 +1062,45 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-wasm-runtime, build-pico-firmware, update-addon-repo, release-notes]
+    needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, sign-wasm-runtime, build-pico-firmware, update-addon-repo, release-notes]
     runs-on: ubuntu-24.04
+    permissions:
+      actions: write # dispatches the Discord notification
+      contents: write # creates the release
     steps:
       # Shallow: this job only needs a working directory for `gh` and the
       # downloaded artifacts. Release notes come from an artifact and the tag
       # is created from RELEASE_SHA, so no history is read here.
       - name: Checkout release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.update-versions.outputs.release_sha }}
           fetch-depth: 1
 
       - name: Download prebuilt cross artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: frameos-${{ needs.update-versions.outputs.docker_version }}-*
           path: release-assets
           merge-multiple: true
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-notes-${{ needs.update-versions.outputs.docker_version }}
 
-      # Signed OTA, both halves, on a GitHub-hosted runner — the ONLY place
-      # the firmware signing key is ever unsealed. A Pi verifies the release
+      # Signed OTA, both halves, on a GitHub-hosted runner. The firmware
+      # signing key is unsealed in two jobs, this one and sign-wasm-runtime,
+      # and neither builds anything or runs a third-party action: only the
+      # repository's signing script, its hash-pinned dependency, and
+      # first-party actions pinned by commit. A Pi verifies the release
       # archive against the key compiled into its binary before unpacking it
       # (frameos/src/frameos/upgrade.nim); an ESP32 verifies its image before
       # switching boot slots (fos_ota.c). The .tar.gz archives and the
       # ESP32 images built on self-hosted runners (which must never see the
-      # key) are signed here; images a GitHub-hosted job already signed keep
-      # their .minisig. An unsigned asset must fail the release, loudly.
+      # key) are signed here, every ESP32 image included; the wasm runtime
+      # sign-wasm-runtime already signed keeps its .minisig. An unsigned asset
+      # must fail the release, loudly.
       #
       # The buildroot .img.gz SD-card images are signed too: the backend's
       # SD-card builder and the cloud's browser flasher fetch and patch them
@@ -1108,7 +1125,8 @@ jobs:
             echo "::error::no release archives found to sign"
             exit 1
           fi
-          # Same hash pin as "Sign ESP32 firmware", for the same reason.
+          # Hash-pinned (tools/requirements-signing.txt): this runner holds
+          # the signing key, so nothing unverified from PyPI runs on it.
           python3 -m pip install --quiet --require-hashes --break-system-packages \
               -r tools/requirements-signing.txt \
             || python3 -m pip install --quiet --require-hashes -r tools/requirements-signing.txt
@@ -1122,7 +1140,7 @@ jobs:
           # committed secret would sign archives no frame accepts, and the
           # failure would only show up on devices.
           # Every signable asset must now carry a signature — the ones signed
-          # here and the ones a GitHub-hosted firmware job signed before upload.
+          # here and the wasm runtime sign-wasm-runtime signed before upload.
           # `verify` also checks what each asset was signed AS: the trusted
           # comment (covered by the global signature) must name the file
           # exactly as it is about to be published. Devices, the backend and

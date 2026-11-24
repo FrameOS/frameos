@@ -75,6 +75,12 @@
 #define LWIP_ALTCP 1
 #define LWIP_ALTCP_TLS 1
 #define LWIP_ALTCP_TLS_MBEDTLS 1
+// The server's certificate must verify, or the handshake fails. lwIP's default
+// is MBEDTLS_SSL_VERIFY_OPTIONAL: the handshake then completes with any
+// certificate at all (self-signed, another host's) and leaves the verdict for
+// the caller to read, which nothing here does. pk_http.c refuses to build
+// without this line.
+#define ALTCP_MBEDTLS_AUTHMODE MBEDTLS_SSL_VERIFY_REQUIRED
 
 // SNTP for certificate validity checks and log timestamps (pk_time.c).
 #define SNTP_SERVER_DNS 1

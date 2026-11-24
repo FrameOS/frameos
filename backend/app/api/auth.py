@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from arq import ArqRedis as Redis
 from app import config as app_config
 from app.models.user import User
-from app.models.api_token import ApiTokenIdentity, authenticate_api_token, is_api_token
+from app.models.api_token import (
+    ApiTokenIdentity,
+    api_token_access_from_prefix,
+    authenticate_api_token,
+    is_api_token,
+)
 from app.database import get_db
 from app.redis import get_redis
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -198,16 +203,52 @@ def request_api_token(request: Request) -> ApiTokenIdentity | None:
     return getattr(request.state, "api_token", None)
 
 
+def _bearer_is_api_token(request: Request) -> bool:
+    """Whether the bearer slot holds an API token, read off the header so the
+    answer does not depend on the user dependency having run first (it sets
+    `request.state.api_token`; a route-level dependency may run before it)."""
+    authorization = request.headers.get("authorization") or ""
+    return authorization.startswith("Bearer ") and is_api_token(authorization.split(" ", 1)[1])
+
+
 def require_session_credential(request: Request) -> None:
     """Refuse API tokens on the routes that turn a session into something
-    more durable (minting a token) or change the login itself (email,
-    password): a leaked token must not be able to make itself permanent."""
-    if request_api_token(request) is not None:
+    more durable (minting a token, linking the install or an identity to a
+    cloud account, the backup recovery code) or change the login itself
+    (email, password, whether the password still works): a leaked token must
+    not be able to make itself permanent. Usable as a route dependency."""
+    if request_api_token(request) is not None or _bearer_is_api_token(request):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "error": "api_token_not_allowed",
                 "message": "This action needs a browser sign-in and is not available to API tokens",
+            },
+        )
+
+
+def request_token_is_read_only(request: Request) -> bool:
+    """Whether this request carries a read-only API token."""
+    token = request_api_token(request)
+    if token is not None:
+        return token.read_only
+    authorization = request.headers.get("authorization") or ""
+    bearer = authorization.split(" ", 1)[1] if authorization.startswith("Bearer ") else ""
+    return is_api_token(bearer) and api_token_access_from_prefix(bearer) == "read_only"
+
+
+def refuse_read_only_token(request: Request) -> None:
+    """Refuse a read-only token on a GET whose answer is credentials (a
+    backup with every frame's keys, a provisioning command list, an SD
+    image). The read-only rule is the HTTP method, and these reads would let
+    "may look" become "may log in to every frame". Usable as a route
+    dependency."""
+    if request_token_is_read_only(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "read_only_token",
+                "message": "This read hands out credentials and is not available to read-only API tokens",
             },
         )
 

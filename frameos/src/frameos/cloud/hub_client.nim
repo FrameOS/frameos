@@ -53,6 +53,8 @@ import std/asyncdispatch
 import std/asyncnet
 import std/httpclient
 import std/net as std_net
+when defined(ssl):
+  import std/openssl
 import std/uri
 import ws
 
@@ -1598,17 +1600,18 @@ proc hubFrameConfig(): FrameConfig =
 # WebSocket session
 # ---------------------------------------------------------------------------
 
-type DialHandle = ref object
-  ## Lets the caller close the HTTP client of a dial it gave up on. Without it
-  ## a timed-out `withTimeout(dialFut, …)` leaves the abandoned future holding
-  ## a connected socket that nothing ever closes — one leaked fd per failed
+type DialHandle* = ref object
+  ## Lets the caller close the socket of a dial it gave up on. Without it a
+  ## timed-out `withTimeout(dialFut, …)` leaves the abandoned future holding a
+  ## connected socket that nothing ever closes — one leaked fd per failed
   ## reconnect, forever.
-  client: AsyncHttpClient
+  socket: AsyncSocket
 
 proc closeClient(handle: DialHandle) =
-  if handle != nil and handle.client != nil:
+  if handle != nil and handle.socket != nil:
     try:
-      handle.client.close() # idempotent: no-ops once disconnected
+      if not handle.socket.isClosed:
+        handle.socket.close()
     except CatchableError:
       discard
 
@@ -1624,63 +1627,158 @@ proc webSocketAcceptFor*(key: string): string =
     raw[i] = char(byte)
   base64.encode(raw)
 
-proc dialManagementSocket(providerUrl, wsPath, accessToken: string,
-                          handle: DialHandle): Future[WebSocket] {.async.} =
+when defined(testing):
+  var hubDialCaFile* = ""
+    ## Tests only: the CA bundle the dial trusts instead of the system's, so
+    ## a test can hold a chain that verifies for the wrong name.
+
+const
+  HubUpgradeMaxLine = 8192
+  HubUpgradeMaxHeaders = 64
+
+proc requireCertificateFor(socket: AsyncSocket, hostname: string) =
+  ## The TLS peer must hold a certificate for `hostname`. Nim's async TLS
+  ## verifies the chain and never the name (only the sync `net` path calls
+  ## `checkCertName`), so without this any publicly trusted certificate for
+  ## any name at all passed, and the link token went to whoever held it.
+  ## Uses only what the stdlib already binds: no new OpenSSL symbol to miss.
+  when defined(ssl) and declared(X509_check_host):
+    if isIpAddress(hostname):
+      raise newException(WebSocketFailedUpgradeError,
+        "An https provider must be named by a hostname, not an address: " &
+        "its certificate cannot be checked")
+    let ssl = socket.sslHandle
+    if ssl == nil or SSL_get_verify_result(ssl) != X509_V_OK:
+      raise newException(WebSocketFailedUpgradeError,
+        "The provider's certificate did not verify")
+    let certificate = SSL_get_peer_certificate(ssl)
+    if certificate.isNil:
+      raise newException(WebSocketFailedUpgradeError,
+        "The provider presented no certificate")
+    const X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT = 0x1.cuint
+    let match = X509_check_host(certificate, hostname.cstring, hostname.len.cint,
+                                X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT, nil)
+    X509_free(certificate)
+    if match != 1:
+      raise newException(WebSocketFailedUpgradeError,
+        "The provider's certificate is not for " & hostname)
+  else:
+    raise newException(WebSocketFailedUpgradeError,
+      "This build cannot check a provider's certificate")
+
+proc dialManagementSocket*(providerUrl, wsPath, accessToken: string,
+                           handle: DialHandle): Future[WebSocket] {.async.} =
   ## Opens the management socket with an Authorization header. The `ws`
-  ## package's client cannot send custom headers, so this performs the same
-  ## HTTP upgrade itself (TLS iff the provider URL is https, matching the
-  ## cloud-link rules for plain-http development providers) and hands the
-  ## upgraded socket to `ws` for framing. Raises CloudHubAuthError on 401.
+  ## package's client cannot send custom headers, and std/httpclient's async
+  ## TLS cannot be asked who it is talking to before it sends them, so this
+  ## performs the HTTP upgrade itself (TLS iff the provider URL is https,
+  ## matching the cloud-link rules for plain-http development providers) and
+  ## hands the upgraded socket to `ws` for framing. Raises CloudHubAuthError
+  ## on 401.
   ##
-  ## Redirects are NOT followed: httpclient would re-send the bearer to
-  ## whatever host a 3xx names, so a 3xx is a failed dial with the location
+  ## Over TLS the request goes out in two parts. The opening lines (path,
+  ## Host, the WebSocket key: nothing secret) drive the handshake; then the
+  ## certificate is checked against the provider's hostname; only then does
+  ## the bearer follow. A peer that is not the provider never sees the token.
+  ##
+  ## Redirects are NOT followed: a 3xx is a failed dial with the location
   ## logged. And the upgrade is accepted only when the reply is a 101 whose
   ## `Sec-WebSocket-Accept` matches the key sent.
   let uri = parseUri(providerUrl & wsPath)
-  # Only build a TLS context for https providers: getDefaultSSL() is eager in
-  # newAsyncHttpClient and newContext() is known to crash against the macOS
-  # system LibreSSL, which plain-http dev providers (and tests) never need.
-  var client =
-    when defined(ssl):
-      if uri.scheme == "https":
-        newAsyncHttpClient(maxRedirects = 0, sslContext = std_net.newContext())
+  let secure = uri.scheme == "https"
+  if not secure and uri.scheme != "http":
+    raise newException(WebSocketFailedUpgradeError,
+      "Unsupported provider scheme: " & uri.scheme)
+  let port =
+    if uri.port.len > 0: Port(parseInt(uri.port))
+    elif secure: Port(443)
+    else: Port(80)
+  let socket = await asyncnet.dial(uri.hostname, port)
+  handle.socket = socket
+  try:
+    var secStr = newString(16)
+    for i in 0 ..< secStr.len:
+      secStr[i] = char rand(255)
+    let secKey = base64.encode(secStr)
+
+    var target = if uri.path.len > 0: uri.path else: "/"
+    if uri.query.len > 0:
+      target.add "?" & uri.query
+    var hostHeader = if ':' in uri.hostname: "[" & uri.hostname & "]" else: uri.hostname
+    if uri.port.len > 0:
+      hostHeader.add ":" & uri.port
+    var request = "GET " & target & " HTTP/1.1\r\n" &
+      "Host: " & hostHeader & "\r\n" &
+      "User-Agent: " & defUserAgent & "\r\n" &
+      "Connection: Upgrade\r\n" &
+      "Upgrade: websocket\r\n" &
+      "Sec-WebSocket-Version: 13\r\n" &
+      "Sec-WebSocket-Key: " & secKey & "\r\n"
+    if secure:
+      when defined(ssl):
+        # Built only for https providers: newContext() is known to crash
+        # against the macOS system LibreSSL, which plain-http dev providers
+        # (and tests) never need.
+        let tls =
+          when defined(testing):
+            if hubDialCaFile.len > 0: std_net.newContext(caFile = hubDialCaFile)
+            else: std_net.newContext()
+          else:
+            std_net.newContext()
+        tls.wrapConnectedSocket(socket, handshakeAsClient, uri.hostname)
+        await socket.send(request) # the handshake happens inside this send
+        requireCertificateFor(socket, uri.hostname)
+        request = ""
       else:
-        newAsyncHttpClient(maxRedirects = 0, sslContext = nil)
-    else:
-      newAsyncHttpClient(maxRedirects = 0)
-  handle.client = client
-  var secStr = newString(16)
-  for i in 0 ..< secStr.len:
-    secStr[i] = char rand(255)
-  let secKey = base64.encode(secStr)
-  client.headers = newHttpHeaders({
-    "Connection": "Upgrade",
-    "Upgrade": "websocket",
-    "Sec-WebSocket-Version": "13",
-    "Sec-WebSocket-Key": secKey,
-    "Authorization": "Bearer " & accessToken,
-  })
-  let response = await client.get($uri)
-  if response.code == Http401 or response.code == Http403:
-    client.close()
-    raise newException(CloudHubAuthError, "Provider rejected the link token: " & $response.code)
-  if response.code.is3xx:
-    let location = response.headers.getOrDefault("Location")
-    client.close()
-    raise newException(WebSocketFailedUpgradeError,
-      "Provider redirected the management socket (" & $response.code &
-      " to " & location & "); redirects are not followed")
-  if response.code != Http101 or
-      response.headers.getOrDefault("Upgrade").toLowerAscii() != "websocket":
-    client.close()
-    raise newException(WebSocketFailedUpgradeError,
-      "Provider did not upgrade the management socket (" & $response.code & ")")
-  let accept = response.headers.getOrDefault("Sec-WebSocket-Accept").strip()
-  if accept != webSocketAcceptFor(secKey):
-    client.close()
-    raise newException(WebSocketFailedUpgradeError,
-      "Provider answered the upgrade with a wrong Sec-WebSocket-Accept")
-  result = WebSocket(tcpSocket: client.getSocket(), readyState: Open, masked: true)
+        raise newException(WebSocketFailedUpgradeError,
+          "This build has no TLS: an https provider cannot be reached")
+    await socket.send(request & "Authorization: Bearer " & accessToken & "\r\n\r\n")
+
+    let statusLine = await socket.recvLine(maxLength = HubUpgradeMaxLine)
+    let statusParts = statusLine.strip().split(' ', 2)
+    var code = 0
+    if statusParts.len >= 2 and statusParts[0].startsWith("HTTP/"):
+      try:
+        code = parseInt(statusParts[1])
+      except ValueError:
+        code = 0
+    var headers = newHttpHeaders()
+    var complete = false
+    for _ in 0 ..< HubUpgradeMaxHeaders:
+      let line = await socket.recvLine(maxLength = HubUpgradeMaxLine)
+      if line.len == 0:
+        break # the peer went away mid-headers
+      if line == "\r\n":
+        complete = true
+        break
+      let colon = line.find(':')
+      if colon > 0:
+        headers.add(line[0 ..< colon].strip(), line[colon + 1 .. ^1].strip())
+    if code == 0 or not complete:
+      raise newException(WebSocketFailedUpgradeError,
+        "Provider did not answer the management socket's upgrade")
+    if code == 401 or code == 403:
+      raise newException(CloudHubAuthError, "Provider rejected the link token: " & $code)
+    if code >= 300 and code < 400:
+      let location = headers.getOrDefault("Location")
+      raise newException(WebSocketFailedUpgradeError,
+        "Provider redirected the management socket (" & $code &
+        " to " & location & "); redirects are not followed")
+    if code != 101 or
+        headers.getOrDefault("Upgrade").toLowerAscii() != "websocket":
+      raise newException(WebSocketFailedUpgradeError,
+        "Provider did not upgrade the management socket (" & $code & ")")
+    let accept = headers.getOrDefault("Sec-WebSocket-Accept").strip()
+    if accept != webSocketAcceptFor(secKey):
+      raise newException(WebSocketFailedUpgradeError,
+        "Provider answered the upgrade with a wrong Sec-WebSocket-Accept")
+  except CatchableError:
+    # Whatever went wrong, this socket goes no further: not to `ws`, and not
+    # left open for the bearer to follow on.
+    if not socket.isClosed:
+      socket.close()
+    raise
+  result = WebSocket(tcpSocket: socket, readyState: Open, masked: true)
 
 type HubPacket = object
   ## One WebSocket packet as the hub session cares about it. Control frames are

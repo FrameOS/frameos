@@ -7,6 +7,7 @@
 #include "lwip/altcp.h"
 #include "lwip/altcp_tcp.h"
 #include "lwip/altcp_tls.h"
+#include "lwip/apps/altcp_tls_mbedtls_opts.h"
 #include "lwip/dns.h"
 #include "lwip/pbuf.h"
 #include "mbedtls/ssl.h"
@@ -16,6 +17,13 @@
 #include "certs/pk_ca_roots.h"
 #include "pk_platform.h"
 #include "pk_time.h"
+
+// The frame's bearer rides every request, and the settings that come back can
+// set the device's own login: an https backend that is not authenticated is
+// worth nothing. lwipopts.h sets this; a build that lost it must not link.
+#if ALTCP_MBEDTLS_AUTHMODE != MBEDTLS_SSL_VERIFY_REQUIRED
+#error "ALTCP_MBEDTLS_AUTHMODE must be MBEDTLS_SSL_VERIFY_REQUIRED (lwipopts.h)"
+#endif
 
 typedef struct {
     const pk_http_request_t *request;
@@ -258,9 +266,14 @@ pk_http_result_t pk_http_request(const pk_http_request_t *request)
             struct altcp_tls_config *config = tls_config();
             state->pcb = config ? altcp_tls_new(config, IP_GET_TYPE(&state->addr)) : NULL;
             if (state->pcb != NULL) {
-                // SNI + hostname verification against the certificate.
-                mbedtls_ssl_set_hostname(
-                    (mbedtls_ssl_context *)altcp_tls_context(state->pcb), state->host);
+                // SNI + hostname verification against the certificate. A
+                // session with no name set would verify the chain alone, so
+                // one that could not take it does not connect.
+                if (mbedtls_ssl_set_hostname(
+                        (mbedtls_ssl_context *)altcp_tls_context(state->pcb), state->host) != 0) {
+                    altcp_abort(state->pcb);
+                    state->pcb = NULL;
+                }
             }
         } else {
             state->pcb = altcp_tcp_new_ip_type(IP_GET_TYPE(&state->addr));

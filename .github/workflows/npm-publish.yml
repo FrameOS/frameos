@@ -119,7 +119,7 @@ jobs:
       # run of this repository's main branch (not a fork's, not a PR's,
       # not some other workflow's artifact that happens to share the name),
       # and the tarball carries a signature by the release key (the
-      # build-wasm-runtime job signs it; release-assets/firmware-signing.pub
+      # sign-wasm-runtime job signs it; release-assets/firmware-signing.pub
       # is the committed public half). The run is usually still going when it
       # dispatches this workflow, so its conclusion is not required, and
       # "still going" is any status but completed: GitHub reports a running

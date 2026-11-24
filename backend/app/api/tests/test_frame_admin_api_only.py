@@ -210,6 +210,7 @@ async def test_assets_panel_verbs_ride_the_admin_api(async_client, db, redis):
         assert thumb.status_code == 200
         assert thumb.content == b"THUMB:photos/b.png"
         assert thumb.headers["content-type"].startswith("image/png")
+        assert thumb.headers["x-content-type-options"] == "nosniff"
 
         renamed = await async_client.post(
             f"/api/frames/{frame.id}/assets/rename", data={"src": "photos/b.png", "dst": "photos/c.png"}
