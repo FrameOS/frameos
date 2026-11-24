@@ -123,6 +123,48 @@ suite "local access challenge":
     check not localAccessRateLimited()
     check consumeLocalAccessCode(code).ok
 
+  test "the window doubles for whoever keeps guessing, and a quiet month ends it":
+    proc spend() =
+      for round in 0 ..< 2:
+        let code = startLocalAccessChallenge().code
+        let wrong = if code == "111111": "222222" else: "111111"
+        for attempt in 1 .. LocalAccessMaxAttempts:
+          discard consumeLocalAccessCode(wrong)
+    # An hour, then two, four ... 128, and 128 from there.
+    var hours = 1.0
+    for window in 0 .. LocalAccessWrongCodeMaxDoublings + 2:
+      spend()
+      check localAccessRateLimited()
+      ageLocalAccessWrongCodesForTest(hours * LocalAccessWrongCodeWindowSeconds - 1.0)
+      check localAccessRateLimited()
+      ageLocalAccessWrongCodesForTest(1.0)
+      check not localAccessRateLimited()
+      if window < LocalAccessWrongCodeMaxDoublings:
+        hours *= 2.0
+    check hours == 128.0
+    # The state file carries it over a restart.
+    spend()
+    let stored = parseJson(readFile(LocalAccessStatePath))["wrongCodes"]
+    check stored["doublings"].getInt() == LocalAccessWrongCodeMaxDoublings
+    forgetLocalAccessWrongCodes()
+    ageLocalAccessWrongCodesForTest(64.0 * LocalAccessWrongCodeWindowSeconds)
+    check localAccessRateLimited()
+    # A month without a wrong code: an hour again.
+    ageLocalAccessWrongCodesForTest(LocalAccessWrongCodeQuietSeconds)
+    check not localAccessRateLimited()
+    spend()
+    ageLocalAccessWrongCodesForTest(LocalAccessWrongCodeWindowSeconds)
+    check not localAccessRateLimited()
+
+  test "a typo now and then never meets the budget":
+    for week in 0 ..< 12:
+      let code = startLocalAccessChallenge().code
+      let wrong = if code == "111111": "222222" else: "111111"
+      check consumeLocalAccessCode(wrong).error == "invalid_code"
+      check consumeLocalAccessCode(code).ok
+      check not localAccessRateLimited()
+      ageLocalAccessWrongCodesForTest(7.0 * 24.0 * 3600.0)
+
   test "a restart does not refill the wrong-code budget":
     # `restart_runtime` and `reboot` come from the same control plane that
     # asks for codes, so the budget lives in the state file.
