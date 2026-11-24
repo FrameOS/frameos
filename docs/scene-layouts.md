@@ -708,10 +708,10 @@ on e-paper the chrome never wakes the frame sooner than its scene would
 - **`reTerminal Sticky`** (`layout-reterminal-sticky`). The Sticky is held
   upright, its panel turned 270, with three keys on its right edge: Action on top
   (Seeed prints AI on it, and `AI` stays its label in event maps, NVS and the
-  fixtures), then UP and DOWN. Once it is the scene's (`primary`, the
-  contract's `buttons.roleByLabel`: what is picked opens), twice it goes back,
-  thrice it goes home to the scene list, and held it talks (the board's
-  preset map). People are told "Action" everywhere a key is named for them: the
+  fixtures), then UP and DOWN. Its presses, in the help's words: once: go (the
+  scene's press, its `primary` role from the contract's `buttons.roleByLabel`:
+  what is picked opens), twice: back, thrice: home (the scene list), held:
+  talk (the board's preset map). People are told "Action" everywhere a key is named for them: the
   layout's help, and the SPA's and the iOS app's button rows (`keyTitle`,
   pinned by `docs/button-map-fixtures.json`). The scene gets the whole glass.
   When the scene list is open (a swipe up, Action pressed thrice, or twice
@@ -719,7 +719,7 @@ on e-paper the chrome never wakes the frame sooner than its scene would
   layout turns it into a home screen. That screen has the time
   and the date, the battery and the signal, and under the list how to get
   around, a line each, read off the frame's event map: what Action does (once,
-  twice, thrice, held: "go", "go back", "go home", "talk"), what UP and
+  twice, thrice, held: `once: go · twice: back · thrice: home · hold: talk`), what UP and
   DOWN do (in the list they move; held, the map's scene back and on) and the
   swipes. That is the one place the layout teaches
   the keys: a rail of tabs beside them on every scene was its first look, and
