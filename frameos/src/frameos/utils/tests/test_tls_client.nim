@@ -102,3 +102,9 @@ suite "a TLS client to an address":
       handshake(otherPort, checked = true)
 
 removeFile(caFile)
+# Down before the process exits: a serving thread still holding its TLS
+# sessions while OpenSSL cleans up at exit crashed the run on CI, after both
+# tests had passed (the TLS listener test's harness closes its server too).
+GC_fullCollect()
+server.close()
+joinThread(thread)
