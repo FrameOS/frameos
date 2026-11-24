@@ -335,6 +335,40 @@ proc refreshFrameColorSettings(self: RunnerThread) =
   setAssetColorsPanelPalette(panelPaletteForDevice(self.frameConfig.device,
     if self.frameConfig.palette.isNil: @[] else: self.frameConfig.palette.colors))
 
+proc panelOutputDevice(device: string): bool =
+  ## Whether a render goes anywhere but the stored image: a panel, or an
+  ## `http.upload` frame's upload (its picture is shown wherever it is sent).
+  let name = device.strip()
+  not (name.len == 0 or name == "web_only" or name == "wasm")
+
+proc drawControlCode(self: RunnerThread, context: ExecutionContext) =
+  render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
+  render_imageApp.App(self.controlCodeRender).run(context)
+  if context.image.isPanelCanvas:
+    notePanelCanvasWritten()
+
+proc drawLinkCode(self: RunnerThread, context: ExecutionContext, linkCode: LinkCodeView) =
+  ## A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
+  ## plus a QR of the claim URL, drawn over the scene.
+  let qrPayload = if linkCode.verificationUriComplete.len > 0:
+      linkCode.verificationUriComplete
+    else:
+      linkCode.verificationUri
+  if qrPayload.len > 0:
+    if self.linkCodeQrImage == nil or self.linkCodeQrKey != qrPayload:
+      data_qrApp.App(self.linkCodeQrData).appConfig.code = qrPayload
+      self.linkCodeQrImage = data_qrApp.App(self.linkCodeQrData).get(context)
+      self.linkCodeQrKey = qrPayload
+    render_imageApp.App(self.linkCodeQrRender).appConfig.image = self.linkCodeQrImage
+    render_imageApp.App(self.linkCodeQrRender).run(context)
+  var linkText = "Connect to FrameOS Cloud\n" & linkCode.userCode
+  if linkCode.verificationUri.len > 0:
+    linkText.add("\n" & linkCode.verificationUri)
+  render_textApp.App(self.linkCodeRender).appConfig.text = linkText
+  render_textApp.App(self.linkCodeRender).run(context)
+  if context.image.isPanelCanvas:
+    notePanelCanvasWritten()
+
 proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: FrameScene): (Image, float) =
   let sceneTimer = getMonoTime()
   let requiredWidth = self.frameConfig.renderWidth()
@@ -374,36 +408,27 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
         discard exportedScene.render(scene, context)
     finally:
       endPanelCanvasFrame()
-    if self.frameConfig.controlCode.enabled:
-      render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
-      render_imageApp.App(self.controlCodeRender).run(context)
-      if context.image.isPanelCanvas:
-        notePanelCanvasWritten()
-    # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
-    # plus a QR of the claim URL, drawn over the scene for the same reason as
-    # the presence code — reading it off the panel is the ownership proof.
-    # The status screen (system/index) draws the code itself, beside its
-    # rows; painting it over that screen too covered the very facts it shows.
+    # Two things drawn over the scene are for whoever stands at the frame and
+    # for nobody who can only fetch its picture: the control QR, which holds
+    # the frame access key in every access mode but `public` (utils/url.nim),
+    # and a pending cloud link code, whose reading off the panel is the
+    # ownership proof. Where there is a panel they go onto its copy alone,
+    # after the render is stored (below), like the local network access code.
+    # Into the render itself only what gives nothing away, or has nowhere
+    # else to be seen: the QR of a `public` frame, and the link code of a
+    # frame without a panel (`web_only`), where the stored render is the
+    # only screen there is.
+    let keyedControlCode = self.frameConfig.controlCode.enabled and self.frameConfig.frameAccess != "public"
+    if self.frameConfig.controlCode.enabled and not keyedControlCode:
+      self.drawControlCode(context)
+    # The status screen (system/index) draws the link code itself, beside
+    # its rows; painting it over that screen too covered the very facts it
+    # shows.
     let linkCode = activeLinkCode()
-    if linkCode.active and scene.id.string != "system/index":
-      let qrPayload = if linkCode.verificationUriComplete.len > 0:
-          linkCode.verificationUriComplete
-        else:
-          linkCode.verificationUri
-      if qrPayload.len > 0:
-        if self.linkCodeQrImage == nil or self.linkCodeQrKey != qrPayload:
-          data_qrApp.App(self.linkCodeQrData).appConfig.code = qrPayload
-          self.linkCodeQrImage = data_qrApp.App(self.linkCodeQrData).get(context)
-          self.linkCodeQrKey = qrPayload
-        render_imageApp.App(self.linkCodeQrRender).appConfig.image = self.linkCodeQrImage
-        render_imageApp.App(self.linkCodeQrRender).run(context)
-      var linkText = "Connect to FrameOS Cloud\n" & linkCode.userCode
-      if linkCode.verificationUri.len > 0:
-        linkText.add("\n" & linkCode.verificationUri)
-      render_textApp.App(self.linkCodeRender).appConfig.text = linkText
-      render_textApp.App(self.linkCodeRender).run(context)
-      if context.image.isPanelCanvas:
-        notePanelCanvasWritten()
+    let linkCodeWanted = linkCode.active and scene.id.string != "system/index"
+    let panelDevice = localAccessPanelDevice(self.frameConfig.device)
+    if linkCodeWanted and not panelDevice:
+      self.drawLinkCode(context, linkCode)
     let image = context.image
 
     var outImage: Image
@@ -419,6 +444,16 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     if outImage.isPanelCanvas and frameColorSettings.global.hasAdjustments():
       notePanelCanvasWritten()
     setLastImage(outImage)
+    # The panel's own: the control QR with the key in it (an `http.upload`
+    # frame's picture is its panel too, as it always was) and the link code.
+    self.panelOverlayDrawn = false
+    context.image = outImage
+    if keyedControlCode and panelOutputDevice(self.frameConfig.device):
+      self.drawControlCode(context)
+      self.panelOverlayDrawn = true
+    if linkCodeWanted and panelDevice:
+      self.drawLinkCode(context, linkCode)
+      self.panelOverlayDrawn = true
     # The local network access code, if one is pending. Drawn AFTER the render is stored
     # (setLastImage copies), so it reaches the panel only: the whole point is
     # that it is readable from in front of the frame, by someone the admin API
@@ -444,6 +479,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   except Exception as e:
     let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
     setLastImage(errorImage)
+    self.panelOverlayDrawn = false
     # A failing scene must not hide the code, or a pending challenge could
     # never be completed on it.
     self.localAccessShownFor = self.localAccessPanelWanted()
@@ -639,11 +675,12 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         # Raised before the panel gets a code, lowered only once a picture
         # without one is on it: in between, `GET /image` must not hand out the
         # driver's own copy of the panel (local_access.nim, the image sinks).
-        if self.localAccessDrawn:
+        # The same for the control QR and a cloud link code (`panelOverlayDrawn`).
+        if self.localAccessDrawn or self.panelOverlayDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
         pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
-        if not self.localAccessDrawn:
+        if not (self.localAccessDrawn or self.panelOverlayDrawn):
           clearLocalAccessCodeOnPanel()
         # What the new frame has under the mouse may want another shape.
         if self.sceneEvents.inputState.cursorVisible and cursorPanelDevice(self.frameConfig.device):
@@ -794,10 +831,10 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           try:
             setNextRenderSeconds(remainingSleepMs / 1000)
             # The held canvas is the frame rendered above, code and all.
-            if self.localAccessDrawn:
+            if self.localAccessDrawn or self.panelOverlayDrawn:
               markLocalAccessCodeOnPanel()
             pushToPanel(driverRetryImage, self.frameConfig.rotate)
-            if not self.localAccessDrawn:
+            if not (self.localAccessDrawn or self.panelOverlayDrawn):
               clearLocalAccessCodeOnPanel()
             # This retry is exactly where a late framebuffer probe lands.
             if detectedDisplayChanged(self.frameConfig):
@@ -1237,6 +1274,12 @@ proc startMessageLoop*(self: RunnerThread, maxIterations = -1): Future[void] {.a
         waitTime = min(waitTime, 20)
       elif waitTime < 200:
         waitTime += 5
+
+when defined(testing):
+  proc configureOverlaysForTest*(self: RunnerThread) =
+    ## What `createRunnerThread` configures before its first render.
+    self.configureControlCode()
+    self.configureLinkCodeOverlay()
 
 proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
   {.cast(gcsafe).}:

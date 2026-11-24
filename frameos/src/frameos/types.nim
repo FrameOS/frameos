@@ -953,6 +953,10 @@ type
     localAccessShownFor*: string
     ## Whether that render actually carries the code (drawing it can fail).
     localAccessDrawn*: bool
+    # The control QR (where it holds the frame access key) or a cloud link
+    # code went onto the panel's copy of the last render, after it was stored:
+    # the image sinks answer from the stored render while it is up.
+    panelOverlayDrawn*: bool
     linkCodeRender*: AppRoot
     linkCodeQrRender*: AppRoot
     linkCodeQrData*: AppRoot

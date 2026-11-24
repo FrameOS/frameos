@@ -9,6 +9,8 @@ import ../scenes
 import ../types
 import ../channels
 import ../local_access
+import ../cloud/link_state
+import ../cloud/device_flow
 import ../loading_mark_panel
 import ../cursor_panel
 import ../driver_abi
@@ -1130,6 +1132,126 @@ proc lanAccessRunner(device: string, store: LogStore, sceneId: SceneId): RunnerT
     triggerRenderNext: false,
     logger: testLogger(config, store)
   )
+
+proc controlCodeRunner(device, access: string, store: LogStore, sceneId: SceneId): RunnerThread =
+  result = lanAccessRunner(device, store, sceneId)
+  result.frameConfig.controlCode = ControlCode(
+    enabled: true,
+    position: "center",
+    size: 2,
+    padding: 1,
+    offsetX: 0,
+    offsetY: 0,
+    qrCodeColor: parseHtmlColor("#000000"),
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+  result.frameConfig.frameAccess = access
+  result.frameConfig.frameAccessKey = "the-access-key"
+  result.configureOverlaysForTest()
+
+proc sceneAlone(image: Image): bool =
+  ## fastRender fills the canvas with one color: anything else was drawn over it.
+  let pixels = image.toContiguousSeq()
+  pixels.allIt(it == pixels[0])
+
+suite "what is drawn over a scene for whoever stands at the frame":
+  # The control QR holds the frame access key unless access is `public`, and
+  # a cloud link code is the proof of standing at the panel. `GET /image`
+  # needs only read access (everyone, on a `protected` frame), and the same
+  # stored render goes to scene snapshots, the cloud's `image_get` and both
+  # planes' previews: neither may be in it.
+  setup:
+    clearEventChannel()
+    clearLocalAccessChallenge()
+    clearLocalAccessCodeOnPanel()
+
+  teardown:
+    clearLocalAccessCodeOnPanel()
+
+  test "a control QR with the access key in it is on the panel's copy only":
+    for access in ["private", "protected"]:
+      let sceneId = "tests/runner/control-code-keyed".SceneId
+      let store = LogStore(entries: @[])
+      var runnerThread = controlCodeRunner("framebuffer", access, store, sceneId)
+      let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+      let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+        render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+      let (panel, _) = runnerThread.renderSceneImage(exported, scene)
+      let stored = getLastImageCopy()
+      check runnerThread.panelOverlayDrawn
+      check sceneAlone(stored)
+      check not sceneAlone(panel)
+
+  test "a public frame's QR holds no key and stays in the render":
+    let sceneId = "tests/runner/control-code-public".SceneId
+    let store = LogStore(entries: @[])
+    var runnerThread = controlCodeRunner("framebuffer", "public", store, sceneId)
+    let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+    let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+      render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+    let (panel, _) = runnerThread.renderSceneImage(exported, scene)
+    let stored = getLastImageCopy()
+    check not runnerThread.panelOverlayDrawn
+    check not sceneAlone(stored)
+    check panel.toContiguousSeq() == stored.toContiguousSeq()
+
+  test "a frame with no panel draws no keyed QR, and an upload's picture is its panel":
+    let sceneId = "tests/runner/control-code-no-panel".SceneId
+    let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+      render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+    block webOnly:
+      let store = LogStore(entries: @[])
+      var runnerThread = controlCodeRunner("web_only", "private", store, sceneId)
+      let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+      let (output, _) = runnerThread.renderSceneImage(exported, scene)
+      check not runnerThread.panelOverlayDrawn
+      check sceneAlone(getLastImageCopy())
+      check sceneAlone(output)
+    block upload:
+      let store = LogStore(entries: @[])
+      var runnerThread = controlCodeRunner("http.upload", "private", store, sceneId)
+      let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+      let (output, _) = runnerThread.renderSceneImage(exported, scene)
+      check runnerThread.panelOverlayDrawn
+      check sceneAlone(getLastImageCopy())
+      check not sceneAlone(output)
+
+  test "a cloud link code goes to the panel, and into the render only where there is no panel":
+    let sceneId = "tests/runner/link-code".SceneId
+    let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+      render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+    let store = LogStore(entries: @[])
+    var panelRunner = lanAccessRunner("framebuffer", store, sceneId)
+    panelRunner.configureOverlaysForTest()
+    var webRunner = lanAccessRunner("web_only", store, sceneId)
+    webRunner.configureOverlaysForTest()
+    # ./state/cloud_link.json is read relative to the working directory.
+    let home = getCurrentDir()
+    let dir = getTempDir() / ("frameos-link-code-test-" & $getCurrentProcessId())
+    createDir(dir)
+    setCurrentDir(dir)
+    try:
+      saveCloudLinkState(%*{"status": "connecting", "user_code": "ABCD-2345",
+        "verification_uri": "https://cloud.example/device", "expires_epoch": int(epochTime()) + 600})
+      check activeLinkCode().active
+      block panel:
+        let scene = sixtySecondInit(sceneId, panelRunner.frameConfig, panelRunner.logger, %*{})
+        let (output, _) = panelRunner.renderSceneImage(exported, scene)
+        check panelRunner.panelOverlayDrawn
+        check sceneAlone(getLastImageCopy())
+        check not sceneAlone(output)
+      block noPanel:
+        # The stored render is the only screen a `web_only` frame has.
+        let scene = sixtySecondInit(sceneId, webRunner.frameConfig, webRunner.logger, %*{})
+        let (output, _) = webRunner.renderSceneImage(exported, scene)
+        check not webRunner.panelOverlayDrawn
+        check not sceneAlone(getLastImageCopy())
+        check not sceneAlone(output)
+    finally:
+      saveCloudLinkState(%*{"status": "disconnected"})
+      check not activeLinkCode().active
+      setCurrentDir(home)
+      removeDir(dir)
 
 suite "the local network access code on the panel":
   setup:
