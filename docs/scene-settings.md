@@ -256,6 +256,46 @@ was off can still be fixed at the frame, the device has the last word:
 host writes its facts as text, not with cJSON, and the page's words live once,
 in the scene: keep it that lean.
 
+### A boot that does not wait for the network
+
+A frame with a touch screen is set up on that screen: it never waits for its
+network before it shows a scene, and never puts up a setup hotspot in its
+place. The page above is where it joins.
+
+- **ESP32** (`fos_wake_wifi_plan` in `main/fos_wake.c`, host-tested in
+  `test_fos_wake.c`; `main.c` and `fos_client.c` carry it out): a board whose
+  touch panel answered at boot (the SenseCAP Indicator, the Sunton, the round
+  AMOLED, the reTerminal Sticky and E1003) starts its scenes at once and joins
+  the stored network behind them. The scene renders again when the join
+  lands, but only if it drew before it: a join that beats the first render
+  costs e-paper no second refresh. Its first render does not wait for a cloud
+  session's queued commands either (up to 20 s): what they bring renders
+  after. A sleeping e-paper board's timer wake, which nobody tapped, waits for
+  the join before its one render, at most 45 s after boot, and a touch, a key
+  or a console event ends that wait (the log's `wifi:wait` says how it ended:
+  `joined`, `input`, `timeout`). A join that does not come opens no hotspot:
+  the board draws without it and sleeps again, where it used to stay up with
+  its hotspot until the network came back. With no network saved and no scene
+  to show, the first picture is this page, not a status screen that says to
+  swipe for it.
+- **Linux** (`frameos/boot_network.nim`, `test_boot_network.nim`): a
+  HyperPixel's scene starts at once. The network check (`networkCheck`), the
+  supplicant's join and the boot hotspot's decision run on a thread of their
+  own (`startNetworkCheckBehind` in `portal.nim`), the scene renders again when
+  the check answers, and while this page is offered a failed check raises no
+  boot hotspot (`wifiHotspot: bootOnly`). With the page turned off, the hotspot
+  is still the way to set the network at the frame, and comes up behind the
+  scene.
+
+**What still waits:** every frame without a touch screen (e-paper, an HDMI
+screen, which may have no input at all, an ESP32 with no touch panel: the 45 s
+join and the hotspot when it fails); an ESP32 asked to update at boot (console
+`ota`, the backend's action), which joins first and then runs the updater; the
+timer wake above; and a HyperPixel whose frame says `networkCheckOnTouch`
+("Wait on the touch screen too" in a backend's Network settings), which waits
+for the check and raises its boot hotspot like any other frame. An ESP32 has
+no network check setting: `networkCheck*` are a Linux frame's.
+
 ## Saving
 
 **Save** is `setCurrentScene {sceneId: from, state: values}`, from the
