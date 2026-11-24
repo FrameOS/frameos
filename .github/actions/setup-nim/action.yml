@@ -42,14 +42,14 @@ runs:
     - name: Cache Nim toolchain
       if: steps.warm.outputs.warm != 'true'
       id: cache_nim_toolchain
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: |
           ~/.choosenim
           ~/.nimble/bin
         key: ${{ runner.os }}-nim-toolchain-${{ inputs.nim-version }}
 
-    - uses: jiro4989/setup-nim-action@v1
+    - uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
       if: steps.warm.outputs.warm != 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true'
       id: setup_nim
       continue-on-error: true
@@ -59,7 +59,7 @@ runs:
 
     - name: Retry Nim setup once
       if: steps.warm.outputs.warm != 'true' && steps.cache_nim_toolchain.outputs.cache-hit != 'true' && steps.setup_nim.outcome == 'failure'
-      uses: jiro4989/setup-nim-action@v1
+      uses: jiro4989/setup-nim-action@2af8a1a117733b60524c7c873a4cc91885796cfe # v1.5.2
       with:
         nim-version: ${{ inputs.nim-version }}
         repo-token: ${{ inputs.github-token }}
@@ -70,7 +70,7 @@ runs:
 
     - name: Cache nimble packages
       if: steps.warm.outputs.warm != 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
       with:
         path: ~/.nimble/pkgs2
         key: ${{ runner.os }}-nimble-${{ hashFiles('frameos/nimble.lock', 'frameos/remote/nimble.lock') }}
