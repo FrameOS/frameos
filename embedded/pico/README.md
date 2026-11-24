@@ -174,7 +174,11 @@ a frame that stays dark until somebody presses a button.
 `https://` backends work: TLS 1.2 via pico-sdk's mbedTLS behind lwIP altcp,
 with hostname verification against an embedded bundle of the major public
 CA roots (`src/certs/pk_ca_roots.h` — ISRG, DigiCert, Amazon, GlobalSign,
-USERTrust, GoDaddy; swap in your own root for a private CA). Certificate
+USERTrust, GoDaddy; swap in your own root for a private CA). The certificate
+has to verify (`ALTCP_MBEDTLS_AUTHMODE` in `src/lwipopts.h`; lwIP's default
+would complete the handshake with any certificate): a self-signed one, or one
+for another name, fails the request, so a backend with a private certificate
+needs its root in the bundle or plain `http://` on a LAN you trust. Certificate
 validity periods check against the RTC / SNTP time, falling back to a
 build-time floor when neither has it. The device's *own* server is plain HTTP
 (no TLS listener): on the LAN it is guarded by the frame's API key or device
