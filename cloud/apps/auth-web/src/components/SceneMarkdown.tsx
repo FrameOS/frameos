@@ -17,10 +17,24 @@ export function SceneMarkdown({ description }: { description: string | null }) {
               <a
                 {...props}
                 href={href}
-                {...(external ? { rel: "noreferrer", target: "_blank" } : {})}
+                {...(external ? { rel: "noopener noreferrer", target: "_blank" } : {})}
               >
                 {children}
               </a>
+            );
+          },
+          // A description is its author's text on everyone's page: an <img>
+          // would be fetched from wherever it says the moment the listing is
+          // drawn (who looked, from where). An image is a link to open by
+          // choice; a scene's pictures are its cover and gallery.
+          img: ({ alt, src }) => {
+            const label = alt ? `Image: ${alt}` : "Image";
+            return typeof src === "string" && src ? (
+              <a href={src} rel="noopener noreferrer" target="_blank">
+                {label}
+              </a>
+            ) : (
+              <span>{label}</span>
             );
           },
         }}
