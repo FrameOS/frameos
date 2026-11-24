@@ -938,7 +938,10 @@
   While someone taps, slow chores wait (`input_hold_on()` in `fos_client.c`, the
   rule in `fos_animation.c`): the render task drains the touch queue, so a new
   network call or flash write on it goes behind the hold too, and a full refresh
-  that only clears ghosts waits for the idle frame. Better still, a chore leaves
+  that only clears ghosts waits for the idle frame. Whether the ghosts are due
+  one is the glass's wear, the pixels flipped per 16x16 tile since the last full
+  refresh (`fos_ghost_add`, doc section "The ghosts, counted where they are"),
+  never a count of updates or a timer. Better still, a chore leaves
   the render task: scene state is written by `scene_state_writer_task`
   (`main.c`), a frame that stays awake does its backend round trips (logs,
   picture push, pulls) on `backend_link_task` in `fos_client.c`, which applies
