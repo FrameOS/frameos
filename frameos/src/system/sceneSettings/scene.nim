@@ -41,6 +41,7 @@ import frameos/ui/events
 import frameos/ui/keyboard
 import frameos/frame_settings_hooks
 export frame_settings_hooks
+import frameos/scene_store_hooks
 import frameos/ui/theme
 import frameos/ui/tree
 import frameos/utils/image
@@ -79,6 +80,7 @@ const
   ALayout = 4
   ACheckUpdate = 5
   AInstallUpdate = 6
+  AUpdateScenes = 7
   # The host's `updateState` (fos_ota_check_t): the words are the page's.
   UpdateChecking = 1
   UpdateAvailable = 3
@@ -169,6 +171,28 @@ proc openedOnFrame(self: SceneSettingsScene): bool =
 proc frameAction(action: string) =
   if not frameSettingsAction.isNil:
     frameSettingsAction(action)
+
+proc sceneUpdates(asker: string): tuple[listed, movable: int, busy: bool] =
+  ## The store scenes on the frame with a newer version, as the scene store's
+  ## host has them from the control plane (docs/scene-store.md "What has
+  ## updates"): how many, how many the frame may take itself, and whether it
+  ## takes them now. `listed` is -1 where nothing is known (no plane, no host).
+  result.listed = -1
+  let read = sceneStoreRead
+  if read.isNil:
+    return
+  try:
+    let
+      facts = parseJson(read(asker))
+      updates = facts{"updates"}
+    result.busy = facts{"busy"}.getStr() == "updateAll"
+    if not updates.isNil and updates.kind == JArray:
+      result.listed = updates.len
+      for row in updates.elems:
+        if not row{"owner"}.getBool():
+          inc result.movable
+  except CatchableError:
+    discard
 
 template uiId(self: SceneSettingsScene): string =
   ## Its UI's target (ui/events.nim): one a scene where built-in scenes stay
@@ -541,6 +565,9 @@ proc press(self: SceneSettingsScene, action: int) =
   elif self.state{"confirm"}.getInt(-1) == action:
     if action == AInstallUpdate:
       frameAction("installUpdate")
+    elif action == AUpdateScenes:
+      if not sceneStoreAction.isNil:
+        sceneStoreAction(self.uiId, "updateAll", "{}")
     else:
       sendEvent(if action == ARestart: evRestart else: evReboot, newJObject(), eoPanel)
   else:
@@ -853,6 +880,14 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     card.line(look, "Update", info{"updateVersion"}.getStr() & " available")
   elif update >= 0:
     card.line(look, "Update", UpdateWords[update])
+  # The store scenes with a newer version, where the control plane says.
+  let scenes = sceneUpdates(self.uiId)
+  if scenes.busy:
+    card.line(look, "Scenes", "Updating\xe2\x80\xa6")
+  elif scenes.listed == 0:
+    card.line(look, "Scenes", UpdateWords[2])
+  elif scenes.listed > 0:
+    card.line(look, "Scenes", $scenes.listed & (if scenes.listed == 1: " update" else: " updates"))
   result.children.add card.role("card")
   let
     fields = self.frameFields(info, autoScale, unit)
@@ -882,6 +917,8 @@ proc frameList(self: SceneSettingsScene, look: Look, info: JsonNode, autoScale: 
     buttons.children.add look.pressButton("Install update", AInstallUpdate, asking)
   elif update >= 0 and update != UpdateChecking and update != UpdateInstalling:
     buttons.children.add look.pressButton("Check for updates", ACheckUpdate)
+  if scenes.movable > 0 and not scenes.busy:
+    buttons.children.add look.pressButton("Update scenes", AUpdateScenes, asking)
   if %"restart" in arrayOf(info{"actions"}).elems:
     buttons.children.add look.pressButton("Restart FrameOS", ARestart, asking)
   buttons.children.add look.pressButton("Reboot", AReboot, asking)

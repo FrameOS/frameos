@@ -175,6 +175,15 @@ What the page holds, top to bottom:
   an install, nothing downloaded). **Install update** asks for a second tap and
   takes the same path as the plane's own update (`fos_ota_request_for_control_plane`).
   A frame with no plane shows neither.
+- **Scenes** and **Update scenes** (a frame with a control plane): how many
+  store scenes on the frame have a newer version, and a button that updates
+  every one the frame may take in one push. Both are the scene store's
+  (`docs/scene-store.md` "What has updates"): the page reads the store host's
+  facts (`sceneStoreRead`, its `updates` and `busy`) and asks it for
+  `updateAll` (`sceneStoreAction`), so no host has a hook of its own for it,
+  and the words stay on the page. It asks for a second tap, as Install update
+  does. One only the owner may take is counted and left to the owner. A
+  frame with no plane, or whose plane does not list updates, shows neither.
 - **Render again**, **Restart FrameOS** (where the host lists it) and
   **Reboot**. Restart and Reboot ask for a second tap ("Tap again", red);
   anything else in between asks again. They send the

@@ -1,6 +1,7 @@
 ## The scene store's hooks (docs/scene-store.md): what a JS app reads with
 ## `frameos.store()` and asks with `frameos.storeAction(action, args)`. The
-## Scene store sample scene is the app that uses them; any app may.
+## Scene store sample scene is the app that uses them; any app may. The
+## frame page (system/sceneSettings) reads `updates` and asks `updateAll`.
 ##
 ## The host has the facts and does the work, off the render task: the Pi's
 ## frameos/scene_store_linux.nim, the ESP32's main/fos_store.c through

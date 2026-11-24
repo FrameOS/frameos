@@ -639,8 +639,9 @@ static void run(const char *job)
     }
     snprintf(asker, sizeof(asker), "%s", S->asker);
     unlock();
-    /* A re-read that found what the app shows already draws nothing. */
-    if ((!scan || changed) && fos_scenes_showing(asker)) fos_client_render_now();
+    /* A re-read that found what the app shows already draws nothing. The
+     * frame page shows the updates too (system/sceneSettings). */
+    if ((!scan || changed) && (fos_scenes_showing(asker) || fos_scenes_settings_shown())) fos_client_render_now();
 }
 
 /* On the request task (fos_js_io_run): the work asked for, until none is. */

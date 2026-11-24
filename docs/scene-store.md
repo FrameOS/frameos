@@ -272,6 +272,11 @@ desktop two readers may show at once. An old plane refuses
 the action, and the facts have no `updates`. A frame with no plane has none:
 the app lists nothing.
 
+The frame page (`docs/scene-settings.md` "The frame page") reads the same
+facts: a "Scenes" line with their count and **Update scenes**, which asks the
+host for `updateAll`. While it shows, the host's news draws it again (the
+ESP32's `fos_scenes_settings_shown`).
+
 `updateAll` is one push however many scenes move: the cloud's
 `updateAssignedScenesToLatest` with every scene it may take (the workspace's
 "Update all scenes"), a backend's saved list changed once and sent once. Each
