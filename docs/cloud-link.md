@@ -535,7 +535,12 @@ Semantics the provider must honor:
   moderation_unavailable` when the provider's moderation backend is down —
   retry later, the publish was not accepted. Abuse controls may answer `403
   store_banned` (account-level publish ban) or `429
-  daily_scene_limit_exceeded`.
+  daily_scene_limit_exceeded`. The ban is asked by every door, not this one
+  alone (`src/lib/store-ban.ts`): a banned account makes no new scene
+  (publish, upload, create, fork), changes nothing that is public (no new
+  version, listing or image, and nothing goes public), and its public scenes
+  are in no listing; making a scene private and working on one's own
+  private scenes stay open.
 - **Photos share links stay private.** A scene holding a Photos album share
   link (docs/photos.md, "Share links") cannot be public: such a publish
   answers `400 scene_contains_photo_link` (with a `detail` sentence). A

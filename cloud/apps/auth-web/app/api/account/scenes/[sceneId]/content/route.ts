@@ -42,6 +42,7 @@ import {
   parseListingChanges,
   type SceneListing,
 } from "../../../../../../src/lib/store-listing";
+import { storeBanRefusal } from "../../../../../../src/lib/store-ban";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
 import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
 import {
@@ -84,6 +85,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   if (scene.status === "pulled") {
     return jsonError("scene_pulled", 403);
+  }
+  // A banned publisher changes nothing that is public (store-ban.ts): no new
+  // version, no listing edit. Their private scenes stay theirs to work on.
+  if (scene.visibility === "public") {
+    const banned = await storeBanRefusal(db, session.accountId!);
+    if (banned) {
+      return banned;
+    }
   }
 
   // Interactive editor saves have a separate, higher allowance than uploads

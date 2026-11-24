@@ -23,6 +23,7 @@ import {
 import { PATCH as adminPatchPublisher } from "../../../app/api/admin/publishers/[accountId]/route";
 import { PATCH as adminPatchReport } from "../../../app/api/admin/reports/[reportId]/route";
 import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
+import { POST as forkScene } from "../../../app/api/account/scenes/[sceneId]/fork/route";
 import { PATCH as patchScene } from "../../../app/api/account/scenes/[sceneId]/route";
 import { GET as getDriveRepositoryJson } from "../../../app/api/store/account/repository.json/route";
 import { POST as publishScene } from "../../../app/api/store/publish/route";
@@ -36,6 +37,7 @@ import { POST as startDevice } from "../../../app/api/device/start/route";
 import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { maxNewScenesPerDay, maxPublishesPerHour } from "../../lib/store";
+import { listStoreScenes } from "../../lib/store-browse";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
@@ -606,6 +608,90 @@ describe("publish bans", () => {
     );
     expect(unban.status).toBe(200);
     expect((await publish(accessToken)).status).toBe(200);
+  });
+
+  // The ban used to be asked by the publish route alone: the editor's Save,
+  // a fork and the visibility switch walked past it, and the store went on
+  // listing a banned publisher's scenes.
+  it("closes every door to the store and takes the publisher out of the listings", async () => {
+    const { accessToken, accountId } = await linkClient(publishScopes);
+    const published = await publish(accessToken, { visibility: "public" });
+    const publicScene = (await readJson(published)).scene as { id: string };
+    const kept = await publish(accessToken, { name: "Private Clock" });
+    const privateScene = (await readJson(kept)).scene as { id: string };
+    const listed = async () => {
+      const repo = await readJson(
+        await getRepositoryJson(request("/api/store/repository.json", "GET")),
+      );
+      const front = await listStoreScenes(
+        db,
+        { category: "", query: "", tag: "", version: "" },
+        1,
+      );
+      return { front: front.length, repository: (repo.templates as unknown[]).length };
+    };
+    expect(await listed()).toEqual({ front: 1, repository: 1 });
+
+    await db
+      .update(accounts)
+      .set({ storeBannedAt: new Date() })
+      .where(eq(accounts.id, accountId));
+    expect(await listed()).toEqual({ front: 0, repository: 0 });
+
+    const post = (path: string, body: Record<string, unknown>) =>
+      request(path, "POST", { body, headers: { origin: baseUrl } });
+    const flip = (sceneId: string, visibility: string) =>
+      patchScene(
+        request(`/api/account/scenes/${sceneId}`, "PATCH", {
+          body: { visibility },
+          headers: { origin: baseUrl },
+        }),
+        ctx({ sceneId }),
+      );
+    const refused = async (response: Response) => {
+      expect(response.status).toBe(403);
+      expect((await readJson(response)).error).toBe("store_banned");
+    };
+    const scenes = [{ id: "scene-1", nodes: [] }];
+
+    // Nothing goes public, nothing public changes, no new scene is made.
+    await refused(await flip(privateScene.id, "public"));
+    await refused(
+      await editSceneContent(
+        post(`/api/account/scenes/${publicScene.id}/content`, { scenes }),
+        ctx({ sceneId: publicScene.id }),
+      ),
+    );
+    await refused(
+      await editSceneContent(
+        post(`/api/account/scenes/${publicScene.id}/content`, {
+          listing: { description: "a new pitch" },
+        }),
+        ctx({ sceneId: publicScene.id }),
+      ),
+    );
+    await refused(
+      await forkScene(
+        post(`/api/account/scenes/${publicScene.id}/fork`, { scenes }),
+        ctx({ sceneId: publicScene.id }),
+      ),
+    );
+
+    // Their own private scene stays theirs to work on, and stepping back
+    // stays open: a public scene can still be made private.
+    const ownEdit = await editSceneContent(
+      post(`/api/account/scenes/${privateScene.id}/content`, { scenes }),
+      ctx({ sceneId: privateScene.id }),
+    );
+    expect(ownEdit.status).toBe(200);
+    expect((await flip(publicScene.id, "private")).status).toBe(200);
+
+    await db
+      .update(accounts)
+      .set({ storeBannedAt: null })
+      .where(eq(accounts.id, accountId));
+    expect((await flip(publicScene.id, "public")).status).toBe(200);
+    expect(await listed()).toEqual({ front: 1, repository: 1 });
   });
 
   it("requires a superadmin", async () => {

@@ -27,6 +27,7 @@ import { readBlob } from "./blobs";
 import { jsonError } from "./device-flow";
 import { moderateStoreContent } from "./moderation";
 import { identityRateLimitResponse } from "./rate-limit";
+import { storeBanRefusal } from "./store-ban";
 import { newSceneDailyLimit } from "./store-publish-limit";
 import {
   compiledSceneHint,
@@ -111,6 +112,11 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
       (source.visibility === "public" && source.status === "active"));
   if (!source || !sourceVisible) {
     return jsonError("scene_not_found", 404);
+  }
+  // A fork is a new scene of the forker's, like a publish (store-ban.ts).
+  const banned = await storeBanRefusal(db, accountId);
+  if (banned) {
+    return banned;
   }
 
   // Same per-account quotas as publishing a new scene. Forks are born
