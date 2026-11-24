@@ -25,6 +25,18 @@
  * ends the caller logs its summary and, if its last frame was quiet, makes
  * up the render announce and the backend push that frame skipped.
  *
+ * A fast loop is a burst too: a scene that asks for frames faster than once
+ * a second on a panel that does not animate (e-paper), which the whole-second
+ * loop renders on every pass. Each of those passes logged in full: the
+ * Kitchen sink on the reTerminal Sticky sent seven lines a second to its
+ * backend, which dropped them (`log:dropped`) and flipped the frame's status
+ * twice a second (2026-11-24). Its timed frames are a burst's, with up to
+ * FOS_ANIMATION_LOOP_GAP_US between one's end and the next one's start: a
+ * pass's pulls or a refresh waited for can hold a frame past the burst's
+ * second, which would end the burst and log in full every few seconds. Like
+ * the Linux runner's fast-render log pause (runner.nim), which counts a scene
+ * under a one-second interval.
+ *
  * The input hold: on a panel that answers a tap at once, the render task
  * must not be on the network or writing to flash while someone is tapping. It
  * also drains the touch queue, so a tap made during either waits it out, and
@@ -47,9 +59,12 @@
 #define FOS_ANIMATION_LOG_US (10LL * 1000LL * 1000LL)
 /* Frames the scene asked for this close together are one burst. */
 #define FOS_ANIMATION_BURST_US (1000LL * 1000LL)
+/* A fast loop's frames this close together (fos_animation_set_loop). */
+#define FOS_ANIMATION_LOOP_GAP_US (3LL * 1000LL * 1000LL)
 
 typedef struct {
     bool active;
+    bool loop;               /* a fast loop: its timed frames are a burst's */
     int64_t period_us;       /* the scene's interval */
     int64_t next_due_us;     /* when the next frame should start */
     int64_t housekeeping_us; /* the last pass that did the per-second work */
@@ -152,6 +167,21 @@ bool fos_animation_burst_quiet(const fos_animation_t *a, int64_t now_us);
 /* Outside animation: a frame the scene asked for started at `start_us`,
  * ended at `end_us`, logged in full or quiet. */
 void fos_animation_burst_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_us, bool quiet);
+
+/* Whether the scene's interval makes a fast loop here: positive and below a
+ * second, while not animating (an LCD's animation logs its own way). */
+bool fos_animation_fast_loop(double scene_interval_s, bool animating);
+
+/* Once per pass, with fos_animation_fast_loop's answer: while it holds, the
+ * caller counts the pass's timed render as a burst frame, and the gap that
+ * keeps a burst going is FOS_ANIMATION_LOOP_GAP_US. When it stops, the burst
+ * ends on the burst's own second. */
+void fos_animation_set_loop(fos_animation_t *a, bool loop);
+
+/* Animating or in a burst (a fast loop's included): the passes come once a
+ * second or faster, and a line every pass would say once a second what it
+ * said the second before. */
+bool fos_animation_steady(const fos_animation_t *a, int64_t now_us);
 
 #define FOS_INPUT_HOLD_QUIET_US (10 * 1000000LL)
 #define FOS_INPUT_HOLD_MAX_US (60 * 1000000LL)

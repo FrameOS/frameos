@@ -622,8 +622,21 @@ export function frameLastActivityAt(frame: FrameType): number {
   return parseFrameTimestamp(frameActivityTimestamp(frame))
 }
 
+/**
+ * Whether the frame is up: it says "ready", or it was heard from and is in
+ * the middle of something (a render, a deploy, a restart). Every render
+ * moves a backend frame's status to "rendering" and back to "ready"
+ * (backend/app/models/log.py), so a scene that renders once a second turned
+ * the dot off and on twice a second, and a deploy turned it off for its
+ * length.
+ */
 export function frameIsHealthy(frame: FrameType): boolean {
-  return frame.status === 'ready' && !frameIsStale(frame)
+  if (frameIsStale(frame)) {
+    return false
+  }
+  return (
+    frame.status === 'ready' || (frameStatusWithSpinner.includes(frame.status) && frameHasActivityLog(frame))
+  )
 }
 
 export function frameIsActive(frame: FrameType): boolean {
