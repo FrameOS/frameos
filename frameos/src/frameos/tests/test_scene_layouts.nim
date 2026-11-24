@@ -1275,12 +1275,7 @@ suite "the starter layouts":
       let layout = scene.layoutOf
       let hole = layout.holeIn
       check hole.found and hole.w > 0 and hole.h > 0
-      # The reTerminal Sticky's draws its chrome only around the scene list
-      # (its home screen): on a scene it gives the whole glass by default.
-      if starter["id"].getStr() == "layout-reterminal-sticky":
-        check hole.w * hole.h == W * H
-      else:
-        check hole.w * hole.h < W * H
+      check hole.w * hole.h < W * H
       check canvas.color(hole.x + hole.w div 2, hole.y + hole.h div 2) == colored("#0000ff")
       check not ($logged).contains("error")
   test "there are starters to check":

@@ -230,9 +230,9 @@ describe("bindings and rules", () => {
     expect(frameSupportsTriplePress(triplePressMinVersion, true)).toBe(true);
     expect(frameSupportsTriplePress("2026.11.14", true)).toBe(false);
     expect(frameSupportsTriplePress(null, false)).toBe(true);
-    // The reTerminal Sticky's AI key: twice back, three times the scene list.
+    // The reTerminal Sticky's Action key (label AI): twice back, three times the scene list.
     const thrice = { label: "AI", action: "triplePress" };
-    expect(frameGestureTitle(thrice)).toBe("AI · triple press");
+    expect(frameGestureTitle(thrice)).toBe("Action · triple press");
     expect(bindingRule({ gesture: thrice, action: { kind: "sceneSwitcher" } })).toEqual({
       event: "button", match: thrice, emit: "sceneSwitcher", as: {},
     });
