@@ -2346,144 +2346,166 @@ proc windowLimit*(): int =
   else: 1
 
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  ## One way out: a `return` per key repeated the clean-up of the key's
+  ## text and the inlined sentinel (docs/esp32-image-size.md). `undef`: the
+  ## key has no value here.
   let e = env(ctx)
-  if e == nil:
-    return jsUndefSentinel(ctx)
+  var undef = e == nil
+  if not undef:
+    case toNimString(ctx, key)
+    of "width":
+      # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
+      result = appLength(ctx, e, e.owner.frameConfig.width)
+    of "height":
+      result = appLength(ctx, e, e.owner.frameConfig.height)
+    of "scale":
+      # The render scale in effect for the scene, whatever kind of app asks.
+      result = nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
+    of "rotate":
+      # A board rendered on its plane is turned by the board: the runtime draws
+      # its canvas already turned and keeps 0 itself, and says the board's.
+      let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
+      result = nimIntToJS(ctx, rotate.int32)
+    of "assetsPath":
+      result = nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
+    of "storages":
+      result = jsonToJS(ctx, frameStorages())
+    of "timeZone":
+      result = nimStringToJS(ctx, e.owner.frameConfig.timeZone)
+    of "debug":
+      result = nimBoolToJS(ctx, e.owner.frameConfig.debug)
+    of "embedded":
+      # An ESP32-class runtime, or the preview running as one: no storage for
+      # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
+      # picture there.
+      result = nimBoolToJS(ctx, runsAsEmbedded())
+    of "fast":
+      # Whether a change shows as soon as it is drawn (panel_shape.panelIsFast):
+      # an app that follows a finger waits for it to lift where it does not.
+      # The frame's panel, never the context's canvas, which onEvent, init()
+      # and an async continuation do not have: on an ESP32 they read e-paper
+      # on an LCD.
+      result = nimBoolToJS(ctx, panelIsFast(e.owner.frameConfig.device))
+    of "paper":
+      # Whether the panel draws in inks (panel_shape.panelIsPaper): how a scene
+      # looks there. Until 2026.11.10 it also said what `fast` says now, and
+      # today the two are opposites on every panel. The panel's, as above.
+      result = nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
+    of "round":
+      # Only the circle inside the panel's square shows and takes touches
+      # (panel_shape.panelIsRound: the HyperPixel 2.1 Round, the Waveshare
+      # 1.75" AMOLED). An app that draws the whole panel keeps what matters
+      # inside it; the frame's own scenes do.
+      result = nimBoolToJS(ctx, panelIsRound(e.owner.frameConfig.device))
+    of "color":
+      # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
+      # a scene draws in high contrast where it does not. The panel's, as above.
+      result = nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device))
+    of "sceneName":
+      # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
+      if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
+        result = nimStringToJS(ctx, e.owner.scene.shownName)
+      else:
+        undef = true
+    of "systemScene":
+      # A layout around the scene list or the settings: it may give them the
+      # whole panel by returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.systemScene:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "typing":
+      # A layout around a scene that has the keyboard on the screen up: it may
+      # give the scene the whole panel by returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.typing:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "fullScreen":
+      # A layout around a scene that asks for the whole panel (full_screen.nim:
+      # its role field, else settings.fullScreen): the layout gives it by
+      # returning a bare <yield />.
+      if not e.owner.scene.isNil and e.owner.scene.wrapsFullScreen:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "batteryPercent":
+      # An ESP32 with a battery. A Pi and the preview have nothing to say.
+      when defined(freertos):
+        let percent = fos_client_battery_percent()
+        if percent >= 0:
+          result = nimIntToJS(ctx, percent.int32)
+        else:
+          undef = true
+      else:
+        undef = true
+    of "wifiRssi":
+      when defined(freertos):
+        let rssi = fos_client_wifi_rssi()
+        if rssi != 0:
+          result = nimIntToJS(ctx, rssi.int32)
+        else:
+          undef = true
+      else:
+        undef = true
+    of "sceneId":
+      # A layout's is the id of the scene it wraps, the one its <yield /> shows.
+      if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
+        result = nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
+      else:
+        undef = true
+    of "wentBack":
+      # True while the scene a layout wraps is showing because a built-in scene
+      # went back to it by itself (its Close, its Cancel, its timeout), not
+      # because anyone picked it: a desktop opens no window again for it.
+      if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil and sceneWentBackTo.len > 0 and
+          layoutWrappedSceneId(e.owner.scene) == sceneWentBackTo:
+        result = nimBoolToJS(ctx, true)
+      else:
+        undef = true
+    of "scenes":
+      # The scenes a layout can open side by side: not on every host.
+      if not windowSceneListing.isNil:
+        result = jsonToJS(ctx, windowSceneListing())
+      else:
+        undef = true
+    of "keptOpen":
+      # The built-in scenes open beside the scene showing (`builtInsAway`).
+      if not windowSceneListing.isNil:
+        result = jsonToJS(ctx, %builtInsAway)
+      else:
+        undef = true
+    of "windows":
+      # How many of them may run at once, where there is a limit (windowLimit).
+      let limit = windowLimit()
+      if not windowSceneListing.isNil and limit > 0:
+        result = nimIntToJS(ctx, limit.int32)
+      else:
+        undef = true
+    of "eventMap":
+      # The frame's event map (frame.json `eventMap`, docs/events.md "Event
+      # map"): what its keys and swipes do whatever scene shows, for a layout
+      # that labels the keys beside the glass. Undefined with none (the
+      # preview of a scene, a frame never given one).
+      let rules = e.owner.frameConfig.eventMap
+      if not rules.isNil and rules.kind == JArray:
+        result = jsonToJS(ctx, rules)
+      else:
+        undef = true
+    of "theme":
+      # The theme of the desktop around the frame's scene (ui/theme.nim), for
+      # what an element's `look` cannot reach: an SVG's fill, a mask in the
+      # page's color. None, or an empty one, is the app's own look.
+      let theme = if themeSource.isNil: nil else: themeSource()
+      if not theme.isNil and theme.kind == JObject and theme.len > 0:
+        result = jsonToJS(ctx, theme)
+      else:
+        undef = true
+    else:
+      undef = true
 
-  case toNimString(ctx, key)
-  of "width":
-    # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
-    return appLength(ctx, e, e.owner.frameConfig.width)
-  of "height":
-    return appLength(ctx, e, e.owner.frameConfig.height)
-  of "scale":
-    # The render scale in effect for the scene, whatever kind of app asks.
-    return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
-  of "rotate":
-    # A board rendered on its plane is turned by the board: the runtime draws
-    # its canvas already turned and keeps 0 itself, and says the board's.
-    let rotate = if boardRotation >= 0: boardRotation else: e.owner.frameConfig.rotate
-    return nimIntToJS(ctx, rotate.int32)
-  of "assetsPath":
-    return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
-  of "storages":
-    return jsonToJS(ctx, frameStorages())
-  of "timeZone":
-    return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
-  of "debug":
-    return nimBoolToJS(ctx, e.owner.frameConfig.debug)
-  of "embedded":
-    # An ESP32-class runtime, or the preview running as one: no storage for
-    # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
-    # picture there.
-    return nimBoolToJS(ctx, runsAsEmbedded())
-  of "fast":
-    # Whether a change shows as soon as it is drawn (panel_shape.panelIsFast):
-    # an app that follows a finger waits for it to lift where it does not.
-    # The frame's panel, never the context's canvas, which onEvent, init()
-    # and an async continuation do not have: on an ESP32 they read e-paper
-    # on an LCD.
-    return nimBoolToJS(ctx, panelIsFast(e.owner.frameConfig.device))
-  of "paper":
-    # Whether the panel draws in inks (panel_shape.panelIsPaper): how a scene
-    # looks there. Until 2026.11.10 it also said what `fast` says now, and
-    # today the two are opposites on every panel. The panel's, as above.
-    return nimBoolToJS(ctx, panelIsPaper(e.owner.frameConfig.device))
-  of "round":
-    # Only the circle inside the panel's square shows and takes touches
-    # (panel_shape.panelIsRound: the HyperPixel 2.1 Round, the Waveshare
-    # 1.75" AMOLED). An app that draws the whole panel keeps what matters
-    # inside it; the frame's own scenes do.
-    return nimBoolToJS(ctx, panelIsRound(e.owner.frameConfig.device))
-  of "color":
-    # Whether the panel shows colors (utils/asset_colors.panelShowsColor):
-    # a scene draws in high contrast where it does not. The panel's, as above.
-    return nimBoolToJS(ctx, panelShowsColor(e.owner.frameConfig.device))
-  of "sceneName":
-    # A layout's is the name of the scene it wraps (interpreter.ensureLayoutScene).
-    if not e.owner.scene.isNil and e.owner.scene.shownName.len > 0:
-      return nimStringToJS(ctx, e.owner.scene.shownName)
-    return jsUndefSentinel(ctx)
-  of "systemScene":
-    # A layout around the scene list or the settings: it may give them the
-    # whole panel by returning a bare <yield />.
-    if not e.owner.scene.isNil and e.owner.scene.systemScene:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "typing":
-    # A layout around a scene that has the keyboard on the screen up: it may
-    # give the scene the whole panel by returning a bare <yield />.
-    if not e.owner.scene.isNil and e.owner.scene.typing:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "fullScreen":
-    # A layout around a scene that asks for the whole panel (full_screen.nim:
-    # its role field, else settings.fullScreen): the layout gives it by
-    # returning a bare <yield />.
-    if not e.owner.scene.isNil and e.owner.scene.wrapsFullScreen:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "batteryPercent":
-    # An ESP32 with a battery. A Pi and the preview have nothing to say.
-    when defined(freertos):
-      let percent = fos_client_battery_percent()
-      if percent >= 0:
-        return nimIntToJS(ctx, percent.int32)
-    return jsUndefSentinel(ctx)
-  of "wifiRssi":
-    when defined(freertos):
-      let rssi = fos_client_wifi_rssi()
-      if rssi != 0:
-        return nimIntToJS(ctx, rssi.int32)
-    return jsUndefSentinel(ctx)
-  of "sceneId":
-    # A layout's is the id of the scene it wraps, the one its <yield /> shows.
-    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil:
-      return nimStringToJS(ctx, layoutWrappedSceneId(e.owner.scene))
-    return jsUndefSentinel(ctx)
-  of "wentBack":
-    # True while the scene a layout wraps is showing because a built-in scene
-    # went back to it by itself (its Close, its Cancel, its timeout), not
-    # because anyone picked it: a desktop opens no window again for it.
-    if not e.owner.scene.isNil and not layoutWrappedSceneId.isNil and sceneWentBackTo.len > 0 and
-        layoutWrappedSceneId(e.owner.scene) == sceneWentBackTo:
-      return nimBoolToJS(ctx, true)
-    return jsUndefSentinel(ctx)
-  of "scenes":
-    # The scenes a layout can open side by side: not on every host.
-    if not windowSceneListing.isNil:
-      return jsonToJS(ctx, windowSceneListing())
-    return jsUndefSentinel(ctx)
-  of "keptOpen":
-    # The built-in scenes open beside the scene showing (`builtInsAway`).
-    if not windowSceneListing.isNil:
-      return jsonToJS(ctx, %builtInsAway)
-    return jsUndefSentinel(ctx)
-  of "windows":
-    # How many of them may run at once, where there is a limit (windowLimit).
-    let limit = windowLimit()
-    if not windowSceneListing.isNil and limit > 0:
-      return nimIntToJS(ctx, limit.int32)
-    return jsUndefSentinel(ctx)
-  of "eventMap":
-    # The frame's event map (frame.json `eventMap`, docs/events.md "Event
-    # map"): what its keys and swipes do whatever scene shows, for a layout
-    # that labels the keys beside the glass. Undefined with none (the
-    # preview of a scene, a frame never given one).
-    let rules = e.owner.frameConfig.eventMap
-    if not rules.isNil and rules.kind == JArray:
-      return jsonToJS(ctx, rules)
-    return jsUndefSentinel(ctx)
-  of "theme":
-    # The theme of the desktop around the frame's scene (ui/theme.nim), for
-    # what an element's `look` cannot reach: an SVG's fill, a mask in the
-    # page's color. None, or an empty one, is the app's own look.
-    let theme = if themeSource.isNil: nil else: themeSource()
-    if not theme.isNil and theme.kind == JObject and theme.len > 0:
-      return jsonToJS(ctx, theme)
-    return jsUndefSentinel(ctx)
-  else:
-    return jsUndefSentinel(ctx)
+  if undef:
+    result = jsUndefSentinel(ctx)
 
 proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
