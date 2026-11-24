@@ -215,12 +215,84 @@ suite "video player":
       check player.image.blue
       check player.status.decoder == "software"
       check hardwareFailed("mpeg4")
+      let fallback = player.lastFallback()
+      check fallback.count == 1 and player.fallbacks() == 1
+      check fallback.decoder == "mpeg4_v4l2m2m"
+      check fallback.reason.len > 0 and not fallback.busy
       player.close()
       # The next player of this codec starts with ffmpeg's own.
       let next = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
       discard next.playUntil(200, 100, vfContain, nil, 30, proc(p: VideoPlayer): bool = not p.image.isNil)
       check next.status.decoder == "software"
       next.close()
+
+  test "a hardware decoder that cannot take it now gives way for this player only":
+    if not haveFfmpeg:
+      skip()
+    else:
+      # An ffmpeg that fails a V4L2 launch as a Pi Zero W's did with its CMA
+      # taken, and is the real one otherwise.
+      let fake = dir / "ffmpeg-short"
+      writeFile(fake, "#!/bin/sh\ncase \"$*\" in\n  *_v4l2m2m*)\n" &
+        "    echo '[mpeg4_v4l2m2m @ 0x1] output VIDIOC_REQBUFS failed: Cannot allocate memory' >&2\n" &
+        "    echo '[vost#0:0/rawvideo @ 0x2] Error initializing a simple filtergraph' >&2\n" &
+        "    echo 'Error opening output file pipe:1.' >&2\n    exit 1;;\nesac\nexec " &
+        quoteShell(findExe("ffmpeg")) & " \"$@\"\n")
+      setFilePermissions(fake, {fpUserRead, fpUserWrite, fpUserExec})
+      putEnv("FRAMEOS_FFMPEG", fake)
+      setDecodeCapsForTest(DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"]))
+      defer:
+        delEnv("FRAMEOS_FFMPEG")
+        setDecodeCapsForTest(DecodeCaps())
+      let player = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard player.playUntil(200, 100, vfContain, nil, 30,
+        proc(p: VideoPlayer): bool = p.state == "ended")
+      check player.state == "ended"
+      check player.image.blue
+      check player.status.decoder == "software"
+      let fallback = player.lastFallback()
+      check fallback.count == 1
+      check fallback.busy
+      check fallback.reason == "output VIDIOC_REQBUFS failed: Cannot allocate memory"
+      # Not the hardware's fault: the codec's hardware stays on, and the next
+      # player tries it first.
+      check not hardwareFailed("mpeg4")
+      player.close()
+      let next = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard next.playUntil(200, 100, vfContain, nil, 30, proc(p: VideoPlayer): bool = p.fallbacks() > 0)
+      check next.fallbacks() == 1 and next.lastFallback().busy
+      next.close()
+
+  test "a hardware decoder that makes no frame is stopped and gives way":
+    if not haveFfmpeg:
+      skip()
+    else:
+      # A V4L2 launch that waits on its device for ever, as one did on a Pi
+      # Zero W with part of its buffers; the real ffmpeg otherwise.
+      let fake = dir / "ffmpeg-hangs"
+      writeFile(fake, "#!/bin/sh\ncase \"$*\" in\n  *_v4l2m2m*) exec sleep 60;;\nesac\nexec " &
+        quoteShell(findExe("ffmpeg")) & " \"$@\"\n")
+      setFilePermissions(fake, {fpUserRead, fpUserWrite, fpUserExec})
+      putEnv("FRAMEOS_FFMPEG", fake)
+      setDecodeCapsForTest(DecodeCaps(v4l2Decoders: @["mpeg4_v4l2m2m"]))
+      hardwareFirstFrameSeconds = 1.0
+      defer:
+        delEnv("FRAMEOS_FFMPEG")
+        setDecodeCapsForTest(DecodeCaps())
+        hardwareFirstFrameSeconds = 20.0
+      let started = nowSeconds()
+      let player = newVideoPlayer(fileSource(clip), "clip.mp4", loop = false, maxFps = 30, startAt = 0)
+      discard player.playUntil(200, 100, vfContain, nil, 30,
+        proc(p: VideoPlayer): bool = p.state == "ended")
+      check player.state == "ended"
+      check player.image.blue
+      check player.status.decoder == "software"
+      check nowSeconds() - started < 20 # the sleep was stopped, not waited out
+      let fallback = player.lastFallback()
+      check fallback.count == 1 and not fallback.busy
+      check "made no frame" in fallback.reason
+      check hardwareFailed("mpeg4") # ffmpeg's own played it: the hardware's fault
+      player.close()
 
   test "a slow decoder starts at the keyframe before the time asked for, and says that time":
     if not haveFfmpeg:

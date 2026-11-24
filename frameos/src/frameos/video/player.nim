@@ -88,6 +88,12 @@ type
     decoder: array[DecoderKeep, char] ## what decodes the running launch (decodeName)
     decoderLen: int
     fast: bool             ## ... with a slow decoder's shortcuts (VideoDecode.fast)
+    fallbacks: int         ## hardware launches that gave way to ffmpeg's own; the last one's:
+    fallbackFrom: array[DecoderKeep, char] ## ... decoder
+    fallbackFromLen: int
+    fallbackWhy: array[MessageKeep, char]  ## ... ffmpeg's reason
+    fallbackWhyLen: int
+    fallbackBusy: bool     ## ... the hardware busy (hardwareBusy), so it stays on
     # The ring: `count` frames from `head`, oldest first.
     buf: ptr UncheckedArray[byte]
     frameBytes: int
@@ -137,6 +143,12 @@ var retrySeconds* = 10.0
   ## A source that loops (a camera, a stream) and failed is opened again this
   ## often, its error shown meanwhile. A plain value the readers read; tests
   ## shorten it.
+var hardwareFirstFrameSeconds* = 20.0
+  ## A hardware launch with no frame by then is stopped and gives way to
+  ## ffmpeg's own: a VideoCore decoder that got some of its buffers and not
+  ## the rest waited on its device for ever (a Pi Zero W, four 1080p videos
+  ## at once, 2026-11-24). A file's exact start decodes up to a keyframe
+  ## interval first, 6 s of a 1080p one there. A plain value; tests shorten it.
 
 # What the machine decodes in hardware, read once, and the codecs whose
 # hardware decoder failed here: values every reader reads under `capsLock`
@@ -282,6 +294,19 @@ proc messageOf(s: ptr Shared): string =
   for i in 0 ..< s.messageLen:
     result[i] = s.message[i]
 
+proc noteFallback(s: ptr Shared, decoder, why: string, busy: bool) =
+  ## A hardware launch gave way to ffmpeg's own. Under the lock.
+  let d = min(decoder.len, DecoderKeep)
+  for i in 0 ..< d:
+    s.fallbackFrom[i] = decoder[i]
+  s.fallbackFromLen = d
+  let w = min(why.len, MessageKeep)
+  for i in 0 ..< w:
+    s.fallbackWhy[i] = why[i]
+  s.fallbackWhyLen = w
+  s.fallbackBusy = busy
+  inc s.fallbacks
+
 proc pthreadCondTimedwait(cond: pointer, lock: pointer, abstime: ptr Timespec): cint {.
   importc: "pthread_cond_timedwait", header: "<pthread.h>".}
 proc c_setpriority(which: cint, who: cuint, prio: cint): cint {.importc: "setpriority", header: "<sys/resource.h>".}
@@ -357,10 +382,12 @@ type LaunchEnd = enum
 
 proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixels: VideoPixels,
     startAt, fps: float, loopFile: bool, firstSeq: int64, decode: VideoDecode, made: var int64,
-    exitCode: var int): LaunchEnd =
+    exitCode: var int, why: var string, busy: var bool): LaunchEnd =
   ## One ffmpeg, its frames into the ring until it ends, is told to stop or
   ## nobody takes them. `made`: frames it put in the ring; `exitCode`
-  ## ffmpeg's, -1 when it was stopped.
+  ## ffmpeg's, -1 when it was stopped; `why` its reason when it failed or
+  ## exited with an error, and `busy` whether it said the hardware could not
+  ## take the video now (hardwareBusy).
   let s = arg.shared
   let args = decodeArgs(arg.source, width, height, fit, pixels, startAt, fps, loopFile, arg.threads, decode)
   let shownDecoder = decodeName(decode)
@@ -398,6 +425,8 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
       seqNo = firstSeq
       errBuf: array[2048, char]
     let frameTime = 1.0 / fps
+    let launchedAt = nowSeconds()
+    let hardware = decode.decoder.len > 0 or decode.hwaccel.len > 0
     template drainErr() =
       if errOpen:
         while true:
@@ -445,6 +474,10 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
               result = leSuperseded
               break frames
           drainErr()
+          if hardware and made == 0 and nowSeconds() - launchedAt > hardwareFirstFrameSeconds:
+            errText.add "\nthe hardware decoder made no frame in " & $hardwareFirstFrameSeconds & " s\n"
+            result = leFailed
+            break frames
           if (fds[0].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
             let n = posix.read(outFd, addr dst[got], fb - got)
             if n > 0:
@@ -503,10 +536,19 @@ proc runLaunch(arg: ReaderArg, gen: int, width, height: int, fit: VideoFit, pixe
     p.close()
     if result == leEof and made == 0:
       result = leFailed
-    if result == leFailed or (result == leEof and code != 0 and code != -1 and made == 0):
-      let why = cleaned(errText, arg.shownSource, arg.source.input)
-      withLock s.lock:
-        s.setMessage(if why.len > 0: why else: "ffmpeg could not play it (exit code " & $code & ")")
+    busy = hardwareBusy(errText)
+    if result == leFailed or (result == leEof and code != 0 and code != -1):
+      var said = cleaned(errText, arg.shownSource, arg.source.input)
+      if busy:
+        # The line that says so, not the errors that follow from it.
+        for line in errText.splitLines():
+          if hardwareBusy(line):
+            said = cleaned(line, arg.shownSource, arg.source.input)
+            break
+      why = if said.len > 0: said else: "ffmpeg could not play it (exit code " & $code & ")"
+      if result == leFailed:
+        withLock s.lock:
+          s.setMessage(why)
 
 proc readerMain(arg: ReaderArg) {.thread.} =
   let s = arg.shared
@@ -587,8 +629,10 @@ proc readerMain(arg: ReaderArg) {.thread.} =
           launchAt = keyframeBefore(arg, launchAt)
         var made: int64 = 0
         var code = 0
+        var why = ""
+        var busy = false
         let ended = runLaunch(arg, gen, width, height, fit, pixels, launchAt, fps, loopFile, seqNo,
-          decode, made, code)
+          decode, made, code, why, busy)
         seqNo += made
         if suspect and not hardware and made > 0:
           # ffmpeg's own played what the hardware would not: the hardware's
@@ -609,11 +653,16 @@ proc readerMain(arg: ReaderArg) {.thread.} =
         if hardware and not atEnd and
             (ended == leFailed or (ended == leEof and code != 0 and code != -1)):
           # The hardware would not (a codec or profile it lacks, a stream it
-          # chokes on): ffmpeg's own, from where it got to.
+          # chokes on): ffmpeg's own, from where it got to. One that could
+          # not take it now (no buffers: a VideoCore's are CMA, which the
+          # other players and the display share; or a VideoCore busy with
+          # other videos) is no fault of the hardware's: this player goes on
+          # in software and the next one tries the hardware again.
           software = true
-          suspect = true
+          suspect = not busy
           withLock s.lock:
             s.messageLen = 0
+            s.noteFallback(decodeName(decode), why, busy)
           launchAt = reached
           continue
         if ended == leIdle:
@@ -996,6 +1045,35 @@ proc status*(player: VideoPlayer): VideoStatus =
       result.error = if text.len > 0: text else: "the video could not be played"
   if result.state == "ended" and result.duration > 0:
     result.time = result.duration
+
+type VideoFallback* = object
+  ## The last hardware launch of a player that gave way to ffmpeg's own.
+  count*: int         ## how many have, so far (0: none)
+  decoder*: string    ## the hardware decoder that failed ("h264_v4l2m2m")
+  reason*: string     ## ffmpeg's reason
+  busy*: bool         ## the hardware could not take it now: it stays on for the next player
+
+proc fallbacks*(player: VideoPlayer): int =
+  ## Hardware launches of this player that gave way to ffmpeg's own: a number
+  ## the render thread checks every frame, `lastFallback` when it moves.
+  if player.shared.isNil:
+    return 0
+  withLock player.shared.lock:
+    result = player.shared.fallbacks
+
+proc lastFallback*(player: VideoPlayer): VideoFallback =
+  if player.shared.isNil:
+    return
+  let s = player.shared
+  withLock s.lock:
+    result.count = s.fallbacks
+    result.decoder = newString(s.fallbackFromLen)
+    for i in 0 ..< s.fallbackFromLen:
+      result.decoder[i] = s.fallbackFrom[i]
+    result.reason = newString(s.fallbackWhyLen)
+    for i in 0 ..< s.fallbackWhyLen:
+      result.reason[i] = s.fallbackWhy[i]
+    result.busy = s.fallbackBusy
 
 proc shownImage*(player: VideoPlayer): Image =
   ## What an `<img>` of it draws now.

@@ -116,6 +116,11 @@ suite "video args":
     check onPi.has("-c:v", "h264_v4l2m2m")
     check "-threads" notin onPi # the VideoCore's work, not the cores'
     check onPi.find("-c:v") < onPi.find("-i")
+    # The decoder's own buffers, fewer than ffmpeg's 16 + 20: a 1080p one is
+    # 3 MB of CMA each, which the other players and the display share.
+    check onPi.has("-num_output_buffers", $V4l2OutputBuffers)
+    check onPi.has("-num_capture_buffers", $V4l2CaptureBuffers)
+    check onPi.find("-num_capture_buffers") < onPi.find("-i")
     let onIntel = decodeArgs(source, 320, 180, vfContain, vpRgba, 0, 30, loopFile = true, threads = 3,
       decode = pickDecode("h264", intel, fast = false, software = false))
     check onIntel.has("-hwaccel", "vaapi") and onIntel.has("-threads", "3")
@@ -129,6 +134,25 @@ suite "video args":
     let plain = decodeArgs(source, 320, 180, vfCover, vpRgba, 0, 30, loopFile = true, threads = 0)
     check "flags=bilinear" in plain[plain.find("-vf") + 1]
     check "-skip_loop_filter" notin plain
+    check "-num_capture_buffers" notin plain and "-num_capture_buffers" notin onIntel
+
+  test "a hardware decoder that cannot take a video now is told from one that cannot decode it":
+    # What ffmpeg 6.1 said on a Pi Zero W whose CMA was taken (2026-11-24).
+    let short = "[h264_v4l2m2m @ 0x1d31e50] output VIDIOC_REQBUFS failed: Cannot allocate memory\n" &
+      "[h264_v4l2m2m @ 0x1d31e50] no v4l2 output context's buffers\n" &
+      "[h264_v4l2m2m @ 0x1d31e50] can't configure decoder\n" &
+      "[vist#0:0/h264 @ 0x1d04fd0] Error while opening decoder: Inappropriate ioctl for device\n" &
+      "[vost#0:0/rawvideo @ 0x1d3c910] Error initializing a simple filtergraph\n" &
+      "Error opening output file -.\n"
+    check hardwareBusy(short)
+    # ... and with its VideoCore busy with two other videos (the kernel: "failed
+    # to create component ril.video_decode").
+    check hardwareBusy("[h264_v4l2m2m @ 0x7400e0] output VIDIOC_REQBUFS failed: Invalid argument\n" &
+      "[h264_v4l2m2m @ 0x7400e0] no v4l2 output context's buffers\n")
+    # A machine without the device: the hardware's fault.
+    check not hardwareBusy("[h264_v4l2m2m @ 0x1] Could not find a valid device\n" &
+      "[vist#0:0/h264 @ 0x2] Error while opening decoder: No such file or directory")
+    check not hardwareBusy("")
 
   test "a slow decoder's start: the keyframe before, as ffprobe says":
     let args = keyframeArgs(VideoSource(input: "/a.mp4"), 15.8)

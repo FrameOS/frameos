@@ -53,6 +53,15 @@ const
   MaxMaxFps* = 60.0
   MinMaxFps* = 0.5
   MaxFrameEdge* = 4096
+  V4l2OutputBuffers* = 6
+  V4l2CaptureBuffers* = 10
+    ## A V4L2 decoder's buffers, the coded (output) and the decoded (capture)
+    ## ones; ffmpeg's own counts are 16 and 20. A VideoCore's are CMA, 1.5 and
+    ## 3 MB each at 1080p, which every player and the display share. On a Pi
+    ## Zero W (2026-11-24) ffmpeg's counts took 85 MB a 1080p video, so the
+    ## fourth of four failed (and one hung); these take 43, four fit, and the
+    ## VideoCore decodes as fast (44 frames a second). Fewer capture buffers
+    ## than 8 had ffmpeg warn that all of them were in use.
   NetworkTimeoutMicros = 15_000_000
   PlaylistFreeFormats = "mov,matroska,webm,avi,flv,mpegts,mpjpeg,mjpeg,rtsp,rtp,sdp,ogg,h264,hevc,m4v," &
     "mpegvideo,mpeg,asf,mxf,dv,ivf,gif"
@@ -204,6 +213,17 @@ proc decodeName*(decode: VideoDecode): string =
   elif decode.hwaccel.len > 0: decode.hwaccel
   else: "software"
 
+proc hardwareBusy*(said: string): bool =
+  ## ffmpeg's stderr says a hardware decoder could not take this video now,
+  ## not that it cannot decode it: it got no buffers ("output VIDIOC_REQBUFS
+  ## failed: Cannot allocate memory": a VideoCore's are CMA, which every
+  ## player and the display share), or no decoder of its own ("...: Invalid
+  ## argument", the kernel saying "failed to create component
+  ## ril.video_decode": a VideoCore busy with other videos, 2026-11-24).
+  ## Another player, or this one later, may have the room. A machine without
+  ## the device says "Could not find a valid device" instead.
+  "Cannot allocate memory" in said or "Out of memory" in said or "VIDIOC_REQBUFS failed" in said
+
 proc parseDecoderList*(text: string, suffix = "_v4l2m2m"): seq[string] =
   ## Names from `ffmpeg -decoders` that end in `suffix`.
   for line in text.splitLines():
@@ -239,6 +259,8 @@ proc decodeArgs*(source: VideoSource, width, height: int, fit: VideoFit, pixels:
     result.add @["-hwaccel", decode.hwaccel]
   if decode.decoder.len > 0:
     result.add @["-c:v", decode.decoder]
+    if decode.decoder.endsWith("_v4l2m2m"):
+      result.add @["-num_output_buffers", $V4l2OutputBuffers, "-num_capture_buffers", $V4l2CaptureBuffers]
   if decode.fast:
     # No deblocking filter (a tenth of a Pi Zero's 720p frame, 2026-11-24):
     # what it smooths is hardly seen on a frame's panel.

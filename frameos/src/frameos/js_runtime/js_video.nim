@@ -254,8 +254,30 @@ else:
       frameos_apps.logError(e.owner, "frameos.video " & what & " failed: " & err.msg)
       return nimStringToJS(ctx, $(%*{"error": err.msg}))
 
-  proc fillVideosIn(runtime: JsAppRuntime, node: SvgNode, scale: float32, like: Image, wait: var float,
-      taken: var seq[VideoPlayer]) =
+  proc logFallback(owner: AppRoot, video: var JsVideo) =
+    ## A hardware launch of `video` gave way to ffmpeg's own: said once, with
+    ## ffmpeg's reason (docs/video.md "Hardware"). A video renders fast, and
+    ## the runner turns the scene's log off while a scene does ("render:pause"):
+    ## this line goes out anyway, as the runner's own signals do.
+    let count = video.player.fallbacks()
+    if count == video.toldFallbacks:
+      return
+    video.toldFallbacks = count
+    if owner.isNil or owner.scene.isNil or owner.scene.logger.isNil:
+      return
+    let fallback = video.player.lastFallback()
+    let logger = owner.scene.logger
+    let wasEnabled = logger.enabled
+    if not wasEnabled:
+      logger.enable()
+    frameos_apps.log(owner, %*{"event": "video:software", "src": shownName(video.src),
+      "decoder": fallback.decoder, "reason": fallback.reason,
+      "hardwareKept": fallback.busy})
+    if not wasEnabled:
+      logger.disable()
+
+  proc fillVideosIn(runtime: JsAppRuntime, owner: AppRoot, node: SvgNode, scale: float32, like: Image,
+      wait: var float, taken: var seq[VideoPlayer]) =
     if node.tag == "image" and not node.image.isNil:
       for i in 0 ..< runtime.videos.len:
         let player = runtime.videos[i].player
@@ -280,6 +302,7 @@ else:
               of "xMidYMid slice": vfCover
               else: vfContain
         discard player.take(width, height, fit, like)
+        logFallback(owner, runtime.videos[i])
         let shown = player.shownImage()
         if node.image != shown:
           node.image = shown
@@ -291,14 +314,15 @@ else:
         return
       return
     for child in node.children:
-      runtime.fillVideosIn(child, scale, like, wait, taken)
+      runtime.fillVideosIn(owner, child, scale, like, wait, taken)
 
-  proc fillVideos(runtime: JsAppRuntime, context: ExecutionContext, svg: SvgNode, scale: float32) =
+  proc fillVideos(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, svg: SvgNode,
+      scale: float32) =
     ## The layout's `<img>`s of this app's videos: each given the frame that
     ## is due at the size it was laid out at, in panel pixels. The scene
     ## renders again when the next frame is due.
     var wait = -1.0
     var taken: seq[VideoPlayer]
-    runtime.fillVideosIn(svg, scale, pictureFormatLike(context), wait, taken)
+    runtime.fillVideosIn(owner, svg, scale, pictureFormatLike(context), wait, taken)
     if wait >= 0:
       context.nextSleep = if context.nextSleep < 0: wait else: min(context.nextSleep, wait)
