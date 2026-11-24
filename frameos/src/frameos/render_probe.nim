@@ -36,6 +36,7 @@ type RenderPhase* = enum
   phEmit = "emit"      ## ui/layout.nim: the nodes that draw the UI
   phParse = "parse"    ## pixie's parse of the nodes (utils/svg_frames.nim)
   phDamage = "damage"  ## the boxes that changed
+  phCopy = "copy"      ## of which pixels copied in from another of the panel's buffers
   phRaster = "raster"  ## pixie's render into the panel
   phFit = "fit"        ## the automatic fit of a drawn image into the panel's range (utils/asset_colors)
 
