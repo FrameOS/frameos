@@ -4,6 +4,7 @@
 
 import std/[atomics, base64, json, monotimes, os, sequtils, strutils, tables, times, unittest]
 import pixie
+import zippy
 
 import frameos/channels
 import frameos/js_runtime/app_runtime
@@ -12,6 +13,7 @@ import frameos/js_runtime/runtime
 import frameos/types
 import frameos/values
 import frameos/utils/http_client
+import frameos/utils/piece_text
 
 proc testConfig(): FrameConfig =
   FrameConfig(width: 6, height: 4, rotate: 0, scalingMode: "cover", debug: true, saveAssets: %*false,
@@ -41,6 +43,50 @@ let bigBody = block:
     s.add "<p class=\"x\">a \\ b\t\"c\"\nΩmega … 🙂 </script>\r\n"
   s
 
+# Bodies for `fetch(url, { onChunk })`: plain text, text whose characters are
+# two, three and four bytes (an odd byte first, so a 2048-byte piece ends
+# inside one), and a Windows-1252 page (no UTF-8) behind 3000 bytes of ASCII.
+let streamBody = block:
+  var s = ""
+  var n = 0
+  while s.len < 50_000:
+    s.add "line " & $n & " of the page\n"
+    inc n
+  s
+let utf8Body = "a" & "é€🙂Ω".repeat(900)
+let latinBody = "x".repeat(3000) & "caf\xE9 \x93quoted\x94 \x80 5 \xFCber"
+const latinText = "café “quoted” € 5 über"
+
+# A page for `digest: "html"` (docs/html-digest.md): 400 KB of script around a
+# heading, a paragraph with a link, and a letter of three bytes for a piece to end inside.
+let digestPage = "<html><head><title>A page</title><script>" & "var junk = '<p>not words</p>';".repeat(14_000) &
+  "</script></head><body><h1>Words</h1>" & "<p>Read by the runtime, with <a href=\"/next\">a link</a> and a \xE2\x82\xAC.</p>".repeat(40) &
+  "</body></html>"
+
+proc streamAnswerFor(url: string): tuple[code: int, body: string, headers: seq[SimpleHttpHeader]] =
+  ## stream.test's pages, for both seams.
+  {.cast(gcsafe).}:
+    result.code = 200
+    result.headers = @[("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", "a=1"), ("Set-Cookie", "b=2")]
+    if "/utf8" in url: result.body = utf8Body
+    elif "/latin" in url: result.body = latinBody
+    elif "/empty" in url: result.body = ""
+    elif "/gone" in url:
+      result.code = 404
+      result.body = "not here"
+    elif "/gzip" in url:
+      result.body = compress(streamBody, dataFormat = dfGzip)
+      result.headers.add(("Content-Encoding", "gzip"))
+    elif "/page" in url:
+      result.body = digestPage
+    elif "/words" in url:
+      result.body = "<b>not a page</b>, as its type says"
+      result.headers = @[("Content-Type", "text/plain")]
+    elif "/untyped" in url:
+      result.body = digestPage
+      result.headers = @[]
+    else: result.body = streamBody
+
 # The network: `?ms=N` answers after N ms, `/fail` does not answer at all,
 # `/missing` is a 404, `.png` is an 8x6 picture, `/json` a JSON body, `/big`
 # bigBody and `/huge` four of it.
@@ -61,6 +107,15 @@ jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
     sleep(parseInt(digits))
   if "/fail" in request.url:
     return JsIoResult(error: "connection refused")
+  if "stream.test" in request.url:
+    var asksGzip = false
+    for (name, value) in request.headers:
+      if name == "Accept-Encoding" and value == "gzip": asksGzip = true
+    if not asksGzip and "/asis" notin request.url:
+      return JsIoResult(error: "a streamed request did not ask for gzip")
+    let (code, body, headers) = streamAnswerFor(request.url)
+    return JsIoResult(code: code, body: body, headers: headers,
+      url: if "/moved" in request.url: "https://stream.test/landed?q=1" else: request.url)
   if "/missing" in request.url:
     return JsIoResult(code: 404, body: "not here")
   if ".png" in request.url:
@@ -577,14 +632,236 @@ suite "async JavaScript":
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
     check a.render().startsWith("fetch failed: out of memory")
 
+  # ---- a response in pieces: fetch(url, { onChunk }) -------------------------
+  const collect = """
+    let text = "", sizes = [], dones = 0, first = "", bytes = 0, result = "-", same = true, seen = null
+    const onChunk = (piece, info) => {
+      if (seen && seen !== info) same = false
+      seen = info
+      if (!sizes.length) first = [info.status, info.url, info.headers["content-type"], info.headers["set-cookie"]].join("|")
+      sizes.push(piece.length)
+      text += piece
+      bytes = info.bytes
+      if (info.done) dones++
+      if (info.error) result = "error:" + info.error
+    }
+  """
+
+  test "onChunk: the body in pieces, in order, with the answer's head and one done call":
+    let a = app(collect & """
+      export async function init() {
+        const r = await fetch("https://stream.test/moved", { chunkBytes: 4096, onChunk })
+        result = [r.status, r.ok, r.url, (await r.text()) === "", dones, same, bytes].join("|")
+      }
+      export function get(app) {
+        const want = app.config.want
+        return want === "text" ? text : want === "first" ? first : want === "sizes" ? sizes.join(",") : result
+      }
+    """, "pieces")
+    proc want(what: string): string = a.runtime.get(a.owner, %*{"want": what}, a.context).asString()
+    check a.render() == "-"
+    check pumpUntil(proc(): bool = a.render() != "-")
+    check a.render() == "200|true|https://stream.test/landed?q=1|true|1|true|" & $streamBody.len
+    check want("text") == streamBody
+    check want("first") == "200|https://stream.test/landed?q=1|text/html; charset=utf-8|a=1\nb=2"
+    # Twelve whole pieces, the rest, and the done call with nothing.
+    let sizes = want("sizes").split(',')
+    check sizes.len == streamBody.len div 4096 + 2
+    check sizes[0] == "4096" and sizes[^1] == "0"
+    check jsAsyncPending() == 0
+
+  test "onChunk: a character two pieces share is whole, and a page that is not UTF-8 is Windows-1252":
+    let a = app(collect & """
+      let latin = ""
+      export async function init() {
+        await fetch("https://stream.test/utf8", { chunkBytes: 2048, onChunk })
+        await fetch("https://stream.test/latin", { chunkBytes: 2048, onChunk: (piece) => { latin += piece } })
+        result = "done"
+      }
+      export function get(app) { return app.config.want === "text" ? text : app.config.want === "latin" ? latin : result }
+    """, "seams")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() == "done")
+    let got = a.runtime.get(a.owner, %*{"want": "text"}, a.context).asString()
+    check got == utf8Body
+    check "\xEF\xBF\xBD" notin got
+    check a.runtime.get(a.owner, %*{"want": "latin"}, a.context).asString() == "x".repeat(3000) & latinText
+
+  test "onChunk: pieceText holds a split character back, and reads Windows-1252 from where UTF-8 ends":
+    var state: PieceText
+    let euro = "€"
+    check pieceText(state, "a" & euro[0 .. 1]) == "a"
+    check pieceText(state, euro[2 .. 2] & "b") == euro & "b"
+    check pieceText(state, "\xF0\x9F") == ""
+    check pieceText(state, "\x99\x82!", last = true) == "🙂!"
+    check not state.latin
+    var cut: PieceText
+    check pieceText(cut, "ok \xE2\x82", last = true) == "ok " # a body that ends inside a character
+    var old: PieceText
+    check pieceText(old, "plain") == "plain"
+    check pieceText(old, "caf\xE9 \x85") == "café …"
+    check old.latin
+    check pieceText(old, "\xC3\xA9") == "Ã©" # it stays Windows-1252
+
+  test "onChunk: returning false stops the download, and the promise resolves":
+    let a = app(collect & """
+      export async function init() {
+        const r = await fetch("https://stream.test/", { chunkBytes: 4096, onChunk: (piece, info) => {
+          onChunk(piece, info)
+          return sizes.length < 3
+        } })
+        result = [r.status, sizes.length, dones].join("|")
+      }
+      export function get() { return result }
+    """, "stops")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() != "-")
+    check a.render() == "200|3|0"
+    # What was read past the third piece is dropped, and nothing waits.
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0 and jsIoInFlight() == 0)
+    for _ in 0 ..< 20: discard pumpJsAsync()
+    check a.render() == "200|3|0"
+
+  test "onChunk: an aborted signal stops it too, and a throw in onChunk rejects":
+    let a = app(collect & """
+      export async function init() {
+        const c = new AbortController()
+        try {
+          await fetch("https://stream.test/", { chunkBytes: 4096, signal: c.signal, onChunk: (piece, info) => {
+            onChunk(piece, info)
+            c.abort()
+          } })
+        } catch (e) { result = e.name }
+        try {
+          await fetch("https://stream.test/", { chunkBytes: 4096, onChunk: () => { throw new Error("no thanks") } })
+        } catch (e) { result += "|" + e.message }
+        result += "|" + sizes.length
+      }
+      export function get() { return result }
+    """, "aborts")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render().count('|') == 2)
+    check a.render() == "AbortError|no thanks|1"
+    check pumpUntil(proc(): bool = jsAsyncPending() == 0 and jsIoInFlight() == 0)
+
+  test "onChunk: an error status is an answer, an empty body one done call, no answer a rejection":
+    let a = app(collect & """
+      export async function init() {
+        const gone = await fetch("https://stream.test/gone", { onChunk })
+        const empty = await fetch("https://stream.test/empty", { onChunk })
+        let failed = ""
+        try { await fetch("https://down.test/fail", { onChunk }) } catch (e) { failed = `${e instanceof TypeError}:${e.message}` }
+        result = [gone.status, gone.ok, text, empty.status, sizes.join(","), dones, failed].join("|")
+      }
+      export function get() { return result }
+    """, "statuses")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() != "-")
+    check a.render() == "404|false|not here|200|8,0,0|2|true:fetch failed: connection refused"
+
+  test "onChunk: a gzip body is asked for and inflated":
+    let a = app(collect & """
+      export async function init() {
+        const r = await fetch("https://stream.test/gzip", { chunkBytes: 65536, onChunk })
+        result = [r.status, bytes, sizes.length, dones].join("|")
+      }
+      export function get(app) { return app.config.want === "text" ? text : result }
+    """, "gzip")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() != "-")
+    check a.render() == "200|" & $streamBody.len & "|2|1"
+    check a.runtime.get(a.owner, %*{"want": "text"}, a.context).asString() == streamBody
+
+  test "onChunk with digest: \"html\": a page comes as its records, whole ones, and what is not a page as it is":
+    let a = app(collect & """
+      let digests = [], whole = true
+      const see = (piece, info) => {
+        if (!digests.includes(info.digest)) digests.push(info.digest)
+        if (info.digest === "html" && piece && !piece.endsWith("\n")) whole = false
+        onChunk(piece, info)
+      }
+      export async function init(app) {
+        await fetch("https://stream.test/page", { chunkBytes: 2048, digest: "html", onChunk: see })
+        const page = text
+        text = ""
+        await fetch("https://stream.test/words", { digest: "html", onChunk: see })
+        const words = text
+        text = ""
+        await fetch("https://stream.test/page", { onChunk: see }) // not asked for: the markup
+        const raw = text.length
+        text = ""
+        await fetch("https://stream.test/untyped", { digest: "html", onChunk: see }) // no Content-Type: by its first bytes
+        result = JSON.stringify({ page: page.split("\n").slice(0, 5), lines: page.split("\n").length, whole, words, raw,
+          untyped: text.slice(0, 7), digests })
+      }
+      export function get() { return result }
+    """, "digest")
+    discard a.render()
+    check pumpUntil(proc(): bool = a.render() != "-")
+    let got = parseJson(a.render())
+    # The title, the heading, then a link's address before the paragraph it is in: no script, no tags.
+    check got["page"] == %*["TA page", "h384\t\tWords", "A/next", "p0\t0,0,26,256,32,0\tRead by the runtime, with a link and a €.", "A/next"]
+    check got["lines"].getInt() == 2 + 2 * 40 + 1
+    check got["whole"].getBool()
+    check got["words"].getStr() == "<b>not a page</b>, as its type says"
+    check got["raw"].getInt() == digestPage.len - 2 * 40 # as text: the 3-byte letters one each
+    check got["untyped"].getStr() == "TA page"
+    check got["digests"] == %*["html", ""]
+
+  test "onChunk: where nothing pumps, every piece comes inside the fetch() call":
+    asyncPumped = false
+    defer: asyncPumped = true
+    var asked: seq[string]
+    jsHttpRequestHook = proc(url, httpMethod, body: string, headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      if "/fail" in url:
+        raise newException(IOError, "connection refused")
+      for (name, value) in headers:
+        if name == "Accept-Encoding": asked.add value
+      let answer = streamAnswerFor(url)
+      jsHttpHookHeaders = ""
+      for (name, value) in answer.headers:
+        jsHttpHookHeaders.add name & ": " & value & "\n"
+      (answer.code, answer.body)
+    defer:
+      jsHttpRequestHook = nil
+      jsHttpHookHeaders = ""
+    let a = app(collect & """
+      export function get(app) {
+        text = ""; sizes = []; dones = 0
+        let after = ""
+        fetch("https://stream.test/" + app.config.page, { chunkBytes: 2048, onChunk }).then(
+          (r) => { after = "resolved:" + r.status }, (e) => { after = "rejected:" + e.message })
+        // Before any promise callback: the pieces are here already.
+        return [sizes.length, dones, first, text].join("|") + after
+      }
+    """, "blocking")
+    let head = "|1|200|https://stream.test/"
+    check a.runtime.get(a.owner, %*{"page": "utf8"}, a.context).asString() ==
+      $(utf8Body.len div 2048 + 2) & head & "utf8|text/html; charset=utf-8|a=1\nb=2|" & utf8Body
+    check a.runtime.get(a.owner, %*{"page": "gzip"}, a.context).asString().endsWith("|" & streamBody)
+    check a.runtime.get(a.owner, %*{"page": "latin"}, a.context).asString().endsWith(latinText)
+    check a.runtime.get(a.owner, %*{"page": "empty"}, a.context).asString().startsWith("1|1|200|")
+    check asked == @["gzip", "gzip", "gzip", "gzip"]
+    # No answer: onChunk never runs, and the promise rejects.
+    let b = app(collect & """
+      let after = "-"
+      export function get() {
+        fetch("https://down.test/fail", { onChunk }).then(() => { after = "resolved" }, (e) => { after = e.message })
+        return sizes.length + "|" + after
+      }
+    """, "blockingfail")
+    check b.render() == "0|-"
+    check b.render() == "0|fetch failed: connection refused"
+
   test "fetch and the timers are promises and functions, and get() may start one":
     let a = app("""
       export function get() {
         return [frameos.sleep(0) instanceof Promise, fetch("https://x.test/?ms=1") instanceof Promise,
-          typeof setTimeout, typeof clearInterval, typeof frameos.useImage].join(":")
+          typeof setTimeout, typeof clearInterval, typeof frameos.useImage, fetch.chunks].join(":")
       }
     """, "promises")
-    check a.render() == "true:true:function:function:undefined"
+    # fetch.chunks: this runtime hands a body over in pieces (onChunk).
+    check a.render() == "true:true:function:function:undefined:true"
     check pumpUntil(proc(): bool = jsAsyncPending() == 0)
 
 stopJsIo()

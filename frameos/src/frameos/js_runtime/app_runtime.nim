@@ -3625,25 +3625,79 @@ const appJsPrelude* = compactJs("""
     try { w[0](typeof text !== "string" ? text : text ? JSON.parse(text) : undefined); } catch (e) { w[1](e); }
   };
   const __fetchInit = (init) => JSON.stringify({ method: init.method, headers: init.headers, timeoutMs: init.timeoutMs,
+    chunkBytes: init.chunkBytes, digest: init.digest,
     body: init.body == null || typeof init.body === "string" ? init.body : JSON.stringify(init.body) }, __appReplacer);
   const __response = (url, a) => {
     if (!a.status) throw new TypeError("fetch failed: " + (a.error || url));
     const body = a.body ?? "", h = a.headers || {};
-    return { ok: a.status > 199 && a.status < 300, status: a.status, statusText: "", url, redirected: false,
+    return { ok: a.status > 199 && a.status < 300, status: a.status, statusText: "", url: a.url || url, redirected: false,
       headers: { get: (n) => h[String(n).toLowerCase()] ?? null, has: (n) => String(n).toLowerCase() in h,
         forEach: (f) => Object.keys(h).forEach((k) => f(h[k], k)) },
       text: async () => body, json: async () => JSON.parse(body) };
+  };
+  // A response in pieces, fetch(url, { onChunk }) (docs/async-js.md): the
+  // host hands each piece of the body here (js_async.nim), the first with
+  // the answer's head: the URL it came from if another than asked, and its
+  // headers a line each. What it returns: whether to go on reading.
+  const __chunks = new Map();
+  let __chunkSeq = 0;
+  globalThis.__frameosChunk = (id, text, status, head, bytes, done, error) => {
+    const c = __chunks.get(id);
+    if (!c) return false;
+    const info = c[1], h = info.headers;
+    info.status = status;
+    if (head) {
+      const lines = head.split("\n");
+      if (lines[0]) info.url = lines[0];
+      for (const line of lines.slice(1)) {
+        const at = line.indexOf(":"), k = line.slice(0, at).trim().toLowerCase(), v = line.slice(at + 1).trim();
+        if (at > 0) h[k] = k in h ? h[k] + (k === "set-cookie" ? "\n" : ", ") + v : v;
+      }
+      // HTML the runtime reads on the way (docs/html-digest.md): the pieces are its records.
+      info.digest = h["frameos-digest"] || "";
+      delete h["frameos-digest"];
+    }
+    let go = false;
+    try {
+      if (!status) throw new TypeError("fetch failed: " + (error || info.url));
+      info.bytes = bytes; info.done = done;
+      if (error) info.error = error;
+      // Aborted in onChunk: its entry is gone, and so is the reading.
+      go = c[0](text, info) !== false && !done && __chunks.has(id);
+    } catch (e) { __chunks.delete(id); c[3](e); return false; }
+    if (!go && __chunks.delete(id)) c[2](info);
+    return go;
   };
   globalThis.fetch = (input, init = {}) => {
     const url = String((input && input.url) || input || ""), o = __fetchInit(init), s = init.signal;
     return new Promise((ok, no) => {
       if (s && s.aborted) return no(s.reason);
+      if (typeof init.onChunk === "function") {
+        const c = [init.onChunk, { status: 0, url, headers: {}, done: false, bytes: 0 }, ok, no];
+        if (!jsAsyncMode()) {
+          // Nothing pumps promises: every piece is handed over in this call
+          // (an ESP32's I/O task is asked as ever, and answers in it).
+          const id = jsAsyncStart("stream", url, o) || -(++__chunkSeq);
+          __chunks.set(id, c);
+          jsFetchStream(url, o, id);
+          if (__chunks.delete(id)) no(new TypeError("fetch failed: " + url));
+          return;
+        }
+        const id = jsAsyncStart("stream", url, o);
+        if (!id) return no(new Error("fetch could not start"));
+        __chunks.set(id, c);
+        // Aborted: rejected now, and the host stops reading.
+        if (s) s.addEventListener("abort", () => { if (__chunks.delete(id)) { jsAsyncCancel(id); no(s.reason); } });
+        return;
+      }
       if (!jsAsyncMode()) return ok(__frameosAnswer(jsHttpRequest(url, o)));
       const id = __wait("fetch", url, o, ok, no);
       // Aborted while in flight: rejected now, its answer dropped when it comes.
       if (s && id) s.addEventListener("abort", () => { if (__waits.delete(id)) { jsAsyncCancel(id); no(s.reason); } });
     }).then((a) => __response(url, a));
   };
+  // What an app asks before its first request: a runtime without it ignores onChunk.
+  fetch.chunks = true;
   // AbortController and AbortSignal, as far as fetch and timers go:
   // fetch(url, { signal: AbortSignal.timeout(5000) }) rejects with a
   // TimeoutError after 5 s, controller.abort() with an AbortError.
@@ -3841,6 +3895,7 @@ proc registerAppNatives(js: var QuickJS) =
   js.registerFunction("jsAsyncMode", jsAsyncMode)
   js.registerFunction("jsAssets", jsAssets)
   js.registerFunction("jsAsyncStart", jsAsyncStart)
+  js.registerFunction("jsFetchStream", jsFetchStream)
   js.registerFunction("jsTypedOps", jsTypedOps)
   js.registerFunction("jsMeasureText", jsMeasureText)
   when not defined(frameosEmbedded):

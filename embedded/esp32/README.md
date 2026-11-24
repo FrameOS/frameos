@@ -94,7 +94,8 @@ components/
                           pixel loop's rows with a helper on the other core (resample.nim);
                           fos_js_io.c makes a JS app's fetch and <img src> requests, and
                           runs the scene store's work, on one task, one at a time
-                          (docs/async-js.md)
+                          (docs/async-js.md); include/fos_tls_sessions.h the TLS sessions
+                          a scene's HTTPS requests resume (host-tested)
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
@@ -115,7 +116,7 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version, Wi-Fi network order, OTA download, LCD splash and loading mark,
-                          slot cache, refresh queue
+                          slot cache, refresh queue, TLS session table
                           (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -2018,6 +2019,66 @@ The C3 overlay (no PSRAM) keeps IDF's values. `test_esp32_network_buffers.py`
 pins all three. What is left of a photo's network time is opening the
 request: DNS, connect and the TLS handshake, 2.3 to 4 s to
 gallery.frameos.net.
+
+**A scene's HTTPS request resumes the TLS session of its host's last one.**
+Most of opening a request is the handshake, and an ESP32-S3 has hardware for
+RSA but verifies an ECDSA chain in software: a host whose certificates are
+signed with P-384 (Let's Encrypt's ECDSA chain: Hacker News, Wikipedia;
+GlobalSign's: CNN, the BBC) took 1.9 to 3.1 s to its first byte at every
+request, against 0.55 s for an all-RSA chain (text.npr.org). The glue keeps
+the session each connection ended with (`fos_tls_sessions.h`: six hosts, by
+host and port, the one used longest ago first out, ten minutes unused at
+most; a few hundred bytes to 2 KB each, in PSRAM) and offers it at the next
+connect to that host and port, a redirect hop under its own. A server that
+still knows it (its ticket, RFC 5077) skips its certificates and the key
+exchange. No connection is kept open for it: an open one is ~40 KB of
+internal RAM, a kept session none (12 bytes of statics; the internal
+min-ever-free of the run below was 83 KB with it and 80 KB without).
+
+First byte of a streamed fetch on a reTerminal E1003 (2026-11-24), the first
+request to a host and the ones after it:
+
+| Host | Before, every request | First | After it |
+| --- | --- | --- | --- |
+| news.ycombinator.com | 2.9 to 3.1 s | 3.0 s | 1.0 to 1.1 s |
+| en.wikipedia.org | 2.0 to 2.1 s | 2.1 s | 0.18 to 0.24 s |
+| lite.cnn.com | 2.1 to 2.2 s | 2.4 s | 0.13 s |
+| www.bbc.com | 1.85 s | 1.8 s | 0.67 s |
+| text.npr.org (RSA) | 0.55 s | 0.55 s | 0.10 to 0.22 s |
+| github.com, lite.duckduckgo.com | 2.5 s, 1.3 s | as before | as before |
+
+GitHub and DuckDuckGo answer an offered session with a full handshake; a
+server that did so is not kept (its next connect offers none and is), so it
+never puts a host that does resume out of the table.
+
+How: mbedTLS hands a session over at `mbedtls_ssl_handshake`, and ESP-IDF
+keeps one only inside an `esp_http_client`, of which the glue makes one a
+request. So that function goes through a linker wrap
+(`__wrap_mbedtls_ssl_handshake` in `frameos_nim_glue.c`), which is the real
+call and nothing else for every connection of the firmware but one a task
+marked in `http_open_request` (`tls_resume_begin` / `tls_resume_end` around
+each connect). `sdkconfig` is as it was: mbedTLS's client asks for a ticket
+by default. ESP-IDF's dynamic TLS buffers (`CONFIG_MBEDTLS_DYNAMIC_BUFFER`)
+had to be worked around: they free the receive buffer of a handshake message
+by "the state before the current one", which a resumed handshake skips
+twice, after the server's hello and after its Finished. The next message was
+then read into a block of the last one's size (the new ticket over the
+hello's, the first of the answer over the Finished's), and the heap asserted
+at its next call. A connection that offered a session is stepped by the glue
+(`tls_handshake_resuming`), which frees those two buffers as that code does
+where no state is skipped. +1.4 KB of flash; `test_esp32_tls_sessions.py`
+runs the table's host test and pins the rest.
+
+Two mbedTLS switches that would speed the first handshake were measured the
+same day and left as they are. `CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM`
+(tables in flash for a curve's fixed point): 10 to 25 % off a full ECDSA
+handshake (Hacker News 3.0 → 2.7 s, Wikipedia 2.1 → 1.6 s, lite.cnn.com
+2.2 → 1.7 s, the BBC 1.85 → 1.6 s, GitHub 2.5 → 2.1 s) for +10.8 KB of
+flash. `CONFIG_MBEDTLS_HARDWARE_MPI` off (big numbers multiplied in
+software, on the guess that the RSA peripheral's set-up costs more than a
+384-bit product): 3 to 9 % off an ECDSA host, an RSA one slower (text.npr.org
+0.55 → 0.74 s, DuckDuckGo 1.3 → 1.4 s), 0.6 KB less flash. `ECP_NIST_OPTIM`
+is on already.
 
 ## Memory guardrails (M4)
 

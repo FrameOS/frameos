@@ -316,3 +316,36 @@ block:
       doAssert hidden[x, y] == expected[x, y], &"({x}, {y}) is {hidden[x, y]}, a whole render gives {expected[x, y]}"
 
 echo "svg damage ok"
+
+block:
+  # A box that scrolled (a nested <svg> whose viewBox moved): every line in
+  # it differs, and the damage is its viewport, one box, not a box a line.
+  # Repainting that box leaves the target as a whole render would.
+  proc page(scroll: int, ticked = -1): string =
+    var rows = ""
+    for i in 0 ..< 200:
+      let fill = if i == ticked: "#ff0000" elif i mod 2 == 0: "#335577" else: "#557733"
+      rows.add &"""<rect x="4" y="{i * 6}" width="{40 + i mod 50}" height="4" fill="{fill}"/>"""
+    &"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">""" &
+      &"""<rect x="0" y="0" width="{W}" height="{H}" fill="#ffffff"/><rect x="0" y="0" width="{W}" height="20" fill="#dddddd"/>""" &
+      &"""<svg x="0" y="20" width="{W}" height="{H - 20}" viewBox="0 {scroll} {W} {H - 20}">{rows}</svg></svg>"""
+  let
+    before = parseSvg(page(0), W, H)
+    scrolled = parseSvg(page(37), W, H)
+    found = damageRects(before, scrolled, W, H, 6)
+  doAssert not found.full
+  doAssert found.rects == @[(0, 20, W, H - 20)], "a scrolled viewport is one box, its own: " & $found.rects
+  let target = fresh(page(0), pfRgbx)
+  for r in found.rects:
+    scrolled.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
+  let want = fresh(page(37), pfRgbx)
+  var differ = 0
+  for y in 0 ..< H:
+    for x in 0 ..< W:
+      if target[x, y] != want[x, y]:
+        inc differ
+  doAssert differ == 0, "the scrolled box repainted is the page scrolled: " & $differ & " pixels differ"
+  # One row of it changed: that row, not the viewport.
+  let ticked = damageRects(before, parseSvg(page(0, ticked = 5), W, H), W, H, 6)
+  doAssert ticked.rects.len == 1 and ticked.rects[0].h <= 10 and ticked.rects[0].w < 80, "one row that differs is its own box: " & $ticked.rects
+

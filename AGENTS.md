@@ -1076,6 +1076,53 @@
   `setNextSleep` loop around a synchronous `fetchImage` (what froze the Scene
   store, 2026-11-15). Not in the scene guide or `appTypeDeclarations.ts` yet:
   making it public is those two plus the AI evals.
+- **A body bigger than memory is read in pieces**: `fetch(url, { onChunk })`
+  (the doc's "A response in pieces"; `fetch.chunks` says a runtime has it).
+  An ESP32's I/O task reads the body off the socket a piece at a time
+  (`fos_js_io.c` `run_stream`, the glue's `fos_nim_http_stream_open_text`,
+  gzip inflated by the ROM's tinfl), two pieces queued at most, and the pump
+  hands each to the prelude's `__frameosChunk`; a `false` from the app, an
+  abort or an interpreter gone stops the read (`cancelJsIo`). Where nothing
+  pumps the pieces come inside the `fetch()` call (`jsFetchStream`). A Pi
+  has the body whole first and cuts it up. The text rules (a character two
+  pieces share, Windows-1252 for what is not UTF-8) are `utils/piece_text.nim`,
+  one module for every runtime. A new way to get a big text into a JS app
+  goes through it, never a bigger string.
+
+## Reading the web on a frame: `docs/html-digest.md`
+
+- **A JS app does not read HTML in JavaScript on an ESP32.** QuickJS there
+  runs a loop iteration in 4 to 6 µs and a regular expression over one tag
+  in ~175 µs: GitHub's front page was 5.5 s of reading, Wikipedia's ESP32
+  article ten (a SenseCAP Indicator, 2026-11-24). `fetch(url, { onChunk,
+  digest: "html" })` hands the app the page as **records**, a line a block
+  (a paragraph, a heading, a list item, a table's line, a picture, a form's
+  field, with its links and bold runs), read by
+  `frameos/src/frameos/utils/html_digest.nim` as the bytes come: one
+  implementation for a Pi, an ESP32 and the wasm runtime, hooked in where a
+  streamed piece becomes a JS string (`js_async.nim` `chunkArgs`). Scripts,
+  style sheets, comments, inline SVG and what is hidden never reach
+  JavaScript. The doc's table is the format; a new record or rule is the
+  module, the doc, the reader (`take()` in the Browser's `page.ts`) and
+  `utils/tests/test_html_digest.nim` together, and any cut of the input
+  must give the same records.
+- **The digest says what markup alone says; the app decides.** What is
+  around a page (a `<nav>`, a sidebar, the footer, an element named for one)
+  comes marked, with how much of it is links; folding it is the app's. Keep
+  policy out of the module: it is in every image, the app is a scene anyone
+  can update.
+- **The Browser sample** (`repo/scenes/samples/Browser`) is its user, a
+  browser the way Lynx and Opera Mini were: no style sheets fetched, no
+  scripts run, a page in one column in the frame's type. `page.ts` is the
+  page (records, feeds, plain text, Markdown, JSON), `lay.ts` breaks it into
+  lines as far down as is looked at, with the built-in face's letter widths
+  from a table (a line is drawn as one row that does not wrap, so the page's
+  height is known before anything is drawn), `app.tsx` draws the rows that
+  show. **Every letter drawn is a node the frame keeps** (a screenful of
+  text is a thousand, three times that was one 380 KB block on an 8 MB
+  board): draw what shows and a little around it, in pieces with a fixed
+  place in the tree (`CHUNK`, `GROUP`), so the keys' ring stays on its link
+  while the page scrolls. The page before stays up while the next one comes.
 
 ## ESP32 memory: `docs/esp32-memory.md`
 
@@ -1102,6 +1149,17 @@
   an app's `*.test.*` files (`scenes_for_frame` / `scenesForFrame`).
 - Measure on the board (`-d:memProbe`, `heapinfo`'s `min_ever_free`) and add
   what you find to the doc: a host model has been wrong both ways.
+- **A scene's HTTPS request resumes its host's TLS session** (ESP32:
+  `fos_tls_sessions.h`, `frameos_nim_glue.c` "TLS sessions resumed", the
+  numbers in `embedded/esp32/README.md`): a full ECDSA handshake is 2 to 3 s
+  there, a resumed one a few hundred ms. Every `mbedtls_ssl_handshake` of the
+  firmware goes through a linker wrap that is the real call unless
+  `http_open_request` marked the task (`tls_resume_begin` / `_end` around
+  each connect, a session only ever offered to the host and port it came
+  from). ESP-IDF's dynamic buffers leave a too-small receive buffer behind at
+  the states a resumed handshake skips, so a connection that offers a session
+  is stepped by `tls_handshake_resuming`: a new way to offer one goes through
+  it, never `mbedtls_ssl_set_session` alone. No connection is kept open.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 

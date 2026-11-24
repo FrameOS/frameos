@@ -109,7 +109,8 @@ not by call order, so it may sit in a condition or a loop.
 
 - **`fetch(url, init)`**: the web's, as far as a frame goes. `init.method`,
   `headers`, `body` (a string, or an object sent as JSON), `signal`, plus
-  `timeoutMs` (the request's own limit, 15 s by default).
+  `timeoutMs` (the request's own limit, 15 s by default) and `onChunk`, which
+  takes the body in pieces instead ("A response in pieces" below).
   It resolves with a `Response`: `ok`, `status`, `url`, `headers.get(name)`
   (a Pi's, and from 2026.11.12 those of every runtime where `fetch` blocks:
   the wasm runtime and a deep sleeper, through `httpRequest`; the I/O task of
@@ -152,11 +153,111 @@ Limits:
 |---|---|
 | requests, timers and pictures pending, per app | 32 (one more is refused: its promise rejects; an `<img>` asks again at a later render) |
 | one stretch of async code, from an await to the next | 2 s (`JsAsyncSliceMs`): stopped there, logged |
-| requests in flight, the frame over | a Pi 4 (`JsIoWorkers`, the fifth waits); an ESP32 1 at a time, 32 queued |
+| requests in flight, the frame over | a Pi 4 (`JsIoWorkers`, the fifth waits); an ESP32 1 at a time, 32 queued (a body read in pieces holds it until its end) |
 | one pump between renders | ~40 ms (`PumpBudgetMs`) and at least one answer; the rest at the next. On an ESP32 answers wait while a tap or key is queued or came in the last 250 ms (`fos_client_input_pending`) |
 
 Async code runs on the thread that renders, between renders: a stretch that
 computes for a second holds the frame for that second. Await often.
+
+### A response in pieces: `fetch(url, { onChunk })`
+
+A body bigger than the frame can hold, or one worth reading before all of it
+is in (a web page, a long feed, a log): the app is handed it a piece at a
+time and keeps what it wants of each.
+
+```tsx
+let words = 0
+const r = await fetch('https://example.com/a-very-long-page', {
+  chunkBytes: 16384,
+  onChunk(text, info) {
+    words += text.split(/\s+/).length  // keep what you need of the piece, not the piece
+    if (words > 50_000) return false   // enough: the download stops here
+    if (info.done) frameos.dispatch('render')
+  },
+})
+```
+
+- **`fetch.chunks`** is `true` on a runtime that has this. One without it
+  (2026.11.14 and before) ignores `onChunk` and resolves with the whole body:
+  an app that must not hold a body whole asks first and falls back to byte
+  ranges (`Range` headers) where it is `undefined`.
+- **`onChunk(text, info)`** is called with the body in order, in pieces of
+  about `chunkBytes` (16384 by default, 2048 to 65536), each a string of its
+  own. `info` is the same object at every call: `status`, `url` (where the
+  answer came from, after redirects), `headers` (an object, names in lower
+  case; a name that came twice is joined with `", "`, cookies with a line
+  break), `bytes` (of the body, handed over so far) and `done`. **The last
+  call has `done: true`** and no text, whatever the status and for an empty
+  body too; a body the network cut short, or one past the limits below, has
+  `info.error` there.
+- **Returning `false` stops the download**: the connection is closed, no
+  call follows (no `done` one either) and the promise resolves. An aborted
+  `signal` stops it too, and rejects as for any `fetch`. A throw in
+  `onChunk` stops it and rejects with what was thrown.
+- **The promise** resolves after the last piece with a `Response` whose
+  `text()` is `""` (`status`, `ok`, `url`, `headers` as `info` had them). It
+  rejects with a `TypeError`, as any `fetch`, only when no answer came at
+  all, and then `onChunk` never ran.
+- **Text**: a character whose bytes two pieces share is completed before it
+  is handed over, never a U+FFFD at a seam. A body that is not UTF-8 is read
+  as Windows-1252, every byte a character, from the first piece that holds a
+  sequence UTF-8 has none of (`utils/piece_text.nim`): an old Latin-1 page
+  reads as it was written. Other encodings are not known.
+- **gzip**: the request says `Accept-Encoding: gzip` unless the app set that
+  header itself, and a gzip (or deflate) body is inflated as it comes. `bytes`
+  and `chunkBytes` count the inflated text.
+- **`digest: "html"`**: a body that is HTML (by its `Content-Type`, else its
+  first bytes) is read by the runtime as it comes and the pieces are its
+  **records**, a line a block of the page, never its markup
+  (`docs/html-digest.md`): its scripts, style sheets and tags do not become
+  JavaScript strings at all, which on an ESP32 is the difference between
+  ten seconds for a long page and a fraction of one. `info.digest` is
+  `"html"` then, and `""` for a body that came as it is (text, a feed, JSON).
+- **Where nothing pumps promises** (the table below: wasm, a board that
+  sleeps) the request is made inside the `fetch()` call and every piece is
+  handed over before the call returns: a `get()` that starts one has the
+  whole answer when its `fetch()` line is over, and draws it in that render.
+  The promise's own callbacks still run after the call, as any promise's.
+
+| | |
+|---|---|
+| a streamed body, at most | 16 MiB of text, two minutes: the last call says so in `info.error` (a Pi, which has the body whole first, rejects instead) |
+| pieces waiting for the app, on an ESP32 | 2: the server is read no faster than the app takes them |
+| the scene's response ceiling | not applied: the body is never held |
+| headers, on an ESP32 | those of up to 256 bytes each (`FOS_NIM_STREAM_HEADER_MAX`: a content security policy would push the content type out), 2 KB of them |
+
+What it costs: +7.3 KB of the ESP32-S3 image (2026-11-24, against the
+commit before it): the prelude's half 1.3 KB of bytecode, `js_async.nim`'s
+2.1 KB, the glue's stream with its inflater and the redirect's URL 1.7 KB,
+the I/O task's pieces 0.8 KB, the text rules (`piece_text.nim`) 0.7 KB. No
+RAM while no stream runs but nine bytes of the task's own.
+
+How much of it is streaming depends on the runtime:
+
+- **An ESP32** reads the body off the socket a piece at a time and holds
+  none of it: the I/O task (`fos_js_io.c` `run_stream`) reads a piece, queues
+  it for the render task and waits while two are queued, so a page of 10 MB
+  costs a piece or two of PSRAM, and a `false` or an abort closes the
+  connection (`fos_js_io_cancel`; a piece queued before it is dropped as it
+  is taken). A gzip body goes through the
+  ROM's inflater (tinfl, as a FOSB picture does): its state, its 32 KiB window
+  and 2 KB of what came off the wire, 43 KB of PSRAM while the stream is open
+  (`frameos_nim_glue.c` `fos_nim_http_stream_open_text`). One request at a
+  time as ever: a picture or another `fetch` waits behind a stream. Where
+  nothing pumps (a board that sleeps between renders) the same task reads
+  it, and the render task takes the pieces inside the call
+  (`jsFetchStream`, `fos_js_io_take` with a wait). `info.url` is another
+  than the one asked only after a redirect: the client's own rendering of
+  where it went (`esp_http_client_get_url`, which has no query) with the
+  `Location`'s query and without a default port; a redirect to a path past
+  250 bytes leaves it the URL asked.
+- **A Pi** downloads the body whole on a worker (inflating a gzip one with
+  zippy) and hands it over in pieces: the pieces keep it from being one JS
+  string, not from being in memory, which a Pi has. Reading it off the socket
+  as it comes (`http_client.nim` has the sink) is the step after.
+- **wasm** (the preview, a plane's render for a board) makes the request as
+  it makes any, through the page's or the server's own `fetch` (which
+  inflates by itself), and cuts the body up inside the call.
 
 ## Where it runs
 
@@ -209,6 +310,16 @@ is only faster where it can be.
     firmware idles, and it waited in the queue for the next tap.
     A picture is decoded from the chunks on the render task, by the same
     code as a buffered download (`decodeBufferedImage`), into the size asked.
+- **A streamed answer is many.** `fetch(url, { onChunk })` waits under an id
+  like any request, and its answers come as pieces (`JsIoResult.kind`:
+  `jkPiece`, then one `jkEnd`), the first with the response's head. The pump
+  hands each to the prelude's `__frameosChunk` (the wait stays until the
+  end) and stops the I/O when that says the app wants no more, or when the
+  interpreter that asked is gone (`js_io.cancelJsIo`). The head crosses as
+  lines (the status, the URL, the headers as they came) and the prelude
+  reads them: no JSON is built and no header parsed in the firmware. Where
+  nothing pumps, `jsFetchStream` is the whole of it: the request, and a call
+  of `__frameosChunk` a piece, inside the app's own call.
 - **A promise is an id.** The prelude asks the bridge for one
   (`jsAsyncStart`) and keeps its resolver in a JS map under it. The pump
   settles each answer and each timer that is over (`__frameosSettle`), and
@@ -239,7 +350,10 @@ is only faster where it can be.
 four apps' requests in flight together, a spinning stretch stopped while the
 others go on, a dropped interpreter dropping its waits, `<img src>` with one
 render for a pass's pictures and a failure not asked again at once,
-`useFetch`, the blocking answers where nothing pumps),
+`useFetch`, the blocking answers where nothing pumps; `onChunk`: the pieces
+in order with the head and one done call, a character two pieces share, a
+Windows-1252 page, `false` and an abort stopping it, a gzip body, the pieces
+inside the call where nothing pumps),
 `tests/test_runner_async_js.nim` (through the real runner) and
 `tests/test_scene_store_scene.nim` (the store's pages over `fetch` and its
 covers from the network: the placeholders render in ~10 ms, a tap during the

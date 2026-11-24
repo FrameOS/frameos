@@ -1,10 +1,10 @@
 {
   "name": "Browser",
-  "description": "A web browser on the frame: type an address or a search and read the page, drawn from its HTML and CSS without JavaScript.",
+  "description": "A web browser on the frame, the way Lynx and Opera Mini browsed: a page is read as it downloads and shown as its words, links, pictures and forms in one column, without its scripts or style sheets.",
   "config": null,
   "image": "./image.jpg",
   "imageWidth": 800,
   "imageHeight": 480,
   "scenes": "./scenes.json",
-  "frameosVersion": "2026.11.14"
+  "frameosVersion": "2026.11.15"
 }

@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <setjmp.h>
 #include "fos_http_chunks.h"
+#include "fos_tls_sessions.h"
 #include "fos_oom_policy.h"
 #include <string.h>
 #include <limits.h>
@@ -32,6 +33,9 @@
 #include "esp_spiffs.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+/* The ROM's inflater (tinfl), for a streamed body that came gzipped. */
+#include "miniz.h"
+#include "mbedtls/ssl.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -1957,8 +1961,40 @@ void fos_nim_http_set_spill_force_bytes(size_t threshold)
  * whose canvas already owns most of its PSRAM (8 MB reTerminal E1004 with a
  * 1200x1600 panel) show a 2 MB gallery image at all: the buffering path had
  * ~1.5 MB free and a /state partition too small to spill into. */
+/* What a request keeps of its answer's headers (http_header_event). */
+typedef struct {
+    char *out;       /* "name: value\n" lines; NULL keeps none */
+    size_t cap;
+    size_t line_max; /* a longer header is left out (0: none is) */
+    /* Where the answer came from once a redirect was followed ("" when none
+     * was), and the last Location header, both `url_cap` bytes; NULL: not asked. */
+    char *url;
+    char *location;
+    size_t url_cap;
+    uint8_t encoding; /* Content-Encoding: HEAD_PLAIN, HEAD_GZIP, HEAD_ZLIB or HEAD_OTHER */
+} http_head_t;
+enum { HEAD_PLAIN, HEAD_GZIP, HEAD_ZLIB, HEAD_OTHER };
+
+/* A gzip body inflated as it is read (fos_nim_http_stream_open_text): the
+ * ROM's tinfl, its state, the 32 KiB window a deflate stream refers back
+ * into and what comes off the wire, in PSRAM while the stream is open. */
+#define STREAM_WIRE_BYTES 2048
+typedef struct {
+    tinfl_decompressor state;
+    uint8_t window[TINFL_LZ_DICT_SIZE];
+    uint8_t wire[STREAM_WIRE_BYTES];
+    size_t window_at;        /* where the next inflated byte goes */
+    size_t out_at, out_len;  /* inflated and not handed over yet */
+    size_t in_at, in_len;
+    int flags;               /* TINFL_FLAG_PARSE_ZLIB_HEADER for `deflate` */
+    bool gzip_header;        /* still to be skipped */
+    bool more, done, failed;
+} stream_inflater_t;
+
 struct fos_nim_http_stream {
     esp_http_client_handle_t client;
+    http_head_t head;
+    stream_inflater_t *z;
 };
 
 static esp_http_client_handle_t http_open_request(
@@ -1966,7 +2002,7 @@ static esp_http_client_handle_t http_open_request(
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
-    char *err_buf, size_t err_buf_len, char *out_headers);
+    char *err_buf, size_t err_buf_len, http_head_t *head);
 
 fos_nim_http_stream *fos_nim_http_stream_open(
     const char *url, const char *headers, size_t headers_len,
@@ -1992,10 +2028,144 @@ fos_nim_http_stream *fos_nim_http_stream_open(
     return stream;
 }
 
+fos_nim_http_stream *fos_nim_http_stream_open_text(
+    const char *method, const char *url, const void *body, size_t body_len,
+    const char *headers, size_t headers_len, int timeout_ms, int *out_status,
+    char *out_url, size_t out_url_len, char *out_headers,
+    char *err_buf, size_t err_buf_len)
+{
+    int64_t content_length = -1;
+    char log_url[FOS_NETGUARD_LOG_URL_LEN];
+    fos_netguard_url_origin(url, log_url, sizeof(log_url));
+    *out_status = 0;
+    fos_nim_http_stream *stream = calloc(1, sizeof(*stream));
+    if (stream == NULL) {
+        if (err_buf != NULL && err_buf_len > 0) snprintf(err_buf, err_buf_len, "out of memory");
+        return NULL;
+    }
+    /* The events' data outlives this call (a chunked body's trailers come
+     * while it is read): it is the stream's own. */
+    stream->head = (http_head_t){.out = out_headers, .cap = FOS_NIM_HTTP_HEADERS_BYTES,
+                                 .line_max = FOS_NIM_STREAM_HEADER_MAX, .url = out_url,
+                                 .location = out_url != NULL ? calloc(1, out_url_len) : NULL,
+                                 .url_cap = out_url_len};
+    if (stream->head.location == NULL) stream->head.url = NULL;
+    stream->client = http_open_request(method, url, log_url, body, body_len, headers, headers_len,
+                                       timeout_ms, out_status, &content_length, err_buf, err_buf_len,
+                                       &stream->head);
+    /* The caller's buffers are the caller's again. */
+    free(stream->head.location);
+    stream->head.out = stream->head.url = stream->head.location = NULL;
+    if (stream->client == NULL) {
+        free(stream);
+        return NULL;
+    }
+    if (stream->head.encoding == HEAD_PLAIN) return stream;
+    stream_inflater_t *z = stream->head.encoding == HEAD_OTHER ? NULL
+        : heap_caps_calloc(1, sizeof(*z), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (z == NULL) {
+        if (err_buf != NULL && err_buf_len > 0) {
+            snprintf(err_buf, err_buf_len, stream->head.encoding == HEAD_OTHER
+                     ? "the answer is compressed in a way this frame cannot read" : "out of memory");
+        }
+        fos_nim_http_stream_close(stream);
+        *out_status = 0;
+        return NULL;
+    }
+    tinfl_init(&z->state);
+    z->more = true;
+    z->gzip_header = stream->head.encoding == HEAD_GZIP;
+    z->flags = stream->head.encoding == HEAD_ZLIB ? TINFL_FLAG_PARSE_ZLIB_HEADER : 0;
+    stream->z = z;
+    return stream;
+}
+
+/* The length of the gzip header at `p` (RFC 1952): 0 when it does not end
+ * within `len` bytes, SIZE_MAX when it is not one. */
+static size_t gzip_header_len(const uint8_t *p, size_t len)
+{
+    if (len < 4) return 0;
+    if (p[0] != 0x1f || p[1] != 0x8b || p[2] != 8) return SIZE_MAX;
+    uint8_t flags = p[3];
+    size_t at = 10;
+    if (flags & 4) { /* FEXTRA */
+        if (at + 2 > len) return 0;
+        at += 2 + (size_t)p[at] + ((size_t)p[at + 1] << 8);
+    }
+    for (int name = 8; name <= 16; name <<= 1) { /* FNAME, FCOMMENT */
+        if (!(flags & name)) continue;
+        while (at < len && p[at] != 0) at++;
+        at++;
+    }
+    if (flags & 2) at += 2; /* FHCRC */
+    return at <= len ? at : 0;
+}
+
+/* Inflated bytes of the body into `buf`: as fos_nim_http_stream_read. */
+static int stream_inflate(fos_nim_http_stream *stream, uint8_t *buf, size_t len)
+{
+    stream_inflater_t *z = stream->z;
+    size_t got = 0;
+    while (got < len) {
+        if (z->out_len > 0) {
+            size_t n = z->out_len < len - got ? z->out_len : len - got;
+            memcpy(buf + got, z->window + z->out_at, n);
+            z->out_at += n;
+            z->out_len -= n;
+            got += n;
+            continue;
+        }
+        if (z->done) break;
+        if (z->in_at == z->in_len && z->more) {
+            /* A gzip header not whole yet stays in front of what comes next. */
+            size_t have = z->gzip_header ? z->in_len : 0;
+            int r = esp_http_client_read(stream->client, (char *)z->wire + have, (int)(STREAM_WIRE_BYTES - have));
+            if (r <= 0) {
+                z->more = false;
+                r = 0;
+            }
+            z->in_at = 0;
+            z->in_len = have + (size_t)r;
+            if (z->gzip_header) {
+                size_t skip = gzip_header_len(z->wire, z->in_len);
+                if (skip == 0 && z->more && z->in_len < STREAM_WIRE_BYTES) {
+                    z->in_at = z->in_len;
+                    continue;
+                }
+                z->gzip_header = false;
+                if (skip == 0 || skip == SIZE_MAX) {
+                    /* No body at all is an empty one; anything else is not gzip. */
+                    z->done = true;
+                    z->failed = z->in_len > 0;
+                    continue;
+                }
+                z->in_at = skip;
+            }
+        }
+        size_t in_size = z->in_len - z->in_at;
+        size_t out_size = TINFL_LZ_DICT_SIZE - z->window_at;
+        tinfl_status status = tinfl_decompress(&z->state, z->wire + z->in_at, &in_size, z->window,
+                                               z->window + z->window_at, &out_size,
+                                               (z->more ? TINFL_FLAG_HAS_MORE_INPUT : 0) | z->flags);
+        z->in_at += in_size;
+        z->out_at = z->window_at;
+        z->out_len = out_size;
+        z->window_at = (z->window_at + out_size) & (TINFL_LZ_DICT_SIZE - 1);
+        if (status == TINFL_STATUS_DONE) {
+            z->done = true;
+        } else if (status < 0 || (status == TINFL_STATUS_NEEDS_MORE_INPUT && !z->more && z->in_at == z->in_len)) {
+            /* It does not inflate, or the answer ended early. */
+            z->failed = z->done = true;
+        }
+    }
+    return got == 0 && z->failed ? -1 : (int)got;
+}
+
 int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len)
 {
     if (stream == NULL || stream->client == NULL || buf == NULL) return -1;
     if (len > (size_t)INT_MAX) len = INT_MAX;
+    if (stream->z != NULL) return stream_inflate(stream, buf, len);
     return esp_http_client_read(stream->client, (char *)buf, (int)len);
 }
 
@@ -2007,6 +2177,7 @@ void fos_nim_http_stream_close(fos_nim_http_stream *stream)
         esp_http_client_cleanup(stream->client);
         stream->client = NULL;
     }
+    free(stream->z);
     free(stream);
 }
 
@@ -2329,6 +2500,214 @@ static void http_wait_for_wifi(int timeout_ms)
     s_http_wifi_gave_up = true;
 }
 
+/* ------------------------------------------------------------------------
+ * TLS sessions resumed (fos_tls_sessions.h). A scene's HTTPS request to a
+ * host it asked a moment ago offers the session that connection ended with,
+ * and a server that still knows it skips its certificates and the key
+ * exchange: on an ESP32-S3 the two to three seconds of a chain signed with
+ * P-384, which it verifies in software, become a few hundred milliseconds
+ * (embedded/esp32/README.md, "A scene's HTTPS request resumes the TLS session
+ * of its host's last one").
+ *
+ * esp_http_client keeps a session only inside one client, and the glue makes
+ * a client a request. So the session is taken where mbedTLS hands it over:
+ * mbedtls_ssl_handshake goes through __wrap_mbedtls_ssl_handshake (the
+ * component's CMakeLists.txt), which is the real one for every connection
+ * but one a task marked with tls_resume_begin(): there the host's kept
+ * session is offered before the handshake starts, and the session it ends
+ * with is taken. mbedTLS asks for a ticket by default (its client config),
+ * so nothing in sdkconfig changes. No connection stays open: what is kept is
+ * the session alone (its ticket, its master secret: a few hundred bytes to
+ * 2 KB a host), in PSRAM.
+ *
+ * A session is offered to the host and port it came from and no other, hop
+ * by hop of a redirect; every check before the connect (the private-network
+ * policy, the pin) is as it was. A server that refuses it answers with a
+ * full handshake in the same connection. */
+#define TLS_RESUME_TASKS 3 /* the render task, the request task, one more */
+
+typedef struct {
+    TaskHandle_t task;          /* whose connect this is; NULL: free */
+    mbedtls_ssl_session *offer; /* the host's kept session, offered once */
+    mbedtls_ssl_session *got;   /* the session its handshake ended with */
+    bool offered;
+    bool taken;                 /* the server resumed the one offered */
+    char key[FOS_TLS_SESSION_KEY_LEN];
+} tls_resume_t;
+
+typedef struct {
+    fos_tls_sessions_t kept;
+    tls_resume_t tasks[TLS_RESUME_TASKS];
+} tls_resume_state_t;
+
+/* In PSRAM, made at the first HTTPS request. */
+static tls_resume_state_t *s_tls_resume = NULL;
+static portMUX_TYPE s_tls_resume_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void *tls_resume_alloc(size_t size)
+{
+    void *block = heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return block != NULL ? block : calloc(1, size);
+}
+
+static void tls_session_free(mbedtls_ssl_session *session)
+{
+    if (session == NULL) return;
+    mbedtls_ssl_session_free(session);
+    free(session);
+}
+
+/* The calling task's record, or NULL. The lock is held. */
+static tls_resume_t *tls_resume_mine(void)
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    for (size_t i = 0; i < TLS_RESUME_TASKS; i++) {
+        if (s_tls_resume->tasks[i].task == self) return &s_tls_resume->tasks[i];
+    }
+    return NULL;
+}
+
+/* Before a connect to `url`: an https one offers the session kept for its
+ * host and port, and keeps the one it ends with (tls_resume_end). */
+static void tls_resume_begin(const char *url)
+{
+    char host[FOS_NETGUARD_HOST_LEN];
+    char key[FOS_TLS_SESSION_KEY_LEN];
+    int port = 0;
+    if (url == NULL || strncasecmp(url, "https://", 8) != 0) return;
+    if (!fos_netguard_parse_url(url, host, sizeof(host), &port) ||
+        !fos_tls_session_key(host, port, key, sizeof(key))) {
+        return;
+    }
+    if (s_tls_resume == NULL) {
+        tls_resume_state_t *state = tls_resume_alloc(sizeof(*state));
+        if (state == NULL) return;
+        taskENTER_CRITICAL(&s_tls_resume_mux);
+        if (s_tls_resume == NULL) {
+            s_tls_resume = state;
+            state = NULL;
+        }
+        taskEXIT_CRITICAL(&s_tls_resume_mux);
+        free(state);
+    }
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    void *stale = NULL;
+    taskENTER_CRITICAL(&s_tls_resume_mux);
+    tls_resume_t *mine = tls_resume_mine();
+    for (size_t i = 0; mine == NULL && i < TLS_RESUME_TASKS; i++) {
+        if (s_tls_resume->tasks[i].task == NULL) mine = &s_tls_resume->tasks[i];
+    }
+    if (mine != NULL && mine->task == NULL) {
+        mine->task = xTaskGetCurrentTaskHandle();
+        mine->offer = fos_tls_sessions_take(&s_tls_resume->kept, key, now_ms, &stale);
+        mine->got = NULL;
+        mine->offered = false;
+        mine->taken = false;
+        strcpy(mine->key, key);
+    }
+    taskEXIT_CRITICAL(&s_tls_resume_mux);
+    tls_session_free(stale);
+}
+
+/* After the connect: the session it ended with is kept for the host's next
+ * one, in place of the one offered. A connect that failed keeps neither, and
+ * neither does one whose server did not take the session offered: a host
+ * that does not resume would hold a slot for nothing. (Its next connect
+ * offers none and is kept again, so it is asked every other time.) */
+static void tls_resume_end(bool connected)
+{
+    if (s_tls_resume == NULL) return;
+    mbedtls_ssl_session *offer = NULL;
+    mbedtls_ssl_session *spare = NULL;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    taskENTER_CRITICAL(&s_tls_resume_mux);
+    tls_resume_t *mine = tls_resume_mine();
+    if (mine != NULL) {
+        offer = mine->offer;
+        spare = mine->got;
+        if (connected && spare != NULL && (offer == NULL || mine->taken)) {
+            spare = fos_tls_sessions_put(&s_tls_resume->kept, mine->key, spare, now_ms);
+        }
+        memset(mine, 0, sizeof(*mine));
+    }
+    taskEXIT_CRITICAL(&s_tls_resume_mux);
+    tls_session_free(offer);
+    tls_session_free(spare);
+}
+
+int __real_mbedtls_ssl_handshake(mbedtls_ssl_context *ssl);
+
+#if CONFIG_MBEDTLS_DYNAMIC_BUFFER
+/* ESP-IDF's (mbedtls/port/dynamic/esp_mbedtls_dynamic_impl.c). */
+int esp_mbedtls_free_rx_buffer(mbedtls_ssl_context *ssl);
+#endif
+
+/* The handshake of a connection that offered a session, a step at a time
+ * (what mbedtls_ssl_handshake is). ESP-IDF's dynamic buffers
+ * (CONFIG_MBEDTLS_DYNAMIC_BUFFER, esp_ssl_cli.c) give each message of the
+ * server a receive buffer of its own size and free it after the step by "the
+ * state before the one it is in now", which holds for a full handshake
+ * alone. A server that takes the session skips states twice: from its hello
+ * to the end of the handshake, and from its Finished back to the client's.
+ * Neither buffer was freed, so the next message was read into a block of
+ * the last one's size: the new ticket over the hello's, then the first of
+ * the answer over the Finished's 60 bytes, and the heap asserted at its
+ * next call (a reTerminal E1003, 2026-11-24). Both are freed here, as that
+ * code frees them where no state is skipped. */
+static int tls_handshake_resuming(mbedtls_ssl_context *ssl, bool *taken)
+{
+    int ret = 0;
+    while (!mbedtls_ssl_is_handshake_over(ssl)) {
+        int before = ssl->MBEDTLS_PRIVATE(state);
+        ret = mbedtls_ssl_handshake_step(ssl);
+        if (ret != 0) break;
+        int state = ssl->MBEDTLS_PRIVATE(state);
+        /* From its hello straight to the end: the server took the session. */
+        bool resumed = before == MBEDTLS_SSL_SERVER_HELLO &&
+            (state == MBEDTLS_SSL_SERVER_CHANGE_CIPHER_SPEC || state == MBEDTLS_SSL_NEW_SESSION_TICKET);
+        if (resumed) *taken = true;
+#if CONFIG_MBEDTLS_DYNAMIC_BUFFER
+        bool skipped = (resumed && !ssl->MBEDTLS_PRIVATE(keep_current_message)) ||
+            (before == MBEDTLS_SSL_SERVER_FINISHED && state == MBEDTLS_SSL_CLIENT_CHANGE_CIPHER_SPEC);
+        if (skipped) {
+            ret = esp_mbedtls_free_rx_buffer(ssl);
+            if (ret != 0) break;
+        }
+#endif
+    }
+    return ret;
+}
+
+/* Every TLS handshake of the firmware comes through here (the linker's
+ * --wrap). All but a scene request's are the real call and nothing else. */
+int __wrap_mbedtls_ssl_handshake(mbedtls_ssl_context *ssl)
+{
+    tls_resume_t *mine = NULL;
+    if (s_tls_resume != NULL) {
+        taskENTER_CRITICAL(&s_tls_resume_mux);
+        mine = tls_resume_mine();
+        taskEXIT_CRITICAL(&s_tls_resume_mux);
+    }
+    if (mine == NULL) return __real_mbedtls_ssl_handshake(ssl);
+    /* Its own task alone writes a record between begin and end. Offered
+     * once: a connect tried again (http_open_with_retry) after a handshake
+     * that failed with it starts from nothing. */
+    if (mine->offer != NULL && !mine->offered) {
+        mine->offered = true;
+        (void)mbedtls_ssl_set_session(ssl, mine->offer);
+    }
+    int ret = mine->offer != NULL ? tls_handshake_resuming(ssl, &mine->taken) : __real_mbedtls_ssl_handshake(ssl);
+    if (ret == 0 && mine->got == NULL) {
+        mbedtls_ssl_session *session = tls_resume_alloc(sizeof(*session));
+        if (session != NULL) {
+            mbedtls_ssl_session_init(session);
+            if (mbedtls_ssl_get_session(ssl, session) == 0) mine->got = session;
+            else tls_session_free(session);
+        }
+    }
+    return ret;
+}
+
 /* The first connect after a deep-sleep wake is sometimes refused at once
  * while the next one, a second later, goes through (fos_backend_http.c does
  * the same for the firmware's own requests). Only an instant refusal is
@@ -2381,12 +2760,24 @@ static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t bo
  * dropped whole. */
 static esp_err_t http_header_event(esp_http_client_event_t *evt)
 {
-    char *out = evt->user_data;
+    http_head_t *head = evt->user_data;
     if (evt->event_id == HTTP_EVENT_ON_HEADER) {
+        if (strcasecmp(evt->header_key, "Content-Encoding") == 0) {
+            const char *v = evt->header_value;
+            head->encoding = strcasecmp(v, "gzip") == 0 || strcasecmp(v, "x-gzip") == 0 ? HEAD_GZIP
+                : strcasecmp(v, "deflate") == 0 ? HEAD_ZLIB
+                : strcasecmp(v, "identity") == 0 || v[0] == '\0' ? HEAD_PLAIN : HEAD_OTHER;
+        }
+        if (head->location != NULL && strcasecmp(evt->header_key, "Location") == 0) {
+            strlcpy(head->location, evt->header_value, head->url_cap);
+        }
+        char *out = head->out;
+        if (out == NULL) return ESP_OK;
+        if (head->line_max > 0 && strlen(evt->header_key) + strlen(evt->header_value) > head->line_max) return ESP_OK;
         size_t used = strlen(out);
-        int n = snprintf(out + used, FOS_NIM_HTTP_HEADERS_BYTES - used, "%s: %s\n",
+        int n = snprintf(out + used, head->cap - used, "%s: %s\n",
                          evt->header_key, evt->header_value);
-        if (n < 0 || used + (size_t)n >= FOS_NIM_HTTP_HEADERS_BYTES) out[used] = '\0';
+        if (n < 0 || used + (size_t)n >= head->cap) out[used] = '\0';
     }
     return ESP_OK;
 }
@@ -2396,7 +2787,7 @@ static esp_http_client_handle_t http_open_request(
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
-    char *err_buf, size_t err_buf_len, char *out_headers)
+    char *err_buf, size_t err_buf_len, http_head_t *head)
 {
     *out_status = 0;
     *out_content_length = -1;
@@ -2447,8 +2838,8 @@ static esp_http_client_handle_t http_open_request(
         .buffer_size = 1024,
         .buffer_size_tx = 4096,
         .max_redirection_count = 5,
-        .event_handler = out_headers != NULL ? http_header_event : NULL,
-        .user_data = out_headers,
+        .event_handler = head != NULL ? http_header_event : NULL,
+        .user_data = head,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
@@ -2471,7 +2862,9 @@ static esp_http_client_handle_t http_open_request(
         HTTP_OPEN_FAIL("too many requests in flight");
     }
     /* A retry stays inside the pin: both attempts dial the checked address. */
+    tls_resume_begin(url);
     esp_err_t err = http_open_with_retry(client, body_len, log_url);
+    tls_resume_end(err == ESP_OK);
     fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s %s: connect failed: 0x%x", method ? method : "GET", log_url,
@@ -2522,6 +2915,23 @@ static esp_http_client_handle_t http_open_request(
         if (!redirect_url_ok || !http_same_origin(url, redirect_url)) {
             drop_cross_origin_headers(client);
         }
+        if (head != NULL && head->url != NULL) {
+            /* Where the answer comes from now: esp_http_client_get_url() has no
+             * query, so the Location's own goes after it, and names the port
+             * always, so a default one comes off ("https://host:443/path"). */
+            const char *query = strchr(head->location, '?');
+            size_t query_len = query != NULL ? strcspn(query, "#") : 0;
+            const char *path = redirect_url_ok ? strchr(redirect_url + 8, '/') : NULL;
+            head->url[0] = '\0';
+            if (path != NULL && strlen(redirect_url) + query_len < head->url_cap) {
+                const char *port = redirect_url[4] == 's' ? ":443" : ":80";
+                size_t host_len = (size_t)(path - redirect_url);
+                size_t port_len = strlen(port);
+                if (strncmp(path - port_len, port, port_len) == 0) host_len -= port_len;
+                snprintf(head->url, head->url_cap, "%.*s%s%.*s", (int)host_len, redirect_url, path,
+                         (int)query_len, query != NULL ? query : "");
+            }
+        }
         memset(&pin, 0, sizeof(pin));
         if (fos_netguard_policy_active()) {
             fos_netguard_verdict_t verdict = FOS_NETGUARD_BLOCKED;
@@ -2551,7 +2961,10 @@ static esp_http_client_handle_t http_open_request(
             esp_http_client_cleanup(client);
             HTTP_OPEN_FAIL("too many requests in flight");
         }
+        /* The hop's own host: never the session of the host that sent it on. */
+        tls_resume_begin(redirect_url_ok ? redirect_url : NULL);
         err = http_open_with_retry(client, body_len, log_url);
+        tls_resume_end(err == ESP_OK);
         fos_netguard_unpin_for_task();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s %s: redirect connect failed: 0x%x", method ? method : "GET", log_url,
@@ -2569,7 +2982,10 @@ static esp_http_client_handle_t http_open_request(
                 HTTP_OPEN_FAIL("request body write failed");
             }
         }
-        if (out_headers != NULL) out_headers[0] = '\0'; /* the final answer's alone */
+        if (head != NULL) { /* the final answer's alone */
+            if (head->out != NULL) head->out[0] = '\0';
+            head->encoding = HEAD_PLAIN;
+        }
         content_length = esp_http_client_fetch_headers(client);
         *out_status = esp_http_client_get_status_code(client);
         redirects++;
@@ -2618,9 +3034,10 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     char log_url[FOS_NETGUARD_LOG_URL_LEN];
     fos_netguard_url_origin(url, log_url, sizeof(log_url));
     int64_t content_length = -1;
+    http_head_t head = {.out = out_headers, .cap = FOS_NIM_HTTP_HEADERS_BYTES};
     esp_http_client_handle_t client = http_open_request(
         method, url, log_url, body, body_len, headers, headers_len, timeout_ms,
-        out_status, &content_length, open_err, sizeof(open_err), out_headers);
+        out_status, &content_length, open_err, sizeof(open_err), out_headers != NULL ? &head : NULL);
     if (client == NULL) {
         return chunked_error(out_status, out_count, "%s", open_err);
     }

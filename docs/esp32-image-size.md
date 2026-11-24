@@ -1312,6 +1312,32 @@ assets API), GIF and BMP (decision 2026-11-21). Not done, needs work: std/xml
 the SVG reader's fast parser learns entities, text and CDATA and the Nim
 `xmlToJson` app is retired to JavaScript; kept for now (2026-11-21).
 
+## The web, read by the runtime: +38,304 (2026-11-24)
+
+What it took for the Browser sample to open Wikipedia in three seconds on
+an 8 MB board, where JavaScript took ten to read it and the page before
+left it no memory (`docs/esp32-memory.md`, `docs/html-digest.md`). Against
+main built at the same paths (3,111,664 → 3,149,968):
+
+| | bytes |
+|---|---:|
+| `utils/html_digest.nim`: HTML read as it comes, a record a block | +26,044 |
+| a response in pieces (`fetch`'s `onChunk`): `js_async.nim` and the prelude's bytecode in `app_runtime.nim` | +5,348 |
+| the glue: the streamed open with its head and final URL, gzip through the ROM's tinfl, a TLS session resumed (`fos_tls_sessions.h`, +1,440 of it) | +2,856 |
+| `fos_js_io.c`: the stream's read loop, its pieces and their back-pressure | +767 |
+| pixie: a scrolled viewport as one box of damage | +741 |
+| what moved around them, less the link order made again (−1,376) | +2,548 |
+
+The digest is the rules themselves: `open` (a start tag) 4.2 KB, the
+entities and element names 1.5 KB, and what was tried on it is in its doc
+("What it costs"). What would take it lower is a feature: forms about 2.5 KB,
+`srcset` 0.6 KB, the lines for video, sound and frames 0.5 KB.
+
+Measured and left out: `CONFIG_MBEDTLS_ECP_FIXED_POINT_OPTIM` takes 10 to
+25 % off a full ECDSA handshake (Hacker News 3.0 → 2.7 s, Wikipedia 2.1 →
+1.6 s to the first byte) for +10,800 bytes; a resumed session is 0.2 to 1.1 s
+for 1,440, and that is what a second page of a site gets.
+
 ## Dead ends
 
 - **Jump tables** (`-fjump-tables -ftree-switch-conversion` on the Nim

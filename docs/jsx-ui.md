@@ -80,7 +80,12 @@ cheap is that the pictures are reconciled, not the code:
   two element lists are matched in order, identical with identical, like a
   keyed list, so an element added or removed (a check mark ticked) is
   damage where it is and the rest still match. The damage is up to six
-  boxes, joined where they meet.
+  boxes, joined where they meet. A box that scrolled (more than eight of
+  one viewport's elements differ) is damage whole, its viewport one box,
+  and the rest of what is in it is passed over without a look: matching a
+  page's thousand moved glyphs one by one was up to 390 ms of a scrolled
+  frame on the SenseCAP against 20 ms of raster (the Browser sample,
+  2026-11-24).
 - **A box draws only what can touch it.** Each box is repainted alone, and
   pixie skips every element whose bounds miss it: a card's box costs that
   card's paths, not the other cards' flattening and strokes.

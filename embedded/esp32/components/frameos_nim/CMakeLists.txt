@@ -85,6 +85,11 @@ if(NIM_GENERATED_SRCS)
                 --objcopy "${CMAKE_OBJCOPY}" --ar "${CMAKE_AR}" ${fold_keep}
                 "$<TARGET_FILE:${COMPONENT_LIB}>"
         VERBATIM)
+    # A scene's HTTPS request resumes the TLS session of its host's last one:
+    # every handshake goes through the glue's __wrap_mbedtls_ssl_handshake,
+    # where mbedTLS hands a session over (frameos_nim_glue.c "TLS sessions
+    # resumed"). -u: the only reference is esp-tls's.
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=mbedtls_ssl_handshake" "-u __wrap_mbedtls_ssl_handshake")
     # The hand-written C that stands among the shell's objects (link_order.txt)
     # calls ROM and IRAM through the shell's veneers (main/fos_veneers.h,
     # test_esp32_veneers.py). None of it is IRAM code; fos_rows.c, whose
