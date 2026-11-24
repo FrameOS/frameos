@@ -1,9 +1,7 @@
 # Security — what is still open
 
-> **Local draft, not pushed (2026-11-24).** The High list below still
-> describes open holes (the settings group), in a public repository. Keep it
-> off `origin` until that group ships or its wording is cut down, and delete
-> this note then.
+> **The High list below is the settings group, still open (2026-11-24).** It
+> waits on the settings refactor; delete this note when that group ships.
 
 Open work only, most severe first, from the full-repo security reviews of
 2026-09-02 and 2026-09-09, the device HTTP-server pass of 2026-09-19 and the
