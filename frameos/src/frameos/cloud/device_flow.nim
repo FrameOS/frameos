@@ -244,7 +244,11 @@ proc pollDeviceFlow*(frameConfig: FrameConfig): DeviceFlowPoll {.gcsafe.} =
         state["token_reference"] = jsonOrNull(pollResponse{"token_reference"})
         state["linked_client_id"] = jsonOrNull(pollResponse{"linked_client_id"})
         if pollResponse{"scope"}.getStr("") != "":
-          state["scope"] = pollResponse{"scope"}
+          # What was granted of what this frame asked for (`scope` still
+          # holds the request, written when the flow started): a provider
+          # answering with more does not get it.
+          state["scope"] = %scopesTakenFromProvider(state,
+            pollResponse{"scope"}.getStr("").splitWhitespace(), managed = false).join(" ")
         for key in ["device_code", "user_code", "verification_uri",
                     "verification_uri_complete", "expires_epoch", "poll_error"]:
           if state.hasKey(key):

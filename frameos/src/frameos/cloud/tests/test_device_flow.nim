@@ -158,6 +158,24 @@ suite "device flow poll":
     check not state.hasKey("user_code")
     check not activeLinkCode().active
 
+  test "an approval that answers with more than was asked for grants only what was asked":
+    # The flow asked for frame:link. A provider naming cloud login and
+    # management in its answer does not get them on its say-so.
+    setStubResponse("/api/device/poll", 200, %*{
+      "access_token": "link-token-2",
+      "token_reference": "ref-2",
+      "linked_client_id": "client-2",
+      "scope": "frame:link auth:login frame:managed",
+    })
+    setStubResponse("/api/backends/inventory", 200, %*{"status": "ok"})
+    setStubResponse("/api/backends/grants", 200, %*{"grants": []})
+    let poll = pollDeviceFlow(standaloneConfig())
+    check poll.changed
+    check not poll.startHub
+    let state = linkStateNow()
+    check state{"status"}.getStr("") == "connected"
+    check state{"scope"}.getStr("") == "frame:link"
+
   test "denial resets the link and records why":
     setStubResponse("/api/device/poll", 403, %*{"error": "access_denied"})
     let poll = pollDeviceFlow(standaloneConfig())

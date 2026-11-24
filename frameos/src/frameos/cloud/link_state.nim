@@ -216,6 +216,29 @@ proc managedEnrollmentRequested*(state: JsonNode): bool =
   ## page, which is the ceremony this check exists to protect.
   "frame:managed" in requestedLinkScopes(state) and linkHasScope(state, "frame:managed")
 
+const PROVIDER_ADDED_SCOPES* = ["settings:services", "telemetry:logs", "telemetry:metrics"]
+  ## The scopes a provider that manages this frame may add to the link on its
+  ## own word, after the link was made: FrameOS Cloud has an owner's switch
+  ## per frame for each, and a frame learns of one from its hub's `ready`.
+  ## None of them hands the provider anything over the frame that managing it
+  ## does not already: it is given service keys, or sent the frame's logs.
+
+proc scopesTakenFromProvider*(state: JsonNode, announced: openArray[string], managed: bool): seq[string] =
+  ## What a provider says the link holds (a device-flow poll's `scope`, an
+  ## enrollment's, a hub `ready`'s `scopes`) cut down to what this frame
+  ## takes: a scope it holds already, one its local admin asked for when the
+  ## link was made (`requested_scope`), or, from the provider that manages it,
+  ## one of PROVIDER_ADDED_SCOPES. Anything else is the provider granting
+  ## itself something: `auth:login` would make its account an admin of this
+  ## frame, on its say-so alone.
+  let requested = requestedLinkScopes(state)
+  let held = state{"scope"}.getStr("").splitWhitespace()
+  for scope in announced:
+    if scope.len == 0 or scope in result:
+      continue
+    if scope in held or scope in requested or (managed and scope in PROVIDER_ADDED_SCOPES):
+      result.add(scope)
+
 proc unionScopeString*(existing, added: string): string =
   ## Whitespace-separated scope strings merged with existing order preserved
   ## and no duplicates. Used when a later step in a link's life reports the

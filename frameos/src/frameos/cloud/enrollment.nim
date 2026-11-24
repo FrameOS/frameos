@@ -354,8 +354,11 @@ proc enrollManagedFrame*(providerUrl, claimToken, bearerToken, name: string,
           # additive: replacing the link's scope string here would silently
           # drop everything else the device-flow grant carried (auth:login,
           # telemetry:logs, backup:assets …).
+          # Only what the link asked for, or what a managing provider may
+          # add (link_state.scopesTakenFromProvider).
           state["scope"] = %unionScopeString(state{"scope"}.getStr(""),
-                                             response{"scope"}.getStr(""))
+            scopesTakenFromProvider(state, response{"scope"}.getStr("").splitWhitespace(),
+                                    managed = true).join(" "))
       state["mode"] = %"managed"
       if frameId != nil and frameId.kind != JNull:
         state["frame_id"] = frameId

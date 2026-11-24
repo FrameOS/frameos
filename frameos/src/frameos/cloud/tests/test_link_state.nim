@@ -35,6 +35,24 @@ suite "link scope helpers":
     # Links minted before requested_scope existed never auto-enroll.
     check not managedEnrollmentRequested(%*{"scope": "frame:managed"})
 
+  test "a provider's word adds only what was asked for, or what managing the frame already implies":
+    # Linked for cloud login and nothing else; the provider answers with more.
+    let asked = %*{"requested_scope": "frame:link auth:login", "scope": "frame:link auth:login"}
+    check scopesTakenFromProvider(asked, ["frame:link", "auth:login", "frame:managed", "telemetry:logs"],
+      managed = false) == @["frame:link", "auth:login"]
+    # Fewer than asked for is the provider's to decide.
+    check scopesTakenFromProvider(asked, ["frame:link"], managed = false) == @["frame:link"]
+    # A managed frame (claim-token enrollment: no request on record) learns of
+    # service keys and telemetry from its hub. It does not learn that the
+    # provider's account may now sign in as its admin.
+    let managed = %*{"status": "connected", "mode": "managed", "scope": "frame:managed"}
+    check scopesTakenFromProvider(managed,
+      ["frame:managed", "settings:services", "telemetry:logs", "telemetry:metrics", "auth:login", "remote:access"],
+      managed = true) == @["frame:managed", "settings:services", "telemetry:logs", "telemetry:metrics"]
+    # What the link holds already is not taken away by being announced again.
+    let held = %*{"scope": "frame:managed auth:login"}
+    check scopesTakenFromProvider(held, ["auth:login", "auth:login", ""], managed = true) == @["auth:login"]
+
   test "resetting a link forgets the requested scopes":
     let state = %*{"provider_url": "https://cloud.frameos.net",
                    "status": "connected",
