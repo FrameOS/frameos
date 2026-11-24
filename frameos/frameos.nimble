@@ -27,7 +27,7 @@ requires "crunchy >= 0.1.11"
 # FrameOS/mummy: upstream mummy plus TLS listeners (OpenSSL inside the epoll
 # loop), listeners added/removed while serving, and Request.secure. HTTPS on
 # Linux frames terminates here; see docs/native-https.md.
-requires "https://github.com/FrameOS/mummy#020dfe59fd112bef4b711684c41fe9f678f56889"
+requires "https://github.com/FrameOS/mummy#7ce2bb88503a9edffdf3f18710cb496f53434886"
 requires "linuxfb >= 0.1.0"
 requires "jsony >= 1.1.5"
 requires "ws >= 0.5.0"
