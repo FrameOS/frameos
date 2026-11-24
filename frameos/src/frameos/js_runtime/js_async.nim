@@ -190,9 +190,10 @@ when jsAsyncOn:
       maxBytes: frameos_apps.maxImageResponseBytes(owner), timeoutMs: DefaultFetchTimeoutMs,
       maxSeconds: DefaultFetchMaxSeconds)
 
-  proc fetchAnswer(answer: var JsIoResult): string =
+  proc fetchAnswer(ctx: ptr JSContext, answer: var JsIoResult): JSValue =
     ## What `fetch`'s promise settles with: {status, body, headers}, or
-    ## {status: 0, error}, which the prelude rejects with a TypeError.
+    ## {status: 0, error}, which the prelude rejects with a TypeError. The
+    ## body is its own JS string (answerToJS), never part of a JSON text.
     var body = ""
     if answer.error.len == 0:
       try:
@@ -201,20 +202,20 @@ when jsAsyncOn:
         # A body with no block to hold it whole (http_client.requireRoomForBody).
         releaseJsIoResult(answer)
         answer.error = err.msg
+    var head: string
     if answer.error.len > 0:
-      result = """{"status":0,"error":"""
-      escapeJson(redactedUrlsIn(answer.error), result)
-      result.add '}'
-      return
-    result = """{"status":""" & $answer.code & ""","headers":{"""
+      head = """{"status":0,"error":"""
+      escapeJson(redactedUrlsIn(answer.error), head)
+      head.add '}'
+      return answerToJS(ctx, head, body, false)
+    head = """{"status":""" & $answer.code & ""","headers":{"""
     for i, (name, value) in answer.headers:
-      if i > 0: result.add ','
-      escapeJson(name.toLowerAscii(), result)
-      result.add ':'
-      escapeJson(value, result)
-    result.add """},"body":"""
-    escapeJson(body, result)
-    result.add '}'
+      if i > 0: head.add ','
+      escapeJson(name.toLowerAscii(), head)
+      head.add ':'
+      escapeJson(value, head)
+    head.add "}}"
+    answerToJS(ctx, head, body, true)
 
   proc decodeAnswer(wait: AsyncWait, answer: var JsIoResult): UrlImage =
     ## A picture's answer decoded at the size asked and kept, or why not.
@@ -338,17 +339,20 @@ when jsAsyncOn:
         runtime.closeLineStreams()
     true
 
-  proc settle(id: int, wait: AsyncWait, json: string, failed: bool): bool =
+  proc settle(id: int, wait: AsyncWait, value: JSValue, failed: bool): bool =
+    ## `value`: JSON text, or an answer already made (fetchAnswer); taken.
     let ctx = wait.ctx
     let idValue = nimIntToJS(ctx, id.int32)
-    let jsonValue = nimStringToJS(ctx, json)
     let failedValue = nimBoolToJS(ctx, failed)
     try:
-      result = runAsync(wait, "__frameosSettle", [idValue, jsonValue, failedValue])
+      result = runAsync(wait, "__frameosSettle", [idValue, value, failedValue])
     finally:
       JS_FreeValue(ctx, idValue)
-      JS_FreeValue(ctx, jsonValue)
+      JS_FreeValue(ctx, value)
       JS_FreeValue(ctx, failedValue)
+
+  proc settle(id: int, wait: AsyncWait, json: string, failed: bool): bool =
+    settle(id, wait, nimStringToJS(wait.ctx, json), failed)
 
   when defined(frameosEmbedded):
     proc fos_js_io_wake_if_waiting() {.importc, cdecl.}
@@ -387,7 +391,7 @@ when jsAsyncOn:
         continue
       case wait.kind
       of akFetch:
-        if settle(answer.id, wait, fetchAnswer(answer), false):
+        if settle(answer.id, wait, fetchAnswer(wait.ctx, answer), false):
           inc result
       of akUrlImage:
         wait.runtime.rememberUrlImage(decodeAnswer(wait, answer))
