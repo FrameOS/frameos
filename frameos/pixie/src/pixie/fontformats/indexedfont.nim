@@ -27,6 +27,10 @@ type
     numGlyphs*: int
     numRuns, numBlocks, dictLen, numValues: int
     cmapAt, glyphsAt, blocksAt, blockDataAt, kernAt, valuesAt: int
+    # The kerning section's tables (its head, read once): where each is and
+    # how many entries it holds, checked against the file's length.
+    kernLefts, kernPairs, kernRuns, kernRows, kernEntries: int
+    kernLeftsAt, kernPairsAt, kernRunsAt, kernRowsAt, kernEntriesAt: int
 
 const
   HeaderBytes = 64
@@ -63,6 +67,34 @@ proc i8(font: IndexedFont, at: int): int {.inline.} =
 proc u32(font: IndexedFont, at: int): int {.inline.} =
   font.u16(at) or (font.u16(at + 2) shl 16)
 
+proc readKerningHead(font: IndexedFont) =
+  ## The kerning section's head (generate_indexed_font.py, "kerning"): its
+  ## tables' places and counts, each table inside the file. The pair and
+  ## entry counts are the tables' own last entries. `kerning` reads with the
+  ## checks off, so every place it reads is one of these tables, and the
+  ## indices it takes from them are checked against these counts.
+  let k = font.kernAt
+  font.kernLefts = font.u16(k)
+  font.kernRuns = font.u16(k + 2)
+  font.kernRows = font.u16(k + 4)
+  font.kernLeftsAt = font.u32(k + 8)
+  font.kernPairsAt = font.u32(k + 12)
+  font.kernRunsAt = font.u32(k + 16)
+  font.kernRowsAt = font.u32(k + 20)
+  font.kernEntriesAt = font.u32(k + 24)
+  # A u32 past 2 GB is a negative int where an int is 32 bits (an ESP32).
+  if min([font.kernLeftsAt, font.kernPairsAt, font.kernRunsAt, font.kernRowsAt,
+      font.kernEntriesAt]) < 0 or
+      font.kernLeftsAt + (font.kernLefts + 1) * 4 > font.len or
+      font.kernRunsAt + font.kernRuns * 4 > font.len or
+      font.kernRowsAt + (font.kernRows + 1) * 2 > font.len:
+    fail("kerning tables out of bounds")
+  font.kernPairs = font.u16(font.kernLeftsAt + font.kernLefts * 4 + 2)
+  font.kernEntries = font.u16(font.kernRowsAt + font.kernRows * 2)
+  if font.kernPairsAt + font.kernPairs * 3 > font.len or
+      font.kernEntriesAt + font.kernEntries * 2 > font.len:
+    fail("kerning tables out of bounds")
+
 proc readHeader(font: IndexedFont) =
   if font.len < HeaderBytes or font.data[0] != uint8('F') or font.data[1] != uint8('O') or
       font.data[2] != uint8('S') or font.data[3] != uint8('F'):
@@ -91,6 +123,8 @@ proc readHeader(font: IndexedFont) =
   font.kernAt = font.u32(52)
   font.valuesAt = font.u32(56)
   if font.u32(60) != font.len or font.unitsPerEm == 0 or font.numBlocks == 0 or
+      min([font.cmapAt, font.glyphsAt, font.blocksAt, font.blockDataAt, font.kernAt,
+        font.valuesAt]) < 0 or
       font.cmapAt + font.numRuns * 8 > font.len or
       font.glyphsAt + font.numGlyphs * GlyphBytes > font.len or
       font.blocksAt + (font.numBlocks + 1) * 8 > font.len or
@@ -98,6 +132,7 @@ proc readHeader(font: IndexedFont) =
       font.kernAt + KernHeadBytes > font.len or
       font.valuesAt + font.numValues * 2 > font.len:
     fail("sections out of bounds")
+  font.readKerningHead()
   font.id = uint32(atomicInc(indexedFontIds))
 
 proc parseIndexedFont*(data: ptr UncheckedArray[uint8], len: int): IndexedFont {.raises: [PixieError].} =
@@ -265,10 +300,13 @@ proc getGlyphPath*(font: IndexedFont, rune: int32): Path {.raises: [PixieError],
   result = font.parseGlyfGlyph(max(font.glyphIdOf(rune), 0).uint16, 0)
   result.transform(scale(vec2(1, -1)))
 
-proc entryValue(font: IndexedFont, at, size, first, stop, key: int): int =
+proc entryValue(font: IndexedFont, at, size, first, stop, count, key: int): int =
   ## In the entries `first ..< stop` at `at`, `size` bytes each, sorted by
   ## their key (a u16 when `size` is 3, a u8 when 2) and ending in a u8
-  ## value index, the value index of `key`; -1 for none.
+  ## value index, the value index of `key`; -1 for none. The table holds
+  ## `count` entries: a span the file names outside it is no entry.
+  if first < 0 or first > stop or stop > count:
+    return -1
   var
     lo = first
     hi = stop - 1
@@ -284,11 +322,11 @@ proc entryValue(font: IndexedFont, at, size, first, stop, key: int): int =
 
 proc runOf(font: IndexedFont, glyph: int): int =
   ## Where the run of glyphs holding `glyph` is: u16 first glyph, u8 row,
-  ## u8 column.
-  let runsAt = font.u32(font.kernAt + 16)
+  ## u8 column. The font has at least one run (`kerning` asks).
+  let runsAt = font.kernRunsAt
   var
     lo = 0
-    hi = font.u16(font.kernAt + 2) - 1
+    hi = font.kernRuns - 1
   while lo < hi:
     let mid = (lo + hi + 1) div 2
     if font.u16(runsAt + mid * 4) <= glyph: lo = mid
@@ -300,16 +338,16 @@ proc kerning*(font: IndexedFont, left, right: int): int {.raises: [].} =
   ## lookup order, that covers `left` and has a nonzero entry for the pair
   ## (opentype's `getKerningAdjustment`). The file holds the glyph pairs, then
   ## the class subtables merged into one table: the left glyph's row, the
-  ## right glyph's column in it.
+  ## right glyph's column in it. Every table is inside the file
+  ## (`readKerningHead`), and every index read out of one is checked against
+  ## the table it names, so a broken font kerns by nothing.
   if left < 0 or right < 0 or left >= font.numGlyphs or right >= font.numGlyphs:
     return 0
-  let
-    k = font.kernAt
-    leftsAt = font.u32(k + 8)
+  let leftsAt = font.kernLeftsAt
   var
     v = -1
     lo = 0
-    hi = font.u16(k) - 1
+    hi = font.kernLefts - 1
   # Glyph pairs: the left glyph's list, then the right glyph in it.
   while lo <= hi:
     let
@@ -318,14 +356,16 @@ proc kerning*(font: IndexedFont, left, right: int): int {.raises: [].} =
     if left < g: hi = mid - 1
     elif left > g: lo = mid + 1
     else:
-      v = font.entryValue(font.u32(k + 12), 3, font.u16(leftsAt + mid * 4 + 2),
-        font.u16(leftsAt + mid * 4 + 6), right)
+      v = font.entryValue(font.kernPairsAt, 3, font.u16(leftsAt + mid * 4 + 2),
+        font.u16(leftsAt + mid * 4 + 6), font.kernPairs, right)
       break
-  if v < 0:
+  if v < 0 and font.kernRuns > 0:
     # Class pairs: the left glyph's row, the right glyph's column in it.
-    let row = font.u32(k + 20) + font.u8(font.runOf(left) + 2) * 2
-    v = font.entryValue(font.u32(k + 24), 2, font.u16(row), font.u16(row + 2),
-      font.u8(font.runOf(right) + 3))
+    let rowIndex = font.u8(font.runOf(left) + 2)
+    if rowIndex < font.kernRows:
+      let row = font.kernRowsAt + rowIndex * 2
+      v = font.entryValue(font.kernEntriesAt, 2, font.u16(row), font.u16(row + 2),
+        font.kernEntries, font.u8(font.runOf(right) + 3))
   if v >= 0 and v < font.numValues:
     return font.i16(font.valuesAt + v * 2)
   0

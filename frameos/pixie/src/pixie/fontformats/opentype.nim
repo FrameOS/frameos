@@ -782,10 +782,9 @@ proc parseNameTable(buf: string, offset: int): NameTable =
     record.nameID = buf.readUint16(i + 6).swap()
     record.length = buf.readUint16(i + 8).swap()
     record.offset = buf.readUint16(i + 10).swap()
-    record.text = buf[
-      (offset + result.stringOffset.int + record.offset.int) ..<
-      (offset + result.stringOffset.int + record.offset.int + record.length.int)
-    ]
+    let textAt = offset + result.stringOffset.int + record.offset.int
+    buf.eofCheck(textAt + record.length.int)
+    record.text = buf[textAt ..< textAt + record.length.int]
     if record.platformID == 3 and
       record.encodingID == 1 and
       record.languageID == 1033:
@@ -950,6 +949,9 @@ proc parseKernTable(buf: string, offset: int): KernTable =
 proc parseCFFIndexOffsets(
   buf: string, start: var int, stripZero = false
 ): seq[(int, int)] =
+  ## A CFF INDEX at `start`: where each of its objects is in `buf`, every one
+  ## inside it (the reader runs with the checks off in a release, and every
+  ## place it reads comes from the font). `start` moves past the INDEX.
 
   proc getOffset(buf: string, offset, offSize: int): int =
     var v = 0
@@ -960,18 +962,28 @@ proc parseCFFIndexOffsets(
 
   # Compute all of the offsets first.
   var offsets: seq[int]
+  buf.eofCheck(start + 2)
   let count = buf.readUint16(start).swap().int
   var endOffset = 0
   var objectOffset = 0
   if count != 0:
+    buf.eofCheck(start + 3)
     var offsetSize = buf.readUint8(start + 2).int
+    if offsetSize < 1 or offsetSize > 4:
+      raise newException(PixieError, "Invalid CFF INDEX offset size")
+    buf.eofCheck(start + 3 + (count + 1) * offsetSize)
     objectOffset = start + ((count.int + 1) * offsetSize.int) + 2
     var pos = start + 3
     for i in 0 .. count.int:
-      offsets.add(buf.getOffset(pos, offsetSize.int))
+      let offset = buf.getOffset(pos, offsetSize.int)
+      # Offsets count from 1 and never go back.
+      if offset < 1 or (i > 0 and offset < offsets[^1]):
+        raise newException(PixieError, "Invalid CFF INDEX offsets")
+      offsets.add(offset)
 
       pos += offsetSize
     endOffset = objectOffset + offsets[count]
+    buf.eofCheck(endOffset)
   else:
     endOffset = start + 2
 
@@ -982,7 +994,7 @@ proc parseCFFIndexOffsets(
     var
       a = objectOffset + offsets[i]
       b = objectOffset + offsets[i + 1]
-    if stripZero:
+    if stripZero and b > a:
       dec b # ignore 0 at the end
     result.add((a, b))
   start = endOffset
@@ -1119,6 +1131,32 @@ proc shift[T](s: var seq[T]): T =
   result = s[0]
   s.delete(0)
 
+const
+  CffMaxSubrDepth = 10
+    ## Type 2 charstrings nest subroutine calls ten deep at most.
+  CffMaxOperators = 65536
+    ## Operators one glyph may run, subroutines included: a real glyph runs
+    ## hundreds, and a broken font whose subroutines call each other over and
+    ## over must not keep a thread busy for ever.
+
+proc cffPop(stack: var seq[float32]): float32 =
+  ## The last operand: a charstring that asks for one with none there is
+  ## broken (the reader runs with the checks off in a release).
+  if stack.len == 0:
+    raise newException(PixieError, "Invalid CFF charstring: operand stack is empty")
+  stack.pop()
+
+proc cffShift(stack: var seq[float32]): float32 =
+  ## The first operand; see `cffPop`.
+  if stack.len == 0:
+    raise newException(PixieError, "Invalid CFF charstring: operand stack is empty")
+  stack.shift()
+
+template cffNeed(code: string, i, n: int) =
+  ## `n` operand bytes at `i`, inside the charstring.
+  if i + n > code.len:
+    raise newException(PixieError, "Invalid CFF charstring: operand past its end")
+
 proc calcCFFSubroutineBias(subrs: seq[string]): int =
   if subrs.len < 1240:
     107
@@ -1143,7 +1181,11 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
     nominalWidthX: int
 
   if cff.isCID:
+    if glyphIndex < 0 or glyphIndex >= cff.topDict.fdSelectSeq.len:
+      raise newException(PixieError, "Invalid CFF font: glyph has no FDSelect entry")
     let fdIndex = cff.topDict.fdSelectSeq[glyphIndex]
+    if fdIndex < 0 or fdIndex >= cff.topDict.fdArraySeq.len:
+      raise newException(PixieError, "Invalid CFF font: FDSelect names no FD")
     let fdDict = cff.topDict.fdArraySeq[fdIndex]
     subrs = fdDict.subrIndex
     subrsBias = calcCFFSubroutineBias(subrs)
@@ -1166,12 +1208,23 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
     stack.setLen(0)
     haveWidth = true
 
+  var
+    depth = 0
+    operators = 0
+
   proc parse(code: string) =
+    if depth > CffMaxSubrDepth:
+      raise newException(PixieError, "Invalid CFF charstring: subroutines nested too deep")
+    inc depth
+    defer: dec depth
 
     var i = 0
     while i < code.len:
       var v = code.readUint8(i).int
       inc i
+      inc operators
+      if operators > CffMaxOperators:
+        raise newException(PixieError, "Invalid CFF charstring: too long")
       case v:
 
       of 1, 3: # hstem vstem
@@ -1179,48 +1232,50 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
 
       of 4: # vmoveto
         if stack.len > 1 and not haveWidth:
-          width = stack.shift() + nominalWidthX.float32
+          width = stack.cffShift() + nominalWidthX.float32
           haveWidth = true
-        y += stack.pop()
+        y += stack.cffPop()
         p.moveTo(x, y)
 
       of 5: # rlineto
         while stack.len > 0:
-          x += stack.shift()
-          y += stack.shift()
+          x += stack.cffShift()
+          y += stack.cffShift()
           p.lineTo(x, y)
 
       of 6: # hlineto
         while stack.len > 0:
-          x += stack.shift()
+          x += stack.cffShift()
           p.lineTo(x, y)
           if stack.len == 0:
             break
-          y += stack.shift()
+          y += stack.cffShift()
           p.lineTo(x, y)
 
       of 7: # vlineto
         while stack.len > 0:
-          y += stack.shift()
+          y += stack.cffShift()
           p.lineTo(x, y)
           if stack.len == 0:
             break
-          x += stack.shift()
+          x += stack.cffShift()
           p.lineTo(x, y)
 
       of 8: # rrcurveto
         while stack.len > 0:
           let
-            c1x = x + stack.shift()
-            c1y = y + stack.shift()
-            c2x = c1x + stack.shift()
-            c2y = c1y + stack.shift()
-          x = c2x + stack.shift()
-          y = c2y + stack.shift()
+            c1x = x + stack.cffShift()
+            c1y = y + stack.cffShift()
+            c2x = c1x + stack.cffShift()
+            c2y = c1y + stack.cffShift()
+          x = c2x + stack.cffShift()
+          y = c2y + stack.cffShift()
           p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       of 10: # callsubr
-        let codeIndex = stack.pop().int + subrsBias
+        let codeIndex = stack.cffPop().int + subrsBias
+        if codeIndex < 0 or codeIndex >= subrs.len:
+          raise newException(PixieError, "Invalid CFF charstring: no such subroutine")
         let subrCode = subrs[codeIndex]
         if subrCode.len > 0:
           parse(subrCode)
@@ -1230,7 +1285,7 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
 
       of 14: # endchar
         if stack.len > 2 and not haveWidth:
-          width = stack.shift() + nominalWidthX.float32
+          width = stack.cffShift() + nominalWidthX.float32
           haveWidth = true
         p.closePath()
 
@@ -1243,17 +1298,17 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
 
       of 21: # rmoveto
         if stack.len > 2 and not haveWidth:
-          width = stack.shift() + nominalWidthX.float32
+          width = stack.cffShift() + nominalWidthX.float32
           haveWidth = true
-        y += stack.pop()
-        x += stack.pop()
+        y += stack.cffPop()
+        x += stack.cffPop()
         p.moveTo(x, y)
 
       of 22: # hmoveto
         if stack.len > 1 and not haveWidth:
-          width = stack.shift() + nominalWidthX.float32
+          width = stack.cffShift() + nominalWidthX.float32
           haveWidth = true
-        x += stack.pop()
+        x += stack.cffPop()
         p.moveTo(x, y)
 
       of 23: # vstemhm
@@ -1262,65 +1317,68 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
       of 24: # rcurveline
         while stack.len > 2:
           let
-            c1x = x + stack.shift()
-            c1y = y + stack.shift()
-            c2x = c1x + stack.shift()
-            c2y = c1y + stack.shift()
-          x = c2x + stack.shift()
-          y = c2y + stack.shift()
+            c1x = x + stack.cffShift()
+            c1y = y + stack.cffShift()
+            c2x = c1x + stack.cffShift()
+            c2y = c1y + stack.cffShift()
+          x = c2x + stack.cffShift()
+          y = c2y + stack.cffShift()
           p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
-        x += stack.shift()
-        y += stack.shift()
+        x += stack.cffShift()
+        y += stack.cffShift()
         p.lineTo(x, y)
 
       of 25: # rlinecurve
         while stack.len > 6:
-          x += stack.shift()
-          y += stack.shift()
+          x += stack.cffShift()
+          y += stack.cffShift()
           p.lineTo(x, y)
         let
-          c1x = x + stack.shift()
-          c1y = y + stack.shift()
-          c2x = c1x + stack.shift()
-          c2y = c1y + stack.shift()
-        x = c2x + stack.shift()
-        y = c2y + stack.shift()
+          c1x = x + stack.cffShift()
+          c1y = y + stack.cffShift()
+          c2x = c1x + stack.cffShift()
+          c2y = c1y + stack.cffShift()
+        x = c2x + stack.cffShift()
+        y = c2y + stack.cffShift()
         p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       of 26: # vvcurveto
         if stack.len mod 2 != 0:
-          x += stack.shift()
+          x += stack.cffShift()
         while stack.len > 0:
           let
             c1x = x
-            c1y = y + stack.shift()
-            c2x = c1x + stack.shift()
-            c2y = c1y + stack.shift()
+            c1y = y + stack.cffShift()
+            c2x = c1x + stack.cffShift()
+            c2y = c1y + stack.cffShift()
           x = c2x
-          y = c2y + stack.shift()
+          y = c2y + stack.cffShift()
           p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       of 27: # hhcurveto
         if stack.len mod 2 != 0:
-          y += stack.shift()
+          y += stack.cffShift()
         while stack.len > 0:
           let
-            c1x = x + stack.shift()
+            c1x = x + stack.cffShift()
             c1y = y
-            c2x = c1x + stack.shift()
-            c2y = c1y + stack.shift()
-          x = c2x + stack.shift()
+            c2x = c1x + stack.cffShift()
+            c2y = c1y + stack.cffShift()
+          x = c2x + stack.cffShift()
           y = c2y
           p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       of 28: # shortint
+        code.cffNeed(i, 2)
         let value = code.readInt16(i).swap().float32
         stack.add(value)
         i += 2
 
       of 29: # callgsubr
         let codeIndex =
-          stack.pop().int + calcCFFSubroutineBias(cff.globalSubrIndex)
+          stack.cffPop().int + calcCFFSubroutineBias(cff.globalSubrIndex)
+        if codeIndex < 0 or codeIndex >= cff.globalSubrIndex.len:
+          raise newException(PixieError, "Invalid CFF charstring: no such subroutine")
         let subrCode = cff.globalSubrIndex[codeIndex]
         if subrCode.len > 0:
           parse(subrCode)
@@ -1330,45 +1388,45 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
           block:
             let
               c1x = x
-              c1y = y + stack.shift()
-              c2x = c1x + stack.shift()
-              c2y = c1y + stack.shift()
-            x = c2x + stack.shift()
-            y = c2y + (if stack.len == 1: stack.shift() else: 0)
+              c1y = y + stack.cffShift()
+              c2x = c1x + stack.cffShift()
+              c2y = c1y + stack.cffShift()
+            x = c2x + stack.cffShift()
+            y = c2y + (if stack.len == 1: stack.cffShift() else: 0)
             p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
           if stack.len == 0:
             break
           block:
             let
-              c1x = x + stack.shift()
+              c1x = x + stack.cffShift()
               c1y = y
-              c2x = c1x + stack.shift()
-              c2y = c1y + stack.shift()
-            y = c2y + stack.shift()
-            x = c2x + (if stack.len == 1: stack.shift() else: 0)
+              c2x = c1x + stack.cffShift()
+              c2y = c1y + stack.cffShift()
+            y = c2y + stack.cffShift()
+            x = c2x + (if stack.len == 1: stack.cffShift() else: 0)
             p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       of 31: # hvcurveto
         while stack.len > 0:
           block:
             let
-              c1x = x + stack.shift()
+              c1x = x + stack.cffShift()
               c1y = y
-              c2x = c1x + stack.shift()
-              c2y = c1y + stack.shift()
-            y = c2y + stack.shift()
-            x = c2x + (if stack.len == 1: stack.shift() else: 0)
+              c2x = c1x + stack.cffShift()
+              c2y = c1y + stack.cffShift()
+            y = c2y + stack.cffShift()
+            x = c2x + (if stack.len == 1: stack.cffShift() else: 0)
             p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
           if stack.len == 0:
             break
           block:
             let
               c1x = x
-              c1y = y + stack.shift()
-              c2x = c1x + stack.shift()
-              c2y = c1y + stack.shift()
-            x = c2x + stack.shift()
-            y = c2y + (if stack.len == 1: stack.shift() else: 0)
+              c1y = y + stack.cffShift()
+              c2x = c1x + stack.cffShift()
+              c2y = c1y + stack.cffShift()
+            x = c2x + stack.cffShift()
+            y = c2y + (if stack.len == 1: stack.cffShift() else: 0)
             p.bezierCurveTo(c1x, c1y, c2x, c2y, x, y)
 
       else:
@@ -1377,15 +1435,18 @@ proc parseCFFCharstring(cff: CffTable, code: string, glyphIndex: int): Path =
         elif v < 247:
           stack.add(float32(v - 139))
         elif v < 251:
+          code.cffNeed(i, 1)
           let b1 = code.readUint8(i).int
           i += 1
           stack.add(float32((v - 247) * 256 + b1 + 108))
         elif v < 255:
+          code.cffNeed(i, 1)
           let b1 = code.readUint8(i).int
           i += 1
           stack.add(float32(-(v - 251) * 256 - b1 - 108))
         else:
           #failUnsupported("test me")
+          code.cffNeed(i, 4)
           let
             b1 = code.readUint8(i + 0).int
             b2 = code.readUint8(i + 1).int
@@ -2607,7 +2668,7 @@ proc parseGlyphPath*(
   let instructionLength = buf.readUint16(i + 0).swap().int
   i += 2
 
-  buf.eofCheck(instructionLength)
+  buf.eofCheck(i + instructionLength)
 
   # let instructions = buf.readUint8Seq(i, instructionLength)
   i += instructionLength
@@ -2682,12 +2743,20 @@ proc parseGlyphPath*(
     prevY += y
     points[point].y = prevY.float32
 
+  # The contours are cut by the end points as the file gives them, and a
+  # release reads them with the checks off: each must end inside the points
+  # and after the one before (a contour of no points, ending where the one
+  # before did, is skipped). Anything else is a broken glyph, refused.
   var
     contours: seq[seq[TtfCoordinate]]
     startIdx = 0
   for endIdx in endPtsOfContours:
-    contours.add(points[startIdx .. endIdx.int])
-    startIdx = endIdx.int + 1
+    let last = endIdx.int
+    if last >= numPoints or last < startIdx - 1:
+      raise newException(PixieError, "Glyph contour end points out of order")
+    if last >= startIdx:
+      contours.add(points[startIdx .. last])
+    startIdx = last + 1
 
   for contour in contours:
     var prev, curr, next: TtfCoordinate
@@ -2869,10 +2938,13 @@ proc parseGlyfGlyph(
     parseGlyphPath(opentype.buf, i, numberOfContours)
 
 proc parseCffGlyph(opentype: OpenType, glyphId: uint16): Path =
-  let
-    cff = opentype.cff
-    (a, b) = cff.charIndex[glyphId]
-    charstring = opentype.buf[a ..< b]
+  let cff = opentype.cff
+  if glyphId.int >= cff.charIndex.len:
+    raise newException(PixieError, "Invalid CFF font: no charstring for the glyph")
+  let (a, b) = cff.charIndex[glyphId]
+  if a < 0 or a > b or b > opentype.buf.len:
+    raise newException(PixieError, "Invalid CFF font: charstring outside the font")
+  let charstring = opentype.buf[a ..< b]
   return cff.parseCFFCharstring(charstring, glyphId.int)
 
 proc parseGlyphById(opentype: OpenType, glyphId: uint16): Path =

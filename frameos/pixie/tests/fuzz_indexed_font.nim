@@ -19,22 +19,6 @@ if not fileExists(fontPath):
 let original = readFile(fontPath)
 var rng = fuzzRand()
 
-const KerningOpen = not defined(pixieFuzzIndexedKerning)
-  ## A finding of this fuzzer that is still open (2026-11-24, seed 363256417,
-  ## round 452). `kerning` takes the places and counts of its tables from the
-  ## file's kerning head and reads there without asking whether that is inside
-  ## the file: 1020 bytes past its end in that round. The font a frame reads
-  ## is compiled in, so nothing from outside reaches this today. Until the
-  ## reader checks its kerning section as it checks the others, kerning is
-  ## not asked here (-d:pixieFuzzIndexedKerning asks). Delete this with the
-  ## fix.
-
-proc u16(data: string, at: int): int =
-  data[at].int or (data[at + 1].int shl 8)
-
-proc u32(data: string, at: int): int =
-  data.u16(at) or (data.u16(at + 2) shl 16)
-
 proc ask(rng: var Rand, font: IndexedFont) =
   var glyphs: seq[int]
   for r in 0x20 .. 0x7E:
@@ -54,9 +38,8 @@ proc ask(rng: var Rand, font: IndexedFont) =
     if glyph >= 0 and glyph <= uint16.high.int:
       outline:
         discard font.parseGlyfGlyph(glyph.uint16, 0)
-  when not KerningOpen:
-    for _ in 0 ..< 96:
-      discard font.kerning(glyphs[rng.rand(glyphs.high)], glyphs[rng.rand(glyphs.high)])
+  for _ in 0 ..< 96:
+    discard font.kerning(glyphs[rng.rand(glyphs.high)], glyphs[rng.rand(glyphs.high)])
 
 for i in 0 ..< fuzzIterations(100_000_000):
   fuzzRound()
