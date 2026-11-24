@@ -745,6 +745,16 @@ when the frame exceeds its ingestion budget, or `payload_too_large` when a
 message is over the size the provider retains. Neither is fatal: the device
 should drop the batch and keep going rather than reconnect.
 
+A provider may also stop listening to a socket that sends faster than it
+handles: the reference provider closes with WebSocket code **1008**
+(`message_rate` past a sustained 500 messages a second after a burst of
+2000, `message_backlog` once 1024 messages or 32 MiB are waiting to be
+handled; `cloud/apps/frame-hub/src/inbound-guard.ts`), and drops without an
+answer the `ack`, `render` and `sleep` messages past a per-frame ceiling no
+working frame comes near (1200, 600 and 60 a minute). Streaming a file back
+in chunks as fast as the link takes them stays far under all of it. A device
+reconnects as after any other close.
+
 ### Message size and delivery guarantees
 
 Both ends cap inbound message size and close the socket rather than allocate

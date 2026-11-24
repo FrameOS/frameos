@@ -2998,6 +2998,77 @@ describe("inbound size limits", () => {
     device.ws.close();
   });
 
+  // Every arrival is chained behind the one before, and several kinds cost a
+  // database round trip: without a bound, a socket that sends faster than it
+  // is handled queued without end, each waiting message held in memory.
+  it("closes a device that sends faster than the hub will listen", async () => {
+    const limited = await startExtraHub({
+      inboundLimits: {
+        backlogBytes: 32 * 1024 * 1024,
+        backlogMessages: 1024,
+        burst: 20,
+        perSecond: 1,
+      },
+    });
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, limited.port);
+    await handshake(device, privateKey);
+
+    // Cheap messages (a chunk of a stream nobody asked for), far past the
+    // burst: the bucket runs dry and the socket is closed.
+    for (let i = 0; i < 60; i += 1) {
+      device.send({ data: "", id: randomUUID(), seq: 1, type: "asset_chunk" });
+    }
+    expect(await device.closed).toBe(1008);
+  });
+
+  it("closes a device whose messages pile up unhandled", async () => {
+    const limited = await startExtraHub({
+      inboundLimits: {
+        backlogBytes: 32 * 1024 * 1024,
+        backlogMessages: 8,
+        burst: 100_000,
+        perSecond: 100_000,
+      },
+    });
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token, limited.port);
+    await handshake(device, privateKey);
+
+    // Each batch is a database write; 400 of them arrive long before the
+    // first few are stored.
+    for (let i = 0; i < 400; i += 1) {
+      device.send({
+        id: randomUUID(),
+        logs: [{ payload: { line: `line ${i}` }, timestamp: Date.now() / 1000 }],
+        type: "log_batch",
+      });
+    }
+    expect(await device.closed).toBe(1008);
+  });
+
+  it("keeps a device that streams a file back as fast as it can", async () => {
+    const { privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey);
+
+    // 342 chunks of 24 KiB: an 8 MiB file the way an ESP32 sends it, all at
+    // once. Nobody asked for it, so nothing is stored; the socket must live.
+    const id = randomUUID();
+    const data = Buffer.alloc(24 * 1024, 7).toString("base64");
+    for (let seq = 0; seq < 342; seq += 1) {
+      device.send({ data, id, seq, type: "asset_chunk", ...(seq === 341 ? { done: true } : {}) });
+    }
+    const pingId = randomUUID();
+    device.send({ id: pingId, metrics: { sample: 1 }, type: "metrics" });
+    await waitFor(async () => {
+      const rows = await db.select().from(frameMetrics);
+      return rows.length > 0 ? rows : undefined;
+    }, "the metrics sent after the stream were stored");
+    expect(device.ws.readyState).toBe(WebSocket.OPEN);
+    device.ws.close();
+  });
+
   it("rate limits a device that floods metrics, keeping the samples that got through", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);

@@ -159,6 +159,12 @@ import {
   firmwareUpdateFromLogEntries,
 } from "./protocol";
 import {
+  deviceInboundLimits,
+  inboundBytes,
+  InboundGuard,
+  type InboundLimits,
+} from "./inbound-guard";
+import {
   checkMemoryRateLimit,
   checkSharedRateLimit,
   clientIpFromRequest,
@@ -286,6 +292,28 @@ const deviceWriteRateLimits: Record<string, { limit: number; windowMs: number }>
   scene_ack: { limit: 30, windowMs: 60_000 },
   state: { limit: 60, windowMs: 60_000 },
 };
+
+// The messages that cost a database round trip and had no ceiling at all.
+// Over the limit they are dropped without an answer (an `ack` answering an
+// `ack` would only confuse a frame) and the socket is kept. The ceilings sit
+// far above a working frame: it acks what the hub sent it, one command at a
+// time (a chunked upload is the fastest run of them, a few a second); it
+// announces a render per picture it drew that someone could look at (one a
+// second for a clock, a few for a scene being tapped; an animation announces
+// once in ten seconds); it finishes a file per asset_get / image_get /
+// scenes_get the hub asked for; and it says `sleep` once before it sleeps. A
+// dropped ack is a command the hub delivers again.
+const deviceQuietRateLimits: Record<string, { limit: number; windowMs: number }> = {
+  ack: { limit: 1200, windowMs: 60_000 },
+  render: { limit: 600, windowMs: 60_000 },
+  sleep: { limit: 60, windowMs: 60_000 },
+};
+// Finished asset_chunk streams, each of which looks its command up.
+const assetStreamDoneRateLimit = { limit: 600, windowMs: 60_000 };
+
+// The socket's own close code for a device that sends faster than the hub
+// will listen (inbound-guard.ts): 1008, policy violation.
+const closeInboundLimit = 1008;
 
 // Snapshot fetches triggered by a device's "render" announcement, per frame.
 // The device already throttles itself to one snapshot write a minute
@@ -425,6 +453,8 @@ export interface FrameHubOptions {
   sweepIntervalMs?: number;
   lifecycleAuditDebounceMs?: number;
   assetStreamIdleMs?: number;
+  // What one device socket may send (inbound-guard.ts). Tests shrink it.
+  inboundLimits?: InboundLimits;
   virtualTickIntervalMs?: number;
   // The refresh floor of a virtual frame, in seconds (the plan's,
   // FRAMEOS_CLOUD_RENDERED_MIN_INTERVAL_SECONDS). Tests shorten it.
@@ -488,6 +518,7 @@ export async function startFrameHub(
     options.lifecycleAuditDebounceMs ?? lifecycleAuditDebounceMs;
   const assetStreamIdleMs =
     options.assetStreamIdleMs ?? defaultAssetStreamIdleMs;
+  const inboundLimits = options.inboundLimits ?? deviceInboundLimits;
   const virtualTickIntervalMs =
     options.virtualTickIntervalMs ?? defaultVirtualTickIntervalMs;
   const virtualMinIntervalSeconds =
@@ -2796,6 +2827,18 @@ export async function startFrameHub(
       return;
     }
     session.assetStreams.delete(commandId);
+    if (
+      !checkMemoryRateLimit(
+        `frame_msg:asset_done:${session.frame.id}`,
+        assetStreamDoneRateLimit,
+      ).allowed
+    ) {
+      logWarn("device.message_rate_limited", {
+        frameId: session.frame.id,
+        type: "asset_chunk",
+      });
+      return;
+    }
     // The command row is the authority on what was requested: a device must
     // not be able to poison the cache for a path the provider never asked for.
     // image_get replies land under a reserved dot-path — devices never list
@@ -2944,6 +2987,20 @@ export async function startFrameHub(
       sendAckError(session, msg, "rate_limited");
       return;
     }
+    const quietLimit = deviceQuietRateLimits[msg.type];
+    if (
+      quietLimit &&
+      !checkMemoryRateLimit(
+        `frame_msg:${msg.type}:${session.frame.id}`,
+        quietLimit,
+      ).allowed
+    ) {
+      logWarn("device.message_rate_limited", {
+        frameId: session.frame.id,
+        type: msg.type,
+      });
+      return;
+    }
 
     switch (msg.type) {
       case "ack":
@@ -3035,16 +3092,38 @@ export async function startFrameHub(
           );
       }
     });
+    // What this socket may send before the hub stops listening to it
+    // (inbound-guard.ts): the chain below would otherwise grow without bound
+    // behind one slow handler, every waiting message held in memory.
+    const inbound = new InboundGuard(inboundLimits);
+    let inboundRefused = false;
     ws.on("message", (data) => {
+      if (inboundRefused) {
+        return;
+      }
+      const bytes = inboundBytes(data);
+      const refusal = inbound.admit(bytes);
+      if (refusal) {
+        inboundRefused = true;
+        logWarn("device.inbound_limit", {
+          backlog: inbound.backlog,
+          frameId: frame.id,
+          reason: refusal,
+        });
+        ws.close(closeInboundLimit, refusal);
+        return;
+      }
       // One message at a time per session: handlers read-modify-write the
       // frames row and (for log_batch) re-select what they just inserted, so
       // interleaving two of them produces duplicate broadcasts and lost
       // updates. ws delivers messages in order; this keeps the handling in
       // that order too.
       session.handling = session.handling.then(() =>
-        handleDeviceMessage(session, data).catch((error: unknown) => {
-          reportDeviceMessageFailure(frame.id, error);
-        }),
+        handleDeviceMessage(session, data)
+          .catch((error: unknown) => {
+            reportDeviceMessageFailure(frame.id, error);
+          })
+          .finally(() => inbound.handled(bytes)),
       );
     });
     ws.on("error", (error) => {
