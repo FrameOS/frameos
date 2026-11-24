@@ -69,6 +69,22 @@ if(NIM_GENERATED_SRCS)
             endif()
         endforeach()
     endforeach()
+    # One copy of each function the archive holds more than once: Nim's
+    # hooks of types with the same shape and generics made again per module,
+    # renamed to one name and made weak, so the link keeps one
+    # (tools/fold_identical_code.py, about 20 KB; docs/esp32-image-size.md).
+    # Run on the archive as it is made, so every link reads it folded. The
+    # hot modules keep their own copies.
+    idf_build_get_property(fold_python PYTHON)
+    set(fold_keep "")
+    foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
+        list(APPEND fold_keep "--keep=${hot}")
+    endforeach()
+    add_custom_command(TARGET ${COMPONENT_LIB} POST_BUILD
+        COMMAND "${fold_python}" "${CMAKE_CURRENT_LIST_DIR}/../../tools/fold_identical_code.py"
+                --objcopy "${CMAKE_OBJCOPY}" --ar "${CMAKE_AR}" ${fold_keep}
+                "$<TARGET_FILE:${COMPONENT_LIB}>"
+        VERBATIM)
 else()
     # fos_netguard.c is in both branches on purpose: fos_cloud.c arms the
     # private-network policy unconditionally, so a thin-client image that
