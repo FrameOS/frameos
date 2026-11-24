@@ -1203,6 +1203,63 @@ suite "js app runtime":
     check payload["badRead"].kind == JNull
     check readFile(assetsDir / "streams" / "out.txt") == "streamed"
 
+  test "a stream is its scene's: another scene can neither read it nor close it":
+    # The registry is one for every runtime and its ids count up: a scene that
+    # guessed one read and closed the files another had open.
+    let config = testConfig()
+    proc appIn(sceneId, source: string): tuple[runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext] =
+      let scene = FrameScene(id: sceneId.SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
+      result.owner = AppRoot(nodeId: 23.NodeId, nodeName: "streams", scene: scene, frameConfig: config)
+      result.context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+        loopKey: ".", nextSleep: -1)
+      result.runtime = newJsAppRuntime(category = "data", outputType = "json", source = source)
+    let opener = appIn("tests/js-streams-a", """
+      let ref = null
+      export function get(app) {
+        if (!ref) { ref = frameos.createStream(btoa("mine")); return { id: ref.id } }
+        frameos.streamRewind(ref)
+        return { read: frameos.streamRead(ref, 16) }
+      }""")
+    let id = opener.runtime.get(opener.owner, %*{}, opener.context).asJson()["id"].getInt()
+    check id > 0
+    let other = appIn("tests/js-streams-b", """
+      export function get(app) {
+        const id = app.config.id
+        return { read: frameos.streamRead(id, 16), atEnd: frameos.streamAtEnd(id),
+          lines: frameos.openLines({ __frameosType: "streamRef", id }), write: frameos.streamWrite(id, btoa("x")),
+          rewind: frameos.streamRewind(id), close: frameos.streamClose(id) }
+      }""")
+    let refused = other.runtime.get(other.owner, %*{"id": id}, other.context).asJson()
+    check refused["read"].kind == JNull
+    check refused["atEnd"].getBool() # nothing there for it
+    check refused["lines"].kind == JNull
+    check not refused["write"].getBool()
+    check not refused["rewind"].getBool()
+    check not refused["close"].getBool()
+    # Still open, and untouched, for the scene that opened it.
+    check decode(opener.runtime.get(opener.owner, %*{}, opener.context).asJson()["read"].getStr()) == "mine"
+
+  test "what a scene's string streams hold is capped":
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-streams-cap".SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "streams", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+      loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(category = "data", outputType = "json", source = """
+      export function get(app) {
+        const mb = btoa("x".repeat(1 << 20))
+        const ref = frameos.createStream("")
+        let written = 0
+        while (written < 40 && frameos.streamWrite(ref, mb)) written++
+        const another = frameos.createStream(mb)
+        frameos.streamClose(ref)
+        return { written, another, after: frameos.createStream(mb) !== null }
+      }""")
+    let result = runtime.get(owner, %*{}, context).asJson()
+    check result["written"].getInt() == 16 # MaxStringStreamBytes off a board
+    check result["another"].kind == JNull # the scene's streams together
+    check result["after"].getBool()
+
   test "fetchImage decodes natively and hands JS an image ref the output resolves":
     let base = echoServerBase()
     let config = testConfig()

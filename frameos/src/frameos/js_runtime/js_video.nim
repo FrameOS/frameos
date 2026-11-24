@@ -40,7 +40,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
 else:
   proc videoArg(ctx: ptr JSContext, argJson: JSValue): JsonNode =
     try:
-      result = parseJson(toNimString(ctx, argJson))
+      result = parseJsonBounded(toNimString(ctx, argJson))
     except CatchableError:
       result = newJObject()
     if result.kind != JObject:

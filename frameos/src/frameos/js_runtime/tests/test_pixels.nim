@@ -41,6 +41,11 @@ export function get(app) {
   const palette = colors.map((_, i) => colors[(i + k) % colors.length])
   const options = { width: Number(c.cols) || 20, height: 12, pixelSize: 5 }
   if (c.palette === 'none') return frameos.pixels(cells, [], options)
+  if (c.palette === 'detaches') {
+    // Reading it lets go of the cells' buffer.
+    Object.defineProperty(palette, 1, { get() { cells.buffer.transfer(); return 0xff0000 } })
+    return frameos.pixels(cells, palette, options)
+  }
   if (c.palette === 'short') return frameos.pixels(cells, [0x000000, 0xff0000], options)
   if (c.cells === 'short') return frameos.pixels(cells.subarray(1), palette, options)
   if (c.cells === 'array') return frameos.pixels([...cells], palette, options)
@@ -218,6 +223,14 @@ suite "frameos.pixels":
       checkpoint $config
       expect ValueError: # no picture comes back
         discard newApp("tests/pixels-refused").render(config)
+
+  test "a palette that runs code cannot leave the cells' bytes behind":
+    # The palette is read off an object the app made, and a getter there can
+    # detach the cells' buffer: it is read first, so the cells are found gone
+    # and the frame refused. Read after, the cells were copied out of memory
+    # the buffer no longer had.
+    expect ValueError:
+      discard newApp("tests/pixels-detached").render(%*{"palette": "detaches"})
 
   test "a grid larger than the frame is a whole picture of its own, not a sheared one":
     let app = newApp("tests/pixels-large", 40, 30) # 8x6 cells would fit; the app sends 20x12 at 5

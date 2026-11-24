@@ -39,6 +39,17 @@ return{ev(n){…},flow(i){…},data(i){…}}},[…where each snippet is…],[…
   `__x<n>` a cache expression). The glue is an inner function; its natives
   have one-letter names a snippet cannot reach (a global `d` in a snippet is
   still a ReferenceError), and the snippets' own `__K` hides the kit.
+- **A snippet stays between its parentheses.** The program holds each
+  snippet as written, so text that closed them ran in the scope around it
+  when the program loaded (and with a brace or two more, reached the kit).
+  Before the program is evaluated, each snippet is compiled alone between
+  square brackets (`snippetStaysInside`, `interpreter.nim`): one that
+  compiles there closes every string, template and comment it opens, and
+  the only bracket it could close is a `]`, which the program's `(` refuses.
+  Every expression that parentheses take, brackets take too. A snippet of
+  plain names and dots skips the check; one that fails it is a
+  `interpreter:jsCompileError` like any syntax error, and nothing of the
+  program runs.
 - **The kit** (`ProgramKit` in `scene_compiler.nim`): what is the same in
   every program is not in it. `console`, the `state` and `context` proxies
   and the glue's helpers (the log lines of a snippet's error, a failed

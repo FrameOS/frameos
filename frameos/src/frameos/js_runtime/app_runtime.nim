@@ -1,6 +1,7 @@
 import std/[algorithm, base64, json, monotimes, options, os, sequtils, streams, strformat, strutils, tables, times]
 from std/posix import Stat, stat, errno, ENOENT, ENOTDIR
 import frameos/utils/memory
+import frameos/utils/json_depth
 import pixie
 import pixie/fileformats/svg
 
@@ -502,6 +503,7 @@ proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   ## released. The next render builds the app a new one and runs its init()
   ## again; `frameos.remember` values are Nim data and carry over.
   currentEnv = nil # the abort skipped the `finally` that puts the caller's back
+  memoAbandon()
   for runtime in jsRuntimeStack:
     if runtime.isNil or not runtime.ready:
       continue  # already dropped: a runtime re-entered further up the chain
@@ -558,7 +560,7 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
   let lvl = toNimString(ctx, level)
   let payloadStr = toNimString(ctx, payloadJson)
   try:
-    let payload = parseJson(payloadStr)
+    let payload = parseJsonBounded(payloadStr)
     if payload.kind == JObject:
       var logPayload = payload
       logPayload["event"] = %*("jsApp:" & lvl)
@@ -614,7 +616,7 @@ proc jsDispatch(ctx: ptr JSContext, event: JSValue, payloadJson: JSValue): JSVal
   let e = env(ctx)
   if e != nil and not e.owner.scene.isNil:
     try:
-      dispatchFromScene(e.owner.scene, toNimString(ctx, event), parseJson(toNimString(ctx, payloadJson)),
+      dispatchFromScene(e.owner.scene, toNimString(ctx, event), parseJsonBounded(toNimString(ctx, payloadJson)),
         e.owner.nodeId.int, e.context.event)
     except CatchableError as error:
       frameos_apps.logError(e.owner, "frameos.dispatch failed: " & error.msg)
@@ -760,7 +762,7 @@ proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
   try:
     if e.owner.scene.state.isNil:
       e.owner.scene.state = %*{}
-    e.owner.scene.state[stateKey] = parseJson(valueStr)
+    e.owner.scene.state[stateKey] = parseJsonBounded(valueStr)
   except CatchableError:
     e.owner.scene.state[stateKey] = %*valueStr
 
@@ -922,7 +924,7 @@ proc optionsArg(ctx: ptr JSContext, optionsJson: JSValue): JsonNode =
   ## A bridge call's options, handed over from JS as a JSON string: that
   ## object, or an empty one when the string is not one.
   try:
-    result = parseJson(toNimString(ctx, optionsJson))
+    result = parseJsonBounded(toNimString(ctx, optionsJson))
   except CatchableError:
     discard
   if result.isNil or result.kind != JObject:
@@ -1993,7 +1995,7 @@ when not defined(frameosEmbedded):
         let upload = what == "upload"
         var given = newJObject()
         try:
-          given = parseJson(toNimString(ctx, argsJson))
+          given = parseJsonBounded(toNimString(ctx, argsJson))
         except CatchableError:
           discard
         let
@@ -2015,41 +2017,64 @@ when not defined(frameosEmbedded):
 ## Streams let apps pass around and process data bigger than memory allows in
 ## one piece: a data app can return a streamRef (it travels between nodes as
 ## plain JSON), and the consumer reads it chunk by chunk. Backed by simple
-## string streams or files inside the assets folder. The registry is global so
-## refs resolve across app runtimes; it is capped, evicting (and closing) the
-## oldest stream, so forgotten handles cannot pile up.
+## string streams or files inside the assets folder. The registry is one for
+## every app runtime, so a ref resolves in any app of the scene that opened
+## it, and in no other scene: the ids count up, and a scene that guessed one
+## read, wrote or closed a file another scene had open. It is capped, evicting
+## (and closing) the oldest stream, the opener's own first, so forgotten
+## handles cannot pile up and one scene's cannot push out another's.
 const MaxOpenJsStreams = 64
 const DefaultJsStreamChunkBytes = 65536
+const MaxStringStreamBytes = when defined(frameosEmbedded): 512 * 1024 else: 16 * 1024 * 1024
+  ## What a scene's string streams hold together: they are memory of the
+  ## runtime's own, outside the JS heap's ceiling, and `streamWrite` grew one
+  ## without end.
 
 type JsStream = object
   stream: Stream
   lines: LineReader ## set by openLines: what nextLine reads
   spool: Spool ## the bytes a line reader reads, kept as long as it is open
+  scene: string ## the scene whose app opened it
 
 var jsStreamsGlobal = initOrderedTable[int, JsStream]()
 var jsNextStreamId = 0
 
-proc registerJsStream(stream: Stream, lines: LineReader = nil, spool: Spool = nil): JsonNode =
+proc registerJsStream(scene: string, stream: Stream, lines: LineReader = nil, spool: Spool = nil): JsonNode =
   while jsStreamsGlobal.len >= MaxOpenJsStreams:
-    for id in jsStreamsGlobal.keys:
-      try:
-        jsStreamsGlobal[id].stream.close()
-      except CatchableError:
-        discard
-      jsStreamsGlobal.del(id)
-      break
+    var oldest = 0
+    for id, held in jsStreamsGlobal.pairs:
+      if oldest == 0:
+        oldest = id
+      if held.scene == scene:
+        oldest = id
+        break
+    try:
+      jsStreamsGlobal[oldest].stream.close()
+    except CatchableError:
+      discard
+    jsStreamsGlobal.del(oldest)
   inc jsNextStreamId
-  jsStreamsGlobal[jsNextStreamId] = JsStream(stream: stream, lines: lines, spool: spool)
+  jsStreamsGlobal[jsNextStreamId] = JsStream(stream: stream, lines: lines, spool: spool, scene: scene)
   return %*{"__frameosType": "streamRef", "id": jsNextStreamId}
 
-proc jsStreamById(options: JsonNode): Stream =
+proc jsStreamOf(scene: string, id: int): bool =
+  ## Whether `id` is a stream an app of `scene` opened.
+  id != 0 and jsStreamsGlobal.hasKey(id) and jsStreamsGlobal[id].scene == scene
+
+proc jsStreamById(scene: string, options: JsonNode): Stream =
   let id = options{"id"}.getInt(0)
-  if id != 0 and jsStreamsGlobal.hasKey(id):
+  if jsStreamOf(scene, id):
     return jsStreamsGlobal[id].stream
   return nil
 
-proc closeJsStream(id: int): bool =
-  if id == 0 or not jsStreamsGlobal.hasKey(id):
+proc stringStreamBytes(scene: string): int =
+  ## What the scene's string streams hold now.
+  for held in jsStreamsGlobal.values:
+    if held.scene == scene and held.stream of StringStream:
+      result += StringStream(held.stream).data.len
+
+proc closeJsStream(scene: string, id: int): bool =
+  if not jsStreamOf(scene, id):
     return false
   try:
     jsStreamsGlobal[id].stream.close()
@@ -2062,7 +2087,7 @@ proc closeLineStreams(runtime: JsAppRuntime) =
   ## card for as long as a reader holds it.
   for id in runtime.lineStreamIds:
     try:
-      discard closeJsStream(id)
+      discard closeJsStream(runtime.sceneId, id)
     except CatchableError:
       discard
   runtime.lineStreamIds.setLen(0)
@@ -2085,20 +2110,21 @@ proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSVal
   if e == nil:
     return jsUndefSentinel(ctx)
   var options = optionsArg(ctx, optionsJson)
+  let scene = e.runtime.sceneId
   try:
     let source = options{"source"}
     var reference: JsonNode = nil
     if source.isNil or source.kind == JNull:
-      reference = registerJsStream(newStringStream(toNimString(ctx, text)))
+      reference = registerJsStream(scene, newStringStream(toNimString(ctx, text)))
     elif source{"spool"}.getStr("").len > 0:
       let field = source{"spool"}.getStr()
       if not e.runtime.spoolFields.hasKey(field):
         return jsNull(ctx)
       let spool = e.runtime.spoolFields[field]
-      reference = registerJsStream(newStream(spool), spool = spool)
+      reference = registerJsStream(scene, newStream(spool), spool = spool)
     else:
       let id = source{"id"}.getInt(0)
-      if not jsStreamsGlobal.hasKey(id):
+      if not jsStreamOf(scene, id):
         return jsNull(ctx)
       reference = %*{"__frameosType": "streamRef", "id": id}
     let id = reference{"id"}.getInt()
@@ -2111,32 +2137,33 @@ proc jsOpenLines(ctx: ptr JSContext, text: JSValue, optionsJson: JSValue): JSVal
 
 proc jsNextLine(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
   ## The next line, or null at the end. Called once per line of a feed.
+  let e = env(ctx)
   let streamId = toNimFloat(ctx, id).int
-  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+  if e == nil or not jsStreamOf(e.runtime.sceneId, streamId) or jsStreamsGlobal[streamId].lines.isNil:
     return jsNull(ctx)
   var line = ""
   try:
     if jsStreamsGlobal[streamId].lines.nextLine(line):
       return nimStringToJS(ctx, line)
   except CatchableError as err:
-    let e = env(ctx)
-    if e != nil:
-      frameos_apps.logError(e.owner, "JS app nextLine failed: " & err.msg)
+    frameos_apps.logError(e.owner, "JS app nextLine failed: " & err.msg)
   return jsNull(ctx)
 
 proc jsNextBlock(ctx: ptr JSContext, id: JSValue, stop: JSValue): JSValue {.nimcall.} =
   ## The lines up to the next one starting with `stop`, or null at the end.
+  let e = env(ctx)
   let streamId = toNimFloat(ctx, id).int
-  if not jsStreamsGlobal.hasKey(streamId) or jsStreamsGlobal[streamId].lines.isNil:
+  # `stop` as text before the stream is looked up: the conversion can run
+  # the app's code, which can close it.
+  let stopAt = toNimString(ctx, stop)
+  if e == nil or not jsStreamOf(e.runtime.sceneId, streamId) or jsStreamsGlobal[streamId].lines.isNil:
     return jsNull(ctx)
   var text = ""
   try:
-    if jsStreamsGlobal[streamId].lines.nextBlock(toNimString(ctx, stop), text):
+    if jsStreamsGlobal[streamId].lines.nextBlock(stopAt, text):
       return nimStringToJS(ctx, text)
   except CatchableError as err:
-    let e = env(ctx)
-    if e != nil:
-      frameos_apps.logError(e.owner, "JS app nextBlock failed: " & err.msg)
+    frameos_apps.logError(e.owner, "JS app nextBlock failed: " & err.msg)
   return jsNull(ctx)
 
 proc jsTimeZoneInfo(ctx: ptr JSContext, name: JSValue): JSValue {.nimcall.} =
@@ -2179,25 +2206,36 @@ proc streamOpenAsset(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JS
     return jsNull(ctx)
   if stream.isNil:
     return jsNull(ctx)
-  jsonToJS(ctx, registerJsStream(stream))
+  jsonToJS(ctx, registerJsStream(e.runtime.sceneId, stream))
+
+proc streamCreate(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
+  let bytes = decode(options{"base64"}.getStr(""))
+  if stringStreamBytes(e.runtime.sceneId) + bytes.len > MaxStringStreamBytes:
+    frameos_apps.logError(e.owner, "JS app createStream: this scene's streams hold too much already")
+    return jsNull(ctx)
+  jsonToJS(ctx, registerJsStream(e.runtime.sceneId, newStringStream(bytes)))
 
 proc streamRead(ctx: ptr JSContext, e: JsAppEvalEnv, options: JsonNode): JSValue =
-  let stream = jsStreamById(options)
+  let stream = jsStreamById(e.runtime.sceneId, options)
   if stream.isNil:
     return jsNull(ctx)
   let length = clamp(options{"length"}.getInt(DefaultJsStreamChunkBytes), 1, jsAssetReadMaxBytes(e))
   nimStringToJS(ctx, encode(stream.readStr(length)))
 
-proc streamWrite(options: JsonNode): bool =
-  let stream = jsStreamById(options)
+proc streamWrite(e: JsAppEvalEnv, options: JsonNode): bool =
+  let stream = jsStreamById(e.runtime.sceneId, options)
   if stream.isNil:
     return false
-  stream.write(decode(options{"base64"}.getStr("")))
+  let bytes = decode(options{"base64"}.getStr(""))
+  if stream of StringStream and stringStreamBytes(e.runtime.sceneId) + bytes.len > MaxStringStreamBytes:
+    frameos_apps.logError(e.owner, "JS app streamWrite: this scene's streams hold too much already")
+    return false
+  stream.write(bytes)
   true
 
-proc streamRewind(options: JsonNode): bool =
+proc streamRewind(scene: string, options: JsonNode): bool =
   let id = options{"id"}.getInt(0)
-  if not jsStreamsGlobal.hasKey(id):
+  if not jsStreamOf(scene, id):
     return false
   if jsStreamsGlobal[id].lines.isNil:
     jsStreamsGlobal[id].stream.setPosition(0)
@@ -2223,18 +2261,18 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     of "openAsset":
       return streamOpenAsset(ctx, e, options)
     of "create":
-      return jsonToJS(ctx, registerJsStream(newStringStream(decode(options{"base64"}.getStr("")))))
+      return streamCreate(ctx, e, options)
     of "read":
       return streamRead(ctx, e, options)
     of "write":
-      return nimBoolToJS(ctx, streamWrite(options))
+      return nimBoolToJS(ctx, streamWrite(e, options))
     of "atEnd":
-      let stream = jsStreamById(options)
+      let stream = jsStreamById(e.runtime.sceneId, options)
       return nimBoolToJS(ctx, stream.isNil or stream.atEnd())
     of "rewind":
-      return nimBoolToJS(ctx, streamRewind(options))
+      return nimBoolToJS(ctx, streamRewind(e.runtime.sceneId, options))
     of "close":
-      return nimBoolToJS(ctx, closeJsStream(options{"id"}.getInt(0)))
+      return nimBoolToJS(ctx, closeJsStream(e.runtime.sceneId, options{"id"}.getInt(0)))
     else:
       frameos_apps.logError(e.owner, "JS app streams: unknown operation: " & opStr)
       return jsUndefSentinel(ctx)
@@ -3039,7 +3077,7 @@ proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {
   let name = toNimString(ctx, key)
   var options = newJObject()
   try:
-    options = parseJson(toNimString(ctx, optionsJson))
+    options = parseJsonBounded(toNimString(ctx, optionsJson))
   except CatchableError:
     discard
   let
@@ -3193,16 +3231,22 @@ proc jsTypedOps(ctx: ptr JSContext, args: seq[JSValue]): JSValue {.nimcall.} =
   if args.len < 6:
     refuse()
   let op = jsArgInt(ctx, args[0], -1)
+  # An array's bytes are a pointer into the JS heap, good only until the
+  # scene's code runs again: it can detach the buffer or resize it. So what
+  # can run it is read first (a kernel's elements may be getters, or a
+  # proxy's), the arrays are taken after, and from there to the loops nothing
+  # calls into JavaScript (a number is read as one, never converted).
+  var kernel: array[9, int32]
+  if op == 4:
+    for k in 0 ..< 9:
+      let v = JS_GetPropertyUint32(ctx, args[4], k.uint32)
+      kernel[k] = int32(clamp(jsArgInt(ctx, v, 0), -65536, 65536))
+      JS_FreeValue(ctx, v)
   var dst, a: Elements
   if not jsElements(ctx, args[1], dst) or not jsElements(ctx, args[2], a):
     refuse()
   if op == 4:
     let width = jsArgInt(ctx, args[3], 0)
-    var kernel: array[9, int32]
-    for k in 0 ..< 9:
-      let v = JS_GetPropertyUint32(ctx, args[4], k.uint32)
-      kernel[k] = int32(clamp(jsArgInt(ctx, v, 0), -65536, 65536))
-      JS_FreeValue(ctx, v)
     let shift = clamp(jsArgInt(ctx, args[5], 0), 0, 31)
     if width < 3 or a.length < width * 3 or dst.length < a.length:
       refuse()
@@ -4773,10 +4817,16 @@ proc imageFromPixels(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCo
     ps = clamp(jsOptionInt(ctx, options, "pixelSize", 1), 1, 64)
     width = jsOptionInt(ctx, options, "width", frameWidth div ps)
     height = jsOptionInt(ctx, options, "height", frameHeight div ps)
-    (cells, byteLen) = jsBytes(ctx, cellsValue)
   var palette: PixelPalette
+  # The palette and the options before the cells: reading them can run the
+  # app's code (a getter, a proxy), which can detach or resize the cells'
+  # buffer, and the cells are a pointer into it. Nothing below calls into
+  # JavaScript.
+  let
+    colors = readPalette(ctx, paletteValue, palette)
+    (cells, byteLen) = jsBytes(ctx, cellsValue)
   # One constant message: the numbers in one were a kilobyte of firmware.
-  if cells.isNil or readPalette(ctx, paletteValue, palette) == 0 or width <= 0 or height <= 0 or
+  if cells.isNil or colors == 0 or width <= 0 or height <= 0 or
       width.int64 * height.int64 > byteLen.int64 or width * ps > 4096 or height * ps > 4096:
     frameos_apps.logError(owner, "frameos.pixels(cells, palette, options) needs a typed array of width x height cells and a palette")
     return
