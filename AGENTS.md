@@ -402,9 +402,10 @@
 
 - Flash is the budget (the 8 MB layout's 3520 KB OTA slot), and every cut is
   in that doc with what it measured: read it before proposing one, and add
-  to it. Two decisions stand: QuickJS keeps its Unicode tables, and a Defect
-  stays catchable (no `--panics:on`): with the desktops a failed node must
-  not take the other windows with it.
+  to it. Three decisions stand: QuickJS keeps its Unicode tables and its
+  built-ins (Atomics, Proxy, the ES2025 additions: measured 2026-11-24 and
+  kept), and a Defect stays catchable (no `--panics:on`): with the desktops
+  a failed node must not take the other windows with it.
 - **Where an object stands is `embedded/esp32/link_order.txt`** (S3): callers
   near what they call, because a `CALL8` is 3 bytes and reaches 512 KB and a
   longer call is 6. A new module needs no line (the file's `*` stands for
@@ -418,10 +419,25 @@
   are the frame rate keep the assembler's (`FRAMEOS_NIM_HOT_MODULES`,
   `quickjs_hot.c`). A module that becomes hot goes on that list, and the PR
   says what it cost.
-- `build_nim.sh` folds what Nim writes once per C file: inline helpers
-  (`fold_nim_inlines.py`) and string literals (`fold_nim_strings.py`). The
-  same shape of waste elsewhere (a hook or a generic that is byte for byte
-  another's) is counted in the doc and not folded yet.
+- `build_nim.sh` drops the error check Nim writes after a call that cannot
+  raise (`drop_nim_dead_checks.py`: a proc that reaches a raise, an indirect
+  call or unknown C is never clean) and folds what Nim writes once per C
+  file: inline helpers (`fold_nim_inlines.py`) and string literals
+  (`fold_nim_strings.py`). The archive's byte-identical functions (hooks of
+  same-shaped types, generics per module) fold after it is made
+  (`fold_identical_code.py`, the hot modules kept), and the vendored e-paper
+  drivers' identical helpers at the copy step (`fold_panel_helpers.py`).
+  A function whose address is compared, or that something outside the
+  archive names, must stay out of the fold: the tool refuses any use that is
+  not a call or a Nim type descriptor's.
+- newlib's formatter and scanner are not in the image: the `printf` family
+  is `fos_printf.c` (doubles through QuickJS's `js_dtoa`) and `sscanf` /
+  `siscanf` are `fos_sscanf.c`, both `--wrap`s, both byte for byte newlib's
+  (`test_fos_printf.c`, `test_fos_sscanf.c`; newlib under QEMU is the
+  oracle, doc "Tools for the next pass"). A new conversion goes in them and
+  their tests. The shell's C calls ROM and IRAM through flash veneers
+  (`main/fos_veneers.h`): a file with `IRAM_ATTR` code stays out of it
+  (`test_esp32_veneers.py`).
 
 ## One scene at a time on the ESP32: `embedded/esp32/README.md` "Scene storage"
 
