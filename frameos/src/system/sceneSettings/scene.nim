@@ -895,13 +895,14 @@ proc box(c: var string, x, y, w, h: int) =
   c.px("h", h)
 
 proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, height: int, title: string,
-    keyboardTop: int, gear: bool) =
+    keyboardTop: int, gear: bool, body: SvgNode, cancel = "Cancel", saveLit = true) =
   ## A round panel's: the scene's name in the top arc, Cancel and Save
-  ## under it, and the fields in a list as wide as the circle is where the
-  ## list ends, everything `RoundInset` in from the rim. With the keyboard
-  ## up (on the circle's lower half, ui/keyboard.nim) the name makes way
-  ## for the buttons and the list ends above the keys. With `gear` the gear
-  ## that opens the frame page sits between Cancel and Save.
+  ## under it, and `body` (the fields, or the frame page's rows) in a list as
+  ## wide as the circle is where the list ends, everything `RoundInset` in
+  ## from the rim. With the keyboard up (on the circle's lower half,
+  ## ui/keyboard.nim) the name makes way for the buttons and the list ends
+  ## above the keys. With `gear` the gear that opens the frame page sits
+  ## between Cancel and Save.
   let
     cx = width div 2
     cy = height div 2
@@ -926,10 +927,10 @@ proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, heigh
   c.add " flex items-center justify-center"
   c.px("gap", look.gap)
   let buttons = el("div", move c)
-  buttons.children.add look.button("Cancel", HCancel, false)
+  buttons.children.add look.button(cancel, HCancel, false)
   if gear:
     buttons.children.add look.gear(false, named = false)
-  buttons.children.add look.button("Save", HSave, true)
+  buttons.children.add look.button("Save", HSave, saveLit)
   root.children.add buttons
   y += rowH + look.gap div 2
   # As far below the centre as it starts above it, or to the keyboard.
@@ -937,7 +938,7 @@ proc roundTree(self: SceneSettingsScene, look: Look, root: SvgNode, width, heigh
   half = max(chordHalf(radius, max(abs(y - cy), abs(bottom - cy))) - 2, 4)
   c.box(cx - half, y, 2 * half, max(bottom - y, 1))
   c.add " overflow-y-auto"
-  root.children.add el("div", move c, self.fieldList(look, 2, look.gap div 2))
+  root.children.add el("div", move c, body)
 
 proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: string, round = false,
     keyboardTop = high(int), info: JsonNode = nil, sizeUnit = 0): SvgNode =
@@ -961,22 +962,18 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   result = el("div", move c).role("page")
   if round:
     if not info.isNil and self.onFrame():
-      # The frame page (Wi-Fi, rotation, scale, restart): the page as on a
-      # square panel, in the square inside the circle, cut short above the
-      # keyboard while it is up.
-      let
-        radius = max(min(width, height) div 2 - RoundInset, 8)
-        side = max(int(float(radius) * sqrt(2.0)) - 4, 8)
-        x0 = width div 2 - side div 2
-        y0 = height div 2 - side div 2
-        h = if keyboardTop < height: max(min(side, keyboardTop - look.gap div 2 - y0), look.line) else: side
-      c = ""
-      c.box(x0, y0, side, h)
-      result.children.add el("div", move c,
-        self.tree(side, h, paper, title, false, high(int), info, unit))
+      # The frame page (Wi-Fi, rotation, scale, restart), as the form is:
+      # its name in the top arc, Back and Save under it, its rows in the
+      # list as wide as the circle, which ends above the keyboard while it
+      # is up. Save is lit while there is something to save.
+      let edits = self.state{"frameValues"}
+      self.roundTree(look, result, width, height, "Frame settings", min(keyboardTop, height),
+        gear = false, self.frameList(look, info,
+          scaleText(autoRenderScale(unit, unit, self.frameConfig.device)), unit),
+        cancel = "Back", saveLit = not edits.isNil and edits.len > 0)
     else:
       self.roundTree(look, result, width, height, title, min(keyboardTop, height),
-        gear = not info.isNil and not self.panelWindow())
+        gear = not info.isNil and not self.panelWindow(), self.fieldList(look, 2, look.gap div 2))
     return
   c = "shrink-0 flex items-center"
   c.px("h", look.line * 3 div 2)

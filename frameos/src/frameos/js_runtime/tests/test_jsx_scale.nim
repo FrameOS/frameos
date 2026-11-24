@@ -227,6 +227,30 @@ export function get(app, context) {
     check round("embedded")
     boardPanelRound = false
 
+  test "context.round says the app draws a round panel's whole canvas":
+    const source = """
+      export function get(app, context) {
+        frameos.setState('round', context.round)
+        return { ok: true }
+      }
+    """
+    proc round(device: string, width, height: int): bool =
+      let ui = newUi(source, "tests/context-round", sourceName = "app.js", outputType = "json")
+      ui.owner.frameConfig.device = device
+      ui.owner.frameConfig.width = 400
+      ui.owner.frameConfig.height = 400
+      let context = ExecutionContext(scene: ui.scene, event: "render", payload: %*{},
+        hasImage: true, image: newImage(width, height), loopIndex: 0, loopKey: ".", nextSleep: -1)
+      discard ui.runtime.get(ui.owner, %*{}, context)
+      ui.scene.state["round"].getBool()
+    check round("pimoroni.hyperpixel2r", 400, 400)
+    # A window, a split's panel, a layout's hole: a room of its own.
+    check not round("pimoroni.hyperpixel2r", 200, 400)
+    check not round("framebuffer", 400, 400)
+    boardPanelRound = true
+    check round("embedded", 400, 400)
+    boardPanelRound = false
+
   test "app.frame says nothing of a battery or Wi-Fi where the host cannot tell":
     const source = """
       export function get(app) {

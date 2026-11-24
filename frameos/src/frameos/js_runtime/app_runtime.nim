@@ -2467,6 +2467,16 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if e.context.hasImage and not e.context.image.isNil:
       return appLength(ctx, e, e.context.image.height)
     return jsUndefSentinel(ctx)
+  of "round":
+    # This app draws a round panel's whole canvas: only the circle inside it
+    # shows, so the app keeps what matters there (docs/scene-guide.md "Round
+    # panels"). False in a window, a split's panel or a layout's hole, which
+    # are rooms of their own, and on every other panel.
+    let config = e.owner.frameConfig
+    return nimBoolToJS(ctx, not config.isNil and panelIsRound(config.device) and
+      e.context.hasImage and not e.context.image.isNil and
+      e.context.image.width == frameos_apps.renderWidth(config) and
+      e.context.image.height == frameos_apps.renderHeight(config))
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
@@ -2507,7 +2517,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       if windowLimit() > 0:
         keys.add("windows")
   of "context":
-    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
+    keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep", "round"]
     if e.context.hasImage and not e.context.image.isNil:
       keys.add("image")
       keys.add("imageWidth")

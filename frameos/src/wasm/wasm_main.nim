@@ -32,7 +32,7 @@ import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/utils/dither
 import frameos/utils/asset_colors
-from frameos/panel_shape import boardPanelFormat
+from frameos/panel_shape import boardPanelFormat, boardPanelRound
 from frameos/scene_rhythm import rhythmForgetCanvases
 from frameos/utils/svg_frames import forgetPanelFrames
 import frameos/js_runtime/runtime as jsRuntime
@@ -383,6 +383,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     deviceCanvasBitsPerPixel = 32
     namedPanelFormat = 0
     boardPanelFormat = 0
+    boardPanelRound = false
     boardRotate = 0
     app_runtime.boardRotation = -1
     pendingSceneStates = initTable[string, JsonNode]()
@@ -711,7 +712,7 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
   ## plane rendering for a frame (docs/server-rendering.md):
   ## `{"eventMap": [rules] | null, "palette": ["#rrggbb", …] | {"colors":
   ## […]}, "colors": {autoFit, global}, "pixelFormat": n, "gpioButtons":
-  ## [{pin, label, role?}], "rotate": 0 | 90 | 180 | 270}`, every key
+  ## [{pin, label, role?}], "rotate": 0 | 90 | 180 | 270, "round": bool}`, every key
   ## optional; call it before the scenes are loaded. The event map is the
   ## frame's (docs/events.md "Event map"), read by the dispatcher off this
   ## config; `palette` and `colors` are what the ESP32's settings hand its
@@ -720,7 +721,8 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
   ## panel shows, as embedded_main's render does, and a scene hears what the
   ## board's runtime says of it (`app.frame.color` and `paper`, the switcher's
   ## and the settings' look: panel_shape.boardPanelFormat); `rotate` is the frame's,
-  ## for the relayed pointers' panel positions.
+  ## for the relayed pointers' panel positions; `round` a panel that shows
+  ## only the circle inside it (panel_shape.boardPanelRound).
   try:
     if frameConfig.isNil:
       setLastError("setFrame: init not called")
@@ -759,6 +761,13 @@ proc frameos_wasm_set_frame(frameJson: cstring): bool {.exportc, cdecl.} =
         buttons.add GPIOButton(pin: entry["pin"].getInt(), label: entry{"label"}.getStr(),
           role: entry{"role"}.getStr())
       frameConfig.gpioButtons = buttons
+      rebuildInput = true
+    let roundNode = node{"round"}
+    if not roundNode.isNil and roundNode.kind == JBool and roundNode.getBool() != boardPanelRound:
+      # A round board (its panel shows only the circle inside its square):
+      # `app.frame.round`, the built-in scenes inside the circle and an edge
+      # swipe from its rim, as the board's own runtime has them.
+      boardPanelRound = roundNode.getBool()
       rebuildInput = true
     var rotate = 0
     let rotateNode = node{"rotate"}

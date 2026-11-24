@@ -214,7 +214,13 @@ the control plane") brings it back with the page.
   covers the glass: the list is the square inscribed in that circle and
   scrolls inside it, the arc above holds the title (12 o'clock) and the one
   below Close and the gear (6), each box cut to the chord it sits on. The
-  bottom swipe opens it from the rim there (`input_state.nim` `edgeAt`).
+  list is a lens, as a watch's is: a tile is full size at the circle's middle
+  and smaller towards its rim (`lens`, 1 − 0.65 × (dy / radius)², about two
+  thirds at the list's top and bottom edges), its cell and what a tap there
+  does unchanged; every scroll is a render, so the lens follows the finger.
+  Its scroll bar is an arc along the rim (docs/jsx-ui.md "Scrolling and
+  clipping"). The bottom swipe opens it from the rim there (`input_state.nim`
+  `edgeAt`).
   `test_scene.nim` checks every hit region where it shows and every pixel
   drawn for 1, 5, 9 and 20 scenes, with categories and without, at the top
   of the list and scrolled to its end, pressed and highlighted.

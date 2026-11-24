@@ -121,6 +121,10 @@ export interface FrameOSPreviewOptions {
    * `<Scene id>` is the runtime's own instance, and a scene switched away
    * from keeps running in its window. Off (the default) previews one scene. */
   windowed?: boolean
+  /** A round panel (the HyperPixel 2.1 Round, the Waveshare 1.75" AMOLED): only the circle
+   * inside it shows. Scenes read `context.round` and `app.frame.round`, and the built-in
+   * scenes keep inside the circle (docs/scene-guide.md "Round panels"). */
+  round?: boolean
   /** Offer the frame's own page in the scene settings (a desktop's Control
    * Panel), for a page that is a frame of its own rather than an editor's
    * preview. Its Restart and Reboot arrive as `onSceneEvent` `restart` /
@@ -290,6 +294,7 @@ export class FrameOSPreview {
       deviceLimits: options.deviceLimits ?? null,
       renderScale: options.renderScale ?? 0,
       windowed: options.windowed === true,
+      round: options.round === true,
       framePage: options.framePage === true,
       fileTransfer: options.fileTransfer !== false,
       ...(options.storeUrl ? { storeUrl: options.storeUrl } : {}),
@@ -688,6 +693,11 @@ export class FrameOSPreview {
    */
   chooseLayout(layoutId: string): void {
     this.toRuntime({ type: 'chooseLayout', layoutId })
+  }
+
+  /** A round panel or not (`round` in the options), drawn again at once. */
+  setRound(round: boolean): void {
+    this.toRuntime({ type: 'setRound', round })
   }
 
   /** The frame's render scale (0 = automatic), drawn again at once. */

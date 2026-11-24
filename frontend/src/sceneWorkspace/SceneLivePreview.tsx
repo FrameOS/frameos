@@ -965,6 +965,7 @@ export function SceneLivePreviewPanel({
         fastMode,
         drawnCursor,
         windowed,
+        round: roundRef.current,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,
         deviceLimits: deviceLimitsFor(
@@ -1257,6 +1258,15 @@ export function SceneLivePreviewPanel({
   const panelDevice = previewDeviceFor(panelDeviceKey);
   const shownDeviceKey =
     panelDevice && previewShowsDevice(panelDevice, viewport) ? panelDevice.key : "";
+  // A round panel at its size: drawn round, and the runtime told so.
+  const round = Boolean(panelDevice?.round) && shownDeviceKey !== "";
+  const roundRef = useRef(round);
+  useEffect(() => {
+    if (roundRef.current !== round) {
+      roundRef.current = round;
+      previewRef.current?.setRound(round);
+    }
+  }, [round]);
   function choosePanelDevice(key: string) {
     const next = previewDeviceFor(key);
     setPanelDeviceKey(next?.key ?? null);
@@ -1696,7 +1706,7 @@ export function SceneLivePreviewPanel({
           >
             <canvas
               aria-label="Scene preview"
-              className={`live-preview__canvas${pointerInput ? " live-preview__canvas--interactive" : ""}`}
+              className={`live-preview__canvas${pointerInput ? " live-preview__canvas--interactive" : ""}${round ? " live-preview__canvas--round" : ""}`}
               height={viewport.height}
               ref={canvasRef}
               role="img"

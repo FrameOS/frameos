@@ -91,6 +91,9 @@ type
     ## and the title and Close sit in the arcs above and below it.
     round*: bool
     cx*, cy*, radius*, side*: int
+    lift*: int
+      ## A round panel's lens (`lens`): how far down its cell a tile drawn
+      ## smaller is put, so it stays centred where a full one would be.
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
@@ -314,6 +317,27 @@ proc switcherGrid*(width, height: int, thumbnails: bool, round = false, unit = 0
   result.tileH = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
   result.cols = clamp((gw + result.gap) div (result.tileW + result.gap), 1, MaxCols)
   result.rows = max((gh + result.gap) div (result.tileH + result.gap), 1)
+
+proc lens*(grid: SwitcherGrid, top, scroll: int): SwitcherGrid =
+  ## A round panel's list is a lens: a tile is full size at the circle's
+  ## middle and smaller towards its rim, a watch's list, following the finger
+  ## as the list scrolls (every scroll is a render). `top`: the tile's top in
+  ## the list, `scroll` how far the list is scrolled. Only what is drawn
+  ## shrinks: the cell, and what a tap there does, stay.
+  result = grid
+  let
+    dy = abs(grid.listY + top - scroll + grid.tileH div 2 - grid.cy)
+    reach = max(grid.radius, 1)
+    # 1000 at the middle, 1000 - 650 × (dy / radius)² towards the rim:
+    # about two thirds at the list's top and bottom edges.
+    k = clamp(1000 - 650 * dy * dy div reach div reach, 550, 1000)
+  if k >= 1000:
+    return
+  result.icon = max(permille(grid.icon, k), 8)
+  result.text = max(permille(grid.text, k), 8)
+  result.inner = max(permille(grid.inner, k), 1)
+  let drawn = 5 * result.inner + result.icon + 2 * (result.text * 5 div 4)
+  result.lift = max((grid.tileH - drawn) div 2, 0)
 
 proc isRound*(frameConfig: FrameConfig): bool =
   ## Whether the frame's panel shows only the circle inside it
@@ -814,7 +838,7 @@ proc tile(self: SceneSwitcherScene, look: TileLook, index: int, spot: Spot, grid
   ## (Explorer's blue label, Finder's pill); on e-paper the cell is inverted.
   var c: string
   c.at(grid.x0 - grid.listX + spot.col * (grid.tileW + grid.gap), spot.top, grid.tileW, grid.tileH)
-  c.px("pt", grid.inner)
+  c.px("pt", grid.inner + grid.lift)
   c.px("gap", grid.inner)
   c.px("rounded", grid.inner * 2)
   c.add " flex flex-col items-center"
@@ -976,6 +1000,7 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
   var look = TileLook(paper: paper)
   let opener = self.opener()
   let spots = self.spots(grid)
+  let scroll = if grid.round: int(listScroll()) else: 0
   var group = -1
   for index in 0 ..< self.entries.len:
     if index == 0 or self.entries[index].category != self.entries[index - 1].category:
@@ -986,7 +1011,8 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool, unit = 0):
     look.hue = group
     look.lit = index == lit
     look.showing = self.entries[index].id == opener
-    list.children.add self.tile(look, index, spots[index], grid)
+    list.children.add self.tile(look, index, spots[index],
+      if grid.round: grid.lens(spots[index].top, scroll) else: grid)
 
 const
   PaperWhite = color(1, 1, 1, 1)

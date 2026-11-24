@@ -1353,6 +1353,9 @@ export interface FrameSceneSettings {
   /** Its category by its name, "Photos" or "Clocks & time", picked from the store's titles
    * (utils/sceneCategory.ts): a desktop layout groups its list of scenes by it. */
   category?: string
+  /** It works on a round screen (true) or is not offered for one (false); unset = what its code says
+   * (utils/sceneNeeds.ts `round`, docs/scene-guide.md "Round panels"). */
+  round?: boolean
 }
 
 /** The layout an installed scene wears, and the layout's settings for it. */

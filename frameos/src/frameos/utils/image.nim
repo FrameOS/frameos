@@ -1,6 +1,7 @@
 import pixie
 import pixie/fileformats/svg
 import pixie/fileformats/jpeg as pixie_jpeg
+from frameos/panel_shape import RoundInset
 import base64
 import json
 import math
@@ -1853,10 +1854,20 @@ when defined(frameosEmbedded):
     fillPixelRect(image, width div 8, height div 2 - bar div 2, width * 3 div 4, bar, black)
     fillPixelRect(image, width div 2 - bar div 2, height div 8, bar, height * 3 div 4, black)
 
+
+proc errorBox(width, height: int, round: bool): (int, int, int, int) =
+  ## Where an error's message goes: the whole picture, or on a round panel
+  ## the square inside its circle, `RoundInset` in from the rim.
+  if not round:
+    return (0, 0, width, height)
+  let side = max(int(float(min(width, height) div 2 - RoundInset) * sqrt(2.0)), 8)
+  ((width - side) div 2, (height - side) div 2, side, side)
+
 when defined(frameosEmbedded):
-  proc writeEmbeddedErrorText(image: Image, width, height: int, message: string) =
+  proc writeEmbeddedErrorText(image: Image, width, height: int, message: string, round: bool) =
     ## Renders the error message with the compiled-in typeface: a thin black
-    ## border and the wrapped text centered on the (already white) canvas.
+    ## border and the wrapped text centered on the (already white) canvas,
+    ## in the square inside the circle on a `round` panel.
     let black = rgbx(0, 0, 0, 255)
     let border = max(2, min(width, height) div 160)
     fillPixelRect(image, 0, 0, width, border, black)
@@ -1868,43 +1879,48 @@ when defined(frameosEmbedded):
     let fontSize = clamp(min(width, height).float / 24.0, 16.0, 44.0)
     let font = newFont(typeface, fontSize, color(0, 0, 0, 1))
     let padding = max(16.0, min(width, height).float / 20.0)
+    let (ox, oy, bw, bh) = errorBox(width, height, round)
     let types = typeset(
       spans = [newSpan(message, font)],
-      bounds = vec2(width.toFloat() - 2 * padding, height.toFloat() - 2 * padding),
+      bounds = vec2(bw.toFloat() - 2 * padding, bh.toFloat() - 2 * padding),
       hAlign = CenterAlign,
       vAlign = MiddleAlign,
     )
-    image.fillText(types, translate(vec2(padding, padding)))
+    image.fillText(types, translate(vec2(ox.float + padding, oy.float + padding)))
 
-proc writeError*(image: Image, width, height: int, message: string) =
+proc writeError*(image: Image, width, height: int, message: string, round = false) =
+  ## The message centred on the picture; on a `round` panel (only the circle
+  ## inside it shows: panel_shape.nim) in the square inside that circle.
   when defined(frameosEmbedded):
     # Error frames often follow allocation failures; if typesetting the real
     # message runs out of memory too, fall back to the allocation-free marker.
     try:
-      writeEmbeddedErrorText(image, width, height, message)
+      writeEmbeddedErrorText(image, width, height, message, round)
     except Exception:
       writeEmbeddedErrorMarker(image, width, height)
   else:
     let typeface = getDefaultTypeface()
     let font = newFont(typeface, 32, parseHtmlColor("#000000"))
     let padding = 10.0
+    let (ox, oy, bw, bh) = errorBox(width, height, round)
     let types = typeset(
         spans = [newSpan(message, font)],
-        bounds = vec2(width.toFloat() - 2 * padding,
-        height.toFloat() - 2 * padding),
+        bounds = vec2(bw.toFloat() - 2 * padding,
+        bh.toFloat() - 2 * padding),
         hAlign = CenterAlign,
         vAlign = MiddleAlign,
       )
     let borderFont = newFont(typeface, 32, parseHtmlColor("#ffffff"))
     let borderTypes = typeset(
         spans = [newSpan(message, borderFont)],
-        bounds = vec2(width.toFloat() - 2 * padding,
-        height.toFloat() - 2 * padding),
+        bounds = vec2(bw.toFloat() - 2 * padding,
+        bh.toFloat() - 2 * padding),
         hAlign = CenterAlign,
         vAlign = MiddleAlign,
       )
-    image.strokeText(borderTypes, translate(vec2(padding, padding)), strokeWidth = 2)
-    image.fillText(types, translate(vec2(padding, padding)))
+    let at = translate(vec2(ox.float + padding, oy.float + padding))
+    image.strokeText(borderTypes, at, strokeWidth = 2)
+    image.fillText(types, at)
 
 proc spillImageToSpool*(image: Image, name: string, preferredDir = ""): ImageSpool =
   ## The disk tier of the image side: write the image's pixels to a spill file
@@ -1985,15 +2001,15 @@ proc materializeImageSpool*(spool: ImageSpool): Image =
     return nil
   image
 
-proc renderErrorInto*(image: Image, width, height: int, message: string) =
+proc renderErrorInto*(image: Image, width, height: int, message: string, round = false) =
   image.fill(parseHtmlColor("#ffffff"))
-  writeError(image, width, height, message)
+  writeError(image, width, height, message, round)
 
-proc renderError*(width, height: int, message: string): Image =
+proc renderError*(width, height: int, message: string, round = false): Image =
   when defined(frameosEmbedded):
     GC_fullCollect()
   result = newImage(width, height)
-  result.renderErrorInto(width, height, message)
+  result.renderErrorInto(width, height, message, round)
 
 when defined(frameosEmbedded):
   proc drawScaledNearest(targetImage: Image, srcImage: Image, scalingMode: string,
