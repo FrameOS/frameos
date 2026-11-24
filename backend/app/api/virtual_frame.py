@@ -24,6 +24,7 @@ the server API key does not).
 
 from __future__ import annotations
 
+import hmac
 import io
 import urllib.parse
 from html import escape as html_escape
@@ -80,7 +81,11 @@ def _virtual_frame(db: Session, frame_id: int, token: str | None) -> Frame:
     # device API surface. Rotate by regenerating device_config.viewToken.
     device_config = frame.device_config if isinstance(frame.device_config, dict) else {}
     view_token = device_config.get("viewToken")
-    if not isinstance(view_token, str) or not view_token or token != view_token:
+    if (
+        not isinstance(view_token, str)
+        or not view_token
+        or not hmac.compare_digest(token.encode("utf-8", "replace"), view_token.encode("utf-8", "replace"))
+    ):
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized")
     return frame
 
