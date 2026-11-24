@@ -6,6 +6,8 @@ import ../events
 import ../input_state
 import ../interpreter
 import ../layout_choice
+import ../scene_code_hooks
+import ../scene_store_hooks
 import ../types
 import system/sceneSwitcher/scene as sceneSwitcher
 import system/sceneSettings/scene as sceneSettings
@@ -247,10 +249,15 @@ block the_frame_page_is_withheld_from_a_run_on_the_access_keys_event:
   frameSettingsRead = proc (): JsonNode {.nimcall, gcsafe, raises: [].} = newJObject()
   frameSettingsApply = proc (changes: JsonNode) {.nimcall, gcsafe, raises: [].} = discard
   frameSettingsAction = proc (action: string) {.nimcall, gcsafe, raises: [].} = discard
+  sceneCode = proc (asker, op, arg: string): string {.nimcall, gcsafe, raises: [].} = ""
+  sceneStoreAction = proc (asker, action, args: string) {.nimcall, gcsafe, raises: [].} = discard
   var offered: seq[bool]
   let run = host.loop.host.runScene
   host.loop.host.runScene = proc (scene: FrameScene, event: string, payload: JsonNode) =
     offered.add(not frameSettingsRead.isNil and not frameSettingsApply.isNil and not frameSettingsAction.isNil)
+    # The code host and the store's actions go with the page.
+    doAssert sceneCode.isNil == frameSettingsRead.isNil
+    doAssert sceneStoreAction.isNil == frameSettingsRead.isNil
     doAssert framePageWithheld == frameSettingsRead.isNil
     run(scene, event, payload)
   for origin in [eoHttpWrite, eoDriver, eoHttpAdmin, eoHttpWrite]:
@@ -266,9 +273,12 @@ block the_frame_page_is_withheld_from_a_run_on_the_access_keys_event:
   doAssert frameSettingsRead.isNil
   host.loop.resetAfterAbort()
   doAssert not framePageWithheld and not frameSettingsRead.isNil
+  doAssert not sceneCode.isNil and not sceneStoreAction.isNil
   frameSettingsRead = nil
   frameSettingsApply = nil
   frameSettingsAction = nil
+  sceneCode = nil
+  sceneStoreAction = nil
   localEventSink = nil
 
 block a_payload_is_an_object:

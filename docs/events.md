@@ -161,8 +161,10 @@ event route and schedule validator. What it comes to:
   while a scene runs on an event from `http:write` the frame offers no page
   (`frame_settings_hooks.nim`: the frame page's three hooks are nil for that
   run, as when the control plane turned the page off, for the frame page and
-  for an app with `frameos.frame` alike), and the scene settings take no
-  input from it at all. Opening them, as switching a scene, it may. Over the
+  for an app with `frameos.frame` alike, and so are the code host behind
+  `frameos.code` and the store's actions behind `frameos.storeAction`), and
+  the scene settings take no input from it at all. What an app runs later,
+  after an `await`, is outside that run. Opening them, as switching a scene, it may. Over the
   frame's HTTP API the key also reads neither the scene JSON
   (`GET /getUploadedScenes`) nor the value of a field marked `secret`
   (`/state`, `/states`, the control page): those take an admin session or the
