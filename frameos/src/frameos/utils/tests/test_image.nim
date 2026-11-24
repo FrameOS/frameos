@@ -4,6 +4,7 @@ import pixie/fileformats/png
 
 import ../image
 import ../memory
+from ../../panel_shape import insideRound, RoundInset
 
 
 proc pixel(image: Image, x, y: int): ColorRGBX =
@@ -429,3 +430,19 @@ suite "exiftool arguments":
     check args[3].isAbsolute
     check args[3].endsWith("-j.txt")
     check exifToolPathArgs("/srv/assets/photo.jpg")[3] == "/srv/assets/photo.jpg"
+
+suite "error frames":
+  test "on a round panel the message keeps inside the circle":
+    let message = "Image from URL: no URL given. Set the url field of the downloadImage node to a picture's address."
+    proc inked(round: bool): tuple[outside, inside: int] =
+      let image = renderError(480, 480, message, round)
+      for y in 0 ..< 480:
+        for x in 0 ..< 480:
+          if image.pixel(x, y) != rgbx(255, 255, 255, 255):
+            if insideRound(480, 480, x, y, RoundInset): inc result.inside
+            else: inc result.outside
+    let square = inked(false)
+    check square.outside > 0 # the square's lines run into the corners
+    let round = inked(true)
+    check round.outside == 0
+    check round.inside > 1000

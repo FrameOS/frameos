@@ -19,6 +19,7 @@ import { sceneWindowSizeOptions, type WindowSizeOption } from '../../../../utils
 import { sceneIconPath, sceneIconProblem } from '../../../../utils/sceneIcon'
 import { svgToSceneIcon } from '../../../../utils/svgToSceneIcon'
 import { sceneCategoryOptions, type SceneCategoryOption } from '../../../../utils/sceneCategory'
+import { sceneCodeReadsRound } from '../../../../utils/sceneNeeds'
 import type { FieldName } from 'kea-forms/lib/types'
 
 export interface SceneSettingsLogicProps {
@@ -56,6 +57,7 @@ export interface sceneSettingsLogicValues {
   permissionRows: ScenePermissionRow[]
   renderScaleFieldName: string | null
   renderScaleOptions: RenderScaleOption[]
+  roundOptions: { value: string; label: string }[]
   scene: FrameScene | null
   sceneAccess: SceneAccess | null
   sceneIndex: number
@@ -105,6 +107,7 @@ export interface sceneSettingsLogicMeta {
     layoutProblem: (scene: FrameScene | null) => string | null
     renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
     windowSizeOptions: (scene: FrameScene | null) => WindowSizeOption[]
+    roundOptions: (scene: FrameScene | null) => { value: string; label: string }[]
     categoryOptions: (scene: FrameScene | null) => SceneCategoryOption[]
     iconPath: (scene: FrameScene | null) => string | null
     iconProblem: (scene: FrameScene | null) => string | null
@@ -235,6 +238,21 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
       (s) => [s.scene],
       (scene: sceneSettingsLogicValues['scene']): WindowSizeOption[] =>
         sceneWindowSizeOptions(scene?.settings?.windowSize),
+    ],
+    // The Round screens select (utils/sceneNeeds.ts `round`): Automatic says
+    // what the scene's code makes of it, the other two what settings.round does.
+    roundOptions: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): { value: string; label: string }[] => [
+        {
+          value: 'auto',
+          label: sceneCodeReadsRound(scene)
+            ? 'Automatic: works on round screens (its code adapts)'
+            : 'Automatic: not marked for round screens',
+        },
+        { value: 'yes', label: 'Works on round screens' },
+        { value: 'no', label: 'Not for round screens' },
+      ],
     ],
     // The Category select: None, the store's category titles for a scene (the
     // layout ones for a layout), and a name of the scene's own kept as it is.

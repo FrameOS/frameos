@@ -345,6 +345,29 @@ describe("GET /api/store/device/scenes", () => {
     expect((await read("exclude=games")).scenes).toHaveLength(5);
   });
 
+  it("puts the scenes made for a round screen first on a round panel, the first need asked weighing most", async () => {
+    const { accountId } = await account("Publisher");
+    for (let i = 0; i < 3; i += 1) {
+      await storeScene(accountId, `Weather ${i}`);
+    }
+    const dial = await storeScene(accountId, "Dial", { category: "clocks", needs: ["round"] });
+    const spin = await storeScene(accountId, "Spin", { category: "games", needs: ["fast"] });
+    const both = await storeScene(accountId, "Orbit", { category: "fun", needs: ["fast", "round"] });
+    const read = async (query: string) =>
+      (await (await getDeviceStore(get(`/api/store/device/scenes?${query}`))).json()) as {
+        scenes: { id: string; needs?: string[] }[];
+      };
+
+    const round = await read("prefer=round");
+    expect(round.scenes.slice(0, 2).map((scene) => scene.id).sort()).toEqual([dial.id, both.id].sort());
+    expect(round.scenes.find((scene) => scene.id === dial.id)?.needs).toEqual(["round"]);
+    // A round LCD: round first, then fast among them and after them.
+    const roundFast = await read("prefer=round,fast");
+    expect(roundFast.scenes.slice(0, 3).map((scene) => scene.id)).toEqual([both.id, dial.id, spin.id]);
+    // Round rules nothing out.
+    expect((await read("without=round")).scenes).toHaveLength(6);
+  });
+
   it("answers one listed scene with its newest version and a short description", async () => {
     const { accountId } = await account("Publisher");
     const scene = await storeScene(accountId, "Rain radar", { description: "word ".repeat(100) });

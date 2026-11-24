@@ -111,7 +111,10 @@ describe("rules from choices and back", () => {
       { label: "REFRESH", action: "longPress" },
       { label: "LEFT", action: "press" },
     ]);
-    expect(gestureTitle({ label: "AI", action: "triplePress" })).toBe("AI · triple press");
+    // The reTerminal Sticky's AI key is the Action key to people; AI stays its label.
+    expect(gestureTitle({ label: "AI", action: "triplePress" })).toBe("Action · triple press");
+    expect(gestureTitle({ label: "ai", action: "press" })).toBe("Action · press");
+    expect(gestureTitle({ label: "AIR", action: "press" })).toBe("AIR · press");
   });
 
   it("writes one rule per mapped listener, with every field the listener filters on in `as`", () => {

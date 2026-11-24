@@ -1,7 +1,7 @@
 import frameos/types
 import frameos/values
 import frameos/spool
-from frameos/apps as frameos_apps import spoolDir
+from frameos/apps as frameos_apps import spoolDir, renderWidth, renderHeight
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage,
   renderSvgIntoTarget
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
@@ -1557,6 +1557,13 @@ proc contextValue(ctx: ptr JSContext, context: ExecutionContext, key: string): J
       nimIntToJS(ctx, (if key == "imageWidth": context.image.width else: context.image.height).int32)
     else:
       jsUndefined(ctx)
+  of "round":
+    # The run draws a round panel's whole canvas (app_runtime's context.round):
+    # a scene's graph can split another way there.
+    let config = if context.scene.isNil: nil else: context.scene.frameConfig
+    nimBoolToJS(ctx, not config.isNil and panelIsRound(config.device) and context.hasImage and
+      not context.image.isNil and context.image.width == config.renderWidth() and
+      context.image.height == config.renderHeight())
   else: jsUndefined(ctx)
 
 proc programOp(scene: InterpretedFrameScene, ctx: ptr JSContext, op: ProgramOp, argc: int,
@@ -2674,6 +2681,17 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
         (if passStarted: ensureLayoutScene(InterpretedFrameScene(self)) else: self.wornLayout)
       elif self.ownRun.isNil: nil
       else: builtInLayout(self, not yieldScene.isNil)
+    # The frame's `back` while the scene's UI or its layout's has a field with
+    # the keyboard (a <select>'s list, a link's code) up: that goes away, as
+    # on a phone, and the scene, the layout and their apps hear nothing of
+    # it. A built-in scene puts its own away (dismissKeyboard).
+    if yieldScene.isNil and context.event == evBack and self.ownRun.isNil and
+        uiBack(keyIds(self, layout)):
+      rhythmMarkDue(self)
+      if not layout.isNil:
+        rhythmMarkDue(layout)
+      sendEvent("render", %*{}, eoScene)
+      return
     # The frame's scene, before any UI hears a key or a button: is it the
     # keys'? A built-in scene walks its own (its highlight, its form).
     let keys = yieldScene.isNil and context.event in ["keyDown", "button"]

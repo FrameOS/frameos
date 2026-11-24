@@ -28,6 +28,7 @@ import { frameSceneEditorColumn } from './FrameSceneEditorColumn'
 import { applyAiEventToFrame, sceneEditorPageLogic, scenesAsJson } from './sceneEditorPageLogic'
 import { workspaceLogic } from './workspaceLogic'
 import { workspaceMode } from './workspaceSurfaces'
+import { previewDeviceKeyForFrame } from '../../sceneWorkspace/lib/preview-devices'
 
 /** An embedded frame short of memory (utils/frameMemory.ts): what the next
  * scene will run out of, under the bar. */
@@ -160,7 +161,12 @@ export function SceneEditorPage({ frameId }: { frameId: FrameId }): JSX.Element 
                   framesUrl: urls.frames(),
                   signedIn: true,
                 }}
-                preview={{ sceneId: null, scenes: previewScenes }}
+                preview={{
+                  sceneId: null,
+                  scenes: previewScenes,
+                  // A round frame's scenes previewed in its circle.
+                  initialDevice: previewDeviceKeyForFrame(frame.device),
+                }}
               />
             ) : (
               <div className="editor-modal__frame editor-modal__frame--empty">

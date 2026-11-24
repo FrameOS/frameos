@@ -371,6 +371,12 @@ void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_bo
     }
 }
 
+bool fos_panel_box_hit(const fos_panel_code_box_t *box, int px, int py)
+{
+    return box != NULL && box->pw > 0 && box->ph > 0 && px >= box->px && px < box->px + box->pw &&
+           py >= box->py && py < box->py + box->ph;
+}
+
 /* --------------------------------------------------------- the sleep mark */
 
 /* 16x16, most significant bit leftmost: a crescent moon, a "z" above it. */

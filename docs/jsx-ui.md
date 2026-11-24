@@ -708,6 +708,14 @@ export function get(app) {
   landed. A tap anywhere else (a button, the page) takes it away and then
   does what it does; so do Enter in an `<input>` (a `<textarea>` gets a new
   line) and Escape.
+- **The frame's `back`** (a swipe in from the left edge, a reTerminal
+  Sticky's Action key pressed twice) puts the keyboard away as Escape does, and
+  goes no further: the scene, its layout and their apps never hear that
+  `back`, so it does not also leave the page or the scene. A key's accents
+  or a selection made by touch go first, the keyboard staying; an open
+  `<select>`'s list and a link's code go too. Every host, from
+  `interpreter.runEvent` (`ui/events.nim` `uiBack`); a built-in scene puts
+  its own away.
 - **The keyboard is on the screen** when the frame has none of its own: a
   US layout under the UI, which is laid out in what is left and scrolled so
   the field shows. Its pages are letters (shift for one capital, shift
@@ -1008,6 +1016,21 @@ where they got to. A long press stays the frame's event map's (a reTerminal's
 arrows held walk the scenes, its green key held talks). A UI with nothing to
 press hears neither keys nor buttons.
 
+**A frame's buttons turn pages.** On an element in a box that scrolls
+([Scrolling](#scrolling-and-clipping)), while the box has more below, `next`
+goes to the next element only when it shows whole there. When it does not (it
+is cut off at the bottom, or the walk would leave the box for the scene's
+header or the layout's bar), the box scrolls down a page instead, its height
+less an eighth so the reader keeps their place, and the ring goes to the first
+element the new page shows below the one it was on. With nothing to press on
+the new page it stays where it was while that shows, else it rings the box
+itself. Only at the box's end does `next` go on past it. `prev` mirrors it
+upward. A box that scrolls with nothing to press showing in it is a stop of
+its own, so a long text pages too. Presses that come before the new page is
+drawn (a double press, taps while e-paper refreshes) go on from where the ring
+lands, one element each. A keyboard's Tab walks on without pages and brings
+what it goes to into sight by what that needs, as a browser does.
+
 **The scene's own code hears them first.** A scene or a layout with an event
 node for `keyDown` or `button` keeps every one of them. A JS app subscribed to
 them (`"events"` in its config.json) hears each one before the keys move,
@@ -1025,10 +1048,15 @@ switcher's highlight is its focus (Tab moves it a tile), and the scene
 settings' form walks alone, without the layout around it.
 
 The ring is `UiInput.ring` (the element's key + 1, kept with the UI's input
-like a field's focus), drawn by `ui/layout.nim` `ring` over the UI and under
-the keyboard; an element gone from the next render takes the ring with it and
-Tab starts over from the top. `ui/tests/test_ui_keys.nim` and
-`tests/test_frame_keys.nim` are where a rule gets its test.
+like a field's focus, and between a plane's pulls), drawn by `ui/layout.nim`
+`ring` over the UI and under the keyboard; an element gone from the next
+render takes the ring with it and Tab starts over from the top. A page is
+turned in two halves: `ui/events.nim` `turnPage` decides from the regions
+(each knows the box around it that scrolls, `UiRegion.scroller`) and scrolls
+the box, and the next layout's `turnPage`, before `reveal`, knows every
+element in the box, shown or not, and moves the ring (`UiInput.turn`).
+`ui/tests/test_ui_keys.nim` and `tests/test_frame_keys.nim` are where a rule
+gets its test.
 
 ## Select boxes
 
@@ -1069,8 +1097,8 @@ export function get(app) {
   holds, `active:` for the press. The list's box is the select's background
   and corners with a thin line of its text color around it.
 - **While it is up nothing else answers**: a tap on an option picks it and
-  closes the list, a tap anywhere else, the frame's `back` in a built-in scene
-  or Escape closes it. A drag scrolls the list and picks nothing.
+  closes the list, a tap anywhere else, the frame's `back` or Escape closes
+  it. A drag scrolls the list and picks nothing.
 - **On a round panel** it keeps an eighth of the height from the top and the
   bottom.
 
@@ -1106,7 +1134,7 @@ URL in a new tab instead.
   block) the run of text it is in: a tap anywhere on that text opens the first
   link there. Two links in one sentence want two elements.
 - **While the code is up nothing else answers**: a tap anywhere on it, the
-  frame's `back` in a built-in scene or Escape puts it away. A field's
+  frame's `back` or Escape puts it away. A field's
   keyboard and an open `<select>` go first. A board its plane renders keeps
   it between pulls (`lastingUiInput`).
 - `<a>` has no look of its own: give it `underline`, a color, or a button's
@@ -1144,6 +1172,13 @@ A box with `overflow-y-auto` (or `-scroll`, `overflow-x-auto`,
 </div>
 ```
 
+- **Its bar**: a thin bar at its right edge says where in what it holds it
+  shows. On a round panel's whole canvas (`UiInput.round`: the circle inside
+  the square shows) the bar of a box whose right edge is right of the
+  centre is an arc along the rim instead, `RoundInset` and a little in from
+  it, across the box's height as far as 45° either side of 3 o'clock
+  (`rimBar` in `ui/layout.nim`): every UI that scrolls gets it, the built-in
+  scenes' and every app's. The app does nothing for it.
 - **A finger drags it**: once a press on it moves past the tap's slop
   along the way it scrolls, the content follows the finger and nothing is
   pressed (from where the box is at each move, so a `scrollTop` the app set

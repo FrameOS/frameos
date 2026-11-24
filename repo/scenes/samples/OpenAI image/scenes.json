@@ -3,6 +3,7 @@
     "id": "e90c4175-8156-4a0e-824f-ff54bec706e5",
     "name": "OpenAI image",
     "settings": {
+      "round": true,
       "category": "AI & generative",
       "backgroundColor": "#000000",
       "refreshInterval": 3600,

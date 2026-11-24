@@ -44,6 +44,21 @@ export function get(app) {
 }
 """
 
+# Twenty rows in a list that scrolls (40 px each), a page of a news reader.
+const longListUi = """
+export function get(app) {
+  return (
+    <div className="flex flex-col w-full h-full bg-black text-white">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {Array.from({ length: 20 }, (_, i) => (
+          <div className="h-[40px] shrink-0" onClick={() => frameos.setState('pressed', 'row ' + i)}>Row {i}</div>
+        ))}
+      </div>
+    </div>
+  )
+}
+"""
+
 # A layout with a button of its own over the scene.
 const chromeLayout = """
 export function get(app) {
@@ -84,6 +99,7 @@ let scenes = %*[
   jsxScene("keys/chrome", chromeLayout, """{"settings": {"execution": "interpreted", "refreshInterval": 600,
     "backgroundColor": "#000000", "isLayout": true}}"""),
   jsxScene("keys/listed", listUi, """{"layout": {"sceneId": "keys/chrome"}}"""),
+  jsxScene("keys/long", longListUi, """{"layout": {"sceneId": "keys/chrome"}}"""),
   # A scene with its own button listener: its buttons are its own.
   jsxScene("keys/own", listUi, """{"nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}},
       {"id": "2", "type": "app", "data": {"keyword": "ui", "config": {}}},
@@ -221,6 +237,39 @@ suite "the keys on a frame":
     check scene.state{"pressed"}.getStr() == ""
     discard scene.button("next")
     check ringedText("keys/listed") == 1 and uiTarget("keys/chrome", 2).input.ring == 0
+    check problems.len == 0
+
+  test "next turns the page of a list in a layout before it goes on to the layout's chrome":
+    # The Hacker News sample in the reTerminal Sticky's layout: from the last
+    # row that shows, next went to the layout's bar instead of down the list.
+    let config = configOf()
+    let scene = init("keys/long".SceneId, config, logger(config), %*{})
+    discard pass(scene)
+    let target = uiTarget("keys/long", 2)
+    var box = -1
+    for r in target.regions:
+      if r.scrollY > 0: box = r.key
+    check box >= 0
+    # 290 px of list under the layout's 30 px bar: rows 0 to 6 whole.
+    for row in 1 .. 7:
+      discard scene.button("next")
+      check ringedText("keys/long") == row
+    check target.input.scrolled(box)[1] == 0
+    discard scene.button("next")
+    discard pass(scene)
+    check target.input.scrolled(box)[1] > 200 # a page, not the 10 px row 7 needed
+    check ringedText("keys/long") > 0 and uiTarget("keys/chrome", 2).input.ring == 0
+    for _ in 1 .. 20:
+      if uiTarget("keys/chrome", 2).input.ring > 0:
+        break
+      discard scene.button("next")
+      discard pass(scene)
+    # The layout's bar only once the list is at its end, its last row seen.
+    check uiTarget("keys/chrome", 2).input.ring > 0
+    check target.input.scrolled(box)[1] == float32(20 * 40 - 290)
+    discard scene.button("prev")
+    discard scene.button("primary")
+    check scene.state{"pressed"}.getStr() == "row 19"
     check problems.len == 0
 
   test "a scene that hears its buttons itself keeps them":

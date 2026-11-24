@@ -291,6 +291,11 @@
    mouseUp). A vertical swipe still scrolls the page on a phone; taps,
    sideways drags and two fingers (a pinch) reach the scene, never the
    page's zoom. */
+.live-preview__canvas--round {
+  /* A round panel shows only the circle inside its square. */
+  border-radius: 50%;
+}
+
 .live-preview__canvas--interactive {
   touch-action: pan-y;
 }

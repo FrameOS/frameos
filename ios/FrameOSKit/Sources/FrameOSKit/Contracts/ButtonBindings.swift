@@ -81,9 +81,17 @@ public enum ButtonBindings {
     static let edgeTitles = ["left": "Swipe in from the left", "right": "Swipe in from the right",
                              "top": "Swipe down from the top", "bottom": "Swipe up from the bottom"]
 
+    /// What people call a key whose label on the wire is something else: the
+    /// reTerminal Sticky's `AI` is the Action key (the SPA's keyTitle).
+    static let keyTitles = ["AI": "Action"]
+
+    public static func keyTitle(_ label: String) -> String {
+        keyTitles[label.trimmingCharacters(in: .whitespaces).uppercased()] ?? label
+    }
+
     public static func gestureTitle(_ gesture: ButtonBinding.Gesture) -> String {
         switch gesture {
-        case .button(let label, let action): return "\(label) · \(pressTitles[action] ?? action)"
+        case .button(let label, let action): return "\(keyTitle(label)) · \(pressTitles[action] ?? action)"
         case .edge(let edge): return edgeTitles[edge] ?? "Swipe from \(edge)"
         }
     }

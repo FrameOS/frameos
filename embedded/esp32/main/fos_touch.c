@@ -321,6 +321,10 @@ static int s_last_raw_x = -1, s_last_raw_y = -1;
  * carry none) and which fingers' a queued move owns. */
 static fos_touch_passed_t *s_passed = NULL;
 static uint8_t s_passed_owned = 0;
+/* Fingers that landed on the voice chat's notice (fos_client_notice_takes):
+ * the notice's from the press to the lift, so none of their reports is
+ * queued and the scene under it hears nothing. Touch task. */
+static uint8_t s_notice_mask = 0;
 static bool s_woke = false;
 /* The last report a CST92xx sent (not its ack read back): the console's. */
 static uint8_t s_last_report[FOS_TOUCH_CST92_REPORT_BYTES];
@@ -334,6 +338,7 @@ static volatile uint32_t s_n_irq = 0, s_n_read = 0, s_n_stale = 0, s_n_none = 0,
 
 static void enqueue(uint8_t kind, uint8_t id, uint16_t x, uint16_t y)
 {
+    if (s_notice_mask & (1u << id)) return;
     int64_t at_ms = esp_timer_get_time() / 1000;
     portENTER_CRITICAL(&s_queue_lock);
     if (kind == FOS_TOUCH_MOVE) {
@@ -662,6 +667,14 @@ static int read_points(fos_touch_point_t *points)
 
 static void report_down(uint8_t id, uint16_t wx, uint16_t wy)
 {
+    /* On the notice: it comes off when the finger lifts, and the press
+     * clicks as one something took. */
+    if (fos_client_notice_takes(wx, wy)) {
+        s_notice_mask |= (uint8_t)(1u << id);
+        s_edge[id] = FOS_TOUCH_EDGE_NONE;
+        click(FOS_TOUCH_DOWN, id, 1);
+        return;
+    }
     /* Where the finger landed first, then that it did, as the Linux evdev
      * translator does (translate.nim flushSlots): a scene that follows the
      * pointer by its moves (the Touch test's `mouseMove`) sees a tap where it
@@ -790,6 +803,7 @@ static void touch_task(void *arg)
                 s_edge[id] = FOS_TOUCH_EDGE_NONE;
             }
         }
+        s_notice_mask &= seen;
         s_down_mask &= seen; /* a finger still settling is not down yet */
         if (lifted) fos_client_wake_for_events();
     }

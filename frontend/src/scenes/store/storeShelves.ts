@@ -38,9 +38,10 @@ export interface StoreFilters {
  * Which scenes a store page lists by what they need (the template's `needs`,
  * utils/sceneNeeds.ts): every scene, the ones e-paper can show (no fast
  * screen needed), the ones made for a fast screen, the ones used with touch
- * or a mouse, or the ones used with a keyboard.
+ * or a mouse, the ones used with a keyboard, or the ones made for round
+ * screens too.
  */
-export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch' | 'keys'
+export type StoreFit = 'any' | 'epaper' | 'fast' | 'touch' | 'keys' | 'round'
 
 export const STORE_FIT_OPTIONS: { value: StoreFit; label: string }[] = [
   { value: 'any', label: 'Any screen' },
@@ -48,10 +49,13 @@ export const STORE_FIT_OPTIONS: { value: StoreFit; label: string }[] = [
   { value: 'fast', label: 'Made for fast screens' },
   { value: 'touch', label: 'Touch & mouse' },
   { value: 'keys', label: 'Keyboard' },
+  { value: 'round', label: 'Round screens' },
 ]
 
 export function storeFitOf(value: unknown): StoreFit {
-  return value === 'epaper' || value === 'fast' || value === 'touch' || value === 'keys' ? value : 'any'
+  return value === 'epaper' || value === 'fast' || value === 'touch' || value === 'keys' || value === 'round'
+    ? value
+    : 'any'
 }
 
 /** The URL's `kind` (`layouts` for the Layouts side), or the kind of the shelf it names. */
@@ -75,6 +79,9 @@ export function templateFitsStoreFit(template: TemplateType, fit: StoreFit): boo
   }
   if (fit === 'keys') {
     return needs.includes('keys')
+  }
+  if (fit === 'round') {
+    return needs.includes('round')
   }
   return true
 }

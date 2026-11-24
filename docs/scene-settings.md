@@ -309,9 +309,11 @@ ends (as far below the centre as it starts above it). With the keyboard up
 it sits on the circle's lower half (`docs/jsx-ui.md`), the name makes way
 for the buttons, and the list ends above the keys. `test_scene.nim` checks
 every hit region and every pixel drawn, the keyboard down and up. The frame
-page there is the square panel's page laid out in the square inside the
-circle (cut short above the keyboard while it is up): a round touch board
-joins Wi-Fi on it like any other touch board.
+page there is laid out the same way: "Frame settings" in the top arc, Back
+and Save under it, its rows in the list as wide as the circle (which ends
+above the keyboard while it is up): a round touch board joins Wi-Fi on it
+like any other touch board. Either list's scroll bar is an arc along the rim
+(docs/jsx-ui.md "Scrolling and clipping").
 
 ## The scene
 

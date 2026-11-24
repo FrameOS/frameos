@@ -1132,8 +1132,8 @@ export const keyboardLayouts: readonly { id: string; label: string }[] = [
 export const defaultKeyboardLayout = 'us'
 
 /** `context` keys per JavaScript sandbox. */
-export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight"]
-export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit"]
+export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight", "round"]
+export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit", "round"]
 
 /** Ambient declarations for the Monaco editors: event names and payloads. */
 export const eventTypeDeclarations = `/** What each built-in scene event carries in \`context.payload\` (docs/events.md). */
@@ -1220,6 +1220,8 @@ export const codeContextMembers = `  /** The name of the event this run is handl
   imageWidth?: number;
   /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
+  /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
+  round?: boolean;
 `
 
 /** The members of a JavaScript app's `FrameOSContext`. */
@@ -1247,4 +1249,6 @@ export const appContextMembers = `  /** The name of the event this run is handli
   targetHeight?: number;
   /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
   targetFit?: string;
+  /** Whether this app draws a round panel's whole canvas: only the circle inside it shows and takes touches, so keep what matters inside that circle (docs/scene-guide.md "Round panels"). False in a window, a split's cell or a layout's hole, and on every other panel; undefined before FrameOS 2026.11.15. */
+  round?: boolean;
 `
