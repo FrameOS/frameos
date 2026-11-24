@@ -16,6 +16,10 @@ typedef struct {
     char method[8];
     char path[PK_HTTPD_PATH_MAX];  // without the query string
     char authorization[PK_HTTPD_AUTH_MAX];
+    // True when the request names an Origin that is not the page it was sent
+    // to (its own Host): another site's page, in a browser that holds this
+    // device's login or sits on its hotspot. See pk_httpd_cross_site_write.
+    bool foreign_origin;
     size_t content_length;
     size_t body_offset;            // where the body starts in the buffer
 } pk_httpd_request_t;
@@ -34,6 +38,13 @@ pk_httpd_parse_t pk_httpd_parse(const char *buf, size_t len, pk_httpd_request_t 
 // `Authorization: Bearer <api_key>` (what the backend sends) or, when the
 // device login is enabled, `Basic user:pass`. Compared in constant time.
 bool pk_httpd_authorized(const pk_httpd_request_t *request, const pk_config_t *config);
+
+// A request that changes something (anything but GET and HEAD) from a page
+// that is not this device's own: refused before the access rule is asked. A
+// request with no Origin is not a browser's cross-site one (the backend, curl,
+// the setup page of an old browser); "null" and any Origin that is not
+// http(s)://<this request's Host> are.
+bool pk_httpd_cross_site_write(const pk_httpd_request_t *request);
 
 // One field of an application/x-www-form-urlencoded body, decoded. False when
 // absent or too long for dst.

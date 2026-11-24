@@ -5,8 +5,9 @@
  * `lan_access_challenge` mints six digits, the render task draws them over
  * the next render for the panel only (fos_client.c), and `lan_access_set
  * {enabled: true, code}` must give them back. Single use, 300 s, five tries,
- * compared in constant time, and at most ten wrong codes an hour across
- * challenges (`rate_limited` once spent). The code never leaves this module except into
+ * compared in constant time, and at most ten wrong codes a window across
+ * challenges (`rate_limited` once spent): the first window is an hour, and
+ * each one that saw a wrong code makes the next twice as long. The code never leaves this module except into
  * fos_lan_access_panel_code(), whose one caller draws it: it is not in an
  * ack, a log line or an image the frame serves.
  *
@@ -31,23 +32,46 @@ extern "C" {
 #define FOS_LAN_ACCESS_MAX_ATTEMPTS 5
 /* Across challenges: at most this many wrong codes per window, counted from
  * the first wrong one. A new challenge brings five fresh attempts, so without
- * this a control plane could mint code after code and keep guessing; with it,
- * ten guesses an hour. A right code does not reset the window. */
+ * this a control plane could mint code after code and keep guessing. A right
+ * code does not reset the window.
+ *
+ * The window grows. Ten guesses an hour for ever were 87,600 a year at a
+ * six-digit code: one frame in twelve, for a control plane that only keeps
+ * asking. So every window that saw a wrong code makes the next one twice as
+ * long (an hour, two, four ... FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS times:
+ * 128 hours), and it is an hour again once FOS_LAN_ACCESS_BUDGET_QUIET_SEC
+ * have passed without a wrong code. Somebody who mistypes now and then never
+ * meets it: a window still takes ten wrong codes. Whoever guesses on gets
+ * about 740 a year, one frame in 1,350. The Pi's rule is the same
+ * (frameos/src/frameos/local_access.nim). */
 #define FOS_LAN_ACCESS_BUDGET_WRONG 10
 #define FOS_LAN_ACCESS_BUDGET_WINDOW_SEC 3600
+#define FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS 7
+#define FOS_LAN_ACCESS_BUDGET_QUIET_SEC (30 * 24 * 3600)
 
 /* A uniform 32-bit random value: esp_random() on the device. */
 typedef uint32_t (*fos_lan_access_rng_t)(void);
 
-/* The clock every caller on the device passes as `now_s`: system time, which
- * the RTC keeps through deep sleep and software resets (only a power-on
- * starts it again), so the wrong-code budget below does not refill with
- * every reboot or every wake of a battery frame — esp_timer starts at 0 each
- * boot. The Pi keeps its TTL in wall-clock time too. */
+/* The clock every caller on the device passes as `now_s`: seconds the RTC
+ * has counted since power-on. It runs through deep sleep and software resets
+ * (only a power-on starts it again, and that clears the budget's memory too),
+ * so the wrong-code budget below does not refill with every reboot or every
+ * wake of a battery frame, as it would by esp_timer, which starts at 0 each
+ * boot. Not the system time: SNTP sets that, unauthenticated, and whoever
+ * answers for the time server could step the frame's clock past a lock-out.
+ * (The Pi keeps its budget in a file, by wall clock.) */
+#ifdef ESP_PLATFORM
+#include "esp_rtc_time.h"
+static inline int64_t fos_lan_access_now(void)
+{
+    return (int64_t)(esp_rtc_get_time_us() / 1000000ULL);
+}
+#else
 static inline int64_t fos_lan_access_now(void)
 {
     return (int64_t)time(NULL);
 }
+#endif
 
 typedef enum {
     FOS_LAN_ACCESS_OK = 0,

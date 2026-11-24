@@ -13,6 +13,7 @@
 
 #include "fos_client.h"
 #include "fos_http.h"
+#include "fos_json_guard.h"
 #include "fos_scenes.h"
 #include "frameos_nim.h"
 
@@ -508,6 +509,13 @@ static fos_event_result_t dispatch_event(fos_event_origin_t origin, const char *
     if (!fos_event_origin_may_emit(origin, name)) {
         log_event_line("event:refused", origin, name, "origin");
         return FOS_EVENT_REFUSED;
+    }
+    /* Whoever reads the payload next recurses once per level of it (the
+     * runtime's JSON reader, the relay): one nested deeper than any FrameOS
+     * payload is nobody's event, from any producer (fos_json_guard.h). */
+    if (!fos_json_depth_ok(payload, strlen(payload), FOS_JSON_MAX_DEPTH)) {
+        log_event_line("event:dropped", origin, name, "nested too deep");
+        return FOS_EVENT_FAILED;
     }
 
     /* The firmware's own: no runtime lock, done when this returns. `render`

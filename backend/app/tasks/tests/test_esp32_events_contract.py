@@ -79,7 +79,7 @@ def test_fos_events_dispatch_routes_events(tmp_path: Path):
             "-I", str(MAIN_DIR / "tests" / "host_shim"),
             "-I", str(ESP32_DIR / "components" / "frameos_nim" / "include"),
             "-I", str(ESP32_DIR / "components" / "frameos_display" / "include"),
-            str(DISPATCH_SOURCE), str(DISPATCH_TEST_SOURCE), "-o", str(binary),
+            str(DISPATCH_SOURCE), str(MAIN_DIR / "fos_json_guard.c"), str(DISPATCH_TEST_SOURCE), "-o", str(binary),
         ],
         capture_output=True,
         text=True,

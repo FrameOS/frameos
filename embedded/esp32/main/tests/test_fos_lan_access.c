@@ -254,11 +254,22 @@ static void test_tokens(void)
           "rate_limited");
 }
 
-/* Ten wrong codes in a window of an hour, across challenges. Each test
- * before this one ran in its own hour, so the budget starts full. */
+/* Ten wrong codes in the window at `at`, in two challenges. */
+static void spend_budget(int64_t at)
+{
+    for (int round = 0; round < 2; round++) {
+        start_with(171717, at);
+        for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", at);
+    }
+}
+
+/* Ten wrong codes a window, across challenges. The first window is an hour;
+ * the tests before this one made wrong codes of their own, so this one
+ * begins a quiet month after them, where the window is an hour again. */
 static void test_wrong_code_budget(void)
 {
-    const int64_t t0 = 100000;
+    const int64_t hour = FOS_LAN_ACCESS_BUDGET_WINDOW_SEC;
+    const int64_t t0 = 100000 + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     CHECK(!fos_lan_access_rate_limited(t0), "starts with the budget unspent");
 
@@ -298,7 +309,7 @@ static void test_wrong_code_budget(void)
               FOS_LAN_ACCESS_RATE_LIMITED, "an expired challenge is not even looked at");
 
     /* The window runs from the first wrong code (t0 + 1). */
-    const int64_t refill = t0 + 1 + FOS_LAN_ACCESS_BUDGET_WINDOW_SEC;
+    const int64_t refill = t0 + 1 + hour;
     CHECK(fos_lan_access_rate_limited(refill - 1), "still spent a second before the hour");
     CHECK(fos_lan_access_start(refill - 1, lcg_rng) == 0, "still no challenge");
     CHECK(!fos_lan_access_rate_limited(refill), "refilled an hour after the first wrong code");
@@ -308,30 +319,62 @@ static void test_wrong_code_budget(void)
           "a wrong code opens a new window");
     CHECK(fos_lan_access_consume("151515", refill + 2) == FOS_LAN_ACCESS_OK, "and the right one");
 
-    /* A new window opens at its first wrong code: nine more wrong, an hour
-     * minus a second after it, still leaves one. */
+    /* That window opens at its first wrong code, and is twice as long: the
+     * one before it saw wrong codes. Nine more wrong spend it for two hours. */
     const int64_t t1 = refill + 1;
     for (int round = 0; round < 3; round++) {
         start_with(161616, t1 + 100 + round);
         for (int i = 0; i < 3; i++) fos_lan_access_consume("000000", t1 + 100 + round);
     }
     CHECK(fos_lan_access_rate_limited(t1 + 100), "1 + 9 wrong: spent");
-    CHECK(!fos_lan_access_rate_limited(t1 + FOS_LAN_ACCESS_BUDGET_WINDOW_SEC),
-          "refilled an hour after this window's first wrong code");
+    CHECK(fos_lan_access_rate_limited(t1 + hour), "an hour is no longer enough");
+    CHECK(fos_lan_access_rate_limited(t1 + 2 * hour - 1), "nor two less a second");
+    CHECK(!fos_lan_access_rate_limited(t1 + 2 * hour), "refilled two hours after this window's first wrong code");
 
-    /* A clock that goes backwards (an SNTP correction) keeps the count and
-     * restarts the window: longer, never shorter. */
-    const int64_t t2 = t1 + 10 * FOS_LAN_ACCESS_BUDGET_WINDOW_SEC;
-    for (int round = 0; round < 2; round++) {
-        start_with(171717, t2);
-        for (int i = 0; i < FOS_LAN_ACCESS_MAX_ATTEMPTS; i++) fos_lan_access_consume("000000", t2);
+    /* Whoever keeps guessing: four hours, eight ... 128, and 128 from there. */
+    int64_t at = t1 + 2 * hour;
+    for (int doublings = 2; doublings <= FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS + 2; doublings++) {
+        int64_t window = hour << (doublings < FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS
+                                      ? doublings : FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS);
+        spend_budget(at);
+        CHECK(fos_lan_access_rate_limited(at + window - 1), "window %d: spent to its last second", doublings);
+        CHECK(fos_lan_access_start(at + window - 1, lcg_rng) == 0, "window %d: no challenge", doublings);
+        CHECK(!fos_lan_access_rate_limited(at + window), "window %d: refilled after %lld h", doublings,
+              (long long)(window / hour));
+        at += window;
     }
+    CHECK((hour << FOS_LAN_ACCESS_BUDGET_MAX_DOUBLINGS) == 128 * hour, "the longest window is 128 hours");
+
+    /* A month without a wrong code, from the last one: an hour again. A day
+     * short of it, still the long window. */
+    spend_budget(at);
+    int64_t quiet = at + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
+    CHECK(!fos_lan_access_rate_limited(quiet - 86400), "long refilled, a day before the month is up");
+    start_with(181818, quiet - 86400);
+    CHECK(fos_lan_access_consume("181818", quiet - 86400 + 1) == FOS_LAN_ACCESS_OK,
+          "and a right code is no wrong one");
+    spend_budget(quiet);
+    CHECK(fos_lan_access_rate_limited(quiet + hour - 1), "spent for the hour");
+    CHECK(!fos_lan_access_rate_limited(quiet + hour), "and only the hour");
+
+    /* Somebody who mistypes once a week never meets the budget, however long
+     * the window has grown: a window still takes ten. */
+    at = quiet + hour + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
+    for (int week = 0; week < 12; week++, at += 7 * 86400) {
+        start_with(191919, at);
+        CHECK(fos_lan_access_consume("000000", at + 1) == FOS_LAN_ACCESS_INVALID_CODE, "week %d: a typo", week);
+        CHECK(fos_lan_access_consume("191919", at + 2) == FOS_LAN_ACCESS_OK, "week %d: then the code", week);
+        CHECK(!fos_lan_access_rate_limited(at + 3), "week %d: never limited", week);
+    }
+
+    /* A clock that goes backwards keeps the count and restarts the window:
+     * longer, never shorter. A month on, so the window is the hour. */
+    const int64_t t2 = at + FOS_LAN_ACCESS_BUDGET_QUIET_SEC;
+    spend_budget(t2);
     CHECK(fos_lan_access_rate_limited(t2), "spent at t2");
     CHECK(fos_lan_access_rate_limited(t2 - 500), "a clock 500 s behind: still spent");
-    CHECK(fos_lan_access_rate_limited(t2 - 500 + FOS_LAN_ACCESS_BUDGET_WINDOW_SEC - 1),
-          "and the hour counts from the earlier clock");
-    CHECK(!fos_lan_access_rate_limited(t2 - 500 + FOS_LAN_ACCESS_BUDGET_WINDOW_SEC),
-          "refilled an hour after that");
+    CHECK(fos_lan_access_rate_limited(t2 - 500 + hour - 1), "and the hour counts from the earlier clock");
+    CHECK(!fos_lan_access_rate_limited(t2 - 500 + hour), "refilled an hour after that");
 }
 
 static void test_clear(void)

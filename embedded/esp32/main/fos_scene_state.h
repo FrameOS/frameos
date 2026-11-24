@@ -18,7 +18,13 @@
  * File names: /state/st-<fnv1a32 of the scene id>.json. SPIFFS caps a name
  * at 32 bytes (CONFIG_SPIFFS_OBJ_NAME_LEN) and a scene id is a 36-byte uuid,
  * so the id cannot be the name; a hash, unlike the scene-store slot number
- * (fos_scenes.c), does not move when a redeploy reorders the scenes.
+ * (fos_scenes.c), does not move when a redeploy reorders the scenes. Two ids
+ * can share a hash, and are easy to make so: the file's first member names
+ * the id it belongs to ({"__owner":"<id>", ...}), and a scene is handed no
+ * file that names another. Such a pair shares the one file (the last to save
+ * has it); neither reads the other's. A file from before is taken by the
+ * scene that reads it first and written again with its owner, and firmware
+ * from before reads a file with one as it always did.
  *
  * Written behind (fos_scene_state_set_write_behind): on the chip the files
  * share the program flash, and a SPIFFS write that has to erase a block holds

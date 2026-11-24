@@ -115,6 +115,11 @@ CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
 # never in the full bundle either.
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
+# A certificate's validity dates are checked: one that ran out is refused, so
+# a leaked key ages out with it. What a frame without the time does is
+# main/fos_tls_dates.h (it still reaches its plane), told to mbedTLS by
+# main/fos_tls.c for every client in the image.
+CONFIG_MBEDTLS_HAVE_TIME_DATE=y
 CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 # HTTPS renders happen after Nim/QuickJS have consumed most internal SRAM.
 # Put mbedTLS' large dynamic buffers in PSRAM so image/data apps can fetch

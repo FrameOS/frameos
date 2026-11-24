@@ -12,7 +12,11 @@
 #include <stddef.h>
 
 /* The depth any FrameOS payload legitimately reaches is well under this;
- * scenes.json nests apps → config → arrays about ten deep. */
+ * scenes.json nests apps → config → arrays about ten deep. cJSON itself is
+ * built to stop here too (CJSON_NESTING_LIMIT in the project's
+ * CMakeLists.txt, checked against this in fos_json_guard.c): a parse with no
+ * scan in front of it fails at this depth instead of running out of stack.
+ * The scan stays where a refusal has its own answer, or saves an allocation. */
 #define FOS_JSON_MAX_DEPTH 32
 
 /* True when `len` bytes of `text` never nest deeper than `max_depth`

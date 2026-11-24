@@ -52,6 +52,42 @@ static void test_parse(void)
     CHECK_STR(request.authorization, ""); // dropped, not truncated into a different credential
 }
 
+// A page that is not the device's own may not post to it: a browser names
+// the page in Origin, and the device's own pages are the ones whose Origin is
+// the request's Host. Nothing else sends an Origin.
+static void test_cross_site(void)
+{
+    pk_httpd_request_t request;
+    // The backend, curl, the app: no Origin at all.
+    CHECK(parse("POST /api/action/render HTTP/1.1\r\nHost: 192.168.1.50\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(!pk_httpd_cross_site_write(&request));
+    // The setup page posting to itself: by address, by name, in the hotspot,
+    // and under a captive-portal probe's name (DNS answers every name here).
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: 192.168.4.1\r\nOrigin: http://192.168.4.1\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(!pk_httpd_cross_site_write(&request));
+    CHECK(parse("POST /api/setup HTTP/1.1\r\norigin:   HTTP://Frame42.local:80  \r\nhost: frame42.LOCAL:80\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(!pk_httpd_cross_site_write(&request));
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: captive.apple.com\r\nOrigin: http://captive.apple.com\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(!pk_httpd_cross_site_write(&request));
+    // Another site's page.
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: 192.168.1.50\r\nOrigin: http://example.com\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request));
+    CHECK(parse("POST /api/action/restart HTTP/1.1\r\nOrigin: https://192.168.1.50.example.com\r\nHost: 192.168.1.50\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request));
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: 192.168.1.50:8080\r\nOrigin: http://192.168.1.50\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request)); // another port is another origin
+    // A sandboxed frame, a file: no page of this device's.
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: 192.168.1.50\r\nOrigin: null\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request));
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nOrigin: http://192.168.1.50\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request)); // no Host to hold it against
+    CHECK(parse("POST /api/setup HTTP/1.1\r\nHost: 192.168.1.50\r\nOrigin: \r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(pk_httpd_cross_site_write(&request));
+    // Reading is not writing: an image tag on another page changes nothing.
+    CHECK(parse("GET /status HTTP/1.1\r\nHost: 192.168.1.50\r\nOrigin: http://example.com\r\n\r\n", &request) == PK_HTTPD_READY);
+    CHECK(request.foreign_origin && !pk_httpd_cross_site_write(&request));
+}
+
 static void test_access(void)
 {
     pk_config_t config;
@@ -141,6 +177,7 @@ static void test_escape_and_base64(void)
 int main(void)
 {
     test_parse();
+    test_cross_site();
     test_access();
     test_form();
     test_escape_and_base64();

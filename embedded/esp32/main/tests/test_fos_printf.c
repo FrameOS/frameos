@@ -335,6 +335,24 @@ int main(void)
     expect("%g exact", out, __wrap_snprintf(out, sizeof out, "%g|%#g", 1200000.0, 1200005.0), "1.2e+06|1.20000e+06");
     expect("%g below 1e15 only", out, __wrap_snprintf(out, sizeof out, "%.3g", 1000000000000005.0), "1e+15");
 
+    /* A precision past js_dtoa's digits is held to them, for every float
+     * conversion and however large: `%.*e` at INT_MAX is `%.200e`'s output,
+     * not a buffer sized from `INT_MAX + 1`. */
+    {
+        static char held[512], huge[512];
+        static const char *const formats[][2] = {
+            {"%.200e", "%.*e"}, {"%.200g", "%.*g"}, {"%.200f", "%.*f"}, {"%.200E", "%.*E"},
+        };
+        for (size_t i = 0; i < sizeof formats / sizeof formats[0]; i++) {
+            int want_n = __wrap_snprintf(held, sizeof held, formats[i][0], 1.0 / 3.0);
+            expect(formats[i][1], huge, __wrap_snprintf(huge, sizeof huge, formats[i][1], INT_MAX, 1.0 / 3.0), held);
+            if (want_n < 50) {
+                printf("FAIL %s: only %d characters\n", formats[i][0], want_n);
+                failures++;
+            }
+        }
+    }
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

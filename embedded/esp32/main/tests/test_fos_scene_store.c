@@ -60,6 +60,14 @@ static long slot_file_size(int slot)
     return stat(path, &st) == 0 ? (long)st.st_size : -1;
 }
 
+static long named_file_size(const char *name)
+{
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s", s_dir, name);
+    struct stat st;
+    return stat(path, &st) == 0 ? (long)st.st_size : -1;
+}
+
 static bool file_exists(const char *name)
 {
     char path[160];
@@ -671,6 +679,76 @@ static void test_opens_in_the_index(void)
     /* A list is no text: none, as a runtime reads it. */
     CHECK(put_one("{\"id\":\"list\",\"settings\":{\"opens\":[\"pdf\"]}}", &result) == FOS_SCENE_STORE_OK);
     CHECK(entry_says("list", "opens", NULL));
+}
+
+/* The index is read whole by every catalog read, and no reader takes one
+ * over FOS_SCENE_STORE_MAX_BYTES: what one scene may add to it is bounded,
+ * and a change that would still push it past that is refused with the set
+ * as it was. Two scenes with 300 KB names used to make an index nobody
+ * could read, and the frame lost every scene it had. */
+static void test_the_index_stays_readable(void)
+{
+    fresh_dir();
+    fos_scene_store_result_t result;
+    CHECK(put_one("{\"id\":\"first\",\"name\":\"First\"}", &result) == FOS_SCENE_STORE_OK);
+
+    /* A name is a title: one longer than that is not kept, the scene is. */
+    size_t name_len = 300 * 1024;
+    char *scene = malloc(name_len + 256);
+    for (int i = 0; i < 2; i++) {
+        size_t at = (size_t)sprintf(scene, "{\"id\":\"big%d\",\"name\":\"", i);
+        memset(scene + at, 'n', name_len);
+        strcpy(scene + at + name_len, "\",\"settings\":{\"category\":\"Photos\"}}");
+        CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    }
+    CHECK(entry_says("big0", "name", NULL) && entry_says("big1", "name", NULL));
+    CHECK(entry_says("big1", "category", "Photos") && entry_says("first", "name", "First"));
+    CHECK(named_file_size("scene-index.json") > 0 && named_file_size("scene-index.json") < 4096);
+    /* 256 bytes fit, one more does not. */
+    char name[300];
+    memset(name, 'n', 257);
+    name[256] = '\0';
+    sprintf(scene, "{\"id\":\"fits\",\"name\":\"%s\"}", name);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("fits", "name", name));
+    name[256] = 'n';
+    name[257] = '\0';
+    sprintf(scene, "{\"id\":\"over\",\"name\":\"%s\"}", name);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("over", "name", NULL));
+    /* "WxH" is a few digits. */
+    memset(name, '9', 33);
+    name[33] = '\0';
+    sprintf(scene, "{\"id\":\"wide\",\"settings\":{\"windowSize\":\"%s\"}}", name);
+    CHECK(put_one(scene, &result) == FOS_SCENE_STORE_OK);
+    CHECK(entry_says("wide", "windowSize", NULL));
+
+    /* What is kept can still be long once written: an icon of 1024 control
+     * characters is 6 KB of escapes in the index. The scene whose entry
+     * would take the index past what a reader takes is refused, and the set
+     * from before it is still there, every scene of it. */
+    fresh_dir();
+    size_t at = (size_t)sprintf(scene, "{\"id\":\"s000\",\"settings\":{\"icon\":\"");
+    for (int i = 0; i < 1024; i++) at += (size_t)sprintf(scene + at, "\\u0001");
+    strcpy(scene + at, "\"}}");
+    int stored = 0;
+    fos_scene_store_err_t err = FOS_SCENE_STORE_OK;
+    for (int i = 0; i < FOS_SCENE_STORE_SCENES && err == FOS_SCENE_STORE_OK; i++) {
+        char id[8];
+        snprintf(id, sizeof(id), "s%03d", i);
+        memcpy(scene + strlen("{\"id\":\""), id, 4);
+        err = put_one(scene, &result);
+        if (err == FOS_SCENE_STORE_OK) stored++;
+    }
+    CHECK(err == FOS_SCENE_STORE_ERR_INVALID);
+    CHECK(stored > 40 && stored < FOS_SCENE_STORE_SCENES);
+    CHECK(named_file_size("scene-index.json") <= FOS_SCENE_STORE_MAX_BYTES);
+    entry_t *entries = calloc(FOS_SCENE_STORE_SLOTS, sizeof(*entries));
+    CHECK(read_entries(entries, FOS_SCENE_STORE_SLOTS) == stored);
+    free(entries);
+    /* And a smaller scene still goes in. */
+    CHECK(put_one("{\"id\":\"small\"}", &result) == FOS_SCENE_STORE_OK);
+    free(scene);
 }
 
 static void test_layouts_and_the_default(void)
@@ -1357,6 +1435,7 @@ int main(void)
     test_icon_in_the_index();
     test_category_in_the_index();
     test_opens_in_the_index();
+    test_the_index_stays_readable();
     test_replace_all();
     test_every_2_kb_written_is_paced();
     test_a_set_file_from_its_scenes();

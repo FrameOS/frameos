@@ -58,3 +58,12 @@ bool fos_url_origin(const char *url, char *out, size_t out_len);
  * frame's bearer goes only to a first-party origin. */
 bool fos_url_download_is_first_party(const char *download_url, const char *base_url,
                                      const char *ws_url);
+
+/* Is `origin` (a request's Origin header, "scheme://host[:port]") the page
+ * that request's own Host header names? The device's HTTP server asks it of
+ * every request that changes something (fos_http.c): a browser names the page
+ * a request came from, and the device's own pages are the ones served under
+ * the Host the request was sent to. Text against text, case aside: a browser
+ * writes both from one URL and leaves a default port out of both. False for
+ * "null", for any other scheme, and for an empty host. */
+bool fos_url_origin_is_host(const char *origin, const char *host);
