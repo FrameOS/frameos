@@ -15,6 +15,7 @@ type
     gradients: Table[string, SvgGradient]
     viewBoxWidth, viewBoxHeight: float32 # what percentage lengths refer to
     lateData: bool # long path data is read when its element is drawn (parseSvg)
+    reuse: bool # nodes handed over again keep their parse (parseSvg's `reuse`)
 
   SvgNode* {.acyclic.} = ref object
     ## What `parseSvg` reads: an element (`tag`, `attrs`, `children`), a run
@@ -1123,6 +1124,81 @@ proc intersect(a, b: Rect): Rect =
 proc parseSvgElement(
   node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
   elements: var seq[SvgElement]
+)
+
+proc movedOnly(was, now: SvgProperties, d: var Vec2): bool =
+  ## Whether `now` is `was` moved: the same in everything but the
+  ## transform's translation, which moved by `d`.
+  var same = now
+  same.transform[2, 0] = was.transform[2, 0]
+  same.transform[2, 1] = was.transform[2, 1]
+  if same != was:
+    return false
+  d = vec2(now.transform[2, 0] - was.transform[2, 0], now.transform[2, 1] - was.transform[2, 1])
+  true
+
+proc movedBy(element: SvgElement, d: Vec2): SvgElement =
+  ## `element` drawn `d` further on (its transform's translation).
+  var props = element.props
+  props.transform[2, 0] += d.x
+  props.transform[2, 1] += d.y
+  SvgElement(path: element.path, props: props, bounds: rect(0, 0, -1, -1))
+
+proc parseViewportChildren(
+  node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
+  elements: var seq[SvgElement]
+) =
+  ## A nested `<svg>`'s children with `reuse`: a viewport that only moved (a
+  ## UI's scrolled list, whose children the layout hands over again as the
+  ## same nodes and whose viewBox alone changed) brings each child's elements
+  ## back moved with it, without a parse; one that did not move, the very
+  ## same elements. Only a child drawn wholly in this viewport's clip is kept:
+  ## a viewport inside it cuts its own clip, which a move would change.
+  let props = propertiesStack[^1]
+  var
+    under: ref SvgProperties # `props`, for the children parsed or moved here
+    was: ref SvgProperties   # the last `parsedUnder` looked at, and
+    moved = false            # whether `props` is it moved,
+    d: Vec2                  # by this much
+  for child in node.children:
+    if not child.parsedUnder.isNil:
+      if child.parsedUnder != was:
+        was = child.parsedUnder
+        moved = movedOnly(was[], props, d)
+      if moved:
+        if d.x == 0 and d.y == 0:
+          elements.add child.parsed
+        else:
+          if under.isNil:
+            under = new(SvgProperties)
+            under[] = props
+          for i in 0 ..< child.parsed.len:
+            child.parsed[i] = child.parsed[i].movedBy(d)
+          elements.add child.parsed
+          child.parsedUnder = under
+        continue
+    let
+      first = elements.len
+      gradients = svg.gradients.len
+    child.parseSvgElement(svg, propertiesStack, elements)
+    var keep = svg.gradients.len == gradients
+    for i in first ..< elements.len:
+      if elements[i].late != nil or elements[i].props.clip != props.clip:
+        keep = false
+        break
+    if keep:
+      if under.isNil:
+        under = new(SvgProperties)
+        under[] = props
+      child.parsed = elements[first .. ^1]
+      child.parsedUnder = under
+    else:
+      child.parsed = @[]
+      child.parsedUnder = nil
+
+proc parseSvgElement(
+  node: SvgNode, svg: Svg, propertiesStack: var seq[SvgProperties],
+  elements: var seq[SvgElement]
 ) =
   if node.isText:
     return
@@ -1173,8 +1249,11 @@ proc parseSvgElement(
         props.transform[1, r] = m[1, r] * sy
         props.transform[2, r] = m[0, r] * tx + m[1, r] * ty + m[2, r]
     propertiesStack.add(props)
-    for child in node.children:
-      child.parseSvgElement(svg, propertiesStack, elements)
+    if node.tag == "svg" and svg.reuse:
+      node.parseViewportChildren(svg, propertiesStack, elements)
+    else:
+      for child in node.children:
+        child.parseSvgElement(svg, propertiesStack, elements)
     discard propertiesStack.pop()
 
   of "text":
@@ -1359,7 +1438,8 @@ proc parseSvg*(
     result = Svg(
       viewBoxWidth: box.width,
       viewBoxHeight: box.height,
-      lateData: lateData and not reuse
+      lateData: lateData and not reuse,
+      reuse: reuse
     )
 
     if width == 0 and height == 0: # Default to the view box size

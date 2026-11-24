@@ -269,6 +269,39 @@ block: # A window repaint draws a clipped element as the whole render does
   doAssert whole[5, 3] == rgbx(0, 255, 0, 255) # y 5: green
   doAssert whole[5, 7] == rgbx(0, 0, 0, 0)     # below the viewport
 
+block: # A scrolled viewport's children, handed over again, keep their parse
+  # A UI's scrolled list: the same child nodes inside a new viewport whose
+  # viewBox alone moved. Drawn as a parse without reuse draws them, the
+  # unmoved ones the same elements (no damage); a child with a viewport of
+  # its own, whose clip a scroll changes, is parsed again.
+  let
+    rows = @[
+      el("rect", {"x": "0", "y": "0", "width": "10", "height": "5", "fill": "#ff0000"}),
+      el("rect", {"x": "0", "y": "5", "width": "10", "height": "5", "fill": "#00ff00"}),
+      el("svg", {"x": "2", "y": "10", "width": "6", "height": "4"},
+        el("rect", {"x": "0", "y": "0", "width": "20", "height": "20", "fill": "#0000ff"})),
+      el("g", {"transform": "translate(1 15)"},
+        el("rect", {"x": "0", "y": "0", "width": "8", "height": "3", "fill": "#ffff00"}))]
+    list = proc(top: int): SvgNode =
+      result = el("svg", {"x": "1", "y": "1", "width": "10", "height": "6", "viewBox": "0 " & $top & " 10 6"})
+      result.children = rows
+    doc = proc(top: int): SvgNode = el("svg", {"width": "12", "height": "8"}, list(top))
+  discard parseSvg(doc(0), 12, 8, reuse = true)
+  for top in [3, 3, 9, 12, 2]:
+    let
+      kept = parseSvg(doc(top), 12, 8, reuse = true)
+      reused = newImage(12, 8)
+      plain = newImage(12, 8)
+    kept.renderInto(reused)
+    parseSvg(doc(top), 12, 8).renderInto(plain)
+    doAssert same(reused, plain), $top
+  # Not moved: the very same elements, so no damage at all.
+  let
+    a = parseSvg(doc(4), 12, 8, reuse = true)
+    b = parseSvg(doc(4), 12, 8, reuse = true)
+  doAssert damageRects(a, b, 12, 8).rects.len == 0
+  echo "svg viewport reuse ok"
+
 block: # Long path data read when its element is drawn draws the same picture
   # A coastline: one subpath of relative lines, long past the path cache's
   # limit (a map's are 20-95 KB). With `lateData` its commands are made when

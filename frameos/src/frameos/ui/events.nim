@@ -53,6 +53,7 @@ type
                                 ## render needs no new tree (app_runtime.get)
     partial*, full*: bool       ## since the last render: a handler set signals (and only that) / did not
     declined*: bool             ## the pointer handler just run returned false: no render for it
+                                ## (a scroll handler's: no get() for it)
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
     heard: seq[(int, float32, float32)] ## where each box with an onScroll was when it last heard
@@ -695,8 +696,12 @@ proc scrolledBy(target: UiTarget, r: UiRegion, unheard = false) =
     let payload = newJObject()
     payload["scrollTop"] = newJFloat(y)
     payload["scrollLeft"] = newJFloat(x)
+    target.declined = false
     target.call(r.handlers[ueScroll] - 1, "scroll", payload, [0'f32, 0, r.w, r.h])
-    target.inputOnly = false # whatever the handler changed, get() shows it
+    # Whatever the handler changed, get() shows it; one that returned false
+    # changed nothing it reads, and the box scrolls on the tree laid out last.
+    if not target.declined:
+      target.inputOnly = false
 
 proc keyDown(target: UiTarget, key: string) =
   let payload = newJObject()
