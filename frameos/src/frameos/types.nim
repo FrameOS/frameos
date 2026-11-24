@@ -1022,3 +1022,10 @@ var sceneWentBackTo* {.threadvar.}: string
   ## "" once anything else picks a scene. A layout reads it as
   ## `app.frame.wentBack`: a desktop opens no window again for a scene the
   ## focus only came back to (docs/scene-layouts.md "Windows").
+
+proc logsWhilePaused*(payload: JsonNode): bool =
+  ## A log line that goes out while a logger is paused (an ESP32 animation's
+  ## quiet frames, a Pi's fast renders): an error. One that failed in a quiet
+  ## frame was said only on the panel, never on the console or to the plane
+  ## (the Browser out of memory on a reTerminal Sticky, 2026-11-24).
+  payload.kind == JObject and payload{"event"}.getStr().contains("error")

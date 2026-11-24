@@ -380,7 +380,7 @@ proc newLogger*(frameConfig: FrameConfig): Logger =
     enabled: true,
   )
   logger.log = proc(payload: JsonNode) =
-    if logger.enabled:
+    if logger.enabled or payload.logsWhilePaused:
       log(payload)
   logger.enable = proc() =
     logger.enabled = true

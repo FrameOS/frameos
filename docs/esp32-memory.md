@@ -342,6 +342,86 @@ From a cold boot the Sticky then shows GitHub's front page and a repository
 page, slowly: the last render, the page laid out, is 38-52 s on the render
 task.
 
+## A Browser that copies nothing whole (2026-11-24)
+
+A hands-on test of the Sticky found GitHub failing in the Browser twice, each
+time after the Scene store had run in the same boot: once `out of memory in
+regexp execution` (the JS runtime's 4 MB cap) in `slimPush`, once "no free
+block of 571610 bytes, 4168060 free" on the panel only, with the largest
+PSRAM block at 704 KB.
+
+**The store leaves nothing behind.** Measured on the board with a build that
+traces the heap (`heap_trace` in leak mode from the store's boot render to
+the next scene's first render, and a walk of the PSRAM heap):
+
+- the store's realm goes with it: the shared JS runtime held 207,832 bytes
+  and one context afterwards, the layout's, as before the store ran;
+- of what was allocated while the store showed, 303 KB was still held, and
+  it was the next scene's own (its interpreter, its laid-out tree), the glyph
+  cache (one 28 KB block), the e-paper refresh copy (48 KB) and log lines:
+  none of it the store's.
+
+What the store does is what any scene does: its run puts long-lived small
+blocks (glyph masks, layout trees, log lines) into the free region, so the
+largest block falls while the free total comes back. From a cold boot the
+largest block was 4.98 MB after the store's first render; the tester's board,
+which had shown the Browser before the store, had 4.97 MB free and a largest
+block of 1,376 KB when the Browser started, and 704 KB with 4.1 MB free at
+the failure. The Browser fragments the heap the same way by itself (4.7 MB to
+2.7 MB in one load of GitHub from a cold boot).
+
+**The 571,610 bytes were the Browser's own copy.** Every JS allocation over
+128 KB in one load of GitHub's front page (a host run of the scene as an
+ESP32 runs it, the saved page and its 37 sheets answering byte ranges; the
+sizes are the device's, strings being one or two bytes a letter on both):
+
+| Block | Who asked | Before | Now |
+| --- | --- | ---: | ---: |
+| A 256 KB piece of the page as a JS string (two bytes a letter: one letter past Latin-1) | the fetch's answer | 524,308 | 524,308 |
+| The piece again, after what the last piece left over (`s.carry + piece`, flattened at its first `indexOf`) | `slimPush` | 524,194 | none |
+| The page kept (343K letters, 22 of them past Latin-1), joined | `slimText` | 840,736 growing, 686,954 | 420,379 growing, 343,625 |
+| Its first 200,000 letters | `scanHead`'s `slice` | 400,020 | none |
+| GitHub's 285 KB sheet (wide) | the fetch's answer | 571,772 | 571,772 |
+| That sheet without its comments | `slimCss`'s `replace` | 571,610 | none |
+| GitHub's 333 KB sheet, one `@layer primer-react{...}` block, without its comments | `slimCss` | 333,522 | none |
+| A regexp's backtracking stack over each long tag, looking for `aria-expanded` (12 bytes a letter; the host's is twice that) | `convert` | about 126,000 | none |
+
+- **A piece is read where it lies** (`slimPush`): what the last piece left
+  unread (a tag cut in two, an SVG kept whole) is finished with a window of
+  the next one's start, 16 KB and wider while what was cut goes on, so the
+  piece is never copied whole. A tag ends where an `indexOf` walk of its
+  quotes says, not a regular expression: QuickJS's keeps a frame of 12 bytes
+  a letter on its backtracking stack (a 9 KB tag is 108 KB of it, a quote
+  left open to a piece's end megabytes), and the first failure was that
+  stack refused by the 4 MB cap. Which page GitHub sent then is not known:
+  it renders each request again, and no saved copy has such a quote. A script's text
+  is no longer sliced out only to be dropped. The SVG reader's tag regexp
+  (`svg.ts`) still keeps such a stack, about 126 KB for GitHub's longest
+  path.
+- **What is kept is Latin-1**: a letter past it becomes a character
+  reference, which the converter's `decode` reads back. The page kept is a
+  JS string of one byte a letter (GitHub: 344 KB, not 687 KB; a Wikipedia
+  article: 306 KB, not 603 KB).
+- **A sheet is slimmed a few dozen KB of whole rules at a time**
+  (`slimSheet`), cut inside an `@layer`, `@supports` or `@media` block that
+  is most of the sheet and each part put in the block again.
+
+The pages converted are the same as before (GitHub's front page twice, a
+repository page, Hacker News and a Wikipedia article, read in pieces of 256,
+64 and 7 KB), and every slimmed sheet is the same. The largest JS block the
+Browser asks for is now the fetch's own answer, and the peak of the JS heap
+in the render that lays the page out fell from 3.57 MB to 3.22 MB (64-bit
+host). `test_browser_js_app.nim` loads a page and a sheet past Latin-1 where
+no block over 600 KB is free: the Browser of before was refused 678,178
+bytes.
+
+**An error in a quiet frame is logged.** The 571,610-byte failure reached
+neither the console nor the backend: it came in a quiet frame (an
+animation's, or e-paper pictures coming quickly), where the logger is paused,
+and the pause took the scene's errors with it. A line whose event names an
+error passes a paused logger now (`logsWhilePaused`, the Pi's fast-render
+pause too).
+
 ## Text keeps coverage, not outlines (2026-11-19)
 
 What a text costs in memory beside the typeface was three caches of the same

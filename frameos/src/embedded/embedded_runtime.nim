@@ -604,8 +604,8 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     log: proc(payload: JsonNode) =
       # Off for an animation's quiet frames (setQuiet), like the Linux
       # runner's fast-render log pause: the scene's own lines, not the
-      # runtime's.
-      if logger.enabled:
+      # runtime's, and never an error (logsWhilePaused).
+      if logger.enabled or payload.logsWhilePaused:
         espLog(($payload).cstring)
   )
   initLock(logger.lock)

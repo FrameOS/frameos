@@ -16,6 +16,7 @@ import frameos/js_runtime/app_runtime
 import frameos/js_runtime/app_tests
 import frameos/js_runtime/js_io
 import frameos/js_runtime/runtime
+import frameos/js_runtime/burrito
 import frameos/channels
 import frameos/utils/http_client
 import frameos/utils/memory
@@ -305,3 +306,68 @@ suite "the Browser scene":
     check heaps.len >= 5
     checkpoint($heaps)
     check max(heaps) - heaps[0] < 128 * 1024
+
+  test "a page and a sheet past Latin-1 load where no free block is over 600 KB, as on an 8 MB board after a while":
+    # A reTerminal Sticky that had shown the Scene store had 4 MB of PSRAM
+    # free and no block of 571,610 bytes for GitHub (2026-11-24): the Browser
+    # copied a whole sheet (slimCss), a whole piece (slimPush) and the page
+    # kept (two bytes a letter once one is past Latin-1). Here every JS block
+    # over 600 KB is refused, as that heap refused it.
+    asyncPumped = true
+    setSimulatedEmbedded(true)
+    jsLargestBlockForTest = 600 * 1024
+    defer:
+      setSimulatedEmbedded(false)
+      jsLargestBlockForTest = 0
+    let config = testConfig(480, 800)
+    var page = "<html><head><link rel=\"stylesheet\" href=\"https://wide.test/s.css\"></head><body>"
+    var n = 0
+    while page.len < 340_000:
+      page.add "<p class=\"c\">Paragraph " & $n & " → a line of the site's own words, kept as the page is read " &
+        "in pieces of a quarter of a megabyte each, past Latin-1 … and on</p>\n"
+      inc n
+    page.add "<p>The end</p></body></html>"
+    var sheet = "@layer primer{/* → */"
+    var r = 0
+    while sheet.len < 200_000:
+      sheet.add ".c .u" & $r & ", .c{color:#123456;margin:0 4px}\n"
+      inc r
+    sheet.add "}"
+    jsIoHook = proc(request: JsIoRequest): JsIoResult {.gcsafe, nimcall.} =
+      {.cast(gcsafe).}:
+        asked.add request.url
+        let body = if request.url == "https://wide.test/": page elif request.url == "https://wide.test/s.css": sheet else: ""
+        if body.len == 0:
+          return JsIoResult(code: 404, body: "")
+        for h in request.headers:
+          if h.name.toLowerAscii == "range" and h.value.startsWith("bytes="):
+            let parts = h.value[6 .. ^1].split('-')
+            let first = parseInt(parts[0])
+            if first >= body.len:
+              return JsIoResult(code: 416, body: "")
+            return JsIoResult(code: 206, body: body[first .. min(body.high, parseInt(parts[1]))])
+        JsIoResult(code: 200, body: body)
+    defer: jsIoHook = nil
+    setUploadedInterpretedScenes(parseInterpretedScenes($(%*[sample])))
+    resetInterpretedScenes()
+    logger.frameConfig = config
+    let scene = init("browser".SceneId, config, logger, %*{"homepage": "https://wide.test/"})
+    let loading = draw(scene, config, "wide-loading")
+    for i in 0 ..< 600:
+      discard pumpJsAsync()
+      var rendered = false
+      while true:
+        let (ok, message) = eventChannel.tryRecv()
+        if not ok: break
+        if message[1] == "render": rendered = true
+      if rendered:
+        discard draw(scene, config, "wide")
+      elif jsAsyncPending() == 0 and "https://wide.test/s.css" in asked:
+        break
+      sleep(5)
+    let image = draw(scene, config, "wide-page")
+    check asked.countIt(it == "https://wide.test/") >= 2 # in pieces
+    check "https://wide.test/s.css" in asked
+    if problems.len > 0: echo problems
+    check problems.len == 0
+    check image != loading

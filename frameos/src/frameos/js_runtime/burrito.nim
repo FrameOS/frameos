@@ -573,6 +573,16 @@ when not defined(frameosEmbedded):
   proc c_free(p: pointer) {.importc: "free", header: "<stdlib.h>".}
   proc c_realloc(p: pointer, size: csize_t): pointer {.importc: "realloc", header: "<stdlib.h>".}
 
+  when defined(testing):
+    var jsLargestBlockForTest* = 0
+      ## A test's heap with no free block larger than this, as an 8 MB
+      ## board's is after a while (megabytes free, none of them together):
+      ## a budgeted runtime is refused a larger allocation. 0: any size.
+    template beyondLargestBlock(size: csize_t): bool =
+      jsLargestBlockForTest > 0 and size.int > jsLargestBlockForTest
+  else:
+    template beyondLargestBlock(size: csize_t): bool = false
+
   proc budgetRaw(p: pointer): pointer {.inline.} =
     cast[pointer](cast[uint](p) - BudgetHeaderBytes.uint)
 
@@ -587,6 +597,8 @@ when not defined(frameosEmbedded):
       return nil
     let budget = cast[ptr JsHeapBudget](s.opaque)
     if budget != nil and budget.limitBytes > 0 and budget.usedBytes + size > budget.limitBytes:
+      return nil
+    if beyondLargestBlock(size):
       return nil
     let raw = c_malloc(size + BudgetHeaderBytes.csize_t)
     if raw == nil:
@@ -622,6 +634,8 @@ when not defined(frameosEmbedded):
     let budget = cast[ptr JsHeapBudget](s.opaque)
     if budget != nil and budget.limitBytes > 0 and size > oldSize and
         budget.usedBytes + (size - oldSize) > budget.limitBytes:
+      return nil
+    if size > oldSize and beyondLargestBlock(size):
       return nil
     let raw = c_realloc(budgetRaw(p), size + BudgetHeaderBytes.csize_t)
     if raw == nil:
