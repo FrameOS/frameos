@@ -98,6 +98,19 @@ when not defined(frameosEmbedded):
       check svgFontFileFor("system-ui") == ""
       check svgFontFileFor("Nonesuch") == ""
 
+    test "a font file that arrives is found by its name at once, by its family after":
+      check svgFontFileFor("Plain") == "Plain.ttf" # the folder listed
+      writeFile(fontsDir / "Lobster-Regular.ttf", "")
+      check svgFontFileFor("Lobster") == "" # a family waits for the listing
+      check svgFontFileFor("Lobster-Regular.ttf") == "Lobster-Regular.ttf"
+      check svgFontFileFor("Lobster") == "Lobster-Regular.ttf"
+      # A name that is not there lists nothing again, and one the listing
+      # leaves out (a hidden file) lists it once.
+      check svgFontFileFor("Nonesuch-Regular.ttf") == ""
+      writeFile(fontsDir / "._Junk.ttf", "")
+      check svgFontFileFor("._Junk.ttf") == ""
+      check svgFontFileFor("._Junk.ttf") == ""
+
     test "pointing at another assets path forgets the old answers":
       check svgFontFileFor("Comic") == "Comic-Regular.ttf"
       setSvgFontAssetsPath(getTempDir() / "frameos-svg-font-tests-empty")

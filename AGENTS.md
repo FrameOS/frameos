@@ -825,6 +825,11 @@
   pixie's colour glyph cache (`colorGlyphCacheBudget`), never the decode
   or the font. The glyph budget grows with the board's PSRAM
   (`glyphCacheBudgetBytes`: 128 KB on 8 MB, 512 KB on 16, 1 MB on 32).
+  A frame gets more fonts by itself in the Fonts sample's "Get fonts"
+  (docs/esp32-fonts.md): `repo/fonts/catalog.txt`, made by
+  `frameos/tools/generate_font_catalog.py` (every file checked there, never
+  converted on a frame), downloaded straight from where the files are in
+  ranges by the scene's own JS, no firmware for it and no plane in the way.
 - Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
   each render's handler functions in the app's interpreter, the layout hands
   back the regions, and `ui/events.nim` hit-tests the scene's pointer events
