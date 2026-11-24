@@ -294,17 +294,11 @@ const EMBEDDED_USB_IMAGE_REFRESH_TIMEOUT_MS = 45000
 // until a preview exists (12 x 20s covers the slowest panels)
 const EMBEDDED_USB_IMAGE_RETRY_DELAY_MS = 20000
 const EMBEDDED_USB_IMAGE_RETRY_LIMIT = 12
-const EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS = 45000
-const EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS = 30000
-const EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB = 250
 const SD_CARD_IMAGE_PROGRESS_INTERVAL_MS = 30 * 1000
 
-export function embeddedUsbUploadTimeoutMs(payloadBytes: number): number {
-  return Math.max(
-    EMBEDDED_USB_UPLOAD_MIN_TIMEOUT_MS,
-    EMBEDDED_USB_UPLOAD_BASE_TIMEOUT_MS + Math.ceil(payloadBytes / 1024) * EMBEDDED_USB_UPLOAD_TIMEOUT_MS_PER_KB
-  )
-}
+// In utils/embeddedUsbUpload.ts, where the flashers (and flash.frameos.net,
+// which has no frames model) reach it without importing this one.
+export { embeddedUsbUploadTimeoutMs } from '../utils/embeddedUsbUpload'
 
 async function responseErrorDetail(response: Response, fallback: string): Promise<string> {
   try {

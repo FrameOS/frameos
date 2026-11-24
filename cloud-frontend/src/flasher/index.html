@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FrameOS flasher</title>
+    <meta
+      name="description"
+      content="Flash FrameOS onto an ESP32 frame from your browser: standalone, or for your own FrameOS backend. No account needed."
+    />
+    <link rel="icon" type="image/svg+xml" href="/logo-light.svg" data-frameos-favicon />
+    <script>
+      // Pre-paint theme: the shared frameos_theme cookie, else the system's.
+      ;(function () {
+        try {
+          var match = document.cookie.match(/(?:^|;\s*)frameos_theme=(dark|light)/)
+          var theme = match
+            ? match[1]
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light'
+          document.documentElement.dataset.frameosTheme = theme
+          document.documentElement.style.colorScheme = theme
+          var favicon = document.querySelector('link[data-frameos-favicon]')
+          if (favicon) {
+            var darkChrome = window.matchMedia('(prefers-color-scheme: dark)').matches
+            favicon.href = '/logo-' + (darkChrome ? 'dark' : 'light') + '.svg'
+          }
+        } catch (e) {}
+      })()
+    </script>
+    <link rel="stylesheet" href="/frames-app/static/flasher.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/frames-app/static/flasher.js"></script>
+  </body>
+</html>

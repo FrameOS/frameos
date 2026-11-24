@@ -2,6 +2,7 @@ import {
   getAccountBaseUrl,
   getAccountPath,
   getCloudBaseUrl,
+  getFlasherBaseUrl,
   getPlaygroundBaseUrl,
   getScenesBaseUrl,
   myScenesPath,
@@ -125,11 +126,25 @@ export const playgroundRootRewrite = {
   destination: playgroundPath,
 };
 
+// The browser flasher's page is app/flash (cloud/docs/flasher.md); on its
+// own host it is the root, by the same mark-and-rewrite as the playground's.
+export const flasherPath = "/flash";
+export const flasherRootHeader = "x-frameos-flasher-root";
+
+export const flasherRootRewrite = {
+  source: "/",
+  has: [{ type: "header" as const, key: flasherRootHeader, value: "1" }],
+  destination: flasherPath,
+};
+
 export type SurfaceRoute =
   | { kind: "redirect"; destination: URL }
   // The playground host's root (playgroundRootRewrite).
   | { kind: "playgroundRoot" }
-  // An API path the playground host does not serve (playgroundServesApi).
+  // The flasher host's root (flasherRootRewrite).
+  | { kind: "flasherRoot" }
+  // An API path the playground or flasher host does not serve
+  // (playgroundServesApi, flasherServesApi).
   | { kind: "notFound" };
 
 // The playground runs anyone's store scene in a page whose origin shares the
@@ -163,6 +178,38 @@ export function isPlaygroundHost(requestUrl: URL, requestHost?: string | null) {
   return host === playground.host.toLowerCase();
 }
 
+// The flasher is a page for people with no account, and it takes jobs (a
+// frame's API key and Wi-Fi password among them) from pages it does not know
+// (frontend/src/utils/flasherBridge.ts). So its host is no door to the API
+// either: it answers the one thing the flasher asks for — the release
+// listing, the firmware and its signature (app/api/frames/firmware) — and
+// proxy.ts takes the cookie and any bearer off that too.
+const flasherApiReads = ["/api/frames/firmware"] as const;
+
+export function flasherServesApi(pathname: string, method = "GET") {
+  const verb = method.toUpperCase();
+  return (
+    (verb === "GET" || verb === "HEAD") &&
+    (flasherApiReads as readonly string[]).includes(pathname)
+  );
+}
+
+// Whether a request arrived on the flasher's own host (false while the
+// flasher is a path of the cloud origin, as in development).
+export function isFlasherHost(requestUrl: URL, requestHost?: string | null) {
+  const flasher = new URL(getFlasherBaseUrl());
+  if (flasher.origin === new URL(getCloudBaseUrl()).origin) {
+    return false;
+  }
+  const host = (requestHost ?? requestUrl.host).trim().toLowerCase();
+  return host === flasher.host.toLowerCase();
+}
+
+/** A host whose every request is served as to a stranger. */
+export function isAnonymousHost(requestUrl: URL, requestHost?: string | null) {
+  return isPlaygroundHost(requestUrl, requestHost) || isFlasherHost(requestUrl, requestHost);
+}
+
 // All the hostnames reach one Next.js process. Human pages get canonical
 // hosts and clean account paths, while API routes stay available everywhere
 // for existing FrameOS links and clients.
@@ -175,9 +222,15 @@ export function resolveSurfaceRoute(
   const cloud = new URL(getCloudBaseUrl());
   const scenes = new URL(getScenesBaseUrl());
   const playground = new URL(getPlaygroundBaseUrl());
+  const flasher = new URL(getFlasherBaseUrl());
   if (
-    new Set([account.origin, cloud.origin, scenes.origin, playground.origin])
-      .size === 1
+    new Set([
+      account.origin,
+      cloud.origin,
+      scenes.origin,
+      playground.origin,
+      flasher.origin,
+    ]).size === 1
   ) {
     return undefined;
   }
@@ -186,13 +239,31 @@ export function resolveSurfaceRoute(
   const pathname = requestUrl.pathname;
   if (
     pathMatchesPrefix(pathname, "/api") &&
-    isPlaygroundHost(requestUrl, requestHost) &&
-    !playgroundServesApi(pathname, method)
+    ((isPlaygroundHost(requestUrl, requestHost) &&
+      !playgroundServesApi(pathname, method)) ||
+      (isFlasherHost(requestUrl, requestHost) &&
+        !flasherServesApi(pathname, method)))
   ) {
     return { kind: "notFound" };
   }
   if (isApiOrAsset(pathname)) {
     return undefined;
+  }
+
+  // The flasher host serves the flasher at its root and nothing else: any
+  // other page is the cloud's.
+  const flasherIsOwnHost = flasher.origin !== cloud.origin;
+  if (flasherIsOwnHost && host === flasher.host.toLowerCase()) {
+    if (pathname === "/") {
+      return { kind: "flasherRoot" };
+    }
+    if (pathname === flasherPath) {
+      return redirectTo(requestUrl, flasher, "/");
+    }
+    return redirectTo(requestUrl, cloud, pathname);
+  }
+  if (flasherIsOwnHost && pathMatchesPrefix(pathname, flasherPath)) {
+    return redirectTo(requestUrl, flasher, "/");
   }
 
   // The playground host serves the playground at its root and nothing else:

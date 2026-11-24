@@ -23,7 +23,9 @@ import {
   type EmbeddedProvisioningPlan,
 } from "../../../../../../frontend/src/scenes/workspace/EmbeddedReleaseFlasher";
 import type { FrameType } from "../../../../../../frontend/src/types";
+import { overrideReleaseSigningKeyForTests } from "../../../../../../frontend/src/utils/releaseSigning";
 import { mergedImage } from "./esp32ImageFixtures";
+import { testSigningKey } from "./fixtures/releaseSigning";
 
 interface WriteFlashOptions {
   eraseAll: boolean;
@@ -84,6 +86,13 @@ vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) 
 });
 
 const releaseImage = mergedImage();
+// The image is checked against the release signature before esptool writes a
+// byte (releaseFirmware.ts): signed here with a throwaway key, as the release
+// pipeline signs it, and the verifier pointed at that key.
+const signingKey = testSigningKey();
+const releaseSignature = signingKey.minisigFor(releaseImage, {
+  signedAs: "frameos-2026.8.26-esp32-c3-generic.bin",
+});
 
 function plan(overrides: Partial<EmbeddedProvisioningPlan> = {}): EmbeddedProvisioningPlan {
   return {
@@ -126,7 +135,7 @@ function embeddedC3Frame(): FrameType {
   } as FrameType;
 }
 
-function mockBackendApi(provisioning: EmbeddedProvisioningPlan) {
+function mockBackendApi(provisioning: EmbeddedProvisioningPlan, signatureText = releaseSignature) {
   apiFetchMock.mockImplementation((input: string) => {
     const url = String(input);
     if (url === "/api/frames/1/embedded/provisioning") {
@@ -139,6 +148,9 @@ function mockBackendApi(provisioning: EmbeddedProvisioningPlan) {
           assets: [{ name: "frameos-2026.8.26-esp32-c3-generic.bin", platform: "esp32-c3-generic", size: 1024 }],
         }),
       );
+    }
+    if (url.startsWith("/api/frames/firmware?platform=") && url.endsWith("&signature=1")) {
+      return Promise.resolve(new Response(signatureText));
     }
     if (url.startsWith("/api/frames/firmware?platform=")) {
       return Promise.resolve(new Response(releaseImage.slice()));
@@ -172,6 +184,7 @@ type CloudTestWindow = Window & {
 const testWindow = window as CloudTestWindow;
 
 beforeEach(() => {
+  overrideReleaseSigningKeyForTests(signingKey.publicKeyBase64);
   testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
   testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
   apiFetchMock.mockReset();
@@ -183,6 +196,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  overrideReleaseSigningKeyForTests(undefined);
   cleanup();
   delete (navigator as { serial?: unknown }).serial;
   delete testWindow.FRAMEOS_APP_CONFIG;
@@ -204,6 +218,32 @@ describe("EmbeddedReleaseFlasher", () => {
     expect(options.fileArray.length).toBe(1);
     expect(options.fileArray[0].address).toBe(0);
     expect(options.fileArray[0].data.byteLength).toBe(releaseImage.byteLength);
+  });
+
+  it("refuses an image whose signature is for another release, before writing anything", async () => {
+    // A genuinely signed older image served as this release: the signature
+    // names what it was signed AS, and that must be this release's image.
+    mockBackendApi(plan(), signingKey.minisigFor(releaseImage, { signedAs: "frameos-2026.8.1-esp32-c3-generic.bin" }));
+    render(<EmbeddedReleaseFlasher frame={embeddedC3Frame()} />);
+    await screen.findByText(/esp32-c3-generic image/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /flash latest release/i }));
+
+    expect(await screen.findByText(/signature is for .*2026\.8\.1/i, {}, { timeout: 5000 })).toBeTruthy();
+    expect(esptool.state.writeFlashCalls.length).toBe(0);
+  });
+
+  it("refuses an image that does not match its signature", async () => {
+    mockBackendApi(plan(), signingKey.minisigFor(new Uint8Array([1, 2, 3]), {
+      signedAs: "frameos-2026.8.26-esp32-c3-generic.bin",
+    }));
+    render(<EmbeddedReleaseFlasher frame={embeddedC3Frame()} />);
+    await screen.findByText(/esp32-c3-generic image/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /flash latest release/i }));
+
+    expect(await screen.findByText(/does not match the FrameOS release signature/i, {}, { timeout: 5000 })).toBeTruthy();
+    expect(esptool.state.writeFlashCalls.length).toBe(0);
   });
 
   it("shows what the published image cannot carry, before anyone chooses it", async () => {

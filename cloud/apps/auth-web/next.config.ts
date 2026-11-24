@@ -10,7 +10,7 @@ import {
   getCloudBaseUrl,
 } from "./src/lib/env";
 import { storeEmbedAncestors } from "./src/lib/store-embed";
-import { playgroundRootRewrite } from "./src/lib/surfaces";
+import { flasherRootRewrite, playgroundRootRewrite } from "./src/lib/surfaces";
 
 function assertRuntimeConfig(phase: string) {
   if (phase !== PHASE_DEVELOPMENT_SERVER && phase !== PHASE_PRODUCTION_SERVER) {
@@ -138,7 +138,7 @@ function createNextConfig(phase: string): NextConfig {
         // The playground host's root, on the mark proxy.ts gives it
         // (src/lib/surfaces.ts). beforeFiles: ahead of app/route.ts, which
         // is the root everywhere else.
-        beforeFiles: [playgroundRootRewrite],
+        beforeFiles: [playgroundRootRewrite, flasherRootRewrite],
         // The frames SPA (cloud-frontend) resolves root-absolute assets
         // through assets_base_path, so it asks for the preview runtime at
         // /frames-app/frameos-wasm/*. Its build copies frontend/public into

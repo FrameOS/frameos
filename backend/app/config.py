@@ -186,6 +186,10 @@ class Config:
     # (app/utils/public_tls.py), else "http". The UI prefixes a new frame's
     # server address with it; frames' own reporting is unaffected.
     FRAMEOS_PUBLIC_SCHEME = (os.environ.get('FRAMEOS_PUBLIC_SCHEME') or 'http').strip().lower()
+    # The browser flasher a page without Web Serial (plain http, a
+    # cross-origin frame) hands its USB work to (cloud/docs/flasher.md): the
+    # UI's default, https://flash.frameos.net, unless this names another copy.
+    FRAMEOS_FLASHER_URL = (os.environ.get('FRAMEOS_FLASHER_URL') or '').strip()
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)
